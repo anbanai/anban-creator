@@ -1,0 +1,72 @@
+# 轻松科普写作风格配置
+
+style:
+  id: casual-science
+  name: 轻松科普风格
+  description: 通俗易懂，趣味性强
+
+  characteristics:
+    - 通俗易懂，零门槛
+    - 多用比喻和生活化例子
+    - 有趣味性，不枯燥
+    - 亲切自然，像聊天
+    - 适当使用emoji增加趣味
+
+  sentence:
+    length: medium  # 中等长度
+    avg_words: 10-20
+    max_words: 30
+    prefer:
+      - 口语化表达
+      - 生活化比喻
+      - 问答式表达
+
+  paragraph:
+    length: 3-4  # 每段3-4句
+    structure: conversational  # 对话式
+    questions: encouraged  # 鼓励提问
+
+  tone:
+    - friendly  # 友好
+    - casual  # 轻松
+    - humorous  # 幽默
+    - approachable  # 亲切
+
+  vocabulary:
+    prefer:
+      - 生活词汇
+      - 口语表达
+      - 比喻说明
+      - emoji表情（适度）
+    avoid:
+      - 专业术语（不解释）
+      - 书面语
+      - 复杂句式
+
+  golden_rules:
+    - "用生活化比喻解释专业概念"
+    - "多用'你''我'拉近距离"
+    - "每个知识点都有例子"
+    - "适当使用emoji增加趣味"
+    - "鼓励读者动手尝试"
+
+  techniques:
+    - 比喻说明（专业 = 生活）
+    - 问答式展开
+    - 故事化表达
+    - 场景再现
+    - 互动引导
+
+  emoji_usage:
+    frequency: moderate  # 适度使用
+    prefer:
+      - 👍 赞同
+      - 💡 提示
+      - ⚠️ 注意
+      - 🎯 重点
+      - 😊 轻松氛围
+
+  examples:
+    - "茶叶发酵就像做面包：面粉遇到酵母会膨胀，茶叶遇到氧气会变色。原理是一样的。"
+    - "为什么绿茶不能用开水泡？就像炒菜，火太大会糊。道理都是一样的。"
+    - "试试看，同样的茶，用对水温后，口感能差10倍。不信？今天晚上就试试 😊"

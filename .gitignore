@@ -1,0 +1,59 @@
+# Binaries (current directory only)
+/writer
+/writer.exe
+
+# Ignore all binaries (anywhere in the repo)
+**/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Configuration files (contain sensitive information)
+.wechatwriter/settings.json
+writer.yaml
+writer.yml
+writer.json
+.writer.yaml
+.writer.yml
+.writer.json
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build output
+dist/
+build/
+
+# Coverage files
+coverage.txt
+coverage.html

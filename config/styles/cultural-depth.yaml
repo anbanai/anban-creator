@@ -1,0 +1,62 @@
+# 深度文化写作风格配置
+
+style:
+  id: cultural-depth
+  name: 深度文化风格
+  description: 引经据典，文化底蕴深厚
+
+  characteristics:
+    - 引经据典，有文化底蕴
+    - 娓娓道来，层层递进
+    - 注重意境和韵味
+    - 古今结合，承上启下
+    - 文字优美，适合朗读
+
+  sentence:
+    length: medium  # 中等长度
+    avg_words: 15-25
+    max_words: 40
+    prefer:
+      - 四字词语
+      - 文言词汇（适度）
+      - 对仗句式
+
+  paragraph:
+    length: 4-5  # 每段4-5句
+    structure: progressive  # 层层递进
+    transition: smooth  # 注重过渡
+
+  tone:
+    - gentle  # 温和
+    - profound  # 深沉
+    - cultural  # 有文化感
+    - reflective  # 引人深思
+
+  vocabulary:
+    prefer:
+      - 文化词汇
+      - 历史典故
+      - 意象词汇
+      - 优美表达
+    avoid:
+      - 过于白话
+      - 网络用语
+      - 口语化表达
+
+  golden_rules:
+    - "至少引用2-3处古籍或典故"
+    - "营造文化氛围和意境"
+    - "古今结合，承上启下"
+    - "文字优美，有韵味"
+    - "传递文化价值和情怀"
+
+  elements:
+    - 历史典故
+    - 古籍引用
+    - 场景描绘
+    - 意境营造
+    - 文化连接
+
+  examples:
+    - "《茶经》有云：'茶之为饮，发乎神农氏。'这不仅是茶的起源，更是中华文明对自然的敬畏。"
+    - "一个紫砂壶，经年累月的泡养，表面渐生包浆，温润如玉。这不是器物的改变，是时间与茶香的对话。"

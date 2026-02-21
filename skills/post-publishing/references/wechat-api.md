@@ -1,0 +1,98 @@
+# 微信公众号 API 参考（小绿书）
+
+## SDK
+
+使用 `github.com/silenceper/wechat/v2` SDK 进行初始化和素材上传。小绿书草稿需直接调用微信 API（SDK 不支持 newspic 类型）。
+
+## API 1: 上传永久素材
+
+上传图片到微信素材库，返回 media_id 和 URL。
+
+### CLI 命令
+
+```bash
+wechatwriter image upload <file_path>
+wechatwriter image download <url>
+```
+
+### 错误码
+
+| 错误码 | 说明 | 处理方式 |
+|--------|------|----------|
+| 40001 | AppID 错误 | 检查配置 |
+| 40004 | 文件为空 | 检查文件路径 |
+| 40005 | 文件类型不支持 | 检查图片格式 |
+| 40006 | 文件大小超限 | 压缩图片 |
+| 42001 | AppSecret 错误 | 检查配置 |
+
+## API 2: 新建小绿书草稿（Newspic）
+
+创建微信公众号小绿书（图片消息）草稿，支持最多 20 张图片。
+
+### CLI 命令
+
+```bash
+wechatwriter draft post -t "标题" --images photo1.jpg,photo2.jpg
+wechatwriter draft post -t "标题" -m article.md
+wechatwriter draft post -t "标题" --images photo.jpg --dry-run
+```
+
+### 与图文草稿的区别
+
+| 特性 | 图文草稿（news） | 小绿书（newspic） |
+|------|-----------------|------------------|
+| 内容格式 | HTML 正文 | 纯文本描述 |
+| 图片 | 嵌入在 HTML 中 | image_info.image_list |
+| 图片数量 | 不限（嵌入） | 最多 20 张 |
+| 封面图 | thumb_media_id | 自动取第一张 |
+| SDK 支持 | 是（silenceper） | 否（直接调用 API） |
+
+### 字段限制
+
+| 字段 | 限制 |
+|------|------|
+| title | 不超过 32 字符 |
+| content | 纯文本，不超过 2 万字符 |
+| image_list | 最多 20 张，首张为封面 |
+
+### 封面裁剪 (cover_info)
+
+可选的封面裁剪信息，控制封面在不同比例下的显示区域：
+
+| 字段 | 说明 |
+|------|------|
+| crop_percent_list[].ratio | 裁剪比例：`1_1`、`16_9`、`2.35_1` |
+| crop_percent_list[].x1/y1 | 左上角坐标（0-1） |
+| crop_percent_list[].x2/y2 | 右下角坐标（0-1） |
+
+### 草稿错误码
+
+| 错误码 | 说明 | 处理方式 |
+|--------|------|----------|
+| 45002 | 内容超过 2 万字符或 1MB | 精简内容 |
+| 45004 | 标题超过 32 字符 | 缩短标题 |
+| 45005 | 摘要超过 128 字符 | 缩短摘要 |
+
+### 重要约束
+
+- 每张图片必须先上传为永久素材（`image upload`），获取 `media_id`
+- 最多 20 张图片
+- 内容为纯文本（不支持 HTML）
+- SDK（silenceper）不支持 newspic，需直接调用微信 API
+
+## 认证配置
+
+WeChat AppID 和 AppSecret 通过 `.wechatwriter/settings.json` 配置文件管理。
+
+## 速率限制
+
+| API | 限制 |
+|-----|------|
+| 上传素材 | 100 次/天 |
+| 创建草稿 | 100 次/天 |
+
+## 最佳实践
+
+- 缓存已上传图片的 media_id，避免重复上传
+- 失败后等待 1 秒再重试，最多重试 3 次
+- 批量处理时控制并发数，避免触发速率限制

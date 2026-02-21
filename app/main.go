@@ -1,0 +1,130 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+)
+
+var (
+	cfg     *config.Config
+	log     *zap.Logger
+	version = "2.0.0"
+)
+
+// initConfig 初始化配置（延迟加载，允许 help 命令无需配置）
+func initConfig() error {
+	if cfg != nil && log != nil {
+		return nil
+	}
+
+	var err error
+	cfg, err = config.Load()
+	if err != nil {
+		return err
+	}
+
+	log, err = zap.NewProduction()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// initConfigMinimal 初始化配置（不验证微信账号）
+// 用于不需要微信 API 的命令（如 AI 提示词生成）
+func initConfigMinimal() error {
+	if cfg != nil && log != nil {
+		return nil
+	}
+
+	var err error
+	cfg, err = config.LoadMinimal()
+	if err != nil {
+		return err
+	}
+
+	log, err = zap.NewProduction()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func main() {
+	rootCmd := &cobra.Command{
+		Use:   "writer",
+		Short: "微信公众号写作工具",
+		Long: `Writer - 微信公众号写作助手
+
+提供图片处理、格式转换、草稿管理、风格化写作、AI去痕、热点评分等全流程功能。
+支持多领域配置和多种写作风格。
+
+Configuration:
+  Config file: .wechatwriter/settings.json (use 'wechatwriter account init' to create)`,
+		Version:       version,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+	}
+
+	// 添加所有子命令
+	rootCmd.AddCommand(imageCmd())
+	rootCmd.AddCommand(convertCmd)
+	rootCmd.AddCommand(draftCmd())
+	rootCmd.AddCommand(writeCmd)
+	rootCmd.AddCommand(humanizeCmd)
+	rootCmd.AddCommand(scoreCmd())
+	rootCmd.AddCommand(outlineCmd())
+	rootCmd.AddCommand(accountCmd())
+	rootCmd.AddCommand(doctorCmd())
+
+	if err := rootCmd.Execute(); err != nil {
+		responseError(err)
+		os.Exit(1)
+	}
+}
+
+// 响应辅助函数
+func responseSuccess(data any) {
+	response := map[string]any{
+		"success": true,
+		"data":    data,
+	}
+	printJSON(response)
+}
+
+func responseError(err error) {
+	response := map[string]any{
+		"success": false,
+		"error":   err.Error(),
+	}
+	if hint := hintFrom(err); hint != "" {
+		response["hint"] = hint
+	}
+	printJSON(response)
+	os.Exit(1)
+}
+
+func printJSON(v any) {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
+		fmt.Fprintf(os.Stderr, "JSON encode error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// maskMediaID 遮蔽 media_id 用于日志
+func maskMediaID(id string) string {
+	if len(id) < 8 {
+		return "***"
+	}
+	return id[:4] + "***" + id[len(id)-4:]
+}

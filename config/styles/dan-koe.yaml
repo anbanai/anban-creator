@@ -1,0 +1,56 @@
+# Dan Koe 写作风格配置
+
+style:
+  id: dan-koe
+  name: Dan Koe 风格
+  description: 简洁有力，每句话都有分量
+
+  characteristics:
+    - 简洁有力，每句话都有分量
+    - 金句频出，适合社交分享
+    - 直击痛点，引发共鸣
+    - 强烈的个人观点和态度
+
+  sentence:
+    length: short  # 短句为主
+    avg_words: 8-15
+    max_words: 20
+    avoid:
+      - 可能
+      - 也许
+      - 大概
+      - 比较
+      - 有点
+
+  paragraph:
+    length: 2-3  # 每段2-3句
+    structure: punchy  # 有冲击力
+    single_sentence_ok: true  # 允许单句成段
+
+  tone:
+    - confident  # 自信
+    - direct  # 直接
+    - opinionated  # 有观点
+    - authoritative  # 权威
+
+  vocabulary:
+    prefer:
+      - 精准的动词
+      - 具体的名词
+      - 简单的连接词
+    avoid:
+      - 修饰词堆砌
+      - 被动语态
+      - 模糊表达
+
+  golden_rules:
+    - "每句话都能独立成立"
+    - "删掉任何一句不影响理解"
+    - "一个词能说清不用两个"
+    - "金句至少3-5个"
+    - "没有废话"
+
+  examples:
+    - "你以为买的是茶。实际上买的是信息差。"
+    - "好茶不贵。贵的是你的认知成本。"
+    - "懂茶 ≠ 喝贵茶。懂茶 = 喝对茶。"

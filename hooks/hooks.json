@@ -1,0 +1,47 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && [ -n \"$CLAUDE_ENV_FILE\" ] && { echo \"export CLAUDE_PLUGIN_ROOT=$CLAUDE_PLUGIN_ROOT\" >> \"$CLAUDE_ENV_FILE\"; echo \"export PATH=$CLAUDE_PLUGIN_ROOT/bin:\\$PATH\" >> \"$CLAUDE_ENV_FILE\"; bash \"$CLAUDE_PLUGIN_ROOT/scripts/bootstrap.sh\" & } || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "article-writer",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "article-writer agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些文件、文章字数、是否成功创建草稿。如发现问题请提醒用户。"
+          }
+        ]
+      },
+      {
+        "matcher": "post-creator",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "post-creator agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些图片、图片数量、是否成功创建草稿。如发现问题请提醒用户。"
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "任务已完成。请检查任务结果是否符合预期质量标准。如发现问题（如文件不存在、内容不完整、格式错误等），请提醒用户并建议解决方案。"
+          }
+        ]
+      }
+    ]
+  }
+}

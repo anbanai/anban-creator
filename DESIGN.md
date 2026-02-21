@@ -1,0 +1,628 @@
+# wechatwriter 设计方案
+
+> 版本: v2.0
+> 更新时间: 2026-01-11
+> 状态: 设计中
+
+---
+
+## 1. 项目概述
+
+### 1.1 项目定位
+
+将 Markdown 文章转换为微信公众号格式的 HTML，并支持上传到微信草稿箱。
+
+### 1.2 核心特性
+
+| 特性 | 描述 |
+|------|------|
+| **双模式转换** | 支持 API 转换和 AI 转换两种方式 |
+| **图片处理** | 本地上传、在线下载、AI 生成三种方式 |
+| **样式系统** | 内置多套主题，支持自定义 |
+| **微信集成** | 直接上传素材、创建草稿 |
+
+---
+
+## 2. 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              md2wechat 架构                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────┐     ┌─────────────────────┐     ┌─────────────────────┐   │
+│  │   Input     │     │   Convert Engine    │     │      Output         │   │
+│  │  .md 文件   │ ──▶ │   (双模式支持)       │ ──▶ │   WeChat HTML       │   │
+│  └─────────────┘     └─────────────────────┘     └─────────────────────┘   │
+│                              │         │                                    │
+│              ┌───────────────┘         └───────────────┐                  │
+│              ▼                                             ▼                  │
+│  ┌─────────────────────┐                   ┌─────────────────────┐         │
+│  │   API 模式          │                   │   AI 模式            │         │
+│  │   md2wechat.cn      │                   │   Claude AI 生成     │         │
+│  └─────────────────────┘                   └─────────────────────┘         │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                         图片处理管道                                  │   │
+│  ├─────────────────────────────────────────────────────────────────────┤   │
+│  │  本地图片 ──▶ 压缩 ──▶ 上传微信 ──▶ 返回 CDN URL                        │   │
+│  │  在线图片 ──▶ 下载 ──▶ 压缩 ──▶ 上传微信 ──▶ 返回 CDN URL               │   │
+│  │  AI 生成  ──▶ 生成 ──▶ 下载 ──▶ 压缩 ──▶ 上传微信 ──▶ 返回 CDN URL      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                         微信集成                                      │   │
+│  ├─────────────────────────────────────────────────────────────────────┤   │
+│  │  • 素材上传 (upload_image)                                            │   │
+│  │  • 草稿创建 (create_draft)                                            │   │
+│  │  • Access Token 管理                                                  │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. 转换模式对比
+
+### 3.1 API 模式 vs AI 模式
+
+| 对比项 | API 模式 | AI 模式 |
+|--------|----------|---------|
+| **实现方式** | 调用 md2wechat.cn API | 通过 Claude AI 生成 |
+| **稳定性** | 高，可控 | 中，有一定随机性 |
+| **速度** | 快 | 较慢 |
+| **主题限制** | API 支持的主题 | 无限，可自定义 |
+| **成本** | 可能需要付费 API Key | 消耗 AI 配额 |
+| **适用场景** | 生产环境、批量处理 | 自定义需求、特殊风格 |
+
+### 3.2 API 模式规范
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    md2wechat.cn API                         │
+├─────────────────────────────────────────────────────────────┤
+│  URL:    https://www.md2wechat.cn/api/convert              │
+│  Method: POST                                               │
+│                                                             │
+│  Headers:                                                   │
+│    Content-Type: application/json                           │
+│    X-API-Key: wme_your_api_key_here                         │
+│                                                             │
+│  Request Body:                                              │
+│  {                                                          │
+│    "markdown": string,    // Markdown 内容                 │
+│    "theme": string,       // default/bytedance/apple/...   │
+│    "fontSize": string     // small/medium/large            │
+│  }                                                          │
+│                                                             │
+│  Response:                                                  │
+│  {                                                          │
+│    "code": 0,              // 0=成功, 非0=失败              │
+│    "data": {               // 成功时返回                    │
+│      "html": string        // 转换后的 HTML                │
+│    },                                                       │
+│    "msg": string           // 错误信息                      │
+│  }                                                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 3.3 AI 模式规范
+
+```
+输入: Markdown 内容 + 主题提示词
+处理: Claude AI 根据提示词生成内联 CSS 的 HTML
+输出: 完整的 WeChat 兼容 HTML
+
+内置提示词主题:
+  - autumn-warm  : 【秋日暖光】温暖治愈，橙色调，文艺美学
+  - spring-fresh : 【春日清新】清新自然，绿色调，生机盎然
+  - ocean-calm   : 【深海静谧】深邃冷静，蓝色调，理性专业
+  - custom       : 自定义主题，使用用户自己的提示词
+```
+
+### 3.4 提示词结构框架
+
+所有 AI 主题提示词统一遵循以下四部分结构：
+
+```
+【终极指令 V4.0】主题名称兼容性网页设计提示词
+
+指令:
+角色定义和任务说明
+
+核心主题与愿景 (Core Theme & Vision):
+主题定位和美学目标
+
+第一部分：【兼容性优先】结构与技术要求
+【关键】主容器结构 (Main Container)
+【关键】样式实现 (Styling Implementation)
+模块化与间距 (Modularity & Spacing)
+
+第二部分：设计美学与风格指南 (Aesthetics & Style Guide)
+色彩方案 (Color Palette)
+卡片式布局 (Card Layout)
+
+第三部分：排版与元素特效 (Typography & Element Effects)
+字体 (Font)
+一级标题 (<h2>) 特效
+二级标题 (<h3>) 特效
+加粗/高亮 (<strong>)
+引用 (<blockquote>)
+分割线 (<hr>)
+
+第四部分：最终交付要求 (Final Delivery Requirements)
+输出格式
+代码封装
+无外部依赖
+重要补充规则
+```
+
+---
+
+## 4. 目录结构
+
+```
+wechatwriter/
+├── app/
+│   ├── main.go              ✅ 主入口 (cobra 命令)
+│   └── convert.go           📝 convert 命令 (待实现)
+│
+├── app/
+│   ├── config/
+│   │   └── config.go        ✅ 配置管理
+│   │
+│   ├── wechat/
+│   │   └── service.go       ✅ 微信 API 封装
+│   │
+│   ├── image/
+│   │   ├── processor.go     ✅ 图片处理框架
+│   │   └── compress.go      📝 图片压缩 (待实现)
+│   │
+│   ├── converter/           📝 新增模块
+│   │   ├── converter.go     # 转换器接口
+│   │   ├── api.go           # API 模式实现
+│   │   ├── ai.go            # AI 模式实现
+│   │   ├── theme.go         # 主题/提示词管理
+│   │   └── image.go         # 图片占位符处理
+│   │
+│   └── draft/
+│       └── service.go       ✅ 草稿服务
+│
+├── go.mod                   ✅ 依赖管理
+│
+├── .claude/skills/md2wechat/
+│   ├── SKILL.md             ✅ Skill 使用文档
+│   └── references/
+│       ├── themes.md        ✅ 主题规范
+│       ├── html-guide.md    ✅ HTML 安全指南
+│       └── wechat-api.md    ✅ 微信 API 文档
+│
+├── DESIGN.md                📝 本文档
+└── README.md                📝 项目说明
+```
+
+图例: ✅ 已完成 | 🟡 部分完成 | 📝 待实现
+
+---
+
+## 5. 核心数据结构
+
+```go
+// 转换模式
+type ConvertMode string
+
+const (
+    ModeAPI ConvertMode = "api"   // API 模式
+    ModeAI  ConvertMode = "ai"    // AI 模式
+)
+
+// 转换请求
+type ConvertRequest struct {
+    // 输入
+    Markdown string       // Markdown 内容
+    Mode     ConvertMode  // 转换模式
+    Theme    string       // 主题名称 / AI 提示词名称
+
+    // API 模式专用
+    APIKey    string      // md2wechat.cn API Key
+    FontSize  string      // small/medium/large
+
+    // AI 模式专用
+    CustomPrompt string   // 自定义提示词
+}
+
+// 转换结果
+type ConvertResult struct {
+    HTML     string       // 生成的 HTML
+    Mode     ConvertMode  // 使用的模式
+    Images   []ImageRef   // 图片引用列表
+}
+
+// 图片引用
+type ImageRef struct {
+    Index      int    // 位置索引
+    Original   string // 原始路径
+    Placeholder string // <!-- IMG:0 -->
+    WechatURL  string // 上传后的 URL (处理完成后)
+    Type       string // local/online/ai
+}
+
+// 主题定义
+type Theme struct {
+    Name     string // 主题名称
+    Type     string // "api" | "ai"
+    APITheme string // API 模式使用的主题名
+    AIPrompt string // AI 模式使用的提示词
+}
+```
+
+---
+
+## 6. 命令行接口
+
+### 6.1 convert 命令
+
+```bash
+md2wechat convert <markdown_file> [options]
+
+选项:
+  --mode <api|ai>          转换模式，默认 api
+  --theme <name>           主题/提示词名称，默认 default
+  --api-key <key>          API 模式使用的 Key
+  --font-size <size>       API 模式: small/medium/large
+  --custom-prompt <text>   AI 模式: 自定义提示词
+  --output <file>          输出 HTML 文件
+  --preview                仅预览，不上传图片
+  --upload                 上传图片到微信并替换
+  --draft                  创建微信草稿
+  --save-draft <file>      保存草稿 JSON 到文件
+```
+
+### 6.2 使用示例
+
+```bash
+md2wechat convert article.md --mode ai --theme default --preview
+
+# AI 模式 + 上传图片
+md2wechat convert article.md --mode ai --theme elegant --upload
+
+# 自定义 AI 提示词
+md2wechat convert article.md --mode ai --custom-prompt "使用暗黑科技风格..."
+
+# 创建草稿
+md2wechat convert article.md --mode ai --theme default --upload --draft
+
+# 输出到文件
+md2wechat convert article.md --mode ai --output output.html
+```
+
+---
+
+## 7. 内置主题
+
+### 7.1 主题列表
+
+**API 主题**（快速稳定，调用 md2wechat.cn API）：
+
+| 主题名 | 描述 |
+|--------|------|
+| `default` | API 默认主题 |
+| `bytedance` | 字节跳动风格 |
+| `apple` | Apple 极简风格 |
+| `sports` | 运动活力风格 |
+| `chinese` | 中国传统文化风格 |
+| `cyber` | 赛博朋克风格 |
+
+**AI 主题**（精美排版，Claude AI 生成）：
+
+| 主题名 | 描述 |
+|--------|------|
+| `autumn-warm` | **【秋日暖光】** 温暖治愈，橙色调 #d97758，文艺美学 |
+| `spring-fresh` | **【春日清新】** 清新自然，绿色调 #6b9b7a，生机盎然 |
+| `ocean-calm` | **【深海静谧】** 深邃冷静，蓝色调 #4a7c9b，理性专业 |
+| `custom` | 自定义主题，使用用户自己的提示词 |
+
+### 7.2 主题对比
+
+| 特性 | autumn-warm | spring-fresh | ocean-calm |
+|------|-------------|--------------|------------|
+| **主色调** | 橙色 #d97758 | 绿色 #6b9b7a | 蓝色 #4a7c9b |
+| **背景色** | #faf9f5 暖白 | #f5f8f5 淡绿 | #f0f4f8 淡蓝 |
+| **文字色** | #4a413d 棕灰 | #3d4a3d 绿灰 | #3a4150 蓝灰 |
+| **标题符号** | ▶ | ❀ | ◆ |
+| **卡片纹理** | 方格 linear-gradient | 点状 radial-gradient | 网格 linear-gradient |
+| **阴影风格** | 暖光橙色光晕 | 清新绿色光晕 | 静谧蓝色光晕 |
+| **适用场景** | 文艺、情感、随笔 | 自然、园艺、生活 | 专业、学术、科技 |
+
+### 7.2 主题代码结构
+
+```go
+// app/converter/theme.go
+
+var BuiltInThemes = map[string]Theme{
+    // API 主题
+    "default": {
+        Type:     "api",
+        APITheme: "default",
+    },
+    "bytedance": {
+        Type:     "api",
+        APITheme: "bytedance",
+    },
+    "apple": {
+        Type:     "api",
+        APITheme: "apple",
+    },
+    "sports": {
+        Type:     "api",
+        APITheme: "sports",
+    },
+    "chinese": {
+        Type:     "api",
+        APITheme: "chinese",
+    },
+    "cyber": {
+        Type:     "api",
+        APITheme: "cyber",
+    },
+    // AI 主题
+    "autumn-warm": {
+        Type:  "ai",
+        AIPrompt: autumnWarmPrompt,
+    },
+    "spring-fresh": {
+        Type:  "ai",
+        AIPrompt: springFreshPrompt,
+    },
+    "ocean-calm": {
+        Type:  "ai",
+        AIPrompt: oceanCalmPrompt,
+    },
+}
+
+const minimalPrompt = `使用极简风格生成微信公众号 HTML：
+- 白色背景 #FFFFFF，黑色文字 #333333
+- 无衬线字体，行高 1.8
+- 所有 CSS 必须内联（style 属性）
+- 使用安全的 HTML 标签
+- 图片使用占位符格式 <!-- IMG:index -->`
+
+// ... 其他提示词
+```
+
+---
+
+## 8. 配置管理
+
+### 8.1 环境变量
+
+| 变量名 | 描述 | 必需 | 默认值 |
+|--------|------|------|--------|
+| `WECHAT_APPID` | 微信公众号 AppID | 是 | - |
+| `WECHAT_SECRET` | 微信 API Secret | 是 | - |
+| `MD2WECHAT_API_KEY` | md2wechat.cn API Key | API 模式 | - |
+| `CONVERT_MODE` | 默认转换模式 | 否 | `api` |
+| `DEFAULT_THEME` | 默认主题 | 否 | `default` |
+| `IMAGE_API_KEY` | 图片生成 API Key | AI 图片 | - |
+| `IMAGE_API_BASE` | 图片 API 地址 | AI 图片 | `https://api.openai.com/v1` |
+| `COMPRESS_IMAGES` | 是否压缩图片 | 否 | `true` |
+| `MAX_IMAGE_WIDTH` | 最大图片宽度 | 否 | `1920` |
+
+### 8.2 配置结构扩展
+
+```go
+// app/config/config.go
+
+type Config struct {
+    // 微信配置
+    WechatAppID   string
+    WechatSecret  string
+
+    // md2wechat.cn API 配置
+    MD2WechatAPIKey    string
+    DefaultConvertMode string
+    DefaultTheme       string
+
+    // 图片生成 API 配置
+    ImageAPIKey   string
+    ImageAPIBase  string
+
+    // 图片处理配置
+    CompressImages bool
+    MaxImageWidth  int
+    MaxImageSize   int64
+    HTTPTimeout    int
+}
+```
+
+---
+
+## 9. 开发计划
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        开发阶段划分                                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  阶段 1: converter 模块 (核心)                                   │    │
+│  ├─────────────────────────────────────────────────────────────────┤    │
+│  │  1.1 创建 app/converter 目录                               │    │
+│  │  1.2 实现 converter.go - 接口和数据结构                         │    │
+│  │  1.3 实现 api.go - 调用 md2wechat.cn API                        │    │
+│  │  1.4 实现 ai.go  - AI 模式框架                                  │    │
+│  │  1.5 实现 theme.go - 内置主题/提示词管理                         │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                    ↓                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  阶段 2: 图片压缩完善                                            │    │
+│  ├─────────────────────────────────────────────────────────────────┤    │
+│  │  2.1 添加 imaging 依赖                                          │    │
+│  │  2.2 实现 app/image/compress.go                            │    │
+│  │  2.3 集成到 processor.go 的 compressIfNeeded                     │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                    ↓                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  阶段 3: convert 命令                                            │    │
+│  ├─────────────────────────────────────────────────────────────────┤    │
+│  │  3.1 创建 cmd/convert.go                                         │    │
+│  │  3.2 实现命令行参数解析                                          │    │
+│  │  3.3 实现预览模式                                                │    │
+│  │  3.4 实现图片上传模式                                            │    │
+│  │  3.5 实现草稿创建模式                                            │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                    ↓                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  阶段 4: AI 提示词系统                                            │    │
+│  ├─────────────────────────────────────────────────────────────────┤    │
+│  │  4.1 内置 minimal/elegant/tech 提示词                            │    │
+│  │  4.2 支持自定义提示词                                            │    │
+│  │  4.3 提示词模板管理                                              │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                    ↓                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  阶段 5: 配置管理                                                │    │
+│  ├─────────────────────────────────────────────────────────────────┤    │
+│  │  5.1 添加 MD2WECHAT_API_KEY 环境变量支持                         │    │
+│  │  5.2 添加默认模式配置                                            │    │
+│  │  5.3 添加主题配置                                                │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                    ↓                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  阶段 6: 测试与文档                                              │    │
+│  ├─────────────────────────────────────────────────────────────────┤    │
+│  │  6.1 单元测试                                                    │    │
+│  │  6.2 集成测试                                                    │    │
+│  │  6.3 更新 SKILL.md 文档                                          │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 10. 依赖清单
+
+### 10.1 现有依赖
+
+```go
+// go.mod
+require (
+    github.com/silenceper/wechat/v2 v2.1.9    // 微信公众号 SDK
+    github.com/spf13/cobra v1.8.1             // CLI 框架
+    go.uber.org/zap v1.27.0                   // 日志库
+)
+```
+
+### 10.2 待添加依赖
+
+```go
+// 图片压缩
+require (
+    github.com/disintegration/imaging v1.6.2  // 图片处理
+)
+
+// 可选: Markdown 解析 (如果需要本地预处理)
+// github.com/gomarkdown/markdown v2.1.0
+```
+
+---
+
+## 11. 工作流程
+
+### 11.1 预览模式 (不处理图片)
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  读取 .md    │ ──▶ │  调用转换    │ ──▶ │  输出 HTML   │
+│  文件        │     │  (API/AI)    │     │  (含占位符)  │
+└──────────────┘     └──────────────┘     └──────────────┘
+```
+
+### 11.2 上传模式 (处理图片)
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  读取 .md    │ ──▶ │  提取图片    │ ──▶ │  调用转换    │
+│  文件        │     │  引用列表    │     │  生成 HTML   │
+└──────────────┘     └──────────────┘     └──────────────┘
+                                                  │
+                    ┌─────────────────────────────┘
+                    ▼
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  替换图片    │ ◀── │  上传图片    │ ◀── │  遍历图片    │
+│  URL         │     │  到微信 CDN  │     │  引用        │
+└──────────────┘     └──────────────┘     └──────────────┘
+        │
+        ▼
+┌──────────────┐
+│  输出最终    │
+│  HTML        │
+└──────────────┘
+```
+
+### 11.3 草稿模式 (创建微信草稿)
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  上传模式    │ ──▶ │  构造草稿    │ ──▶ │  调用微信    │
+│  完成        │     │  JSON        │     │  草稿 API    │
+└──────────────┘     └──────────────┘     └──────────────┘
+                                                  │
+                                                  ▼
+                                          ┌──────────────┐
+                                          │  返回草稿    │
+                                          │  media_id    │
+                                          └──────────────┘
+```
+
+---
+
+## 12. 更新日志
+
+| 日期 | 版本 | 更新内容 |
+|------|------|----------|
+| 2026-01-11 | v2.0 | 重新设计：支持双模式转换（API + AI） |
+| 2026-01-11 | v1.0 | 初始设计：基础框架和微信集成 |
+
+---
+
+## 13. 附录
+
+### 13.1 微信安全 HTML 标签
+
+```html
+允许的标签:
+  section, p, span, strong, em, u, a
+  h1-h6, ul, ol, li
+  blockquote, pre, code
+  table, thead, tbody, tr, th, td
+  br, hr, img
+
+禁止的标签:
+  script, noscript, iframe, form
+  input, button, textarea, select
+  object, embed, video, audio
+  style, link, meta
+```
+
+### 13.2 图片语法
+
+```markdown
+<!-- 本地图片 -->
+![alt](./path/to/image.png)
+
+<!-- 在线图片 -->
+![alt](https://example.com/image.png)
+
+<!-- AI 生成图片 -->
+![alt](__generate:A futuristic city skyline__)
+```
+
+### 13.3 相关文档
+
+- [SKILL.md](.claude/skills/md2wechat/SKILL.md) - Skill 使用文档
+- [themes.md](.claude/skills/md2wechat/references/themes.md) - 主题详细规范
+- [html-guide.md](.claude/skills/md2wechat/references/html-guide.md) - HTML 安全指南
+- [wechat-api.md](.claude/skills/md2wechat/references/wechat-api.md) - 微信 API 文档

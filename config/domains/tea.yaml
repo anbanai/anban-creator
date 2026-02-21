@@ -1,0 +1,110 @@
+# 茶文化领域配置
+
+domain:
+  id: tea
+  name: 茶文化领域
+  description: 专注于茶叶知识、茶文化传承、茶叶电商
+
+  author:
+    name: 老张
+    position: 国家一级评茶师
+    expertise:
+      - 茶叶品质鉴定
+      - 茶文化研究
+      - 茶叶选购指导
+    experience: 30年制茶经验
+
+  audience:
+    age_range: 50-70岁
+    characteristics:
+      - 注重健康养生
+      - 喜欢传统文化
+      - 有一定消费能力
+      - 追求品质生活
+    interests:
+      - 茶文化
+      - 健康养生
+      - 传统文化
+      - 生活品质
+    pain_points:
+      - 不知道如何选购好茶
+      - 担心买到假茶
+      - 不了解茶的保存方法
+      - 冲泡方法不正确
+
+  content:
+    preferred_templates:
+      - authoritative  # 权威揭秘型
+      - cultural  # 文化故事型
+      - practical  # 实用干货型
+
+    preferred_styles:
+      - cultural-depth  # 深度文化风格（最佳）
+      - dan-koe  # Dan Koe 风格
+
+    content_levels:
+      - 入门科普  # 新手入门
+      - 进阶专业  # 进阶知识
+      - 深度文化  # 文化传承
+
+  keywords:
+    core:
+      - 茶叶
+      - 茶文化
+      - 茶艺
+      - 茶道
+      - 品茶
+      - 评茶
+
+    seasonal:
+      - 春茶
+      - 明前茶
+      - 雨前茶
+      - 新茶
+      - 秋茶
+
+    categories:
+      - 绿茶
+      - 红茶
+      - 乌龙茶
+      - 普洱茶
+      - 白茶
+      - 黑茶
+      - 黄茶
+
+    famous_teas:
+      - 龙井
+      - 碧螺春
+      - 毛峰
+      - 铁观音
+      - 大红袍
+      - 正山小种
+
+    activities:
+      - 选购
+      - 冲泡
+      - 保存
+      - 品鉴
+      - 收藏
+
+  viral_strategy:
+    primary_goal: 综合表现  # 阅读量、互动率、分享率综合
+
+    weights:
+      read_weight: 25  # 阅读量权重
+      like_weight: 20  # 点赞权重
+      share_weight: 30  # 分享权重（最重要）
+      engagement_weight: 25  # 互动率权重
+
+    target_metrics:
+      min_read_count: 10000
+      min_engagement_rate: 0.03  # 3%
+      min_share_rate: 0.015  # 1.5%
+
+  content_angles:
+    - 专业鉴别方法
+    - 文化历史故事
+    - 实用冲泡技巧
+    - 选购避坑指南
+    - 健康养生功效
+    - 茶艺美学欣赏
