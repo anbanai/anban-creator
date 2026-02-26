@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 
@@ -30,7 +31,7 @@ func draftPostCmd() *cobra.Command {
 		Long: `创建微信公众号小绿书帖子（图片消息/newspic），支持最多 20 张图片。
 
 示例：
-  # 从逗号分隔的图片列表创建
+  # 从逗号分隔的本地图片文件路径创建（自动上传到微信素材库）
   wechatwriter draft post -t "周末出游" --images photo1.jpg,photo2.jpg,photo3.jpg
 
   # 从 Markdown 文件提取图片
@@ -38,6 +39,12 @@ func draftPostCmd() *cobra.Command {
 
   # 带描述文字和评论设置
   wechatwriter draft post -t "美食分享" -c "今天的午餐" --images food.jpg --open-comment
+
+  # 使用微信素材 ID 创建（先用 image upload 获取 media_id，再跳过重复上传）
+  wechatwriter draft post -t "AI 图集" --media-ids "MEDIA_ID_1,MEDIA_ID_2"
+
+  # 混合使用：微信素材 ID + 本地文件路径
+  wechatwriter draft post -t "混合图集" --media-ids "MEDIA_ID_1" --images "local.jpg"
 
   # 从 stdin 读取描述
   echo "每日打卡" | wechatwriter draft post -t "每日" --images pic.jpg
@@ -100,7 +107,7 @@ func draftPostCmd() *cobra.Command {
 			}
 
 			if len(req.Images) == 0 && req.FromMarkdown == "" && len(req.MediaIDs) == 0 {
-				responseError(&AppError{Message: "--images, --media-ids, or --from-markdown is required", HintText: "使用 --images 指定图片路径，--media-ids 指定已上传的 media_id，或 -m 从 Markdown 提取图片"})
+				responseError(&AppError{Message: "--images, --media-ids, or --from-markdown is required", HintText: "使用 --images 指定本地图片文件路径，--media-ids 指定微信素材 ID（media_id），或 -m 从 Markdown 提取图片"})
 				return
 			}
 
@@ -112,15 +119,6 @@ func draftPostCmd() *cobra.Command {
 				if err != nil {
 					responseError(err)
 					return
-				}
-
-				// 保存到文件
-				if output != "" {
-					data, _ := json.MarshalIndent(preview, "", "  ")
-					if err := os.WriteFile(output, data, 0644); err != nil {
-						responseError(err)
-						return
-					}
 				}
 
 				responseSuccess(map[string]any{
@@ -137,11 +135,15 @@ func draftPostCmd() *cobra.Command {
 				return
 			}
 
-			// 保存结果到文件
+			// 若指定了 --output，将结果写入文件
 			if output != "" {
-				data, _ := json.MarshalIndent(result, "", "  ")
-				if err := os.WriteFile(output, data, 0644); err != nil {
-					responseError(err)
+				data, marshalErr := json.MarshalIndent(result, "", "  ")
+				if marshalErr != nil {
+					responseError(fmt.Errorf("marshal result: %w", marshalErr))
+					return
+				}
+				if writeErr := os.WriteFile(output, data, 0644); writeErr != nil {
+					responseError(fmt.Errorf("write output %s: %w", output, writeErr))
 					return
 				}
 			}
@@ -152,13 +154,15 @@ func draftPostCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "帖子标题（必填）")
 	cmd.Flags().StringVarP(&content, "content", "c", "", "描述文字")
-	cmd.Flags().StringVar(&images, "images", "", "图片路径（逗号分隔）")
-	cmd.Flags().StringVar(&mediaIDs, "media-ids", "", "已上传的 media_id（逗号分隔，跳过重复上传）")
+	cmd.Flags().StringVar(&images, "images", "", "本地图片文件路径，逗号分隔（将自动上传到微信素材库）")
+	cmd.Flags().StringVar(&mediaIDs, "media-ids", "", "微信素材 ID（media_id），逗号分隔（已上传到微信素材库的图片，跳过重复上传）")
 	cmd.Flags().StringVarP(&fromMD, "from-markdown", "m", "", "从 Markdown 文件提取图片")
 	cmd.Flags().BoolVar(&openComment, "open-comment", false, "开启评论")
 	cmd.Flags().BoolVar(&fansOnly, "fans-only", false, "仅粉丝可评论")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "预览模式（不实际创建草稿）")
-	cmd.Flags().StringVarP(&output, "output", "o", "", "保存结果到 JSON 文件")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "将结果写入 JSON 文件")
+	cmd.Flags().StringVar(&content, "desc", "", "描述文字（--content 的别名）")
+	_ = cmd.Flags().MarkHidden("desc")
 
 	return cmd
 }

@@ -21,9 +21,12 @@ maxTurns: 25
 ## 创作流程
 
 1. 执行 `wechatwriter account info` 获取账号信息
-2. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，规划小绿书的标题、描述、标签和图片的关键内容描述
-3. 使用 skill `visual-design` 逐一生成小绿书图片，始终传递 `--post` 参数（自动使用配置中的小绿书比例）
-4. 使用 skill `post-publishing` → `draft post` 发布到微信公众号草稿箱
+2. 执行 `wechatwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
+3. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，规划小绿书的标题、描述、标签和图片的关键内容描述
+4. **定义统一视觉风格**：构思一段 50-150 字的风格描述，涵盖设计风格、色彩方案、版式、字体和整体氛围，作为 `$STYLE` 变量，所有图片生成命令均传 `--style "$STYLE"` 以保持多图视觉一致性
+5. 使用 skill `visual-design` 逐一生成小绿书图片（`image generate --post --style "$STYLE"`），保存到本地
+6. 逐一上传图片到微信素材库（`image upload`），记录每张图的 media_id
+7. 使用 skill `post-publishing` → `draft post --media-ids` 用素材 ID 发布到微信公众号草稿箱
 
 ## 小绿书内容设计原则
 
@@ -37,16 +40,19 @@ maxTurns: 25
 - 收尾图：总结要点或引导关注的 CTA 卡片
 
 ### 多图叙事结构
+
+根据 `wechatwriter account info` 中的「图片数量」配置决定生成张数，按以下结构分配：
+
 | 位置 | 作用 | 内容类型 |
 |------|------|----------|
 | 第1张 | 封面钩子 | 标题卡片，点明主题和价值 |
-| 第2-4张 | 核心内容 | 知识点/步骤/技巧，每张一个主题 |
+| 中间图 | 核心内容 | 知识点/步骤/技巧，每张一个主题 |
 | 最后1张 | 收尾CTA | 总结或引导互动 |
 
 ## 质量标准
 
-- 图片数量 3-5张
-- 所有图片统一使用 `--post` 参数生成，保持视觉一致性
+- 图片数量以 `wechatwriter account info` 输出的「图片数量」为准（配置项 `post.count`，默认 4）
+- 所有图片统一使用 `--post --style "$STYLE"` 参数生成，保持视觉一致性
 - 所有图片文件存在且可访问
 - 标题不为空，不超过 32 字符
 - 描述文字为纯文本（不含 HTML 标签）
@@ -84,7 +90,7 @@ maxTurns: 25
 - 开始前：`TaskUpdate status → in_progress`
 - 完成后：`TaskUpdate status → completed`
 - 设置依赖：每个任务 blockedBy 前一个任务
-- 报告进度：`[3/4] 图片生成完成 → output/ (8张图片)`
+- 报告进度：`[3/7] 图片生成完成 → output/ (8张图片)`
 
 ## 执行原则
 

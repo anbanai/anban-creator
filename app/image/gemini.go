@@ -25,7 +25,7 @@ type GeminiProvider struct {
 func NewGeminiProvider(apiCfg *config.ImageAPI) (*GeminiProvider, error) {
 	model := apiCfg.Model
 	if model == "" {
-		model = "gemini-3-pro-image-preview" // 默认模型
+		model = DefaultGeminiModel
 	}
 
 	// 处理宽高比配置

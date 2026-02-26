@@ -31,7 +31,7 @@ type OpenRouterProvider struct {
 func NewOpenRouterProvider(apiCfg *config.ImageAPI) (*OpenRouterProvider, error) {
 	model := apiCfg.Model
 	if model == "" {
-		model = "google/gemini-3-pro-image-preview" // 默认模型
+		model = DefaultOpenRouterModel
 	}
 
 	// 将 WIDTHxHEIGHT 格式映射到 OpenRouter 的 aspect_ratio 和 image_size
@@ -39,7 +39,7 @@ func NewOpenRouterProvider(apiCfg *config.ImageAPI) (*OpenRouterProvider, error)
 
 	baseURL := apiCfg.BaseURL
 	if baseURL == "" {
-		baseURL = "https://openrouter.ai/api/v1"
+		baseURL = DefaultOpenRouterBaseURL
 	}
 
 	return &OpenRouterProvider{
@@ -257,7 +257,7 @@ func (p *OpenRouterProvider) handleErrorResponse(resp *http.Response) error {
 			Provider: p.Name(),
 			Code:     "unauthorized",
 			Message:  "OpenRouter API Key 无效或已过期",
-			HintMsg:  "请检查配置中的 image.api.key 是否正确，或前往 openrouter.ai 获取新的 API Key",
+			HintMsg:  "请检查配置中的 article.image.key 或 post.image.key 是否正确，或前往 openrouter.ai 获取新的 API Key",
 			Original: fmt.Errorf("status 401: %s", string(body)),
 		}
 	case http.StatusTooManyRequests:
@@ -269,6 +269,15 @@ func (p *OpenRouterProvider) handleErrorResponse(resp *http.Response) error {
 			Original: fmt.Errorf("status 429: %s", string(body)),
 		}
 	case http.StatusBadRequest:
+		if isContentSafetyError(errMsg) || isContentSafetyError(string(body)) {
+			return &GenerateError{
+				Provider: p.Name(),
+				Code:     "safety_blocked",
+				Message:  "提示词被内容安全策略拦截",
+				HintMsg:  "提示词可能包含敏感内容，请修改提示词后重试",
+				Original: fmt.Errorf("status 400: %s", string(body)),
+			}
+		}
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "bad_request",

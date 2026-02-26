@@ -13,6 +13,7 @@ import (
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"go.uber.org/zap"
 )
+
 // ServiceError 草稿服务错误，携带修复建议
 type ServiceError struct {
 	Message  string
@@ -46,7 +47,8 @@ type Article struct {
 	Title            string `json:"title"`
 	Author           string `json:"author,omitempty"`
 	Digest           string `json:"digest,omitempty"`
-	Content          string `json:"content"`
+	Content          string `json:"content,omitempty"`
+	ContentFile      string `json:"content_file,omitempty"`
 	ContentSourceURL string `json:"content_source_url,omitempty"`
 	ThumbMediaID     string `json:"thumb_media_id,omitempty"`
 	ShowCoverPic     int    `json:"show_cover_pic,omitempty"`
@@ -149,6 +151,22 @@ type DraftItem struct {
 	UpdateTime int64  `json:"update_time"`
 }
 
+// ListPublishedResult 已发布文章列表结果
+type ListPublishedResult struct {
+	TotalCount int64           `json:"total_count"`
+	ItemCount  int64           `json:"item_count"`
+	Items      []PublishedItem `json:"items"`
+}
+
+// PublishedItem 已发布文章列表项
+type PublishedItem struct {
+	ArticleID  string `json:"article_id"`
+	Title      string `json:"title"`
+	Digest     string `json:"digest,omitempty"`
+	URL        string `json:"url,omitempty"`
+	UpdateTime int64  `json:"update_time"`
+}
+
 // ListDrafts 获取草稿列表
 func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 	ws := wechat.NewService(s.cfg, s.log)
@@ -175,12 +193,39 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 	}, nil
 }
 
+// ListPublished 获取已发布文章列表
+func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, error) {
+	ws := wechat.NewService(s.cfg, s.log)
+	result, err := ws.ListPublished(offset, count)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ListPublishedResult{
+		TotalCount: result.TotalCount,
+		ItemCount:  result.ItemCount,
+		Items: func() []PublishedItem {
+			items := make([]PublishedItem, len(result.Items))
+			for i, item := range result.Items {
+				items[i] = PublishedItem{
+					ArticleID:  item.ArticleID,
+					Title:      item.Title,
+					Digest:     item.Digest,
+					URL:        item.URL,
+					UpdateTime: item.UpdateTime,
+				}
+			}
+			return items
+		}(),
+	}, nil
+}
+
 // ImagePostRequest 创建小绿书请求
 type ImagePostRequest struct {
 	Title        string   // 标题（必需）
 	Content      string   // 纯文本描述
-	Images       []string // 图片路径列表（本地文件，将上传）
-	MediaIDs     []string // 已上传的 media_id（跳过重复上传）
+	Images       []string // 本地图片文件路径列表（将自动上传到微信素材库）
+	MediaIDs     []string // 微信素材 ID（media_id）列表（已上传到微信素材库的图片，跳过重复上传）
 	OpenComment  bool     // 开启评论
 	FansOnly     bool     // 仅粉丝评论
 	FromMarkdown string   // 从 MD 文件提取图片
@@ -190,7 +235,7 @@ type ImagePostRequest struct {
 type ImagePostResult struct {
 	MediaID     string   `json:"media_id"`
 	DraftURL    string   `json:"draft_url"`
-	ImageCount  int      `json:"image_count"`
+	Count       int      `json:"count"`
 	UploadedIDs []string `json:"uploaded_ids"`
 }
 
@@ -286,7 +331,7 @@ func (s *Service) CreateImagePost(req *ImagePostRequest) (*ImagePostResult, erro
 	return &ImagePostResult{
 		MediaID:     result.MediaID,
 		DraftURL:    result.DraftURL,
-		ImageCount:  totalCount,
+		Count:       totalCount,
 		UploadedIDs: uploadedIDs,
 	}, nil
 }
@@ -326,7 +371,7 @@ func (s *Service) GetImagePostPreview(req *ImagePostRequest) (map[string]any, er
 	return map[string]any{
 		"title":        req.Title,
 		"content":      req.Content,
-		"image_count":  totalCount,
+		"count":        totalCount,
 		"images":       imageDetails,
 		"media_ids":    req.MediaIDs,
 		"open_comment": req.OpenComment,

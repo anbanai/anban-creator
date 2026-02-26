@@ -81,6 +81,7 @@ Configuration:
 	rootCmd.AddCommand(humanizeCmd)
 	rootCmd.AddCommand(scoreCmd())
 	rootCmd.AddCommand(outlineCmd())
+	rootCmd.AddCommand(topicsCmd())
 	rootCmd.AddCommand(accountCmd())
 	rootCmd.AddCommand(doctorCmd())
 

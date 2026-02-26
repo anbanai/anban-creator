@@ -336,6 +336,7 @@ func TestFeature(t *testing.T) {
 ## CLI Commands Overview
 
 - `./bin/wechatwriter account init` - Create config file with guided setup
+- `./bin/wechatwriter account history` - View unified history of drafts and published articles
 - `./bin/wechatwriter convert <file>` - Convert Markdown to WeChat HTML
 - `./bin/wechatwriter write` - Style-based writing assistance
 - `./bin/wechatwriter humanize <file>` - Remove AI writing traces

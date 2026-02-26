@@ -1,3 +1,5 @@
+//go:build windows
+
 package main
 
 func getDiskAvailable(path string) (uint64, bool) {

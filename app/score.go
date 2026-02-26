@@ -38,7 +38,6 @@ func scoreCmd() *cobra.Command {
 		inputFile string
 		topic     string
 		domain    string
-		output    string
 	)
 
 	cmd := &cobra.Command{
@@ -51,19 +50,18 @@ func scoreCmd() *cobra.Command {
 - 互动率、分享率等衍生指标
 - 领域相关性评估`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScore(inputFile, topic, domain, output)
+			return runScore(inputFile, topic, domain)
 		},
 	}
 
 	cmd.Flags().StringVarP(&inputFile, "input", "i", "", "输入文件路径（JSON格式），留空则从stdin读取")
 	cmd.Flags().StringVarP(&topic, "topic", "t", "", "话题名称")
 	cmd.Flags().StringVarP(&domain, "domain", "d", "tea", "领域配置 (tea, tech, lifestyle)")
-	cmd.Flags().StringVarP(&output, "output", "o", "json", "输出格式 (json, text)")
 
 	return cmd
 }
 
-func runScore(inputFile, topic, domain, outputFormat string) error {
+func runScore(inputFile, topic, domain string) error {
 	if inputFile == "" && isTerminal() {
 		return fmt.Errorf("需要提供评分数据。用法:\n" +
 			"  wechatwriter score -i metrics.json\n" +
@@ -128,13 +126,7 @@ func runScore(inputFile, topic, domain, outputFormat string) error {
 		"recommendations": generateRecommendations(request.Metrics),
 	}
 
-	if outputFormat == "json" {
-		output, _ := json.MarshalIndent(result, "", "  ")
-		fmt.Println(string(output))
-	} else {
-		printTextScore(result)
-	}
-
+	responseSuccess(result)
 	return nil
 }
 
@@ -201,22 +193,3 @@ func generateRecommendations(metrics ViralMetrics) []string {
 	return recs
 }
 
-func printTextScore(result map[string]interface{}) {
-	fmt.Printf("爆款潜力评分\n")
-	fmt.Printf("============\n\n")
-	if t, _ := result["topic"].(string); t != "" {
-		fmt.Printf("话题: %s\n", t)
-	}
-	if d, _ := result["domain"].(string); d != "" {
-		fmt.Printf("领域: %s\n", d)
-	}
-	fmt.Printf("综合评分: %.1f 分\n", result["score"])
-	fmt.Printf("爆款等级: %s\n\n", result["level"])
-
-	if recs, ok := result["recommendations"].([]string); ok {
-		fmt.Printf("优化建议:\n")
-		for _, rec := range recs {
-			fmt.Printf("  • %s\n", rec)
-		}
-	}
-}

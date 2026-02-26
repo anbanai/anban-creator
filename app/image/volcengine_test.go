@@ -39,3 +39,31 @@ func TestParseVolcengineSize(t *testing.T) {
 		})
 	}
 }
+
+func TestIsContentSafetyError(t *testing.T) {
+	tests := []struct {
+		name    string
+		errMsg  string
+		want    bool
+	}{
+		{"sensitive keyword", "content contains sensitive material", true},
+		{"safety keyword", "safety policy violation", true},
+		{"content_filter keyword", "content_filter triggered", true},
+		{"blocked keyword", "request blocked by safety system", true},
+		{"Chinese 违规", "提示词违规，无法生成", true},
+		{"Chinese 敏感", "包含敏感词汇", true},
+		{"Chinese 审核", "图片审核未通过", true},
+		{"normal bad request", "invalid parameter: aspect_ratio", false},
+		{"rate limit message", "rate limit exceeded", false},
+		{"empty string", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isContentSafetyError(tt.errMsg)
+			if got != tt.want {
+				t.Errorf("isContentSafetyError(%q) = %v, want %v", tt.errMsg, got, tt.want)
+			}
+		})
+	}
+}

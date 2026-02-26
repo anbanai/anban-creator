@@ -99,6 +99,9 @@ func checkConfig(cfg *config.Config, cfgErr error) []CheckResult {
 		checks = append(checks, CheckResult{Name: "wechat_secret", Status: "fail", Message: "AppSecret 未配置", Hint: "登录微信公众平台 > 设置与开发 > 基本配置 > 获取 Secret"})
 	}
 
+	// AI 文字生成模式
+	checks = append(checks, CheckResult{Name: "ai_text_mode", Status: "pass", Message: "AI 文字生成: Claude 代理模式（由 Claude Code 直接生成）"})
+
 	// 图片 API
 	articleKey := cfg.Article.Image.Key
 	if articleKey != "" {

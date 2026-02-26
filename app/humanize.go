@@ -1,11 +1,9 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 
-	"github.com/royalrick/wechatwriter/app/ai"
 	"github.com/royalrick/wechatwriter/app/humanizer"
 	"github.com/spf13/cobra"
 )
@@ -13,7 +11,6 @@ import (
 var (
 	intensityFlag   string
 	showChangesFlag bool
-	outputFlag      string
 )
 
 // humanizeCmd - AI 写作去痕命令
@@ -65,17 +62,6 @@ func runHumanize(filePath string) error {
 		return fmt.Errorf("读取文件失败: %w", err)
 	}
 
-	// 加载配置（不验证微信账号）
-	if err := initConfigMinimal(); err != nil {
-		return fmt.Errorf("初始化配置失败: %w", err)
-	}
-
-	// 创建 AI 客户端
-	aiClient, err := ai.NewClient(&cfg.AI)
-	if err != nil {
-		return fmt.Errorf("创建 AI 客户端失败: %w", err)
-	}
-
 	// 构建请求
 	req := &humanizer.HumanizeRequest{
 		Content:       string(content),
@@ -85,37 +71,20 @@ func runHumanize(filePath string) error {
 		PreserveStyle: false,
 	}
 
-	// 构建提示词并调用 AI
+	// 构建提示词，返回给 Claude 代理处理
 	h := humanizer.NewHumanizer()
 	prompt := h.BuildAIRequestForAI(req)
 
-	aiResponse, err := aiClient.ChatCompletion(context.Background(), prompt)
-	if err != nil {
-		return fmt.Errorf("AI 处理失败: %w", err)
-	}
-
-	// 解析 AI 响应
-	result := h.ParseAIResponse(aiResponse, req)
-
-	if !result.Success {
-		return fmt.Errorf("解析 AI 结果失败: %s", result.Error)
-	}
-
-	// 输出结果
-	if outputFlag != "" {
-		if err := os.WriteFile(outputFlag, []byte(result.Content), 0644); err != nil {
-			return fmt.Errorf("写入输出文件失败: %w", err)
-		}
-	} else {
-		fmt.Println(result.Content)
-	}
-
+	responseSuccess(map[string]any{
+		"type":      "humanize_prompt",
+		"prompt":    prompt,
+		"intensity": intensityFlag,
+		"file":      filePath,
+	})
 	return nil
 }
 
 func init() {
 	humanizeCmd.Flags().StringVarP(&intensityFlag, "intensity", "i", "medium", "处理强度: gentle/medium/aggressive")
 	humanizeCmd.Flags().BoolVarP(&showChangesFlag, "show-changes", "c", false, "显示修改对比和质量评分")
-	humanizeCmd.Flags().StringVarP(&outputFlag, "output", "o", "", "输出文件路径")
 }
-

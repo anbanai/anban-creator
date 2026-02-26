@@ -39,7 +39,7 @@ release:
 build:
 	@echo "🔨 构建当前平台..."
 	@mkdir -p bin
-	@go build -ldflags="$(LDFLAGS)" -o bin/wechatwriter ./app/*.go
+	@go build -ldflags="$(LDFLAGS)" -o bin/wechatwriter ./app
 	@echo "✅ 构建完成: bin/wechatwriter"
 
 # 快速构建（仅当前平台，用于开发）

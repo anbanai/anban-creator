@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,11 +13,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// sanitizeJSON 清理 JSON 中的中文引号和其他非标准字符
+// sanitizeJSON 清理 JSON 中的非标准字符
+// 如果 JSON 本身有效则跳过处理；否则尝试替换中文引号
 func sanitizeJSON(data []byte) []byte {
-	// 替换中文双引号为转义的英文双引号
-	result := bytes.ReplaceAll(data, []byte{0xe2, 0x80, 0x9c}, []byte("\\\""))  // " (U+201C)
-	result = bytes.ReplaceAll(result, []byte{0xe2, 0x80, 0x9d}, []byte("\\\"")) // " (U+201D)
+	if json.Valid(data) {
+		return data
+	}
+	// 替换中文双引号为英文双引号（未转义，让 JSON 解析器处理上下文）
+	result := bytes.ReplaceAll(data, []byte{0xe2, 0x80, 0x9c}, []byte("\""))  // " (U+201C)
+	result = bytes.ReplaceAll(result, []byte{0xe2, 0x80, 0x9d}, []byte("\"")) // " (U+201D)
 	// 替换中文单引号为英文单引号
 	result = bytes.ReplaceAll(result, []byte{0xe2, 0x80, 0x98}, []byte("'")) // ' (U+2018)
 	result = bytes.ReplaceAll(result, []byte{0xe2, 0x80, 0x99}, []byte("'")) // ' (U+2019)
@@ -40,7 +45,6 @@ func draftCmd() *cobra.Command {
 	cmd.AddCommand(draftArticleCmd())
 	cmd.AddCommand(draftTestCmd())
 	cmd.AddCommand(draftPublishCmd())
-	cmd.AddCommand(draftListCmd())
 	cmd.AddCommand(draftPostCmd())
 
 	return cmd
@@ -51,7 +55,38 @@ func draftArticleCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "article <json_file>",
 		Short: "从 JSON 文件创建微信图文文章草稿",
-		Args:  cobra.ExactArgs(1),
+		Long: `从 JSON 文件创建微信图文文章草稿
+
+JSON 格式示例:
+  {
+    "articles": [
+      {
+        "title": "文章标题",
+        "author": "作者",
+        "digest": "文章摘要（120字以内）",
+        "content": "<p>HTML 正文内容</p>",
+        "thumb_media_id": "封面图片 media_id",
+        "show_cover_pic": 1
+      }
+    ]
+  }
+
+使用 content_file 替代内联 content（推荐用于长文章）:
+  {
+    "articles": [
+      {
+        "title": "文章标题",
+        "content_file": "/path/to/article.html",
+        "thumb_media_id": "封面图片 media_id"
+      }
+    ]
+  }
+
+注意：
+  - 需要在配置文件中设置微信公众号账号信息
+  - 运行 'wechatwriter account init' 创建配置文件
+  - 内容长度限制 20000 字符，超出请使用 content_file 分离 HTML 文件`,
+		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfig()
 		},
@@ -74,7 +109,13 @@ func draftArticleCmd() *cobra.Command {
 				Articles []draft.Article `json:"articles"`
 			}
 			if err := json.Unmarshal(data, &req); err != nil {
-				responseError(fmt.Errorf("parse json: %w", err))
+				// 提供更有用的错误信息
+				syntaxErr, ok := err.(*json.SyntaxError)
+				if ok {
+					responseError(fmt.Errorf("JSON 解析失败（位置 %d）: %w\n💡 提示: 如果正文 HTML 含有特殊字符，建议使用 content_file 字段引用外部 HTML 文件", syntaxErr.Offset, err))
+				} else {
+					responseError(fmt.Errorf("JSON 解析失败: %w\n💡 提示: 可使用 content_file 字段替代内联 content，避免 HTML 转义问题", err))
+				}
 				return
 			}
 
@@ -82,6 +123,23 @@ func draftArticleCmd() *cobra.Command {
 			if len(req.Articles) == 0 {
 				responseError(&AppError{Message: "no articles in request", HintText: "JSON 文件需包含 articles 数组，格式: {\"articles\": [...]}"})
 				return
+			}
+
+			// 解析 content_file 字段
+			jsonDir := filepath.Dir(jsonFile)
+			for i := range req.Articles {
+				if req.Articles[i].ContentFile != "" && req.Articles[i].Content == "" {
+					htmlPath := req.Articles[i].ContentFile
+					if !filepath.IsAbs(htmlPath) {
+						htmlPath = filepath.Join(jsonDir, htmlPath)
+					}
+					htmlData, err := os.ReadFile(htmlPath)
+					if err != nil {
+						responseError(fmt.Errorf("读取 content_file 失败 (%s): %w", htmlPath, err))
+						return
+					}
+					req.Articles[i].Content = string(htmlData)
+				}
 			}
 
 			// 创建草稿
@@ -107,7 +165,18 @@ func draftTestCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "test <html_file> <cover_image>",
 		Short: "测试从 HTML 文件创建微信草稿",
-		Args:  cobra.ExactArgs(2),
+		Long: `从 HTML 文件和封面图片创建微信草稿（测试用途）
+
+快速验证 HTML 内容能否正确发布到微信草稿箱，适合调试转换效果。
+
+需要配置:
+  wechat.appid   - 微信公众号 AppID
+  wechat.secret  - 微信公众号 Secret
+
+示例:
+  wechatwriter draft test output.html cover.jpg
+  wechatwriter draft test output.html cover.jpg --title "测试文章" --digest "摘要"`,
+		Args: cobra.ExactArgs(2),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfig()
 		},
@@ -148,7 +217,6 @@ func draftTestCmd() *cobra.Command {
 			}
 
 			responseSuccess(map[string]any{
-				"success":   true,
 				"media_id":  result.MediaID,
 				"draft_url": result.DraftURL,
 				"message":   "Draft created successfully!",
@@ -200,36 +268,6 @@ func draftPublishCmd() *cobra.Command {
 	return cmd
 }
 
-// draftListCmd 列出草稿
-func draftListCmd() *cobra.Command {
-	var (
-		offset int64
-		count  int64
-	)
-
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "列出微信公众号草稿箱",
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return initConfig()
-		},
-		Run: func(cmd *cobra.Command, args []string) {
-			svc := draft.NewService(cfg, log)
-			result, err := svc.ListDrafts(offset, count)
-			if err != nil {
-				responseError(err)
-				return
-			}
-			responseSuccess(result)
-		},
-	}
-
-	cmd.Flags().Int64Var(&offset, "offset", 0, "偏移量（从第几条开始）")
-	cmd.Flags().Int64Var(&count, "count", 20, "返回条数（最多20）")
-
-	return cmd
-}
-
 func runPublish(title, content, author, digest, coverID, outputDir, images string) error {
 	// 检查 content 是否是文件路径
 	if _, err := os.Stat(content); err == nil {
@@ -274,9 +312,11 @@ func runPublish(title, content, author, digest, coverID, outputDir, images strin
 		return fmt.Errorf("无法保存草稿文件: %w", err)
 	}
 
-	fmt.Printf("✅ 草稿JSON已保存到: %s\n", draftFile)
-	fmt.Printf("\n使用以下命令上传草稿:\n")
-	fmt.Printf("  writer draft article %s\n", draftFile)
+	responseSuccess(map[string]any{
+		"draft_file":   draftFile,
+		"message":      "草稿JSON已保存",
+		"next_command": "wechatwriter draft article " + draftFile,
+	})
 
 	return nil
 }

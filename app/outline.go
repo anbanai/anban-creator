@@ -1,8 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -43,13 +43,15 @@ func outlineCmd() *cobra.Command {
 		domain   string
 		style    string
 		keywords []string
-		output   string
+		noAI     bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "outline",
 		Short: "生成爆款内容框架",
 		Long: `基于话题和模板生成文章框架
+
+默认使用 Claude 代理生成更有针对性的框架内容（返回提示词），使用 --no-ai 切换到模板模式。
 
 支持的模板：
 - authoritative: 权威揭秘型
@@ -60,12 +62,16 @@ func outlineCmd() *cobra.Command {
 支持的风格：
 - dan-koe: Dan Koe 风格（简洁有力）
 - cultural-depth: 深度文化风格
-- casual-science: 轻松科普风格`,
+- casual-science: 轻松科普风格
+
+示例:
+  wechatwriter outline -t "茶叶养生" -k "绿茶,健康,抗氧化"
+  wechatwriter outline -t "茶叶养生" --no-ai --template practical`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 回退到配置文件默认值
 			if !cmd.Flags().Changed("style") {
-				if err := initConfigMinimal(); err == nil && cfg.Wechat.Style != "" {
-					style = cfg.Wechat.Style
+				if err := initConfigMinimal(); err == nil && cfg.Article.Style != "" {
+					style = cfg.Article.Style
 				}
 			}
 
@@ -74,7 +80,21 @@ func outlineCmd() *cobra.Command {
 				style = "dan-koe"
 			}
 
-			return runGenerate(topic, template, domain, style, keywords, output)
+			// 使用模板模式
+			if noAI {
+				return runGenerate(topic, template, domain, style, keywords)
+			}
+
+			// 构建提示词，返回给 Claude 代理处理
+			prompt := buildOutlinePrompt(topic, template, style, keywords)
+			responseSuccess(map[string]any{
+				"type":     "outline_prompt",
+				"prompt":   prompt,
+				"topic":    topic,
+				"template": template,
+				"style":    style,
+			})
+			return nil
 		},
 	}
 
@@ -83,14 +103,54 @@ func outlineCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&domain, "domain", "d", "tea", "领域配置")
 	cmd.Flags().StringVarP(&style, "style", "s", "", "写作风格 (default: from config or 'dan-koe')")
 	cmd.Flags().StringSliceVarP(&keywords, "keywords", "k", []string{}, "关键词列表")
-	cmd.Flags().StringVarP(&output, "output", "o", "json", "输出格式 (json, text)")
+	cmd.Flags().BoolVar(&noAI, "no-ai", false, "跳过 AI，使用模板模式生成框架")
 
 	cmd.MarkFlagRequired("topic")
 
 	return cmd
 }
 
-func runGenerate(topic, template, domain, style string, keywords []string, outputFormat string) error {
+// buildOutlinePrompt 构建大纲提示词（供 Claude 代理使用）
+func buildOutlinePrompt(topic, templateType, style string, keywords []string) string {
+	kwStr := strings.Join(keywords, "、")
+	if kwStr == "" {
+		kwStr = "（无）"
+	}
+
+	return fmt.Sprintf(`请为以下微信公众号文章生成一个详细的内容框架，以 JSON 格式输出。
+
+话题: %s
+模板类型: %s
+写作风格: %s
+关键词: %s
+
+请输出严格的 JSON 格式，结构如下（不要包含任何额外文字）:
+{
+  "title": "吸引眼球的文章标题",
+  "subtitle": "副标题或引导语",
+  "hook": "开头钩子句（吸引读者继续阅读）",
+  "sections": [
+    {
+      "title": "1. 节标题",
+      "content": "该节的核心内容描述（2-3句话）",
+      "key_points": ["要点一", "要点二", "要点三"],
+      "engagement": "该节的互动引导语"
+    }
+  ],
+  "key_points": ["全文核心要点一", "全文核心要点二", "全文核心要点三"],
+  "call_to_action": "结尾行动号召",
+  "viral_elements": ["传播元素一", "传播元素二"],
+  "seo_keywords": ["SEO关键词一", "SEO关键词二", "SEO关键词三"]
+}
+
+要求：
+- 标题要有冲击力和好奇心驱动
+- 钩子要能在3秒内抓住读者注意力
+- 各节内容要具体，紧扣关键词
+- 结构要符合%s模板类型的逻辑`, topic, templateType, style, kwStr, templateType)
+}
+
+func runGenerate(topic, template, domain, style string, keywords []string) error {
 	request := ContentRequest{
 		Topic:    topic,
 		Template: template,
@@ -102,12 +162,7 @@ func runGenerate(topic, template, domain, style string, keywords []string, outpu
 	// 生成内容框架
 	content := generateContentFramework(request)
 
-	if outputFormat == "json" {
-		output, _ := json.MarshalIndent(content, "", "  ")
-		fmt.Println(string(output))
-	} else {
-		printTextFramework(content)
-	}
+	responseSuccess(content)
 
 	return nil
 }
@@ -222,10 +277,25 @@ func buildSections(req ContentRequest, template map[string]interface{}) []Conten
 
 	var sections []ContentSection
 	for i, sectionType := range structure {
+		// 将关键词轮询分配到各节
+		var keyPoints []string
+		if len(req.Keywords) > 0 {
+			for j := 0; j < 3; j++ {
+				kwIdx := (i*3 + j) % len(req.Keywords)
+				keyPoints = append(keyPoints, fmt.Sprintf("关于「%s」的%s要点", req.Keywords[kwIdx], sectionType))
+			}
+		} else {
+			keyPoints = []string{
+				fmt.Sprintf("%s核心要点一", sectionType),
+				fmt.Sprintf("%s核心要点二", sectionType),
+				fmt.Sprintf("%s核心要点三", sectionType),
+			}
+		}
+
 		section := ContentSection{
 			Title:      fmt.Sprintf("%d. %s", i+1, sectionType),
-			Content:    fmt.Sprintf("详细阐述%s的要点", sectionType),
-			KeyPoints:  []string{"要点1", "要点2", "要点3"},
+			Content:    fmt.Sprintf("围绕「%s」详细阐述%s的要点", req.Topic, sectionType),
+			KeyPoints:  keyPoints,
 			Engagement: "💡 互动提问：你有类似的经验吗？",
 		}
 		sections = append(sections, section)
@@ -259,20 +329,4 @@ func optimizeKeywords(req ContentRequest) []string {
 	keywords := []string{req.Topic}
 	keywords = append(keywords, req.Keywords...)
 	return keywords
-}
-
-func printTextFramework(content GeneratedContent) {
-	fmt.Printf("内容框架\n")
-	fmt.Printf("========\n\n")
-	fmt.Printf("标题: %s\n", content.Title)
-	fmt.Printf("副标题: %s\n", content.Subtitle)
-	fmt.Printf("\n开头钩子:\n%s\n", content.Hook)
-
-	fmt.Printf("\n内容结构:\n")
-	for _, section := range content.Sections {
-		fmt.Printf("\n%s\n", section.Title)
-		fmt.Printf("  %s\n", section.Content)
-	}
-
-	fmt.Printf("\n行动号召:\n%s\n", content.CallToAction)
 }

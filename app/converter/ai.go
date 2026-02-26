@@ -67,7 +67,7 @@ func (c *converter) convertViaAI(req *ConvertRequest) *ConvertResult {
 
 	c.log.Info("AI conversion request prepared",
 		zap.String("theme", req.Theme),
-		zap.Int("image_count", len(images)),
+		zap.Int("count", len(images)),
 		zap.Int("prompt_length", len(prompt)))
 
 	return result

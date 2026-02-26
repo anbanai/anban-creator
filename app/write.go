@@ -2,17 +2,13 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
-	"github.com/royalrick/wechatwriter/app/ai"
-	"github.com/royalrick/wechatwriter/app/humanizer"
 	"github.com/royalrick/wechatwriter/app/writer"
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 )
 
 // writeCmd 写作命令
@@ -54,7 +50,6 @@ var (
 	writeArticleType       string
 	writeLength            string
 	writeTitle             string
-	writeOutput            string
 	writeCover             bool
 	writeCoverOnly         bool
 	writeListStyles        bool
@@ -70,7 +65,6 @@ func init() {
 	writeCmd.Flags().StringVar(&writeArticleType, "article-type", "essay", "Article type: essay/commentary/story/tutorial/review")
 	writeCmd.Flags().StringVar(&writeLength, "length", "medium", "Article length: short/medium/long")
 	writeCmd.Flags().StringVar(&writeTitle, "title", "", "Article title")
-	writeCmd.Flags().StringVarP(&writeOutput, "output", "o", "", "Output file")
 	writeCmd.Flags().BoolVar(&writeCover, "cover", false, "Generate matching cover")
 	writeCmd.Flags().BoolVar(&writeCoverOnly, "cover-only", false, "Generate cover only")
 	writeCmd.Flags().BoolVar(&writeListStyles, "list", false, "List all available styles")
@@ -90,8 +84,8 @@ func runWrite(cmd *cobra.Command, args []string) error {
 
 	// 回退到配置文件默认值
 	if !cmd.Flags().Changed("style") {
-		if err := initConfigMinimal(); err == nil && cfg.Wechat.Style != "" {
-			writeStyle = cfg.Wechat.Style
+		if err := initConfigMinimal(); err == nil && cfg.Article.Style != "" {
+			writeStyle = cfg.Article.Style
 		}
 	}
 
@@ -140,17 +134,7 @@ func runListStyles() error {
 		return fmt.Errorf("%s", result.Error)
 	}
 
-	if writeStyleDetail {
-		// 详细模式
-		for _, style := range result.Styles {
-			fmt.Println(writer.FormatStyleSummary(style))
-			fmt.Println("---")
-		}
-	} else {
-		// 简洁模式
-		fmt.Println(writer.FormatStyleList(result.Styles))
-	}
-
+	responseSuccess(map[string]any{"styles": result.Styles})
 	return nil
 }
 
@@ -191,26 +175,30 @@ func runInteractiveWrite() error {
 		Length:    writer.GetLengthFromString(writeLength),
 	}
 
-	// 执行写作
+	// 执行写作：返回提示词给 Claude 代理处理
 	result := asst.Write(req)
 
 	if result.IsAIRequest {
-		article, err := callWriteAI(result.Prompt)
-		if err != nil {
-			return err
+		data := map[string]any{
+			"type":               "write_prompt",
+			"prompt":             result.Prompt,
+			"style":              styleInput,
+			"humanize":           writeHumanize,
+			"humanize_intensity": writeHumanizeIntensity,
 		}
-		result.Article = article
-
-		if writeHumanize {
-			result.Article, err = callHumanizeAI(article, writeHumanizeIntensity, result.Style.EnglishName)
-			if err != nil {
-				return fmt.Errorf("humanize 失败: %w", err)
-			}
-		}
+		responseSuccess(data)
+		return nil
 	}
 
 	if !result.Success && result.Article == "" {
 		return fmt.Errorf("%s", result.Error)
+	}
+
+	// 输出结果
+	data := map[string]any{
+		"article": result.Article,
+		"quotes":  result.Quotes,
+		"style":   styleInput,
 	}
 
 	if writeCover {
@@ -220,26 +208,11 @@ func runInteractiveWrite() error {
 			ArticleContent: input,
 		})
 		if coverResult.Success {
-			fmt.Println("\n=== 封面提示词 ===")
-			fmt.Println(coverResult.Prompt)
+			data["cover_prompt"] = coverResult.Prompt
 		}
 	}
 
-	// 输出结果
-	if writeOutput != "" {
-		if err := os.WriteFile(writeOutput, []byte(result.Article), 0644); err != nil {
-			return fmt.Errorf("保存文件: %w", err)
-		}
-		log.Info("article saved", zap.String("file", writeOutput))
-	} else {
-		fmt.Println("\n=== 生成文章 ===")
-		fmt.Println(result.Article)
-		fmt.Println("\n=== 金句 ===")
-		for i, quote := range result.Quotes {
-			fmt.Printf("%d. %s\n", i+1, quote)
-		}
-	}
-
+	responseSuccess(data)
 	return nil
 }
 
@@ -258,18 +231,16 @@ func executeWrite(input string) error {
 	result := asst.Write(req)
 
 	if result.IsAIRequest {
-		article, err := callWriteAI(result.Prompt)
-		if err != nil {
-			return err
+		// 返回提示词给 Claude 代理处理
+		data := map[string]any{
+			"type":               "write_prompt",
+			"prompt":             result.Prompt,
+			"style":              req.StyleName,
+			"humanize":           writeHumanize,
+			"humanize_intensity": writeHumanizeIntensity,
 		}
-		result.Article = article
-
-		if writeHumanize {
-			result.Article, err = callHumanizeAI(article, writeHumanizeIntensity, result.Style.EnglishName)
-			if err != nil {
-				return fmt.Errorf("humanize 失败: %w", err)
-			}
-		}
+		responseSuccess(data)
+		return nil
 	}
 
 	if !result.Success && result.Article == "" {
@@ -278,34 +249,35 @@ func executeWrite(input string) error {
 
 	// 只生成封面
 	if writeCoverOnly {
-		return generateCover(asst, req)
+		coverPrompt, err := generateCover(asst, req)
+		if err != nil {
+			return err
+		}
+		responseSuccess(map[string]any{"cover_prompt": coverPrompt})
+		return nil
 	}
 
 	// 输出文章
-	if writeOutput != "" {
-		if err := os.WriteFile(writeOutput, []byte(result.Article), 0644); err != nil {
-			return fmt.Errorf("保存文件: %w", err)
-		}
-		log.Info("article saved", zap.String("file", writeOutput))
-	} else {
-		fmt.Println("\n=== 生成文章 ===")
-		fmt.Println(result.Article)
-		fmt.Println("\n=== 金句 ===")
-		for i, quote := range result.Quotes {
-			fmt.Printf("%d. %s\n", i+1, quote)
-		}
+	data := map[string]any{
+		"article": result.Article,
+		"quotes":  result.Quotes,
+		"style":   req.StyleName,
 	}
 
-	// 如果需要封面
 	if writeCover {
-		return generateCover(asst, req)
+		coverPrompt, err := generateCover(asst, req)
+		if err != nil {
+			return err
+		}
+		data["cover_prompt"] = coverPrompt
 	}
 
+	responseSuccess(data)
 	return nil
 }
 
-// generateCover 生成封面
-func generateCover(asst *writer.Assistant, req *writer.WriteRequest) error {
+// generateCover 生成封面，返回封面提示词
+func generateCover(asst *writer.Assistant, req *writer.WriteRequest) (string, error) {
 	coverGen := writer.NewCoverGenerator(asst.GetStyleManager())
 
 	coverReq := &writer.GenerateCoverRequest{
@@ -316,18 +288,10 @@ func generateCover(asst *writer.Assistant, req *writer.WriteRequest) error {
 
 	result, err := coverGen.GeneratePrompt(coverReq)
 	if err != nil {
-		return fmt.Errorf("生成封面提示词: %w", err)
+		return "", fmt.Errorf("生成封面提示词: %w", err)
 	}
 
-	fmt.Println("\n=== 封面提示词 ===")
-	fmt.Println(result.Prompt)
-
-	if result.Explanation != "" {
-		fmt.Println("\n---")
-		fmt.Println("📖 隐喻说明:", result.Explanation)
-	}
-
-	return nil
+	return result.Prompt, nil
 }
 
 // readLine 读取一行输入
@@ -370,50 +334,4 @@ func readStdin() (string, error) {
 	}
 
 	return strings.TrimSpace(string(content)), nil
-}
-
-// callWriteAI 调用 AI 生成文章内容
-func callWriteAI(prompt string) (string, error) {
-	if err := initConfigMinimal(); err != nil {
-		return "", fmt.Errorf("初始化配置失败: %w", err)
-	}
-	aiClient, err := ai.NewClient(&cfg.AI)
-	if err != nil {
-		return "", fmt.Errorf("创建 AI 客户端失败: %w", err)
-	}
-	article, err := aiClient.ChatCompletion(context.Background(), prompt)
-	if err != nil {
-		return "", fmt.Errorf("AI 写作失败: %w", err)
-	}
-	return article, nil
-}
-
-// callHumanizeAI 调用 AI 去除文章中的 AI 写作痕迹
-func callHumanizeAI(content, intensity, styleName string) (string, error) {
-	if err := initConfigMinimal(); err != nil {
-		return "", fmt.Errorf("初始化配置失败: %w", err)
-	}
-	aiClient, err := ai.NewClient(&cfg.AI)
-	if err != nil {
-		return "", fmt.Errorf("创建 AI 客户端失败: %w", err)
-	}
-	h := humanizer.NewHumanizer()
-	hReq := &humanizer.HumanizeRequest{
-		Content:       content,
-		Intensity:     humanizer.ParseIntensity(intensity),
-		PreserveStyle: true,
-		OriginalStyle: styleName,
-		ShowChanges:   true,
-		IncludeScore:  true,
-	}
-	prompt := h.BuildAIRequestForAI(hReq)
-	aiResponse, err := aiClient.ChatCompletion(context.Background(), prompt)
-	if err != nil {
-		return "", fmt.Errorf("AI humanize 失败: %w", err)
-	}
-	result := h.ParseAIResponse(aiResponse, hReq)
-	if !result.Success {
-		return content, nil // fall back to original on parse failure
-	}
-	return result.Content, nil
 }

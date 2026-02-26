@@ -3,12 +3,16 @@ package image
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/royalrick/wechatwriter/app/config"
 	"github.com/royalrick/wechatwriter/app/wechat"
 	"go.uber.org/zap"
 )
+
 // ProcessorError 图片处理错误，携带修复建议
 type ProcessorError struct {
 	Message  string
@@ -20,12 +24,13 @@ func (e *ProcessorError) Hint() string  { return e.HintText }
 
 // Processor 图片处理器
 type Processor struct {
-	cfg        *config.Config
-	apiCfg     *config.ImageAPI
-	log        *zap.Logger
-	ws         *wechat.Service
-	compressor *Compressor
-	provider   Provider
+	cfg         *config.Config
+	apiCfg      *config.ImageAPI
+	log         *zap.Logger
+	ws          *wechat.Service
+	compressor  *Compressor
+	provider    Provider
+	stylePrompt string
 }
 
 // NewProcessor 创建图片处理器
@@ -55,9 +60,69 @@ func NewProcessor(cfg *config.Config, apiCfg *config.ImageAPI, log *zap.Logger) 
 		apiCfg:     apiCfg,
 		log:        log,
 		ws:         wechatService,
-		compressor: NewCompressor(log, cfg.Image.MaxWidth, cfg.MaxImageSizeBytes()),
+		compressor: NewCompressor(log, apiCfg.MaxWidth, apiCfg.MaxSizeBytes()),
 		provider:   provider,
 	}
+}
+
+// SetStylePrompt 设置风格提示词（CLI --style 传入，优先级高于配置文件）
+func (p *Processor) SetStylePrompt(prompt string) {
+	p.stylePrompt = prompt
+}
+
+// buildPrompt 拼接风格前缀与用户提示词
+// 优先级：CLI --style > config style_prompt > 无风格（原样返回）
+func (p *Processor) buildPrompt(userPrompt string) string {
+	style := strings.TrimSpace(p.stylePrompt)
+	if style == "" && p.apiCfg != nil {
+		style = strings.TrimSpace(p.apiCfg.StylePrompt)
+	}
+	userPrompt = strings.TrimSpace(userPrompt)
+
+	var prompt string
+	if style == "" {
+		prompt = userPrompt
+	} else if userPrompt == "" {
+		prompt = style
+	} else {
+		prompt = style + "\n\n" + userPrompt
+	}
+
+	// 如果启用了水印裁剪，追加留白提示
+	if p.apiCfg != nil && p.apiCfg.Watermark.Enable && p.apiCfg.Watermark.Margin > 0 {
+		prompt = appendCropMarginHint(prompt, p.apiCfg)
+	}
+
+	return prompt
+}
+
+// appendCropMarginHint 根据水印裁剪配置，在提示词末尾追加留白指令
+func appendCropMarginHint(prompt string, apiCfg *config.ImageAPI) string {
+	margin := apiCfg.Watermark.Margin
+	w, h := parseImageSize(apiCfg.Size)
+	if w == 0 || h == 0 {
+		return prompt + fmt.Sprintf(
+			"\n\n【重要】图片四周需要预留至少 %d 像素的空白边距，边缘区域应为纯色或渐变背景，不包含任何重要元素。",
+			margin)
+	}
+	vMargin := int(math.Round(float64(margin) * float64(h) / float64(w)))
+	return prompt + fmt.Sprintf(
+		"\n\n【重要】图片四周需要预留空白边距：左右各至少 %d 像素，上下各至少 %d 像素。边缘区域应为纯色或渐变背景，不包含任何重要元素。",
+		margin, vMargin)
+}
+
+// parseImageSize 解析 "WIDTHxHEIGHT" 格式的尺寸字符串
+func parseImageSize(size string) (int, int) {
+	parts := strings.SplitN(strings.ToLower(size), "x", 2)
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	w, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	h, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil {
+		return 0, 0
+	}
+	return w, h
 }
 
 // UploadResult 上传结果
@@ -84,7 +149,7 @@ func (p *Processor) UploadLocalImage(filePath string) (*UploadResult, error) {
 
 	// 如果需要压缩，先处理
 	processedPath := filePath
-	if p.cfg.Image.Compress {
+	if p.apiCfg.Compress {
 		compressedPath, compressed, err := p.compressor.CompressImage(filePath)
 		if err != nil {
 			p.log.Warn("compress failed, using original", zap.Error(err))
@@ -125,7 +190,7 @@ func (p *Processor) DownloadAndUpload(url string) (*UploadResult, error) {
 
 	// 压缩（如果需要）
 	processedPath := tmpPath
-	if p.cfg.Image.Compress {
+	if p.apiCfg.Compress {
 		compressedPath, compressed, err := p.compressor.CompressImage(tmpPath)
 		if err != nil {
 			p.log.Warn("compress failed, using original", zap.Error(err))
@@ -158,10 +223,20 @@ type GenerateAndUploadResult struct {
 	Height      int    `json:"height"`
 }
 
-// GenerateAndUpload AI 生成图片并上传
-func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, error) {
-	p.log.Info("generating image via AI", zap.String("prompt", prompt))
+// GenerateOnlyResult AI 生成图片结果（不含上传）
+type GenerateOnlyResult struct {
+	Prompt        string `json:"prompt"`
+	URL           string `json:"url"`                      // 原始 URL（远程）或 provider 临时路径
+	FilePath      string `json:"file_path"`                // 最终本地文件路径
+	RevisedPrompt string `json:"revised_prompt,omitempty"` // 优化后的提示词
+	Model         string `json:"model"`
+	Size          string `json:"size"`
+}
 
+// generateOnly 生成图片到本地，不上传到微信。
+// outputPath 非空时复制到目标路径并清理所有临时文件；
+// outputPath 为空时返回临时文件路径（调用方负责清理）。
+func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnlyResult, error) {
 	// 验证配置
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
@@ -172,9 +247,21 @@ func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, 
 		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 article.image.provider 和 article.image.key")
 	}
 
+	// 如果指定了尺寸，创建带覆盖尺寸的临时 provider，不 mutate 原始配置
+	activeProvider := p.provider
+	if size != "" {
+		apiCfgWithSize := *p.apiCfg
+		apiCfgWithSize.Size = size
+		var err error
+		activeProvider, err = NewProvider(&apiCfgWithSize)
+		if err != nil {
+			return nil, fmt.Errorf("create provider with size: %w", err)
+		}
+	}
+
 	// 调用图片生成 API
 	ctx := context.Background()
-	result, err := p.provider.Generate(ctx, prompt)
+	result, err := activeProvider.Generate(ctx, p.buildPrompt(prompt))
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
@@ -183,35 +270,113 @@ func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, 
 		zap.String("provider", result.Model),
 		zap.String("size", result.Size))
 
-	// 下载生成的图片
-	tmpPath, err := wechat.DownloadFile(result.URL)
-	if err != nil {
-		return nil, fmt.Errorf("download generated image: %w", err)
+	// 跟踪需要清理的临时文件
+	var toClean []string
+
+	// 远程 URL 需要下载，本地路径（Gemini/OpenRouter）直接使用
+	sourcePath := result.URL
+	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
+		tmpPath, err := wechat.DownloadFile(result.URL)
+		if err != nil {
+			return nil, fmt.Errorf("download generated image: %w", err)
+		}
+		toClean = append(toClean, tmpPath)
+		sourcePath = tmpPath
+	} else {
+		// 本地文件（provider 已写入临时路径）
+		toClean = append(toClean, sourcePath)
 	}
-	defer os.Remove(tmpPath)
+
+	// 裁剪水印（仅 AI 生成图片）
+	processedPath, isCropped := p.cropWatermark(sourcePath)
+	if isCropped {
+		toClean = append(toClean, processedPath)
+	}
 
 	// 压缩（如果需要）
-	processedPath := tmpPath
-	if p.cfg.Image.Compress {
-		compressedPath, compressed, err := p.compressor.CompressImage(tmpPath)
+	if p.apiCfg.Compress {
+		compressedPath, compressed, err := p.compressor.CompressImage(processedPath)
 		if err != nil {
 			p.log.Warn("compress failed, using original", zap.Error(err))
 		} else if compressed {
+			toClean = append(toClean, compressedPath)
 			processedPath = compressedPath
-			defer os.Remove(compressedPath)
 			p.log.Info("using compressed image", zap.String("path", processedPath))
 		}
 	}
 
+	// 处理输出路径
+	finalPath := processedPath
+	if outputPath != "" {
+		data, err := os.ReadFile(processedPath)
+		if err != nil {
+			for _, f := range toClean {
+				os.Remove(f)
+			}
+			return nil, fmt.Errorf("read processed image: %w", err)
+		}
+		if err := os.WriteFile(outputPath, data, 0644); err != nil {
+			for _, f := range toClean {
+				os.Remove(f)
+			}
+			return nil, fmt.Errorf("save to output %s: %w", outputPath, err)
+		}
+		for _, f := range toClean {
+			os.Remove(f)
+		}
+		finalPath = outputPath
+	} else {
+		// 清理中间临时文件，保留最终处理结果（由调用方负责清理）
+		for _, f := range toClean {
+			if f != processedPath {
+				os.Remove(f)
+			}
+		}
+	}
+
+	return &GenerateOnlyResult{
+		Prompt:        prompt,
+		URL:           result.URL,
+		FilePath:      finalPath,
+		RevisedPrompt: result.RevisedPrompt,
+		Model:         result.Model,
+		Size:          result.Size,
+	}, nil
+}
+
+// GenerateOnly AI 生成图片到本地文件，不上传到微信
+func (p *Processor) GenerateOnly(prompt, outputPath string) (*GenerateOnlyResult, error) {
+	p.log.Info("generating image via AI", zap.String("prompt", prompt))
+	return p.generateOnly(prompt, "", outputPath)
+}
+
+// GenerateOnlyWithSize AI 生成指定尺寸的图片到本地文件，不上传到微信
+func (p *Processor) GenerateOnlyWithSize(prompt, size, outputPath string) (*GenerateOnlyResult, error) {
+	p.log.Info("generating image via AI with size",
+		zap.String("prompt", prompt),
+		zap.String("size", size))
+	return p.generateOnly(prompt, size, outputPath)
+}
+
+// GenerateAndUpload AI 生成图片并上传
+func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, error) {
+	p.log.Info("generating image via AI", zap.String("prompt", prompt))
+
+	onlyResult, err := p.generateOnly(prompt, "", "")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(onlyResult.FilePath)
+
 	// 上传到微信
-	uploadResult, err := p.ws.UploadMaterialWithRetry(processedPath, 3)
+	uploadResult, err := p.ws.UploadMaterialWithRetry(onlyResult.FilePath, 3)
 	if err != nil {
 		return nil, err
 	}
 
 	return &GenerateAndUploadResult{
 		Prompt:      prompt,
-		OriginalURL: result.URL,
+		OriginalURL: onlyResult.URL,
 		MediaID:     uploadResult.MediaID,
 		WechatURL:   uploadResult.WechatURL,
 	}, nil
@@ -223,53 +388,21 @@ func (p *Processor) GenerateAndUploadWithSize(prompt string, size string) (*Gene
 		zap.String("prompt", prompt),
 		zap.String("size", size))
 
-	// 验证配置
-	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
+	onlyResult, err := p.generateOnly(prompt, size, "")
+	if err != nil {
 		return nil, err
 	}
-
-	// 检查 provider 是否可用
-	if p.provider == nil {
-		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 article.image.provider 和 article.image.key")
-	}
-
-	// 创建带有覆盖尺寸的临时 apiCfg 副本，不 mutate 原始配置
-	apiCfgWithSize := *p.apiCfg
-	apiCfgWithSize.Size = size
-
-	// 重新创建 provider 以使用新尺寸
-	newProvider, err := NewProvider(&apiCfgWithSize)
-	if err != nil {
-		return nil, fmt.Errorf("create provider with size: %w", err)
-	}
-
-	// 调用图片生成 API
-	ctx := context.Background()
-	result, err := newProvider.Generate(ctx, prompt)
-	if err != nil {
-		return nil, fmt.Errorf("generate image: %w", err)
-	}
-	p.log.Info("image generated",
-		zap.String("url", result.URL),
-		zap.String("provider", result.Model),
-		zap.String("size", result.Size))
-
-	// 下载生成的图片
-	tmpPath, err := wechat.DownloadFile(result.URL)
-	if err != nil {
-		return nil, fmt.Errorf("download generated image: %w", err)
-	}
-	defer os.Remove(tmpPath)
+	defer os.Remove(onlyResult.FilePath)
 
 	// 上传到微信
-	uploadResult, err := p.ws.UploadMaterialWithRetry(tmpPath, 3)
+	uploadResult, err := p.ws.UploadMaterialWithRetry(onlyResult.FilePath, 3)
 	if err != nil {
 		return nil, err
 	}
 
 	return &GenerateAndUploadResult{
 		Prompt:      prompt,
-		OriginalURL: result.URL,
+		OriginalURL: onlyResult.URL,
 		MediaID:     uploadResult.MediaID,
 		WechatURL:   uploadResult.WechatURL,
 	}, nil
@@ -296,7 +429,7 @@ func (p *Processor) DownloadOnly(url, outputPath string) (*DownloadResult, error
 	}
 
 	processedPath := tmpPath
-	if p.cfg.Image.Compress {
+	if p.apiCfg.Compress {
 		compressedPath, compressed, err := p.compressor.CompressImage(tmpPath)
 		if err != nil {
 			p.log.Warn("compress failed, using original", zap.Error(err))
@@ -332,6 +465,22 @@ func (p *Processor) SetCompressQuality(quality int) {
 	p.compressor.SetQuality(quality)
 }
 
+// cropWatermark 若配置了去水印，裁剪水印并返回裁剪后的临时文件路径。
+// 返回: 处理后的路径, 是否创建了新临时文件（需要调用方 defer os.Remove）, 错误。
+// 失败时记录 Warn 并返回原始路径（graceful degradation）。
+func (p *Processor) cropWatermark(filePath string) (string, bool) {
+	wm := p.apiCfg.Watermark
+	if !wm.Enable || wm.Margin <= 0 {
+		return filePath, false
+	}
+	croppedPath, err := CropMargin(p.log, filePath, wm.Margin)
+	if err != nil {
+		p.log.Warn("watermark crop failed, using original", zap.Error(err))
+		return filePath, false
+	}
+	return croppedPath, true
+}
+
 // ValidateCoverImage 验证封面图片是否满足微信要求
 // 要求：总像素 >= 3,686,400、< 10MB、格式为 JPG/PNG
 func (p *Processor) ValidateCoverImage(filePath string) error {
@@ -348,7 +497,7 @@ func (p *Processor) ValidateCoverImage(filePath string) error {
 	if info.Width*info.Height < config.MinWeChatPixels {
 		return &ProcessorError{
 			Message:  fmt.Sprintf("cover image too small: %dx%d = %d pixels (min %d)", info.Width, info.Height, info.Width*info.Height, config.MinWeChatPixels),
-			HintText: "封面图需 ≥ 3,686,400 像素，建议使用 -s 4k 生成 2560x1440 封面",
+			HintText: "封面图需 ≥ 3,686,400 像素，建议使用 -s 2k 生成 2560x1440 封面",
 		}
 	}
 	stat, err := os.Stat(filePath)

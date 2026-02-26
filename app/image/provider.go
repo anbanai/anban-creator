@@ -3,8 +3,19 @@ package image
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/royalrick/wechatwriter/app/config"
+)
+
+// 各图片生成服务商的默认模型和 API 地址
+const (
+	DefaultGeminiModel       = "gemini-3-pro-image-preview"
+	DefaultOpenAIModel       = "dall-e-3"
+	DefaultOpenRouterModel   = "google/gemini-3-pro-image-preview"
+	DefaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
+	DefaultVolcengineModel   = "doubao-seedream-4-5-251128"
+	DefaultVolcengineBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 )
 
 // Provider 图片生成服务提供者接口
@@ -49,6 +60,23 @@ func (e *GenerateError) Unwrap() error {
 
 
 func (e *GenerateError) Hint() string { return e.HintMsg }
+
+// isContentSafetyError 检测错误信息是否为内容安全/审核拦截
+func isContentSafetyError(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+	safetyKeywords := []string{
+		"sensitive", "safety", "content_filter", "blocked", "moderat",
+		"违规", "敏感", "违反", "审核", "屏蔽", "过滤", "不合规",
+		"content policy", "content filter", "inappropriate",
+	}
+	for _, kw := range safetyKeywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return true
+		}
+	}
+	return false
+}
+
 // NewProvider 根据 ImageAPI 配置创建对应的 Provider
 func NewProvider(apiCfg *config.ImageAPI) (Provider, error) {
 	switch apiCfg.Provider {

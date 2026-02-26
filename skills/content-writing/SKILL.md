@@ -33,6 +33,10 @@ metadata:
 
 详见 [writing-guide.md](references/writing-guide.md)
 
+## 平台内容合规
+
+详见 [content-compliance.md](references/content-compliance.md)
+
 ## 微信 HTML 规范
 
 - 所有 CSS 必须内联（style 属性）

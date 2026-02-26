@@ -80,6 +80,10 @@ SEO 优化结果应输出以下结构：
 - [具体优化建议，如某段落缺少关键词]
 ```
 
+## 参考文档
+
+- 平台标题规范：[title-guidelines.md](references/title-guidelines.md)
+
 ## 相关命令
 
 ```bash

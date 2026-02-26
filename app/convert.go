@@ -1,13 +1,12 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 
-	"github.com/royalrick/wechatwriter/app/ai"
 	"github.com/royalrick/wechatwriter/app/converter"
+	"github.com/royalrick/wechatwriter/app/config"
 	"github.com/royalrick/wechatwriter/app/draft"
 	"github.com/royalrick/wechatwriter/app/image"
 	"github.com/royalrick/wechatwriter/app/wechat"
@@ -21,7 +20,10 @@ var convertCmd = &cobra.Command{
 	Short: "Convert Markdown to WeChat HTML",
 	Long: `Convert Markdown article to WeChat Official Account formatted HTML.
 
-Uses Claude AI to generate HTML with theme-based styling.
+Two-step workflow using Claude agent:
+  Step 1: Run without --ai-html to get the prompt in JSON output.
+          Claude agent reads the prompt, generates HTML, then provides it back.
+  Step 2: Run with --ai-html <html_file> to complete conversion with the generated HTML.
 
 Supported themes:
   - autumn-warm, spring-fresh, ocean-calm, custom`,
@@ -37,30 +39,31 @@ Supported themes:
 var (
 	convertTheme        string
 	convertCustomPrompt string
-	convertOutput       string
 	convertPreview      bool
 	convertUpload       bool
 	convertDraft        bool
 	convertSaveDraft    string
 	convertCoverImage   string // 封面图片路径
+	convertAIHTML       string // Step 2: agent 生成的 HTML 文件路径
+	convertOutput       string // 输出文件路径
 )
 
 func init() {
 	// 添加 flags
 	convertCmd.Flags().StringVar(&convertTheme, "theme", "", "Theme name (default: from config or 'default')")
 	convertCmd.Flags().StringVar(&convertCustomPrompt, "custom-prompt", "", "Custom AI prompt")
-	convertCmd.Flags().StringVarP(&convertOutput, "output", "o", "", "Output HTML file path")
 	convertCmd.Flags().BoolVar(&convertPreview, "preview", false, "Preview only, do not upload images")
 	convertCmd.Flags().BoolVar(&convertUpload, "upload", false, "Upload images to WeChat and replace URLs")
 	convertCmd.Flags().BoolVar(&convertDraft, "draft", false, "Create WeChat draft after conversion")
 	convertCmd.Flags().StringVar(&convertSaveDraft, "save-draft", "", "Save draft JSON to file")
 	convertCmd.Flags().StringVar(&convertCoverImage, "cover", "", "Cover image path for draft (required when using --draft)")
+	convertCmd.Flags().StringVar(&convertAIHTML, "ai-html", "", "Path to agent-generated HTML file (Step 2 of two-step workflow)")
+	convertCmd.Flags().StringVarP(&convertOutput, "output", "o", "", "Output HTML file path")
 }
 
 // runConvert 执行转换
 func runConvert(cmd *cobra.Command, args []string) error {
 	// 默认加载轻量级配置（不验证微信账号）
-	// 只有在需要微信功能时才加载完整配置
 	if err := initConfigMinimal(); err != nil {
 		return fmt.Errorf("初始化配置失败: %w", err)
 	}
@@ -70,9 +73,9 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		convertTheme = cfg.Article.Theme
 	}
 
-	// 如果仍然为空，使用硬编码默认值
+	// 如果仍然为空，使用默认值
 	if convertTheme == "" {
-		convertTheme = "default"
+		convertTheme = config.DefaultArticleTheme
 	}
 
 	markdownFile := args[0]
@@ -100,28 +103,53 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	// 执行转换
 	result := conv.Convert(req)
 
-	// AI 模式：调用 AI API 完成转换
-	if converter.IsAIRequest(result) {
+	// Step 2: --ai-html 提供了 agent 生成的 HTML，完成转换
+	if convertAIHTML != "" {
+		htmlBytes, err := os.ReadFile(convertAIHTML)
+		if err != nil {
+			return fmt.Errorf("read ai-html file: %w", err)
+		}
+
+		_, images, ok := converter.GetAIRequestInfo(result)
+		if !ok {
+			// 如果不是 AI 请求结果，直接使用 HTML
+			images = result.Images
+		}
+
+		result = converter.CompleteAIConversion(string(htmlBytes), images, convertTheme)
+	} else if converter.IsAIRequest(result) {
+		// Step 1: 返回提示词给 Claude 代理处理
 		prompt, images, ok := converter.GetAIRequestInfo(result)
 		if !ok {
 			return fmt.Errorf("invalid AI request result")
 		}
 
-		aiClient, err := ai.NewClient(&cfg.AI)
-		if err != nil {
-			return fmt.Errorf("创建 AI 客户端失败: %w", err)
+		// 序列化图片列表
+		type imageInfo struct {
+			Index    int    `json:"index"`
+			Type     string `json:"type"`
+			Original string `json:"original"`
+		}
+		var imageList []imageInfo
+		for _, img := range images {
+			imageList = append(imageList, imageInfo{
+				Index:    img.Index,
+				Type:     string(img.Type),
+				Original: img.Original,
+			})
 		}
 
-		log.Info("calling AI for conversion",
-			zap.Int("image_count", len(images)),
+		log.Info("returning AI prompt for agent",
+			zap.Int("count", len(images)),
 			zap.Int("prompt_length", len(prompt)))
 
-		html, err := aiClient.ChatCompletion(context.Background(), prompt)
-		if err != nil {
-			return fmt.Errorf("AI 转换失败: %w", err)
-		}
-
-		result = converter.CompleteAIConversion(html, images, convertTheme)
+		responseSuccess(map[string]any{
+			"type":   "convert_prompt",
+			"prompt": prompt,
+			"theme":  convertTheme,
+			"images": imageList,
+		})
+		return nil
 	}
 
 	if !result.Success {
@@ -130,7 +158,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 
 	log.Info("conversion completed",
 		zap.String("theme", result.Theme),
-		zap.Int("image_count", len(result.Images)))
+		zap.Int("count", len(result.Images)))
 
 	// 处理图片（需要微信配置）
 	if convertUpload || convertDraft {

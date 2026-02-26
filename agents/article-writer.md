@@ -23,14 +23,16 @@ maxTurns: 50
 ## 创作流程
 
 1. 执行 `wechatwriter account info` 获取账号信息，分析定位、受众、写作风格
-2. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，创作文章大纲
-3. 使用 skill `content-writing` 基于账号定位和大纲输出 Markdown 格式文章
-4. 使用 skill `content-writing` 去除 AI 痕迹，确保语言自然
-5. 使用 skill `seo-optimization` 优化标题、关键词、摘要
-6. 使用 skill `visual-design` 创作高点击率文章封面（生成并上传，记录 media_id）
-7. 使用 skill `visual-design` 根据文章图片占位符为各章节生成配图
-8. 使用 skill `content-writing` 把 Markdown 转成微信公众号专用 HTML，图片替换为 CDN 链接
-9. 使用 skill `article-publishing` → `draft article` 把文章发布到草稿箱
+2. 执行 `wechatwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
+3. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，创作文章大纲
+4. 使用 skill `content-writing` 基于账号定位和大纲输出 Markdown 格式文章
+5. 使用 skill `content-writing` 去除 AI 痕迹，确保语言自然
+6. 使用 skill `seo-optimization` 优化标题、关键词、摘要
+7. 使用 skill `visual-design` 生成文章封面图（`image generate` → 本地文件）
+8. 上传封面图到微信素材库（`image upload` → 获取 media_id）
+9. 使用 skill `visual-design` 根据文章图片占位符为各章节生成配图
+10. 使用 skill `content-writing` 把 Markdown 转成微信公众号专用 HTML，图片替换为 CDN 链接
+11. 使用 skill `article-publishing` → `draft article` 把文章发布到草稿箱
 
 **任务命名**：`01-research.md`, `02-outline.md`, `03-article.md`, `04-article-final.md`, `05-article.html`, `draft.json`
 
@@ -43,13 +45,21 @@ maxTurns: 50
 - 封面图必须成功生成并上传（硬性要求）
 - 配图为可选项（失败可跳过）
 
+### 平台合规检查
+
+- **封面图合规**：人物头部五官完整、无马赛克/播放标记、画质清晰、与文章主旨一致
+- **标题合规**：准确反映内容、无无中生有信息、无故意隐藏关键信息的省略号或代词
+- **内容合规**：语言文明（无粗俗/谩骂/侮辱），无低俗擦边内容，无暴力宣扬
+
 ## 错误处理
 
 **非关键步骤失败**（配图生成、SEO优化、AI去痕）：
+
 - 记录问题，使用降级方案继续
 - 在最终报告中说明
 
 **关键步骤失败**（封面生成、草稿创建）：
+
 - 暂停流程，分析原因
 - 尝试重试一次
 - 仍失败则请求用户协助
@@ -73,7 +83,7 @@ maxTurns: 50
 - 开始前：`TaskUpdate status → in_progress`
 - 完成后：`TaskUpdate status → completed`
 - 设置依赖：每个任务 blockedBy 前一个任务
-- 报告进度：`[3/9] 文章撰写完成 → output/03-article.md (2,847字)`
+- 报告进度：`[3/11] 文章撰写完成 → output/03-article.md (2,847字)`
 
 ## 执行原则
 

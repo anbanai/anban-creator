@@ -13,7 +13,7 @@ metadata:
 
 ## 草稿管理
 
-查看现有草稿：`wechatwriter draft list`
+查看现查看现发布历史：`wechatwriter account history`
 
 ## 命令
 
@@ -67,8 +67,8 @@ wechatwriter draft post \
 |------|------|------|
 | `-t` / `--title` | 帖子标题 | 是 |
 | `-c` / `--content` | 纯文本描述 | 否 |
-| `--images` | 图片路径，逗号分隔 | 三选一 |
-| `--media-ids` | 已上传的 media_id，逗号分隔（跳过重复上传） | 三选一 |
+| `--images` | 本地图片文件路径，逗号分隔（将自动上传到微信素材库） | 三选一 |
+| `--media-ids` | 微信素材 ID（media_id），逗号分隔（已上传到素材库的图片，跳过重复上传） | 三选一 |
 | `-m` / `--from-markdown` | 从 Markdown 提取本地图片 | 三选一 |
 | `--open-comment` | 开启评论 | 否 |
 | `--fans-only` | 仅粉丝可评论（需同时 --open-comment） | 否 |
@@ -83,13 +83,15 @@ wechatwriter draft post \
   "data": {
     "media_id": "draft_media_id_xxx",
     "draft_url": "https://mp.weixin.qq.com/...",
-    "image_count": 3,
+    "count": 3,
     "uploaded_ids": ["media_id_1", "media_id_2", "media_id_3"]
   }
 }
 ```
 
 ## 完整工作流
+
+### 直接使用本地图片
 
 ```bash
 # 1. 预览（验证图片路径和数量）
@@ -101,6 +103,29 @@ wechatwriter draft post \
   -t "周末出游" --images p1.jpg,p2.jpg,p3.jpg \
   -c "难得的好天气" --open-comment \
   -o output/02-result.json
+```
+
+### AI 生成图片完整工作流
+
+```bash
+# 1. 生成图片到本地
+wechatwriter image generate "封面" --post --style "$STYLE" -o output/cover.jpg
+wechatwriter image generate "内容" --post --style "$STYLE" -o output/page1.jpg
+
+# 2. 上传到微信素材库，获取 media_id
+wechatwriter image upload output/cover.jpg
+# → data.media_id = "COVER_MID"
+wechatwriter image upload output/page1.jpg
+# → data.media_id = "PAGE1_MID"
+
+# 3. 用 media_id 创建小绿书（跳过重复上传）
+wechatwriter draft post -t "标题" --media-ids "COVER_MID,PAGE1_MID"
+```
+
+也可以直接用本地文件路径（自动上传，但无法复用 media_id）：
+
+```bash
+wechatwriter draft post -t "标题" --images "output/cover.jpg,output/page1.jpg"
 ```
 
 ## 注意事项

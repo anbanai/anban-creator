@@ -11,6 +11,20 @@ metadata:
 
 ## 核心功能
 
+### 0. 查看已有内容（选题前必做）
+
+在开始选题前，先检查已有内容，避免重复主题：
+
+```bash
+# 查看草稿箱和已发布文章（统一视图）
+wechatwriter account history
+
+# 可指定获取更多条目
+wechatwriter account history --count 10
+```
+
+列出所有已有标题后，选题应避开这些已有主题。
+
 ### 1. 话题评分
 
 评估话题的爆款潜力：
@@ -19,7 +33,7 @@ metadata:
 wechatwriter score -i metrics.json -t "主题" -d [领域]
 ```
 
-**标志**: `-i/--input`（数据文件）, `-t/--topic`（话题）, `-d/--domain`（领域）, `-o/--output`（输出格式: json/text）
+**标志**: `-i/--input`（数据文件）, `-t/--topic`（话题）, `-d/--domain`（领域）
 
 ### 2. 内容框架生成
 
@@ -29,7 +43,7 @@ wechatwriter score -i metrics.json -t "主题" -d [领域]
 wechatwriter outline -t "主题" --template [模板] -d [领域] -s [风格] -k [关键词]
 ```
 
-**标志**: `-t/--topic`, `--template`, `-d/--domain`, `-s/--style`, `-k/--keywords`, `-o/--output`（输出格式: json/text）
+**标志**: `-t/--topic`, `--template`, `-d/--domain`, `-s/--style`, `-k/--keywords`
 
 **可用模板**: authoritative(权威), comparison(对比), cultural(文化), practical(实用)
 **可用领域**: general, tea, tech, lifestyle, culture, business, education

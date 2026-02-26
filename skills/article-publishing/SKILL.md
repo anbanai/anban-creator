@@ -13,20 +13,20 @@ metadata:
 
 ## 草稿管理
 
-查看现有草稿：`wechatwriter draft list`
+查看现发布历史：`wechatwriter account history`
 
 ## 命令
 
 ```bash
+# 查看草稿箱和已发布文章
+wechatwriter account history
+wechatwriter account history --count 10
+
 # 从 JSON 文件创建草稿
 wechatwriter draft article /path/to/article.json
 
 # 测试 HTML 草稿（验证内容）
 wechatwriter draft test article.html cover.jpg -t "标题"
-
-# 列出草稿箱
-wechatwriter draft list
-wechatwriter draft list --offset 20 --count 10
 ```
 
 ## draft.json 格式
@@ -65,10 +65,12 @@ wechatwriter draft list --offset 20 --count 10
 # 1. 转换 Markdown → WeChat HTML（同时保存 draft.json）
 wechatwriter convert article.md --theme autumn-warm --draft
 
-# 2. 生成封面图，记录 media_id
-wechatwriter image generate -s 4k "封面图提示词"
+# 2. 生成封面图到本地
+wechatwriter image generate -s 2k "封面图提示词" -o output/cover.jpg
+# 3. 上传封面图到微信素材库，记录返回的 media_id
+wechatwriter image upload output/cover.jpg
 
-# 3. 创建草稿
+# 4. 创建草稿
 wechatwriter draft article ./draft.json
 ```
 

@@ -26,6 +26,9 @@ wechatwriter image download https://example.com/image.jpg
 
 # AI生成配图
 wechatwriter image generate "茶园清晨薄雾"
+
+# AI生成配图，指定统一风格（多图一致性）
+wechatwriter image generate "封面标题" --style "扁平插画，莫兰迪色系，圆角卡片"
 ```
 
 > 图片压缩由配置自动处理（`image.compress: true`），无需手动执行。
@@ -35,8 +38,8 @@ wechatwriter image generate "茶园清晨薄雾"
 生成专业封面图（WeChat 最低要求：≥3,686,400 像素）：
 
 ```bash
-# 生成封面图，指定 4k 尺寸（约 2560x1440）
-wechatwriter image generate "春茶品鉴指南封面，简约大气" -s 4k
+# 生成封面图，指定 2k 尺寸（约 2560x1440）
+wechatwriter image generate "春茶品鉴指南封面，简约大气" -s 2k
 ```
 
 **设计要素**:
@@ -52,30 +55,63 @@ wechatwriter image generate "春茶品鉴指南封面，简约大气" -s 4k
 # 1. 生成配图（压缩自动进行）
 wechatwriter image generate "茶园清晨薄雾，阳光透过茶树"
 
-# 2. 生成封面（4k 高清）
-wechatwriter image generate "春茶品鉴指南封面" -s 4k
+# 2. 生成封面（2k 高清）
+wechatwriter image generate "春茶品鉴指南封面" -s 2k
 
-# 3. 上传本地图片到微信
+# 3. 生成小绿书多图（统一风格）
+STYLE="扁平信息图，低饱和莫兰迪配色，圆角卡片，无衬线字体"
+wechatwriter image generate "封面" --post --style "$STYLE"
+wechatwriter image generate "内容1" --post --style "$STYLE"
+wechatwriter image generate "内容2" --post --style "$STYLE"
+
+# 4. 上传本地图片到微信
 wechatwriter image upload ./cover.jpg
 
-# 4. 下载在线图片并上传到微信
+# 5. 下载在线图片并上传到微信
 wechatwriter image download https://example.com/photo.jpg
 ```
 
 ## 输出格式
+
+### image generate（生成图片到本地）
 
 ```json
 {
   "success": true,
   "data": {
     "prompt": "茶园清晨薄雾",
-    "original_url": "https://generated.example.com/xxx.jpg",
-    "wechat_url": "https://mmbiz.qpic.cn/mmbiz_jpg/xxx/0?wx_fmt=jpeg",
-    "media_id": "media_id_xxx",
-    "width": 1024,
-    "height": 1024
+    "url": "https://generated.example.com/xxx.jpg",
+    "file_path": "generated_image.png",
+    "model": "gemini-3-pro-image-preview",
+    "size": "16:9"
   }
 }
+```
+
+### image upload / image download（上传到微信素材库）
+
+```json
+{
+  "success": true,
+  "data": {
+    "media_id": "微信素材 ID",
+    "wechat_url": "https://mmbiz.qpic.cn/... (微信素材库外部访问链接)"
+  }
+}
+```
+
+## 生成 + 上传工作流
+
+图片生成和上传是两个独立步骤：
+
+```bash
+# Step 1: 生成图片到本地（返回 file_path）
+wechatwriter image generate "茶园清晨薄雾" -o cover.jpg
+# → data.file_path = "cover.jpg"
+
+# Step 2: 上传到微信素材库（返回 media_id + wechat_url）
+wechatwriter image upload cover.jpg
+# → data.media_id = "xxx", data.wechat_url = "https://..."
 ```
 
 ## 设计标准
@@ -99,3 +135,4 @@ wechatwriter image generate --help
 
 - 主题样式：[themes.md](references/themes.md)
 - 图片语法：[image-syntax.md](references/image-syntax.md)
+- 封面图平台规范：[cover-guidelines.md](references/cover-guidelines.md)

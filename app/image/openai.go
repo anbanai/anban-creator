@@ -21,13 +21,10 @@ type OpenAIProvider struct {
 func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 	model := apiCfg.Model
 	if model == "" {
-		model = "dall-e-3" // 默认模型
+		model = DefaultOpenAIModel
 	}
 
-	size := apiCfg.Size
-	if size == "" {
-		size = "2k" // 默认尺寸
-	}
+	size := mapToDALLESize(apiCfg.Size, model)
 
 	// 创建 OpenAI client，使用官方 SDK
 	opts := []option.RequestOption{
@@ -46,6 +43,69 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 		model:  model,
 		size:   size,
 	}, nil
+}
+
+// mapToDALLESize 将用户配置的 size（宽高比或像素格式）映射到 DALL-E 支持的尺寸
+// DALL-E 3 支持: 1024x1024, 1792x1024, 1024x1792
+// DALL-E 2 支持: 256x256, 512x512, 1024x1024
+func mapToDALLESize(size, model string) string {
+	if size == "" {
+		return "1024x1024"
+	}
+
+	isDallE2 := model == "dall-e-2"
+
+	// 精确尺寸直接通过（DALL-E 3 格式）
+	dalle3Sizes := map[string]bool{
+		"1024x1024": true, "1792x1024": true, "1024x1792": true,
+	}
+	if !isDallE2 && dalle3Sizes[size] {
+		return size
+	}
+
+	// DALL-E 2 支持的尺寸
+	dalle2Sizes := map[string]bool{
+		"256x256": true, "512x512": true, "1024x1024": true,
+	}
+	if isDallE2 && dalle2Sizes[size] {
+		return size
+	}
+
+	if isDallE2 {
+		return "1024x1024"
+	}
+
+	// 宽高比映射到 DALL-E 3 尺寸
+	ratioMap := map[string]string{
+		"1:1":   "1024x1024",
+		"16:9":  "1792x1024",
+		"9:16":  "1024x1792",
+		"4:3":   "1792x1024", // 近似横向
+		"3:4":   "1024x1792", // 近似纵向
+		"3:2":   "1792x1024",
+		"2:3":   "1024x1792",
+		"21:9":  "1792x1024",
+		"wide":  "1792x1024",
+		"tall":  "1024x1792",
+		"square": "1024x1024",
+	}
+	if mapped, ok := ratioMap[size]; ok {
+		return mapped
+	}
+
+	// 像素格式：分析宽高比确定方向
+	// WIDTHxHEIGHT 格式
+	var w, h int
+	if n, err := fmt.Sscanf(size, "%dx%d", &w, &h); n == 2 && err == nil {
+		if w > h {
+			return "1792x1024" // 横向
+		} else if h > w {
+			return "1024x1792" // 纵向
+		}
+		return "1024x1024" // 正方形
+	}
+
+	return "1024x1024" // 默认
 }
 
 // Name 返回提供者名称
@@ -107,7 +167,7 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 			Provider: p.Name(),
 			Code:     "unauthorized",
 			Message:  "API Key 无效或已过期",
-			HintMsg:  "请检查配置文件中的 api.image_key 是否正确",
+			HintMsg:  "请检查配置文件中的 article.image.key 或 post.image.key 是否正确",
 			Original: err,
 		}
 	}
@@ -123,6 +183,15 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 	}
 
 	if contains(errMsg, "400") || contains(errMsg, "bad request") {
+		if isContentSafetyError(errMsg) {
+			return &GenerateError{
+				Provider: p.Name(),
+				Code:     "safety_blocked",
+				Message:  "提示词被内容安全策略拦截",
+				HintMsg:  "提示词可能包含敏感内容，请修改提示词后重试",
+				Original: err,
+			}
+		}
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "bad_request",

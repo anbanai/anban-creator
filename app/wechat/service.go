@@ -228,6 +228,22 @@ func (s *Service) CreateNewspicDraft(articles []NewspicArticle) (*CreateDraftRes
 	}, nil
 }
 
+// PublishedItem 已发布文章列表项
+type PublishedItem struct {
+	ArticleID  string `json:"article_id"`
+	Title      string `json:"title"`
+	Digest     string `json:"digest,omitempty"`
+	URL        string `json:"url,omitempty"`
+	UpdateTime int64  `json:"update_time"`
+}
+
+// ListPublishedResult 已发布文章列表结果
+type ListPublishedResult struct {
+	TotalCount int64           `json:"total_count"`
+	ItemCount  int64           `json:"item_count"`
+	Items      []PublishedItem `json:"items"`
+}
+
 // ListDrafts 获取草稿列表
 func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 	oa := s.getOfficialAccount()
@@ -236,6 +252,9 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 	list, err := dm.PaginateDraft(offset, count, true)
 	if err != nil {
 		s.log.Error("list drafts failed", zap.Error(err))
+		if wErr := ParseWechatError(err); wErr != nil {
+			return nil, wErr
+		}
 		return nil, fmt.Errorf("list drafts: %w", err)
 	}
 
@@ -255,6 +274,42 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 			di.Digest = item.Content.NewsItem[0].Digest
 		}
 		result.Items = append(result.Items, di)
+	}
+
+	return result, nil
+}
+
+// ListPublished 获取已发布文章列表
+func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, error) {
+	oa := s.getOfficialAccount()
+	fp := oa.GetFreePublish()
+
+	list, err := fp.Paginate(offset, count, true)
+	if err != nil {
+		s.log.Error("list published failed", zap.Error(err))
+		if wErr := ParseWechatError(err); wErr != nil {
+			return nil, wErr
+		}
+		return nil, fmt.Errorf("list published: %w", err)
+	}
+
+	result := &ListPublishedResult{
+		TotalCount: list.TotalCount,
+		ItemCount:  list.ItemCount,
+		Items:      make([]PublishedItem, 0, len(list.Item)),
+	}
+
+	for _, item := range list.Item {
+		pi := PublishedItem{
+			ArticleID:  item.ArticleID,
+			UpdateTime: item.UpdateTime,
+		}
+		if len(item.Content.NewsItem) > 0 {
+			pi.Title = item.Content.NewsItem[0].Title
+			pi.Digest = item.Content.NewsItem[0].Digest
+			pi.URL = item.Content.NewsItem[0].URL
+		}
+		result.Items = append(result.Items, pi)
 	}
 
 	return result, nil

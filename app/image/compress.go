@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -259,4 +260,79 @@ func NeedsCompression(info *ImageInfo, maxWidth int, maxSize int64) bool {
 		return true
 	}
 	return false
+}
+
+// CropMargin 裁剪图片左右各 margin 像素，上下按宽高比自动计算，用于去除 AI 生成图片的水印。
+// 水平边距为 margin，垂直边距为 round(margin * origH / origW)，以保持原始宽高比。
+// 返回: 裁剪后的临时文件路径, 错误
+func CropMargin(log *zap.Logger, filePath string, margin int) (string, error) {
+	if margin <= 0 {
+		return "", fmt.Errorf("margin must be positive, got %d", margin)
+	}
+
+	img, err := imaging.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("open image: %w", err)
+	}
+
+	bounds := img.Bounds()
+	origW := bounds.Dx()
+	origH := bounds.Dy()
+
+	hMargin := margin
+	vMargin := int(math.Round(float64(margin) * float64(origH) / float64(origW)))
+
+	newW := origW - 2*hMargin
+	newH := origH - 2*vMargin
+	if newW <= 0 || newH <= 0 {
+		return "", fmt.Errorf("margin %d too large for image %dx%d: cropped size would be %dx%d", margin, origW, origH, newW, newH)
+	}
+
+	cropped := imaging.Crop(img, image.Rect(hMargin, vMargin, origW-hMargin, origH-vMargin))
+
+	ext := filepath.Ext(filePath)
+	baseName := strings.TrimSuffix(filepath.Base(filePath), ext)
+	var outputFormat string
+	switch strings.ToLower(ext) {
+	case ".png":
+		outputFormat = "png"
+	case ".jpg", ".jpeg":
+		outputFormat = "jpeg"
+	default:
+		outputFormat = "jpeg"
+		ext = ".jpg"
+	}
+
+	tempPath := filepath.Join(os.TempDir(), "cropped_"+baseName+ext)
+
+	file, err := os.Create(tempPath)
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	defer file.Close()
+
+	switch outputFormat {
+	case "png":
+		encoder := png.Encoder{CompressionLevel: png.DefaultCompression}
+		if err := encoder.Encode(file, cropped); err != nil {
+			os.Remove(tempPath)
+			return "", fmt.Errorf("encode png: %w", err)
+		}
+	default:
+		if err := jpeg.Encode(file, cropped, &jpeg.Options{Quality: 92}); err != nil {
+			os.Remove(tempPath)
+			return "", fmt.Errorf("encode jpeg: %w", err)
+		}
+	}
+
+	log.Info("image cropped",
+		zap.String("source", filePath),
+		zap.Int("original_width", origW),
+		zap.Int("original_height", origH),
+		zap.Int("cropped_width", newW),
+		zap.Int("cropped_height", newH),
+		zap.Int("h_margin", hMargin),
+		zap.Int("v_margin", vMargin))
+
+	return tempPath, nil
 }
