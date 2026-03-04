@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/royalrick/wechatwriter/app/draft"
+	"github.com/royalrick/wechatwriter/app/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +26,7 @@ func draftPostCmd() *cobra.Command {
 		fansOnly    bool
 		dryRun      bool
 		output      string
+		dir         string
 	)
 
 	cmd := &cobra.Command{
@@ -135,6 +139,27 @@ func draftPostCmd() *cobra.Command {
 				return
 			}
 
+			// 静默记录到 DB
+			if store != nil {
+				_ = store.CreateDraft(&storage.Draft{
+					MediaID:   result.MediaID,
+					DraftURL:  result.DraftURL,
+					Title:     req.Title,
+					Type:      "post",
+					CreatedAt: time.Now(),
+				})
+
+				// 自动更新 Content 状态为 published
+				if dir != "" {
+					absDir, _ := filepath.Abs(dir)
+					_ = store.UpdateContentFields(absDir, map[string]any{
+						"status":   "published",
+						"media_id": result.MediaID,
+						"title":    req.Title,
+					})
+				}
+			}
+
 			// 若指定了 --output，将结果写入文件
 			if output != "" {
 				data, marshalErr := json.MarshalIndent(result, "", "  ")
@@ -163,6 +188,7 @@ func draftPostCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&output, "output", "o", "", "将结果写入 JSON 文件")
 	cmd.Flags().StringVar(&content, "desc", "", "描述文字（--content 的别名）")
 	_ = cmd.Flags().MarkHidden("desc")
+	cmd.Flags().StringVar(&dir, "dir", "", "内容目录路径（用于自动更新内容状态）")
 
 	return cmd
 }

@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/wechatwriter/app/storage"
 	"github.com/royalrick/wechatwriter/app/wechat"
 	"github.com/spf13/cobra"
 )
@@ -37,6 +39,9 @@ func doctorCmd() *cobra.Command {
 
 			// 环境检查
 			checks = append(checks, checkEnvironment()...)
+
+			// 数据库检查
+			checks = append(checks, checkDatabase()...)
 
 			// 网络检查
 			if !skipNetwork {
@@ -185,6 +190,38 @@ func checkNetwork(cfg *config.Config) []CheckResult {
 			checks = append(checks, CheckResult{Name: "image_api_reachable", Status: "pass", Message: "图片 API 可达"})
 		}
 	}
+
+	return checks
+}
+
+func checkDatabase() []CheckResult {
+	var checks []CheckResult
+
+	dbPath := filepath.Join(config.ConfigDir, "data.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		checks = append(checks, CheckResult{Name: "db_file", Status: "warn", Message: "数据库未初始化（首次运行时自动创建）", Hint: "运行任意命令后自动创建"})
+		return checks
+	}
+
+	// 尝试打开 DB 并获取记录数
+	s, err := storage.Open(dbPath)
+	if err != nil {
+		checks = append(checks, CheckResult{Name: "db_open", Status: "fail", Message: "数据库打开失败: " + err.Error(), Hint: "检查 .wechatwriter/data.db 文件权限"})
+		return checks
+	}
+	defer s.Close()
+
+	stat, _ := os.Stat(dbPath)
+	sizeMB := float64(0)
+	if stat != nil {
+		sizeMB = float64(stat.Size()) / (1024 * 1024)
+	}
+
+	checks = append(checks, CheckResult{
+		Name:    "db_file",
+		Status:  "pass",
+		Message: fmt.Sprintf("数据库正常: %s (%.2f MB)", dbPath, sizeMB),
+	})
 
 	return checks
 }

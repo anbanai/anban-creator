@@ -135,7 +135,7 @@ type UploadResult struct {
 
 // UploadLocalImage 上传本地图片
 func (p *Processor) UploadLocalImage(filePath string) (*UploadResult, error) {
-	p.log.Info("uploading local image", zap.String("path", filePath))
+	p.log.Debug("uploading local image", zap.String("path", filePath))
 
 	// 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -225,12 +225,9 @@ type GenerateAndUploadResult struct {
 
 // GenerateOnlyResult AI 生成图片结果（不含上传）
 type GenerateOnlyResult struct {
-	Prompt        string `json:"prompt"`
-	URL           string `json:"url"`                      // 原始 URL（远程）或 provider 临时路径
-	FilePath      string `json:"file_path"`                // 最终本地文件路径
-	RevisedPrompt string `json:"revised_prompt,omitempty"` // 优化后的提示词
-	Model         string `json:"model"`
-	Size          string `json:"size"`
+	FilePath string `json:"file_path"` // 最终本地文件路径
+	Size     string `json:"size"`
+	url      string // 原始 URL（远程）或 provider 临时路径，仅内部使用
 }
 
 // generateOnly 生成图片到本地，不上传到微信。
@@ -265,8 +262,7 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
-	p.log.Info("image generated",
-		zap.String("url", result.URL),
+	p.log.Debug("image generated",
 		zap.String("provider", result.Model),
 		zap.String("size", result.Size))
 
@@ -301,7 +297,7 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 		} else if compressed {
 			toClean = append(toClean, compressedPath)
 			processedPath = compressedPath
-			p.log.Info("using compressed image", zap.String("path", processedPath))
+			p.log.Debug("using compressed image", zap.String("path", processedPath))
 		}
 	}
 
@@ -335,24 +331,21 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 	}
 
 	return &GenerateOnlyResult{
-		Prompt:        prompt,
-		URL:           result.URL,
-		FilePath:      finalPath,
-		RevisedPrompt: result.RevisedPrompt,
-		Model:         result.Model,
-		Size:          result.Size,
+		FilePath: finalPath,
+		Size:     result.Size,
+		url:      result.URL,
 	}, nil
 }
 
 // GenerateOnly AI 生成图片到本地文件，不上传到微信
 func (p *Processor) GenerateOnly(prompt, outputPath string) (*GenerateOnlyResult, error) {
-	p.log.Info("generating image via AI", zap.String("prompt", prompt))
+	p.log.Debug("generating image via AI", zap.String("prompt", prompt))
 	return p.generateOnly(prompt, "", outputPath)
 }
 
 // GenerateOnlyWithSize AI 生成指定尺寸的图片到本地文件，不上传到微信
 func (p *Processor) GenerateOnlyWithSize(prompt, size, outputPath string) (*GenerateOnlyResult, error) {
-	p.log.Info("generating image via AI with size",
+	p.log.Debug("generating image via AI with size",
 		zap.String("prompt", prompt),
 		zap.String("size", size))
 	return p.generateOnly(prompt, size, outputPath)
@@ -360,7 +353,7 @@ func (p *Processor) GenerateOnlyWithSize(prompt, size, outputPath string) (*Gene
 
 // GenerateAndUpload AI 生成图片并上传
 func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, error) {
-	p.log.Info("generating image via AI", zap.String("prompt", prompt))
+	p.log.Debug("generating image via AI", zap.String("prompt", prompt))
 
 	onlyResult, err := p.generateOnly(prompt, "", "")
 	if err != nil {
@@ -376,7 +369,7 @@ func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, 
 
 	return &GenerateAndUploadResult{
 		Prompt:      prompt,
-		OriginalURL: onlyResult.URL,
+		OriginalURL: onlyResult.url,
 		MediaID:     uploadResult.MediaID,
 		WechatURL:   uploadResult.WechatURL,
 	}, nil
@@ -384,7 +377,7 @@ func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, 
 
 // GenerateAndUploadWithSize AI 生成指定尺寸的图片并上传
 func (p *Processor) GenerateAndUploadWithSize(prompt string, size string) (*GenerateAndUploadResult, error) {
-	p.log.Info("generating image via AI with size",
+	p.log.Debug("generating image via AI with size",
 		zap.String("prompt", prompt),
 		zap.String("size", size))
 
@@ -402,7 +395,7 @@ func (p *Processor) GenerateAndUploadWithSize(prompt string, size string) (*Gene
 
 	return &GenerateAndUploadResult{
 		Prompt:      prompt,
-		OriginalURL: onlyResult.URL,
+		OriginalURL: onlyResult.url,
 		MediaID:     uploadResult.MediaID,
 		WechatURL:   uploadResult.WechatURL,
 	}, nil

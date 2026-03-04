@@ -3,7 +3,7 @@ name: config
 description: 初始化或查看 wechatwriter 配置。Use when user says "配置"、"config"、"设置"、"账号信息"、"account"。
 user-invocable: true
 metadata:
-  author: rick
+  author: Rick
   version: 2.4.0
 ---
 

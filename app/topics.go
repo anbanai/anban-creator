@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -20,31 +22,54 @@ type TopicSuggestion struct {
 // topicsCmd 话题发现命令
 func topicsCmd() *cobra.Command {
 	var (
-		domain string
-		count  int
+		domain       string
+		count        int
+		keywords     []string
+		aiResultFile string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "topics",
-		Short: "智能话题发现",
+		Use:     "topics",
+		Aliases: []string{"topic"},
+		Short:   "智能话题发现",
 		Long: `基于公众号关键词和领域，生成高传播潜力的话题提示词，由 Claude 代理处理
+
+两步工作流:
+  Step 1: 生成话题建议提示词，由 Claude 代理执行
+  Step 2: 使用 --ai-result 验证并返回结构化话题列表
 
 Claude 代理会根据你的账号画像（关键词、领域）生成定制化的话题建议，
 每个话题包含写作角度、病毒传播得分、推荐模板等信息。
 
 示例:
-  # 基于账号关键词生成话题
+  # 基于账号关键词生成话题（Step 1）
   wechatwriter topics
 
   # 指定领域和数量
-  wechatwriter topics --domain "传统文化" --count 5`,
+  wechatwriter topics --domain "传统文化" --count 5
+
+  # 指定额外关键词
+  wechatwriter topics -k "茶文化" -k "养生"
+
+  # Step 2: 验证代理返回的话题列表
+  wechatwriter topics --ai-result topics.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := initConfigMinimal(); err != nil {
 				return fmt.Errorf("初始化配置失败: %w", err)
 			}
 
-			// 从配置获取账号关键词
+			// Step 2: 验证代理返回的话题 JSON
+			if aiResultFile != "" {
+				return runTopicsStep2(aiResultFile)
+			}
+
+			// 从配置获取账号关键词，命令行关键词优先追加
 			accountKeywords := cfg.Wechat.Keywords
+			for _, kw := range keywords {
+				if !contains(accountKeywords, kw) {
+					accountKeywords = append(accountKeywords, kw)
+				}
+			}
 			if domain != "" && !contains(accountKeywords, domain) {
 				accountKeywords = append([]string{domain}, accountKeywords...)
 			}
@@ -63,6 +88,8 @@ Claude 代理会根据你的账号画像（关键词、领域）生成定制化�
 
 	cmd.Flags().StringVarP(&domain, "domain", "d", "", "内容领域（如：茶文化、健康养生）")
 	cmd.Flags().IntVarP(&count, "count", "n", 5, "生成话题数量（1-10）")
+	cmd.Flags().StringSliceVarP(&keywords, "keywords", "k", []string{}, "额外关键词（优先追加到账号关键词）")
+	cmd.Flags().StringVar(&aiResultFile, "ai-result", "", "Step 2: Claude 代理生成的话题 JSON 文件")
 
 	return cmd
 }
@@ -116,6 +143,39 @@ viral_score 范围 1-100，越高说明传播潜力越大
 - 角度要独特，避免老生常谈
 - 关键词要与账号定位强相关
 - 重点关注近期热点和常青话题的结合`, domainHint, count, kwStr, positioning)
+}
+
+// runTopicsStep2 解析并验证代理生成的话题 JSON
+func runTopicsStep2(aiResultFile string) error {
+	data, err := os.ReadFile(aiResultFile)
+	if err != nil {
+		return fmt.Errorf("读取话题文件失败: %w", err)
+	}
+
+	// 尝试提取 JSON
+	jsonData := extractJSON(string(data))
+
+	var topics []TopicSuggestion
+	if err := json.Unmarshal([]byte(jsonData), &topics); err != nil {
+		return fmt.Errorf("解析话题 JSON 失败: %w\n💡 提示: 确保文件包含有效的 JSON 数组格式", err)
+	}
+
+	if len(topics) == 0 {
+		return fmt.Errorf("话题列表为空")
+	}
+
+	// 验证每个话题的必填字段
+	for i, t := range topics {
+		if t.Topic == "" {
+			return fmt.Errorf("话题 #%d 缺少必填字段: topic", i+1)
+		}
+	}
+
+	responseSuccess(map[string]any{
+		"topics": topics,
+		"count":  len(topics),
+	})
+	return nil
 }
 
 // contains 检查字符串切片是否包含某元素

@@ -42,13 +42,18 @@ func scoreCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "score",
-		Short: "计算热点话题的爆款潜力评分",
-		Long: `基于多维度指标计算爆款潜力评分
+		Short: "基于互动数据计算文章爆款潜力评分",
+		Long: `基于真实互动数据计算文章爆款潜力评分
+
+输入真实的文章互动统计数据（阅读数、点赞数、分享数、评论数、收藏数），
+计算综合爆款评分及各维度互动率，并给出优化建议。
 
 支持的指标：
-- 阅读量、点赞量、分享量、评论量
-- 互动率、分享率等衍生指标
-- 领域相关性评估`,
+- 阅读量、点赞量、分享量、评论量、收藏量
+- 互动率、分享率、点赞率、评论率等衍生指标
+- 综合爆款潜力评级
+
+注意：需要提供真实互动数据，不是预测性话题评分。`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runScore(inputFile, topic, domain)
 		},

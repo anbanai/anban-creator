@@ -20,21 +20,35 @@ maxTurns: 25
 
 ## 创作流程
 
-1. 执行 `wechatwriter account info` 获取账号信息
+1. 执行 `wechatwriter account info --scope post` 获取账号信息
 2. 执行 `wechatwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
-3. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，规划小绿书的标题、描述、标签和图片的关键内容描述
-4. **定义统一视觉风格**：构思一段 50-150 字的风格描述，涵盖设计风格、色彩方案、版式、字体和整体氛围，作为 `$STYLE` 变量，所有图片生成命令均传 `--style "$STYLE"` 以保持多图视觉一致性
-5. 使用 skill `visual-design` 逐一生成小绿书图片（`image generate --post --style "$STYLE"`），保存到本地
-6. 逐一上传图片到微信素材库（`image upload`），记录每张图的 media_id
-7. 使用 skill `post-publishing` → `draft post --media-ids` 用素材 ID 发布到微信公众号草稿箱
+3. **创建内容目录**：执行 `mkdir -p output/posts/post-$(date +%Y%m%d)-001` 生成隔离工作目录（如已存在 001 则自增序号），后续所有图片保存在该目录内，变量记为 `$DIR`
+4. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，规划小绿书的标题、描述、标签和图片的关键内容描述
+5. **定义统一视觉风格**：
+   - 执行 `wechatwriter style list` 查看可用的视觉风格预设
+   - 根据内容主题选择合适的预设名称作为 `$STYLE`（如 `$STYLE="morandi-flat"`）
+   - 可执行 `wechatwriter style show <name>` 查看预设详情（配色、边框、背景等）
+   - 如无合适预设，构思一段包含以下维度的风格描述作为 `$STYLE`：
+     - 设计风格（扁平/3D/水彩/极简等）
+     - 配色方案（主色、辅色、强调色、背景色）
+     - 边框样式（圆角/直角/无边框、投影）
+     - 背景类型（渐变/纯色/纹理）
+     - 字体风格（衬线/无衬线、粗细）
+   - 所有图片生成命令均传 `--style "$STYLE"` 以保持多图视觉一致性
+6. 使用 skill `visual-design` 逐一生成小绿书图片（`image generate --post --style "$STYLE" -o $DIR/image_01.png`），保存到 `$DIR/`
+7. 逐一上传图片到微信素材库（`image upload $DIR/image_01.png`），记录每张图的 media_id
+8. 使用 skill `post-publishing` → `draft post --media-ids` 用素材 ID 发布到微信公众号草稿箱
 
 ## 小绿书内容设计原则
 
 ### 图片即内容
+
 小绿书的图片不是装饰配图，而是内容本体。每张图片必须包含可独立阅读的信息。
 
 ### 图片提示词要求
+
 生成图片时，提示词必须要求信息图/卡片风格，而非纯摄影或插画：
+
 - 封面图：大标题 + 副标题 + 吸引眼球的视觉元素
 - 内容图：结构化信息（列表、对比、步骤、数据）以文字叠加在设计背景上
 - 收尾图：总结要点或引导关注的 CTA 卡片
@@ -73,15 +87,16 @@ maxTurns: 25
 
 **配置问题**：
 
-- 假定配置已正确设置，不要尝试验证配置或建议运行 `wechatwriter config init`
+- 假定配置已正确设置，不要尝试验证配置或建议运行 `wechatwriter account init`
 - 如果命令因配置问题失败，直接报告错误信息并继续流程
 
 ## 工作规范
 
 ### 文件组织
 
-- 所有产物保存在 `output/` 目录
+- 每个小绿书使用独立目录：`output/posts/post-YYYYMMDD-NNN/`（步骤 3 创建，变量 `$DIR`）
 - 使用标准格式：图片（.jpg/.png）、JSON（.json）
+- 图片命名：`$DIR/image_01.png`, `$DIR/image_02.png` 等
 
 ### 任务追踪
 
@@ -90,7 +105,7 @@ maxTurns: 25
 - 开始前：`TaskUpdate status → in_progress`
 - 完成后：`TaskUpdate status → completed`
 - 设置依赖：每个任务 blockedBy 前一个任务
-- 报告进度：`[3/7] 图片生成完成 → output/ (8张图片)`
+- 报告进度：`[3/8] 图片生成完成 → $DIR/ (8张图片)`
 
 ## 执行原则
 

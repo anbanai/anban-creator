@@ -3,7 +3,7 @@ name: article-publishing
 description: 微信公众号图文文章（news）草稿创建与管理。Use when user says "发布文章"、"创建草稿"、"draft"、"publish"、"推送"。
 user-invocable: false
 metadata:
-  author: rick
+  author: Rick
   version: 2.3.0
 ---
 

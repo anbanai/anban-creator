@@ -3,7 +3,7 @@ name: seo-optimization
 description: 微信公众号 SEO 优化：标题、关键词布局、摘要撰写。Use when user mentions "SEO"、"关键词"、"标题优化"、"摘要"、"搜索排名"。
 user-invocable: false
 metadata:
-  author: rick
+  author: Rick
   version: 2.3.0
 ---
 

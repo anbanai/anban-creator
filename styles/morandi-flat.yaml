@@ -1,0 +1,32 @@
+name: "莫兰迪扁平"
+english_name: "morandi-flat"
+description: "低饱和莫兰迪色系扁平信息图，适合知识类小绿书"
+category: "知识图卡"
+
+design:
+  style: "扁平信息图"
+  mood: "专业、清新、易读"
+
+colors:
+  primary: "蓝灰 #8B9DAF"
+  secondary: "暖棕 #C4A882"
+  accent: "陶土橙 #D4856B"
+  background: "米白 #F5F0EB"
+  text: "深灰 #4A4A4A"
+
+border:
+  style: "圆角卡片"
+  radius: "16px"
+
+background:
+  type: "渐变"
+  description: "浅米色到暖白色的垂直渐变"
+
+typography:
+  heading: "粗体无衬线"
+  body: "常规无衬线"
+
+prompt: |
+  扁平信息图设计风格，低饱和莫兰迪配色方案（主色蓝灰#8B9DAF、辅色暖棕#C4A882、强调色陶土橙#D4856B、背景米白#F5F0EB），
+  圆角卡片布局（16px圆角），浅米色到暖白色渐变背景，粗体无衬线标题字体，
+  整体氛围专业清新易读。

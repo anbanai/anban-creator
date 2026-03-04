@@ -8,6 +8,7 @@ import (
 
 	"github.com/royalrick/wechatwriter/app/config"
 	"github.com/royalrick/wechatwriter/app/image"
+	"github.com/royalrick/wechatwriter/app/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -61,6 +62,13 @@ func imageUploadCmd() *cobra.Command {
 				responseError(err)
 				return
 			}
+
+			// 静默记录到 DB
+			if store != nil {
+				absPath, _ := filepath.Abs(filePath)
+				_ = store.UpsertImageUpload(absPath, result.MediaID, result.WechatURL)
+			}
+
 			responseSuccess(result)
 		},
 	}
@@ -214,7 +222,13 @@ func imageGenerateCmd() *cobra.Command {
 
 			processor := image.NewProcessor(cfg, apiCfg, log)
 			if stylePrompt != "" {
-				processor.SetStylePrompt(stylePrompt)
+				// 尝试将 stylePrompt 解析为预设名称，命中则使用预设 prompt，未命中则当自由文本（向后兼容）
+				pm := image.NewStylePresetManager()
+				if presetPrompt, err := pm.GetPrompt(stylePrompt); err == nil {
+					processor.SetStylePrompt(presetPrompt)
+				} else {
+					processor.SetStylePrompt(stylePrompt)
+				}
 			}
 
 			var genResult *image.GenerateOnlyResult
@@ -229,6 +243,23 @@ func imageGenerateCmd() *cobra.Command {
 				return
 			}
 
+			// 静默记录生成结果到 DB
+			if store != nil {
+				imgRecord := &storage.Image{
+					Prompt:      prompt,
+					Provider:    apiCfg.Provider,
+					LocalPath:   genResult.FilePath,
+					StylePreset: stylePrompt,
+					CreatedAt:   time.Now(),
+				}
+				if info, infoErr := image.GetImageInfo(genResult.FilePath); infoErr == nil {
+					imgRecord.Width = info.Width
+					imgRecord.Height = info.Height
+					imgRecord.SizeBytes = info.Size
+				}
+				_ = store.CreateImage(imgRecord)
+			}
+
 			if !upload {
 				responseSuccess(genResult)
 				return
@@ -241,14 +272,16 @@ func imageGenerateCmd() *cobra.Command {
 				return
 			}
 
+			// 静默更新 DB 中的上传信息
+			if store != nil {
+				_ = store.UpdateImageUpload(genResult.FilePath, uploadResult.MediaID, uploadResult.WechatURL)
+			}
+
 			responseSuccess(map[string]any{
-				"prompt":         genResult.Prompt,
-				"file_path":      genResult.FilePath,
-				"revised_prompt": genResult.RevisedPrompt,
-				"model":          genResult.Model,
-				"size":           genResult.Size,
-				"media_id":       uploadResult.MediaID,
-				"wechat_url":     uploadResult.WechatURL,
+				"file_path":  genResult.FilePath,
+				"size":       genResult.Size,
+				"media_id":   uploadResult.MediaID,
+				"wechat_url": uploadResult.WechatURL,
 			})
 		},
 	}

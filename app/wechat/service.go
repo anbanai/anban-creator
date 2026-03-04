@@ -76,7 +76,7 @@ func (s *Service) UploadMaterial(filePath string) (*UploadMaterialResult, error)
 	}
 
 	duration := time.Since(startTime)
-	s.log.Info("material uploaded",
+	s.log.Debug("material uploaded",
 		zap.String("path", filePath),
 		zap.String("media_id", maskMediaID(mediaID)),
 		zap.Duration("duration", duration))
@@ -286,10 +286,11 @@ func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, erro
 
 	list, err := fp.Paginate(offset, count, true)
 	if err != nil {
-		s.log.Error("list published failed", zap.Error(err))
 		if wErr := ParseWechatError(err); wErr != nil {
+			s.log.Debug("list published failed", zap.Int("errcode", wErr.ErrCode), zap.String("msg", wErr.UserMsg))
 			return nil, wErr
 		}
+		s.log.Error("list published failed", zap.Error(err))
 		return nil, fmt.Errorf("list published: %w", err)
 	}
 
@@ -318,9 +319,14 @@ func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, erro
 // UploadMaterialFromBytes 从字节数据上传素材
 func (s *Service) UploadMaterialFromBytes(data []byte, filename string) (*UploadMaterialResult, error) {
 	// 创建临时文件
-	tmpDir := os.TempDir()
-	tmpPath := filepath.Join(tmpDir, "wechatwriter_"+filename)
+	tmpFile, err := os.CreateTemp("", "wechatwriter_*_"+filename)
+	if err != nil {
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		os.Remove(tmpPath)
 		return nil, fmt.Errorf("write temp file: %w", err)
 	}
 	defer os.Remove(tmpPath)
@@ -397,7 +403,6 @@ func DownloadFile(url string) (string, error) {
 	}
 
 	// 创建临时文件
-	tmpDir := os.TempDir()
 	// 从 URL 路径中提取扩展名，排除查询参数
 	ext := ".jpg" // 默认扩展名
 	if parsedURL, err := neturl.Parse(url); err == nil {
@@ -405,12 +410,12 @@ func DownloadFile(url string) (string, error) {
 			ext = pathExt
 		}
 	}
-	tmpPath := filepath.Join(tmpDir, "wechatwriter_download_"+ext)
-	tmpFile, err := os.Create(tmpPath)
+	tmpFile, err := os.CreateTemp("", "wechatwriter_download_*"+ext)
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
 	defer tmpFile.Close()
+	tmpPath := tmpFile.Name()
 
 	// 写入文件
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {

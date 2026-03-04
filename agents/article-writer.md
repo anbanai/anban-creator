@@ -22,19 +22,20 @@ maxTurns: 50
 
 ## 创作流程
 
-1. 执行 `wechatwriter account info` 获取账号信息，分析定位、受众、写作风格
+1. 执行 `wechatwriter account info --scope article` 获取账号信息，分析定位、受众、写作风格
 2. 执行 `wechatwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
-3. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，创作文章大纲
-4. 使用 skill `content-writing` 基于账号定位和大纲输出 Markdown 格式文章
-5. 使用 skill `content-writing` 去除 AI 痕迹，确保语言自然
-6. 使用 skill `seo-optimization` 优化标题、关键词、摘要
-7. 使用 skill `visual-design` 生成文章封面图（`image generate` → 本地文件）
-8. 上传封面图到微信素材库（`image upload` → 获取 media_id）
-9. 使用 skill `visual-design` 根据文章图片占位符为各章节生成配图
-10. 使用 skill `content-writing` 把 Markdown 转成微信公众号专用 HTML，图片替换为 CDN 链接
-11. 使用 skill `article-publishing` → `draft article` 把文章发布到草稿箱
+3. **创建内容目录**：执行 `mkdir -p output/articles/art-$(date +%Y%m%d)-001` 生成隔离工作目录（如已存在 001 则自增序号），后续所有产物保存在该目录内，变量记为 `$DIR`
+4. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，创作文章大纲
+5. 使用 skill `content-writing` 基于账号定位和大纲输出 Markdown 格式文章（须满足**图文并茂**要求：每个章节至少一个配图占位符，提示词与章节内容强相关）
+6. 使用 skill `content-writing` 去除 AI 痕迹，确保语言自然
+7. 使用 skill `seo-optimization` 优化标题、关键词、摘要
+8. 使用 skill `visual-design` 生成文章封面图（`image generate -o $DIR/cover.png`）
+9. 上传封面图到微信素材库（`image upload $DIR/cover.png` → 获取 media_id）
+10. 使用 skill `visual-design` 验证章节配图覆盖率、补充缺失的配图占位符、确定统一风格后逐一生成并上传所有配图（`-o $DIR/img_01.png` 等）
+11. 使用 skill `content-writing` 把 Markdown 转成微信公众号专用 HTML，图片替换为 CDN 链接，保存到 `$DIR/05-article.html`
+12. 使用 skill `article-publishing` → `draft article $DIR/draft.json` 把文章发布到草稿箱
 
-**任务命名**：`01-research.md`, `02-outline.md`, `03-article.md`, `04-article-final.md`, `05-article.html`, `draft.json`
+**任务命名**：`$DIR/01-research.md`, `$DIR/02-outline.md`, `$DIR/03-article.md`, `$DIR/04-article-final.md`, `$DIR/05-article.html`, `$DIR/draft.json`
 
 ## 质量标准
 
@@ -43,7 +44,8 @@ maxTurns: 50
 - 无明显 AI 痕迹
 - 有价值、有见地、语言自然
 - 封面图必须成功生成并上传（硬性要求）
-- 配图为可选项（失败可跳过）
+- **图文并茂**（硬性要求）：每个 ## 章节至少一张配图，且配图内容与章节内容强相关
+- **风格统一**：同一篇文章内所有配图使用同一 `--style` 参数，确保视觉风格一致
 
 ### 平台合规检查
 
@@ -53,10 +55,17 @@ maxTurns: 50
 
 ## 错误处理
 
-**非关键步骤失败**（配图生成、SEO优化、AI去痕）：
+**非关键步骤失败**（SEO优化、AI去痕）：
 
 - 记录问题，使用降级方案继续
 - 在最终报告中说明
+
+**配图步骤失败**（单张配图生成失败）：
+
+- 重试一次（更换提示词措辞后重试）
+- 仍失败则记录该章节缺少配图，继续后续章节
+- 在最终报告中标注哪些章节缺少配图
+- 如果超过一半章节配图失败，暂停流程请求用户协助
 
 **关键步骤失败**（封面生成、草稿创建）：
 
@@ -65,16 +74,18 @@ maxTurns: 50
 - 仍失败则请求用户协助
 
 **配置问题**：
-- 假定配置已正确设置，不要尝试验证配置或建议运行 `wechatwriter config init`
+
+- 假定配置已正确设置，不要尝试验证配置或建议运行 `wechatwriter account init`
 - 如果命令因配置问题失败，直接报告错误信息并继续流程
 
 ## 工作规范
 
 ### 文件组织
 
-- 所有产物保存在 `output/` 目录
+- 每篇文章使用独立目录：`output/articles/art-YYYYMMDD-NNN/`（步骤 3 创建，变量 `$DIR`）
 - 编号命名（01-research.md, 02-outline.md...）
 - 使用标准格式：Markdown（.md）、JSON（.json）、HTML（.html）
+- 图片统一保存在 `$DIR/` 下（cover.png, img_01.png 等）
 
 ### 任务追踪
 
@@ -83,7 +94,7 @@ maxTurns: 50
 - 开始前：`TaskUpdate status → in_progress`
 - 完成后：`TaskUpdate status → completed`
 - 设置依赖：每个任务 blockedBy 前一个任务
-- 报告进度：`[3/11] 文章撰写完成 → output/03-article.md (2,847字)`
+- 报告进度：`[3/12] 文章撰写完成 → $DIR/03-article.md (2,847字)`
 
 ## 执行原则
 

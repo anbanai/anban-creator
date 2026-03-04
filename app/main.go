@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/wechatwriter/app/storage"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -13,8 +15,26 @@ import (
 var (
 	cfg     *config.Config
 	log     *zap.Logger
+	store   *storage.Store
 	version = "2.0.0"
 )
+
+// initStorage 初始化数据库（静默，失败不影响命令运行）
+func initStorage() {
+	if store != nil {
+		return
+	}
+	dbPath := filepath.Join(config.ConfigDir, "data.db")
+	s, err := storage.Open(dbPath)
+	if err != nil {
+		// DB 初始化失败不阻断命令，仅记录日志
+		if log != nil {
+			log.Warn("storage init failed, tracking disabled", zap.Error(err))
+		}
+		return
+	}
+	store = s
+}
 
 // initConfig 初始化配置（延迟加载，允许 help 命令无需配置）
 func initConfig() error {
@@ -33,6 +53,7 @@ func initConfig() error {
 		return err
 	}
 
+	initStorage()
 	return nil
 }
 
@@ -54,6 +75,7 @@ func initConfigMinimal() error {
 		return err
 	}
 
+	initStorage()
 	return nil
 }
 
@@ -78,12 +100,15 @@ Configuration:
 	rootCmd.AddCommand(convertCmd)
 	rootCmd.AddCommand(draftCmd())
 	rootCmd.AddCommand(writeCmd)
-	rootCmd.AddCommand(humanizeCmd)
+	rootCmd.AddCommand(humanizeCmd())
 	rootCmd.AddCommand(scoreCmd())
 	rootCmd.AddCommand(outlineCmd())
 	rootCmd.AddCommand(topicsCmd())
+	rootCmd.AddCommand(seoCmd())
 	rootCmd.AddCommand(accountCmd())
 	rootCmd.AddCommand(doctorCmd())
+	rootCmd.AddCommand(styleCmd())
+	rootCmd.AddCommand(contentCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		responseError(err)

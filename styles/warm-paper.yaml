@@ -1,0 +1,32 @@
+name: "暖色纸质"
+english_name: "warm-paper"
+description: "温暖纸张纹理背景，手写感装饰，适合生活、文化、读书类内容"
+category: "文艺清新"
+
+design:
+  style: "纸质文艺卡片"
+  mood: "温暖、亲切、文艺"
+
+colors:
+  primary: "深棕 #5C3D2E"
+  secondary: "暖赤 #C0714F"
+  accent: "金黄 #D4A843"
+  background: "米黄纸色 #F7F0E3"
+  text: "墨棕 #3D2B1F"
+
+border:
+  style: "不规则手绘风"
+  radius: "8px"
+
+background:
+  type: "纹理"
+  description: "米黄纸张底色，细微纸纹理，局部轻微做旧效果"
+
+typography:
+  heading: "粗体衬线"
+  body: "常规衬线或无衬线"
+
+prompt: |
+  纸质文艺卡片设计风格，米黄纸张背景（#F7F0E3）带细微纸纹理，深棕配色体系（主色#5C3D2E、暖赤#C0714F、金黄#D4A843），
+  不规则手绘风边框（8px圆角），轻微做旧复古效果，粗体衬线标题字体，
+  整体氛围温暖亲切充满文艺感。

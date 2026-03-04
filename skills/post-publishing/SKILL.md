@@ -3,7 +3,7 @@ name: post-publishing
 description: 微信公众号小绿书（newspic）图片帖子的创建与管理。Use when user mentions "小绿书"、"图片帖"、"newspic"、"image post"。
 user-invocable: false
 metadata:
-  author: rick
+  author: Rick
   version: 2.3.0
 ---
 

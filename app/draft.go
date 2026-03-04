@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/royalrick/wechatwriter/app/draft"
+	"github.com/royalrick/wechatwriter/app/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -52,6 +53,8 @@ func draftCmd() *cobra.Command {
 
 // draftArticleCmd 从 JSON 创建图文文章草稿
 func draftArticleCmd() *cobra.Command {
+	var dir string
+
 	cmd := &cobra.Command{
 		Use:   "article <json_file>",
 		Short: "从 JSON 文件创建微信图文文章草稿",
@@ -125,14 +128,10 @@ JSON 格式示例:
 				return
 			}
 
-			// 解析 content_file 字段
-			jsonDir := filepath.Dir(jsonFile)
+			// 解析 content_file 字段（相对路径相对于 CWD 解析）
 			for i := range req.Articles {
 				if req.Articles[i].ContentFile != "" && req.Articles[i].Content == "" {
 					htmlPath := req.Articles[i].ContentFile
-					if !filepath.IsAbs(htmlPath) {
-						htmlPath = filepath.Join(jsonDir, htmlPath)
-					}
 					htmlData, err := os.ReadFile(htmlPath)
 					if err != nil {
 						responseError(fmt.Errorf("读取 content_file 失败 (%s): %w", htmlPath, err))
@@ -148,14 +147,46 @@ JSON 格式示例:
 				responseError(err)
 				return
 			}
+
+			// 静默记录到 DB
+			if store != nil {
+				title := ""
+				digest := ""
+				if len(req.Articles) > 0 {
+					title = req.Articles[0].Title
+					digest = req.Articles[0].Digest
+				}
+				_ = store.CreateDraft(&storage.Draft{
+					MediaID:   result.MediaID,
+					DraftURL:  result.DraftURL,
+					Title:     title,
+					Digest:    digest,
+					Type:      "article",
+					CreatedAt: time.Now(),
+				})
+
+				// 自动更新 Content 状态为 published
+				if dir != "" {
+					absDir, _ := filepath.Abs(dir)
+					_ = store.UpdateContentFields(absDir, map[string]any{
+						"status":   "published",
+						"media_id": result.MediaID,
+						"title":    title,
+						"digest":   digest,
+					})
+				}
+			}
+
 			responseSuccess(result)
 		},
 	}
 
+	cmd.Flags().StringVar(&dir, "dir", "", "内容目录路径（用于自动更新内容状态）")
+
 	return cmd
 }
 
-// draftTestCmd 测试草稿
+// draftTestCmd
 func draftTestCmd() *cobra.Command {
 	var (
 		title  string
