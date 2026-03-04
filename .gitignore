@@ -57,3 +57,4 @@ build/
 # Coverage files
 coverage.txt
 coverage.html
+.worktrees/
