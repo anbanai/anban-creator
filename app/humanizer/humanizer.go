@@ -309,7 +309,7 @@ func (h *Humanizer) GetSummary(result *HumanizeResult) string {
 }
 
 // BuildConvertRequest 构建转换请求（兼容 converter 模块接口）
-func (h *Humanizer) BuildConvertRequest(content string, settings map[string]interface{}) *AIConvertRequest {
+func (h *Humanizer) BuildConvertRequest(content string, settings map[string]any) *AIConvertRequest {
 	req := &HumanizeRequest{
 		Content: content,
 	}

@@ -57,8 +57,8 @@ Supported image providers: `openai`, `gemini`, `openrouter`, `volcengine`
 
 ## Agents
 
-- **article-writer** — Full article creation pipeline: 选题研究 → 写作 → AI去痕 → SEO优化 → 封面配图 → HTML转换 → 草稿发布
-- **post-creator** — Image post creation pipeline: 选题研究 → 图片设计 → 草稿发布
+- **wechatarticle** — Full article creation pipeline: 选题研究 → 写作 → AI去痕 → SEO优化 → 封面配图 → HTML转换 → 草稿发布
+- **wechatpost** — Image post creation pipeline: 选题研究 → 图片设计 → 草稿发布
 
 ## CLI Commands
 

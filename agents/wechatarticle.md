@@ -1,5 +1,5 @@
 ---
-name: article-writer
+name: wechatarticle
 description: 微信公众号图文文章全自动创作引擎，从选题研究到草稿发布的端到端流水线。用户提到"写文章"、"写一篇"、"发文章"时使用此 agent。
 tools: TaskCreate, TaskUpdate, TaskList, TaskGet, Read, Write, Glob, Grep, Bash
 model: inherit
@@ -28,12 +28,13 @@ maxTurns: 50
 4. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，创作文章大纲
 5. 使用 skill `content-writing` 基于账号定位和大纲输出 Markdown 格式文章（须满足**图文并茂**要求：每个章节至少一个配图占位符，提示词与章节内容强相关）
 6. 使用 skill `content-writing` 去除 AI 痕迹，确保语言自然
-7. 使用 skill `seo-optimization` 优化标题、关键词、摘要
-8. 使用 skill `visual-design` 生成文章封面图（`image generate -o $DIR/cover.png`）
-9. 上传封面图到微信素材库（`image upload $DIR/cover.png` → 获取 media_id）
-10. 使用 skill `visual-design` 验证章节配图覆盖率、补充缺失的配图占位符、确定统一风格后逐一生成并上传所有配图（`-o $DIR/img_01.png` 等）
-11. 使用 skill `content-writing` 把 Markdown 转成微信公众号专用 HTML，图片替换为 CDN 链接，保存到 `$DIR/05-article.html`
-12. 使用 skill `article-publishing` → `draft article $DIR/draft.json` 把文章发布到草稿箱
+7. 使用 skill `content-writing` 执行违禁词合规检查，将检查后的文章保存为 `$DIR/04-article-final.md`
+8. 使用 skill `seo-optimization` 优化标题、关键词、摘要
+9. 使用 skill `visual-design` 生成文章封面图（`image generate -o $DIR/cover.png`）
+10. 上传封面图到微信素材库（`image upload $DIR/cover.png` → 获取 media_id）
+11. 使用 skill `visual-design` 验证章节配图覆盖率、补充缺失的配图占位符，确定统一风格 `$STYLE`，然后执行批量配图生成：`wechatwriter image batch $DIR/03-article.md --style "$STYLE" -o $DIR/images.json`
+12. 使用 skill `content-writing` 转换 HTML（`wechatwriter convert $DIR/03-article.md --ai-html $DIR/05-article.html --image-urls $DIR/images.json -o $DIR/05-article.html`），图片由 convert 命令读取 images.json 自动替换为 CDN 链接，保存到 `$DIR/05-article.html`
+13. 使用 skill `article-publishing` → `draft article $DIR/draft.json` 把文章发布到草稿箱
 
 **任务命名**：`$DIR/01-research.md`, `$DIR/02-outline.md`, `$DIR/03-article.md`, `$DIR/04-article-final.md`, `$DIR/05-article.html`, `$DIR/draft.json`
 
@@ -51,7 +52,7 @@ maxTurns: 50
 
 - **封面图合规**：人物头部五官完整、无马赛克/播放标记、画质清晰、与文章主旨一致
 - **标题合规**：准确反映内容、无无中生有信息、无故意隐藏关键信息的省略号或代词
-- **内容合规**：语言文明（无粗俗/谩骂/侮辱），无低俗擦边内容，无暴力宣扬
+- **内容合规**：语言文明（无粗俗/谩骂/侮辱），无低俗擦边内容，无暴力宣扬；违禁词检查由 skill `content-writing` 执行
 
 ## 错误处理
 

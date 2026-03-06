@@ -108,7 +108,7 @@ func checkConfig(cfg *config.Config, cfgErr error) []CheckResult {
 	checks = append(checks, CheckResult{Name: "ai_text_mode", Status: "pass", Message: "AI 文字生成: Claude 代理模式（由 Claude Code 直接生成）"})
 
 	// 图片 API
-	articleKey := cfg.Article.Image.Key
+	articleKey := cfg.Wechat.Article.Content.Image.Key
 	if articleKey != "" {
 		checks = append(checks, CheckResult{Name: "article_image_key", Status: "pass", Message: "文章图片 API Key 已配置"})
 	} else {
@@ -117,10 +117,32 @@ func checkConfig(cfg *config.Config, cfgErr error) []CheckResult {
 
 	// Provider 有效性
 	validProviders := map[string]bool{"": true, "openai": true, "gemini": true, "google": true, "openrouter": true, "or": true, "volcengine": true, "volc": true, "seedream": true}
-	if p := cfg.Article.Image.Provider; !validProviders[p] {
+	if p := cfg.Wechat.Article.Content.Image.Provider; !validProviders[p] {
 		checks = append(checks, CheckResult{Name: "article_image_provider", Status: "fail", Message: fmt.Sprintf("无效的图片提供者: %s", p), Hint: "支持的提供者: openai, gemini, openrouter, volcengine"})
 	} else if p != "" {
 		checks = append(checks, CheckResult{Name: "article_image_provider", Status: "pass", Message: fmt.Sprintf("图片提供者: %s", p)})
+	}
+
+	// 小绿书图片 Key（合并 wechat.post + xiaohongshu 后的结果）
+	resolvedPost := cfg.ResolvedPostContentImage()
+	if resolvedPost.Key != "" {
+		checks = append(checks, CheckResult{Name: "post_image_key", Status: "pass", Message: "小绿书图片 API Key 已配置"})
+	} else {
+		checks = append(checks, CheckResult{Name: "post_image_key", Status: "warn", Message: "小绿书图片 API Key 未配置", Hint: "在配置文件中设置 wechat.post.content.image.key 或 xiaohongshu.content.image.key"})
+	}
+
+	// 小绿书图片 Provider 有效性
+	if p := resolvedPost.Provider; !validProviders[p] {
+		checks = append(checks, CheckResult{Name: "post_image_provider", Status: "fail", Message: fmt.Sprintf("小绿书图片无效的提供者: %s", p), Hint: "支持的提供者: openai, gemini, openrouter, volcengine"})
+	} else if p != "" {
+		checks = append(checks, CheckResult{Name: "post_image_provider", Status: "pass", Message: fmt.Sprintf("小绿书图片提供者: %s", p)})
+	}
+
+	// 微信发布就绪（AppID + Secret 均已配置）
+	if cfg.Wechat.AppID != "" && cfg.Wechat.Secret != "" {
+		checks = append(checks, CheckResult{Name: "publish_ready", Status: "pass", Message: "微信发布就绪（AppID + Secret 均已配置）"})
+	} else {
+		checks = append(checks, CheckResult{Name: "publish_ready", Status: "warn", Message: "微信发布未就绪（AppID 或 Secret 未配置）", Hint: "发布文章到微信需要配置 wechat.appid 和 wechat.secret"})
 	}
 
 	return checks
@@ -181,10 +203,10 @@ func checkNetwork(cfg *config.Config) []CheckResult {
 	}
 
 	// 图片 API 可达性
-	if cfg != nil && cfg.Article.Image.BaseURL != "" {
-		resp, err := client.Get(cfg.Article.Image.BaseURL)
+	if cfg != nil && cfg.Wechat.Article.Content.Image.BaseURL != "" {
+		resp, err := client.Get(cfg.Wechat.Article.Content.Image.BaseURL)
 		if err != nil {
-			checks = append(checks, CheckResult{Name: "image_api_reachable", Status: "warn", Message: "图片 API 不可达: " + cfg.Article.Image.BaseURL, Hint: "检查 article.image.base_url 配置"})
+			checks = append(checks, CheckResult{Name: "image_api_reachable", Status: "warn", Message: "图片 API 不可达: " + cfg.Wechat.Article.Content.Image.BaseURL, Hint: "检查 article.image.base_url 配置"})
 		} else {
 			resp.Body.Close()
 			checks = append(checks, CheckResult{Name: "image_api_reachable", Status: "pass", Message: "图片 API 可达"})

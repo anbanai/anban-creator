@@ -30,9 +30,9 @@ const (
 	// DefaultPostImageCount 默认小绿书图片数量
 	DefaultPostImageCount = 4
 	// DefaultArticleImageSize 默认图文文章图片尺寸（16:9 横版 2K）
-	DefaultArticleImageSize = "2560x1440"
+	DefaultArticleImageSize = "16:9"
 	// DefaultPostImageSize 默认小绿书图片尺寸（3:4 竖版 2K）
-	DefaultPostImageSize = "1728x2304"
+	DefaultPostImageSize = "3:4"
 )
 
 // DefaultConfigPath 返回默认配置文件路径（项目本地）
@@ -40,30 +40,86 @@ func DefaultConfigPath() string {
 	return filepath.Join(ConfigDir, ConfigFileName)
 }
 
+// DefaultXiaohongshuImageSize 默认小红书图片尺寸（3:4 竖版 1K）
+const DefaultXiaohongshuImageSize = "3:4:1K"
+
+// DefaultXiaohongshuImageCount 默认小红书图片数量
+const DefaultXiaohongshuImageCount = 6
+
 // NewDefaultConfig 返回带有推荐默认值的 Config，用于生成配置文件模板
 func NewDefaultConfig() *Config {
 	c := &Config{}
-	c.Wechat.Name = "your_account_name"
-	c.Wechat.Author = "your_author_name"
+
+	// 账号基本信息
+	c.Name = "your_account_name"
+	c.Keywords = []string{"keyword1", "keyword2"}
+	c.Positioning = "your_account_positioning"
+
+	// 微信公众号认证
 	c.Wechat.AppID = "your_wechat_appid"
 	c.Wechat.Secret = "your_wechat_secret"
-	c.Wechat.Keywords = []string{"keyword1", "keyword2"}
-	c.Wechat.Positioning = "your_account_positioning"
-	c.Article.Style = DefaultArticleStyle
-	c.Article.Theme = DefaultArticleTheme
-	c.Article.Image.Provider = DefaultImageProvider
-	c.Article.Image.Key = "your_image_api_key"
-	c.Article.Image.Size = DefaultArticleImageSize
-	c.Article.Image.Compress = true
-	c.Article.Image.MaxWidth = DefaultImageMaxWidth
-	c.Article.Image.MaxSizeMB = DefaultImageMaxSizeMB
-	c.Post.Count = DefaultPostImageCount
-	c.Post.Image.Provider = DefaultImageProvider
-	c.Post.Image.Key = "your_image_api_key"
-	c.Post.Image.Size = DefaultPostImageSize
-	c.Post.Image.Compress = true
-	c.Post.Image.MaxWidth = DefaultImageMaxWidth
-	c.Post.Image.MaxSizeMB = DefaultImageMaxSizeMB
+
+	// 图文文章
+	c.Wechat.Article.Author = "your_author_name"
+	c.Wechat.Article.Style = DefaultArticleStyle
+	c.Wechat.Article.Theme = DefaultArticleTheme
+	// 文章封面图
+	c.Wechat.Article.Cover.Image.Provider = DefaultImageProvider
+	c.Wechat.Article.Cover.Image.Key = "your_image_api_key"
+	c.Wechat.Article.Cover.Image.Model = "gemini-3-pro-image-preview"
+	c.Wechat.Article.Cover.Image.Size = DefaultArticleImageSize
+	c.Wechat.Article.Cover.Image.Compress = true
+	c.Wechat.Article.Cover.Image.MaxWidth = DefaultImageMaxWidth
+	c.Wechat.Article.Cover.Image.MaxSizeMB = DefaultImageMaxSizeMB
+	// 文章内容配图
+	c.Wechat.Article.Content.Image.Provider = DefaultImageProvider
+	c.Wechat.Article.Content.Image.Key = "your_image_api_key"
+	c.Wechat.Article.Content.Image.Model = "gemini-3-pro-image-preview"
+	c.Wechat.Article.Content.Image.Size = DefaultArticleImageSize
+	c.Wechat.Article.Content.Image.Compress = true
+	c.Wechat.Article.Content.Image.MaxWidth = DefaultImageMaxWidth
+	c.Wechat.Article.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
+
+	// 小绿书
+	c.Wechat.Post.Style = "morandi-flat"
+	// 小绿书封面图
+	c.Wechat.Post.Cover.Image.Provider = DefaultImageProvider
+	c.Wechat.Post.Cover.Image.Key = "your_image_api_key"
+	c.Wechat.Post.Cover.Image.Model = "gemini-3-pro-image-preview"
+	c.Wechat.Post.Cover.Image.Size = DefaultPostImageSize
+	c.Wechat.Post.Cover.Image.Refer = "path/to/refer.png"
+	c.Wechat.Post.Cover.Image.Compress = true
+	c.Wechat.Post.Cover.Image.MaxWidth = DefaultImageMaxWidth
+	c.Wechat.Post.Cover.Image.MaxSizeMB = DefaultImageMaxSizeMB
+	// 小绿书内容图
+	c.Wechat.Post.Content.Count = DefaultPostImageCount
+	c.Wechat.Post.Content.Image.Provider = DefaultImageProvider
+	c.Wechat.Post.Content.Image.Key = "your_image_api_key"
+	c.Wechat.Post.Content.Image.Model = "gemini-3-pro-image-preview"
+	c.Wechat.Post.Content.Image.Size = DefaultPostImageSize
+	c.Wechat.Post.Content.Image.Refer = "path/to/refer.png"
+	c.Wechat.Post.Content.Image.StylePrompt = "扁平插画风格，莫兰迪色系，圆角卡片"
+	c.Wechat.Post.Content.Image.Compress = true
+	c.Wechat.Post.Content.Image.MaxWidth = DefaultImageMaxWidth
+	c.Wechat.Post.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
+
+	// 小红书（可选平台）
+	c.Xiaohongshu = &XiaohongshuConfig{}
+	c.Xiaohongshu.Style = "casual-warm"
+	c.Xiaohongshu.Cover.Image.Provider = DefaultImageProvider
+	c.Xiaohongshu.Cover.Image.Key = "your_image_api_key"
+	c.Xiaohongshu.Cover.Image.Model = "gemini-3-pro-image-preview"
+	c.Xiaohongshu.Cover.Image.Size = DefaultXiaohongshuImageSize
+	c.Xiaohongshu.Cover.Image.Refer = "path/to/refer.png"
+	c.Xiaohongshu.Cover.Image.Compress = true
+	c.Xiaohongshu.Content.Image.Provider = DefaultImageProvider
+	c.Xiaohongshu.Content.Image.Key = "your_image_api_key"
+	c.Xiaohongshu.Content.Image.Model = "gemini-3-pro-image-preview"
+	c.Xiaohongshu.Content.Image.Size = DefaultXiaohongshuImageSize
+	c.Xiaohongshu.Content.Image.Refer = "path/to/refer.png"
+	c.Xiaohongshu.Content.Image.Compress = true
+	c.Xiaohongshu.Content.Count = DefaultXiaohongshuImageCount
+
 	return c
 }
 
@@ -79,32 +135,42 @@ func (w *WatermarkConfig) Validate() error {
 		return &ConfigError{
 			Field:   "WatermarkMargin",
 			Message: "启用去水印时必须设置裁剪边距 (watermark.margin)",
-			HintMsg: "配置文件中设置 article.image.watermark.margin: 20（推荐 10-50 像素）",
+			HintMsg: "配置文件中设置 wechat.article.content.image.watermark.margin: 20（推荐 10-50 像素）",
 		}
 	}
 	if w.Margin != 0 && (w.Margin < 1 || w.Margin > 500) {
 		return &ConfigError{
 			Field:   "WatermarkMargin",
 			Message: "水印裁剪边距必须在 1 到 500 之间",
-			HintMsg: "配置文件中设置 article.image.watermark.margin: 20",
+			HintMsg: "配置文件中设置 wechat.article.content.image.watermark.margin: 20",
 		}
 	}
 	return nil
 }
 
-// ImageAPI 图片生成 API 配置（article 和 post 各自独立）
+// VolcengineConfig 火山方舟 Seedream 高级选项（仅 settings.json 配置，不暴露到 agent/skill 层）
+type VolcengineConfig struct {
+	Watermark      *bool    `json:"watermark,omitempty" yaml:"watermark,omitempty"`
+	Seed           *int64   `json:"seed,omitempty" yaml:"seed,omitempty"`
+	GuidanceScale  *float64 `json:"guidance_scale,omitempty" yaml:"guidance_scale,omitempty"`
+	OptimizePrompt *bool    `json:"optimize_prompt,omitempty" yaml:"optimize_prompt,omitempty"`
+	OutputFormat   string   `json:"output_format,omitempty" yaml:"output_format,omitempty"` // "jpeg" or "png"
+}
+
+// ImageAPI 图片生成 API 配置（cover 和 content 各自独立）
 type ImageAPI struct {
-	Enable      bool            `json:"enable,omitempty" yaml:"enable,omitempty"`
-	Key         string          `json:"key,omitempty" yaml:"key,omitempty"`
-	BaseURL     string          `json:"base_url,omitempty" yaml:"base_url,omitempty"`
-	Provider    string          `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Model       string          `json:"model,omitempty" yaml:"model,omitempty"`
-	Size        string          `json:"size,omitempty" yaml:"size,omitempty"`
-	StylePrompt string          `json:"style_prompt,omitempty" yaml:"style_prompt,omitempty"`
-	Compress    bool            `json:"compress,omitempty" yaml:"compress,omitempty"`
-	MaxWidth    int             `json:"max_width,omitempty" yaml:"max_width,omitempty"`
-	MaxSizeMB   int             `json:"max_size_mb,omitempty" yaml:"max_size_mb,omitempty"`
-	Watermark   WatermarkConfig `json:"watermark,omitempty" yaml:"watermark,omitempty"`
+	Key         string            `json:"key,omitempty" yaml:"key,omitempty"`
+	BaseURL     string            `json:"base_url,omitempty" yaml:"base_url,omitempty"`
+	Provider    string            `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Model       string            `json:"model,omitempty" yaml:"model,omitempty"`
+	Size        string            `json:"size,omitempty" yaml:"size,omitempty"`
+	Refer       string            `json:"refer,omitempty" yaml:"refer,omitempty"`
+	StylePrompt string            `json:"style_prompt,omitempty" yaml:"style_prompt,omitempty"`
+	Compress    bool              `json:"compress,omitempty" yaml:"compress,omitempty"`
+	MaxWidth    int               `json:"max_width,omitempty" yaml:"max_width,omitempty"`
+	MaxSizeMB   int               `json:"max_size_mb,omitempty" yaml:"max_size_mb,omitempty"`
+	Watermark   *WatermarkConfig  `json:"watermark,omitempty" yaml:"watermark,omitempty"`
+	Volcengine  *VolcengineConfig `json:"volcengine,omitempty" yaml:"volcengine,omitempty"`
 }
 
 // MaxSizeBytes 返回图片最大尺寸（字节）
@@ -118,7 +184,7 @@ func (api *ImageAPI) Validate() error {
 		return &ConfigError{
 			Field:   "MaxImageWidth",
 			Message: "图片最大宽度必须在 100 到 10000 之间",
-			HintMsg: "配置文件中设置 article.image.max_width: 2560",
+			HintMsg: "配置文件中设置 wechat.article.content.image.max_width: 2560",
 		}
 	}
 	maxSizeBytes := int64(api.MaxSizeMB) * 1024 * 1024
@@ -126,33 +192,65 @@ func (api *ImageAPI) Validate() error {
 		return &ConfigError{
 			Field:   "MaxImageSize",
 			Message: "图片最大大小不能小于 100KB",
-			HintMsg: "配置文件中设置 article.image.max_size_mb: 5",
+			HintMsg: "配置文件中设置 wechat.article.content.image.max_size_mb: 5",
 		}
 	}
-	return api.Watermark.Validate()
+	if api.Watermark != nil {
+		return api.Watermark.Validate()
+	}
+	return nil
 }
 
-// Config 应用配置（嵌套结构，直接对应 JSON/YAML 文件）
+// ImageSection 单个图片用途配置（封面或内容图）
+type ImageSection struct {
+	Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
+}
+
+// PostContentSection 带数量的图片内容配置（用于小绿书内容图）
+type PostContentSection struct {
+	Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
+	Count int      `json:"count,omitempty" yaml:"count,omitempty"`
+}
+
+// ArticleConfig 图文文章配置
+type ArticleConfig struct {
+	Style   string       `json:"style,omitempty" yaml:"style,omitempty"`
+	Theme   string       `json:"theme,omitempty" yaml:"theme,omitempty"`
+	Author  string       `json:"author,omitempty" yaml:"author,omitempty"`
+	Cover   ImageSection `json:"cover,omitempty" yaml:"cover,omitempty"`
+	Content ImageSection `json:"content,omitempty" yaml:"content,omitempty"`
+}
+
+// WechatPostConfig 微信小绿书配置
+type WechatPostConfig struct {
+	Style   string             `json:"style,omitempty" yaml:"style,omitempty"`
+	Cover   ImageSection       `json:"cover,omitempty" yaml:"cover,omitempty"`
+	Content PostContentSection `json:"content,omitempty" yaml:"content,omitempty"`
+}
+
+// WechatConfig 微信公众号配置
+type WechatConfig struct {
+	AppID   string           `json:"appid" yaml:"appid"`
+	Secret  string           `json:"secret" yaml:"secret"`
+	Article ArticleConfig    `json:"article,omitempty" yaml:"article,omitempty"`
+	Post    WechatPostConfig `json:"post,omitempty" yaml:"post,omitempty"`
+}
+
+// XiaohongshuConfig 小红书配置
+type XiaohongshuConfig struct {
+	Style   string             `json:"style,omitempty" yaml:"style,omitempty"`
+	Cover   ImageSection       `json:"cover,omitempty" yaml:"cover,omitempty"`
+	Content PostContentSection `json:"content,omitempty" yaml:"content,omitempty"`
+}
+
+// Config 应用配置（嵌套结构，直接对应 JSON 文件）
 type Config struct {
-	Wechat struct {
-		Name        string   `json:"name,omitempty" yaml:"name,omitempty"`
-		Author      string   `json:"author,omitempty" yaml:"author,omitempty"`
-		AppID       string   `json:"appid" yaml:"appid"`
-		Secret      string   `json:"secret" yaml:"secret"`
-		Keywords    []string `json:"keywords,omitempty" yaml:"keywords,omitempty"`
-		Positioning string   `json:"positioning,omitempty" yaml:"positioning,omitempty"`
-	} `json:"wechat" yaml:"wechat"`
+	Name        string   `json:"name,omitempty" yaml:"name,omitempty"`
+	Keywords    []string `json:"keywords,omitempty" yaml:"keywords,omitempty"`
+	Positioning string   `json:"positioning,omitempty" yaml:"positioning,omitempty"`
 
-	Article struct {
-		Style string   `json:"style,omitempty" yaml:"style,omitempty"`
-		Theme string   `json:"theme,omitempty" yaml:"theme,omitempty"`
-		Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
-	} `json:"article,omitempty" yaml:"article,omitempty"`
-
-	Post struct {
-		Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
-		Count int      `json:"count,omitempty" yaml:"count,omitempty"`
-	} `json:"post,omitempty" yaml:"post,omitempty"`
+	Wechat      WechatConfig       `json:"wechat,omitempty" yaml:"wechat,omitempty"`
+	Xiaohongshu *XiaohongshuConfig `json:"xiaohongshu,omitempty" yaml:"xiaohongshu,omitempty"`
 
 	configPath string
 }
@@ -186,10 +284,6 @@ func loadWithValidation(configPath string, validateWechat bool) (*Config, error)
 			fmt.Fprintf(os.Stderr, "⚠️  警告: 配置文件加载失败 (%v)，将使用默认值\n", err)
 		} else {
 			cfg.configPath = configPath
-
-			// 显示正在使用的配置文件
-			// relPath := getRelativePath(configPath)
-			// fmt.Fprintf(os.Stderr, "✅ 使用配置文件: %s\n", relPath)
 		}
 	}
 
@@ -286,19 +380,19 @@ func (c *Config) Validate() error {
 	}
 
 	// 验证图片处理参数
-	if err := c.Article.Image.Validate(); err != nil {
+	if err := c.Wechat.Article.Content.Image.Validate(); err != nil {
 		return err
 	}
-	if err := c.Post.Image.Validate(); err != nil {
+	if err := c.Wechat.Post.Content.Image.Validate(); err != nil {
 		return err
 	}
 
 	// 验证小绿书图片数量
-	if c.Post.Count != 0 && (c.Post.Count < 1 || c.Post.Count > 20) {
+	if c.Wechat.Post.Content.Count != 0 && (c.Wechat.Post.Content.Count < 1 || c.Wechat.Post.Content.Count > 20) {
 		return &ConfigError{
 			Field:   "PostImageCount",
 			Message: "小绿书图片数量必须在 1 到 20 之间",
-			HintMsg: "配置文件中设置 post.count: 4",
+			HintMsg: "配置文件中设置 wechat.post.content.count: 4",
 		}
 	}
 
@@ -309,19 +403,19 @@ func (c *Config) Validate() error {
 // 用于不需要微信 API 的命令
 func (c *Config) ValidateMinimal() error {
 	// 验证图片处理参数
-	if err := c.Article.Image.Validate(); err != nil {
+	if err := c.Wechat.Article.Content.Image.Validate(); err != nil {
 		return err
 	}
-	if err := c.Post.Image.Validate(); err != nil {
+	if err := c.Wechat.Post.Content.Image.Validate(); err != nil {
 		return err
 	}
 
 	// 验证小绿书图片数量
-	if c.Post.Count != 0 && (c.Post.Count < 1 || c.Post.Count > 20) {
+	if c.Wechat.Post.Content.Count != 0 && (c.Wechat.Post.Content.Count < 1 || c.Wechat.Post.Content.Count > 20) {
 		return &ConfigError{
 			Field:   "PostImageCount",
 			Message: "小绿书图片数量必须在 1 到 20 之间",
-			HintMsg: "配置文件中设置 post.count: 4",
+			HintMsg: "配置文件中设置 wechat.post.content.count: 4",
 		}
 	}
 
@@ -334,7 +428,7 @@ func ValidateForImageGeneration(apiCfg *ImageAPI) error {
 		return &ConfigError{
 			Field:   "ImageAPIKey",
 			Message: "图片生成需要配置 API Key",
-			HintMsg: "在配置文件中设置 article.image.key 或 post.image.key",
+			HintMsg: "在配置文件中设置 wechat.article.content.image.key、wechat.post.content.image.key 或 xiaohongshu.content.image.key",
 		}
 	}
 	return nil
@@ -345,26 +439,96 @@ func (c *Config) GetConfigFile() string {
 	return c.configPath
 }
 
-// PostImageSize 返回小绿书图片尺寸，默认 1728x2304（3:4 竖版 2K）
+// PostImageSize 返回小绿书图片尺寸，默认 3:4 竖版
+// 优先级: wechat.post.content.image.size > xiaohongshu.content.image.size > 默认值
 func (c *Config) PostImageSize() string {
-	if c.Post.Image.Size != "" {
-		return c.Post.Image.Size
+	if c.Wechat.Post.Content.Image.Size != "" {
+		return c.Wechat.Post.Content.Image.Size
+	}
+	if c.Xiaohongshu != nil && c.Xiaohongshu.Content.Image.Size != "" {
+		return c.Xiaohongshu.Content.Image.Size
 	}
 	return DefaultPostImageSize
 }
 
 // PostImageCount 返回小绿书图片数量，默认 4 张
+// 优先级: wechat.post.content.count > xiaohongshu.content.count > 默认值
 func (c *Config) PostImageCount() int {
-	if c.Post.Count > 0 {
-		return c.Post.Count
+	if c.Wechat.Post.Content.Count > 0 {
+		return c.Wechat.Post.Content.Count
+	}
+	if c.Xiaohongshu != nil && c.Xiaohongshu.Content.Count > 0 {
+		return c.Xiaohongshu.Content.Count
 	}
 	return DefaultPostImageCount
 }
 
+// mergeImageAPI 合并两个 ImageAPI 配置，base 字段非空时优先使用 base，否则使用 fallback
+func mergeImageAPI(base, fallback ImageAPI) ImageAPI {
+	result := base
+	if result.Key == "" {
+		result.Key = fallback.Key
+	}
+	if result.BaseURL == "" {
+		result.BaseURL = fallback.BaseURL
+	}
+	if result.Provider == "" {
+		result.Provider = fallback.Provider
+	}
+	if result.Model == "" {
+		result.Model = fallback.Model
+	}
+	if result.Size == "" {
+		result.Size = fallback.Size
+	}
+	if result.Refer == "" {
+		result.Refer = fallback.Refer
+	}
+	if result.StylePrompt == "" {
+		result.StylePrompt = fallback.StylePrompt
+	}
+	if !result.Compress && fallback.Compress {
+		result.Compress = fallback.Compress
+	}
+	if result.MaxWidth == 0 {
+		result.MaxWidth = fallback.MaxWidth
+	}
+	if result.MaxSizeMB == 0 {
+		result.MaxSizeMB = fallback.MaxSizeMB
+	}
+	if result.Watermark == nil {
+		result.Watermark = fallback.Watermark
+	}
+	if result.Volcengine == nil {
+		result.Volcengine = fallback.Volcengine
+	}
+	return result
+}
+
+// ResolvedPostContentImage 返回合并后的小绿书内容图配置
+// wechat.post.content.image 字段优先，xiaohongshu.content.image 作为 fallback
+func (c *Config) ResolvedPostContentImage() ImageAPI {
+	base := c.Wechat.Post.Content.Image
+	if c.Xiaohongshu == nil {
+		return base
+	}
+	return mergeImageAPI(base, c.Xiaohongshu.Content.Image)
+}
+
+// ResolvedPostCoverImage 返回合并后的小绿书封面图配置
+// wechat.post.cover.image 字段优先，xiaohongshu.cover.image 作为 fallback
+func (c *Config) ResolvedPostCoverImage() ImageAPI {
+	base := c.Wechat.Post.Cover.Image
+	if c.Xiaohongshu == nil {
+		return base
+	}
+	return mergeImageAPI(base, c.Xiaohongshu.Cover.Image)
+}
+
 // ArticleImageSize 返回图文文章图片尺寸，默认 2560x1440（16:9 横版 2K）
 func (c *Config) ArticleImageSize() string {
-	if c.Article.Image.Size != "" {
-		return c.Article.Image.Size
+	if c.Wechat.Article.Content.Image.Size != "" {
+		return c.Wechat.Article.Content.Image.Size
 	}
 	return DefaultArticleImageSize
 }

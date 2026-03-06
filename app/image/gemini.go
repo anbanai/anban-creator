@@ -61,14 +61,35 @@ func (p *GeminiProvider) Name() string {
 }
 
 // Generate 生成图片
-func (p *GeminiProvider) Generate(ctx context.Context, prompt string) (*GenerateResult, error) {
+func (p *GeminiProvider) Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error) {
 	// 构建请求内容
+	parts := []*genai.Part{
+		genai.NewPartFromText(prompt),
+	}
+
+	// 如果有参考图，追加内联数据
+	if opts != nil && opts.RefImagePath != "" {
+		data, mimeType, err := ReadRefImage(opts.RefImagePath)
+		if err != nil {
+			return nil, &GenerateError{
+				Provider: p.Name(),
+				Code:     "refer_error",
+				Message:  "读取参考图失败",
+				Original: err,
+			}
+		}
+		parts = append(parts, &genai.Part{
+			InlineData: &genai.Blob{
+				MIMEType: mimeType,
+				Data:     data,
+			},
+		})
+	}
+
 	contents := []*genai.Content{
 		{
-			Parts: []*genai.Part{
-				genai.NewPartFromText(prompt),
-			},
-			Role: "user",
+			Parts: parts,
+			Role:  "user",
 		},
 	}
 
@@ -237,46 +258,6 @@ func (p *GeminiProvider) handleError(err error) error {
 
 // mapSizeToGeminiAspectRatio 将尺寸配置映射到 Gemini 支持的宽高比
 func mapSizeToGeminiAspectRatio(size string) string {
-	if size == "" {
-		return "1:1" // 默认正方形
-	}
-
-	// 如果已经是宽高比格式，直接返回
-	validRatios := map[string]bool{
-		"1:1": true, "16:9": true, "9:16": true,
-		"4:3": true, "3:4": true, "3:2": true, "2:3": true,
-		"4:5": true, "5:4": true, "21:9": true,
-	}
-	if validRatios[size] {
-		return size
-	}
-
-	sizeMap := map[string]string{
-		"1024x1024": "1:1", "2048x2048": "1:1", "4096x4096": "1:1",
-		"848x1264": "2:3", "1696x2528": "2:3", "3392x5056": "2:3",
-		"1264x848": "3:2", "2528x1696": "3:2", "5056x3392": "3:2",
-		"896x1200": "3:4", "1792x2400": "3:4", "3584x4800": "3:4",
-		"1200x896": "4:3", "2400x1792": "4:3", "4800x3584": "4:3",
-		"928x1152": "4:5", "1856x2304": "4:5", "3712x4608": "4:5",
-		"1152x928": "5:4", "2304x1856": "5:4", "4608x3712": "5:4",
-		"768x1376": "9:16", "1536x2752": "9:16", "3072x5504": "9:16",
-		"1376x768": "16:9", "2752x1536": "16:9", "5504x3072": "16:9",
-		"1584x672": "21:9", "3168x1344": "21:9", "6336x2688": "21:9",
-		// 用户分辨率表：2K 档位
-		"2304x1728": "4:3", "1728x2304": "3:4",
-		"2560x1440": "16:9", "1440x2560": "9:16",
-		"2496x1664": "3:2", "1664x2496": "2:3",
-		"3024x1296": "21:9",
-		// 用户分辨率表：4K 档位
-		"4704x3520": "4:3", "3520x4704": "3:4",
-		"5504x3040": "16:9", "3040x5504": "9:16",
-		"4992x3328": "3:2", "3328x4992": "2:3",
-		"6240x2656": "21:9",
-	}
-
-	if ratio, ok := sizeMap[size]; ok {
-		return ratio
-	}
-
-	return "1:1" // 默认
+	ratio, _ := ParseSize(size)
+	return ratio
 }

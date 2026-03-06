@@ -1,71 +1,72 @@
 package image
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/base64"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
+	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 )
 
 // VolcengineProvider 火山方舟 Seedream 图片生成服务提供者
-// 使用 OpenAI 兼容接口，但参数格式不同：
-//   - size: 分辨率档位 "1K" | "2K" | "4K"（默认 2K）
-//   - aspect_ratio: 宽高比 "1:1" | "16:9" | "9:16" | "3:4" | "4:3" | "2:3" | "3:2" | "21:9"
+// 使用官方 arkruntime SDK，支持类型安全的请求体和高级选项
 type VolcengineProvider struct {
-	apiKey      string
-	baseURL     string
-	model       string
-	aspectRatio string // 来自 ImageAPI.Size（如 "3:4", "16:9"）
-	sizeTier    string // 分辨率档位（"1K" / "2K" / "4K"），默认 "2K"
-	client      *http.Client
+	client     *arkruntime.Client
+	model      string
+	sizePixel  string // 像素格式 "WIDTHxHEIGHT"，如 "1728x2304"
+	volcConfig *config.VolcengineConfig
 }
 
-// volcengineSupportedRatios 火山方舟 Seedream 支持的宽高比
-var volcengineSupportedRatios = map[string]bool{
-	"1:1":  true,
-	"16:9": true,
-	"9:16": true,
-	"3:4":  true,
-	"4:3":  true,
-	"2:3":  true,
-	"3:2":  true,
-	"21:9": true,
+// volcenginePixelMap 将 aspect_ratio:sizeTier 映射到像素格式
+var volcenginePixelMap = map[string]string{
+	"1:1:2K": "2048x2048",
+	"4:3:2K": "2304x1728", "3:4:2K": "1728x2304",
+	"16:9:2K": "2560x1440", "9:16:2K": "1440x2560",
+	"3:2:2K": "2496x1664", "2:3:2K": "1664x2496",
+	"21:9:2K": "3024x1296",
+	"1:1:4K":  "4096x4096",
+	"4:3:4K":  "4704x3520", "3:4:4K": "3520x4704",
+	"16:9:4K": "5504x3040", "9:16:4K": "3040x5504",
+	"3:2:4K": "4992x3328", "2:3:4K": "3328x4992",
+	"21:9:4K": "6240x2656",
+}
+
+// volcenginePixelSize 将 aspect_ratio + sizeTier 转换为像素格式
+func volcenginePixelSize(aspectRatio, sizeTier string) string {
+	key := aspectRatio + ":" + sizeTier
+	if px, ok := volcenginePixelMap[key]; ok {
+		return px
+	}
+	return "2048x2048" // fallback
 }
 
 // NewVolcengineProvider 创建火山方舟 Seedream Provider
 func NewVolcengineProvider(apiCfg *config.ImageAPI) (*VolcengineProvider, error) {
-	model := apiCfg.Model
-	if model == "" {
-		model = DefaultVolcengineModel
+	mdl := apiCfg.Model
+	if mdl == "" {
+		mdl = DefaultVolcengineModel
 	}
 
-	baseURL := apiCfg.BaseURL
-	if baseURL == "" {
-		baseURL = DefaultVolcengineBaseURL
+	opts := []arkruntime.ConfigOption{
+		arkruntime.WithTimeout(120 * time.Second),
 	}
+	if apiCfg.BaseURL != "" {
+		opts = append(opts, arkruntime.WithBaseUrl(apiCfg.BaseURL))
+	}
+	client := arkruntime.NewClientWithApiKey(apiCfg.Key, opts...)
 
-	// 解析 size 字段为 aspect_ratio + sizeTier
-	// 格式：
-	//   "3:4"      → aspect_ratio=3:4, sizeTier=2K（默认）
-	//   "3:4:1K"   → aspect_ratio=3:4, sizeTier=1K
-	//   "3:4:4K"   → aspect_ratio=3:4, sizeTier=4K
 	aspectRatio, sizeTier := parseVolcengineSize(apiCfg.Size)
+	sizePixel := volcenginePixelSize(aspectRatio, sizeTier)
 
 	return &VolcengineProvider{
-		apiKey:      apiCfg.Key,
-		baseURL:     baseURL,
-		model:       model,
-		aspectRatio: aspectRatio,
-		sizeTier:    sizeTier,
-		client: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		client:     client,
+		model:      mdl,
+		sizePixel:  sizePixel,
+		volcConfig: apiCfg.Volcengine,
 	}, nil
 }
 
@@ -75,91 +76,57 @@ func (p *VolcengineProvider) Name() string {
 }
 
 // Generate 生成图片
-func (p *VolcengineProvider) Generate(ctx context.Context, prompt string) (*GenerateResult, error) {
-	reqBody := map[string]any{
-		"model":        p.model,
-		"prompt":       prompt,
-		"size":         p.sizeTier,
-		"aspect_ratio": p.aspectRatio,
+func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error) {
+	respFmt := model.GenerateImagesResponseFormatURL
+	req := model.GenerateImagesRequest{
+		Watermark:      new(false),
+		Model:          p.model,
+		Prompt:         prompt,
+		Size:           new(p.sizePixel),
+		ResponseFormat: &respFmt,
 	}
 
-	jsonData, err := json.Marshal(reqBody)
+	// 应用高级选项（从 config.VolcengineConfig）
+	if vc := p.volcConfig; vc != nil {
+		if vc.Watermark != nil {
+			req.Watermark = vc.Watermark
+		}
+		if vc.Seed != nil {
+			req.Seed = vc.Seed
+		}
+		if vc.GuidanceScale != nil {
+			req.GuidanceScale = vc.GuidanceScale
+		}
+		if vc.OptimizePrompt != nil {
+			req.OptimizePrompt = vc.OptimizePrompt
+		}
+		if vc.OutputFormat != "" {
+			format := model.OutputFormat(vc.OutputFormat)
+			req.OutputFormat = &format
+		}
+	}
+
+	// 有参考图时，添加 image 字段（data URI）
+	if opts != nil && opts.RefImagePath != "" {
+		data, mimeType, err := ReadRefImage(opts.RefImagePath)
+		if err != nil {
+			return nil, &GenerateError{
+				Provider: p.Name(),
+				Code:     "refer_error",
+				Message:  "读取参考图失败",
+				Original: err,
+			}
+		}
+		dataURI := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
+		req.Image = dataURI
+	}
+
+	resp, err := p.client.GenerateImages(ctx, req)
 	if err != nil {
-		return nil, &GenerateError{
-			Provider: p.Name(),
-			Code:     "marshal_error",
-			Message:  "请求构造失败",
-			Original: err,
-		}
+		return nil, p.convertSDKError(err)
 	}
 
-	url := strings.TrimRight(p.baseURL, "/") + "/images/generations"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, &GenerateError{
-			Provider: p.Name(),
-			Code:     "request_error",
-			Message:  "创建请求失败",
-			Original: err,
-		}
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, &GenerateError{
-			Provider: p.Name(),
-			Code:     "network_error",
-			Message:  "网络请求失败，请检查网络连接",
-			HintMsg:  "确认网络连接正常，API 地址正确",
-			Original: err,
-		}
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, p.handleErrorResponse(resp)
-	}
-
-	return p.parseResponse(resp.Body)
-}
-
-// volcengineResponse OpenAI 兼容响应结构
-type volcengineResponse struct {
-	Data []struct {
-		URL           string `json:"url"`
-		B64JSON       string `json:"b64_json"`
-		RevisedPrompt string `json:"revised_prompt"`
-	} `json:"data"`
-	Error *struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    any    `json:"code"`
-	} `json:"error,omitempty"`
-}
-
-func (p *VolcengineProvider) parseResponse(body io.Reader) (*GenerateResult, error) {
-	var result volcengineResponse
-	if err := json.NewDecoder(body).Decode(&result); err != nil {
-		return nil, &GenerateError{
-			Provider: p.Name(),
-			Code:     "decode_error",
-			Message:  "响应解析失败",
-			Original: err,
-		}
-	}
-
-	if result.Error != nil {
-		return nil, &GenerateError{
-			Provider: p.Name(),
-			Code:     "api_error",
-			Message:  fmt.Sprintf("API 返回错误: %s", result.Error.Message),
-		}
-	}
-
-	if len(result.Data) == 0 || result.Data[0].URL == "" {
+	if len(resp.Data) == 0 || resp.Data[0].Url == nil || *resp.Data[0].Url == "" {
 		return nil, &GenerateError{
 			Provider: p.Name(),
 			Code:     "no_image",
@@ -168,122 +135,94 @@ func (p *VolcengineProvider) parseResponse(body io.Reader) (*GenerateResult, err
 		}
 	}
 
+	// Return ratio (not pixel size) for consistent GenerateResult.Size format
+	ratio, _ := ParseSize(p.sizePixel)
 	return &GenerateResult{
-		URL:           result.Data[0].URL,
-		RevisedPrompt: result.Data[0].RevisedPrompt,
-		Model:         p.model,
-		Size:          p.aspectRatio,
+		URL:   *resp.Data[0].Url,
+		Model: p.model,
+		Size:  ratio,
 	}, nil
 }
 
-func (p *VolcengineProvider) handleErrorResponse(resp *http.Response) error {
-	body, _ := io.ReadAll(resp.Body)
-
-	var errResp volcengineResponse
-	_ = json.Unmarshal(body, &errResp)
-	errMsg := ""
-	if errResp.Error != nil {
-		errMsg = errResp.Error.Message
-	}
-
-	switch resp.StatusCode {
-	case http.StatusUnauthorized:
-		return &GenerateError{
-			Provider: p.Name(),
-			Code:     "unauthorized",
-			Message:  "API Key 无效或已过期",
-			HintMsg:  "请检查配置中的 article.image.key 或 post.image.key 是否正确，或前往火山引擎控制台获取新的 API Key",
-			Original: fmt.Errorf("status 401: %s", string(body)),
-		}
-	case http.StatusTooManyRequests:
-		return &GenerateError{
-			Provider: p.Name(),
-			Code:     "rate_limit",
-			Message:  "请求过于频繁，请稍后重试",
-			Original: fmt.Errorf("status 429: %s", string(body)),
-		}
-	case http.StatusBadRequest:
-		if isContentSafetyError(errMsg) || isContentSafetyError(string(body)) {
+// convertSDKError 将 SDK 错误转换为 GenerateError
+func (p *VolcengineProvider) convertSDKError(err error) error {
+	var apiErr *model.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.HTTPStatusCode {
+		case 401:
 			return &GenerateError{
 				Provider: p.Name(),
-				Code:     "safety_blocked",
-				Message:  "提示词被内容安全策略拦截",
-				HintMsg:  "提示词可能包含敏感内容，请修改提示词后重试",
-				Original: fmt.Errorf("status 400: %s", string(body)),
+				Code:     "unauthorized",
+				Message:  "API Key 无效或已过期",
+				HintMsg:  "请检查配置中的 article.image.key 或 post.image.key 是否正确，或前往火山引擎控制台获取新的 API Key",
+				Original: err,
+			}
+		case 429:
+			return &GenerateError{
+				Provider: p.Name(),
+				Code:     "rate_limit",
+				Message:  "请求过于频繁，请稍后重试",
+				Original: err,
+			}
+		case 400:
+			if isContentSafetyError(apiErr.Message) {
+				return &GenerateError{
+					Provider: p.Name(),
+					Code:     "safety_blocked",
+					Message:  "提示词被内容安全策略拦截",
+					HintMsg:  "提示词可能包含敏感内容，请修改提示词后重试",
+					Original: err,
+				}
+			}
+			return &GenerateError{
+				Provider: p.Name(),
+				Code:     "bad_request",
+				Message:  fmt.Sprintf("请求参数错误: %s", apiErr.Message),
+				HintMsg:  "请检查 size 等参数是否正确",
+				Original: err,
+			}
+		case 402, 403:
+			return &GenerateError{
+				Provider: p.Name(),
+				Code:     "payment_required",
+				Message:  "账户余额不足或访问受限",
+				HintMsg:  "请前往火山引擎控制台检查账户余额",
+				Original: err,
+			}
+		default:
+			return &GenerateError{
+				Provider: p.Name(),
+				Code:     "api_error",
+				Message:  fmt.Sprintf("API 返回错误 (HTTP %d): %s", apiErr.HTTPStatusCode, apiErr.Message),
+				Original: err,
 			}
 		}
+	}
+
+	var reqErr *model.RequestError
+	if errors.As(err, &reqErr) {
 		return &GenerateError{
 			Provider: p.Name(),
-			Code:     "bad_request",
-			Message:  fmt.Sprintf("请求参数错误: %s", errMsg),
-			HintMsg:  "请检查 aspect_ratio、size 等参数是否正确",
-			Original: fmt.Errorf("status 400: %s", string(body)),
+			Code:     "network_error",
+			Message:  "网络请求失败，请检查网络连接",
+			HintMsg:  "确认网络连接正常，API 地址正确",
+			Original: err,
 		}
-	case http.StatusPaymentRequired, http.StatusForbidden:
-		return &GenerateError{
-			Provider: p.Name(),
-			Code:     "payment_required",
-			Message:  "账户余额不足或访问受限",
-			HintMsg:  "请前往火山引擎控制台检查账户余额",
-			Original: fmt.Errorf("status %d: %s", resp.StatusCode, string(body)),
-		}
-	default:
-		return &GenerateError{
-			Provider: p.Name(),
-			Code:     "unknown",
-			Message:  fmt.Sprintf("API 返回错误 (HTTP %d): %s", resp.StatusCode, errMsg),
-			Original: fmt.Errorf("status %d: %s", resp.StatusCode, string(body)),
-		}
+	}
+
+	return &GenerateError{
+		Provider: p.Name(),
+		Code:     "unknown",
+		Message:  err.Error(),
+		Original: err,
 	}
 }
 
-// parseVolcengineSize 解析 size 配置字段
+// parseVolcengineSize 解析 size 配置字段，返回 aspectRatio 和 sizeTier
 // 支持格式：
-//   - "3:4"          → aspect_ratio=3:4, sizeTier=2K
-//   - "3:4:1K"       → aspect_ratio=3:4, sizeTier=1K
-//   - "3:4:4K"       → aspect_ratio=3:4, sizeTier=4K
-//   - "1728x2304"    → aspect_ratio=3:4, sizeTier=2K（像素格式）
+//   - "3:4"      → aspect_ratio=3:4, sizeTier=2K
+//   - "3:4:1K"   → aspect_ratio=3:4, sizeTier=1K
+//   - "3:4:4K"   → aspect_ratio=3:4, sizeTier=4K
 func parseVolcengineSize(size string) (aspectRatio, sizeTier string) {
-	if size == "" {
-		return "1:1", "2K"
-	}
-
-	// 像素格式映射表（WIDTHxHEIGHT → ratio, tier）
-	pixelMap := map[string]struct{ ratio, tier string }{
-		// 2K 档位
-		"2048x2048": {"1:1", "2K"},
-		"2304x1728": {"4:3", "2K"}, "1728x2304": {"3:4", "2K"},
-		"2560x1440": {"16:9", "2K"}, "1440x2560": {"9:16", "2K"},
-		"2496x1664": {"3:2", "2K"}, "1664x2496": {"2:3", "2K"},
-		"3024x1296": {"21:9", "2K"},
-		// 4K 档位
-		"4096x4096": {"1:1", "4K"},
-		"4704x3520": {"4:3", "4K"}, "3520x4704": {"3:4", "4K"},
-		"5504x3040": {"16:9", "4K"}, "3040x5504": {"9:16", "4K"},
-		"4992x3328": {"3:2", "4K"}, "3328x4992": {"2:3", "4K"},
-		"6240x2656": {"21:9", "4K"},
-	}
-	if mapped, ok := pixelMap[size]; ok {
-		return mapped.ratio, mapped.tier
-	}
-
-	// 检查是否包含分辨率档位后缀（如 "3:4:2K"）
-	upper := strings.ToUpper(size)
-	for _, tier := range []string{"4K", "2K", "1K"} {
-		suffix := ":" + tier
-		if strings.HasSuffix(upper, suffix) {
-			ratio := size[:len(size)-len(suffix)]
-			if volcengineSupportedRatios[ratio] {
-				return ratio, tier
-			}
-		}
-	}
-
-	// 纯宽高比格式（如 "3:4"）
-	if volcengineSupportedRatios[size] {
-		return size, "2K"
-	}
-
-	// 默认
-	return "1:1", "2K"
+	return ParseSize(size)
 }

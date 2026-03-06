@@ -73,21 +73,21 @@ func showAccountInfo(scope string) error {
 	}
 
 	// 获取关键词显示
-	keywords := strings.Join(cfg.Wechat.Keywords, ", ")
+	keywords := strings.Join(cfg.Keywords, ", ")
 	if keywords == "" {
 		keywords = "(未配置)"
 	}
 
 	// 获取账号定位显示
-	positioning := cfg.Wechat.Positioning
+	positioning := cfg.Positioning
 	if positioning == "" {
 		positioning = "(未配置)"
 	}
 
 	// 始终输出账号信息
 	fmt.Printf("# 账号信息\n\n")
-	fmt.Printf("- 公众号: %s\n", cfg.Wechat.Name)
-	fmt.Printf("- 作者: %s\n", cfg.Wechat.Author)
+	fmt.Printf("- 公众号: %s\n", cfg.Name)
+	fmt.Printf("- 作者: %s\n", cfg.Wechat.Article.Author)
 	fmt.Printf("- 关键词: %s\n", keywords)
 	fmt.Printf("- 账号定位: %s\n", positioning)
 
@@ -98,7 +98,7 @@ func showAccountInfo(scope string) error {
 		if err := sm.LoadStyles(); err != nil {
 			return err
 		}
-		activeStyleName := cfg.Article.Style
+		activeStyleName := cfg.Wechat.Article.Style
 		if activeStyleName == "" {
 			activeStyleName = config.DefaultArticleStyle
 		}
@@ -111,13 +111,52 @@ func showAccountInfo(scope string) error {
 		fmt.Printf("- 图片数量: %d\n", cfg.PostImageCount())
 		fmt.Printf("- 图片尺寸: %s\n", cfg.PostImageSize())
 
+		// 图片生成就绪状态
+		resolved := cfg.ResolvedPostContentImage()
+		if resolved.Key != "" {
+			provider := resolved.Provider
+			if provider == "" {
+				provider = config.DefaultImageProvider
+			}
+			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
+		} else {
+			fmt.Printf("- 图片生成: 未配置（需设置 xiaohongshu.content.image.key 或 wechat.post.content.image.key）\n")
+		}
+
+		// 发布能力状态
+		if cfg.Wechat.AppID != "" && cfg.Wechat.Secret != "" {
+			fmt.Printf("- 微信发布: 就绪\n")
+		} else {
+			fmt.Printf("- 微信发布: 未配置（需设置 wechat.appid 和 wechat.secret）\n")
+		}
+
+		if cfg.Wechat.Post.Style != "" {
+			pm := image.NewStylePresetManager()
+			if err := pm.LoadPresets(); err == nil {
+				if preset, err := pm.GetPreset(cfg.Wechat.Post.Style); err == nil {
+					fmt.Printf("\n## 视觉风格预设\n\n")
+					fmt.Printf("- 名称: %s (%s)\n", preset.Name, preset.EnglishName)
+					fmt.Printf("- 说明: %s\n", preset.Description)
+					fmt.Printf("- 适用类型: %s\n", preset.Category)
+					fmt.Printf("- 风格提示词:\n\n```\n%s```\n", preset.Prompt)
+					fmt.Printf("\n- 可用预设: %s\n", strings.Join(pm.ListPresetNames(), ", "))
+				} else {
+					fmt.Printf("- 视觉风格: %s（预设未找到）\n", cfg.Wechat.Post.Style)
+				}
+			}
+		} else if cfg.Wechat.Post.Content.Image.StylePrompt != "" {
+			fmt.Printf("- 自定义风格提示词: %s\n", cfg.Wechat.Post.Content.Image.StylePrompt)
+		} else {
+			fmt.Printf("- 视觉风格: (未配置)\n")
+		}
+
 	default:
 		// 全量输出（向后兼容）
 		sm := writer.NewStyleManager()
 		if err := sm.LoadStyles(); err != nil {
 			return err
 		}
-		activeStyleName := cfg.Article.Style
+		activeStyleName := cfg.Wechat.Article.Style
 		if activeStyleName == "" {
 			activeStyleName = config.DefaultArticleStyle
 		}
@@ -130,6 +169,45 @@ func showAccountInfo(scope string) error {
 		fmt.Printf("\n# 小绿书配置\n\n")
 		fmt.Printf("- 图片数量: %d\n", cfg.PostImageCount())
 		fmt.Printf("- 图片尺寸: %s\n", cfg.PostImageSize())
+
+		// 图片生成就绪状态
+		resolvedPost := cfg.ResolvedPostContentImage()
+		if resolvedPost.Key != "" {
+			provider := resolvedPost.Provider
+			if provider == "" {
+				provider = config.DefaultImageProvider
+			}
+			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
+		} else {
+			fmt.Printf("- 图片生成: 未配置（需设置 xiaohongshu.content.image.key 或 wechat.post.content.image.key）\n")
+		}
+
+		// 发布能力状态
+		if cfg.Wechat.AppID != "" && cfg.Wechat.Secret != "" {
+			fmt.Printf("- 微信发布: 就绪\n")
+		} else {
+			fmt.Printf("- 微信发布: 未配置（需设置 wechat.appid 和 wechat.secret）\n")
+		}
+
+		if cfg.Wechat.Post.Style != "" {
+			pm := image.NewStylePresetManager()
+			if err := pm.LoadPresets(); err == nil {
+				if preset, err := pm.GetPreset(cfg.Wechat.Post.Style); err == nil {
+					fmt.Printf("\n## 视觉风格预设\n\n")
+					fmt.Printf("- 名称: %s (%s)\n", preset.Name, preset.EnglishName)
+					fmt.Printf("- 说明: %s\n", preset.Description)
+					fmt.Printf("- 适用类型: %s\n", preset.Category)
+					fmt.Printf("- 风格提示词:\n\n```\n%s```\n", preset.Prompt)
+					fmt.Printf("\n- 可用预设: %s\n", strings.Join(pm.ListPresetNames(), ", "))
+				} else {
+					fmt.Printf("- 视觉风格: %s（预设未找到）\n", cfg.Wechat.Post.Style)
+				}
+			}
+		} else if cfg.Wechat.Post.Content.Image.StylePrompt != "" {
+			fmt.Printf("- 自定义风格提示词: %s\n", cfg.Wechat.Post.Content.Image.StylePrompt)
+		} else {
+			fmt.Printf("- 视觉风格: (未配置)\n")
+		}
 	}
 
 	return nil
@@ -137,7 +215,7 @@ func showAccountInfo(scope string) error {
 
 // accountInitCmd 初始化配置文件
 func accountInitCmd() *cobra.Command {
-	var appid, secret, name, author, style, theme, provider, aiKey, positioning string
+	var appid, secret, name, author, style, theme, provider, aiKey, positioning, visualStyle string
 
 	cmd := &cobra.Command{
 		Use:   "init [output_file]",
@@ -155,12 +233,12 @@ func accountInitCmd() *cobra.Command {
 				cmd.Flags().Changed("name") || cmd.Flags().Changed("author") ||
 				cmd.Flags().Changed("style") || cmd.Flags().Changed("theme") ||
 				cmd.Flags().Changed("provider") || cmd.Flags().Changed("ai-key") ||
-				cmd.Flags().Changed("positioning")
+				cmd.Flags().Changed("positioning") || cmd.Flags().Changed("visual-style")
 
 			var err error
 			var action string
 			if hasFlags {
-				err = updateConfigFile(outputFile, appid, secret, name, author, style, theme, provider, aiKey, positioning)
+				err = updateConfigFile(outputFile, appid, secret, name, author, style, theme, provider, aiKey, positioning, visualStyle)
 				action = "已更新"
 			} else {
 				err = initConfigFile(outputFile)
@@ -189,12 +267,13 @@ func accountInitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&provider, "provider", "", "图片生成服务 (gemini/openai/openrouter/volcengine)")
 	cmd.Flags().StringVar(&aiKey, "ai-key", "", "图片 API Key")
 	cmd.Flags().StringVar(&positioning, "positioning", "", "账号定位描述")
+	cmd.Flags().StringVar(&visualStyle, "visual-style", "", "小绿书视觉风格预设名称 (morandi-flat/minimal-white/warm-paper/nature-watercolor/tech-dark)")
 
 	return cmd
 }
 
 // updateConfigFile 增量写入配置字段
-func updateConfigFile(outputFile, appid, secret, name, author, style, theme, provider, aiKey, positioning string) error {
+func updateConfigFile(outputFile, appid, secret, name, author, style, theme, provider, aiKey, positioning, visualStyle string) error {
 	c := &config.Config{}
 	if _, err := os.Stat(outputFile); err == nil {
 		data, err := os.ReadFile(outputFile)
@@ -213,27 +292,30 @@ func updateConfigFile(outputFile, appid, secret, name, author, style, theme, pro
 		c.Wechat.Secret = secret
 	}
 	if name != "" {
-		c.Wechat.Name = name
+		c.Name = name
 	}
 	if author != "" {
-		c.Wechat.Author = author
+		c.Wechat.Article.Author = author
 	}
 	if style != "" {
-		c.Article.Style = style
+		c.Wechat.Article.Style = style
 	}
 	if theme != "" {
-		c.Article.Theme = theme
+		c.Wechat.Article.Theme = theme
 	}
 	if provider != "" {
-		c.Article.Image.Provider = provider
-		c.Post.Image.Provider = provider
+		c.Wechat.Article.Content.Image.Provider = provider
+		c.Wechat.Post.Content.Image.Provider = provider
 	}
 	if aiKey != "" {
-		c.Article.Image.Key = aiKey
-		c.Post.Image.Key = aiKey
+		c.Wechat.Article.Content.Image.Key = aiKey
+		c.Wechat.Post.Content.Image.Key = aiKey
 	}
 	if positioning != "" {
-		c.Wechat.Positioning = positioning
+		c.Positioning = positioning
+	}
+	if visualStyle != "" {
+		c.Wechat.Post.Style = visualStyle
 	}
 
 	return config.SaveConfig(outputFile, c)
@@ -245,10 +327,6 @@ func initConfigFile(outputFile string) error {
 	}
 
 	c := config.NewDefaultConfig()
-	// 设置默认 provider 对应的模型名（方便用户了解当前模型）
-	c.Article.Image.Model = image.DefaultGeminiModel
-	c.Post.Image.Model = image.DefaultGeminiModel
-
 	return config.SaveConfig(outputFile, c)
 }
 
@@ -283,7 +361,12 @@ func accountHistoryCmd() *cobra.Command {
   wechatwriter account history --json
   wechatwriter account history --sync`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return initConfig()
+			if sync {
+				// --sync 需要微信 API，加载完整配置
+				return initConfig()
+			}
+			// 默认只读本地 DB，无需微信凭证
+			return initConfigMinimal()
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			// 判断是否需要从 API 同步
@@ -305,10 +388,16 @@ func accountHistoryCmd() *cobra.Command {
 			var warnings []string
 
 			if needSync {
-				items, warnings = fetchHistoryFromAPI(count)
-				// 同步结果持久化到 DB
-				if store != nil && len(items) > 0 {
-					syncHistoriesToDB(items)
+				// 自动同步但缺少微信凭证时，输出提示而非报错
+				if !sync && (cfg.Wechat.AppID == "" || cfg.Wechat.Secret == "") {
+					fmt.Fprintf(os.Stderr, "⚠️  本地历史记录为空，自动同步需要配置微信凭证（wechat.appid / wechat.secret）\n")
+					fmt.Fprintf(os.Stderr, "   运行 'wechatwriter account init' 设置，或使用 --sync 手动触发同步。\n")
+				} else {
+					items, warnings = fetchHistoryFromAPI(count)
+					// 同步结果持久化到 DB
+					if store != nil && len(items) > 0 {
+						syncHistoriesToDB(items)
+					}
 				}
 			} else {
 				// 读本地 DB

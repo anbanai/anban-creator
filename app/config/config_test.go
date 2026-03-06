@@ -15,13 +15,15 @@ func TestLoad_DefaultConfig(t *testing.T) {
 	minimalConfig := `{
   "wechat": {
     "appid": "test_appid",
-    "secret": "test_secret"
-  },
-  "article": {
-    "image": {
-      "compress": true,
-      "max_width": 2560,
-      "max_size_mb": 5
+    "secret": "test_secret",
+    "article": {
+      "content": {
+        "image": {
+          "compress": true,
+          "max_width": 2560,
+          "max_size_mb": 5
+        }
+      }
     }
   }
 }`
@@ -34,60 +36,64 @@ func TestLoad_DefaultConfig(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.Article.Theme != "" {
-		t.Errorf("Article.Theme = %v, want empty (not set in config)", cfg.Article.Theme)
+	if cfg.Wechat.Article.Theme != "" {
+		t.Errorf("Wechat.Article.Theme = %v, want empty (not set in config)", cfg.Wechat.Article.Theme)
 	}
-	if cfg.Article.Image.Compress != true {
-		t.Errorf("Article.Image.Compress = %v, want true", cfg.Article.Image.Compress)
+	if cfg.Wechat.Article.Content.Image.Compress != true {
+		t.Errorf("Wechat.Article.Content.Image.Compress = %v, want true", cfg.Wechat.Article.Content.Image.Compress)
 	}
-	if cfg.Article.Image.MaxWidth != 2560 {
-		t.Errorf("Article.Image.MaxWidth = %v, want 2560", cfg.Article.Image.MaxWidth)
+	if cfg.Wechat.Article.Content.Image.MaxWidth != 2560 {
+		t.Errorf("Wechat.Article.Content.Image.MaxWidth = %v, want 2560", cfg.Wechat.Article.Content.Image.MaxWidth)
 	}
-	if cfg.Article.Image.MaxSizeMB != 5 {
-		t.Errorf("Article.Image.MaxSizeMB = %v, want 5MB", cfg.Article.Image.MaxSizeMB)
+	if cfg.Wechat.Article.Content.Image.MaxSizeMB != 5 {
+		t.Errorf("Wechat.Article.Content.Image.MaxSizeMB = %v, want 5MB", cfg.Wechat.Article.Content.Image.MaxSizeMB)
 	}
-	if cfg.Article.Image.Provider != "" {
-		t.Errorf("Article.Image.Provider = %v, want empty (not set in config)", cfg.Article.Image.Provider)
+	if cfg.Wechat.Article.Content.Image.Provider != "" {
+		t.Errorf("Wechat.Article.Content.Image.Provider = %v, want empty (not set in config)", cfg.Wechat.Article.Content.Image.Provider)
 	}
-	if cfg.Article.Image.BaseURL != "" {
-		t.Errorf("Article.Image.BaseURL = %v, want empty (not set in config)", cfg.Article.Image.BaseURL)
+	if cfg.Wechat.Article.Content.Image.BaseURL != "" {
+		t.Errorf("Wechat.Article.Content.Image.BaseURL = %v, want empty (not set in config)", cfg.Wechat.Article.Content.Image.BaseURL)
 	}
-	if cfg.Article.Image.Model != "" {
-		t.Errorf("Article.Image.Model = %v, want empty (not set in config)", cfg.Article.Image.Model)
+	if cfg.Wechat.Article.Content.Image.Model != "" {
+		t.Errorf("Wechat.Article.Content.Image.Model = %v, want empty (not set in config)", cfg.Wechat.Article.Content.Image.Model)
 	}
-	if cfg.Article.Image.Size != "" {
-		t.Errorf("Article.Image.Size = %v, want empty (not set in config)", cfg.Article.Image.Size)
+	if cfg.Wechat.Article.Content.Image.Size != "" {
+		t.Errorf("Wechat.Article.Content.Image.Size = %v, want empty (not set in config)", cfg.Wechat.Article.Content.Image.Size)
 	}
 }
 
 func TestLoad_JSONConfig_Full(t *testing.T) {
 	configContent := `{
+  "name": "Test Account",
+  "keywords": ["tea", "culture"],
   "wechat": {
-    "name": "Test Account",
     "appid": "wx123456",
     "secret": "secret123",
-    "keywords": ["tea", "culture"]
-  },
-  "article": {
-    "style": "dan-koe",
-    "theme": "apple",
-    "image": {
-      "key": "test_article_key",
-      "base_url": "https://test.api.com",
-      "provider": "gemini",
-      "model": "gemini-3-pro-image-preview",
-      "size": "16:9",
-      "compress": false,
-      "max_width": 2560,
-      "max_size_mb": 10
-    }
-  },
-  "post": {
-    "image": {
-      "key": "test_post_key",
-      "provider": "gemini",
-      "model": "gemini-3-pro-image-preview",
-      "size": "3:4"
+    "article": {
+      "style": "dan-koe",
+      "theme": "apple",
+      "content": {
+        "image": {
+          "key": "test_article_key",
+          "base_url": "https://test.api.com",
+          "provider": "gemini",
+          "model": "gemini-3-pro-image-preview",
+          "size": "16:9",
+          "compress": false,
+          "max_width": 2560,
+          "max_size_mb": 10
+        }
+      }
+    },
+    "post": {
+      "content": {
+        "image": {
+          "key": "test_post_key",
+          "provider": "gemini",
+          "model": "gemini-3-pro-image-preview",
+          "size": "3:4"
+        }
+      }
     }
   }
 }`
@@ -108,47 +114,47 @@ func TestLoad_JSONConfig_Full(t *testing.T) {
 	if cfg.Wechat.Secret != "secret123" {
 		t.Errorf("WechatSecret = %v, want secret123", cfg.Wechat.Secret)
 	}
-	if cfg.Wechat.Name != "Test Account" {
-		t.Errorf("WechatName = %v, want Test Account", cfg.Wechat.Name)
+	if cfg.Name != "Test Account" {
+		t.Errorf("Name = %v, want Test Account", cfg.Name)
 	}
-	if len(cfg.Wechat.Keywords) != 2 || cfg.Wechat.Keywords[0] != "tea" || cfg.Wechat.Keywords[1] != "culture" {
-		t.Errorf("WechatKeyWords = %v, want [tea culture]", cfg.Wechat.Keywords)
+	if len(cfg.Keywords) != 2 || cfg.Keywords[0] != "tea" || cfg.Keywords[1] != "culture" {
+		t.Errorf("Keywords = %v, want [tea culture]", cfg.Keywords)
 	}
-	if cfg.Article.Style != "dan-koe" {
-		t.Errorf("DefaultArticleStyle = %v, want dan-koe", cfg.Article.Style)
+	if cfg.Wechat.Article.Style != "dan-koe" {
+		t.Errorf("Wechat.Article.Style = %v, want dan-koe", cfg.Wechat.Article.Style)
 	}
-	if cfg.Article.Theme != "apple" {
-		t.Errorf("Article.Theme = %v, want apple", cfg.Article.Theme)
+	if cfg.Wechat.Article.Theme != "apple" {
+		t.Errorf("Wechat.Article.Theme = %v, want apple", cfg.Wechat.Article.Theme)
 	}
-	if cfg.Article.Image.Key != "test_article_key" {
-		t.Errorf("Article.Image.Key = %v, want test_article_key", cfg.Article.Image.Key)
+	if cfg.Wechat.Article.Content.Image.Key != "test_article_key" {
+		t.Errorf("Wechat.Article.Content.Image.Key = %v, want test_article_key", cfg.Wechat.Article.Content.Image.Key)
 	}
-	if cfg.Article.Image.BaseURL != "https://test.api.com" {
-		t.Errorf("Article.Image.BaseURL = %v, want https://test.api.com", cfg.Article.Image.BaseURL)
+	if cfg.Wechat.Article.Content.Image.BaseURL != "https://test.api.com" {
+		t.Errorf("Wechat.Article.Content.Image.BaseURL = %v, want https://test.api.com", cfg.Wechat.Article.Content.Image.BaseURL)
 	}
-	if cfg.Article.Image.Provider != "gemini" {
-		t.Errorf("Article.Image.Provider = %v, want gemini", cfg.Article.Image.Provider)
+	if cfg.Wechat.Article.Content.Image.Provider != "gemini" {
+		t.Errorf("Wechat.Article.Content.Image.Provider = %v, want gemini", cfg.Wechat.Article.Content.Image.Provider)
 	}
-	if cfg.Article.Image.Model != "gemini-3-pro-image-preview" {
-		t.Errorf("Article.Image.Model = %v, want gemini-3-pro-image-preview", cfg.Article.Image.Model)
+	if cfg.Wechat.Article.Content.Image.Model != "gemini-3-pro-image-preview" {
+		t.Errorf("Wechat.Article.Content.Image.Model = %v, want gemini-3-pro-image-preview", cfg.Wechat.Article.Content.Image.Model)
 	}
-	if cfg.Article.Image.Size != "16:9" {
-		t.Errorf("Article.Image.Size = %v, want 16:9", cfg.Article.Image.Size)
+	if cfg.Wechat.Article.Content.Image.Size != "16:9" {
+		t.Errorf("Wechat.Article.Content.Image.Size = %v, want 16:9", cfg.Wechat.Article.Content.Image.Size)
 	}
-	if cfg.Post.Image.Key != "test_post_key" {
-		t.Errorf("Post.Image.Key = %v, want test_post_key", cfg.Post.Image.Key)
+	if cfg.Wechat.Post.Content.Image.Key != "test_post_key" {
+		t.Errorf("Wechat.Post.Content.Image.Key = %v, want test_post_key", cfg.Wechat.Post.Content.Image.Key)
 	}
-	if cfg.Post.Image.Size != "3:4" {
-		t.Errorf("Post.Image.Size = %v, want 3:4", cfg.Post.Image.Size)
+	if cfg.Wechat.Post.Content.Image.Size != "3:4" {
+		t.Errorf("Wechat.Post.Content.Image.Size = %v, want 3:4", cfg.Wechat.Post.Content.Image.Size)
 	}
-	if cfg.Article.Image.Compress != false {
-		t.Errorf("Article.Image.Compress = %v, want false", cfg.Article.Image.Compress)
+	if cfg.Wechat.Article.Content.Image.Compress != false {
+		t.Errorf("Wechat.Article.Content.Image.Compress = %v, want false", cfg.Wechat.Article.Content.Image.Compress)
 	}
-	if cfg.Article.Image.MaxWidth != 2560 {
-		t.Errorf("Article.Image.MaxWidth = %v, want 2560", cfg.Article.Image.MaxWidth)
+	if cfg.Wechat.Article.Content.Image.MaxWidth != 2560 {
+		t.Errorf("Wechat.Article.Content.Image.MaxWidth = %v, want 2560", cfg.Wechat.Article.Content.Image.MaxWidth)
 	}
-	if cfg.Article.Image.MaxSizeMB != 10 {
-		t.Errorf("Article.Image.MaxSizeMB = %v, want 10MB", cfg.Article.Image.MaxSizeMB)
+	if cfg.Wechat.Article.Content.Image.MaxSizeMB != 10 {
+		t.Errorf("Wechat.Article.Content.Image.MaxSizeMB = %v, want 10MB", cfg.Wechat.Article.Content.Image.MaxSizeMB)
 	}
 }
 
@@ -156,12 +162,14 @@ func TestLoad_JSONConfig(t *testing.T) {
 	configContent := `{
   "wechat": {
     "appid": "wx123456",
-    "secret": "secret123"
-  },
-  "article": {
-    "image": {
-      "key": "test_image_key",
-      "base_url": "https://test.api.com"
+    "secret": "secret123",
+    "article": {
+      "content": {
+        "image": {
+          "key": "test_image_key",
+          "base_url": "https://test.api.com"
+        }
+      }
     }
   }
 }`
@@ -182,8 +190,8 @@ func TestLoad_JSONConfig(t *testing.T) {
 	if cfg.Wechat.Secret != "secret123" {
 		t.Errorf("WechatSecret = %v, want secret123", cfg.Wechat.Secret)
 	}
-	if cfg.Article.Image.Key != "test_image_key" {
-		t.Errorf("Article.Image.Key = %v, want test_image_key", cfg.Article.Image.Key)
+	if cfg.Wechat.Article.Content.Image.Key != "test_image_key" {
+		t.Errorf("Wechat.Article.Content.Image.Key = %v, want test_image_key", cfg.Wechat.Article.Content.Image.Key)
 	}
 }
 
@@ -227,8 +235,8 @@ func TestConfig_Validate_Success(t *testing.T) {
 	cfg := &Config{}
 	cfg.Wechat.AppID = "wx123456"
 	cfg.Wechat.Secret = "secret123"
-	cfg.Article.Image.MaxWidth = 1920
-	cfg.Article.Image.MaxSizeMB = 5
+	cfg.Wechat.Article.Content.Image.MaxWidth = 1920
+	cfg.Wechat.Article.Content.Image.MaxSizeMB = 5
 
 	err := cfg.Validate()
 	if err != nil {
@@ -239,8 +247,8 @@ func TestConfig_Validate_Success(t *testing.T) {
 func TestConfig_Validate_MissingAppID(t *testing.T) {
 	cfg := &Config{}
 	cfg.Wechat.Secret = "secret123"
-	cfg.Article.Image.MaxWidth = 1920
-	cfg.Article.Image.MaxSizeMB = 5
+	cfg.Wechat.Article.Content.Image.MaxWidth = 1920
+	cfg.Wechat.Article.Content.Image.MaxSizeMB = 5
 
 	err := cfg.Validate()
 	if err == nil {
@@ -260,8 +268,8 @@ func TestConfig_Validate_MissingAppID(t *testing.T) {
 func TestConfig_Validate_MissingSecret(t *testing.T) {
 	cfg := &Config{}
 	cfg.Wechat.AppID = "wx123456"
-	cfg.Article.Image.MaxWidth = 1920
-	cfg.Article.Image.MaxSizeMB = 5
+	cfg.Wechat.Article.Content.Image.MaxWidth = 1920
+	cfg.Wechat.Article.Content.Image.MaxSizeMB = 5
 
 	err := cfg.Validate()
 	if err == nil {
@@ -295,8 +303,8 @@ func TestConfig_Validate_InvalidImageWidth(t *testing.T) {
 			cfg := &Config{}
 			cfg.Wechat.AppID = "wx123456"
 			cfg.Wechat.Secret = "secret123"
-			cfg.Article.Image.MaxWidth = tt.width
-			cfg.Article.Image.MaxSizeMB = 5
+			cfg.Wechat.Article.Content.Image.MaxWidth = tt.width
+			cfg.Wechat.Article.Content.Image.MaxSizeMB = 5
 
 			err := cfg.Validate()
 			if (err != nil) != tt.wantErr {
@@ -308,14 +316,14 @@ func TestConfig_Validate_InvalidImageWidth(t *testing.T) {
 
 func TestSaveConfig_JSON(t *testing.T) {
 	cfg := &Config{}
-	cfg.Wechat.Name = "Test Account"
+	cfg.Name = "Test Account"
 	cfg.Wechat.AppID = "wx123456"
 	cfg.Wechat.Secret = "secret123"
-	cfg.Wechat.Keywords = []string{"tea", "culture"}
-	cfg.Article.Style = "dan-koe"
-	cfg.Article.Image.Key = "test_key"
-	cfg.Article.Image.MaxWidth = 1920
-	cfg.Article.Image.MaxSizeMB = 5
+	cfg.Keywords = []string{"tea", "culture"}
+	cfg.Wechat.Article.Style = "dan-koe"
+	cfg.Wechat.Article.Content.Image.Key = "test_key"
+	cfg.Wechat.Article.Content.Image.MaxWidth = 1920
+	cfg.Wechat.Article.Content.Image.MaxSizeMB = 5
 
 	tmpFile := filepath.Join(t.TempDir(), "test.json")
 	err := SaveConfig(tmpFile, cfg)
@@ -381,7 +389,7 @@ func TestConfig_PostImageCount_Custom(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{}
-			cfg.Post.Count = tt.count
+			cfg.Wechat.Post.Content.Count = tt.count
 			if got := cfg.PostImageCount(); got != tt.want {
 				t.Errorf("PostImageCount() = %d, want %d", got, tt.want)
 			}
@@ -408,7 +416,7 @@ func TestConfig_Validate_InvalidPostImageCount(t *testing.T) {
 			cfg := &Config{}
 			cfg.Wechat.AppID = "wx123456"
 			cfg.Wechat.Secret = "secret123"
-			cfg.Post.Count = tt.count
+			cfg.Wechat.Post.Content.Count = tt.count
 
 			err := cfg.Validate()
 			if (err != nil) != tt.wantErr {
@@ -431,13 +439,15 @@ func TestLoad_JSONConfig_WithPostImageCount(t *testing.T) {
 	configContent := `{
   "wechat": {
     "appid": "wx123456",
-    "secret": "secret123"
-  },
-  "post": {
-    "count": 5,
-    "image": {
-      "key": "test_key",
-      "size": "3:4"
+    "secret": "secret123",
+    "post": {
+      "content": {
+        "count": 5,
+        "image": {
+          "key": "test_key",
+          "size": "3:4"
+        }
+      }
     }
   }
 }`
@@ -452,8 +462,8 @@ func TestLoad_JSONConfig_WithPostImageCount(t *testing.T) {
 		t.Fatalf("LoadWithDefaults() error = %v", err)
 	}
 
-	if cfg.Post.Count != 5 {
-		t.Errorf("Post.Count = %d, want 5", cfg.Post.Count)
+	if cfg.Wechat.Post.Content.Count != 5 {
+		t.Errorf("Wechat.Post.Content.Count = %d, want 5", cfg.Wechat.Post.Content.Count)
 	}
 	if cfg.PostImageCount() != 5 {
 		t.Errorf("PostImageCount() = %d, want 5", cfg.PostImageCount())
@@ -509,12 +519,14 @@ func TestLoad_JSONConfig_WithStylePrompt(t *testing.T) {
 	configContent := `{
   "wechat": {
     "appid": "wx123456",
-    "secret": "secret123"
-  },
-  "post": {
-    "image": {
-      "key": "test_key",
-      "style_prompt": "扁平插画风格，莫兰迪色系，圆角卡片"
+    "secret": "secret123",
+    "post": {
+      "content": {
+        "image": {
+          "key": "test_key",
+          "style_prompt": "扁平插画风格，莫兰迪色系，圆角卡片"
+        }
+      }
     }
   }
 }`
@@ -530,59 +542,59 @@ func TestLoad_JSONConfig_WithStylePrompt(t *testing.T) {
 	}
 
 	want := "扁平插画风格，莫兰迪色系，圆角卡片"
-	if cfg.Post.Image.StylePrompt != want {
-		t.Errorf("Post.Image.StylePrompt = %q, want %q", cfg.Post.Image.StylePrompt, want)
+	if cfg.Wechat.Post.Content.Image.StylePrompt != want {
+		t.Errorf("Wechat.Post.Content.Image.StylePrompt = %q, want %q", cfg.Wechat.Post.Content.Image.StylePrompt, want)
 	}
 }
 
 func TestNewDefaultConfig(t *testing.T) {
 	c := NewDefaultConfig()
 
-	if c.Article.Style != DefaultArticleStyle {
-		t.Errorf("Wechat.Style = %q, want %q", c.Article.Style, DefaultArticleStyle)
+	if c.Wechat.Article.Style != DefaultArticleStyle {
+		t.Errorf("Wechat.Article.Style = %q, want %q", c.Wechat.Article.Style, DefaultArticleStyle)
 	}
-	if c.Article.Theme != DefaultArticleTheme {
-		t.Errorf("Article.Theme = %q, want %q", c.Article.Theme, DefaultArticleTheme)
+	if c.Wechat.Article.Theme != DefaultArticleTheme {
+		t.Errorf("Wechat.Article.Theme = %q, want %q", c.Wechat.Article.Theme, DefaultArticleTheme)
 	}
-	if c.Article.Image.Provider != DefaultImageProvider {
-		t.Errorf("Article.Image.Provider = %q, want %q", c.Article.Image.Provider, DefaultImageProvider)
+	if c.Wechat.Article.Content.Image.Provider != DefaultImageProvider {
+		t.Errorf("Wechat.Article.Content.Image.Provider = %q, want %q", c.Wechat.Article.Content.Image.Provider, DefaultImageProvider)
 	}
-	if c.Article.Image.Size != DefaultArticleImageSize {
-		t.Errorf("Article.Image.Size = %q, want %q", c.Article.Image.Size, DefaultArticleImageSize)
+	if c.Wechat.Article.Content.Image.Size != DefaultArticleImageSize {
+		t.Errorf("Wechat.Article.Content.Image.Size = %q, want %q", c.Wechat.Article.Content.Image.Size, DefaultArticleImageSize)
 	}
-	if c.Article.Image.Compress != true {
-		t.Errorf("Article.Image.Compress = %v, want true", c.Article.Image.Compress)
+	if c.Wechat.Article.Content.Image.Compress != true {
+		t.Errorf("Wechat.Article.Content.Image.Compress = %v, want true", c.Wechat.Article.Content.Image.Compress)
 	}
-	if c.Article.Image.MaxWidth != DefaultImageMaxWidth {
-		t.Errorf("Article.Image.MaxWidth = %d, want %d", c.Article.Image.MaxWidth, DefaultImageMaxWidth)
+	if c.Wechat.Article.Content.Image.MaxWidth != DefaultImageMaxWidth {
+		t.Errorf("Wechat.Article.Content.Image.MaxWidth = %d, want %d", c.Wechat.Article.Content.Image.MaxWidth, DefaultImageMaxWidth)
 	}
-	if c.Article.Image.MaxSizeMB != DefaultImageMaxSizeMB {
-		t.Errorf("Article.Image.MaxSizeMB = %d, want %d", c.Article.Image.MaxSizeMB, DefaultImageMaxSizeMB)
+	if c.Wechat.Article.Content.Image.MaxSizeMB != DefaultImageMaxSizeMB {
+		t.Errorf("Wechat.Article.Content.Image.MaxSizeMB = %d, want %d", c.Wechat.Article.Content.Image.MaxSizeMB, DefaultImageMaxSizeMB)
 	}
-	if c.Post.Count != DefaultPostImageCount {
-		t.Errorf("Post.Count = %d, want %d", c.Post.Count, DefaultPostImageCount)
+	if c.Wechat.Post.Content.Count != DefaultPostImageCount {
+		t.Errorf("Wechat.Post.Content.Count = %d, want %d", c.Wechat.Post.Content.Count, DefaultPostImageCount)
 	}
-	if c.Post.Image.Provider != DefaultImageProvider {
-		t.Errorf("Post.Image.Provider = %q, want %q", c.Post.Image.Provider, DefaultImageProvider)
+	if c.Wechat.Post.Content.Image.Provider != DefaultImageProvider {
+		t.Errorf("Wechat.Post.Content.Image.Provider = %q, want %q", c.Wechat.Post.Content.Image.Provider, DefaultImageProvider)
 	}
-	if c.Post.Image.Size != DefaultPostImageSize {
-		t.Errorf("Post.Image.Size = %q, want %q", c.Post.Image.Size, DefaultPostImageSize)
+	if c.Wechat.Post.Content.Image.Size != DefaultPostImageSize {
+		t.Errorf("Wechat.Post.Content.Image.Size = %q, want %q", c.Wechat.Post.Content.Image.Size, DefaultPostImageSize)
 	}
-	if c.Post.Image.Compress != true {
-		t.Errorf("Post.Image.Compress = %v, want true", c.Post.Image.Compress)
+	if c.Wechat.Post.Content.Image.Compress != true {
+		t.Errorf("Wechat.Post.Content.Image.Compress = %v, want true", c.Wechat.Post.Content.Image.Compress)
 	}
-	if c.Post.Image.MaxWidth != DefaultImageMaxWidth {
-		t.Errorf("Post.Image.MaxWidth = %d, want %d", c.Post.Image.MaxWidth, DefaultImageMaxWidth)
+	if c.Wechat.Post.Content.Image.MaxWidth != DefaultImageMaxWidth {
+		t.Errorf("Wechat.Post.Content.Image.MaxWidth = %d, want %d", c.Wechat.Post.Content.Image.MaxWidth, DefaultImageMaxWidth)
 	}
-	if c.Post.Image.MaxSizeMB != DefaultImageMaxSizeMB {
-		t.Errorf("Post.Image.MaxSizeMB = %d, want %d", c.Post.Image.MaxSizeMB, DefaultImageMaxSizeMB)
+	if c.Wechat.Post.Content.Image.MaxSizeMB != DefaultImageMaxSizeMB {
+		t.Errorf("Wechat.Post.Content.Image.MaxSizeMB = %d, want %d", c.Wechat.Post.Content.Image.MaxSizeMB, DefaultImageMaxSizeMB)
 	}
 	// BaseURL should not be set for Gemini (uses SDK, not HTTP)
-	if c.Article.Image.BaseURL != "" {
-		t.Errorf("Article.Image.BaseURL = %q, want empty (Gemini uses SDK)", c.Article.Image.BaseURL)
+	if c.Wechat.Article.Content.Image.BaseURL != "" {
+		t.Errorf("Wechat.Article.Content.Image.BaseURL = %q, want empty (Gemini uses SDK)", c.Wechat.Article.Content.Image.BaseURL)
 	}
-	if c.Post.Image.BaseURL != "" {
-		t.Errorf("Post.Image.BaseURL = %q, want empty (Gemini uses SDK)", c.Post.Image.BaseURL)
+	if c.Wechat.Post.Content.Image.BaseURL != "" {
+		t.Errorf("Wechat.Post.Content.Image.BaseURL = %q, want empty (Gemini uses SDK)", c.Wechat.Post.Content.Image.BaseURL)
 	}
 }
 
@@ -661,13 +673,15 @@ func TestLoad_JSONConfig_WithWatermark(t *testing.T) {
 	configContent := `{
   "wechat": {
     "appid": "wx123456",
-    "secret": "secret123"
-  },
-  "article": {
-    "image": {
-      "watermark": {
-        "enable": true,
-        "margin": 20
+    "secret": "secret123",
+    "article": {
+      "content": {
+        "image": {
+          "watermark": {
+            "enable": true,
+            "margin": 20
+          }
+        }
       }
     }
   }
@@ -683,11 +697,217 @@ func TestLoad_JSONConfig_WithWatermark(t *testing.T) {
 		t.Fatalf("LoadWithDefaults() error = %v", err)
 	}
 
-	if !cfg.Article.Image.Watermark.Enable {
-		t.Errorf("Article.Image.Watermark.Enable = false, want true")
+	if cfg.Wechat.Article.Content.Image.Watermark == nil || !cfg.Wechat.Article.Content.Image.Watermark.Enable {
+		t.Errorf("Wechat.Article.Content.Image.Watermark.Enable = false, want true")
 	}
-	if cfg.Article.Image.Watermark.Margin != 20 {
-		t.Errorf("Article.Image.Watermark.Margin = %d, want 20", cfg.Article.Image.Watermark.Margin)
+	if cfg.Wechat.Article.Content.Image.Watermark == nil || cfg.Wechat.Article.Content.Image.Watermark.Margin != 20 {
+		t.Errorf("Wechat.Article.Content.Image.Watermark.Margin = %d, want 20", cfg.Wechat.Article.Content.Image.Watermark.Margin)
+	}
+}
+
+func TestMergeImageAPI(t *testing.T) {
+	t.Run("base fields take priority", func(t *testing.T) {
+		base := ImageAPI{Key: "base-key", Provider: "openai", Model: "dall-e-3"}
+		fallback := ImageAPI{Key: "fallback-key", Provider: "gemini", Model: "gemini-model", Size: "3:4"}
+		result := mergeImageAPI(base, fallback)
+		if result.Key != "base-key" {
+			t.Errorf("Key = %q, want base-key", result.Key)
+		}
+		if result.Provider != "openai" {
+			t.Errorf("Provider = %q, want openai", result.Provider)
+		}
+		if result.Model != "dall-e-3" {
+			t.Errorf("Model = %q, want dall-e-3", result.Model)
+		}
+		// fallback fills missing size
+		if result.Size != "3:4" {
+			t.Errorf("Size = %q, want 3:4", result.Size)
+		}
+	})
+
+	t.Run("empty base uses fallback", func(t *testing.T) {
+		base := ImageAPI{}
+		fallback := ImageAPI{
+			Key:       "fb-key",
+			Provider:  "gemini",
+			Model:     "gemini-model",
+			Size:      "3:4",
+			MaxWidth:  1920,
+			MaxSizeMB: 5,
+			Compress:  true,
+		}
+		result := mergeImageAPI(base, fallback)
+		if result.Key != "fb-key" {
+			t.Errorf("Key = %q, want fb-key", result.Key)
+		}
+		if result.Provider != "gemini" {
+			t.Errorf("Provider = %q, want gemini", result.Provider)
+		}
+		if result.Size != "3:4" {
+			t.Errorf("Size = %q, want 3:4", result.Size)
+		}
+		if result.MaxWidth != 1920 {
+			t.Errorf("MaxWidth = %d, want 1920", result.MaxWidth)
+		}
+		if !result.Compress {
+			t.Errorf("Compress = false, want true")
+		}
+	})
+
+	t.Run("partial merge - only missing fields filled", func(t *testing.T) {
+		base := ImageAPI{Key: "my-key", Size: "16:9"}
+		fallback := ImageAPI{Key: "other-key", Size: "3:4", Provider: "volcengine", MaxWidth: 1920}
+		result := mergeImageAPI(base, fallback)
+		if result.Key != "my-key" {
+			t.Errorf("Key = %q, want my-key", result.Key)
+		}
+		if result.Size != "16:9" {
+			t.Errorf("Size = %q, want 16:9", result.Size)
+		}
+		if result.Provider != "volcengine" {
+			t.Errorf("Provider = %q, want volcengine (from fallback)", result.Provider)
+		}
+		if result.MaxWidth != 1920 {
+			t.Errorf("MaxWidth = %d, want 1920 (from fallback)", result.MaxWidth)
+		}
+	})
+}
+
+func TestResolvedPostContentImage(t *testing.T) {
+	t.Run("no xiaohongshu config returns wechat.post", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Wechat.Post.Content.Image.Key = "post-key"
+		cfg.Wechat.Post.Content.Image.Provider = "openai"
+		result := cfg.ResolvedPostContentImage()
+		if result.Key != "post-key" {
+			t.Errorf("Key = %q, want post-key", result.Key)
+		}
+		if result.Provider != "openai" {
+			t.Errorf("Provider = %q, want openai", result.Provider)
+		}
+	})
+
+	t.Run("xiaohongshu fills missing wechat.post fields", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Wechat.Post.Content.Image = ImageAPI{} // empty
+		cfg.Xiaohongshu = &XiaohongshuConfig{}
+		cfg.Xiaohongshu.Content.Image = ImageAPI{
+			Key:      "xhs-key",
+			Provider: "gemini",
+			Size:     "3:4:1K",
+		}
+		result := cfg.ResolvedPostContentImage()
+		if result.Key != "xhs-key" {
+			t.Errorf("Key = %q, want xhs-key (from xiaohongshu)", result.Key)
+		}
+		if result.Provider != "gemini" {
+			t.Errorf("Provider = %q, want gemini (from xiaohongshu)", result.Provider)
+		}
+		if result.Size != "3:4:1K" {
+			t.Errorf("Size = %q, want 3:4:1K (from xiaohongshu)", result.Size)
+		}
+	})
+
+	t.Run("wechat.post takes priority over xiaohongshu", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Wechat.Post.Content.Image = ImageAPI{
+			Key:      "post-key",
+			Provider: "openrouter",
+			Size:     "16:9",
+		}
+		cfg.Xiaohongshu = &XiaohongshuConfig{}
+		cfg.Xiaohongshu.Content.Image = ImageAPI{
+			Key:      "xhs-key",
+			Provider: "gemini",
+			Size:     "3:4:1K",
+		}
+		result := cfg.ResolvedPostContentImage()
+		if result.Key != "post-key" {
+			t.Errorf("Key = %q, want post-key (wechat.post priority)", result.Key)
+		}
+		if result.Provider != "openrouter" {
+			t.Errorf("Provider = %q, want openrouter (wechat.post priority)", result.Provider)
+		}
+		if result.Size != "16:9" {
+			t.Errorf("Size = %q, want 16:9 (wechat.post priority)", result.Size)
+		}
+	})
+}
+
+func TestResolvedPostCoverImage(t *testing.T) {
+	t.Run("xiaohongshu cover fills missing wechat.post.cover", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Xiaohongshu = &XiaohongshuConfig{}
+		cfg.Xiaohongshu.Cover.Image = ImageAPI{
+			Key:      "xhs-cover-key",
+			Provider: "volcengine",
+			Size:     "3:4",
+		}
+		result := cfg.ResolvedPostCoverImage()
+		if result.Key != "xhs-cover-key" {
+			t.Errorf("Key = %q, want xhs-cover-key", result.Key)
+		}
+		if result.Provider != "volcengine" {
+			t.Errorf("Provider = %q, want volcengine", result.Provider)
+		}
+	})
+}
+
+func TestPostImageSize_XiaohongshuFallback(t *testing.T) {
+	tests := []struct {
+		name        string
+		postSize    string
+		xhsSize     string
+		hasXhs      bool
+		wantSize    string
+	}{
+		{"wechat.post has size", "3:4", "3:4:1K", true, "3:4"},
+		{"fallback to xiaohongshu", "", "3:4:1K", true, "3:4:1K"},
+		{"no xiaohongshu", "", "", false, DefaultPostImageSize},
+		{"both empty", "", "", true, DefaultPostImageSize},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			cfg.Wechat.Post.Content.Image.Size = tt.postSize
+			if tt.hasXhs {
+				cfg.Xiaohongshu = &XiaohongshuConfig{}
+				cfg.Xiaohongshu.Content.Image.Size = tt.xhsSize
+			}
+			if got := cfg.PostImageSize(); got != tt.wantSize {
+				t.Errorf("PostImageSize() = %q, want %q", got, tt.wantSize)
+			}
+		})
+	}
+}
+
+func TestPostImageCount_XiaohongshuFallback(t *testing.T) {
+	tests := []struct {
+		name      string
+		postCount int
+		xhsCount  int
+		hasXhs    bool
+		wantCount int
+	}{
+		{"wechat.post has count", 4, 6, true, 4},
+		{"fallback to xiaohongshu", 0, 6, true, 6},
+		{"no xiaohongshu", 0, 0, false, DefaultPostImageCount},
+		{"both zero", 0, 0, true, DefaultPostImageCount},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			cfg.Wechat.Post.Content.Count = tt.postCount
+			if tt.hasXhs {
+				cfg.Xiaohongshu = &XiaohongshuConfig{}
+				cfg.Xiaohongshu.Content.Count = tt.xhsCount
+			}
+			if got := cfg.PostImageCount(); got != tt.wantCount {
+				t.Errorf("PostImageCount() = %d, want %d", got, tt.wantCount)
+			}
+		})
 	}
 }
 

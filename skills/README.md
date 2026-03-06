@@ -1,6 +1,6 @@
 # 技能概览
 
-## 保留的 7 个技能
+## 保留的技能
 
 | 技能 | 类型 | 说明 |
 |------|------|------|
@@ -11,10 +11,12 @@
 | seo-optimization | 知识库 | 标题/关键词/摘要优化 |
 | article-publishing | 知识库 | 图文文章草稿发布 |
 | post-publishing | 知识库 | 小绿书图片帖发布 |
+| xiaohongshu-ops | 知识库 | 小红书选题研究、图片生成、笔记发布、评论互动 |
+| xiaohongshu-writing | 知识库 | 小红书文案公式、标题心理学、行业模板 |
 
 ## 自动化流水线
 
-### 图文文章 (article-writer agent)
+### 图文文章 (wechatarticle agent)
 
 ```
 选题研究 → 文章撰写 → AI去痕 → SEO优化 → 封面配图 → HTML转换 → 草稿发布
@@ -28,7 +30,7 @@ topic-research → content-writing → content-writing(humanize)
 → article-publishing
 ```
 
-### 小绿书 (post-creator agent)
+### 小绿书 (wechatpost agent)
 
 ```
 选题研究 → 图片设计 → 草稿发布
@@ -38,4 +40,16 @@ topic-research → content-writing → content-writing(humanize)
 
 ```
 topic-research → visual-design → post-publishing
+```
+
+### 小红书 (xiaohongshu agent)
+
+```
+选题研究 → 内容创作 → 图片设计 → 笔记发布
+```
+
+对应技能链：
+
+```
+topic-research → xiaohongshu-writing → visual-design → xiaohongshu-ops
 ```

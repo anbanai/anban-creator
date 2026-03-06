@@ -2,7 +2,11 @@ package image
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -12,9 +16,10 @@ import (
 
 // OpenAIProvider OpenAI 图片生成服务提供者
 type OpenAIProvider struct {
-	client openai.Client
-	model  string
-	size   string
+	client    openai.Client
+	model     string
+	size      string // DALL-E pixel size for API calls
+	sizeRatio string // ratio string for GenerateResult.Size
 }
 
 // NewOpenAIProvider 创建 OpenAI Provider
@@ -25,6 +30,7 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 	}
 
 	size := mapToDALLESize(apiCfg.Size, model)
+	ratio, _ := ParseSize(apiCfg.Size)
 
 	// 创建 OpenAI client，使用官方 SDK
 	opts := []option.RequestOption{
@@ -39,13 +45,14 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 	client := openai.NewClient(opts...)
 
 	return &OpenAIProvider{
-		client: client,
-		model:  model,
-		size:   size,
+		client:    client,
+		model:     model,
+		size:      size,
+		sizeRatio: ratio,
 	}, nil
 }
 
-// mapToDALLESize 将用户配置的 size（宽高比或像素格式）映射到 DALL-E 支持的尺寸
+// mapToDALLESize 将用户配置的 size（比例格式）映射到 DALL-E 支持的尺寸
 // DALL-E 3 支持: 1024x1024, 1792x1024, 1024x1792
 // DALL-E 2 支持: 256x256, 512x512, 1024x1024
 func mapToDALLESize(size, model string) string {
@@ -54,55 +61,30 @@ func mapToDALLESize(size, model string) string {
 	}
 
 	isDallE2 := model == "dall-e-2"
-
-	// 精确尺寸直接通过（DALL-E 3 格式）
-	dalle3Sizes := map[string]bool{
-		"1024x1024": true, "1792x1024": true, "1024x1792": true,
-	}
-	if !isDallE2 && dalle3Sizes[size] {
-		return size
-	}
-
-	// DALL-E 2 支持的尺寸
-	dalle2Sizes := map[string]bool{
-		"256x256": true, "512x512": true, "1024x1024": true,
-	}
-	if isDallE2 && dalle2Sizes[size] {
-		return size
-	}
-
 	if isDallE2 {
 		return "1024x1024"
 	}
 
+	ratio, _ := ParseSize(size)
+
 	// 宽高比映射到 DALL-E 3 尺寸
 	ratioMap := map[string]string{
-		"1:1":   "1024x1024",
-		"16:9":  "1792x1024",
-		"9:16":  "1024x1792",
-		"4:3":   "1792x1024", // 近似横向
-		"3:4":   "1024x1792", // 近似纵向
-		"3:2":   "1792x1024",
-		"2:3":   "1024x1792",
-		"21:9":  "1792x1024",
-		"wide":  "1792x1024",
-		"tall":  "1024x1792",
+		"1:1":    "1024x1024",
+		"16:9":   "1792x1024",
+		"9:16":   "1024x1792",
+		"4:3":    "1792x1024", // 近似横向
+		"3:4":    "1024x1792", // 近似纵向
+		"3:2":    "1792x1024",
+		"2:3":    "1024x1792",
+		"4:5":    "1024x1792",
+		"5:4":    "1792x1024",
+		"21:9":   "1792x1024",
+		"wide":   "1792x1024",
+		"tall":   "1024x1792",
 		"square": "1024x1024",
 	}
-	if mapped, ok := ratioMap[size]; ok {
+	if mapped, ok := ratioMap[ratio]; ok {
 		return mapped
-	}
-
-	// 像素格式：分析宽高比确定方向
-	// WIDTHxHEIGHT 格式
-	var w, h int
-	if n, err := fmt.Sscanf(size, "%dx%d", &w, &h); n == 2 && err == nil {
-		if w > h {
-			return "1792x1024" // 横向
-		} else if h > w {
-			return "1024x1792" // 纵向
-		}
-		return "1024x1024" // 正方形
 	}
 
 	return "1024x1024" // 默认
@@ -114,7 +96,12 @@ func (p *OpenAIProvider) Name() string {
 }
 
 // Generate 生成图片
-func (p *OpenAIProvider) Generate(ctx context.Context, prompt string) (*GenerateResult, error) {
+func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error) {
+	// 有参考图时，使用 Images.Edit() API
+	if opts != nil && opts.RefImagePath != "" {
+		return p.generateWithRef(ctx, prompt, opts.RefImagePath)
+	}
+
 	// 调用 SDK 生成图片
 	resp, err := p.client.Images.Generate(ctx, openai.ImageGenerateParams{
 		Prompt: prompt,
@@ -140,7 +127,7 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string) (*Generate
 
 	result := &GenerateResult{
 		Model: p.model,
-		Size:  p.size,
+		Size:  p.sizeRatio,
 	}
 
 	// 提取 URL
@@ -154,6 +141,90 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string) (*Generate
 	}
 
 	return result, nil
+}
+
+// generateWithRef 使用参考图生成图片（调用 Images.Edit() API）
+func (p *OpenAIProvider) generateWithRef(ctx context.Context, prompt, refImagePath string) (*GenerateResult, error) {
+	f, err := os.Open(refImagePath)
+	if err != nil {
+		return nil, &GenerateError{
+			Provider: p.Name(),
+			Code:     "refer_error",
+			Message:  "打开参考图失败",
+			Original: err,
+		}
+	}
+	defer f.Close()
+
+	resp, err := p.client.Images.Edit(ctx, openai.ImageEditParams{
+		Image:  openai.ImageEditParamsImageUnion{OfFile: f},
+		Prompt: prompt,
+		Model:  openai.ImageModel(p.model),
+		Size:   openai.ImageEditParamsSize(p.size),
+		N:      param.NewOpt(int64(1)),
+	})
+	if err != nil {
+		return nil, p.wrapSDKError(err)
+	}
+
+	if len(resp.Data) == 0 {
+		return nil, &GenerateError{
+			Provider: p.Name(),
+			Code:     "no_image",
+			Message:  "未生成图片",
+			HintMsg:  "提示词可能不符合内容政策，请尝试修改提示词",
+		}
+	}
+
+	img := resp.Data[0]
+
+	// GPT image 模型返回 B64JSON，dall-e-2 返回 URL
+	if img.B64JSON != "" {
+		filePath, saveErr := p.saveBase64Image(img.B64JSON)
+		if saveErr != nil {
+			return nil, saveErr
+		}
+		result := &GenerateResult{
+			URL:   filePath,
+			Model: p.model,
+			Size:  p.sizeRatio,
+		}
+		if img.RevisedPrompt != "" {
+			result.RevisedPrompt = img.RevisedPrompt
+		}
+		return result, nil
+	}
+
+	return &GenerateResult{
+		URL:           img.URL,
+		RevisedPrompt: img.RevisedPrompt,
+		Model:         p.model,
+		Size:          p.sizeRatio,
+	}, nil
+}
+
+// saveBase64Image 将 base64 编码的图片数据保存到临时文件，返回文件路径
+func (p *OpenAIProvider) saveBase64Image(b64data string) (string, error) {
+	imageData, err := base64.StdEncoding.DecodeString(b64data)
+	if err != nil {
+		return "", &GenerateError{
+			Provider: p.Name(),
+			Code:     "decode_error",
+			Message:  "图片数据解码失败",
+			Original: err,
+		}
+	}
+
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("wechatwriter_openai_%d.png", time.Now().UnixNano()))
+	if err := os.WriteFile(tmpPath, imageData, 0644); err != nil {
+		return "", &GenerateError{
+			Provider: p.Name(),
+			Code:     "write_error",
+			Message:  "图片保存失败",
+			Original: err,
+		}
+	}
+	return tmpPath, nil
 }
 
 // wrapSDKError 将 SDK 错误包装为 GenerateError

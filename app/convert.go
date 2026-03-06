@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/royalrick/wechatwriter/app/converter"
 	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/wechatwriter/app/converter"
 	"github.com/royalrick/wechatwriter/app/draft"
 	"github.com/royalrick/wechatwriter/app/image"
 	"github.com/royalrick/wechatwriter/app/wechat"
@@ -46,6 +46,7 @@ var (
 	convertCoverImage   string // 封面图片路径
 	convertAIHTML       string // Step 2: agent 生成的 HTML 文件路径
 	convertOutput       string // 输出文件路径
+	convertImageURLs    string // JSON 文件，包含图片索引到 CDN URL 的映射
 )
 
 func init() {
@@ -59,6 +60,7 @@ func init() {
 	convertCmd.Flags().StringVar(&convertCoverImage, "cover", "", "Cover image path for draft (required when using --draft)")
 	convertCmd.Flags().StringVar(&convertAIHTML, "ai-html", "", "Path to agent-generated HTML file (Step 2 of two-step workflow)")
 	convertCmd.Flags().StringVarP(&convertOutput, "output", "o", "", "Output HTML file path")
+	convertCmd.Flags().StringVar(&convertImageURLs, "image-urls", "", "JSON file mapping image indexes to CDN URLs for placeholder replacement")
 }
 
 // runConvert 执行转换
@@ -69,8 +71,8 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	}
 
 	// 回退到配置文件默认值
-	if !cmd.Flags().Changed("theme") && cfg.Article.Theme != "" {
-		convertTheme = cfg.Article.Theme
+	if !cmd.Flags().Changed("theme") && cfg.Wechat.Article.Theme != "" {
+		convertTheme = cfg.Wechat.Article.Theme
 	}
 
 	// 如果仍然为空，使用默认值
@@ -117,6 +119,25 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		}
 
 		result = converter.CompleteAIConversion(string(htmlBytes), images, convertTheme)
+
+		// Populate placeholder fields on all images (fixes root bug where Placeholder was empty)
+		for i := range result.Images {
+			result.Images[i].Placeholder = fmt.Sprintf("<!-- IMG:%d -->", i)
+		}
+
+		// If --image-urls provided, load CDN URLs and replace placeholders
+		if convertImageURLs != "" {
+			urls, err := loadImageURLs(convertImageURLs)
+			if err != nil {
+				return fmt.Errorf("load image URLs: %w", err)
+			}
+			for i := range result.Images {
+				if i < len(urls) && urls[i] != "" {
+					result.Images[i].WechatURL = urls[i]
+				}
+			}
+			result.HTML = converter.ReplaceImagePlaceholders(result.HTML, result.Images)
+		}
 	} else if converter.IsAIRequest(result) {
 		// Step 1: 返回提示词给 Claude 代理处理
 		prompt, images, ok := converter.GetAIRequestInfo(result)
@@ -139,7 +160,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 			})
 		}
 
-		log.Info("returning AI prompt for agent",
+		log.Debug("returning AI prompt for agent",
 			zap.Int("count", len(images)),
 			zap.Int("prompt_length", len(prompt)))
 
@@ -188,6 +209,33 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	// 输出 HTML
 	outputHTML(result.HTML, convertOutput, convertPreview)
 
+	// --ai-html 路径：输出 JSON 元数据（字符数、图片替换状态）
+	if convertAIHTML != "" && convertOutput != "" {
+		charCount := len(result.HTML)
+		imagesReplaced := 0
+		for _, img := range result.Images {
+			if img.WechatURL != "" {
+				imagesReplaced++
+			}
+		}
+
+		resp := map[string]any{
+			"type":            "convert_result",
+			"file":            convertOutput,
+			"char_count":      charCount,
+			"max_chars":       20000,
+			"images_replaced": imagesReplaced,
+			"images_total":    len(result.Images),
+		}
+		if charCount > 20000 {
+			resp["size_warning"] = fmt.Sprintf(
+				"HTML content is %d characters, exceeds WeChat limit of 20000. Suggestions: remove HTML comments (<!-- ... -->), simplify inline CSS (remove radial-gradient, background-image), remove <!DOCTYPE>/head/body wrapper, reduce content length.",
+				charCount,
+			)
+		}
+		responseSuccess(resp)
+	}
+
 	return nil
 }
 
@@ -198,7 +246,7 @@ func processImages(result *converter.ConvertResult) error {
 		return nil
 	}
 
-	processor := image.NewProcessor(cfg, &cfg.Article.Image, log)
+	processor := image.NewProcessor(cfg, &cfg.Wechat.Article.Content.Image, log)
 
 	for i, imgRef := range result.Images {
 		log.Info("processing image",
@@ -362,4 +410,18 @@ func outputHTML(html, outputPath string, preview bool) {
 			log.Info("html saved", zap.String("file", outputPath))
 		}
 	}
+}
+
+// loadImageURLs 从 JSON 文件中加载 CDN URL 列表
+// JSON 格式为字符串数组，索引对应图片索引
+func loadImageURLs(filePath string) ([]string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+	var urls []string
+	if err := json.Unmarshal(data, &urls); err != nil {
+		return nil, fmt.Errorf("parse JSON: %w", err)
+	}
+	return urls, nil
 }

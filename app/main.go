@@ -107,7 +107,6 @@ Configuration:
 	rootCmd.AddCommand(seoCmd())
 	rootCmd.AddCommand(accountCmd())
 	rootCmd.AddCommand(doctorCmd())
-	rootCmd.AddCommand(styleCmd())
 	rootCmd.AddCommand(contentCmd())
 
 	if err := rootCmd.Execute(); err != nil {

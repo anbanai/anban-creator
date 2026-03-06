@@ -183,18 +183,15 @@ bash scripts/run.sh download_and_upload "https://example.com/image.jpg"
 ### AI 生成图片
 
 ```bash
-# 默认尺寸 (2048x2048 方形)
-bash scripts/run.sh generate_image "A futuristic city skyline at sunset"
-
-# 16:9 比例 (推荐用于公众号封面)
-bash scripts/run.sh generate_image --size 2560x1440 "prompt"
+# 16:9 比例 (推荐用于公众号封面，默认 2K 档位)
+bash scripts/run.sh generate_image --size 16:9 "prompt"
 ```
 
 **公众号封面图建议**：
 
-- 使用 16:9 横向比例（2560x1440）作为文章封面
+- 使用 16:9 横向比例作为文章封面
 - 在微信 feed 流和文章列表中显示效果更好
-- 方形图片（2048x2048）在预览时会被裁剪
+- 方形图片在预览时会被裁剪
 
 **响应**：
 

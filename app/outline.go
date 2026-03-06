@@ -77,8 +77,8 @@ func outlineCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 回退到配置文件默认值
 			if !cmd.Flags().Changed("style") {
-				if err := initConfigMinimal(); err == nil && cfg.Article.Style != "" {
-					style = cfg.Article.Style
+				if err := initConfigMinimal(); err == nil && cfg.Wechat.Article.Style != "" {
+					style = cfg.Wechat.Article.Style
 				}
 			}
 

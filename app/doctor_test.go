@@ -51,7 +51,7 @@ func TestCheckConfig(t *testing.T) {
 
 	t.Run("invalid provider fails", func(t *testing.T) {
 		cfg := &config.Config{}
-		cfg.Article.Image.Provider = "unknown_provider"
+		cfg.Wechat.Article.Content.Image.Provider = "unknown_provider"
 		checks := checkConfig(cfg, nil)
 		statusMap := map[string]string{}
 		for _, c := range checks {
@@ -76,6 +76,90 @@ func TestCheckEnvironment(t *testing.T) {
 	}
 }
 
+func TestCheckConfig_PostImageKey(t *testing.T) {
+	t.Run("post image key via wechat.post", func(t *testing.T) {
+		cfg := &config.Config{}
+		cfg.Wechat.Post.Content.Image.Key = "post-key"
+		checks := checkConfig(cfg, nil)
+		statusMap := map[string]string{}
+		for _, c := range checks {
+			statusMap[c.Name] = c.Status
+		}
+		if statusMap["post_image_key"] != "pass" {
+			t.Errorf("post_image_key status = %q, want pass", statusMap["post_image_key"])
+		}
+	})
+
+	t.Run("post image key via xiaohongshu fallback", func(t *testing.T) {
+		cfg := &config.Config{}
+		xhs := &config.XiaohongshuConfig{}
+		xhs.Content.Image.Key = "xhs-key"
+		cfg.Xiaohongshu = xhs
+		checks := checkConfig(cfg, nil)
+		statusMap := map[string]string{}
+		for _, c := range checks {
+			statusMap[c.Name] = c.Status
+		}
+		if statusMap["post_image_key"] != "pass" {
+			t.Errorf("post_image_key status = %q, want pass (xiaohongshu fallback)", statusMap["post_image_key"])
+		}
+	})
+
+	t.Run("no post image key warns", func(t *testing.T) {
+		cfg := &config.Config{}
+		checks := checkConfig(cfg, nil)
+		statusMap := map[string]string{}
+		for _, c := range checks {
+			statusMap[c.Name] = c.Status
+		}
+		if statusMap["post_image_key"] != "warn" {
+			t.Errorf("post_image_key status = %q, want warn", statusMap["post_image_key"])
+		}
+	})
+}
+
+func TestCheckConfig_PublishReady(t *testing.T) {
+	t.Run("appid and secret configured - pass", func(t *testing.T) {
+		cfg := &config.Config{}
+		cfg.Wechat.AppID = "wx123"
+		cfg.Wechat.Secret = "secret123"
+		checks := checkConfig(cfg, nil)
+		statusMap := map[string]string{}
+		for _, c := range checks {
+			statusMap[c.Name] = c.Status
+		}
+		if statusMap["publish_ready"] != "pass" {
+			t.Errorf("publish_ready status = %q, want pass", statusMap["publish_ready"])
+		}
+	})
+
+	t.Run("missing appid - warn", func(t *testing.T) {
+		cfg := &config.Config{}
+		cfg.Wechat.Secret = "secret123"
+		checks := checkConfig(cfg, nil)
+		statusMap := map[string]string{}
+		for _, c := range checks {
+			statusMap[c.Name] = c.Status
+		}
+		if statusMap["publish_ready"] != "warn" {
+			t.Errorf("publish_ready status = %q, want warn", statusMap["publish_ready"])
+		}
+	})
+
+	t.Run("missing secret - warn", func(t *testing.T) {
+		cfg := &config.Config{}
+		cfg.Wechat.AppID = "wx123"
+		checks := checkConfig(cfg, nil)
+		statusMap := map[string]string{}
+		for _, c := range checks {
+			statusMap[c.Name] = c.Status
+		}
+		if statusMap["publish_ready"] != "warn" {
+			t.Errorf("publish_ready status = %q, want warn", statusMap["publish_ready"])
+		}
+	})
+}
+
 func TestCheckNetworkWithMock(t *testing.T) {
 	// Mock WeChat API server
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +169,7 @@ func TestCheckNetworkWithMock(t *testing.T) {
 
 	// checkNetwork uses hardcoded URL, so we just verify it runs without panic
 	cfg := &config.Config{}
-	cfg.Article.Image.BaseURL = srv.URL
+	cfg.Wechat.Article.Content.Image.BaseURL = srv.URL
 	checks := checkNetwork(cfg)
 	if len(checks) == 0 {
 		t.Error("expected at least one network check")

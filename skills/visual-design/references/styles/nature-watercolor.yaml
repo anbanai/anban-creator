@@ -1,0 +1,29 @@
+name: nature-watercolor
+english_name: Nature Watercolor
+description: 自然水彩风——水彩晕染效果、有机流动布局、清新治愈色调，适合旅行/美食/自然类内容
+category: 自然手绘 / 旅行美食
+
+colors:
+  primary: "#7BAE7F"      # 草绿（主色调）
+  secondary: "#87CEEB"    # 天蓝（辅助点缀）
+  accent: "#F4A89A"       # 珊瑚粉（暖色平衡）
+  background: "#F0F7F4"   # 薄荷白（底色渐变起点）
+  text: "#2D4A3E"         # 深森绿（正文）
+
+background:
+  type: 薄荷白到淡绿柔和渐变
+  texture: 水彩纸纹理，颜料晕染扩散效果
+  note: 有机流动，颜色边缘有自然渗透扩散感
+
+design:
+  layout: 有机流动布局，信息区域如水彩色块自然晕开，无硬边分隔
+  whitespace: 大量留白，呼吸感强，治愈系
+  border: 水彩晕染软边，无硬边框
+  shadow: 无投影，依靠色彩晕染区分层次
+
+prompt: |
+  清新水彩插画风信息图设计，薄荷白(#F0F7F4)到淡绿柔和渐变底色。
+  色彩：草绿(#7BAE7F)主色调，天蓝(#87CEEB)辅助点缀，珊瑚粉(#F4A89A)暖色平衡。
+  构图：有机流动布局，信息区域如水彩色块自然晕开，无硬边分隔。
+  质感：水彩颜料晕染效果，颜色边缘有自然渗透扩散，可见轻微水彩纸纹理。
+  氛围：清新、自然、治愈，适合旅行/美食/自然类内容。

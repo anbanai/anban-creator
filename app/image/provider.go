@@ -3,6 +3,9 @@ package image
 import (
 	"context"
 	"fmt"
+	"mime"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/royalrick/wechatwriter/app/config"
@@ -18,15 +21,21 @@ const (
 	DefaultVolcengineBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 )
 
+// GenerateOptions 图片生成选项
+type GenerateOptions struct {
+	RefImagePath string // 本地参考图文件路径（可选）
+}
+
 // Provider 图片生成服务提供者接口
 type Provider interface {
 	// Name 返回提供者名称
 	Name() string
 
-	// Generate 生成图片，返回图片 URL
+	// Generate 生成图片，返回图片 URL 或本地路径
 	// ctx: 上下文，用于超时控制
 	// prompt: 图片生成提示词
-	Generate(ctx context.Context, prompt string) (*GenerateResult, error)
+	// opts: 可选参数（如参考图），传 nil 表示无附加选项
+	Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error)
 }
 
 // GenerateResult 图片生成结果
@@ -117,4 +126,32 @@ func validateOpenAIConfig(apiCfg *config.ImageAPI) error {
 		}
 	}
 	return nil
+}
+
+// ReadRefImage 读取参考图文件，返回文件内容、MIME 类型和错误
+func ReadRefImage(path string) ([]byte, string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("读取参考图失败: %w", err)
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		// 根据扩展名手动设置常见图片类型
+		switch ext {
+		case ".jpg", ".jpeg":
+			mimeType = "image/jpeg"
+		case ".png":
+			mimeType = "image/png"
+		case ".gif":
+			mimeType = "image/gif"
+		case ".webp":
+			mimeType = "image/webp"
+		default:
+			mimeType = "image/jpeg"
+		}
+	}
+
+	return data, mimeType, nil
 }

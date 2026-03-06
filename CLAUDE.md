@@ -383,8 +383,8 @@ Skills are auto-loaded when working in this repository or via plugin marketplace
 hooks/hooks.json         # SessionStart (env setup), SubagentStop, TaskCompleted
 
 agents/
-├── article-writer.md    # Full article pipeline agent (maxTurns: 50)
-└── post-creator.md      # Image post pipeline agent (maxTurns: 25)
+├── wechatarticle.md    # Full article pipeline agent (maxTurns: 50)
+└── wechatpost.md      # Image post pipeline agent (maxTurns: 25)
 
 output-styles/
 └── wechat-creator.md    # WeChat creator output style

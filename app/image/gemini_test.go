@@ -6,19 +6,25 @@ import (
 
 func TestMapSizeToGeminiAspectRatio(t *testing.T) {
 	tests := []struct {
-		name  string
-		size  string
-		want  string
+		name string
+		size string
+		want string
 	}{
 		{"empty defaults to 1:1", "", "1:1"},
-		{"valid ratio passthrough 16:9", "16:9", "16:9"},
-		{"valid ratio passthrough 9:16", "9:16", "9:16"},
-		{"valid ratio passthrough 1:1", "1:1", "1:1"},
-		{"1024x1024 maps to 1:1", "1024x1024", "1:1"},
-		{"2048x2048 maps to 1:1", "2048x2048", "1:1"},
-		{"1376x768 maps to 16:9", "1376x768", "16:9"},
-		{"768x1376 maps to 9:16", "768x1376", "9:16"},
-		{"1264x848 maps to 3:2", "1264x848", "3:2"},
+		{"valid ratio 16:9", "16:9", "16:9"},
+		{"valid ratio 9:16", "9:16", "9:16"},
+		{"valid ratio 1:1", "1:1", "1:1"},
+		{"valid ratio 3:4", "3:4", "3:4"},
+		{"valid ratio 4:3", "4:3", "4:3"},
+		{"valid ratio 3:2", "3:2", "3:2"},
+		{"valid ratio 2:3", "2:3", "2:3"},
+		{"valid ratio 21:9", "21:9", "21:9"},
+		// Tier suffix is stripped, ratio is returned
+		{"3:4:1K strips tier", "3:4:1K", "3:4"},
+		{"16:9:4K strips tier", "16:9:4K", "16:9"},
+		// Pixel format not supported, defaults to 1:1
+		{"pixel format not supported", "1024x1024", "1:1"},
+		{"pixel format 2560x1440", "2560x1440", "1:1"},
 		{"unknown size defaults to 1:1", "999x888", "1:1"},
 	}
 

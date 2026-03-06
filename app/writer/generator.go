@@ -113,8 +113,19 @@ func (g *articleGenerator) buildPrompt(req *GenerateRequest) string {
 	prompt.WriteString("\n## 用户内容\n")
 	prompt.WriteString(req.UserInput)
 
-	prompt.WriteString("\n\n---\n\n")
-	prompt.WriteString("请根据以上要求，生成符合该风格的文章。")
+	// 添加配图要求
+	prompt.WriteString("\n\n## 配图要求\n")
+	prompt.WriteString("在文章的每个 ## 章节中，至少插入一个图片占位符，格式为：\n")
+	prompt.WriteString("![简短描述](__generate:从章节内容提炼的具体图片生成提示词__)\n\n")
+	prompt.WriteString("提示词要求：\n")
+	prompt.WriteString("- 必须与所在章节的具体内容强相关，包含 2-3 个章节关键词\n")
+	prompt.WriteString("- 格式：[核心主题] + [具体场景/物体] + [视觉风格]，长度 30-80 字\n")
+	prompt.WriteString("- 不同章节的提示词必须有明显区别\n")
+	prompt.WriteString("- 禁止通用描述（如\u201c美丽风景\u201d、\u201c抽象背景\u201d）\n")
+	prompt.WriteString("- 图片位置：放在关键段落之后，不要紧接 ## 标题，不要放在章节末尾\n\n")
+
+	prompt.WriteString("---\n\n")
+	prompt.WriteString("请根据以上要求，生成符合该风格的图文并茂的文章。")
 	prompt.WriteString("直接输出文章内容，不需要其他说明。")
 
 	return prompt.String()

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "xiaohongshu": {
+      "type": "http",
+      "url": "${API_BASE_URL:-http://localhost:18060}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${API_KEY:-anbanwriter}"
+      }
+    }
+  }
+}

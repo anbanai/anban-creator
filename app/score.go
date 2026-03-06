@@ -120,7 +120,7 @@ func runScore(inputFile, topic, domain string) error {
 	request.Metrics.ViralLevel = getViralLevel(request.Metrics.ViralScore)
 
 	// 输出结果
-	result := map[string]interface{}{
+	result := map[string]any{
 		"score":           request.Metrics.ViralScore,
 		"level":           request.Metrics.ViralLevel,
 		"topic":           request.Topic,
@@ -197,4 +197,3 @@ func generateRecommendations(metrics ViralMetrics) []string {
 
 	return recs
 }
-

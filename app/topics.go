@@ -64,7 +64,7 @@ Claude 代理会根据你的账号画像（关键词、领域）生成定制化�
 			}
 
 			// 从配置获取账号关键词，命令行关键词优先追加
-			accountKeywords := cfg.Wechat.Keywords
+			accountKeywords := cfg.Keywords
 			for _, kw := range keywords {
 				if !contains(accountKeywords, kw) {
 					accountKeywords = append(accountKeywords, kw)
@@ -74,7 +74,7 @@ Claude 代理会根据你的账号画像（关键词、领域）生成定制化�
 				accountKeywords = append([]string{domain}, accountKeywords...)
 			}
 
-			prompt := buildTopicsPrompt(accountKeywords, domain, count, cfg.Wechat.Positioning)
+			prompt := buildTopicsPrompt(accountKeywords, domain, count, cfg.Positioning)
 			responseSuccess(map[string]any{
 				"type":   "topics_prompt",
 				"prompt": prompt,

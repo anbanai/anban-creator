@@ -14,20 +14,29 @@
     ],
     "SubagentStop": [
       {
-        "matcher": "article-writer",
+        "matcher": "wechatarticle",
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "article-writer agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些文件、文章字数、是否成功创建草稿。如发现问题请提醒用户。"
+            "prompt": "wechatarticle agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些文件、文章字数、是否成功创建草稿。如发现问题请提醒用户。"
           }
         ]
       },
       {
-        "matcher": "post-creator",
+        "matcher": "wechatpost",
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "post-creator agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些图片、图片数量、是否成功创建草稿。如发现问题请提醒用户。"
+            "prompt": "wechatpost agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些图片、图片数量、是否成功创建草稿。如发现问题请提醒用户。"
+          }
+        ]
+      },
+      {
+        "matcher": "xiaohongshu",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "xiaohongshu agent 已完成执行。请检查 output/xiaohongshu/ 目录下的产出文件，生成一个简要的交付摘要，包括：创作的笔记标题、生成的图片数量、是否成功发布、以及任何需要用户关注的问题。"
           }
         ]
       }

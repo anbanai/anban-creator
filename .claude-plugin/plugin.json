@@ -3,7 +3,7 @@
   "description": "Professional WeChat content creation toolkit with AI-powered writing, visual design, and publishing optimization",
   "version": "2.3.0",
   "author": {
-    "name": "rick",
+    "name": "Rick",
     "email": "medivhzhan@gmail.com",
     "url": "https://github.com/royalrick"
   },
@@ -23,7 +23,5 @@
     "chinese-content",
     "social-media",
     "official-account"
-  ],
-  "outputStyles": "./output-styles/",
-  "hooks": "./hooks/hooks.json"
+  ]
 }

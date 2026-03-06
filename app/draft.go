@@ -320,8 +320,8 @@ func runPublish(title, content, author, digest, coverID, outputDir, images strin
 	}
 
 	// 创建草稿JSON
-	draftData := map[string]interface{}{
-		"articles": []map[string]interface{}{
+	draftData := map[string]any{
+		"articles": []map[string]any{
 			{
 				"title":   title,
 				"content": content,
@@ -332,8 +332,8 @@ func runPublish(title, content, author, digest, coverID, outputDir, images strin
 	}
 
 	if coverID != "" {
-		draftData["articles"].([]map[string]interface{})[0]["thumb_media_id"] = coverID
-		draftData["articles"].([]map[string]interface{})[0]["show_cover_pic"] = 1
+		draftData["articles"].([]map[string]any)[0]["thumb_media_id"] = coverID
+		draftData["articles"].([]map[string]any)[0]["show_cover_pic"] = 1
 	}
 
 	// 保存到文件

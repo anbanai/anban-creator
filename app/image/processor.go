@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/royalrick/wechatwriter/app/config"
@@ -24,13 +23,15 @@ func (e *ProcessorError) Hint() string  { return e.HintText }
 
 // Processor 图片处理器
 type Processor struct {
-	cfg         *config.Config
-	apiCfg      *config.ImageAPI
-	log         *zap.Logger
-	ws          *wechat.Service
-	compressor  *Compressor
-	provider    Provider
-	stylePrompt string
+	cfg          *config.Config
+	apiCfg       *config.ImageAPI
+	log          *zap.Logger
+	ws           *wechat.Service
+	compressor   *Compressor
+	provider     Provider
+	stylePrompt  string
+	presetPrompt string // 来自 config 预设（第三优先级）
+	refImagePath string // 参考图本地路径（可选）
 }
 
 // NewProcessor 创建图片处理器
@@ -70,12 +71,25 @@ func (p *Processor) SetStylePrompt(prompt string) {
 	p.stylePrompt = prompt
 }
 
-// buildPrompt 拼接风格前缀与用户提示词
-// 优先级：CLI --style > config style_prompt > 无风格（原样返回）
+// SetPresetPrompt 设置预设风格提示词（来自 config 预设，优先级低于 CLI --style 和 config style_prompt）
+func (p *Processor) SetPresetPrompt(prompt string) {
+	p.presetPrompt = prompt
+}
+
+// SetRefImage 设置参考图路径（CLI --ref 传入）
+func (p *Processor) SetRefImage(path string) {
+	p.refImagePath = path
+}
+
+
+// 优先级：CLI --style > config style_prompt > preset prompt > 无风格（原样返回）
 func (p *Processor) buildPrompt(userPrompt string) string {
 	style := strings.TrimSpace(p.stylePrompt)
 	if style == "" && p.apiCfg != nil {
 		style = strings.TrimSpace(p.apiCfg.StylePrompt)
+	}
+	if style == "" {
+		style = strings.TrimSpace(p.presetPrompt)
 	}
 	userPrompt = strings.TrimSpace(userPrompt)
 
@@ -89,7 +103,7 @@ func (p *Processor) buildPrompt(userPrompt string) string {
 	}
 
 	// 如果启用了水印裁剪，追加留白提示
-	if p.apiCfg != nil && p.apiCfg.Watermark.Enable && p.apiCfg.Watermark.Margin > 0 {
+	if p.apiCfg != nil && p.apiCfg.Watermark != nil && p.apiCfg.Watermark.Enable && p.apiCfg.Watermark.Margin > 0 {
 		prompt = appendCropMarginHint(prompt, p.apiCfg)
 	}
 
@@ -99,7 +113,8 @@ func (p *Processor) buildPrompt(userPrompt string) string {
 // appendCropMarginHint 根据水印裁剪配置，在提示词末尾追加留白指令
 func appendCropMarginHint(prompt string, apiCfg *config.ImageAPI) string {
 	margin := apiCfg.Watermark.Margin
-	w, h := parseImageSize(apiCfg.Size)
+	ratio, _ := ParseSize(apiCfg.Size)
+	w, h := parseRatioNumbers(ratio)
 	if w == 0 || h == 0 {
 		return prompt + fmt.Sprintf(
 			"\n\n【重要】图片四周需要预留至少 %d 像素的空白边距，边缘区域应为纯色或渐变背景，不包含任何重要元素。",
@@ -109,20 +124,6 @@ func appendCropMarginHint(prompt string, apiCfg *config.ImageAPI) string {
 	return prompt + fmt.Sprintf(
 		"\n\n【重要】图片四周需要预留空白边距：左右各至少 %d 像素，上下各至少 %d 像素。边缘区域应为纯色或渐变背景，不包含任何重要元素。",
 		margin, vMargin)
-}
-
-// parseImageSize 解析 "WIDTHxHEIGHT" 格式的尺寸字符串
-func parseImageSize(size string) (int, int) {
-	parts := strings.SplitN(strings.ToLower(size), "x", 2)
-	if len(parts) != 2 {
-		return 0, 0
-	}
-	w, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-	h, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err1 != nil || err2 != nil {
-		return 0, 0
-	}
-	return w, h
 }
 
 // UploadResult 上传结果
@@ -258,7 +259,8 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 
 	// 调用图片生成 API
 	ctx := context.Background()
-	result, err := activeProvider.Generate(ctx, p.buildPrompt(prompt))
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+	result, err := activeProvider.Generate(ctx, p.buildPrompt(prompt), genOpts)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
@@ -463,7 +465,7 @@ func (p *Processor) SetCompressQuality(quality int) {
 // 失败时记录 Warn 并返回原始路径（graceful degradation）。
 func (p *Processor) cropWatermark(filePath string) (string, bool) {
 	wm := p.apiCfg.Watermark
-	if !wm.Enable || wm.Margin <= 0 {
+	if wm == nil || !wm.Enable || wm.Margin <= 0 {
 		return filePath, false
 	}
 	croppedPath, err := CropMargin(p.log, filePath, wm.Margin)

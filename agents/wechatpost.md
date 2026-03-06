@@ -1,5 +1,5 @@
 ---
-name: post-creator
+name: wechatpost
 description: 微信公众号小绿书（图片帖）全自动创作引擎，从选题到发布的端到端流水线。用户提到"小绿书"、"图片帖"、"newspic"、"发图片"时使用此 agent。
 tools: TaskCreate, TaskUpdate, TaskList, TaskGet, Read, Write, Glob, Grep, Bash
 model: inherit
@@ -24,18 +24,27 @@ maxTurns: 25
 2. 执行 `wechatwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
 3. **创建内容目录**：执行 `mkdir -p output/posts/post-$(date +%Y%m%d)-001` 生成隔离工作目录（如已存在 001 则自增序号），后续所有图片保存在该目录内，变量记为 `$DIR`
 4. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，规划小绿书的标题、描述、标签和图片的关键内容描述
-5. **定义统一视觉风格**：
-   - 执行 `wechatwriter style list` 查看可用的视觉风格预设
-   - 根据内容主题选择合适的预设名称作为 `$STYLE`（如 `$STYLE="morandi-flat"`）
-   - 可执行 `wechatwriter style show <name>` 查看预设详情（配色、边框、背景等）
-   - 如无合适预设，构思一段包含以下维度的风格描述作为 `$STYLE`：
-     - 设计风格（扁平/3D/水彩/极简等）
-     - 配色方案（主色、辅色、强调色、背景色）
-     - 边框样式（圆角/直角/无边框、投影）
-     - 背景类型（渐变/纯色/纹理）
-     - 字体风格（衬线/无衬线、粗细）
-   - 所有图片生成命令均传 `--style "$STYLE"` 以保持多图视觉一致性
-6. 使用 skill `visual-design` 逐一生成小绿书图片（`image generate --post --style "$STYLE" -o $DIR/image_01.png`），保存到 `$DIR/`
+5. **定义统一视觉风格**（参考图优先，风格描述兜底）：
+
+   **方式 A — 有参考图**：如用户提供了参考图或风格示例图，直接记录路径，后续图片生成用 `--ref <路径>` 传入，无需额外设计风格描述。
+
+   **方式 B — 无参考图**：根据内容主题和目标受众，设计一段完整的视觉风格描述作为 `$STYLE`，包含以下维度：
+   - 设计风格（扁平/3D/水彩/极简等）
+   - 配色方案（主色、辅色、强调色、背景色，含 hex 色值）
+   - 边框样式（圆角/直角/无边框、投影）
+   - 背景类型（渐变/纯色/纹理）
+   - 字体风格（衬线/无衬线、粗细）
+
+6. 使用 skill `visual-design` 逐一生成小绿书图片，保存到 `$DIR/`：
+
+   **第一张封面图**（确定基准风格）：
+   - 有用户参考图：`wechatwriter image generate "{封面prompt}" --post --ref <用户参考图> -o $DIR/image_01.png`
+   - 无参考图：`wechatwriter image generate "{封面prompt}" --post --style "$STYLE" -o $DIR/image_01.png`
+
+   **后续图片**（内容图/收尾图）— 统一用封面作参考图：
+   - `wechatwriter image generate "{内容prompt}" --post --ref $DIR/image_01.png -o $DIR/image_02.png`
+   - `wechatwriter image generate "{收尾prompt}" --post --ref $DIR/image_01.png -o $DIR/image_last.png`
+6.5. 使用 skill `content-writing` 对标题和描述文案执行违禁词合规检查
 7. 逐一上传图片到微信素材库（`image upload $DIR/image_01.png`），记录每张图的 media_id
 8. 使用 skill `post-publishing` → `draft post --media-ids` 用素材 ID 发布到微信公众号草稿箱
 
@@ -66,10 +75,10 @@ maxTurns: 25
 ## 质量标准
 
 - 图片数量以 `wechatwriter account info` 输出的「图片数量」为准（配置项 `post.count`，默认 4）
-- 所有图片统一使用 `--post --style "$STYLE"` 参数生成，保持视觉一致性
+- 所有图片保持视觉一致性：封面用 `--style "$STYLE"` 或 `--ref <参考图>`，后续图片用 `--ref $DIR/image_01.png`
 - 所有图片文件存在且可访问
 - 标题不为空，不超过 32 字符
-- 描述文字为纯文本（不含 HTML 标签）
+- 描述文字为纯文本（不含 HTML 标签），无违禁词
 - 发布前必须通过 `--dry-run` 验证
 
 ## 错误处理

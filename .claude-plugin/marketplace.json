@@ -1,7 +1,7 @@
 {
   "name": "anbanai",
   "owner": {
-    "name": "rick",
+    "name": "Rick",
     "email": "medivhzhan@gmail.com"
   },
   "plugins": [
@@ -10,7 +10,7 @@
       "source": "./",
       "description": "Next-generation WeChat article creation suite with AI-powered content generation, intelligent formatting, and automated publishing workflow. Features smart conversion, natural language image generation, writing style enhancement, and comprehensive content optimization.",
       "author": {
-        "name": "rick"
+        "name": "Rick"
       },
       "homepage": "https://github.com/royalrick/wechatwriter",
       "repository": "https://github.com/royalrick/wechatwriter",

@@ -13,11 +13,7 @@ func TestMapToDALLESize(t *testing.T) {
 	}{
 		// Empty defaults to 1024x1024
 		{"empty defaults to 1024x1024", "", "dall-e-3", "1024x1024"},
-		// DALL-E 3 exact sizes pass through
-		{"dall-e-3 1024x1024 passthrough", "1024x1024", "dall-e-3", "1024x1024"},
-		{"dall-e-3 1792x1024 passthrough", "1792x1024", "dall-e-3", "1792x1024"},
-		{"dall-e-3 1024x1792 passthrough", "1024x1792", "dall-e-3", "1024x1792"},
-		// Aspect ratio mapping
+		// Aspect ratio mapping for DALL-E 3
 		{"16:9 maps to 1792x1024", "16:9", "dall-e-3", "1792x1024"},
 		{"9:16 maps to 1024x1792", "9:16", "dall-e-3", "1024x1792"},
 		{"1:1 maps to 1024x1024", "1:1", "dall-e-3", "1024x1024"},
@@ -25,17 +21,15 @@ func TestMapToDALLESize(t *testing.T) {
 		{"3:4 maps to 1024x1792", "3:4", "dall-e-3", "1024x1792"},
 		{"3:2 maps to 1792x1024", "3:2", "dall-e-3", "1792x1024"},
 		{"2:3 maps to 1024x1792", "2:3", "dall-e-3", "1024x1792"},
-		// Pixel format: landscape
-		{"2560x1440 wide -> 1792x1024", "2560x1440", "dall-e-3", "1792x1024"},
-		// Pixel format: portrait
-		{"1440x2560 tall -> 1024x1792", "1440x2560", "dall-e-3", "1024x1792"},
-		// DALL-E 2 valid sizes
-		{"dall-e-2 256x256", "256x256", "dall-e-2", "256x256"},
-		{"dall-e-2 512x512", "512x512", "dall-e-2", "512x512"},
-		{"dall-e-2 1024x1024", "1024x1024", "dall-e-2", "1024x1024"},
-		// DALL-E 2 invalid size defaults to 1024x1024
-		{"dall-e-2 unknown -> 1024x1024", "16:9", "dall-e-2", "1024x1024"},
-		{"dall-e-2 2560x1440 -> 1024x1024", "2560x1440", "dall-e-2", "1024x1024"},
+		{"21:9 maps to 1792x1024", "21:9", "dall-e-3", "1792x1024"},
+		// Tier suffix stripped before ratio lookup
+		{"16:9:2K maps to 1792x1024", "16:9:2K", "dall-e-3", "1792x1024"},
+		{"3:4:1K maps to 1024x1792", "3:4:1K", "dall-e-3", "1024x1792"},
+		// DALL-E 2 always returns 1024x1024
+		{"dall-e-2 any size defaults to 1024x1024", "16:9", "dall-e-2", "1024x1024"},
+		{"dall-e-2 pixel format defaults to 1024x1024", "2560x1440", "dall-e-2", "1024x1024"},
+		// Pixel format not supported, defaults to 1024x1024
+		{"pixel format not supported", "2560x1440", "dall-e-3", "1024x1024"},
 		// Unknown format defaults to 1024x1024
 		{"unknown format defaults", "badformat", "dall-e-3", "1024x1024"},
 	}

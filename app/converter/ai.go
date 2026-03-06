@@ -129,7 +129,8 @@ func (c *converter) getGenericPrompt() string {
 2. 不使用外部样式表或 <style> 标签
 3. 只使用安全的 HTML 标签
 4. 图片使用占位符格式：<!-- IMG:index -->
-5. 返回完整的 HTML，不需要其他说明文字`
+5. 返回完整的 HTML，不需要其他说明文字
+6. Markdown 中的图片标记 ![desc](__generate:prompt__) 必须转换为 HTML 占位符 <!-- IMG:N -->（N 从 0 开始按出现顺序递增），不要删除或忽略这些标记`
 }
 
 // PrepareAIRequest 准备 AI 转换请求（供外部调用）
@@ -259,5 +260,6 @@ func getGenericPromptForExternal() string {
 2. 不使用外部样式表或 <style> 标签
 3. 只使用安全的 HTML 标签
 4. 图片使用占位符格式：<!-- IMG:index -->
-5. 返回完整的 HTML，不需要其他说明文字`
+5. 返回完整的 HTML，不需要其他说明文字
+6. Markdown 中的图片标记 ![desc](__generate:prompt__) 必须转换为 HTML 占位符 <!-- IMG:N -->（N 从 0 开始按出现顺序递增），不要删除或忽略这些标记`
 }
