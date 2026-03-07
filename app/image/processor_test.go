@@ -59,7 +59,6 @@ func TestProcessor_buildPrompt(t *testing.T) {
 		configStyle   string
 		overrideStyle string
 		userPrompt    string
-		watermark     *config.WatermarkConfig
 		size          string
 		want          string
 	}{
@@ -118,34 +117,6 @@ func TestProcessor_buildPrompt(t *testing.T) {
 			want:          "config 风格\n\n内容图",
 		},
 		{
-			name:       "启用水印+有尺寸时追加具体像素留白提示",
-			userPrompt: "春天的茶园",
-			watermark:  &config.WatermarkConfig{Enable: true, Margin: 50},
-			size:       "16:9",
-			want:       "春天的茶园\n\n【重要】图片四周需要预留空白边距：左右各至少 50 像素，上下各至少 28 像素。边缘区域应为纯色或渐变背景，不包含任何重要元素。",
-		},
-		{
-			name:       "启用水印+无尺寸时追加通用留白提示",
-			userPrompt: "春天的茶园",
-			watermark:  &config.WatermarkConfig{Enable: true, Margin: 30},
-			size:       "",
-			want:       "春天的茶园\n\n【重要】图片四周需要预留空白边距：左右各至少 30 像素，上下各至少 30 像素。边缘区域应为纯色或渐变背景，不包含任何重要元素。",
-		},
-		{
-			name:       "未启用水印时 prompt 不变",
-			userPrompt: "春天的茶园",
-			watermark:  &config.WatermarkConfig{Enable: false, Margin: 50},
-			size:       "16:9",
-			want:       "春天的茶园",
-		},
-		{
-			name:       "启用水印但 margin 为 0 时 prompt 不变",
-			userPrompt: "春天的茶园",
-			watermark:  &config.WatermarkConfig{Enable: true, Margin: 0},
-			size:       "16:9",
-			want:       "春天的茶园",
-		},
-		{
 			name:       "preset prompt 在无其他风格时生效",
 			userPrompt: "封面图",
 			want:       "预设风格\n\n封面图",
@@ -156,7 +127,6 @@ func TestProcessor_buildPrompt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			apiCfg := &config.ImageAPI{
 				StylePrompt: tt.configStyle,
-				Watermark:   tt.watermark,
 				Size:        tt.size,
 			}
 			p := newTestProcessor(apiCfg)

@@ -3,9 +3,10 @@ package image
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/royalrick/wechatwriter/app/config"
 	"github.com/royalrick/wechatwriter/app/wechat"
@@ -102,28 +103,7 @@ func (p *Processor) buildPrompt(userPrompt string) string {
 		prompt = style + "\n\n" + userPrompt
 	}
 
-	// 如果启用了水印裁剪，追加留白提示
-	if p.apiCfg != nil && p.apiCfg.Watermark != nil && p.apiCfg.Watermark.Enable && p.apiCfg.Watermark.Margin > 0 {
-		prompt = appendCropMarginHint(prompt, p.apiCfg)
-	}
-
 	return prompt
-}
-
-// appendCropMarginHint 根据水印裁剪配置，在提示词末尾追加留白指令
-func appendCropMarginHint(prompt string, apiCfg *config.ImageAPI) string {
-	margin := apiCfg.Watermark.Margin
-	ratio, _ := ParseSize(apiCfg.Size)
-	w, h := parseRatioNumbers(ratio)
-	if w == 0 || h == 0 {
-		return prompt + fmt.Sprintf(
-			"\n\n【重要】图片四周需要预留至少 %d 像素的空白边距，边缘区域应为纯色或渐变背景，不包含任何重要元素。",
-			margin)
-	}
-	vMargin := int(math.Round(float64(margin) * float64(h) / float64(w)))
-	return prompt + fmt.Sprintf(
-		"\n\n【重要】图片四周需要预留空白边距：左右各至少 %d 像素，上下各至少 %d 像素。边缘区域应为纯色或渐变背景，不包含任何重要元素。",
-		margin, vMargin)
 }
 
 // UploadResult 上传结果
@@ -228,7 +208,83 @@ type GenerateAndUploadResult struct {
 type GenerateOnlyResult struct {
 	FilePath string `json:"file_path"` // 最终本地文件路径
 	Size     string `json:"size"`
+	Width    int    `json:"width,omitempty"`
+	Height   int    `json:"height,omitempty"`
 	url      string // 原始 URL（远程）或 provider 临时路径，仅内部使用
+}
+
+// BatchImageResult 组图生成结果（单张）
+type BatchImageResult struct {
+	FilePath string `json:"file_path"`
+	Size     string `json:"size"`
+	Index    int    `json:"index"`
+}
+
+// processRawResult 处理单张原始生成结果：下载（如需）、裁水印、压缩，保存到 outputPath。
+// outputPath 非空时保存到目标路径；为空时返回临时文件路径（调用方负责清理）。
+func (p *Processor) processRawResult(result *GenerateResult, outputPath string) (*GenerateOnlyResult, error) {
+	var toClean []string
+
+	// 远程 URL 需要下载，本地路径（Gemini/OpenRouter）直接使用
+	sourcePath := result.URL
+	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
+		tmpPath, err := wechat.DownloadFile(result.URL)
+		if err != nil {
+			return nil, fmt.Errorf("download generated image: %w", err)
+		}
+		toClean = append(toClean, tmpPath)
+		sourcePath = tmpPath
+	} else {
+		toClean = append(toClean, sourcePath)
+	}
+
+	processedPath := sourcePath
+
+	// 压缩（如果需要）
+	if p.apiCfg.Compress {
+		compressedPath, compressed, err := p.compressor.CompressImage(processedPath)
+		if err != nil {
+			p.log.Warn("compress failed, using original", zap.Error(err))
+		} else if compressed {
+			toClean = append(toClean, compressedPath)
+			processedPath = compressedPath
+			p.log.Debug("using compressed image", zap.String("path", processedPath))
+		}
+	}
+
+	finalPath := processedPath
+	if outputPath != "" {
+		data, err := os.ReadFile(processedPath)
+		if err != nil {
+			for _, f := range toClean {
+				os.Remove(f)
+			}
+			return nil, fmt.Errorf("read processed image: %w", err)
+		}
+		if err := os.WriteFile(outputPath, data, 0644); err != nil {
+			for _, f := range toClean {
+				os.Remove(f)
+			}
+			return nil, fmt.Errorf("save to output %s: %w", outputPath, err)
+		}
+		for _, f := range toClean {
+			os.Remove(f)
+		}
+		finalPath = outputPath
+	} else {
+		// 清理中间临时文件，保留最终处理结果（由调用方负责清理）
+		for _, f := range toClean {
+			if f != processedPath {
+				os.Remove(f)
+			}
+		}
+	}
+
+	return &GenerateOnlyResult{
+		FilePath: finalPath,
+		Size:     result.Size,
+		url:      result.URL,
+	}, nil
 }
 
 // generateOnly 生成图片到本地，不上传到微信。
@@ -268,75 +324,146 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 		zap.String("provider", result.Model),
 		zap.String("size", result.Size))
 
-	// 跟踪需要清理的临时文件
-	var toClean []string
+	return p.processRawResult(result, outputPath)
+}
 
-	// 远程 URL 需要下载，本地路径（Gemini/OpenRouter）直接使用
-	sourcePath := result.URL
-	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
-		tmpPath, err := wechat.DownloadFile(result.URL)
+// GenerateBatchOnly 组图生成（不上传到微信），将所有图片保存到 outputDir。
+// count 为期望生成数量，outputDir 为已存在的输出目录。
+// 若 provider 实现了 BatchProvider，使用原生组图 API（一次调用）；否则降级为逐张生成。
+// 处理过程使用并发以提高效率。
+func (p *Processor) GenerateBatchOnly(prompt string, count int, outputDir string) ([]*BatchImageResult, error) {
+	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
+		return nil, err
+	}
+	if p.provider == nil {
+		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
+	}
+
+	builtPrompt := p.buildPrompt(prompt)
+	ctx := context.Background()
+	opts := &GenerateOptions{
+		RefImagePath: p.refImagePath,
+		MaxImages:    count,
+	}
+
+	var rawResults []*GenerateResult
+	if bp, ok := p.provider.(BatchProvider); ok {
+		p.log.Info("using native batch generation", zap.Int("count", count), zap.String("provider", p.provider.Name()))
+		batchResult, err := bp.GenerateBatch(ctx, builtPrompt, opts)
 		if err != nil {
-			return nil, fmt.Errorf("download generated image: %w", err)
+			return nil, fmt.Errorf("batch generate images: %w", err)
 		}
-		toClean = append(toClean, tmpPath)
-		sourcePath = tmpPath
+		rawResults = batchResult.Images
 	} else {
-		// 本地文件（provider 已写入临时路径）
-		toClean = append(toClean, sourcePath)
+		// 降级：循环单图生成
+		p.log.Info("using sequential generation", zap.Int("count", count), zap.String("provider", p.provider.Name()))
+		singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+		for i := 0; i < count; i++ {
+			result, err := p.provider.Generate(ctx, builtPrompt, singleOpts)
+			if err != nil {
+				return nil, fmt.Errorf("generate image %d: %w", i+1, err)
+			}
+			rawResults = append(rawResults, result)
+		}
 	}
 
-	// 裁剪水印（仅 AI 生成图片）
-	processedPath, isCropped := p.cropWatermark(sourcePath)
-	if isCropped {
-		toClean = append(toClean, processedPath)
+	// 并发处理生成的图片（下载、裁水印、压缩）
+	return p.processBatchConcurrent(rawResults, outputDir)
+}
+
+// GenerateBatchWithVariants 组图生成支持多内容描述变体
+// basePrompt 为基础风格描述，variants 为每张图的具体内容描述
+// outputDir 为已存在的输出目录
+func (p *Processor) GenerateBatchWithVariants(basePrompt string, variants []string, outputDir string) ([]*BatchImageResult, error) {
+	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
+		return nil, err
+	}
+	if p.provider == nil {
+		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
 	}
 
-	// 压缩（如果需要）
-	if p.apiCfg.Compress {
-		compressedPath, compressed, err := p.compressor.CompressImage(processedPath)
+	p.log.Info("using batch generation with variants",
+		zap.Int("count", len(variants)),
+		zap.String("provider", p.provider.Name()))
+
+	ctx := context.Background()
+	baseStyle := p.buildPrompt(basePrompt)
+
+	// 为每张图生成：基础风格 + 具体变体
+	var rawResults []*GenerateResult
+	singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+
+	for i, variant := range variants {
+		// 组合 prompt：基础风格 + 变体描述
+		fullPrompt := baseStyle
+		if strings.TrimSpace(variant) != "" {
+			fullPrompt = baseStyle + "\n\n" + strings.TrimSpace(variant)
+		}
+
+		p.log.Debug("generating variant", zap.Int("index", i+1), zap.String("prompt", fullPrompt))
+		result, err := p.provider.Generate(ctx, fullPrompt, singleOpts)
 		if err != nil {
-			p.log.Warn("compress failed, using original", zap.Error(err))
-		} else if compressed {
-			toClean = append(toClean, compressedPath)
-			processedPath = compressedPath
-			p.log.Debug("using compressed image", zap.String("path", processedPath))
+			return nil, fmt.Errorf("generate image %d: %w", i+1, err)
 		}
+		rawResults = append(rawResults, result)
 	}
 
-	// 处理输出路径
-	finalPath := processedPath
-	if outputPath != "" {
-		data, err := os.ReadFile(processedPath)
-		if err != nil {
-			for _, f := range toClean {
-				os.Remove(f)
-			}
-			return nil, fmt.Errorf("read processed image: %w", err)
-		}
-		if err := os.WriteFile(outputPath, data, 0644); err != nil {
-			for _, f := range toClean {
-				os.Remove(f)
-			}
-			return nil, fmt.Errorf("save to output %s: %w", outputPath, err)
-		}
-		for _, f := range toClean {
-			os.Remove(f)
-		}
-		finalPath = outputPath
-	} else {
-		// 清理中间临时文件，保留最终处理结果（由调用方负责清理）
-		for _, f := range toClean {
-			if f != processedPath {
-				os.Remove(f)
-			}
-		}
+	// 并发处理生成的图片（下载、裁水印、压缩）
+	return p.processBatchConcurrent(rawResults, outputDir)
+}
+
+// processBatchConcurrent 并发处理批量图片生成结果
+func (p *Processor) processBatchConcurrent(rawResults []*GenerateResult, outputDir string) ([]*BatchImageResult, error) {
+	count := len(rawResults)
+	if count == 0 {
+		return nil, fmt.Errorf("no images to process")
 	}
 
-	return &GenerateOnlyResult{
-		FilePath: finalPath,
-		Size:     result.Size,
-		url:      result.URL,
-	}, nil
+	// 使用 WaitGroup 等待所有处理完成
+	var wg sync.WaitGroup
+	results := make([]*BatchImageResult, count)
+	errorsChan := make(chan error, count)
+
+	// 限制并发数，避免过多 goroutine
+	sem := make(chan struct{}, 3)
+
+	for i, raw := range rawResults {
+		wg.Add(1)
+		go func(index int, rawResult *GenerateResult) {
+			defer wg.Done()
+
+			sem <- struct{}{}        // 获取信号量
+			defer func() { <-sem }() // 释放信号量
+
+			outputPath := filepath.Join(outputDir, fmt.Sprintf("image_%02d.png", index+1))
+			processed, err := p.processRawResult(rawResult, outputPath)
+			if err != nil {
+				errorsChan <- fmt.Errorf("process image %d: %w", index+1, err)
+				return
+			}
+
+			results[index] = &BatchImageResult{
+				FilePath: processed.FilePath,
+				Size:     processed.Size,
+				Index:    index + 1,
+			}
+			p.log.Debug("batch image processed", zap.Int("index", index+1), zap.String("path", outputPath))
+		}(i, raw)
+	}
+
+	wg.Wait()
+	close(errorsChan)
+
+	// 检查是否有错误
+	var errs []error
+	for err := range errorsChan {
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		return nil, errs[0] // 返回第一个错误
+	}
+
+	return results, nil
 }
 
 // GenerateOnly AI 生成图片到本地文件，不上传到微信
@@ -458,22 +585,6 @@ func (p *Processor) CompressImage(filePath string) (string, bool, error) {
 // SetCompressQuality 设置压缩质量
 func (p *Processor) SetCompressQuality(quality int) {
 	p.compressor.SetQuality(quality)
-}
-
-// cropWatermark 若配置了去水印，裁剪水印并返回裁剪后的临时文件路径。
-// 返回: 处理后的路径, 是否创建了新临时文件（需要调用方 defer os.Remove）, 错误。
-// 失败时记录 Warn 并返回原始路径（graceful degradation）。
-func (p *Processor) cropWatermark(filePath string) (string, bool) {
-	wm := p.apiCfg.Watermark
-	if wm == nil || !wm.Enable || wm.Margin <= 0 {
-		return filePath, false
-	}
-	croppedPath, err := CropMargin(p.log, filePath, wm.Margin)
-	if err != nil {
-		p.log.Warn("watermark crop failed, using original", zap.Error(err))
-		return filePath, false
-	}
-	return croppedPath, true
 }
 
 // ValidateCoverImage 验证封面图片是否满足微信要求

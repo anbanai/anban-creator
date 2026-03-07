@@ -32,7 +32,6 @@ func imageCmd() *cobra.Command {
 	cmd.AddCommand(imageUploadCmd())
 	cmd.AddCommand(imageDownloadCmd())
 	cmd.AddCommand(imageGenerateCmd())
-	cmd.AddCommand(imageCropCmd())
 	cmd.AddCommand(imageBatchCmd())
 
 	return cmd
@@ -164,6 +163,8 @@ func imageGenerateCmd() *cobra.Command {
 	var output string
 	var upload bool
 	var refer string
+	var count int
+	var variants []string
 
 	cmd := &cobra.Command{
 		Use:   "generate <prompt>",
@@ -177,8 +178,19 @@ func imageGenerateCmd() *cobra.Command {
                 尺寸: 比例格式 1:1, 16:9, 9:16, 3:4, 4:3 等
   openrouter  - OpenRouter 多模型网关
                 尺寸: 比例格式 16:9/3:4 等，可加档位 3:4:1K/3:4:2K
-  volcengine  - 火山方舟 Seedream（doubao-seedream-4-5-251128）
+  volcengine  - 火山方舟 Seedream（doubao-seedream-5-0-250128）
                 尺寸: 比例格式 1:1, 16:9, 3:4 等，可加档位 3:4:4K
+
+风格控制：
+  --style 提供文字风格描述，如"扁平插画风格，莫兰迪色系"
+  --ref 提供参考图片路径，生成时会参考该图的视觉风格
+  两者可以同时使用，style 提供文字描述，ref 提供视觉参考
+
+Prompt 构建优先级（从高到低）：
+  1. CLI --style 参数
+  2. 配置文件 image.style_prompt
+  3. 预设风格（通过 --post-style 配置）
+  4. 无风格（仅使用用户 prompt）
 
 需要配置:
   article.image.key      - 图片 API Key
@@ -198,6 +210,15 @@ func imageGenerateCmd() *cobra.Command {
   # 指定比例+档位
   wechatwriter image generate "封面图" --size 3:4:1K -o xhs-cover.jpg
   wechatwriter image generate "封面图" --size 3:4:4K -o cover-4k.jpg
+
+  # 组图模式：一次生成 4 张风格一致的图片到目录
+  wechatwriter image generate "小绿书内容图" --post --count 4 -o ./output/images/
+
+  # 组图变体模式：为每张图指定不同内容描述
+  wechatwriter image generate "清新扁平风格，莫兰迪色系" \
+    --post --count 4 \
+    --variants "封面：茶园晨景，阳光洒在茶树上","图2：采茶姑娘手部特写","图3：传统制茶工艺","图4：一杯清香绿茶" \
+    -o ./xhs_post_images/
 
   # 生成后自动上传到微信
   wechatwriter image generate "封面图" --upload`,
@@ -221,11 +242,6 @@ func imageGenerateCmd() *cobra.Command {
 					responseError(fmt.Errorf("参考图格式不支持: %s（支持格式: JPG, JPEG, PNG, WebP, GIF）", refer))
 					return
 				}
-			}
-
-			// 自动生成时间戳文件名
-			if output == "" {
-				output = time.Now().Format("generated_image_20060102_150405") + ".png"
 			}
 
 			// 选择 article 还是 post 的图片配置
@@ -255,8 +271,8 @@ func imageGenerateCmd() *cobra.Command {
 
 			// 解析预设 prompt（post 模式、无显式 --style、有配置预设时）
 			postStyle := cfg.Wechat.Post.Style
-			if postStyle == "" && cfg.Xiaohongshu != nil {
-				postStyle = cfg.Xiaohongshu.Style
+			if postStyle == "" && cfg.XHS != nil {
+				postStyle = cfg.XHS.Style
 			}
 			if postMode && stylePrompt == "" && postStyle != "" {
 				pm := image.NewStylePresetManager()
@@ -265,6 +281,73 @@ func imageGenerateCmd() *cobra.Command {
 						processor.SetPresetPrompt(preset.Prompt)
 					}
 				}
+			}
+
+			// 组图模式：count > 1 时调用 GenerateBatchOnly 或 GenerateBatchWithVariants
+			if count > 1 {
+				outputDir := output
+				if outputDir == "" {
+					outputDir = "."
+				}
+				if err := os.MkdirAll(outputDir, 0755); err != nil {
+					responseError(fmt.Errorf("创建输出目录失败: %w", err))
+					return
+				}
+
+				var batchResults []*image.BatchImageResult
+				var err error
+
+				// 如果提供了 variants，使用 GenerateBatchWithVariants
+				if len(variants) > 0 {
+					batchResults, err = processor.GenerateBatchWithVariants(prompt, variants, outputDir)
+				} else {
+					batchResults, err = processor.GenerateBatchOnly(prompt, count, outputDir)
+				}
+
+				if err != nil {
+					responseError(err)
+					return
+				}
+
+				var filePaths []string
+				for _, r := range batchResults {
+					filePaths = append(filePaths, r.FilePath)
+				}
+
+				if store != nil {
+					for i, r := range batchResults {
+						imgRecord := &storage.Image{
+							Prompt:      prompt,
+							Provider:    apiCfg.Provider,
+							LocalPath:   r.FilePath,
+							StylePreset: stylePrompt,
+							CreatedAt:   time.Now(),
+						}
+						// 如果有 variants，记录具体变体 prompt
+						if len(variants) > 0 && i < len(variants) {
+							imgRecord.Prompt = fmt.Sprintf("%s\n\n[变体]: %s", prompt, variants[i])
+						}
+						if info, infoErr := image.GetImageInfo(r.FilePath); infoErr == nil {
+							imgRecord.Width = info.Width
+							imgRecord.Height = info.Height
+							imgRecord.SizeBytes = info.Size
+						}
+						_ = store.CreateImage(imgRecord)
+					}
+				}
+
+				responseSuccess(map[string]any{
+					"count":      len(batchResults),
+					"file_paths": filePaths,
+					"size":       size,
+					"results":    batchResults,
+				})
+				return
+			}
+
+			// 单图模式：自动生成时间戳文件名
+			if output == "" {
+				output = time.Now().Format("generated_image_20060102_150405") + ".png"
 			}
 
 			var genResult *image.GenerateOnlyResult
@@ -284,6 +367,17 @@ func imageGenerateCmd() *cobra.Command {
 				genResult.Size = size
 			}
 
+			// 获取实际像素尺寸（同时供 JSON 输出和 DB 记录使用）
+			var imgWidth, imgHeight int
+			var imgSizeBytes int64
+			if info, infoErr := image.GetImageInfo(genResult.FilePath); infoErr == nil {
+				imgWidth = info.Width
+				imgHeight = info.Height
+				imgSizeBytes = info.Size
+				genResult.Width = info.Width
+				genResult.Height = info.Height
+			}
+
 			// 静默记录生成结果到 DB
 			if store != nil {
 				imgRecord := &storage.Image{
@@ -291,12 +385,10 @@ func imageGenerateCmd() *cobra.Command {
 					Provider:    apiCfg.Provider,
 					LocalPath:   genResult.FilePath,
 					StylePreset: stylePrompt,
+					Width:       imgWidth,
+					Height:      imgHeight,
+					SizeBytes:   imgSizeBytes,
 					CreatedAt:   time.Now(),
-				}
-				if info, infoErr := image.GetImageInfo(genResult.FilePath); infoErr == nil {
-					imgRecord.Width = info.Width
-					imgRecord.Height = info.Height
-					imgRecord.SizeBytes = info.Size
 				}
 				_ = store.CreateImage(imgRecord)
 			}
@@ -329,76 +421,12 @@ func imageGenerateCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&size, "size", "s", "", "图片尺寸（比例格式 16:9/9:16/1:1/3:4/4:3，可加档位 3:4:1K/3:4:2K/3:4:4K，默认档位 2K）")
 	cmd.Flags().BoolVar(&postMode, "post", false, "使用小绿书图片尺寸（默认 3:4）")
-	cmd.Flags().StringVar(&stylePrompt, "style", "", "风格提示词，前置于生成提示词以保持多图风格一致")
-	cmd.Flags().StringVarP(&output, "output", "o", "", "输出文件路径（默认自动生成时间戳文件名）")
-	cmd.Flags().BoolVar(&upload, "upload", false, "生成后自动上传到微信素材库（需要配置微信 AppID/Secret）")
-	cmd.Flags().StringVar(&refer, "ref", "", "参考图本地路径（支持 JPG, PNG, WebP, GIF），用于风格/内容参考")
-
-	return cmd
-}
-
-// imageCropCmd 裁剪图片四边
-func imageCropCmd() *cobra.Command {
-	var margin int
-	var output string
-
-	cmd := &cobra.Command{
-		Use:   "crop <file_path>",
-		Short: "裁剪图片四边（自动保持宽高比）",
-		Long: `裁剪图片四边去除水印，左右各裁 margin 像素，上下按宽高比自动计算，保持原始宽高比不变
-
-示例:
-  # 左右各裁 20 像素，上下自动计算
-  wechatwriter image crop cover.jpg --margin 20
-
-  # 指定输出路径
-  wechatwriter image crop cover.jpg --margin 20 -o cropped.jpg`,
-		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return initConfigMinimal()
-		},
-		Run: func(cmd *cobra.Command, args []string) {
-			filePath := args[0]
-
-			outPath, err := image.CropMargin(log, filePath, margin)
-			if err != nil {
-				responseError(err)
-				return
-			}
-
-			// 如果指定了输出路径，移动临时文件到目标位置
-			if output != "" {
-				data, readErr := os.ReadFile(outPath)
-				os.Remove(outPath)
-				if readErr != nil {
-					responseError(readErr)
-					return
-				}
-				if writeErr := os.WriteFile(output, data, 0644); writeErr != nil {
-					responseError(writeErr)
-					return
-				}
-				outPath = output
-			}
-
-			// 获取输出文件尺寸
-			info, _ := image.GetImageInfo(outPath)
-			result := map[string]any{
-				"file_path": outPath,
-				"margin":    margin,
-			}
-			if info != nil {
-				result["width"] = info.Width
-				result["height"] = info.Height
-				result["size"] = info.Size
-			}
-			responseSuccess(result)
-		},
-	}
-
-	cmd.Flags().IntVarP(&margin, "margin", "m", 0, "左右各裁剪的像素数，上下按宽高比自动计算（必填）")
-	cmd.Flags().StringVarP(&output, "output", "o", "", "输出文件路径（默认保存到临时目录）")
-	_ = cmd.MarkFlagRequired("margin")
+	cmd.Flags().StringVar(&stylePrompt, "style", "", "风格提示词（文字描述），前置于 prompt 以保持多图视觉风格一致。可与 --ref 同时使用")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "单图模式：输出文件路径；组图模式（--count>1）：输出目录（默认当前目录）")
+	cmd.Flags().BoolVar(&upload, "upload", false, "生成后自动上传到微信素材库（需要配置微信 AppID/Secret，仅单图模式）")
+	cmd.Flags().StringVar(&refer, "ref", "", "参考图本地路径（支持 JPG, PNG, WebP, GIF）。生成图片会参考此图的视觉风格和内容。可与 --style 同时使用：--ref 提供视觉参考，--style 提供文字风格描述")
+	cmd.Flags().IntVar(&count, "count", 1, "生成图片数量（>1 时启用组图模式，支持 volcengine 原生批量 API）")
+	cmd.Flags().StringArrayVar(&variants, "variants", nil, "组图变体描述，每张图的内容描述（与 --count 一起使用）。例如：--variants \"封面：茶园晨景\",\"图2：采茶特写\"")
 
 	return cmd
 }
@@ -488,8 +516,8 @@ func imageBatchCmd() *cobra.Command {
 
 			// 解析预设 prompt（post 模式、无显式 --style、有配置预设时）
 			postStyle := cfg.Wechat.Post.Style
-			if postStyle == "" && cfg.Xiaohongshu != nil {
-				postStyle = cfg.Xiaohongshu.Style
+			if postStyle == "" && cfg.XHS != nil {
+				postStyle = cfg.XHS.Style
 			}
 			if postMode && stylePrompt == "" && postStyle != "" {
 				pm := image.NewStylePresetManager()

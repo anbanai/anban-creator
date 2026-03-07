@@ -17,13 +17,27 @@ const (
 	DefaultOpenAIModel       = "dall-e-3"
 	DefaultOpenRouterModel   = "google/gemini-3-pro-image-preview"
 	DefaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
-	DefaultVolcengineModel   = "doubao-seedream-4-5-251128"
+	DefaultVolcengineModel   = "doubao-seedream-5-0-250128"
 	DefaultVolcengineBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 )
 
 // GenerateOptions 图片生成选项
 type GenerateOptions struct {
-	RefImagePath string // 本地参考图文件路径（可选）
+	RefImagePath  string   // 本地参考图文件路径（单张，可选）
+	RefImagePaths []string // 多张参考图路径（组图模式，可选）
+	MaxImages     int      // 组图模式：期望生成图片数量（0 = 单图模式）
+}
+
+// GenerateBatchResult 组图生成结果
+type GenerateBatchResult struct {
+	Images []*GenerateResult
+}
+
+// BatchProvider 支持原生组图的提供者（可选接口）
+// 不支持原生组图的 provider 无需实现此接口，processor 会自动降级为循环单图生成
+type BatchProvider interface {
+	Provider
+	GenerateBatch(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateBatchResult, error)
 }
 
 // Provider 图片生成服务提供者接口

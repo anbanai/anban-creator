@@ -177,10 +177,8 @@ func TestVolcengineGenerate_WithAdvancedOptions(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	watermark := false
 	optimizePrompt := true
 	volcCfg := &config.VolcengineConfig{
-		Watermark:      &watermark,
 		OptimizePrompt: &optimizePrompt,
 		OutputFormat:   "png",
 	}
@@ -188,10 +186,6 @@ func TestVolcengineGenerate_WithAdvancedOptions(t *testing.T) {
 	_, err := p.Generate(context.Background(), "a landscape", nil)
 	if err != nil {
 		t.Fatalf("Generate() unexpected error: %v", err)
-	}
-
-	if v, ok := capturedBody["watermark"]; !ok || v != false {
-		t.Errorf("expected watermark=false in request body, got %v", capturedBody["watermark"])
 	}
 	if v, ok := capturedBody["optimize_prompt"]; !ok || v != true {
 		t.Errorf("expected optimize_prompt=true in request body, got %v", capturedBody["optimize_prompt"])
@@ -264,6 +258,104 @@ func TestVolcengineGenerate_RateLimit(t *testing.T) {
 	}
 	if genErr.Code != "rate_limit" {
 		t.Errorf("expected code=rate_limit, got %q", genErr.Code)
+	}
+}
+
+func TestVolcengineGenerateBatch_Success(t *testing.T) {
+	urls := []string{
+		"https://example.com/image1.png",
+		"https://example.com/image2.png",
+		"https://example.com/image3.png",
+	}
+	srv := makeVolcengineTestServer(t, http.StatusOK, map[string]any{
+		"data": []map[string]any{
+			{"url": urls[0]},
+			{"url": urls[1]},
+			{"url": urls[2]},
+		},
+	})
+	defer srv.Close()
+
+	p := makeVolcengineProvider(t, srv.URL, nil)
+	opts := &GenerateOptions{MaxImages: 3}
+	result, err := p.GenerateBatch(context.Background(), "test prompt", opts)
+	if err != nil {
+		t.Fatalf("GenerateBatch() unexpected error: %v", err)
+	}
+	if len(result.Images) != 3 {
+		t.Fatalf("GenerateBatch() got %d images, want 3", len(result.Images))
+	}
+	for i, img := range result.Images {
+		if img.URL != urls[i] {
+			t.Errorf("GenerateBatch() image[%d] URL = %q, want %q", i, img.URL, urls[i])
+		}
+		if img.Model != p.model {
+			t.Errorf("GenerateBatch() image[%d] Model = %q, want %q", i, img.Model, p.model)
+		}
+	}
+}
+
+func TestVolcengineGenerateBatch_NoImages(t *testing.T) {
+	srv := makeVolcengineTestServer(t, http.StatusOK, map[string]any{
+		"data": []map[string]any{},
+	})
+	defer srv.Close()
+
+	p := makeVolcengineProvider(t, srv.URL, nil)
+	_, err := p.GenerateBatch(context.Background(), "test prompt", &GenerateOptions{MaxImages: 3})
+	if err == nil {
+		t.Fatal("GenerateBatch() expected error for empty data, got nil")
+	}
+	genErr, ok := err.(*GenerateError)
+	if !ok {
+		t.Fatalf("expected *GenerateError, got %T", err)
+	}
+	if genErr.Code != "no_image" {
+		t.Errorf("expected code=no_image, got %q", genErr.Code)
+	}
+}
+
+func TestVolcengineGenerateBatch_SetsSequentialImageGeneration(t *testing.T) {
+	var capturedBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"url": "https://example.com/img1.png"},
+				{"url": "https://example.com/img2.png"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := makeVolcengineProvider(t, srv.URL, nil)
+	_, err := p.GenerateBatch(context.Background(), "landscape", &GenerateOptions{MaxImages: 2})
+	if err != nil {
+		t.Fatalf("GenerateBatch() unexpected error: %v", err)
+	}
+
+	if v, ok := capturedBody["sequential_image_generation"]; !ok || v != "auto" {
+		t.Errorf("expected sequential_image_generation=auto in request body, got %v", capturedBody["sequential_image_generation"])
+	}
+	opts, ok := capturedBody["sequential_image_generation_options"].(map[string]any)
+	if !ok {
+		t.Fatal("expected sequential_image_generation_options in request body")
+	}
+	if opts["max_images"] != float64(2) {
+		t.Errorf("expected max_images=2, got %v", opts["max_images"])
+	}
+}
+
+func TestVolcengineProviderImplementsBatchProvider(t *testing.T) {
+	srv := makeVolcengineTestServer(t, http.StatusOK, map[string]any{"data": []map[string]any{}})
+	defer srv.Close()
+	p := makeVolcengineProvider(t, srv.URL, nil)
+
+	var _ BatchProvider = p // compile-time interface check
+	_, ok := Provider(p).(BatchProvider)
+	if !ok {
+		t.Error("VolcengineProvider should implement BatchProvider")
 	}
 }
 

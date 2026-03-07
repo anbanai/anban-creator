@@ -6,7 +6,7 @@ description: |
 user-invocable: false
 metadata:
   author: Rick
-  version: 2.1.0
+  version: 2.2.0
 ---
 
 # 小红书运营技能
@@ -20,13 +20,13 @@ metadata:
 使用前先验证登录状态：
 
 ```
-check_login
+check_login_status()
 ```
 
-若未登录，执行：
+若未登录，执行（返回 Base64 二维码图片，展示给用户扫码）：
 
 ```
-login
+get_login_qrcode()
 ```
 
 ---
@@ -35,19 +35,30 @@ login
 
 ---
 
+## xsec_token 工作流
+
+**重要**：大多数 MCP 工具需要 `feed_id` 和 `xsec_token` 两个参数。这两个参数**只能**从 `search_feeds` 或 `list_feeds` 的返回结果中获取，不能凭空构造。
+
+工作流程：
+1. 先调用 `search_feeds(keyword=...)` 或 `list_feeds()` 获取 Feed 列表
+2. 从返回结果中提取每个笔记的 `feed_id`（或 `id`）和 `xsecToken` 字段
+3. 将这两个值传入后续工具调用（如 `get_feed_detail`、`post_comment_to_feed` 等）
+
+---
+
 ## 1) 选题研究
 
 使用 MCP 工具分析平台热门内容：
 
 ```
-# 搜索相关话题的热门笔记
-search_posts(query="<话题关键词>", limit=20)
+# 搜索相关话题的热门笔记（返回结果包含 feed_id 和 xsecToken）
+search_feeds(keyword="<话题关键词>")
 
-# 获取推荐流（了解平台当前推广内容）
-list_feed(limit=20)
+# 获取推荐流（了解平台当前推广内容，返回结果包含 feed_id 和 xsecToken）
+list_feeds()
 
-# 获取具体笔记详情+评论数据
-get_feed_detail(post_id="<笔记ID>")
+# 获取具体笔记详情+评论数据（需从上面的结果提取 feed_id 和 xsec_token）
+get_feed_detail(feed_id="<笔记ID>", xsec_token="<从列表结果提取的xsecToken>")
 ```
 
 **分析维度**：
@@ -101,13 +112,15 @@ wechatwriter image generate "收尾图：总结CTA卡片" --post --ref ./cover.p
 ### 图文笔记
 
 ```
-publish_post(
+publish_content(
   title="笔记标题",
-  content="正文内容（含话题标签）",
+  content="正文内容（不含 # 话题标签，标签通过 tags 参数传入）",
   images=["./cover.png", "./image_02.png", "./image_03.png"],
   tags=["话题1", "话题2", "话题3"]
 )
 ```
+
+**注意**：`content` 参数不包含以 `#` 开头的话题标签内容，所有话题标签通过 `tags` 参数提供。
 
 **发布前自动检查与修正**（所有检查通过后直接发布）：
 - 标题超过 20 字 → 自动截断并重新生成符合要求的标题
@@ -118,10 +131,10 @@ publish_post(
 ### 视频笔记
 
 ```
-publish_video(
+publish_with_video(
   title="视频标题",
-  content="正文内容",
-  video_path="./video.mp4",
+  content="正文内容（不含 # 话题标签）",
+  video="./video.mp4",
   tags=["话题1", "话题2"]
 )
 ```
@@ -133,18 +146,23 @@ publish_video(
 ### 查看评论
 
 ```
-# 获取笔记详情和评论
-get_feed_detail(post_id="<笔记ID>")
+# 先获取笔记列表取得 feed_id 和 xsec_token
+list_feeds()
+# 或搜索
+search_feeds(keyword="<关键词>")
+
+# 获取笔记详情和评论（使用上一步获取的参数）
+get_feed_detail(feed_id="<笔记ID>", xsec_token="<xsecToken>")
 ```
 
 ### 回复评论
 
 ```
 # 在笔记下发表评论
-post_comment(post_id="<笔记ID>", content="评论内容")
+post_comment_to_feed(feed_id="<笔记ID>", xsec_token="<xsecToken>", content="评论内容")
 
 # 回复具体评论
-reply_comment(post_id="<笔记ID>", comment_id="<评论ID>", content="回复内容")
+reply_comment_in_feed(feed_id="<笔记ID>", xsec_token="<xsecToken>", content="回复内容", comment_id="<评论ID>", user_id="<用户ID>")
 ```
 
 **回复规范**：
@@ -155,11 +173,11 @@ reply_comment(post_id="<笔记ID>", comment_id="<评论ID>", content="回复内�
 ### 互动操作
 
 ```
-# 点赞
-like_post(post_id="<笔记ID>", action="like")
+# 点赞（取消点赞用 unlike=true）
+like_feed(feed_id="<笔记ID>", xsec_token="<xsecToken>")
 
-# 收藏
-favorite_post(post_id="<笔记ID>", action="favorite")
+# 收藏（取消收藏用 unfavorite=true）
+favorite_feed(feed_id="<笔记ID>", xsec_token="<xsecToken>")
 ```
 
 ---
@@ -169,11 +187,14 @@ favorite_post(post_id="<笔记ID>", action="favorite")
 发布后使用 MCP 追踪数据：
 
 ```
-# 获取笔记详情（含点赞/收藏/评论数）
-get_feed_detail(post_id="<已发布笔记ID>")
+# 先获取笔记列表（含已发布笔记的 feed_id 和 xsec_token）
+list_feeds()
 
-# 查看自己账号主页数据
-get_user_profile(user_id="self")
+# 获取笔记详情（含点赞/收藏/评论数）
+get_feed_detail(feed_id="<已发布笔记ID>", xsec_token="<xsecToken>")
+
+# 查看账号主页数据（user_id 和 xsec_token 从 list_feeds/search_feeds 的用户信息中获取）
+user_profile(user_id="<用户ID>", xsec_token="<xsecToken>")
 ```
 
 分析维度：互动率（点赞+收藏/曝光）、评论质量、热门评论关键词。
@@ -184,18 +205,19 @@ get_user_profile(user_id="self")
 
 输入爆款笔记，输出高贴合可发布新笔记：
 
-1. 用 `get_feed_detail(post_id="<爆款ID>")` 获取原笔记完整内容
-2. 拆解模板（标题句式/封面层级/正文节奏/互动机制/标签组合）
-3. 保留：同主题、同互动机制、同内容结构
-4. 替换：具体措辞、案例细节、账号人设口吻
-5. 禁止：逐句照抄、原图二次使用
-6. 参考 `xiaohongshu-writing` 技能创作内容，按第 2-3 节流程生成图片并发布
+1. 先调用 `search_feeds(keyword="<爆款关键词>")` 或 `list_feeds()` 获取 feed_id 和 xsec_token
+2. 用 `get_feed_detail(feed_id="<爆款ID>", xsec_token="<xsecToken>")` 获取原笔记完整内容
+3. 拆解模板（标题句式/封面层级/正文节奏/互动机制/标签组合）
+4. 保留：同主题、同互动机制、同内容结构
+5. 替换：具体措辞、案例细节、账号人设口吻
+6. 禁止：逐句照抄、原图二次使用
+7. 参考 `xiaohongshu-writing` 技能创作内容，按第 2-3 节流程生成图片并发布
 
 ---
 
 ## 实操经验
 
-- 话题标签优先用平台热门话题，发布时在 `tags` 字段传入
+- 话题标签优先用平台热门话题，发布时在 `tags` 字段传入（不要放在 `content` 里）
 - 发布后 1 小时内回复前几条评论，有助于互动率
 - 图片内容密度适中：封面文字大而醒目，内容图信息结构清晰
 - 若出现新类型评论节奏问题，优先减少每小时回复频率而非提高

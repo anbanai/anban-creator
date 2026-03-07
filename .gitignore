@@ -1,6 +1,6 @@
 # Binaries (current directory only)
-/writer
-/writer.exe
+/wechatwriter
+/wechatwriter.exe
 
 # Ignore all binaries (anywhere in the repo)
 **/bin/
@@ -22,13 +22,7 @@ vendor/
 go.work
 
 # Configuration files (contain sensitive information)
-.wechatwriter/settings.json
-writer.yaml
-writer.yml
-writer.json
-.writer.yaml
-.writer.yml
-.writer.json
+.wechatwriter/
 
 # Log files
 *.log

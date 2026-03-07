@@ -10,6 +10,7 @@ import (
 	"github.com/royalrick/wechatwriter/app/storage"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -18,6 +19,26 @@ var (
 	store   *storage.Store
 	version = "2.0.0"
 )
+
+// initLogger 初始化日志，输出到文件而不是 stderr
+func initLogger() (*zap.Logger, error) {
+	logPath := filepath.Join(config.ConfigDir, "app.log")
+
+	// 确保目录存在
+	if err := os.MkdirAll(config.ConfigDir, 0755); err != nil {
+		return nil, fmt.Errorf("create log directory: %w", err)
+	}
+
+	zapConfig := zap.NewProductionConfig()
+	zapConfig.OutputPaths = []string{logPath}
+	zapConfig.ErrorOutputPaths = []string{logPath}
+	zapConfig.Encoding = "json"
+	zapConfig.Sampling = nil // 禁用采样，确保所有日志都被写入
+	zapConfig.EncoderConfig.TimeKey = "timestamp"
+	zapConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	return zapConfig.Build()
+}
 
 // initStorage 初始化数据库（静默，失败不影响命令运行）
 func initStorage() {
@@ -48,9 +69,12 @@ func initConfig() error {
 		return err
 	}
 
-	log, err = zap.NewProduction()
+	log, err = initLogger()
 	if err != nil {
-		return err
+		// 日志初始化失败不阻断命令，仅输出到 stderr（仅一次）
+		fmt.Fprintf(os.Stderr, "⚠️  日志初始化失败: %v\n", err)
+		// 创建 no-op logger
+		log = zap.NewNop()
 	}
 
 	initStorage()
@@ -70,9 +94,12 @@ func initConfigMinimal() error {
 		return err
 	}
 
-	log, err = zap.NewProduction()
+	log, err = initLogger()
 	if err != nil {
-		return err
+		// 日志初始化失败不阻断命令，仅输出到 stderr（仅一次）
+		fmt.Fprintf(os.Stderr, "⚠️  日志初始化失败: %v\n", err)
+		// 创建 no-op logger
+		log = zap.NewNop()
 	}
 
 	initStorage()
@@ -99,6 +126,7 @@ Configuration:
 	rootCmd.AddCommand(imageCmd())
 	rootCmd.AddCommand(convertCmd)
 	rootCmd.AddCommand(draftCmd())
+	rootCmd.AddCommand(xiaohongshuCmd())
 	rootCmd.AddCommand(writeCmd)
 	rootCmd.AddCommand(humanizeCmd())
 	rootCmd.AddCommand(scoreCmd())
@@ -112,6 +140,11 @@ Configuration:
 	if err := rootCmd.Execute(); err != nil {
 		responseError(err)
 		os.Exit(1)
+	}
+
+	// 确保日志写入文件
+	if log != nil {
+		_ = log.Sync()
 	}
 }
 

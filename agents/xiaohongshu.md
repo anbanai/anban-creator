@@ -40,11 +40,14 @@ maxTurns: 30
 
 ## 创作流程
 
+0. **登录检查**：调用 `check_login_status()` 检查登录状态。若未登录，调用 `get_login_qrcode()` 获取二维码展示给用户扫码，等待登录完成后再继续。
+
 1. 执行 `wechatwriter account info --scope post` 获取账号信息
 
 2. **研究选题**：使用 skill `xiaohongshu-ops` 的选题研究模块：
-   - `search_posts(query="<用户话题>", limit=20)` 搜索热门笔记
-   - `list_feed(limit=20)` 获取推荐流
+   - `search_feeds(keyword="<用户话题>")` 搜索热门笔记（返回结果含 feed_id 和 xsecToken）
+   - `list_feeds()` 获取推荐流（返回结果含 feed_id 和 xsecToken）
+   - 从上述结果提取 feed_id 和 xsecToken，调用 `get_feed_detail(feed_id="<ID>", xsec_token="<token>")` 获取互动数据
    - 使用互动率评分公式自动选 Top 1 选题（无需用户确认）：
      ```
      topic_score = engagement_rate × recency_weight × novelty_bonus
@@ -64,8 +67,8 @@ maxTurns: 30
      字数优化: 12-18字→1, 否则→0
      句式加分: 疑问/否定/数字句式→1, 否则→0
      ```
-   - **正文**：遵循 `xiaohongshu-writing` 正文结构（钩子→核心→互动收尾），匹配行业文案公式（如适用），直接生成 1 版最优内容
-   - **话题标签**（5-8 个）
+   - **正文**：遵循 `xiaohongshu-writing` 正文结构（钩子→核心→互动收尾），匹配行业文案公式（如适用），直接生成 1 版最优内容（不含 # 话题标签）
+   - **话题标签**（5-8 个，单独列出）
    - 内容保存到 `$DIR/content.md`
 
 5. **定义视觉风格**（预设优先 > 参考图 > 动态设计）：
@@ -86,29 +89,37 @@ maxTurns: 30
 
    将选择的方式和 `$STYLE`（如有）写入 `$DIR/topic-analysis.md`。
 
-6. **生成图片**：使用 skill `visual-design` 逐一生成图片：
+6. **生成图片**：使用 batch 模式批量生成风格一致的组图（volcengine 支持原生 SequentialImageGeneration，单次 API 调用生成多张）：
 
-   **封面图**（第一张，确定基准风格）：
-   - 有用户参考图：`wechatwriter image generate "{封面prompt}" --post --ref <用户参考图> -o $DIR/cover.png`
-   - 无参考图：`wechatwriter image generate "{封面prompt}" --post --style "$STYLE" -o $DIR/cover.png`
+   **确定图片数量**：根据内容规划，一般 5-7 张（奇数效果更好）：
+   - 第 1 张：封面图（最吸引眼球的标题+核心信息）
+   - 第 2-4 张：内容图（分点展示核心内容，每张信息密度高）
+   - 第 5-6 张：详情/案例图（具体展示、数据、场景）
+   - 第 7 张：收尾图（总结、CTA、互动引导）
 
-   **后续图片**（内容图/收尾图）— 统一用封面作参考图：
-   - `wechatwriter image generate "{内容prompt}" --post --ref $DIR/cover.png -o $DIR/image_02.png`
-   - `wechatwriter image generate "{收尾prompt}" --post --ref $DIR/cover.png -o $DIR/image_last.png`
+   **批量生成命令**（单条命令生成全部图片，确保风格完全一致）：
+   ```bash
+   # 使用 --count 参数批量生成（推荐 5-7 张，volcengine 会自动使用 SequentialImageGeneration）
+   wechatwriter image generate "{组图prompt}" --post --count 7 --style "$STYLE" -o $DIR/
+   ```
 
-   - 小红书图文笔记推荐 3-9 张图（奇数效果更好）
+   生成后检查每张图片：`$DIR/image_01.png`（封面）、`$DIR/image_02.png` ... `$DIR/image_07.png`
+
+   **风格一致性要求**：
+   - 有配置预设：使用 `--style "$STYLE"` 传入预设提示词
+   - 有参考图：先生成封面确认风格，再批量生成其余图片
 
 7. **发布笔记**：合规检查通过后直接发布，无需等待用户确认：
    ```
-   publish_post(
+   publish_content(
      title="<评分选定的标题>",
-     content="<正文+话题标签>",
+     content="<正文内容（不含 # 话题标签）>",
      images=["$DIR/cover.png", "$DIR/image_02.png", ...],
      tags=["话题1", "话题2", "话题3"]
    )
    ```
 
-8. **发布验证**：使用 `get_feed_detail` 确认笔记已发布，记录笔记 ID，写入最终报告 `$DIR/publish-result.md`
+8. **发布验证**：调用 `list_feeds()` 获取最新 Feed 列表，用其中的 feed_id 和 xsec_token 调用 `get_feed_detail` 确认笔记已发布，记录笔记 ID，写入最终报告 `$DIR/publish-result.md`
 
 ---
 
@@ -129,8 +140,8 @@ maxTurns: 30
 ## 质量标准
 
 - 标题 ≤20 字（含核心关键词）
-- 正文包含话题标签（5-8 个）
-- 所有图片保持视觉一致性：有配置预设→ `--style "$STYLE"`；有参考图→封面用 `--style "$STYLE"` 或 `--ref <参考图>`，后续图片用 `--ref $DIR/cover.png`
+- 正文不含话题标签（标签通过 `tags` 参数传入）
+- 所有图片保持视觉一致性：使用 batch 模式 `--count N` 一次性生成全部图片，确保风格完全一致
 - 图片文件均存在且可访问（≥3 张）
 - 内容合规：无违禁词、无虚假承诺、无引战内容
 
@@ -139,7 +150,7 @@ maxTurns: 30
 ## 错误处理（全自动重试+降级）
 
 **图片生成失败**：
-- 重试 1 次（等待 3s）→ 仍失败则跳过该图片
+- 批量生成失败时，尝试降低 --count 重试（如 7 张失败则试 5 张）
 - 确保最终图片 ≥3 张，否则重新生成补充
 - 在 `$DIR/publish-result.md` 中记录跳过原因
 

@@ -107,7 +107,7 @@ func showAccountInfo(scope string) error {
 		fmt.Printf("- 可用风格: %s\n", strings.Join(sm.ListStyleNames(), ", "))
 
 	case "post":
-		fmt.Printf("\n# 小绿书配置\n\n")
+		fmt.Printf("\n# 图文发布配置（微信小绿书 + 小红书）\n\n")
 		fmt.Printf("- 图片数量: %d\n", cfg.PostImageCount())
 		fmt.Printf("- 图片尺寸: %s\n", cfg.PostImageSize())
 
@@ -120,15 +120,18 @@ func showAccountInfo(scope string) error {
 			}
 			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
 		} else {
-			fmt.Printf("- 图片生成: 未配置（需设置 xiaohongshu.content.image.key 或 wechat.post.content.image.key）\n")
+			fmt.Printf("- 图片生成: 未配置（需设置 xhs.content.image.key 或 wechat.post.content.image.key）\n")
 		}
 
 		// 发布能力状态
+		fmt.Printf("\n## 发布通道\n\n")
 		if cfg.Wechat.AppID != "" && cfg.Wechat.Secret != "" {
-			fmt.Printf("- 微信发布: 就绪\n")
+			fmt.Printf("- 微信小绿书: 就绪（使用 draft post 命令）\n")
 		} else {
-			fmt.Printf("- 微信发布: 未配置（需设置 wechat.appid 和 wechat.secret）\n")
+			fmt.Printf("- 微信小绿书: 未配置（需设置 wechat.appid 和 wechat.secret）\n")
 		}
+		fmt.Printf("- 小红书: 通过 MCP 工具 publish_content()\n")
+		fmt.Printf("  💡 确保已配置 xiaohongshu MCP 服务器\n")
 
 		if cfg.Wechat.Post.Style != "" {
 			pm := image.NewStylePresetManager()
@@ -179,14 +182,14 @@ func showAccountInfo(scope string) error {
 			}
 			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
 		} else {
-			fmt.Printf("- 图片生成: 未配置（需设置 xiaohongshu.content.image.key 或 wechat.post.content.image.key）\n")
+			fmt.Printf("- 图片生成: 未配置（需设置 xhs.content.image.key 或 wechat.post.content.image.key）\n")
 		}
 
 		// 发布能力状态
 		if cfg.Wechat.AppID != "" && cfg.Wechat.Secret != "" {
 			fmt.Printf("- 微信发布: 就绪\n")
 		} else {
-			fmt.Printf("- 微信发布: 未配置（需设置 wechat.appid 和 wechat.secret）\n")
+			fmt.Printf("- 微信发布: 未配置（仅微信小绿书需要；小红书发布通过 MCP 工具，无需此配置）\n")
 		}
 
 		if cfg.Wechat.Post.Style != "" {

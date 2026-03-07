@@ -35,15 +35,16 @@ maxTurns: 25
    - 背景类型（渐变/纯色/纹理）
    - 字体风格（衬线/无衬线、粗细）
 
-6. 使用 skill `visual-design` 逐一生成小绿书图片，保存到 `$DIR/`：
+6. 使用 skill `visual-design` 生成小绿书图片，保存到 `$DIR/`：
 
    **第一张封面图**（确定基准风格）：
    - 有用户参考图：`wechatwriter image generate "{封面prompt}" --post --ref <用户参考图> -o $DIR/image_01.png`
    - 无参考图：`wechatwriter image generate "{封面prompt}" --post --style "$STYLE" -o $DIR/image_01.png`
 
-   **后续图片**（内容图/收尾图）— 统一用封面作参考图：
-   - `wechatwriter image generate "{内容prompt}" --post --ref $DIR/image_01.png -o $DIR/image_02.png`
-   - `wechatwriter image generate "{收尾prompt}" --post --ref $DIR/image_01.png -o $DIR/image_last.png`
+   **后续图片**（内容图 + 收尾图）— 用封面作参考图，一次调用批量生成：
+   - `wechatwriter image generate "{内容/收尾prompt}" --post --count $COUNT --ref $DIR/image_01.png -o $DIR/`
+   - 其中 `$COUNT` = 总图片数 - 1（即去除封面后的数量）
+   - 输出的文件为 `$DIR/image_01.png` ... `$DIR/image_N.png`，需重命名为 `image_02.png` ... `image_last.png`（避免与封面覆盖）
 6.5. 使用 skill `content-writing` 对标题和描述文案执行违禁词合规检查
 7. 逐一上传图片到微信素材库（`image upload $DIR/image_01.png`），记录每张图的 media_id
 8. 使用 skill `post-publishing` → `draft post --media-ids` 用素材 ID 发布到微信公众号草稿箱

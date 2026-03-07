@@ -33,14 +33,18 @@ func sanitizeJSON(data []byte) []byte {
 func draftCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "draft",
-		Short: "草稿管理（创建、测试、发布）",
-		Long: `草稿管理命令组
+		Short: "微信草稿管理（创建、测试、发布）",
+		Long: `微信公众号草稿管理命令组（仅用于微信，小红书请使用 xiaohongshu 命令或 MCP 工具）
 
 支持的操作：
-  article     - 从 JSON 文件创建图文文章草稿
-  test        - 测试草稿 HTML
-  publish     - 创建并发布草稿
-  post        - 创建小绿书帖子（图片消息）`,
+  article     - 从 JSON 文件创建微信公众号图文文章草稿
+  test        - 测试草稿 HTML（微信）
+  publish     - 创建并发布草稿到微信公众号
+  post        - 创建微信小绿书帖子（图片消息/newspic），仅微信，小红书请使用 MCP 工具 publish_content()
+
+平台说明：
+  - 本命令组所有子命令仅用于微信公众号/小绿书
+  - 小红书发布请使用 MCP 工具 publish_content() 或 wechatwriter xiaohongshu export 导出`,
 	}
 
 	cmd.AddCommand(draftArticleCmd())
@@ -58,7 +62,7 @@ func draftArticleCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "article <json_file>",
 		Short: "从 JSON 文件创建微信图文文章草稿",
-		Long: `从 JSON 文件创建微信图文文章草稿
+		Long: `从 JSON 文件创建微信公众号图文文章草稿（仅微信，小红书请使用 MCP 工具）
 
 JSON 格式示例:
   {

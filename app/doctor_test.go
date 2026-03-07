@@ -90,18 +90,18 @@ func TestCheckConfig_PostImageKey(t *testing.T) {
 		}
 	})
 
-	t.Run("post image key via xiaohongshu fallback", func(t *testing.T) {
+	t.Run("post image key via xhs fallback", func(t *testing.T) {
 		cfg := &config.Config{}
-		xhs := &config.XiaohongshuConfig{}
+		xhs := &config.XHSConfig{}
 		xhs.Content.Image.Key = "xhs-key"
-		cfg.Xiaohongshu = xhs
+		cfg.XHS = xhs
 		checks := checkConfig(cfg, nil)
 		statusMap := map[string]string{}
 		for _, c := range checks {
 			statusMap[c.Name] = c.Status
 		}
 		if statusMap["post_image_key"] != "pass" {
-			t.Errorf("post_image_key status = %q, want pass (xiaohongshu fallback)", statusMap["post_image_key"])
+			t.Errorf("post_image_key status = %q, want pass (xhs fallback)", statusMap["post_image_key"])
 		}
 	})
 

@@ -629,81 +629,6 @@ func TestNewDefaultConfig_ConsistentWithRuntimeDefaults(t *testing.T) {
 	}
 }
 
-func TestWatermarkConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name         string
-		enable       bool
-		margin       int
-		wantErr      bool
-		wantErrField string
-	}{
-		{"disabled no margin", false, 0, false, ""},
-		{"disabled with margin", false, 20, false, ""},
-		{"enabled with valid margin", true, 20, false, ""},
-		{"enabled zero margin", true, 0, true, "WatermarkMargin"},
-		{"margin too small", false, 0, false, ""},
-		{"margin 1 (min)", false, 1, false, ""},
-		{"margin 500 (max)", false, 500, false, ""},
-		{"margin 501 (too large)", false, 501, true, "WatermarkMargin"},
-		{"enabled margin 501", true, 501, true, "WatermarkMargin"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			w := WatermarkConfig{Enable: tt.enable, Margin: tt.margin}
-			err := w.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr && tt.wantErrField != "" {
-				configErr, ok := err.(*ConfigError)
-				if !ok {
-					t.Fatalf("Error type = %T, want *ConfigError", err)
-				}
-				if configErr.Field != tt.wantErrField {
-					t.Errorf("Error field = %q, want %q", configErr.Field, tt.wantErrField)
-				}
-			}
-		})
-	}
-}
-
-func TestLoad_JSONConfig_WithWatermark(t *testing.T) {
-	configContent := `{
-  "wechat": {
-    "appid": "wx123456",
-    "secret": "secret123",
-    "article": {
-      "content": {
-        "image": {
-          "watermark": {
-            "enable": true,
-            "margin": 20
-          }
-        }
-      }
-    }
-  }
-}`
-
-	tmpFile := filepath.Join(t.TempDir(), "test.json")
-	if err := os.WriteFile(tmpFile, []byte(configContent), 0644); err != nil {
-		t.Fatalf("Failed to create temp config file: %v", err)
-	}
-
-	cfg, err := LoadWithDefaults(tmpFile)
-	if err != nil {
-		t.Fatalf("LoadWithDefaults() error = %v", err)
-	}
-
-	if cfg.Wechat.Article.Content.Image.Watermark == nil || !cfg.Wechat.Article.Content.Image.Watermark.Enable {
-		t.Errorf("Wechat.Article.Content.Image.Watermark.Enable = false, want true")
-	}
-	if cfg.Wechat.Article.Content.Image.Watermark == nil || cfg.Wechat.Article.Content.Image.Watermark.Margin != 20 {
-		t.Errorf("Wechat.Article.Content.Image.Watermark.Margin = %d, want 20", cfg.Wechat.Article.Content.Image.Watermark.Margin)
-	}
-}
 
 func TestMergeImageAPI(t *testing.T) {
 	t.Run("base fields take priority", func(t *testing.T) {
@@ -790,8 +715,8 @@ func TestResolvedPostContentImage(t *testing.T) {
 	t.Run("xiaohongshu fills missing wechat.post fields", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Post.Content.Image = ImageAPI{} // empty
-		cfg.Xiaohongshu = &XiaohongshuConfig{}
-		cfg.Xiaohongshu.Content.Image = ImageAPI{
+		cfg.XHS = &XHSConfig{}
+		cfg.XHS.Content.Image = ImageAPI{
 			Key:      "xhs-key",
 			Provider: "gemini",
 			Size:     "3:4:1K",
@@ -815,8 +740,8 @@ func TestResolvedPostContentImage(t *testing.T) {
 			Provider: "openrouter",
 			Size:     "16:9",
 		}
-		cfg.Xiaohongshu = &XiaohongshuConfig{}
-		cfg.Xiaohongshu.Content.Image = ImageAPI{
+		cfg.XHS = &XHSConfig{}
+		cfg.XHS.Content.Image = ImageAPI{
 			Key:      "xhs-key",
 			Provider: "gemini",
 			Size:     "3:4:1K",
@@ -837,8 +762,8 @@ func TestResolvedPostContentImage(t *testing.T) {
 func TestResolvedPostCoverImage(t *testing.T) {
 	t.Run("xiaohongshu cover fills missing wechat.post.cover", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.Xiaohongshu = &XiaohongshuConfig{}
-		cfg.Xiaohongshu.Cover.Image = ImageAPI{
+		cfg.XHS = &XHSConfig{}
+		cfg.XHS.Cover.Image = ImageAPI{
 			Key:      "xhs-cover-key",
 			Provider: "volcengine",
 			Size:     "3:4",
@@ -853,7 +778,7 @@ func TestResolvedPostCoverImage(t *testing.T) {
 	})
 }
 
-func TestPostImageSize_XiaohongshuFallback(t *testing.T) {
+func TestPostImageSize_XHSFallback(t *testing.T) {
 	tests := []struct {
 		name        string
 		postSize    string
@@ -872,8 +797,8 @@ func TestPostImageSize_XiaohongshuFallback(t *testing.T) {
 			cfg := &Config{}
 			cfg.Wechat.Post.Content.Image.Size = tt.postSize
 			if tt.hasXhs {
-				cfg.Xiaohongshu = &XiaohongshuConfig{}
-				cfg.Xiaohongshu.Content.Image.Size = tt.xhsSize
+				cfg.XHS = &XHSConfig{}
+				cfg.XHS.Content.Image.Size = tt.xhsSize
 			}
 			if got := cfg.PostImageSize(); got != tt.wantSize {
 				t.Errorf("PostImageSize() = %q, want %q", got, tt.wantSize)
@@ -882,7 +807,7 @@ func TestPostImageSize_XiaohongshuFallback(t *testing.T) {
 	}
 }
 
-func TestPostImageCount_XiaohongshuFallback(t *testing.T) {
+func TestPostImageCount_XHSFallback(t *testing.T) {
 	tests := []struct {
 		name      string
 		postCount int
@@ -901,8 +826,8 @@ func TestPostImageCount_XiaohongshuFallback(t *testing.T) {
 			cfg := &Config{}
 			cfg.Wechat.Post.Content.Count = tt.postCount
 			if tt.hasXhs {
-				cfg.Xiaohongshu = &XiaohongshuConfig{}
-				cfg.Xiaohongshu.Content.Count = tt.xhsCount
+				cfg.XHS = &XHSConfig{}
+				cfg.XHS.Content.Count = tt.xhsCount
 			}
 			if got := cfg.PostImageCount(); got != tt.wantCount {
 				t.Errorf("PostImageCount() = %d, want %d", got, tt.wantCount)

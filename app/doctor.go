@@ -110,9 +110,9 @@ func checkConfig(cfg *config.Config, cfgErr error) []CheckResult {
 	// 图片 API
 	articleKey := cfg.Wechat.Article.Content.Image.Key
 	if articleKey != "" {
-		checks = append(checks, CheckResult{Name: "article_image_key", Status: "pass", Message: "文章图片 API Key 已配置"})
+		checks = append(checks, CheckResult{Name: "article_image_key", Status: "pass", Message: "文章图片 API Key 已配置 (wechat.article.content.image.key)"})
 	} else {
-		checks = append(checks, CheckResult{Name: "article_image_key", Status: "warn", Message: "文章图片 API Key 未配置", Hint: "在配置文件中设置 article.image.key（仅 AI 图片生成需要）"})
+		checks = append(checks, CheckResult{Name: "article_image_key", Status: "warn", Message: "文章图片 API Key 未配置", Hint: "在配置文件中设置 wechat.article.content.image.key（仅 AI 图片生成需要）"})
 	}
 
 	// Provider 有效性
@@ -126,9 +126,14 @@ func checkConfig(cfg *config.Config, cfgErr error) []CheckResult {
 	// 小绿书图片 Key（合并 wechat.post + xiaohongshu 后的结果）
 	resolvedPost := cfg.ResolvedPostContentImage()
 	if resolvedPost.Key != "" {
-		checks = append(checks, CheckResult{Name: "post_image_key", Status: "pass", Message: "小绿书图片 API Key 已配置"})
+		// 显示配置来源
+		configSource := "wechat.post.content.image.key"
+		if cfg.Wechat.Post.Content.Image.Key == "" && cfg.XHS != nil && cfg.XHS.Content.Image.Key != "" {
+			configSource = "xhs.content.image.key (fallback)"
+		}
+		checks = append(checks, CheckResult{Name: "post_image_key", Status: "pass", Message: fmt.Sprintf("小绿书图片 API Key 已配置 (%s)", configSource)})
 	} else {
-		checks = append(checks, CheckResult{Name: "post_image_key", Status: "warn", Message: "小绿书图片 API Key 未配置", Hint: "在配置文件中设置 wechat.post.content.image.key 或 xiaohongshu.content.image.key"})
+		checks = append(checks, CheckResult{Name: "post_image_key", Status: "warn", Message: "小绿书图片 API Key 未配置", Hint: "配置查找顺序: 1. wechat.post.content.image.key → 2. xhs.content.image.key (fallback)"})
 	}
 
 	// 小绿书图片 Provider 有效性
