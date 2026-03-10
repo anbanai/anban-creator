@@ -22,8 +22,8 @@ maxTurns: 50
 
 ## 创作流程
 
-1. 执行 `wechatwriter account info --scope article` 获取账号信息，分析定位、受众、写作风格
-2. 执行 `wechatwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
+1. 执行 `anbanwriter account info --scope article` 获取账号信息，分析定位、受众、写作风格
+2. 执行 `anbanwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
 3. **创建内容目录**：执行 `mkdir -p output/articles/art-$(date +%Y%m%d)-001` 生成隔离工作目录（如已存在 001 则自增序号），后续所有产物保存在该目录内，变量记为 `$DIR`
 4. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，创作文章大纲
 5. 使用 skill `content-writing` 基于账号定位和大纲输出 Markdown 格式文章（须满足**图文并茂**要求：每个章节至少一个配图占位符，提示词与章节内容强相关）
@@ -32,8 +32,8 @@ maxTurns: 50
 8. 使用 skill `seo-optimization` 优化标题、关键词、摘要
 9. 使用 skill `visual-design` 生成文章封面图（`image generate -o $DIR/cover.png`）
 10. 上传封面图到微信素材库（`image upload $DIR/cover.png` → 获取 media_id）
-11. 使用 skill `visual-design` 验证章节配图覆盖率、补充缺失的配图占位符，确定统一风格 `$STYLE`，然后执行批量配图生成：`wechatwriter image batch $DIR/03-article.md --style "$STYLE" -o $DIR/images.json`
-12. 使用 skill `content-writing` 转换 HTML（`wechatwriter convert $DIR/03-article.md --ai-html $DIR/05-article.html --image-urls $DIR/images.json -o $DIR/05-article.html`），图片由 convert 命令读取 images.json 自动替换为 CDN 链接，保存到 `$DIR/05-article.html`
+11. 使用 skill `visual-design` 验证章节配图覆盖率、补充缺失的配图占位符，确定统一风格 `$STYLE`，然后执行批量配图生成：`anbanwriter image batch $DIR/03-article.md --style "$STYLE" -o $DIR/images.json`
+12. 使用 skill `content-writing` 转换 HTML（`anbanwriter convert $DIR/03-article.md --ai-html $DIR/05-article.html --image-urls $DIR/images.json -o $DIR/05-article.html`），图片由 convert 命令读取 images.json 自动替换为 CDN 链接，保存到 `$DIR/05-article.html`
 13. 使用 skill `article-publishing` → `draft article $DIR/draft.json` 把文章发布到草稿箱
 
 **任务命名**：`$DIR/01-research.md`, `$DIR/02-outline.md`, `$DIR/03-article.md`, `$DIR/04-article-final.md`, `$DIR/05-article.html`, `$DIR/draft.json`
@@ -76,7 +76,7 @@ maxTurns: 50
 
 **配置问题**：
 
-- 假定配置已正确设置，不要尝试验证配置或建议运行 `wechatwriter account init`
+- 假定配置已正确设置，不要尝试验证配置或建议运行 `anbanwriter account init`
 - 如果命令因配置问题失败，直接报告错误信息并继续流程
 
 ## 工作规范

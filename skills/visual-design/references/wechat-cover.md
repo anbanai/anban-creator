@@ -98,11 +98,11 @@
 
 ```bash
 # 生成封面图（2K 高清，横版 16:9）
-wechatwriter image generate "{prompt}" -s 2k
+anbanwriter image generate "{prompt}" -s 2k
 
 # 示例：生成符合规范的封面
-wechatwriter image generate "春茶品鉴，一位茶艺师专注点茶，面部表情清晰，背景茶园" -s 2k
+anbanwriter image generate "春茶品鉴，一位茶艺师专注点茶，面部表情清晰，背景茶园" -s 2k
 
 # 上传到微信素材库
-wechatwriter image upload ./cover.png
+anbanwriter image upload ./cover.png
 ```

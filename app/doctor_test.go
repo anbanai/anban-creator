@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/config"
 )
 
 func TestCheckConfig(t *testing.T) {
@@ -90,18 +90,18 @@ func TestCheckConfig_PostImageKey(t *testing.T) {
 		}
 	})
 
-	t.Run("post image key via xhs fallback", func(t *testing.T) {
+	t.Run("post image key via rednote fallback", func(t *testing.T) {
 		cfg := &config.Config{}
-		xhs := &config.XHSConfig{}
-		xhs.Content.Image.Key = "xhs-key"
-		cfg.XHS = xhs
+		rednote := &config.RednoteConfig{}
+		rednote.Content.Image.Key = "rednote-key"
+		cfg.Rednote = rednote
 		checks := checkConfig(cfg, nil)
 		statusMap := map[string]string{}
 		for _, c := range checks {
 			statusMap[c.Name] = c.Status
 		}
 		if statusMap["post_image_key"] != "pass" {
-			t.Errorf("post_image_key status = %q, want pass (xhs fallback)", statusMap["post_image_key"])
+			t.Errorf("post_image_key status = %q, want pass (rednote fallback)", statusMap["post_image_key"])
 		}
 	})
 

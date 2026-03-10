@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/royalrick/wechatwriter/app/storage"
+	"github.com/royalrick/anbanwriter/app/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -49,10 +49,10 @@ Article 状态流转: created → outlined → drafted → polished → converte
 Post 状态流转:    created → planned → images_ready → published
 
 示例：
-  wechatwriter content track --dir $DIR --type article --status created --topic "茶文化"
-  wechatwriter content track --dir $DIR --status outlined --title "标题"
-  wechatwriter content track --dir $DIR --status drafted
-  wechatwriter content track --dir $DIR --status published --media-id "xxx"`,
+  anbanwriter content track --dir $DIR --type article --status created --topic "茶文化"
+  anbanwriter content track --dir $DIR --status outlined --title "标题"
+  anbanwriter content track --dir $DIR --status drafted
+  anbanwriter content track --dir $DIR --status published --media-id "xxx"`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfigMinimal()
 		},
@@ -73,7 +73,7 @@ Post 状态流转:    created → planned → images_ready → published
 			}
 
 			if store == nil {
-				responseError(&AppError{Message: "storage not available", HintText: "数据库初始化失败，请检查 .wechatwriter/data.db 文件权限"})
+				responseError(&AppError{Message: "storage not available", HintText: "数据库初始化失败，请检查 .anbanwriter/data.db 文件权限"})
 				return
 			}
 
@@ -130,15 +130,15 @@ func contentListCmd() *cobra.Command {
 		Long: `列出本地追踪的内容，默认仅显示未发布内容
 
 示例：
-  wechatwriter content list
-  wechatwriter content list --all
-  wechatwriter content list --json`,
+  anbanwriter content list
+  anbanwriter content list --all
+  anbanwriter content list --json`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfigMinimal()
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			if store == nil {
-				responseError(&AppError{Message: "storage not available", HintText: "数据库初始化失败，请检查 .wechatwriter/data.db 文件权限"})
+				responseError(&AppError{Message: "storage not available", HintText: "数据库初始化失败，请检查 .anbanwriter/data.db 文件权限"})
 				return
 			}
 

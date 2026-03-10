@@ -1,6 +1,6 @@
 # Binaries (current directory only)
-/wechatwriter
-/wechatwriter.exe
+/anbanwriter
+/anbanwriter.exe
 
 # Ignore all binaries (anywhere in the repo)
 **/bin/
@@ -22,7 +22,7 @@ vendor/
 go.work
 
 # Configuration files (contain sensitive information)
-.wechatwriter/
+.anbanwriter/
 
 # Log files
 *.log

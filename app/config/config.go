@@ -13,7 +13,7 @@ const (
 	MinWeChatPixels = 3686400
 
 	// ConfigDir 项目本地配置目录
-	ConfigDir = ".wechatwriter"
+	ConfigDir = ".anbanwriter"
 	// ConfigFileName 配置文件名
 	ConfigFileName = "settings.json"
 
@@ -40,11 +40,11 @@ func DefaultConfigPath() string {
 	return filepath.Join(ConfigDir, ConfigFileName)
 }
 
-// DefaultXHSImageSize 默认小红书图片尺寸（3:4 竖版 1K）
-const DefaultXHSImageSize = "3:4:1K"
+// DefaultRednoteImageSize 默认小红书图片尺寸（3:4 竖版 1K）
+const DefaultRednoteImageSize = "3:4:1K"
 
-// DefaultXHSImageCount 默认小红书图片数量
-const DefaultXHSImageCount = 6
+// DefaultRednoteImageCount 默认小红书图片数量
+const DefaultRednoteImageCount = 6
 
 // NewDefaultConfig 返回带有推荐默认值的 Config，用于生成配置文件模板
 func NewDefaultConfig() *Config {
@@ -104,21 +104,21 @@ func NewDefaultConfig() *Config {
 	c.Wechat.Post.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
 
 	// 小红书（可选平台）
-	c.XHS = &XHSConfig{}
-	c.XHS.Style = "casual-warm"
-	c.XHS.Cover.Image.Provider = DefaultImageProvider
-	c.XHS.Cover.Image.Key = "your_image_api_key"
-	c.XHS.Cover.Image.Model = "gemini-3-pro-image-preview"
-	c.XHS.Cover.Image.Size = DefaultXHSImageSize
-	c.XHS.Cover.Image.Refer = "path/to/refer.png"
-	c.XHS.Cover.Image.Compress = true
-	c.XHS.Content.Image.Provider = DefaultImageProvider
-	c.XHS.Content.Image.Key = "your_image_api_key"
-	c.XHS.Content.Image.Model = "gemini-3-pro-image-preview"
-	c.XHS.Content.Image.Size = DefaultXHSImageSize
-	c.XHS.Content.Image.Refer = "path/to/refer.png"
-	c.XHS.Content.Image.Compress = true
-	c.XHS.Content.Count = DefaultXHSImageCount
+	c.Rednote = &RednoteConfig{}
+	c.Rednote.Style = "casual-warm"
+	c.Rednote.Cover.Image.Provider = DefaultImageProvider
+	c.Rednote.Cover.Image.Key = "your_image_api_key"
+	c.Rednote.Cover.Image.Model = "gemini-3-pro-image-preview"
+	c.Rednote.Cover.Image.Size = DefaultRednoteImageSize
+	c.Rednote.Cover.Image.Refer = "path/to/refer.png"
+	c.Rednote.Cover.Image.Compress = true
+	c.Rednote.Content.Image.Provider = DefaultImageProvider
+	c.Rednote.Content.Image.Key = "your_image_api_key"
+	c.Rednote.Content.Image.Model = "gemini-3-pro-image-preview"
+	c.Rednote.Content.Image.Size = DefaultRednoteImageSize
+	c.Rednote.Content.Image.Refer = "path/to/refer.png"
+	c.Rednote.Content.Image.Compress = true
+	c.Rednote.Content.Count = DefaultRednoteImageCount
 
 	return c
 }
@@ -128,7 +128,7 @@ type VolcengineConfig struct {
 	Seed                      *int64   `json:"seed,omitempty" yaml:"seed,omitempty"`
 	GuidanceScale             *float64 `json:"guidance_scale,omitempty" yaml:"guidance_scale,omitempty"`
 	OptimizePrompt            *bool    `json:"optimize_prompt,omitempty" yaml:"optimize_prompt,omitempty"`
-	OutputFormat              string   `json:"output_format,omitempty" yaml:"output_format,omitempty"`              // "jpeg" or "png"
+	OutputFormat              string   `json:"output_format,omitempty" yaml:"output_format,omitempty"`                             // "jpeg" or "png"
 	SequentialImageGeneration string   `json:"sequential_image_generation,omitempty" yaml:"sequential_image_generation,omitempty"` // "auto" | "disabled"
 }
 
@@ -207,8 +207,8 @@ type WechatConfig struct {
 	Post    WechatPostConfig `json:"post,omitempty" yaml:"post,omitempty"`
 }
 
-// XHSConfig 小红书配置
-type XHSConfig struct {
+// RednoteConfig 小红书配置
+type RednoteConfig struct {
 	Style   string             `json:"style,omitempty" yaml:"style,omitempty"`
 	Cover   ImageSection       `json:"cover,omitempty" yaml:"cover,omitempty"`
 	Content PostContentSection `json:"content,omitempty" yaml:"content,omitempty"`
@@ -220,8 +220,8 @@ type Config struct {
 	Keywords    []string `json:"keywords,omitempty" yaml:"keywords,omitempty"`
 	Positioning string   `json:"positioning,omitempty" yaml:"positioning,omitempty"`
 
-	Wechat WechatConfig `json:"wechat,omitempty" yaml:"wechat,omitempty"`
-	XHS    *XHSConfig   `json:"xhs,omitempty" yaml:"xhs,omitempty"`
+	Wechat  WechatConfig   `json:"wechat,omitempty" yaml:"wechat,omitempty"`
+	Rednote *RednoteConfig `json:"rednote,omitempty" yaml:"rednote,omitempty"`
 
 	configPath string
 }
@@ -289,7 +289,7 @@ func findConfigFile() string {
 	// 用户目录（优先于可执行文件相对路径，避免开发目录污染）
 	if home, err := os.UserHomeDir(); err == nil {
 		paths = append(paths,
-			filepath.Join(home, ".config", "wechatwriter", ConfigFileName),
+			filepath.Join(home, ".config", "anbanwriter", ConfigFileName),
 			filepath.Join(home, ConfigDir, ConfigFileName),
 		)
 	}
@@ -301,8 +301,8 @@ func findConfigFile() string {
 			exeDir = filepath.Dir(realExe)
 		}
 		paths = append(paths,
-			filepath.Join(exeDir, ConfigDir, ConfigFileName),       // 同级: scripts/.wechatwriter/
-			filepath.Join(exeDir, "..", ConfigDir, ConfigFileName), // 上级: .wechatwriter/（项目根目录）
+			filepath.Join(exeDir, ConfigDir, ConfigFileName),       // 同级: scripts/.anbanwriter/
+			filepath.Join(exeDir, "..", ConfigDir, ConfigFileName), // 上级: .anbanwriter/（项目根目录）
 		)
 	}
 
@@ -399,7 +399,7 @@ func ValidateForImageGeneration(apiCfg *ImageAPI) error {
 		return &ConfigError{
 			Field:   "ImageAPIKey",
 			Message: "图片生成需要配置 API Key",
-			HintMsg: "在配置文件中设置 wechat.article.content.image.key、wechat.post.content.image.key 或 xhs.content.image.key",
+			HintMsg: "在配置文件中设置 wechat.article.content.image.key、wechat.post.content.image.key 或 rednote.content.image.key",
 		}
 	}
 	return nil
@@ -411,25 +411,25 @@ func (c *Config) GetConfigFile() string {
 }
 
 // PostImageSize 返回小绿书图片尺寸，默认 3:4 竖版
-// 优先级: wechat.post.content.image.size > xhs.content.image.size > 默认值
+// 优先级: wechat.post.content.image.size > rednote.content.image.size > 默认值
 func (c *Config) PostImageSize() string {
 	if c.Wechat.Post.Content.Image.Size != "" {
 		return c.Wechat.Post.Content.Image.Size
 	}
-	if c.XHS != nil && c.XHS.Content.Image.Size != "" {
-		return c.XHS.Content.Image.Size
+	if c.Rednote != nil && c.Rednote.Content.Image.Size != "" {
+		return c.Rednote.Content.Image.Size
 	}
 	return DefaultPostImageSize
 }
 
 // PostImageCount 返回小绿书图片数量，默认 4 张
-// 优先级: wechat.post.content.count > xhs.content.count > 默认值
+// 优先级: wechat.post.content.count > rednote.content.count > 默认值
 func (c *Config) PostImageCount() int {
 	if c.Wechat.Post.Content.Count > 0 {
 		return c.Wechat.Post.Content.Count
 	}
-	if c.XHS != nil && c.XHS.Content.Count > 0 {
-		return c.XHS.Content.Count
+	if c.Rednote != nil && c.Rednote.Content.Count > 0 {
+		return c.Rednote.Content.Count
 	}
 	return DefaultPostImageCount
 }
@@ -474,23 +474,23 @@ func mergeImageAPI(base, fallback ImageAPI) ImageAPI {
 }
 
 // ResolvedPostContentImage 返回合并后的小绿书内容图配置
-// wechat.post.content.image 字段优先，xhs.content.image 作为 fallback
+// wechat.post.content.image 字段优先，rednote.content.image 作为 fallback
 func (c *Config) ResolvedPostContentImage() ImageAPI {
 	base := c.Wechat.Post.Content.Image
-	if c.XHS == nil {
+	if c.Rednote == nil {
 		return base
 	}
-	return mergeImageAPI(base, c.XHS.Content.Image)
+	return mergeImageAPI(base, c.Rednote.Content.Image)
 }
 
 // ResolvedPostCoverImage 返回合并后的小绿书封面图配置
-// wechat.post.cover.image 字段优先，xhs.cover.image 作为 fallback
+// wechat.post.cover.image 字段优先，rednote.cover.image 作为 fallback
 func (c *Config) ResolvedPostCoverImage() ImageAPI {
 	base := c.Wechat.Post.Cover.Image
-	if c.XHS == nil {
+	if c.Rednote == nil {
 		return base
 	}
-	return mergeImageAPI(base, c.XHS.Cover.Image)
+	return mergeImageAPI(base, c.Rednote.Cover.Image)
 }
 
 // ArticleImageSize 返回图文文章图片尺寸，默认 2560x1440（16:9 横版 2K）
@@ -542,7 +542,7 @@ func (e *ConfigError) Hint() string { return e.HintMsg }
 
 // getRelativePath 获取相对路径（用于更友好的显示）
 func getRelativePath(fullPath string) string {
-	// 如果是用户目录，显示为 ~/.wechatwriter.yaml
+	// 如果是用户目录，显示为 ~/.anbanwriter.yaml
 	homeDir, _ := os.UserHomeDir()
 	if homeDir != "" && strings.HasPrefix(fullPath, homeDir) {
 		rel := strings.TrimPrefix(fullPath, homeDir)

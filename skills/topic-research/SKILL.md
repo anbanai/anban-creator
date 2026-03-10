@@ -17,10 +17,10 @@ metadata:
 
 ```bash
 # 查看草稿箱和已发布文章（统一视图）
-wechatwriter account history
+anbanwriter account history
 
 # 可指定获取更多条目
-wechatwriter account history --count 10
+anbanwriter account history --count 10
 ```
 
 列出所有已有标题后，选题应避开这些已有主题。
@@ -30,7 +30,7 @@ wechatwriter account history --count 10
 评估话题的爆款潜力：
 
 ```bash
-wechatwriter score -i metrics.json -t "主题" -d [领域]
+anbanwriter score -i metrics.json -t "主题" -d [领域]
 ```
 
 **标志**: `-i/--input`（数据文件）, `-t/--topic`（话题）, `-d/--domain`（领域）
@@ -40,7 +40,7 @@ wechatwriter score -i metrics.json -t "主题" -d [领域]
 基于话题生成内容框架：
 
 ```bash
-wechatwriter outline -t "主题" --template [模板] -d [领域] -s [风格] -k [关键词]
+anbanwriter outline -t "主题" --template [模板] -d [领域] -s [风格] -k [关键词]
 ```
 
 **标志**: `-t/--topic`, `--template`, `-d/--domain`, `-s/--style`, `-k/--keywords`
@@ -54,10 +54,10 @@ wechatwriter outline -t "主题" --template [模板] -d [领域] -s [风格] -k 
 
 ```bash
 # 话题评分
-wechatwriter score --help
+anbanwriter score --help
 
 # 内容框架生成
-wechatwriter outline --help
+anbanwriter outline --help
 ```
 
 ## 注意事项

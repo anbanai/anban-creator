@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/royalrick/wechatwriter/app/config"
-	"github.com/royalrick/wechatwriter/app/storage"
+	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/storage"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -116,7 +116,7 @@ func main() {
 支持多领域配置和多种写作风格。
 
 Configuration:
-  Config file: .wechatwriter/settings.json (use 'wechatwriter account init' to create)`,
+  Config file: .anbanwriter/settings.json (use 'anbanwriter account init' to create)`,
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -126,7 +126,7 @@ Configuration:
 	rootCmd.AddCommand(imageCmd())
 	rootCmd.AddCommand(convertCmd)
 	rootCmd.AddCommand(draftCmd())
-	rootCmd.AddCommand(xiaohongshuCmd())
+	rootCmd.AddCommand(rednoteCmd())
 	rootCmd.AddCommand(writeCmd)
 	rootCmd.AddCommand(humanizeCmd())
 	rootCmd.AddCommand(scoreCmd())
@@ -134,6 +134,7 @@ Configuration:
 	rootCmd.AddCommand(topicsCmd())
 	rootCmd.AddCommand(seoCmd())
 	rootCmd.AddCommand(accountCmd())
+	rootCmd.AddCommand(videoCmd())
 	rootCmd.AddCommand(doctorCmd())
 	rootCmd.AddCommand(contentCmd())
 

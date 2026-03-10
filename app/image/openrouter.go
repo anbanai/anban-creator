@@ -12,7 +12,7 @@ import (
 	"time"
 
 	openrouter "github.com/revrost/go-openrouter"
-	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/config"
 )
 
 // OpenRouterProvider OpenRouter 图片生成服务提供者
@@ -36,8 +36,8 @@ func NewOpenRouterProvider(apiCfg *config.ImageAPI) (*OpenRouterProvider, error)
 
 	cfg := openrouter.DefaultConfig(apiCfg.Key)
 	cfg.HTTPClient = &http.Client{Timeout: 120 * time.Second}
-	cfg.XTitle = "wechatwriter"
-	cfg.HttpReferer = "https://github.com/royalrick/wechatwriter"
+	cfg.XTitle = "anbanwriter"
+	cfg.HttpReferer = "https://github.com/royalrick/anbanwriter"
 	if apiCfg.BaseURL != "" {
 		cfg.BaseURL = apiCfg.BaseURL
 	}
@@ -86,7 +86,7 @@ func (p *OpenRouterProvider) Generate(ctx context.Context, prompt string, opts *
 		}
 	}
 
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("wechatwriter_openrouter_%d%s", time.Now().UnixNano(), ext))
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anbanwriter_openrouter_%d%s", time.Now().UnixNano(), ext))
 	if err := os.WriteFile(tmpPath, imageData, 0644); err != nil {
 		return nil, &GenerateError{
 			Provider: p.Name(),

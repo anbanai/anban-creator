@@ -11,7 +11,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/config"
 )
 
 // OpenAIProvider OpenAI 图片生成服务提供者
@@ -215,7 +215,7 @@ func (p *OpenAIProvider) saveBase64Image(b64data string) (string, error) {
 		}
 	}
 
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("wechatwriter_openai_%d.png", time.Now().UnixNano()))
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anbanwriter_openai_%d.png", time.Now().UnixNano()))
 	if err := os.WriteFile(tmpPath, imageData, 0644); err != nil {
 		return "", &GenerateError{
 			Provider: p.Name(),

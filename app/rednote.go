@@ -10,10 +10,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// xiaohongshuCmd 小红书发布相关命令组
-func xiaohongshuCmd() *cobra.Command {
+// rednoteCmd 小红书发布相关命令组
+func rednoteCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "xiaohongshu",
+		Use:   "rednote",
 		Short: "小红书内容导出工具（用于 MCP 工具发布前的内容准备）",
 		Long: `小红书内容导出工具 —— 将 Markdown 内容格式化为小红书发布格式
 
@@ -25,13 +25,13 @@ func xiaohongshuCmd() *cobra.Command {
   export    - 导出 Markdown 内容为小红书发布格式`,
 	}
 
-	cmd.AddCommand(xiaohongshuExportCmd())
+	cmd.AddCommand(rednoteExportCmd())
 
 	return cmd
 }
 
-// xiaohongshuExportCmd 导出小红书发布内容
-func xiaohongshuExportCmd() *cobra.Command {
+// rednoteExportCmd 导出小红书发布内容
+func rednoteExportCmd() *cobra.Command {
 	var (
 		format  string
 		output  string
@@ -49,10 +49,10 @@ func xiaohongshuExportCmd() *cobra.Command {
 两种使用模式：
 
 模式1：从 Markdown 文件解析（传统方式）
-  wechatwriter xiaohongshu export ./content.md
+  anbanwriter rednote export ./content.md
 
 模式2：直接传参（新增）
-  wechatwriter xiaohongshu export --title "标题" --content "正文内容" --images "a.png,b.png" --tags "tag1,tag2"
+  anbanwriter rednote export --title "标题" --content "正文内容" --images "a.png,b.png" --tags "tag1,tag2"
 
 导出格式：
   clipboard    - 复制到剪贴板（默认），可直接粘贴到小红书 App
@@ -73,13 +73,13 @@ func xiaohongshuExportCmd() *cobra.Command {
 
 示例:
   # 从文件导出到剪贴板（默认）
-  wechatwriter xiaohongshu export ./content.md
+  anbanwriter rednote export ./content.md
 
   # 从文件导出为 JSON
-  wechatwriter xiaohongshu export ./content.md --format json -o output.json
+  anbanwriter rednote export ./content.md --format json -o output.json
 
   # 直接传参导出
-  wechatwriter xiaohongshu export --title "春季茶园攻略" \
+  anbanwriter rednote export --title "春季茶园攻略" \
     --content "春天是采茶的好季节..." \
     --images "cover.png,img2.png,img3.png" \
     --tags "茶园,春季,采茶" \

@@ -32,11 +32,11 @@
         ]
       },
       {
-        "matcher": "xiaohongshu",
+        "matcher": "rednote",
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "xiaohongshu agent 已完成执行。请检查 output/xiaohongshu/ 目录下的产出文件，生成一个简要的交付摘要，包括：创作的笔记标题、生成的图片数量、是否成功发布、以及任何需要用户关注的问题。"
+            "prompt": "rednote agent 已完成执行。请检查 output/rednote/ 目录下的产出文件，生成一个简要的交付摘要，包括：创作的笔记标题、生成的图片数量、是否成功发布、以及任何需要用户关注的问题。"
           }
         ]
       }

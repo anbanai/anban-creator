@@ -47,7 +47,7 @@ cover_mood: "封面情绪"
 
 ```bash
 # CLI 命令
-wechatwriter write --style my-style
+anbanwriter write --style my-style
 
 # 自然语言
 "用 my-style 风格写一篇文章"
@@ -205,13 +205,13 @@ A:
 
 ```bash
 # 列出所有风格
-wechatwriter styles
+anbanwriter styles
 
 # 查看风格详情
-wechatwriter styles --detail my-style
+anbanwriter styles --detail my-style
 
 # 测试写作
-wechatwriter write --style my-style --input-type idea
+anbanwriter write --style my-style --input-type idea
 ```
 
 ### Q: 可以分享我的风格吗？

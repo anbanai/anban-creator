@@ -2,7 +2,7 @@
 
 ## 图片生成方式
 
-wechatwriter 支持 **三种方式** 生成 AI 图片：
+anbanwriter 支持 **三种方式** 生成 AI 图片：
 
 ### 方式一：自然语言对话 - 文章配图（推荐）
 
@@ -36,7 +36,7 @@ wechatwriter 支持 **三种方式** 生成 AI 图片：
 **Claude 会调用：**
 
 ```bash
-wechatwriter image "你的提示词"
+anbanwriter image "你的提示词"
 ```
 
 **返回结果：**
@@ -134,10 +134,10 @@ wechatwriter image "你的提示词"
 
 ```bash
 # 默认尺寸
-wechatwriter image generate "prompt"
+anbanwriter image generate "prompt"
 
 # 16:9 比例（推荐用于公众号封面）
-wechatwriter image generate -s 2k "prompt"
+anbanwriter image generate -s 2k "prompt"
 ```
 
 ## 图片占位符

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/config"
 )
 
 // 各图片生成服务商的默认模型和 API 地址
@@ -80,7 +80,6 @@ func (e *GenerateError) Error() string {
 func (e *GenerateError) Unwrap() error {
 	return e.Original
 }
-
 
 func (e *GenerateError) Hint() string { return e.HintMsg }
 

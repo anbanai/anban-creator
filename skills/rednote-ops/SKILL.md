@@ -1,8 +1,8 @@
 ---
-name: xiaohongshu-ops
+name: rednote-ops
 description: |
   小红书运营全流程技能——选题研究、图片生成、笔记发布、评论互动。
-  Use when user mentions "小红书", "红书", "xiaohongshu", "xhs", "种草笔记", "小红书发布", "小红书评论"
+  Use when user mentions "小红书", "红书", "rednote", "rednote", "种草笔记", "小红书发布", "小红书评论"
 user-invocable: false
 metadata:
   author: Rick
@@ -15,7 +15,7 @@ metadata:
 
 ## 前置条件
 
-**MCP 服务要求**：`xiaohongshu` 必须处于运行状态。所有小红书平台操作均通过 MCP 工具执行，无需浏览器自动化。
+**MCP 服务要求**：`rednote` 必须处于运行状态。所有小红书平台操作均通过 MCP 工具执行，无需浏览器自动化。
 
 使用前先验证登录状态：
 
@@ -31,7 +31,7 @@ get_login_qrcode()
 
 ---
 
-> **内容创作**：文案写作、标题公式、正文结构等创作知识已独立为 [xiaohongshu-writing](../xiaohongshu-writing/SKILL.md) 技能。
+> **内容创作**：文案写作、标题公式、正文结构等创作知识已独立为 [rednote-writing](../rednote-writing/SKILL.md) 技能。
 
 ---
 
@@ -83,21 +83,21 @@ novelty_bonus: 同角度笔记<3 → 1.2, 否则 → 1.0
 
 ## 2) 图片生成
 
-使用 `wechatwriter` CLI 生成小红书图片。详细规范和 Prompt 模板参见：
+使用 `anbanwriter` CLI 生成小红书图片。详细规范和 Prompt 模板参见：
 
-- 封面图：[xiaohongshu-cover.md](../visual-design/references/xiaohongshu-cover.md)
-- 内容图：[xiaohongshu-content.md](../visual-design/references/xiaohongshu-content.md)
+- 封面图：[rednote-cover.md](../visual-design/references/rednote-cover.md)
+- 内容图：[rednote-content.md](../visual-design/references/rednote-content.md)
 
 ```bash
 # 生成单张图片（指定风格描述）
-wechatwriter image generate "内容描述" --post --style "$STYLE" -o ./image_01.png
+anbanwriter image generate "内容描述" --post --style "$STYLE" -o ./image_01.png
 
 # 封面图（第一张，确定基准风格）
-wechatwriter image generate "封面：大标题卡片，主题XXX" --post --style "$STYLE" -o ./cover.png
+anbanwriter image generate "封面：大标题卡片，主题XXX" --post --style "$STYLE" -o ./cover.png
 
 # 后续图片用封面作参考图，保持风格一致
-wechatwriter image generate "内容图：步骤列表信息图" --post --ref ./cover.png -o ./image_02.png
-wechatwriter image generate "收尾图：总结CTA卡片" --post --ref ./cover.png -o ./image_03.png
+anbanwriter image generate "内容图：步骤列表信息图" --post --ref ./cover.png -o ./image_02.png
+anbanwriter image generate "收尾图：总结CTA卡片" --post --ref ./cover.png -o ./image_03.png
 ```
 
 **统一视觉风格**（参考图优先）：
@@ -203,7 +203,7 @@ user_profile(user_id="<用户ID>", xsec_token="<xsecToken>")
 
 ## 6) Viral Copy 链路
 
-输入爆款笔记，输出高贴合可发布新笔记：
+输入爆款笔记，输出高贴合可发布新笔记：参照 [viral-copy.md](references/viral-copy.md)
 
 1. 先调用 `search_feeds(keyword="<爆款关键词>")` 或 `list_feeds()` 获取 feed_id 和 xsec_token
 2. 用 `get_feed_detail(feed_id="<爆款ID>", xsec_token="<xsecToken>")` 获取原笔记完整内容
@@ -211,7 +211,7 @@ user_profile(user_id="<用户ID>", xsec_token="<xsecToken>")
 4. 保留：同主题、同互动机制、同内容结构
 5. 替换：具体措辞、案例细节、账号人设口吻
 6. 禁止：逐句照抄、原图二次使用
-7. 参考 `xiaohongshu-writing` 技能创作内容，按第 2-3 节流程生成图片并发布
+7. 参考 `rednote-writing` 技能创作内容，按第 2-3 节流程生成图片并发布
 
 ---
 

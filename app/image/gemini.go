@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/config"
 	"google.golang.org/genai"
 )
 
@@ -179,7 +179,7 @@ func (p *GeminiProvider) saveInlineData(data *genai.Blob) (string, error) {
 	}
 
 	// 保存到临时文件
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("wechatwriter_gemini_%d%s", time.Now().UnixNano(), ext))
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anbanwriter_gemini_%d%s", time.Now().UnixNano(), ext))
 
 	if err := os.WriteFile(tmpPath, data.Data, 0644); err != nil {
 		return "", &GenerateError{

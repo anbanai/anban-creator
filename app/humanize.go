@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/royalrick/wechatwriter/app/humanizer"
+	"github.com/royalrick/anbanwriter/app/humanizer"
 	"github.com/spf13/cobra"
 )
 

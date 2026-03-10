@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/royalrick/wechatwriter/app/config"
-	"github.com/royalrick/wechatwriter/app/wechat"
+	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/wechat"
 	"go.uber.org/zap"
 )
 
@@ -81,7 +81,6 @@ func (p *Processor) SetPresetPrompt(prompt string) {
 func (p *Processor) SetRefImage(path string) {
 	p.refImagePath = path
 }
-
 
 // 优先级：CLI --style > config style_prompt > preset prompt > 无风格（原样返回）
 func (p *Processor) buildPrompt(userPrompt string) string {

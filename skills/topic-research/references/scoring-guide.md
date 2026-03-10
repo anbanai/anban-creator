@@ -43,5 +43,5 @@
 ## 使用方式
 
 ```bash
-wechatwriter score --help
+anbanwriter score --help
 ```

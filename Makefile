@@ -11,23 +11,23 @@ all: build
 
 # 构建所有平台的二进制文件（发布到 bin/ 目录）
 release:
-	@echo "🔨 构建 wechatwriter 所有平台版本..."
+	@echo "🔨 构建 anbanwriter 所有平台版本..."
 	@echo ""
 	@mkdir -p bin
 	@echo "📦 Building for Linux amd64..."
-	@GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/wechatwriter-linux-amd64 ./app
+	@GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-linux-amd64 ./app
 	@echo "✓ Linux amd64"
 	@echo "📦 Building for Linux arm64..."
-	@GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/wechatwriter-linux-arm64 ./app
+	@GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-linux-arm64 ./app
 	@echo "✓ Linux arm64"
 	@echo "📦 Building for macOS amd64 (Intel)..."
-	@GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/wechatwriter-darwin-amd64 ./app
+	@GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-darwin-amd64 ./app
 	@echo "✓ macOS amd64"
 	@echo "📦 Building for macOS arm64 (Apple Silicon)..."
-	@GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/wechatwriter-darwin-arm64 ./app
+	@GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-darwin-arm64 ./app
 	@echo "✓ macOS arm64"
 	@echo "📦 Building for Windows amd64..."
-	@GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/wechatwriter-windows-amd64.exe ./app
+	@GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-windows-amd64.exe ./app
 	@echo "✓ Windows amd64"
 	@echo ""
 	@chmod +x bin/*-linux* bin/*-darwin* 2>/dev/null || true
@@ -39,15 +39,15 @@ release:
 build:
 	@echo "🔨 构建当前平台..."
 	@mkdir -p bin
-	@go build -ldflags="$(LDFLAGS)" -o bin/wechatwriter ./app
-	@echo "✅ 构建完成: bin/wechatwriter"
+	@go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter ./app
+	@echo "✅ 构建完成: bin/anbanwriter"
 
 # 快速构建（仅当前平台，用于开发）
 fast:
 	@echo "🔨 快速构建当前平台..."
 	@mkdir -p bin
-	@go build -ldflags="$(LDFLAGS)" -o bin/wechatwriter ./app
-	@echo "✅ 构建完成: bin/wechatwriter"
+	@go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter ./app
+	@echo "✅ 构建完成: bin/anbanwriter"
 
 # 清理
 clean:
@@ -116,4 +116,4 @@ help:
 	@echo "  make sync        - 同步 Skill 目录到插件目录"
 	@echo ""
 	@echo "用户快速安装:"
-	@echo "  go install github.com/royalrick/wechatwriter/app/cmd/writer@latest"
+	@echo "  go install github.com/royalrick/anbanwriter/app/cmd/writer@latest"

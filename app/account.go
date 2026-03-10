@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/royalrick/wechatwriter/app/config"
-	"github.com/royalrick/wechatwriter/app/draft"
-	"github.com/royalrick/wechatwriter/app/image"
-	"github.com/royalrick/wechatwriter/app/storage"
-	"github.com/royalrick/wechatwriter/app/writer"
+	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/draft"
+	"github.com/royalrick/anbanwriter/app/image"
+	"github.com/royalrick/anbanwriter/app/storage"
+	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -24,8 +24,8 @@ func accountCmd() *cobra.Command {
 		Short: "账号管理",
 		Long: `管理微信公众号账号信息和配置
 
-使用 'wechatwriter account info' 查看账号画像信息。
-使用 'wechatwriter account init' 创建配置文件。`,
+使用 'anbanwriter account info' 查看账号画像信息。
+使用 'anbanwriter account init' 创建配置文件。`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := showAccountInfo(""); err != nil {
 				responseError(err)
@@ -120,7 +120,7 @@ func showAccountInfo(scope string) error {
 			}
 			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
 		} else {
-			fmt.Printf("- 图片生成: 未配置（需设置 xhs.content.image.key 或 wechat.post.content.image.key）\n")
+			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.post.content.image.key）\n")
 		}
 
 		// 发布能力状态
@@ -131,7 +131,7 @@ func showAccountInfo(scope string) error {
 			fmt.Printf("- 微信小绿书: 未配置（需设置 wechat.appid 和 wechat.secret）\n")
 		}
 		fmt.Printf("- 小红书: 通过 MCP 工具 publish_content()\n")
-		fmt.Printf("  💡 确保已配置 xiaohongshu MCP 服务器\n")
+		fmt.Printf("  💡 确保已配置 rednote MCP 服务器\n")
 
 		if cfg.Wechat.Post.Style != "" {
 			pm := image.NewStylePresetManager()
@@ -182,7 +182,7 @@ func showAccountInfo(scope string) error {
 			}
 			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
 		} else {
-			fmt.Printf("- 图片生成: 未配置（需设置 xhs.content.image.key 或 wechat.post.content.image.key）\n")
+			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.post.content.image.key）\n")
 		}
 
 		// 发布能力状态
@@ -359,10 +359,10 @@ func accountHistoryCmd() *cobra.Command {
 使用 --sync 手动触发 API 同步。
 
 示例:
-  wechatwriter account history
-  wechatwriter account history --count 10
-  wechatwriter account history --json
-  wechatwriter account history --sync`,
+  anbanwriter account history
+  anbanwriter account history --count 10
+  anbanwriter account history --json
+  anbanwriter account history --sync`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if sync {
 				// --sync 需要微信 API，加载完整配置
@@ -394,7 +394,7 @@ func accountHistoryCmd() *cobra.Command {
 				// 自动同步但缺少微信凭证时，输出提示而非报错
 				if !sync && (cfg.Wechat.AppID == "" || cfg.Wechat.Secret == "") {
 					fmt.Fprintf(os.Stderr, "⚠️  本地历史记录为空，自动同步需要配置微信凭证（wechat.appid / wechat.secret）\n")
-					fmt.Fprintf(os.Stderr, "   运行 'wechatwriter account init' 设置，或使用 --sync 手动触发同步。\n")
+					fmt.Fprintf(os.Stderr, "   运行 'anbanwriter account init' 设置，或使用 --sync 手动触发同步。\n")
 				} else {
 					items, warnings = fetchHistoryFromAPI(count)
 					// 同步结果持久化到 DB

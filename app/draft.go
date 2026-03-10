@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/royalrick/wechatwriter/app/draft"
-	"github.com/royalrick/wechatwriter/app/storage"
+	"github.com/royalrick/anbanwriter/app/draft"
+	"github.com/royalrick/anbanwriter/app/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +34,7 @@ func draftCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "draft",
 		Short: "微信草稿管理（创建、测试、发布）",
-		Long: `微信公众号草稿管理命令组（仅用于微信，小红书请使用 xiaohongshu 命令或 MCP 工具）
+		Long: `微信公众号草稿管理命令组（仅用于微信，小红书请使用 rednote 命令或 MCP 工具）
 
 支持的操作：
   article     - 从 JSON 文件创建微信公众号图文文章草稿
@@ -44,7 +44,7 @@ func draftCmd() *cobra.Command {
 
 平台说明：
   - 本命令组所有子命令仅用于微信公众号/小绿书
-  - 小红书发布请使用 MCP 工具 publish_content() 或 wechatwriter xiaohongshu export 导出`,
+  - 小红书发布请使用 MCP 工具 publish_content() 或 anbanwriter rednote export 导出`,
 	}
 
 	cmd.AddCommand(draftArticleCmd())
@@ -91,7 +91,7 @@ JSON 格式示例:
 
 注意：
   - 需要在配置文件中设置微信公众号账号信息
-  - 运行 'wechatwriter account init' 创建配置文件
+  - 运行 'anbanwriter account init' 创建配置文件
   - 内容长度限制 20000 字符，超出请使用 content_file 分离 HTML 文件`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -209,8 +209,8 @@ func draftTestCmd() *cobra.Command {
   wechat.secret  - 微信公众号 Secret
 
 示例:
-  wechatwriter draft test output.html cover.jpg
-  wechatwriter draft test output.html cover.jpg --title "测试文章" --digest "摘要"`,
+  anbanwriter draft test output.html cover.jpg
+  anbanwriter draft test output.html cover.jpg --title "测试文章" --digest "摘要"`,
 		Args: cobra.ExactArgs(2),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfig()
@@ -283,7 +283,7 @@ func draftPublishCmd() *cobra.Command {
 		Long: `将文章内容上传到微信公众号草稿箱
 
 需要在配置文件中设置微信公众号账号信息。
-使用 'wechatwriter account init' 创建配置文件。`,
+使用 'anbanwriter account init' 创建配置文件。`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPublish(title, content, author, digest, coverID, outputDir, images)
 		},
@@ -350,7 +350,7 @@ func runPublish(title, content, author, digest, coverID, outputDir, images strin
 	responseSuccess(map[string]any{
 		"draft_file":   draftFile,
 		"message":      "草稿JSON已保存",
-		"next_command": "wechatwriter draft article " + draftFile,
+		"next_command": "anbanwriter draft article " + draftFile,
 	})
 
 	return nil

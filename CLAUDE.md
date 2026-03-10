@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Writer for WeChat** (wechatwriter) is a Go CLI tool that transforms Markdown articles into WeChat-formatted HTML with professional styling, AI-powered writing assistance, humanization features, and direct publishing to WeChat draft box.
+**Writer for WeChat** (anbanwriter) is a Go CLI tool that transforms Markdown articles into WeChat-formatted HTML with professional styling, AI-powered writing assistance, humanization features, and direct publishing to WeChat draft box.
 
 - **Language**: Go 1.26.0
 - **CLI Framework**: Cobra
@@ -20,14 +20,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Quick build for current platform (development)
 make fast
 
-# Build for current platform (outputs to bin/wechatwriter)
+# Build for current platform (outputs to bin/anbanwriter)
 make build
 
 # Build for all platforms (release)
 make release
 
 # Build via go directly
-go build -o wechatwriter ./app
+go build -o anbanwriter ./app
 ```
 
 ### Testing
@@ -131,9 +131,9 @@ app/
 
 ### Configuration System
 
-**Single Account Support**: The config system supports one WeChat account configured via the config file (`.wechatwriter/settings.json`).
+**Single Account Support**: The config system supports one WeChat account configured via the config file (`.anbanwriter/settings.json`).
 
-**Config Search Priority**: CWD → `CLAUDE_PLUGIN_ROOT` → `~/.config/wechatwriter/` → `~/.wechatwriter/` → executable-relative
+**Config Search Priority**: CWD → `CLAUDE_PLUGIN_ROOT` → `~/.config/anbanwriter/` → `~/.anbanwriter/` → executable-relative
 
 **Two Loading Modes**:
 - `Load()` / `LoadWithDefaults()`: Full validation including WeChat AppID/Secret
@@ -171,7 +171,7 @@ The converter module orchestrates a multi-step process:
 - Returns inline image data (no URL download needed)
 - Default model: `gemini-3-pro-image-preview`
 - Supports image size via `size` field in WIDTHxHEIGHT format (e.g., `2560x1440`, `1728x2304`)
-- Temp file prefix: `wechatwriter_gemini_`
+- Temp file prefix: `anbanwriter_gemini_`
 
 **OpenRouter** (provider: `openrouter` or `or`):
 
@@ -179,14 +179,14 @@ The converter module orchestrates a multi-step process:
 - Uses Chat Completions API, returns base64-encoded images
 - Default model: `google/gemini-3-pro-image-preview`
 - Default base URL: `https://openrouter.ai/api/v1`
-- Temp file prefix: `wechatwriter_openrouter_`
+- Temp file prefix: `anbanwriter_openrouter_`
 
 **Volcengine/Seedream** (provider: `volcengine`, `volc`, or `seedream`):
 
 - Bytedance's image generation model with async task polling
 - Default model: `doubao-seedream-4-5-251128`
 - Default base URL: `https://ark.cn-beijing.volces.com/api/v3`
-- Temp file prefix: `wechatwriter_volcengine_`
+- Temp file prefix: `anbanwriter_volcengine_`
 
 ### Writing Styles
 
@@ -326,7 +326,7 @@ func TestFeature(t *testing.T) {
    - Supported formats: JPG, JPEG, PNG, GIF, BMP, WebP
 
 3. **Configuration**:
-   - Config is JSON only (`.wechatwriter/settings.json`)
+   - Config is JSON only (`.anbanwriter/settings.json`)
 
 4. **AI Generation**:
    - Prompts must be in Chinese for better results with Chinese content
@@ -335,20 +335,21 @@ func TestFeature(t *testing.T) {
 
 ## CLI Commands Overview
 
-- `./bin/wechatwriter account init` - Create config file with guided setup
-- `./bin/wechatwriter account history` - View unified history of drafts and published articles
-- `./bin/wechatwriter convert <file>` - Convert Markdown to WeChat HTML
-- `./bin/wechatwriter write` - Style-based writing assistance
-- `./bin/wechatwriter humanize <file>` - Remove AI writing traces
-- `./bin/wechatwriter score <file>` - Evaluate article quality (viral potential scoring)
-- `./bin/wechatwriter outline` - Generate article outline
-- `./bin/wechatwriter draft` - Manage WeChat drafts
-- `./bin/wechatwriter draft article <json_file>` - Create 图文文章 (news article) draft from JSON
-- `./bin/wechatwriter draft post` - Create 小绿书 (Xiaolvshu/newspic) image posts (max 20 images)
-- `./bin/wechatwriter image generate <prompt>` - Generate AI images
-- `./bin/wechatwriter image upload <file>` - Upload image to WeChat CDN
-- `./bin/wechatwriter image download <url>` - Download image
-- `./bin/wechatwriter doctor` - Diagnose config and connection issues
+- `./bin/anbanwriter account init` - Create config file with guided setup
+- `./bin/anbanwriter account history` - View unified history of drafts and published articles
+- `./bin/anbanwriter convert <file>` - Convert Markdown to WeChat HTML
+- `./bin/anbanwriter write` - Style-based writing assistance
+- `./bin/anbanwriter humanize <file>` - Remove AI writing traces
+- `./bin/anbanwriter score <file>` - Evaluate article quality (viral potential scoring)
+- `./bin/anbanwriter outline` - Generate article outline
+- `./bin/anbanwriter draft` - Manage WeChat drafts
+- `./bin/anbanwriter draft article <json_file>` - Create 图文文章 (news article) draft from JSON
+- `./bin/anbanwriter draft post` - Create 小绿书 (Xiaolvshu/newspic) image posts (max 20 images)
+- `./bin/anbanwriter image generate <prompt>` - Generate AI images
+- `./bin/anbanwriter image upload <file>` - Upload image to WeChat CDN
+- `./bin/anbanwriter image download <url>` - Download image
+- `./bin/anbanwriter video assemble <images_or_dir>` - Assemble images into video with xfade transitions (requires ffmpeg)
+- `./bin/anbanwriter doctor` - Diagnose config and connection issues
 
 ## Skills Integration
 

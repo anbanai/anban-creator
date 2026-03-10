@@ -11,8 +11,8 @@
 ### CLI 命令
 
 ```bash
-wechatwriter image upload <file_path>
-wechatwriter image download <url>
+anbanwriter image upload <file_path>
+anbanwriter image download <url>
 ```
 
 ### 响应格式
@@ -42,7 +42,7 @@ wechatwriter image download <url>
 ### CLI 命令
 
 ```bash
-wechatwriter draft article <json_file>
+anbanwriter draft article <json_file>
 ```
 
 ### 响应格式
@@ -77,7 +77,7 @@ wechatwriter draft article <json_file>
 
 ## 图片生成 API
 
-使用兼容 OpenAI 的图片生成接口，通过 `.wechatwriter/settings.json` 配置 API key 和 base URL。
+使用兼容 OpenAI 的图片生成接口，通过 `.anbanwriter/settings.json` 配置 API key 和 base URL。
 
 | 错误 | 处理方式 |
 |------|----------|
@@ -88,7 +88,7 @@ wechatwriter draft article <json_file>
 
 ## 认证配置
 
-WeChat AppID 和 AppSecret 通过 `.wechatwriter/settings.json` 配置文件管理。
+WeChat AppID 和 AppSecret 通过 `.anbanwriter/settings.json` 配置文件管理。
 
 ## 速率限制
 

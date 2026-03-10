@@ -3,7 +3,7 @@ package image
 import (
 	"testing"
 
-	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/config"
 	"go.uber.org/zap"
 )
 

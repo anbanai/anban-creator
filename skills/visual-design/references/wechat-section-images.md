@@ -141,13 +141,13 @@
 STYLE="水彩插画，柔和暖色调，留白构图"
 
 # 生成每张章节配图（使用同一风格）
-wechatwriter image generate "{section_prompt}" --style "$STYLE"
+anbanwriter image generate "{section_prompt}" --style "$STYLE"
 
 # 上传到微信素材库
-wechatwriter image upload <file_path>
+anbanwriter image upload <file_path>
 
 # 批量生成并上传（从 Markdown 提取所有占位符）
-wechatwriter image batch article.md --style "$STYLE" -o images.json
+anbanwriter image batch article.md --style "$STYLE" -o images.json
 ```
 
 ---

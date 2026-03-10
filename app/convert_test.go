@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/royalrick/wechatwriter/app/converter"
+	"github.com/royalrick/anbanwriter/app/converter"
 )
 
 // TestLoadImageURLs tests the loadImageURLs helper function.

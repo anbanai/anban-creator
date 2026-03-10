@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "xiaohongshu": {
+    "rednote": {
       "type": "http",
       "url": "${API_BASE_URL:-http://localhost:18060}/mcp",
       "headers": {

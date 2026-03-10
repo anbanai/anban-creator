@@ -1,5 +1,5 @@
 {
-  "name": "wechatwriter",
+  "name": "anbanwriter",
   "description": "Professional WeChat content creation toolkit with AI-powered writing, visual design, and publishing optimization",
   "version": "2.3.0",
   "author": {
@@ -7,8 +7,8 @@
     "email": "medivhzhan@gmail.com",
     "url": "https://github.com/royalrick"
   },
-  "homepage": "https://github.com/royalrick/wechatwriter",
-  "repository": "https://github.com/royalrick/wechatwriter",
+  "homepage": "https://github.com/royalrick/anbanwriter",
+  "repository": "https://github.com/royalrick/anbanwriter",
   "license": "MIT",
   "keywords": [
     "wechat",

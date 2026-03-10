@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/royalrick/wechatwriter/app/writer"
+	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/spf13/cobra"
 )
 

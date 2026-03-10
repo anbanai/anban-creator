@@ -1,6 +1,6 @@
 # Writer for WeChat Windows 自动安装脚本
 # 使用方法：在 PowerShell 中运行
-# Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/royalrick/wechatwriter/main/scripts/install.ps1'))
+# Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/royalrick/anbanwriter/main/scripts/install.ps1'))
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "   Writer for WeChat 安装向导" -ForegroundColor Cyan
@@ -25,7 +25,7 @@ New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 # 下载
 Write-Host "正在下载..." -ForegroundColor Green
-$downloadUrl = "https://github.com/royalrick/wechatwriter/app/releases/latest/download/writer-windows-amd64.exe"
+$downloadUrl = "https://github.com/royalrick/anbanwriter/app/releases/latest/download/writer-windows-amd64.exe"
 $outputFile = "$installDir\writer.exe"
 
 try {

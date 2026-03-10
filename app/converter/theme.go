@@ -132,7 +132,7 @@ func (tm *ThemeManager) getThemeDir() string {
 
 	// User config dirs
 	homeDir, _ := os.UserHomeDir()
-	userThemeDir := filepath.Join(homeDir, ".config", "wechatwriter", "themes")
+	userThemeDir := filepath.Join(homeDir, ".config", "anbanwriter", "themes")
 	if _, err := os.Stat(userThemeDir); err == nil {
 		return userThemeDir
 	}

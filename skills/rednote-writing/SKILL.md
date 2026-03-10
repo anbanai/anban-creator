@@ -1,8 +1,8 @@
 ---
-name: xiaohongshu-writing
+name: rednote-writing
 description: |
   小红书内容创作知识库——文案写作公式、标题心理学、行业模板。
-  Use when user mentions "小红书文案", "小红书标题", "种草文案", "笔记写作", "xhs copywriting"
+  Use when user mentions "小红书文案", "小红书标题", "种草文案", "笔记写作", "rednote copywriting"
 user-invocable: false
 metadata:
   author: Rick
@@ -80,7 +80,7 @@ metadata:
 
 ## 6. 违禁词合规
 
-发布前必须扫描违禁词，参照：[../xiaohongshu-ops/references/prohibited-words.md](../xiaohongshu-ops/references/prohibited-words.md)
+发布前必须扫描违禁词，参照：[../rednote-ops/references/prohibited-words.md](../rednote-ops/references/prohibited-words.md)
 
 按风险等级自动替换/删除，避免虚假承诺和过度夸大。
 

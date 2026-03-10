@@ -103,22 +103,22 @@ func (sm *StyleManager) getWritersDir() string {
 	}
 
 	// Executable-relative path (for installed binaries)
-	// Binary is at bin/wechatwriter, writers/ is at project root (../writers/)
+	// Binary is at bin/anbanwriter, writers/ is at project root (../writers/)
 	if exe, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exe)
 		if realExe, err := filepath.EvalSymlinks(exe); err == nil {
 			exeDir = filepath.Dir(realExe)
 		}
 		paths = append(paths,
-			filepath.Join(exeDir, "writers"),      // sibling: scripts/writers/
+			filepath.Join(exeDir, "writers"),       // sibling: scripts/writers/
 			filepath.Join(exeDir, "..", "writers"), // parent:  writers/ (project root)
 		)
 	}
 
 	paths = append(paths,
 		"writers",
-		filepath.Join(os.Getenv("HOME"), ".config", "wechatwriter", "writers"),
-		filepath.Join(os.Getenv("HOME"), ".wechatwriter", "writers"),
+		filepath.Join(os.Getenv("HOME"), ".config", "anbanwriter", "writers"),
+		filepath.Join(os.Getenv("HOME"), ".anbanwriter", "writers"),
 	)
 
 	for _, path := range paths {
@@ -163,13 +163,13 @@ func (sm *StyleManager) mapToEnglishName(name string) string {
 		// Cultural Depth 别名
 		"cultural-depth": "cultural-depth",
 		"cultural":       "cultural-depth",
-		"文化":            "cultural-depth",
-		"深度文化":          "cultural-depth",
+		"文化":             "cultural-depth",
+		"深度文化":           "cultural-depth",
 		// Casual Science 别名
 		"casual-science": "casual-science",
 		"casual":         "casual-science",
-		"科普":            "casual-science",
-		"轻松科普":          "casual-science",
+		"科普":             "casual-science",
+		"轻松科普":           "casual-science",
 	}
 
 	// 先检查精确匹配

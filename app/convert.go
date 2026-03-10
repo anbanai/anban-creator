@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/royalrick/wechatwriter/app/config"
-	"github.com/royalrick/wechatwriter/app/converter"
-	"github.com/royalrick/wechatwriter/app/draft"
-	"github.com/royalrick/wechatwriter/app/image"
-	"github.com/royalrick/wechatwriter/app/wechat"
+	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/converter"
+	"github.com/royalrick/anbanwriter/app/draft"
+	"github.com/royalrick/anbanwriter/app/image"
+	"github.com/royalrick/anbanwriter/app/wechat"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -185,7 +185,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	if convertUpload || convertDraft {
 		// 需要微信功能，加载完整配置（包含微信账号验证）
 		if err := initConfig(); err != nil {
-			return fmt.Errorf("加载微信配置失败: %w\n提示: 运行 'wechatwriter account init' 配置微信账号", err)
+			return fmt.Errorf("加载微信配置失败: %w\n提示: 运行 'anbanwriter account init' 配置微信账号", err)
 		}
 
 		if err := processImages(result); err != nil {

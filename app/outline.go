@@ -70,10 +70,10 @@ func outlineCmd() *cobra.Command {
 
 示例:
   # Step 1: 生成提示词
-  wechatwriter outline -t "茶叶养生" -k "绿茶,健康,抗氧化"
+  anbanwriter outline -t "茶叶养生" -k "绿茶,健康,抗氧化"
 
   # Step 2: 验证代理返回的大纲 JSON
-  wechatwriter outline -t "茶叶养生" --ai-result outline.json`,
+  anbanwriter outline -t "茶叶养生" --ai-result outline.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 回退到配置文件默认值
 			if !cmd.Flags().Changed("style") {

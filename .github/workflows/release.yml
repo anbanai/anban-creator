@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
   workflow_dispatch:
 
 permissions:
@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: "1.24"
           cache: true
 
       - name: Download dependencies
@@ -38,11 +38,11 @@ jobs:
         run: |
           mkdir -p bin
 
-          GOOS=linux   GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/wechatwriter-linux-amd64 ./app
-          GOOS=linux   GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/wechatwriter-linux-arm64 ./app
-          GOOS=darwin  GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/wechatwriter-darwin-amd64 ./app
-          GOOS=darwin  GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/wechatwriter-darwin-arm64 ./app
-          GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/wechatwriter-windows-amd64.exe ./app
+          GOOS=linux   GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-linux-amd64 ./app
+          GOOS=linux   GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-linux-arm64 ./app
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-darwin-amd64 ./app
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-darwin-arm64 ./app
+          GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-windows-amd64.exe ./app
 
           chmod +x bin/*-linux* bin/*-darwin* 2>/dev/null || true
           echo "${{ github.ref_name }}" > bin/version.txt
@@ -59,11 +59,11 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            bin/wechatwriter-linux-amd64
-            bin/wechatwriter-linux-arm64
-            bin/wechatwriter-darwin-amd64
-            bin/wechatwriter-darwin-arm64
-            bin/wechatwriter-windows-amd64.exe
+            bin/anbanwriter-linux-amd64
+            bin/anbanwriter-linux-arm64
+            bin/anbanwriter-darwin-amd64
+            bin/anbanwriter-darwin-arm64
+            bin/anbanwriter-windows-amd64.exe
             bin/version.txt
             bin/checksums.txt
           draft: false

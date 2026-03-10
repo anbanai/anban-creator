@@ -47,7 +47,7 @@ cover_mood: "封面情绪"
 
 ```bash
 # CLI 命令
-wechatwriter write --style my-style
+anbanwriter write --style my-style
 
 # 自然语言
 "用 my-style 风格写一篇文章"
@@ -175,11 +175,11 @@ cover_prompt: |
 
 ## 风格文件位置
 
-`bin/wechatwriter` 会按以下顺序查找风格文件：
+`bin/anbanwriter` 会按以下顺序查找风格文件：
 
 1. `./writers/` - 当前项目目录
-2. `~/.config/wechatwriter/writers/` - 用户配置目录
-3. `~/.wechatwriter/` - 用户主目录
+2. `~/.config/anbanwriter/writers/` - 用户配置目录
+3. `~/.anbanwriter/` - 用户主目录
 
 ---
 
@@ -205,13 +205,13 @@ A:
 
 ```bash
 # 列出所有风格
-wechatwriter styles
+anbanwriter styles
 
 # 查看风格详情
-wechatwriter styles --detail my-style
+anbanwriter styles --detail my-style
 
 # 测试写作
-wechatwriter write --style my-style --input-type idea
+anbanwriter write --style my-style --input-type idea
 ```
 
 ### Q: 可以分享我的风格吗？

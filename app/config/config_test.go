@@ -9,7 +9,7 @@ import (
 func TestLoad_DefaultConfig(t *testing.T) {
 	// 使用临时配置文件，避免加载用户配置
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "wechatwriter.json")
+	configPath := filepath.Join(tmpDir, "anbanwriter.json")
 
 	// 创建一个最小的配置文件（只包含必需的微信配置）
 	minimalConfig := `{
@@ -225,7 +225,7 @@ func TestFindConfigFile(t *testing.T) {
 }
 
 func TestDefaultConfigPath(t *testing.T) {
-	want := filepath.Join(".wechatwriter", "settings.json")
+	want := filepath.Join(".anbanwriter", "settings.json")
 	if got := DefaultConfigPath(); got != want {
 		t.Errorf("DefaultConfigPath() = %q, want %q", got, want)
 	}
@@ -629,7 +629,6 @@ func TestNewDefaultConfig_ConsistentWithRuntimeDefaults(t *testing.T) {
 	}
 }
 
-
 func TestMergeImageAPI(t *testing.T) {
 	t.Run("base fields take priority", func(t *testing.T) {
 		base := ImageAPI{Key: "base-key", Provider: "openai", Model: "dall-e-3"}
@@ -699,7 +698,7 @@ func TestMergeImageAPI(t *testing.T) {
 }
 
 func TestResolvedPostContentImage(t *testing.T) {
-	t.Run("no xiaohongshu config returns wechat.post", func(t *testing.T) {
+	t.Run("no rednote config returns wechat.post", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Post.Content.Image.Key = "post-key"
 		cfg.Wechat.Post.Content.Image.Provider = "openai"
@@ -712,37 +711,37 @@ func TestResolvedPostContentImage(t *testing.T) {
 		}
 	})
 
-	t.Run("xiaohongshu fills missing wechat.post fields", func(t *testing.T) {
+	t.Run("rednote fills missing wechat.post fields", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Post.Content.Image = ImageAPI{} // empty
-		cfg.XHS = &XHSConfig{}
-		cfg.XHS.Content.Image = ImageAPI{
-			Key:      "xhs-key",
+		cfg.Rednote = &RednoteConfig{}
+		cfg.Rednote.Content.Image = ImageAPI{
+			Key:      "rednote-key",
 			Provider: "gemini",
 			Size:     "3:4:1K",
 		}
 		result := cfg.ResolvedPostContentImage()
-		if result.Key != "xhs-key" {
-			t.Errorf("Key = %q, want xhs-key (from xiaohongshu)", result.Key)
+		if result.Key != "rednote-key" {
+			t.Errorf("Key = %q, want rednote-key (from rednote)", result.Key)
 		}
 		if result.Provider != "gemini" {
-			t.Errorf("Provider = %q, want gemini (from xiaohongshu)", result.Provider)
+			t.Errorf("Provider = %q, want gemini (from rednote)", result.Provider)
 		}
 		if result.Size != "3:4:1K" {
-			t.Errorf("Size = %q, want 3:4:1K (from xiaohongshu)", result.Size)
+			t.Errorf("Size = %q, want 3:4:1K (from rednote)", result.Size)
 		}
 	})
 
-	t.Run("wechat.post takes priority over xiaohongshu", func(t *testing.T) {
+	t.Run("wechat.post takes priority over rednote", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Post.Content.Image = ImageAPI{
 			Key:      "post-key",
 			Provider: "openrouter",
 			Size:     "16:9",
 		}
-		cfg.XHS = &XHSConfig{}
-		cfg.XHS.Content.Image = ImageAPI{
-			Key:      "xhs-key",
+		cfg.Rednote = &RednoteConfig{}
+		cfg.Rednote.Content.Image = ImageAPI{
+			Key:      "rednote-key",
 			Provider: "gemini",
 			Size:     "3:4:1K",
 		}
@@ -760,17 +759,17 @@ func TestResolvedPostContentImage(t *testing.T) {
 }
 
 func TestResolvedPostCoverImage(t *testing.T) {
-	t.Run("xiaohongshu cover fills missing wechat.post.cover", func(t *testing.T) {
+	t.Run("rednote cover fills missing wechat.post.cover", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.XHS = &XHSConfig{}
-		cfg.XHS.Cover.Image = ImageAPI{
-			Key:      "xhs-cover-key",
+		cfg.Rednote = &RednoteConfig{}
+		cfg.Rednote.Cover.Image = ImageAPI{
+			Key:      "rednote-cover-key",
 			Provider: "volcengine",
 			Size:     "3:4",
 		}
 		result := cfg.ResolvedPostCoverImage()
-		if result.Key != "xhs-cover-key" {
-			t.Errorf("Key = %q, want xhs-cover-key", result.Key)
+		if result.Key != "rednote-cover-key" {
+			t.Errorf("Key = %q, want rednote-cover-key", result.Key)
 		}
 		if result.Provider != "volcengine" {
 			t.Errorf("Provider = %q, want volcengine", result.Provider)
@@ -778,17 +777,17 @@ func TestResolvedPostCoverImage(t *testing.T) {
 	})
 }
 
-func TestPostImageSize_XHSFallback(t *testing.T) {
+func TestPostImageSize_RednoteFallback(t *testing.T) {
 	tests := []struct {
 		name        string
 		postSize    string
-		xhsSize     string
+		rednoteSize string
 		hasXhs      bool
 		wantSize    string
 	}{
 		{"wechat.post has size", "3:4", "3:4:1K", true, "3:4"},
-		{"fallback to xiaohongshu", "", "3:4:1K", true, "3:4:1K"},
-		{"no xiaohongshu", "", "", false, DefaultPostImageSize},
+		{"fallback to rednote", "", "3:4:1K", true, "3:4:1K"},
+		{"no rednote", "", "", false, DefaultPostImageSize},
 		{"both empty", "", "", true, DefaultPostImageSize},
 	}
 
@@ -797,8 +796,8 @@ func TestPostImageSize_XHSFallback(t *testing.T) {
 			cfg := &Config{}
 			cfg.Wechat.Post.Content.Image.Size = tt.postSize
 			if tt.hasXhs {
-				cfg.XHS = &XHSConfig{}
-				cfg.XHS.Content.Image.Size = tt.xhsSize
+				cfg.Rednote = &RednoteConfig{}
+				cfg.Rednote.Content.Image.Size = tt.rednoteSize
 			}
 			if got := cfg.PostImageSize(); got != tt.wantSize {
 				t.Errorf("PostImageSize() = %q, want %q", got, tt.wantSize)
@@ -807,17 +806,17 @@ func TestPostImageSize_XHSFallback(t *testing.T) {
 	}
 }
 
-func TestPostImageCount_XHSFallback(t *testing.T) {
+func TestPostImageCount_RednoteFallback(t *testing.T) {
 	tests := []struct {
-		name      string
-		postCount int
-		xhsCount  int
-		hasXhs    bool
-		wantCount int
+		name         string
+		postCount    int
+		rednoteCount int
+		hasXhs       bool
+		wantCount    int
 	}{
 		{"wechat.post has count", 4, 6, true, 4},
-		{"fallback to xiaohongshu", 0, 6, true, 6},
-		{"no xiaohongshu", 0, 0, false, DefaultPostImageCount},
+		{"fallback to rednote", 0, 6, true, 6},
+		{"no rednote", 0, 0, false, DefaultPostImageCount},
 		{"both zero", 0, 0, true, DefaultPostImageCount},
 	}
 
@@ -826,8 +825,8 @@ func TestPostImageCount_XHSFallback(t *testing.T) {
 			cfg := &Config{}
 			cfg.Wechat.Post.Content.Count = tt.postCount
 			if tt.hasXhs {
-				cfg.XHS = &XHSConfig{}
-				cfg.XHS.Content.Count = tt.xhsCount
+				cfg.Rednote = &RednoteConfig{}
+				cfg.Rednote.Content.Count = tt.rednoteCount
 			}
 			if got := cfg.PostImageCount(); got != tt.wantCount {
 				t.Errorf("PostImageCount() = %d, want %d", got, tt.wantCount)

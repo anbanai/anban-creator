@@ -1,4 +1,4 @@
-# XHS Viral Copy 链路
+# Rednote Viral Copy 链路
 
 目标：输入一条爆款笔记 ID 或 URL，输出"高贴合主题"的可发布新笔记（封面/配图、标题、正文、话题）。
 
@@ -7,7 +7,7 @@
 1. 获取爆款笔记完整内容
 2. 拆解爆款因素（标题/封面/正文/互动）
 3. 改写生成新内容
-4. 使用 `wechatwriter image generate` 生成图片
+4. 使用 `anbanwriter image generate` 生成图片
 5. 用 MCP `publish_post` 发布
 
 ## 1) 输入
@@ -67,10 +67,10 @@ get_feed_detail(post_id="<爆款笔记ID>")
 
 ```bash
 # 生成封面图
-wechatwriter image generate "<封面prompt>" --post --style "$STYLE" -o ./cover.png
+anbanwriter image generate "<封面prompt>" --post --style "$STYLE" -o ./cover.png
 
 # 生成配图
-wechatwriter image generate "<内容prompt>" --post --style "$STYLE" -o ./image_02.png
+anbanwriter image generate "<内容prompt>" --post --style "$STYLE" -o ./image_02.png
 ```
 
 ## 6) 发布

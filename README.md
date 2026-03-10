@@ -1,4 +1,4 @@
-# WechatWriter Plugin
+# Anban Writer Plugin
 
 Professional WeChat content creation toolkit for Claude Code with AI-powered writing, visual design, and publishing optimization.
 
@@ -6,10 +6,10 @@ Professional WeChat content creation toolkit for Claude Code with AI-powered wri
 
 ```bash
 # Add marketplace
-/plugin marketplace add royalrick/wechatwriter
+/plugin marketplace add royalrick/anbanwriter
 
 # Install plugin
-/plugin install wechatwriter@wechatwriter
+/plugin install anbanwriter@anbanwriter
 ```
 
 ## Features
@@ -24,7 +24,7 @@ Professional WeChat content creation toolkit for Claude Code with AI-powered wri
 
 ## Configuration
 
-Run `wechatwriter account init` for guided setup, or create `.wechatwriter/settings.json` directly:
+Run `anbanwriter account init` for guided setup, or create `.anbanwriter/settings.json` directly:
 
 ```json
 {
@@ -47,13 +47,13 @@ Supported image providers: `openai`, `gemini`, `openrouter`, `volcengine`
 
 | Skill | Description |
 |-------|-------------|
-| `/wechatwriter:config` | Initialize or view account configuration |
-| `/wechatwriter:content-writing` | Writing style, humanization, HTML conversion |
-| `/wechatwriter:visual-design` | Image generation and theme management |
-| `/wechatwriter:topic-research` | Topic scoring and outline generation |
-| `/wechatwriter:seo-optimization` | Title, keyword, and excerpt optimization |
-| `/wechatwriter:article-publishing` | 图文文章 draft publishing |
-| `/wechatwriter:post-publishing` | 小绿书 image post publishing |
+| `/anbanwriter:config` | Initialize or view account configuration |
+| `/anbanwriter:content-writing` | Writing style, humanization, HTML conversion |
+| `/anbanwriter:visual-design` | Image generation and theme management |
+| `/anbanwriter:topic-research` | Topic scoring and outline generation |
+| `/anbanwriter:seo-optimization` | Title, keyword, and excerpt optimization |
+| `/anbanwriter:article-publishing` | 图文文章 draft publishing |
+| `/anbanwriter:post-publishing` | 小绿书 image post publishing |
 
 ## Agents
 

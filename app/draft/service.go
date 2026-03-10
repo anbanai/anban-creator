@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/royalrick/wechatwriter/app/config"
-	"github.com/royalrick/wechatwriter/app/wechat"
+	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/wechat"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"go.uber.org/zap"
 )

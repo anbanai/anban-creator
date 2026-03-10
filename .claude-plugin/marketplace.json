@@ -6,14 +6,14 @@
   },
   "plugins": [
     {
-      "name": "wechatwriter",
+      "name": "anbanwriter",
       "source": "./",
       "description": "Next-generation WeChat article creation suite with AI-powered content generation, intelligent formatting, and automated publishing workflow. Features smart conversion, natural language image generation, writing style enhancement, and comprehensive content optimization.",
       "author": {
         "name": "Rick"
       },
-      "homepage": "https://github.com/royalrick/wechatwriter",
-      "repository": "https://github.com/royalrick/wechatwriter",
+      "homepage": "https://github.com/royalrick/anbanwriter",
+      "repository": "https://github.com/royalrick/anbanwriter",
       "license": "MIT",
       "keywords": [
         "wechat",

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/royalrick/wechatwriter/app/config"
-	"github.com/royalrick/wechatwriter/app/converter"
-	"github.com/royalrick/wechatwriter/app/image"
-	"github.com/royalrick/wechatwriter/app/storage"
+	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/converter"
+	"github.com/royalrick/anbanwriter/app/image"
+	"github.com/royalrick/anbanwriter/app/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -52,8 +52,8 @@ func imageUploadCmd() *cobra.Command {
   wechat.secret  - 微信公众号 Secret
 
 示例:
-  wechatwriter image upload cover.jpg
-  wechatwriter image upload ./images/photo.png`,
+  anbanwriter image upload cover.jpg
+  anbanwriter image upload ./images/photo.png`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfig()
@@ -97,11 +97,11 @@ func imageDownloadCmd() *cobra.Command {
 
 示例:
   # 下载并上传到微信
-  wechatwriter image download https://example.com/photo.jpg
+  anbanwriter image download https://example.com/photo.jpg
 
   # 仅下载到本地
-  wechatwriter image download https://example.com/photo.jpg --no-upload
-  wechatwriter image download https://example.com/photo.jpg --no-upload -o local.jpg`,
+  anbanwriter image download https://example.com/photo.jpg --no-upload
+  anbanwriter image download https://example.com/photo.jpg --no-upload -o local.jpg`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if noUpload {
@@ -198,30 +198,30 @@ Prompt 构建优先级（从高到低）：
 
 示例:
   # 生成图片（自动以时间戳命名，如 generated_image_20060102_150405.png）
-  wechatwriter image generate "春天的茶园，阳光明媚"
+  anbanwriter image generate "春天的茶园，阳光明媚"
 
   # 指定输出文件
-  wechatwriter image generate "春天的茶园" -o tea.png
+  anbanwriter image generate "春天的茶园" -o tea.png
 
   # 指定尺寸（比例格式，默认 2K 档位）
-  wechatwriter image generate "清晨茶园" --size 16:9 -o cover.jpg
-  wechatwriter image generate "竖版封面" --size 9:16 --post -o post.jpg
+  anbanwriter image generate "清晨茶园" --size 16:9 -o cover.jpg
+  anbanwriter image generate "竖版封面" --size 9:16 --post -o post.jpg
 
   # 指定比例+档位
-  wechatwriter image generate "封面图" --size 3:4:1K -o xhs-cover.jpg
-  wechatwriter image generate "封面图" --size 3:4:4K -o cover-4k.jpg
+  anbanwriter image generate "封面图" --size 3:4:1K -o rednote-cover.jpg
+  anbanwriter image generate "封面图" --size 3:4:4K -o cover-4k.jpg
 
   # 组图模式：一次生成 4 张风格一致的图片到目录
-  wechatwriter image generate "小绿书内容图" --post --count 4 -o ./output/images/
+  anbanwriter image generate "小绿书内容图" --post --count 4 -o ./output/images/
 
   # 组图变体模式：为每张图指定不同内容描述
-  wechatwriter image generate "清新扁平风格，莫兰迪色系" \
+  anbanwriter image generate "清新扁平风格，莫兰迪色系" \
     --post --count 4 \
     --variants "封面：茶园晨景，阳光洒在茶树上","图2：采茶姑娘手部特写","图3：传统制茶工艺","图4：一杯清香绿茶" \
-    -o ./xhs_post_images/
+    -o ./rednote_post_images/
 
   # 生成后自动上传到微信
-  wechatwriter image generate "封面图" --upload`,
+  anbanwriter image generate "封面图" --upload`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if upload {
@@ -271,8 +271,8 @@ Prompt 构建优先级（从高到低）：
 
 			// 解析预设 prompt（post 模式、无显式 --style、有配置预设时）
 			postStyle := cfg.Wechat.Post.Style
-			if postStyle == "" && cfg.XHS != nil {
-				postStyle = cfg.XHS.Style
+			if postStyle == "" && cfg.Rednote != nil {
+				postStyle = cfg.Rednote.Style
 			}
 			if postMode && stylePrompt == "" && postStyle != "" {
 				pm := image.NewStylePresetManager()
@@ -448,10 +448,10 @@ func imageBatchCmd() *cobra.Command {
 
 示例:
   # 批量生成并上传，使用统一风格
-  wechatwriter image batch article.md --style "水彩插画，柔和暖色调" -o images.json
+  anbanwriter image batch article.md --style "水彩插画，柔和暖色调" -o images.json
 
   # 仅生成不上传（输出本地路径）
-  wechatwriter image batch article.md --style "水彩插画" --no-upload -o images.json`,
+  anbanwriter image batch article.md --style "水彩插画" --no-upload -o images.json`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if noUpload {
@@ -516,8 +516,8 @@ func imageBatchCmd() *cobra.Command {
 
 			// 解析预设 prompt（post 模式、无显式 --style、有配置预设时）
 			postStyle := cfg.Wechat.Post.Style
-			if postStyle == "" && cfg.XHS != nil {
-				postStyle = cfg.XHS.Style
+			if postStyle == "" && cfg.Rednote != nil {
+				postStyle = cfg.Rednote.Style
 			}
 			if postMode && stylePrompt == "" && postStyle != "" {
 				pm := image.NewStylePresetManager()

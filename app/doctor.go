@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
-	"github.com/royalrick/wechatwriter/app/config"
-	"github.com/royalrick/wechatwriter/app/storage"
-	"github.com/royalrick/wechatwriter/app/wechat"
+	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/storage"
+	"github.com/royalrick/anbanwriter/app/wechat"
 	"github.com/spf13/cobra"
 )
 
@@ -84,7 +85,7 @@ func checkConfig(cfg *config.Config, cfgErr error) []CheckResult {
 	if _, err := os.Stat(configPath); err == nil {
 		checks = append(checks, CheckResult{Name: "config_file", Status: "pass", Message: fmt.Sprintf("配置文件存在: %s", configPath)})
 	} else {
-		checks = append(checks, CheckResult{Name: "config_file", Status: "warn", Message: "配置文件不存在", Hint: "运行 'wechatwriter account init' 创建配置文件"})
+		checks = append(checks, CheckResult{Name: "config_file", Status: "warn", Message: "配置文件不存在", Hint: "运行 'anbanwriter account init' 创建配置文件"})
 	}
 
 	if cfgErr != nil || cfg == nil {
@@ -123,17 +124,17 @@ func checkConfig(cfg *config.Config, cfgErr error) []CheckResult {
 		checks = append(checks, CheckResult{Name: "article_image_provider", Status: "pass", Message: fmt.Sprintf("图片提供者: %s", p)})
 	}
 
-	// 小绿书图片 Key（合并 wechat.post + xiaohongshu 后的结果）
+	// 小绿书图片 Key（合并 wechat.post + rednote 后的结果）
 	resolvedPost := cfg.ResolvedPostContentImage()
 	if resolvedPost.Key != "" {
 		// 显示配置来源
 		configSource := "wechat.post.content.image.key"
-		if cfg.Wechat.Post.Content.Image.Key == "" && cfg.XHS != nil && cfg.XHS.Content.Image.Key != "" {
-			configSource = "xhs.content.image.key (fallback)"
+		if cfg.Wechat.Post.Content.Image.Key == "" && cfg.Rednote != nil && cfg.Rednote.Content.Image.Key != "" {
+			configSource = "rednote.content.image.key (fallback)"
 		}
 		checks = append(checks, CheckResult{Name: "post_image_key", Status: "pass", Message: fmt.Sprintf("小绿书图片 API Key 已配置 (%s)", configSource)})
 	} else {
-		checks = append(checks, CheckResult{Name: "post_image_key", Status: "warn", Message: "小绿书图片 API Key 未配置", Hint: "配置查找顺序: 1. wechat.post.content.image.key → 2. xhs.content.image.key (fallback)"})
+		checks = append(checks, CheckResult{Name: "post_image_key", Status: "warn", Message: "小绿书图片 API Key 未配置", Hint: "配置查找顺序: 1. wechat.post.content.image.key → 2. rednote.content.image.key (fallback)"})
 	}
 
 	// 小绿书图片 Provider 有效性
@@ -159,7 +160,7 @@ func checkEnvironment() []CheckResult {
 	tmpDir := os.TempDir()
 
 	// 临时目录写入权限
-	tmpFile, err := os.CreateTemp(tmpDir, "wechatwriter_doctor_*")
+	tmpFile, err := os.CreateTemp(tmpDir, "anbanwriter_doctor_*")
 	if err != nil {
 		checks = append(checks, CheckResult{Name: "tmp_writable", Status: "fail", Message: "临时目录不可写: " + tmpDir, Hint: "检查临时目录权限"})
 	} else {
@@ -175,6 +176,13 @@ func checkEnvironment() []CheckResult {
 		} else {
 			checks = append(checks, CheckResult{Name: "disk_space", Status: "pass", Message: fmt.Sprintf("临时目录可用空间: %dMB", available/1024/1024)})
 		}
+	}
+
+	// ffmpeg 可用性
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		checks = append(checks, CheckResult{Name: "ffmpeg", Status: "warn", Message: "ffmpeg 未安装", Hint: "video 命令需要 ffmpeg，安装: brew install ffmpeg"})
+	} else {
+		checks = append(checks, CheckResult{Name: "ffmpeg", Status: "pass", Message: "ffmpeg 已安装"})
 	}
 
 	return checks
@@ -233,7 +241,7 @@ func checkDatabase() []CheckResult {
 	// 尝试打开 DB 并获取记录数
 	s, err := storage.Open(dbPath)
 	if err != nil {
-		checks = append(checks, CheckResult{Name: "db_open", Status: "fail", Message: "数据库打开失败: " + err.Error(), Hint: "检查 .wechatwriter/data.db 文件权限"})
+		checks = append(checks, CheckResult{Name: "db_open", Status: "fail", Message: "数据库打开失败: " + err.Error(), Hint: "检查 .anbanwriter/data.db 文件权限"})
 		return checks
 	}
 	defer s.Close()

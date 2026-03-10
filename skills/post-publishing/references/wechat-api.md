@@ -11,8 +11,8 @@
 ### CLI 命令
 
 ```bash
-wechatwriter image upload <file_path>
-wechatwriter image download <url>
+anbanwriter image upload <file_path>
+anbanwriter image download <url>
 ```
 
 ### 错误码
@@ -32,9 +32,9 @@ wechatwriter image download <url>
 ### CLI 命令
 
 ```bash
-wechatwriter draft post -t "标题" --images photo1.jpg,photo2.jpg
-wechatwriter draft post -t "标题" -m article.md
-wechatwriter draft post -t "标题" --images photo.jpg --dry-run
+anbanwriter draft post -t "标题" --images photo1.jpg,photo2.jpg
+anbanwriter draft post -t "标题" -m article.md
+anbanwriter draft post -t "标题" --images photo.jpg --dry-run
 ```
 
 ### 与图文草稿的区别
@@ -82,7 +82,7 @@ wechatwriter draft post -t "标题" --images photo.jpg --dry-run
 
 ## 认证配置
 
-WeChat AppID 和 AppSecret 通过 `.wechatwriter/settings.json` 配置文件管理。
+WeChat AppID 和 AppSecret 通过 `.anbanwriter/settings.json` 配置文件管理。
 
 ## 速率限制
 

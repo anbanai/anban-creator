@@ -1,4 +1,4 @@
-module github.com/royalrick/wechatwriter
+module github.com/royalrick/anbanwriter
 
 go 1.26.0
 

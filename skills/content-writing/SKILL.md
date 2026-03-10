@@ -77,11 +77,11 @@ metadata:
 
 ```bash
 # 风格写作
-wechatwriter write --help
+anbanwriter write --help
 
 # Markdown 转微信 HTML
-wechatwriter convert --help
+anbanwriter convert --help
 
 # AI 去痕
-wechatwriter humanize --help
+anbanwriter humanize --help
 ```

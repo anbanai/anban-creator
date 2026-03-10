@@ -21,8 +21,8 @@ metadata:
 | 公众号 | 章节配图 | [wechat-section-images.md](references/wechat-section-images.md) |
 | 小绿书 | 封面图 | [xiaolvshu-cover.md](references/xiaolvshu-cover.md) |
 | 小绿书 | 内容图 | [xiaolvshu-content.md](references/xiaolvshu-content.md) |
-| 小红书 | 封面图 | [xiaohongshu-cover.md](references/xiaohongshu-cover.md) |
-| 小红书 | 内容图 | [xiaohongshu-content.md](references/xiaohongshu-content.md) |
+| 小红书 | 封面图 | [rednote-cover.md](references/rednote-cover.md) |
+| 小红书 | 内容图 | [rednote-content.md](references/rednote-content.md) |
 
 **通用 reference**（跨场景适用）：
 
@@ -41,19 +41,22 @@ metadata:
 
 ```bash
 # 生成图片（横版，公众号封面 2K）
-wechatwriter image generate "{prompt}" -s 2k
+anbanwriter image generate "{prompt}" -s 2k
 
 # 生成图片（竖版，小绿书/小红书）
-wechatwriter image generate "{prompt}" --post --style "$STYLE"
+anbanwriter image generate "{prompt}" --post --style "$STYLE"
 
 # 上传到微信素材库
-wechatwriter image upload ./image.png
+anbanwriter image upload ./image.png
 
 # 下载并上传在线图片
-wechatwriter image download https://example.com/image.jpg
+anbanwriter image download https://example.com/image.jpg
 
 # 批量生成章节配图
-wechatwriter image batch article.md --style "$STYLE" -o images.json
+anbanwriter image batch article.md --style "$STYLE" -o images.json
+
+# 将多张图片组装成视频（需要 ffmpeg）
+anbanwriter video assemble $DIR/ --duration 3 --transition 1 -o $DIR/video.mp4
 ```
 
 ---
@@ -93,10 +96,10 @@ wechatwriter image batch article.md --style "$STYLE" -o images.json
 
 ```bash
 # Step 1: 生成图片到本地（返回 file_path）
-wechatwriter image generate "茶园清晨薄雾" -o cover.jpg
+anbanwriter image generate "茶园清晨薄雾" -o cover.jpg
 
 # Step 2: 上传到微信素材库（返回 media_id + wechat_url）
-wechatwriter image upload cover.jpg
+anbanwriter image upload cover.jpg
 ```
 
 ---

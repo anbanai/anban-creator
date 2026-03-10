@@ -55,27 +55,27 @@ Humanizer 基于维基百科的"AI 写作特征"指南，检测并处理 **24 �
 
 ```bash
 # 基本用法
-wechatwriter humanize article.md
+anbanwriter humanize article.md
 
 # 指定处理强度
-wechatwriter humanize article.md --intensity gentle
-wechatwriter humanize article.md --intensity aggressive
+anbanwriter humanize article.md --intensity gentle
+anbanwriter humanize article.md --intensity aggressive
 
 # 显示修改对比和质量评分
-wechatwriter humanize article.md --show-changes
+anbanwriter humanize article.md --show-changes
 
 # 输出到文件
-wechatwriter humanize article.md -o output.md
+anbanwriter humanize article.md -o output.md
 ```
 
 ### 与写作风格组合
 
 ```bash
 # 写作 + 去痕
-wechatwriter write --style dan-koe --humanize
+anbanwriter write --style dan-koe --humanize
 
 # 指定去痕强度
-wechatwriter write --style dan-koe --humanize --humanize-intensity aggressive
+anbanwriter write --style dan-koe --humanize --humanize-intensity aggressive
 ```
 
 ## 处理强度
@@ -91,7 +91,7 @@ wechatwriter write --style dan-koe --humanize --humanize-intensity aggressive
 当 Humanizer 与写作风格组合使用时，遵循**风格优先原则**：
 
 ```
-用户: wechatwriter write --style dan-koe --humanize
+用户: anbanwriter write --style dan-koe --humanize
 
 处理流程:
 1. 用 Dan Koe 风格生成文章

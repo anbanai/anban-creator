@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/royalrick/wechatwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 )
 

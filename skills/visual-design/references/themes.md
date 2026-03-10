@@ -25,19 +25,19 @@
 
 ```bash
 # 使用网格背景
-wechatwriter convert article.md --theme elegant-gold --background-type grid
+anbanwriter convert article.md --theme elegant-gold --background-type grid
 
 # 使用无背景
-wechatwriter convert article.md --theme minimal-blue --background-type none
+anbanwriter convert article.md --theme minimal-blue --background-type none
 
 # 组合使用
-wechatwriter convert article.md --theme focus-green --background-type grid --draft --cover cover.jpg
+anbanwriter convert article.md --theme focus-green --background-type grid --draft --cover cover.jpg
 ```
 
 **配置文件设置：**
 
 ```yaml
-# ~/.config/wechatwriter/config.yaml
+# ~/.config/anbanwriter/config.yaml
 api:
   background_type: grid  # default/grid/none
 ```
@@ -184,7 +184,7 @@ api:
 #### 使用方法
 
 ```bash
-wechatwriter convert article.md --custom-prompt "你的自定义提示词"
+anbanwriter convert article.md --custom-prompt "你的自定义提示词"
 ```
 
 #### 自定义提示词模板
@@ -264,7 +264,7 @@ img, br, hr
 ## 切换主题
 
 ```bash
-wechatwriter convert article.md --theme autumn-warm --preview
+anbanwriter convert article.md --theme autumn-warm --preview
 ```
 
 ### 方法 2: 通过 Skill
@@ -299,7 +299,7 @@ wechatwriter convert article.md --theme autumn-warm --preview
 ```
 
 ```bash
-wechatwriter convert story.md --theme autumn-warm --preview
+anbanwriter convert story.md --theme autumn-warm --preview
 ```
 
 ### 春日清新（旅行日记）
@@ -313,7 +313,7 @@ wechatwriter convert story.md --theme autumn-warm --preview
 ```
 
 ```bash
-wechatwriter travel.md --theme spring-fresh --preview
+anbanwriter travel.md --theme spring-fresh --preview
 ```
 
 ### 深海静谧（技术文章）
@@ -327,5 +327,5 @@ wechatwriter travel.md --theme spring-fresh --preview
 ```
 
 ```bash
-wechatwriter tech-post.md --theme ocean-calm --preview
+anbanwriter tech-post.md --theme ocean-calm --preview
 ```
