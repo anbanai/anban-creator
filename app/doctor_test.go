@@ -76,21 +76,21 @@ func TestCheckEnvironment(t *testing.T) {
 	}
 }
 
-func TestCheckConfig_PostImageKey(t *testing.T) {
-	t.Run("post image key via wechat.post", func(t *testing.T) {
+func TestCheckConfig_XlsImageKey(t *testing.T) {
+	t.Run("xls image key via wechat.xls", func(t *testing.T) {
 		cfg := &config.Config{}
-		cfg.Wechat.Post.Content.Image.Key = "post-key"
+		cfg.Wechat.Xls.Content.Image.Key = "xls-key"
 		checks := checkConfig(cfg, nil)
 		statusMap := map[string]string{}
 		for _, c := range checks {
 			statusMap[c.Name] = c.Status
 		}
-		if statusMap["post_image_key"] != "pass" {
-			t.Errorf("post_image_key status = %q, want pass", statusMap["post_image_key"])
+		if statusMap["xls_image_key"] != "pass" {
+			t.Errorf("xls_image_key status = %q, want pass", statusMap["xls_image_key"])
 		}
 	})
 
-	t.Run("post image key via rednote fallback", func(t *testing.T) {
+	t.Run("xls image key via rednote fallback", func(t *testing.T) {
 		cfg := &config.Config{}
 		rednote := &config.RednoteConfig{}
 		rednote.Content.Image.Key = "rednote-key"
@@ -100,20 +100,20 @@ func TestCheckConfig_PostImageKey(t *testing.T) {
 		for _, c := range checks {
 			statusMap[c.Name] = c.Status
 		}
-		if statusMap["post_image_key"] != "pass" {
-			t.Errorf("post_image_key status = %q, want pass (rednote fallback)", statusMap["post_image_key"])
+		if statusMap["xls_image_key"] != "pass" {
+			t.Errorf("xls_image_key status = %q, want pass (rednote fallback)", statusMap["xls_image_key"])
 		}
 	})
 
-	t.Run("no post image key warns", func(t *testing.T) {
+	t.Run("no xls image key warns", func(t *testing.T) {
 		cfg := &config.Config{}
 		checks := checkConfig(cfg, nil)
 		statusMap := map[string]string{}
 		for _, c := range checks {
 			statusMap[c.Name] = c.Status
 		}
-		if statusMap["post_image_key"] != "warn" {
-			t.Errorf("post_image_key status = %q, want warn", statusMap["post_image_key"])
+		if statusMap["xls_image_key"] != "warn" {
+			t.Errorf("xls_image_key status = %q, want warn", statusMap["xls_image_key"])
 		}
 	})
 }

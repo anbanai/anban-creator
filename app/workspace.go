@@ -12,7 +12,7 @@ import (
 var validContentTypes = map[string]bool{
 	"rednote":  true,
 	"articles": true,
-	"posts":    true,
+	"xls":      true,
 }
 
 func workspaceCmd() *cobra.Command {
@@ -34,7 +34,7 @@ func workspacePrepareCmd() *cobra.Command {
 类型:
   rednote   小红书内容 (output/rednote/staging/)
   articles  微信文章 (output/articles/staging/)
-  posts     微信小绿书图片帖 (output/posts/staging/)`,
+  xls     微信小绿书图片帖 (output/xls/staging/)`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			contentType := args[0]
@@ -84,7 +84,7 @@ func workspaceArchiveCmd() *cobra.Command {
 类型:
   rednote   小红书内容 (output/rednote/staging/)
   articles  微信文章 (output/articles/staging/)
-  posts     微信小绿书图片帖 (output/posts/staging/)`,
+  xls     微信小绿书图片帖 (output/xls/staging/)`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			contentType := args[0]

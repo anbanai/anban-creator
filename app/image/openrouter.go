@@ -147,7 +147,7 @@ func (p *OpenRouterProvider) wrapSDKError(err error) error {
 				Provider: p.Name(),
 				Code:     "unauthorized",
 				Message:  "OpenRouter API Key 无效或已过期",
-				HintMsg:  "请检查配置中的 article.image.key 或 post.image.key 是否正确，或前往 openrouter.ai 获取新的 API Key",
+				HintMsg:  "请检查配置中的 article.image.key 或 xls.image.key 是否正确，或前往 openrouter.ai 获取新的 API Key",
 				Original: err,
 			}
 		case http.StatusTooManyRequests:

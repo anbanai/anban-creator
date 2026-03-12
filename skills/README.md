@@ -10,7 +10,7 @@
 | topic-research | 知识库 | 选题评分、大纲生成 |
 | seo-optimization | 知识库 | 标题/关键词/摘要优化 |
 | article-publishing | 知识库 | 图文文章草稿发布 |
-| post-publishing | 知识库 | 小绿书图片帖发布 |
+| xls-publishing | 知识库 | 小绿书图片帖发布 |
 | rednote-research | 知识库 | 小红书选题研究、MCP 数据采集、互动率评分模型 |
 | rednote-writing | 知识库 | 小红书文案公式、标题心理学、行业模板 |
 
@@ -30,7 +30,7 @@ topic-research → content-writing → content-writing(humanize)
 → article-publishing
 ```
 
-### 小绿书 (wechatpost agent)
+### 小绿书 (wechatxls agent)
 
 ```
 选题研究 → 图片设计 → 草稿发布
@@ -39,7 +39,7 @@ topic-research → content-writing → content-writing(humanize)
 对应技能链：
 
 ```
-topic-research → visual-design → post-publishing
+topic-research → visual-design → xls-publishing
 ```
 
 ### 小红书 (rednote agent)

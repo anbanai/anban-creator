@@ -72,7 +72,7 @@
 ## 技术规格
 
 - **比例**：竖版 3:4
-- **尺寸**：`--size 3:4`（默认 2K 档位），使用 `--post` flag
+- **尺寸**：`--size 3:4`（默认 2K 档位），使用 `--xls` flag
 - **画质**：高清，适合手机屏幕查看
 - **输出**：直接输出图片，无手机边框或白色留边
 
@@ -114,7 +114,7 @@
 STYLE="扁平信息图，低饱和莫兰迪配色，圆角卡片，无衬线字体"
 
 # 生成封面图
-anbanwriter image generate "封面：{title}" --post --style "$STYLE" -o ./cover.png
+anbanwriter image generate "封面：{title}" --xls --style "$STYLE" -o ./cover.png
 
 # 上传到微信素材库
 anbanwriter image upload ./cover.png

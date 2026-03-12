@@ -14,8 +14,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// draftPostCmd 创建小绿书帖子（图片消息）命令
-func draftPostCmd() *cobra.Command {
+// draftXlsCmd 创建小绿书帖子（图文笔记）命令
+func draftXlsCmd() *cobra.Command {
 	var (
 		title       string
 		content     string
@@ -30,9 +30,9 @@ func draftPostCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "post",
-		Short: "【微信】创建小绿书帖子（图片消息/newspic），支持最多 20 张图片",
-		Long: `创建微信公众号小绿书帖子（图片消息/newspic），支持最多 20 张图片。
+		Use:   "xls",
+		Short: "【微信】创建小绿书帖子（图文笔记/newspic），支持最多 20 张图片",
+		Long: `创建微信公众号小绿书帖子（图文笔记/newspic），支持最多 20 张图片。
 
 ╔════════════════════════════════════════════════════════════════╗
 ║  ⚠️  平台提示：此命令仅用于微信小绿书发布                      ║
@@ -45,31 +45,31 @@ func draftPostCmd() *cobra.Command {
 
 示例：
   # 从逗号分隔的本地图片文件路径创建（自动上传到微信素材库）
-  anbanwriter draft post -t "周末出游" --images photo1.jpg,photo2.jpg,photo3.jpg
+  anbanwriter draft xls -t "周末出游" --images photo1.jpg,photo2.jpg,photo3.jpg
 
   # 从 Markdown 文件提取图片
-  anbanwriter draft post -t "旅行日记" -m article.md
+  anbanwriter draft xls -t "旅行日记" -m article.md
 
   # 带描述文字和评论设置
-  anbanwriter draft post -t "美食分享" -c "今天的午餐" --images food.jpg --open-comment
+  anbanwriter draft xls -t "美食分享" -c "今天的午餐" --images food.jpg --open-comment
 
   # 使用微信素材 ID 创建（先用 image upload 获取 media_id，再跳过重复上传）
-  anbanwriter draft post -t "AI 图集" --media-ids "MEDIA_ID_1,MEDIA_ID_2"
+  anbanwriter draft xls -t "AI 图集" --media-ids "MEDIA_ID_1,MEDIA_ID_2"
 
   # 混合使用：微信素材 ID + 本地文件路径
-  anbanwriter draft post -t "混合图集" --media-ids "MEDIA_ID_1" --images "local.jpg"
+  anbanwriter draft xls -t "混合图集" --media-ids "MEDIA_ID_1" --images "local.jpg"
 
   # 从 stdin 读取描述
-  echo "每日打卡" | anbanwriter draft post -t "每日" --images pic.jpg
+  echo "每日打卡" | anbanwriter draft xls -t "每日" --images pic.jpg
 
   # 预览模式（不实际创建）
-  anbanwriter draft post -t "测试" --images a.jpg,b.jpg --dry-run`,
+  anbanwriter draft xls -t "测试" --images a.jpg,b.jpg --dry-run`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfig()
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			// 构造请求
-			req := &draft.ImagePostRequest{
+			req := &draft.ImageXlsRequest{
 				Title:       title,
 				Content:     content,
 				OpenComment: openComment,
@@ -128,7 +128,7 @@ func draftPostCmd() *cobra.Command {
 
 			// Dry-run 模式
 			if dryRun {
-				preview, err := svc.GetImagePostPreview(req)
+				preview, err := svc.GetImageXlsPreview(req)
 				if err != nil {
 					responseError(err)
 					return
@@ -142,7 +142,7 @@ func draftPostCmd() *cobra.Command {
 			}
 
 			// 创建小绿书
-			result, err := svc.CreateImagePost(req)
+			result, err := svc.CreateImageXls(req)
 			if err != nil {
 				responseError(err)
 				return

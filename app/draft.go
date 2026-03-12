@@ -40,7 +40,7 @@ func draftCmd() *cobra.Command {
   article     - 从 JSON 文件创建微信公众号图文文章草稿
   test        - 测试草稿 HTML（微信）
   publish     - 创建并发布草稿到微信公众号
-  post        - 创建微信小绿书帖子（图片消息/newspic），仅微信，小红书请使用 MCP 工具 publish_content()
+  xls        - 创建微信小绿书帖子（图文笔记/newspic），仅微信，小红书请使用 MCP 工具 publish_content()
 
 平台说明：
   - 本命令组所有子命令仅用于微信公众号/小绿书
@@ -50,7 +50,7 @@ func draftCmd() *cobra.Command {
 	cmd.AddCommand(draftArticleCmd())
 	cmd.AddCommand(draftTestCmd())
 	cmd.AddCommand(draftPublishCmd())
-	cmd.AddCommand(draftPostCmd())
+	cmd.AddCommand(draftXlsCmd())
 
 	return cmd
 }

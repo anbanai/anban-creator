@@ -27,12 +27,12 @@ const (
 	DefaultImageMaxWidth = 1920
 	// DefaultImageMaxSizeMB 默认图片最大大小（MB）
 	DefaultImageMaxSizeMB = 5
-	// DefaultPostImageCount 默认小绿书图片数量
-	DefaultPostImageCount = 4
+	// DefaultXlsImageCount 默认小绿书图片数量
+	DefaultXlsImageCount = 4
 	// DefaultArticleImageSize 默认图文文章图片尺寸（16:9 横版 2K）
 	DefaultArticleImageSize = "16:9"
-	// DefaultPostImageSize 默认小绿书图片尺寸（3:4 竖版 2K）
-	DefaultPostImageSize = "3:4"
+	// DefaultXlsImageSize 默认小绿书图片尺寸（3:4 竖版 2K）
+	DefaultXlsImageSize = "3:4"
 )
 
 // DefaultConfigPath 返回默认配置文件路径（项目本地）
@@ -81,27 +81,27 @@ func NewDefaultConfig() *Config {
 	c.Wechat.Article.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
 
 	// 小绿书
-	c.Wechat.Post.Style = "flat-vector"
+	c.Wechat.Xls.Style = "flat-vector"
 	// 小绿书封面图
-	c.Wechat.Post.Cover.Image.Provider = DefaultImageProvider
-	c.Wechat.Post.Cover.Image.Key = "your_image_api_key"
-	c.Wechat.Post.Cover.Image.Model = "gemini-3-pro-image-preview"
-	c.Wechat.Post.Cover.Image.Size = DefaultPostImageSize
-	c.Wechat.Post.Cover.Image.Refer = "path/to/refer.png"
-	c.Wechat.Post.Cover.Image.Compress = true
-	c.Wechat.Post.Cover.Image.MaxWidth = DefaultImageMaxWidth
-	c.Wechat.Post.Cover.Image.MaxSizeMB = DefaultImageMaxSizeMB
+	c.Wechat.Xls.Cover.Image.Provider = DefaultImageProvider
+	c.Wechat.Xls.Cover.Image.Key = "your_image_api_key"
+	c.Wechat.Xls.Cover.Image.Model = "gemini-3-pro-image-preview"
+	c.Wechat.Xls.Cover.Image.Size = DefaultXlsImageSize
+	c.Wechat.Xls.Cover.Image.Refer = "path/to/refer.png"
+	c.Wechat.Xls.Cover.Image.Compress = true
+	c.Wechat.Xls.Cover.Image.MaxWidth = DefaultImageMaxWidth
+	c.Wechat.Xls.Cover.Image.MaxSizeMB = DefaultImageMaxSizeMB
 	// 小绿书内容图
-	c.Wechat.Post.Content.Count = DefaultPostImageCount
-	c.Wechat.Post.Content.Image.Provider = DefaultImageProvider
-	c.Wechat.Post.Content.Image.Key = "your_image_api_key"
-	c.Wechat.Post.Content.Image.Model = "gemini-3-pro-image-preview"
-	c.Wechat.Post.Content.Image.Size = DefaultPostImageSize
-	c.Wechat.Post.Content.Image.Refer = "path/to/refer.png"
-	c.Wechat.Post.Content.Image.StylePrompt = "扁平矢量插画风格，低饱和现代配色，简洁构图"
-	c.Wechat.Post.Content.Image.Compress = true
-	c.Wechat.Post.Content.Image.MaxWidth = DefaultImageMaxWidth
-	c.Wechat.Post.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
+	c.Wechat.Xls.Content.Count = DefaultXlsImageCount
+	c.Wechat.Xls.Content.Image.Provider = DefaultImageProvider
+	c.Wechat.Xls.Content.Image.Key = "your_image_api_key"
+	c.Wechat.Xls.Content.Image.Model = "gemini-3-pro-image-preview"
+	c.Wechat.Xls.Content.Image.Size = DefaultXlsImageSize
+	c.Wechat.Xls.Content.Image.Refer = "path/to/refer.png"
+	c.Wechat.Xls.Content.Image.StylePrompt = "扁平矢量插画风格，低饱和现代配色，简洁构图"
+	c.Wechat.Xls.Content.Image.Compress = true
+	c.Wechat.Xls.Content.Image.MaxWidth = DefaultImageMaxWidth
+	c.Wechat.Xls.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
 
 	// 小红书（可选平台）
 	c.Rednote = &RednoteConfig{}
@@ -177,8 +177,8 @@ type ImageSection struct {
 	Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
 }
 
-// PostContentSection 带数量的图片内容配置（用于小绿书内容图）
-type PostContentSection struct {
+// XlsContentSection 带数量的图片内容配置（用于小绿书内容图）
+type XlsContentSection struct {
 	Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
 	Count int      `json:"count,omitempty" yaml:"count,omitempty"`
 }
@@ -192,26 +192,26 @@ type ArticleConfig struct {
 	Content ImageSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
-// WechatPostConfig 微信小绿书配置
-type WechatPostConfig struct {
-	Style   string             `json:"style,omitempty" yaml:"style,omitempty"`
-	Cover   ImageSection       `json:"cover,omitempty" yaml:"cover,omitempty"`
-	Content PostContentSection `json:"content,omitempty" yaml:"content,omitempty"`
+// WechatXlsConfig 微信小绿书配置
+type WechatXlsConfig struct {
+	Style   string            `json:"style,omitempty" yaml:"style,omitempty"`
+	Cover   ImageSection      `json:"cover,omitempty" yaml:"cover,omitempty"`
+	Content XlsContentSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
 // WechatConfig 微信公众号配置
 type WechatConfig struct {
-	AppID   string           `json:"appid" yaml:"appid"`
-	Secret  string           `json:"secret" yaml:"secret"`
-	Article ArticleConfig    `json:"article,omitempty" yaml:"article,omitempty"`
-	Post    WechatPostConfig `json:"post,omitempty" yaml:"post,omitempty"`
+	AppID   string          `json:"appid" yaml:"appid"`
+	Secret  string          `json:"secret" yaml:"secret"`
+	Article ArticleConfig   `json:"article,omitempty" yaml:"article,omitempty"`
+	Xls     WechatXlsConfig `json:"xls,omitempty" yaml:"xls,omitempty"`
 }
 
 // RednoteConfig 小红书配置
 type RednoteConfig struct {
-	Style   string             `json:"style,omitempty" yaml:"style,omitempty"`
-	Cover   ImageSection       `json:"cover,omitempty" yaml:"cover,omitempty"`
-	Content PostContentSection `json:"content,omitempty" yaml:"content,omitempty"`
+	Style   string            `json:"style,omitempty" yaml:"style,omitempty"`
+	Cover   ImageSection      `json:"cover,omitempty" yaml:"cover,omitempty"`
+	Content XlsContentSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
 // Config 应用配置（嵌套结构，直接对应 JSON 文件）
@@ -354,16 +354,16 @@ func (c *Config) Validate() error {
 	if err := c.Wechat.Article.Content.Image.Validate(); err != nil {
 		return err
 	}
-	if err := c.Wechat.Post.Content.Image.Validate(); err != nil {
+	if err := c.Wechat.Xls.Content.Image.Validate(); err != nil {
 		return err
 	}
 
 	// 验证小绿书图片数量
-	if c.Wechat.Post.Content.Count != 0 && (c.Wechat.Post.Content.Count < 1 || c.Wechat.Post.Content.Count > 20) {
+	if c.Wechat.Xls.Content.Count != 0 && (c.Wechat.Xls.Content.Count < 1 || c.Wechat.Xls.Content.Count > 20) {
 		return &ConfigError{
-			Field:   "PostImageCount",
+			Field:   "XlsImageCount",
 			Message: "小绿书图片数量必须在 1 到 20 之间",
-			HintMsg: "配置文件中设置 wechat.post.content.count: 4",
+			HintMsg: "配置文件中设置 wechat.xls.content.count: 4",
 		}
 	}
 
@@ -377,16 +377,16 @@ func (c *Config) ValidateMinimal() error {
 	if err := c.Wechat.Article.Content.Image.Validate(); err != nil {
 		return err
 	}
-	if err := c.Wechat.Post.Content.Image.Validate(); err != nil {
+	if err := c.Wechat.Xls.Content.Image.Validate(); err != nil {
 		return err
 	}
 
 	// 验证小绿书图片数量
-	if c.Wechat.Post.Content.Count != 0 && (c.Wechat.Post.Content.Count < 1 || c.Wechat.Post.Content.Count > 20) {
+	if c.Wechat.Xls.Content.Count != 0 && (c.Wechat.Xls.Content.Count < 1 || c.Wechat.Xls.Content.Count > 20) {
 		return &ConfigError{
-			Field:   "PostImageCount",
+			Field:   "XlsImageCount",
 			Message: "小绿书图片数量必须在 1 到 20 之间",
-			HintMsg: "配置文件中设置 wechat.post.content.count: 4",
+			HintMsg: "配置文件中设置 wechat.xls.content.count: 4",
 		}
 	}
 
@@ -399,7 +399,7 @@ func ValidateForImageGeneration(apiCfg *ImageAPI) error {
 		return &ConfigError{
 			Field:   "ImageAPIKey",
 			Message: "图片生成需要配置 API Key",
-			HintMsg: "在配置文件中设置 wechat.article.content.image.key、wechat.post.content.image.key 或 rednote.content.image.key",
+			HintMsg: "在配置文件中设置 wechat.article.content.image.key、wechat.xls.content.image.key 或 rednote.content.image.key",
 		}
 	}
 	return nil
@@ -410,28 +410,28 @@ func (c *Config) GetConfigFile() string {
 	return c.configPath
 }
 
-// PostImageSize 返回小绿书图片尺寸，默认 3:4 竖版
-// 优先级: wechat.post.content.image.size > rednote.content.image.size > 默认值
-func (c *Config) PostImageSize() string {
-	if c.Wechat.Post.Content.Image.Size != "" {
-		return c.Wechat.Post.Content.Image.Size
+// XlsImageSize 返回小绿书图片尺寸，默认 3:4 竖版
+// 优先级: wechat.xls.content.image.size > rednote.content.image.size > 默认值
+func (c *Config) XlsImageSize() string {
+	if c.Wechat.Xls.Content.Image.Size != "" {
+		return c.Wechat.Xls.Content.Image.Size
 	}
 	if c.Rednote != nil && c.Rednote.Content.Image.Size != "" {
 		return c.Rednote.Content.Image.Size
 	}
-	return DefaultPostImageSize
+	return DefaultXlsImageSize
 }
 
-// PostImageCount 返回小绿书图片数量，默认 4 张
-// 优先级: wechat.post.content.count > rednote.content.count > 默认值
-func (c *Config) PostImageCount() int {
-	if c.Wechat.Post.Content.Count > 0 {
-		return c.Wechat.Post.Content.Count
+// XlsImageCount 返回小绿书图片数量，默认 4 张
+// 优先级: wechat.xls.content.count > rednote.content.count > 默认值
+func (c *Config) XlsImageCount() int {
+	if c.Wechat.Xls.Content.Count > 0 {
+		return c.Wechat.Xls.Content.Count
 	}
 	if c.Rednote != nil && c.Rednote.Content.Count > 0 {
 		return c.Rednote.Content.Count
 	}
-	return DefaultPostImageCount
+	return DefaultXlsImageCount
 }
 
 // mergeImageAPI 合并两个 ImageAPI 配置，base 字段非空时优先使用 base，否则使用 fallback
@@ -473,20 +473,20 @@ func mergeImageAPI(base, fallback ImageAPI) ImageAPI {
 	return result
 }
 
-// ResolvedPostContentImage 返回合并后的小绿书内容图配置
-// wechat.post.content.image 字段优先，rednote.content.image 作为 fallback
-func (c *Config) ResolvedPostContentImage() ImageAPI {
-	base := c.Wechat.Post.Content.Image
+// ResolvedXlsContentImage 返回合并后的小绿书内容图配置
+// wechat.xls.content.image 字段优先，rednote.content.image 作为 fallback
+func (c *Config) ResolvedXlsContentImage() ImageAPI {
+	base := c.Wechat.Xls.Content.Image
 	if c.Rednote == nil {
 		return base
 	}
 	return mergeImageAPI(base, c.Rednote.Content.Image)
 }
 
-// ResolvedPostCoverImage 返回合并后的小绿书封面图配置
-// wechat.post.cover.image 字段优先，rednote.cover.image 作为 fallback
-func (c *Config) ResolvedPostCoverImage() ImageAPI {
-	base := c.Wechat.Post.Cover.Image
+// ResolvedXlsCoverImage 返回合并后的小绿书封面图配置
+// wechat.xls.cover.image 字段优先，rednote.cover.image 作为 fallback
+func (c *Config) ResolvedXlsCoverImage() ImageAPI {
+	base := c.Wechat.Xls.Cover.Image
 	if c.Rednote == nil {
 		return base
 	}
@@ -520,12 +520,12 @@ func (c *Config) RednoteImageCount() int {
 }
 
 // ResolvedRednoteContentImage 返回合并后的小红书内容图配置
-// rednote.content.image 字段优先，wechat.post.content.image 作为 fallback
+// rednote.content.image 字段优先，wechat.xls.content.image 作为 fallback
 func (c *Config) ResolvedRednoteContentImage() ImageAPI {
 	if c.Rednote == nil {
-		return c.Wechat.Post.Content.Image
+		return c.Wechat.Xls.Content.Image
 	}
-	return mergeImageAPI(c.Rednote.Content.Image, c.Wechat.Post.Content.Image)
+	return mergeImageAPI(c.Rednote.Content.Image, c.Wechat.Xls.Content.Image)
 }
 
 // SaveConfig 保存配置到文件（JSON 格式）

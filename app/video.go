@@ -62,7 +62,7 @@ func videoAssembleCmd() *cobra.Command {
   anbanwriter video assemble img1.png img2.png img3.png
 
   # 用目录中的图片组装视频
-  anbanwriter video assemble output/posts/post-20240101-001/
+  anbanwriter video assemble output/xls/xls-20240101-001/
 
   # 指定输出文件和转场效果
   anbanwriter video assemble img1.png img2.png -o result.mp4 --effects "fade,wipeleft"

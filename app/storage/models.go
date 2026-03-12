@@ -44,7 +44,7 @@ type History struct {
 
 // Content 内容生命周期追踪
 // Article 状态流转: created → outlined → drafted → polished → converted → published
-// Post 状态流转:    created → planned → images_ready → published
+// Xls 状态流转:    created → planned → images_ready → published
 type Content struct {
 	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
 	Type      string    `gorm:"not null;index" json:"type"`               // "article" / "xls"

@@ -32,7 +32,7 @@ func TestWorkspacePrepareCmd(t *testing.T) {
 		},
 		{
 			name:        "staging exists with files → archives then creates new",
-			contentType: "posts",
+			contentType: "xls",
 			setup: func(stagingDir string) {
 				_ = os.MkdirAll(stagingDir, 0o755)
 				_ = os.WriteFile(filepath.Join(stagingDir, "image_01.png"), []byte("data"), 0o644)

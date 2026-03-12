@@ -108,11 +108,11 @@ func showAccountInfo(scope string) error {
 
 	case "xls":
 		fmt.Printf("\n# 图文发布配置（微信小绿书 + 小红书）\n\n")
-		fmt.Printf("- 图片数量: %d\n", cfg.PostImageCount())
-		fmt.Printf("- 图片尺寸: %s\n", cfg.PostImageSize())
+		fmt.Printf("- 图片数量: %d\n", cfg.XlsImageCount())
+		fmt.Printf("- 图片尺寸: %s\n", cfg.XlsImageSize())
 
 		// 图片生成就绪状态
-		resolved := cfg.ResolvedPostContentImage()
+		resolved := cfg.ResolvedXlsContentImage()
 		if resolved.Key != "" {
 			provider := resolved.Provider
 			if provider == "" {
@@ -120,23 +120,44 @@ func showAccountInfo(scope string) error {
 			}
 			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
 		} else {
-			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.post.content.image.key）\n")
+			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.xls.content.image.key）\n")
 		}
 
 		// 发布能力状态
 		fmt.Printf("\n## 发布通道\n\n")
 		if cfg.Wechat.AppID != "" && cfg.Wechat.Secret != "" {
-			fmt.Printf("- 微信小绿书: 就绪（使用 draft post 命令）\n")
+			fmt.Printf("- 微信小绿书: 就绪（使用 draft xls 命令）\n")
 		} else {
 			fmt.Printf("- 微信小绿书: 未配置（需设置 wechat.appid 和 wechat.secret）\n")
 		}
 		fmt.Printf("- 小红书: 通过 MCP 工具 publish_content()\n")
 		fmt.Printf("  💡 确保已配置 rednote MCP 服务器\n")
 
-		if cfg.Wechat.Post.Style != "" {
+		// 参考图配置
+		fmt.Printf("\n## 参考图配置\n\n")
+		if cfg.Rednote != nil {
+			if cfg.Rednote.Cover.Image.Refer != "" {
+				fmt.Printf("- 小红书封面参考图: %s\n", cfg.Rednote.Cover.Image.Refer)
+			}
+			if cfg.Rednote.Content.Image.Refer != "" {
+				fmt.Printf("- 小红书内容参考图: %s\n", cfg.Rednote.Content.Image.Refer)
+			}
+		}
+		if cfg.Wechat.Xls.Cover.Image.Refer != "" {
+			fmt.Printf("- 小绿书封面参考图: %s\n", cfg.Wechat.Xls.Cover.Image.Refer)
+		}
+		if cfg.Wechat.Xls.Content.Image.Refer != "" {
+			fmt.Printf("- 小绿书内容参考图: %s\n", cfg.Wechat.Xls.Content.Image.Refer)
+		}
+		if (cfg.Rednote == nil || (cfg.Rednote.Cover.Image.Refer == "" && cfg.Rednote.Content.Image.Refer == "")) &&
+			cfg.Wechat.Xls.Cover.Image.Refer == "" && cfg.Wechat.Xls.Content.Image.Refer == "" {
+			fmt.Printf("- (未配置)\n")
+		}
+
+		if cfg.Wechat.Xls.Style != "" {
 			pm := image.NewStylePresetManager()
 			if err := pm.LoadPresets(); err == nil {
-				if preset, err := pm.GetPreset(cfg.Wechat.Post.Style); err == nil {
+				if preset, err := pm.GetPreset(cfg.Wechat.Xls.Style); err == nil {
 					fmt.Printf("\n## 视觉风格预设\n\n")
 					fmt.Printf("- 名称: %s (%s)\n", preset.Name, preset.EnglishName)
 					fmt.Printf("- 说明: %s\n", preset.Description)
@@ -144,11 +165,11 @@ func showAccountInfo(scope string) error {
 					fmt.Printf("- 风格提示词:\n\n```\n%s```\n", preset.Prompt)
 					fmt.Printf("\n- 可用预设: %s\n", strings.Join(pm.ListPresetNames(), ", "))
 				} else {
-					fmt.Printf("- 视觉风格: %s（预设未找到）\n", cfg.Wechat.Post.Style)
+					fmt.Printf("- 视觉风格: %s（预设未找到）\n", cfg.Wechat.Xls.Style)
 				}
 			}
-		} else if cfg.Wechat.Post.Content.Image.StylePrompt != "" {
-			fmt.Printf("- 自定义风格提示词: %s\n", cfg.Wechat.Post.Content.Image.StylePrompt)
+		} else if cfg.Wechat.Xls.Content.Image.StylePrompt != "" {
+			fmt.Printf("- 自定义风格提示词: %s\n", cfg.Wechat.Xls.Content.Image.StylePrompt)
 		} else {
 			fmt.Printf("- 视觉风格: (未配置)\n")
 		}
@@ -170,19 +191,19 @@ func showAccountInfo(scope string) error {
 		fmt.Printf("- 生成模式: Claude 代理模式\n")
 		fmt.Printf("- 说明: 由 Claude Code 直接生成，无需外部 API\n")
 		fmt.Printf("\n# 小绿书配置\n\n")
-		fmt.Printf("- 图片数量: %d\n", cfg.PostImageCount())
-		fmt.Printf("- 图片尺寸: %s\n", cfg.PostImageSize())
+		fmt.Printf("- 图片数量: %d\n", cfg.XlsImageCount())
+		fmt.Printf("- 图片尺寸: %s\n", cfg.XlsImageSize())
 
 		// 图片生成就绪状态
-		resolvedPost := cfg.ResolvedPostContentImage()
-		if resolvedPost.Key != "" {
-			provider := resolvedPost.Provider
+		resolvedXls := cfg.ResolvedXlsContentImage()
+		if resolvedXls.Key != "" {
+			provider := resolvedXls.Provider
 			if provider == "" {
 				provider = config.DefaultImageProvider
 			}
 			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
 		} else {
-			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.post.content.image.key）\n")
+			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.xls.content.image.key）\n")
 		}
 
 		// 发布能力状态
@@ -192,10 +213,10 @@ func showAccountInfo(scope string) error {
 			fmt.Printf("- 微信发布: 未配置（仅微信小绿书需要；小红书发布通过 MCP 工具，无需此配置）\n")
 		}
 
-		if cfg.Wechat.Post.Style != "" {
+		if cfg.Wechat.Xls.Style != "" {
 			pm := image.NewStylePresetManager()
 			if err := pm.LoadPresets(); err == nil {
-				if preset, err := pm.GetPreset(cfg.Wechat.Post.Style); err == nil {
+				if preset, err := pm.GetPreset(cfg.Wechat.Xls.Style); err == nil {
 					fmt.Printf("\n## 视觉风格预设\n\n")
 					fmt.Printf("- 名称: %s (%s)\n", preset.Name, preset.EnglishName)
 					fmt.Printf("- 说明: %s\n", preset.Description)
@@ -203,11 +224,11 @@ func showAccountInfo(scope string) error {
 					fmt.Printf("- 风格提示词:\n\n```\n%s```\n", preset.Prompt)
 					fmt.Printf("\n- 可用预设: %s\n", strings.Join(pm.ListPresetNames(), ", "))
 				} else {
-					fmt.Printf("- 视觉风格: %s（预设未找到）\n", cfg.Wechat.Post.Style)
+					fmt.Printf("- 视觉风格: %s（预设未找到）\n", cfg.Wechat.Xls.Style)
 				}
 			}
-		} else if cfg.Wechat.Post.Content.Image.StylePrompt != "" {
-			fmt.Printf("- 自定义风格提示词: %s\n", cfg.Wechat.Post.Content.Image.StylePrompt)
+		} else if cfg.Wechat.Xls.Content.Image.StylePrompt != "" {
+			fmt.Printf("- 自定义风格提示词: %s\n", cfg.Wechat.Xls.Content.Image.StylePrompt)
 		} else {
 			fmt.Printf("- 视觉风格: (未配置)\n")
 		}
@@ -308,17 +329,17 @@ func updateConfigFile(outputFile, appid, secret, name, author, style, theme, pro
 	}
 	if provider != "" {
 		c.Wechat.Article.Content.Image.Provider = provider
-		c.Wechat.Post.Content.Image.Provider = provider
+		c.Wechat.Xls.Content.Image.Provider = provider
 	}
 	if aiKey != "" {
 		c.Wechat.Article.Content.Image.Key = aiKey
-		c.Wechat.Post.Content.Image.Key = aiKey
+		c.Wechat.Xls.Content.Image.Key = aiKey
 	}
 	if positioning != "" {
 		c.Positioning = positioning
 	}
 	if visualStyle != "" {
-		c.Wechat.Post.Style = visualStyle
+		c.Wechat.Xls.Style = visualStyle
 	}
 
 	return config.SaveConfig(outputFile, c)

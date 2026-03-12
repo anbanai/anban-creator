@@ -33,7 +33,7 @@
         ]
       },
       {
-        "matcher": "wechatpost",
+        "matcher": "wechatxls",
         "hooks": [
           {
             "type": "command",
@@ -42,7 +42,7 @@
           },
           {
             "type": "prompt",
-            "prompt": "wechatpost agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些图片、图片数量、是否成功创建草稿。如发现问题请提醒用户。"
+            "prompt": "wechatxls agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些图片、图片数量、是否成功创建草稿。如发现问题请提醒用户。"
           }
         ]
       },

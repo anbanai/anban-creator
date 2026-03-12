@@ -27,14 +27,14 @@ anbanwriter image download <url>
 
 ## API 2: 新建小绿书草稿（Newspic）
 
-创建微信公众号小绿书（图片消息）草稿，支持最多 20 张图片。
+创建微信公众号小绿书（图文笔记）草稿，支持最多 20 张图片。
 
 ### CLI 命令
 
 ```bash
-anbanwriter draft post -t "标题" --images photo1.jpg,photo2.jpg
-anbanwriter draft post -t "标题" -m article.md
-anbanwriter draft post -t "标题" --images photo.jpg --dry-run
+anbanwriter draft xls -t "标题" --images photo1.jpg,photo2.jpg
+anbanwriter draft xls -t "标题" -m article.md
+anbanwriter draft xls -t "标题" --images photo.jpg --dry-run
 ```
 
 ### 与图文草稿的区别

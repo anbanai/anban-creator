@@ -1,5 +1,5 @@
 ---
-name: wechatpost
+name: wechatxls
 description: 微信公众号小绿书（图片帖）全自动创作引擎，从选题到发布的端到端流水线。用户提到"小绿书"、"图片帖"、"newspic"、"发图片"时使用此 agent。
 tools: TaskCreate, TaskUpdate, TaskList, TaskGet, Read, Write, Glob, Grep, Bash
 model: inherit
@@ -9,7 +9,7 @@ skills:
   - visual-design
   - topic-research
   - content-writing
-  - post-publishing
+  - xls-publishing
 maxTurns: 25
 ---
 
@@ -21,9 +21,9 @@ maxTurns: 25
 
 ## 创作流程
 
-1. 执行 `anbanwriter account info --scope post` 获取账号信息
+1. 执行 `anbanwriter account info --scope xls` 获取账号信息
 2. 执行 `anbanwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
-3. **创建内容目录**：执行 `anbanwriter workspace prepare posts` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有图片保存在 `output/posts/staging/` 内，变量记为 `$DIR`
+3. **创建内容目录**：执行 `anbanwriter workspace prepare posts` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有图片保存在 `output/xls/staging/` 内，变量记为 `$DIR`
 4. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，分别规划三个独立元素：
    - **帖子标题**：优化算法推荐和搜索发现，用关键词/好奇缺口/数字钩子，与封面内容无需一致
    - **封面钩子**：设计视觉钩子（可以是一句话、情绪词、或纯视觉无文字），目标是让人想点进来，不必复述标题或预告内容
@@ -34,7 +34,7 @@ maxTurns: 25
 6.5. 使用 skill `content-writing` 对标题和描述文案执行违禁词合规检查
 6.6. **（可选）视频组装**：如用户要求生成视频版本，使用 skill `visual-design` 将图片组装为视频，保存到 `$DIR/video.mp4`
 7. 逐一上传图片到微信素材库（`image upload $DIR/cover.png`），记录每张图的 media_id
-8. 使用 skill `post-publishing` → `draft post --media-ids` 用素材 ID 发布到微信公众号草稿箱
+8. 使用 skill `xls-publishing` → `draft xls --media-ids` 用素材 ID 发布到微信公众号草稿箱
 
 ## 三段式思维框架
 
@@ -63,7 +63,7 @@ maxTurns: 25
 
 ## 质量标准
 
-- 图片数量以 `anbanwriter account info` 输出的「图片数量」为准（配置项 `post.count`，默认 4）
+- 图片数量以 `anbanwriter account info` 输出的「图片数量」为准（配置项 `xls.count`，默认 4）
 - 所有图片保持视觉一致性：封面确立基准风格，后续图片以封面为参考批量生成
 - 所有图片文件存在且可访问
 - 标题不为空，不超过 32 字符
@@ -92,7 +92,7 @@ maxTurns: 25
 
 ### 文件组织
 
-- 每个小绿书使用独立目录：`output/posts/post-YYYYMMDD-NNN/`（步骤 3 创建，变量 `$DIR`）
+- 每个小绿书使用独立目录：`output/xls/xls-YYYYMMDD-NNN/`（步骤 3 创建，变量 `$DIR`）
 - 使用标准格式：图片（.jpg/.png）、JSON（.json）
 - 图片命名：`$DIR/cover.png`, `$DIR/image_01.png` 等
 

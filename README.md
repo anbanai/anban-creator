@@ -35,7 +35,7 @@ Run `anbanwriter account init` for guided setup, or create `.anbanwriter/setting
   "article": {
     "image": { "key": "your_api_key", "provider": "gemini" }
   },
-  "post": {
+  "xls": {
     "image": { "key": "your_api_key", "provider": "gemini" }
   }
 }
@@ -53,12 +53,12 @@ Supported image providers: `openai`, `gemini`, `openrouter`, `volcengine`
 | `/anbanwriter:topic-research` | Topic scoring and outline generation |
 | `/anbanwriter:seo-optimization` | Title, keyword, and excerpt optimization |
 | `/anbanwriter:article-publishing` | 图文文章 draft publishing |
-| `/anbanwriter:post-publishing` | 小绿书 image post publishing |
+| `/anbanwriter:xls-publishing` | 小绿书 image post publishing |
 
 ## Agents
 
 - **wechatarticle** — Full article creation pipeline: 选题研究 → 写作 → AI去痕 → SEO优化 → 封面配图 → HTML转换 → 草稿发布
-- **wechatpost** — Image post creation pipeline: 选题研究 → 图片设计 → 草稿发布
+- **wechatxls** — Image post creation pipeline: 选题研究 → 图片设计 → 草稿发布
 
 ## CLI Commands
 
@@ -72,7 +72,7 @@ Supported image providers: `openai`, `gemini`, `openrouter`, `volcengine`
 | `score <file>` | Score article viral potential |
 | `outline` | Generate structured article outline |
 | `draft article <json>` | Create 图文文章 draft |
-| `draft post` | Create 小绿书 image post (max 20 images) |
+| `draft xls` | Create 小绿书 image post (max 20 images) |
 | `image generate <prompt>` | Generate AI images |
 | `image upload <file>` | Upload image to WeChat CDN |
 | `doctor` | Diagnose config and connection issues |

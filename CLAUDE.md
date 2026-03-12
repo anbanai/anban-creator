@@ -344,7 +344,7 @@ func TestFeature(t *testing.T) {
 - `./bin/anbanwriter outline` - Generate article outline
 - `./bin/anbanwriter draft` - Manage WeChat drafts
 - `./bin/anbanwriter draft article <json_file>` - Create 图文文章 (news article) draft from JSON
-- `./bin/anbanwriter draft post` - Create 小绿书 (Xiaolvshu/newspic) image posts (max 20 images)
+- `./bin/anbanwriter draft xls` - Create 小绿书 (Xiaolvshu/newspic) image posts (max 20 images)
 - `./bin/anbanwriter image generate <prompt>` - Generate AI images
 - `./bin/anbanwriter image upload <file>` - Upload image to WeChat CDN
 - `./bin/anbanwriter image download <url>` - Download image
@@ -360,7 +360,7 @@ The project includes Claude Code skills in `skills/` directory:
 - `topic-research` - Research and scoring
 - `seo-optimization` - SEO best practices
 - `article-publishing` - Article draft publishing workflows
-- `post-publishing` - Image post (小绿书) publishing workflows
+- `xls-publishing` - Image post (小绿书) publishing workflows
 - `content-analysis` - Content quality analysis
 - `rednote-research` - 小红书热门内容研究与评分
 - `rednote-writing` - 小红书文案写作、标题优化、爆款改写
@@ -387,7 +387,7 @@ hooks/hooks.json         # SessionStart (env setup), SubagentStop, TaskCompleted
 
 agents/
 ├── wechatarticle.md    # Full article pipeline agent (maxTurns: 50)
-├── wechatpost.md       # Image post pipeline agent (maxTurns: 25)
+├── wechatxls.md       # Image post pipeline agent (maxTurns: 25)
 └── rednote.md          # 小红书创作引擎，支持原创+复刻双模式 (maxTurns: 20)
 
 output-styles/

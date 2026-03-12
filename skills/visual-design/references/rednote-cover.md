@@ -255,11 +255,11 @@
 
 ```bash
 # 有参考图时（优先）：直接用参考图确定风格
-anbanwriter image generate "{prompt}" --post --ref <参考图路径> -o ./cover.png
+anbanwriter image generate "{prompt}" --mode xhs --ref <参考图路径> -o ./cover.png
 
 # 无参考图时：用风格描述（根据内容主题动态设计）
 STYLE="根据内容主题设计的完整风格描述，包含色调方向、背景质感、字体风格、整体氛围"
-anbanwriter image generate "{prompt}" --post --style "$STYLE" -o ./cover.png
+anbanwriter image generate "{prompt}" --mode xhs --style "$STYLE" -o ./cover.png
 
 # 上传到微信素材库
 anbanwriter image upload ./cover.png

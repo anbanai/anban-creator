@@ -46,7 +46,7 @@ func contentTrackCmd() *cobra.Command {
 		Long: `记录或更新内容生命周期状态
 
 Article 状态流转: created → outlined → drafted → polished → converted → published
-Post 状态流转:    created → planned → images_ready → published
+Xls 状态流转:    created → planned → images_ready → published
 
 示例：
   anbanwriter content track --dir $DIR --type article --status created --topic "茶文化"

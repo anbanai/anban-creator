@@ -188,7 +188,7 @@ func imageGenerateCmd() *cobra.Command {
 Prompt 构建优先级（从高到低）：
   1. CLI --style 参数
   2. 配置文件 image.style_prompt
-  3. 预设风格（通过 --post-style 配置）
+  3. 预设风格（通过 --style 配置）
   4. 无风格（仅使用用户 prompt）
 
 需要配置:
@@ -248,10 +248,10 @@ Prompt 构建优先级（从高到低）：
 			var apiCfg *config.ImageAPI
 			switch mode {
 			case "xls":
-				resolved := cfg.ResolvedPostContentImage()
+				resolved := cfg.ResolvedXlsContentImage()
 				apiCfg = &resolved
 				if size == "" {
-					size = cfg.PostImageSize()
+					size = cfg.XlsImageSize()
 				}
 			case "xhs":
 				resolved := cfg.ResolvedRednoteContentImage()
@@ -280,15 +280,15 @@ Prompt 构建优先级（从高到低）：
 			if (mode == "xls" || mode == "xhs") && stylePrompt == "" {
 				var presetStyle string
 				if mode == "xhs" {
-					// xhs 模式：rednote style 优先，wechat.post style 兜底
+					// xhs 模式：rednote style 优先，wechat.xls style 兜底
 					if cfg.Rednote != nil && cfg.Rednote.Style != "" {
 						presetStyle = cfg.Rednote.Style
 					} else {
-						presetStyle = cfg.Wechat.Post.Style
+						presetStyle = cfg.Wechat.Xls.Style
 					}
 				} else {
-					// xls 模式：wechat.post style 优先，rednote style 兜底
-					presetStyle = cfg.Wechat.Post.Style
+					// xls 模式：wechat.xls style 优先，rednote style 兜底
+					presetStyle = cfg.Wechat.Xls.Style
 					if presetStyle == "" && cfg.Rednote != nil {
 						presetStyle = cfg.Rednote.Style
 					}
@@ -501,10 +501,10 @@ func imageBatchCmd() *cobra.Command {
 			var apiCfg *config.ImageAPI
 			switch mode {
 			case "xls":
-				resolved := cfg.ResolvedPostContentImage()
+				resolved := cfg.ResolvedXlsContentImage()
 				apiCfg = &resolved
 				if size == "" {
-					size = cfg.PostImageSize()
+					size = cfg.XlsImageSize()
 				}
 			case "xhs":
 				resolved := cfg.ResolvedRednoteContentImage()
@@ -534,10 +534,10 @@ func imageBatchCmd() *cobra.Command {
 					if cfg.Rednote != nil && cfg.Rednote.Style != "" {
 						presetStyle = cfg.Rednote.Style
 					} else {
-						presetStyle = cfg.Wechat.Post.Style
+						presetStyle = cfg.Wechat.Xls.Style
 					}
 				} else {
-					presetStyle = cfg.Wechat.Post.Style
+					presetStyle = cfg.Wechat.Xls.Style
 					if presetStyle == "" && cfg.Rednote != nil {
 						presetStyle = cfg.Rednote.Style
 					}

@@ -1,5 +1,5 @@
 ---
-name: post-publishing
+name: xls-publishing
 description: 微信公众号小绿书（newspic）图片帖子的创建与管理。Use when user mentions "小绿书"、"图片帖"、"newspic"、"image post"。
 user-invocable: false
 metadata:
@@ -19,45 +19,45 @@ metadata:
 
 ```bash
 # 从图片路径列表创建
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "帖子标题" \
   --images "photo1.jpg,photo2.jpg,photo3.jpg"
 
 # 从 Markdown 文件提取本地图片
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "旅行日记" \
   -m article.md
 
 # 使用已上传的 media_id（跳过重复上传，适合 image generate 后直接发布）
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "AI 生成图集" \
   --media-ids "media_id_1,media_id_2,media_id_3"
 
 # 混合使用：已有 media_id + 本地图片
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "混合图集" \
   --media-ids "media_id_1" \
   --images "local_photo.jpg"
 
 # 带描述文字和评论设置
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "美食分享" \
   -c "今天的午餐，简单又美味" \
   --images food.jpg \
   --open-comment
 
 # 仅粉丝可评论
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "会员专享" \
   --images a.jpg,b.jpg \
   --open-comment --fans-only
 
 # 预览模式（不实际创建）
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "测试" --images a.jpg,b.jpg --dry-run
 
 # 保存结果到文件
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "标题" --images a.jpg -o output/02-result.json
 ```
 
@@ -95,11 +95,11 @@ anbanwriter draft post \
 
 ```bash
 # 1. 预览（验证图片路径和数量）
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "周末出游" --images p1.jpg,p2.jpg,p3.jpg --dry-run
 
 # 2. 确认无误后正式发布
-anbanwriter draft post \
+anbanwriter draft xls \
   -t "周末出游" --images p1.jpg,p2.jpg,p3.jpg \
   -c "难得的好天气" --open-comment \
   -o output/02-result.json
@@ -119,13 +119,13 @@ anbanwriter image upload output/page1.jpg
 # → data.media_id = "PAGE1_MID"
 
 # 3. 用 media_id 创建小绿书（跳过重复上传）
-anbanwriter draft post -t "标题" --media-ids "COVER_MID,PAGE1_MID"
+anbanwriter draft xls -t "标题" --media-ids "COVER_MID,PAGE1_MID"
 ```
 
 也可以直接用本地文件路径（自动上传，但无法复用 media_id）：
 
 ```bash
-anbanwriter draft post -t "标题" --images "output/cover.jpg,output/page1.jpg"
+anbanwriter draft xls -t "标题" --images "output/cover.jpg,output/page1.jpg"
 ```
 
 ## 注意事项

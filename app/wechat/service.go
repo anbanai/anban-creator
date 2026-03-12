@@ -218,7 +218,7 @@ func (s *Service) CreateNewspicDraft(articles []NewspicArticle) (*CreateDraftRes
 	}
 
 	duration := time.Since(startTime)
-	s.log.Info("post draft created",
+	s.log.Info("xls draft created",
 		zap.String("media_id", maskMediaID(resp.MediaID)),
 		zap.Duration("duration", duration))
 

@@ -220,8 +220,8 @@ func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, erro
 	}, nil
 }
 
-// ImagePostRequest 创建小绿书请求
-type ImagePostRequest struct {
+// ImageXlsRequest 创建小绿书请求
+type ImageXlsRequest struct {
 	Title        string   // 标题（必需）
 	Content      string   // 纯文本描述
 	Images       []string // 本地图片文件路径列表（将自动上传到微信素材库）
@@ -231,17 +231,17 @@ type ImagePostRequest struct {
 	FromMarkdown string   // 从 MD 文件提取图片
 }
 
-// ImagePostResult 创建结果
-type ImagePostResult struct {
+// ImageXlsResult 创建结果
+type ImageXlsResult struct {
 	MediaID     string   `json:"media_id"`
 	DraftURL    string   `json:"draft_url"`
 	Count       int      `json:"count"`
 	UploadedIDs []string `json:"uploaded_ids"`
 }
 
-// CreateImagePost 创建小绿书（图片消息）
-func (s *Service) CreateImagePost(req *ImagePostRequest) (*ImagePostResult, error) {
-	s.log.Info("creating image post", zap.String("title", req.Title))
+// CreateImageXls 创建小绿书（图文笔记）
+func (s *Service) CreateImageXls(req *ImageXlsRequest) (*ImageXlsResult, error) {
+	s.log.Info("creating image xls", zap.String("title", req.Title))
 
 	// 验证标题
 	if req.Title == "" {
@@ -328,7 +328,7 @@ func (s *Service) CreateImagePost(req *ImagePostRequest) (*ImagePostResult, erro
 		return nil, fmt.Errorf("create draft: %w", err)
 	}
 
-	return &ImagePostResult{
+	return &ImageXlsResult{
 		MediaID:     result.MediaID,
 		DraftURL:    result.DraftURL,
 		Count:       totalCount,
@@ -336,8 +336,8 @@ func (s *Service) CreateImagePost(req *ImagePostRequest) (*ImagePostResult, erro
 	}, nil
 }
 
-// GetImagePostPreview 获取小绿书预览信息（dry-run 用）
-func (s *Service) GetImagePostPreview(req *ImagePostRequest) (map[string]any, error) {
+// GetImageXlsPreview 获取小绿书预览信息（dry-run 用）
+func (s *Service) GetImageXlsPreview(req *ImageXlsRequest) (map[string]any, error) {
 	// 获取本地图片列表
 	images := req.Images
 	if req.FromMarkdown != "" {

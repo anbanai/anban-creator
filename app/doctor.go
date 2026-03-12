@@ -124,24 +124,24 @@ func checkConfig(cfg *config.Config, cfgErr error) []CheckResult {
 		checks = append(checks, CheckResult{Name: "article_image_provider", Status: "pass", Message: fmt.Sprintf("图片提供者: %s", p)})
 	}
 
-	// 小绿书图片 Key（合并 wechat.post + rednote 后的结果）
-	resolvedPost := cfg.ResolvedPostContentImage()
-	if resolvedPost.Key != "" {
+	// 小绿书图片 Key（合并 wechat.xls + rednote 后的结果）
+	resolvedXls := cfg.ResolvedXlsContentImage()
+	if resolvedXls.Key != "" {
 		// 显示配置来源
-		configSource := "wechat.post.content.image.key"
-		if cfg.Wechat.Post.Content.Image.Key == "" && cfg.Rednote != nil && cfg.Rednote.Content.Image.Key != "" {
+		configSource := "wechat.xls.content.image.key"
+		if cfg.Wechat.Xls.Content.Image.Key == "" && cfg.Rednote != nil && cfg.Rednote.Content.Image.Key != "" {
 			configSource = "rednote.content.image.key (fallback)"
 		}
-		checks = append(checks, CheckResult{Name: "post_image_key", Status: "pass", Message: fmt.Sprintf("小绿书图片 API Key 已配置 (%s)", configSource)})
+		checks = append(checks, CheckResult{Name: "xls_image_key", Status: "pass", Message: fmt.Sprintf("小绿书图片 API Key 已配置 (%s)", configSource)})
 	} else {
-		checks = append(checks, CheckResult{Name: "post_image_key", Status: "warn", Message: "小绿书图片 API Key 未配置", Hint: "配置查找顺序: 1. wechat.post.content.image.key → 2. rednote.content.image.key (fallback)"})
+		checks = append(checks, CheckResult{Name: "xls_image_key", Status: "warn", Message: "小绿书图片 API Key 未配置", Hint: "配置查找顺序: 1. wechat.xls.content.image.key → 2. rednote.content.image.key (fallback)"})
 	}
 
 	// 小绿书图片 Provider 有效性
-	if p := resolvedPost.Provider; !validProviders[p] {
-		checks = append(checks, CheckResult{Name: "post_image_provider", Status: "fail", Message: fmt.Sprintf("小绿书图片无效的提供者: %s", p), Hint: "支持的提供者: openai, gemini, openrouter, volcengine"})
+	if p := resolvedXls.Provider; !validProviders[p] {
+		checks = append(checks, CheckResult{Name: "xls_image_provider", Status: "fail", Message: fmt.Sprintf("小绿书图片无效的提供者: %s", p), Hint: "支持的提供者: openai, gemini, openrouter, volcengine"})
 	} else if p != "" {
-		checks = append(checks, CheckResult{Name: "post_image_provider", Status: "pass", Message: fmt.Sprintf("小绿书图片提供者: %s", p)})
+		checks = append(checks, CheckResult{Name: "xls_image_provider", Status: "pass", Message: fmt.Sprintf("小绿书图片提供者: %s", p)})
 	}
 
 	// 微信发布就绪（AppID + Secret 均已配置）
