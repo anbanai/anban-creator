@@ -11,7 +11,7 @@
 | seo-optimization | 知识库 | 标题/关键词/摘要优化 |
 | article-publishing | 知识库 | 图文文章草稿发布 |
 | post-publishing | 知识库 | 小绿书图片帖发布 |
-| rednote-ops | 知识库 | 小红书选题研究、图片生成、笔记发布、评论互动 |
+| rednote-research | 知识库 | 小红书选题研究、MCP 数据采集、互动率评分模型 |
 | rednote-writing | 知识库 | 小红书文案公式、标题心理学、行业模板 |
 
 ## 自动化流水线
@@ -45,11 +45,11 @@ topic-research → visual-design → post-publishing
 ### 小红书 (rednote agent)
 
 ```
-选题研究 → 内容创作 → 图片设计 → 笔记发布
+选题研究 → 内容创作 → 图片设计
 ```
 
 对应技能链：
 
 ```
-topic-research → rednote-writing → visual-design → rednote-ops
+rednote-research → rednote-writing → visual-design
 ```

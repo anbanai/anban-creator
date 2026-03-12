@@ -138,6 +138,13 @@ anbanwriter image generate "prompt"
 
 # 16:9 比例（推荐用于公众号封面）
 anbanwriter image generate -s 2k "prompt"
+
+# 【多图场景必须使用】组图模式：一次生成 N 张风格一致的图片
+# --count 指定张数，-o 指定输出目录
+anbanwriter image generate "prompt" --count 5 --mode xls --style "$STYLE" -o ./output_dir/
+
+# 组图 + 参考图模式（基于封面风格生成内容图）
+anbanwriter image generate "prompt" --count 4 --mode xls --ref ./cover.png -o ./output_dir/
 ```
 
 ## 图片占位符
@@ -317,3 +324,15 @@ bash scripts/run.sh generate_image --size 16:9 "prompt"
 2. 依次调用图片生成 API
 3. 每张图片独立上传到微信
 4. 按顺序替换占位符
+
+> **重要**：通过 CLI 直接生成多张时（不通过 Markdown 占位符），**必须使用组图模式**：
+>
+> ```bash
+> # 正确：一次生成 3 张，风格一致
+> anbanwriter image generate "未来城市系列，科幻风格" --count 3 -o ./city_series/
+>
+> # 错误：逐张生成，风格漂移
+> anbanwriter image generate "Futuristic city..."   # ❌ 禁止
+> anbanwriter image generate "Underwater city..."   # ❌ 禁止
+> anbanwriter image generate "Space station..."     # ❌ 禁止
+> ```

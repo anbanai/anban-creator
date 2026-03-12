@@ -316,7 +316,7 @@ func runFFmpegAssemble(ffmpegPath string, images []string, w, h, duration, trans
 		effect := pickEffect(effectList)
 		offset := (duration - transition) * i
 		outLabel := fmt.Sprintf("xf%d", i)
-		xfadeFilter := fmt.Sprintf("[%s][v%d]xfade=effect=%s:duration=%d:offset=%d[%s]",
+		xfadeFilter := fmt.Sprintf("[%s][v%d]xfade=transition=%s:duration=%d:offset=%d[%s]",
 			prevLabel, i, effect, transition, offset, outLabel)
 		filterParts = append(filterParts, xfadeFilter)
 		prevLabel = outLabel

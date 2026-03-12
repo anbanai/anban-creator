@@ -109,8 +109,8 @@ anbanwriter draft post \
 
 ```bash
 # 1. 生成图片到本地
-anbanwriter image generate "封面" --post --style "$STYLE" -o output/cover.jpg
-anbanwriter image generate "内容" --post --style "$STYLE" -o output/page1.jpg
+anbanwriter image generate "封面" --mode xls --style "$STYLE" -o output/cover.jpg
+anbanwriter image generate "内容" --mode xls --style "$STYLE" -o output/page1.jpg
 
 # 2. 上传到微信素材库，获取 media_id
 anbanwriter image upload output/cover.jpg

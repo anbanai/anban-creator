@@ -362,6 +362,8 @@ The project includes Claude Code skills in `skills/` directory:
 - `article-publishing` - Article draft publishing workflows
 - `post-publishing` - Image post (小绿书) publishing workflows
 - `content-analysis` - Content quality analysis
+- `rednote-research` - 小红书热门内容研究与评分
+- `rednote-writing` - 小红书文案写作、标题优化、爆款改写
 
 Skills are auto-loaded when working in this repository or via plugin marketplace.
 
@@ -385,7 +387,8 @@ hooks/hooks.json         # SessionStart (env setup), SubagentStop, TaskCompleted
 
 agents/
 ├── wechatarticle.md    # Full article pipeline agent (maxTurns: 50)
-└── wechatpost.md      # Image post pipeline agent (maxTurns: 25)
+├── wechatpost.md       # Image post pipeline agent (maxTurns: 25)
+└── rednote.md          # 小红书创作引擎，支持原创+复刻双模式 (maxTurns: 20)
 
 output-styles/
 └── wechat-creator.md    # WeChat creator output style

@@ -53,7 +53,7 @@ func accountInfoCmd() *cobra.Command {
 
 --scope 可选值：
   article  仅输出账号信息 + 写作风格
-  post     仅输出账号信息 + 小绿书配置
+  xls      仅输出账号信息 + 小绿书配置
   (不传)   输出全部章节`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := showAccountInfo(scope); err != nil {
@@ -62,7 +62,7 @@ func accountInfoCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&scope, "scope", "", "按场景过滤输出 (article/post)")
+	cmd.Flags().StringVar(&scope, "scope", "", "按场景过滤输出 (article/xls)")
 
 	return cmd
 }
@@ -106,7 +106,7 @@ func showAccountInfo(scope string) error {
 		fmt.Printf("- 当前风格: %s\n", activeStyleName)
 		fmt.Printf("- 可用风格: %s\n", strings.Join(sm.ListStyleNames(), ", "))
 
-	case "post":
+	case "xls":
 		fmt.Printf("\n# 图文发布配置（微信小绿书 + 小红书）\n\n")
 		fmt.Printf("- 图片数量: %d\n", cfg.PostImageCount())
 		fmt.Printf("- 图片尺寸: %s\n", cfg.PostImageSize())

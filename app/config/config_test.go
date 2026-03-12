@@ -835,6 +835,118 @@ func TestPostImageCount_RednoteFallback(t *testing.T) {
 	}
 }
 
+func TestRednoteImageSize(t *testing.T) {
+	tests := []struct {
+		name        string
+		hasRednote  bool
+		rednoteSize string
+		want        string
+	}{
+		{"nil rednote returns default", false, "", DefaultRednoteImageSize},
+		{"rednote with size returns it", true, "3:4:2K", "3:4:2K"},
+		{"rednote with empty size returns default", true, "", DefaultRednoteImageSize},
+		{"rednote with 1K size", true, "3:4:1K", "3:4:1K"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			if tt.hasRednote {
+				cfg.Rednote = &RednoteConfig{}
+				cfg.Rednote.Content.Image.Size = tt.rednoteSize
+			}
+			if got := cfg.RednoteImageSize(); got != tt.want {
+				t.Errorf("RednoteImageSize() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRednoteImageCount(t *testing.T) {
+	tests := []struct {
+		name         string
+		hasRednote   bool
+		rednoteCount int
+		want         int
+	}{
+		{"nil rednote returns default", false, 0, DefaultRednoteImageCount},
+		{"rednote with count returns it", true, 8, 8},
+		{"rednote with zero count returns default", true, 0, DefaultRednoteImageCount},
+		{"rednote with 1 count", true, 1, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			if tt.hasRednote {
+				cfg.Rednote = &RednoteConfig{}
+				cfg.Rednote.Content.Count = tt.rednoteCount
+			}
+			if got := cfg.RednoteImageCount(); got != tt.want {
+				t.Errorf("RednoteImageCount() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolvedRednoteContentImage(t *testing.T) {
+	t.Run("nil rednote returns wechat.post", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Wechat.Post.Content.Image.Key = "post-key"
+		cfg.Wechat.Post.Content.Image.Provider = "openai"
+		result := cfg.ResolvedRednoteContentImage()
+		if result.Key != "post-key" {
+			t.Errorf("Key = %q, want post-key", result.Key)
+		}
+		if result.Provider != "openai" {
+			t.Errorf("Provider = %q, want openai", result.Provider)
+		}
+	})
+
+	t.Run("rednote primary over wechat.post", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Wechat.Post.Content.Image = ImageAPI{Key: "post-key", Provider: "openai", Size: "3:4"}
+		cfg.Rednote = &RednoteConfig{}
+		cfg.Rednote.Content.Image = ImageAPI{Key: "rednote-key", Provider: "gemini", Size: "3:4:1K"}
+		result := cfg.ResolvedRednoteContentImage()
+		if result.Key != "rednote-key" {
+			t.Errorf("Key = %q, want rednote-key (rednote primary)", result.Key)
+		}
+		if result.Provider != "gemini" {
+			t.Errorf("Provider = %q, want gemini (rednote primary)", result.Provider)
+		}
+		if result.Size != "3:4:1K" {
+			t.Errorf("Size = %q, want 3:4:1K (rednote primary)", result.Size)
+		}
+	})
+
+	t.Run("wechat.post fills missing rednote fields", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Wechat.Post.Content.Image = ImageAPI{Key: "post-key", MaxWidth: 1920, MaxSizeMB: 5}
+		cfg.Rednote = &RednoteConfig{}
+		cfg.Rednote.Content.Image = ImageAPI{Provider: "volcengine", Size: "3:4:1K"}
+		result := cfg.ResolvedRednoteContentImage()
+		if result.Provider != "volcengine" {
+			t.Errorf("Provider = %q, want volcengine (rednote primary)", result.Provider)
+		}
+		if result.Key != "post-key" {
+			t.Errorf("Key = %q, want post-key (from wechat.post fallback)", result.Key)
+		}
+		if result.MaxWidth != 1920 {
+			t.Errorf("MaxWidth = %d, want 1920 (from wechat.post fallback)", result.MaxWidth)
+		}
+	})
+
+	t.Run("both empty rednote config", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Rednote = &RednoteConfig{}
+		result := cfg.ResolvedRednoteContentImage()
+		if result.Key != "" {
+			t.Errorf("Key = %q, want empty", result.Key)
+		}
+	})
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsMiddle(s, substr)))
 }

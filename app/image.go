@@ -158,13 +158,12 @@ func filenameFromURL(rawURL string) string {
 // imageGenerateCmd AI 生成图片
 func imageGenerateCmd() *cobra.Command {
 	var size string
-	var postMode bool
+	var mode string
 	var stylePrompt string
 	var output string
 	var upload bool
 	var refer string
 	var count int
-	var variants []string
 
 	cmd := &cobra.Command{
 		Use:   "generate <prompt>",
@@ -205,20 +204,12 @@ Prompt 构建优先级（从高到低）：
 
   # 指定尺寸（比例格式，默认 2K 档位）
   anbanwriter image generate "清晨茶园" --size 16:9 -o cover.jpg
-  anbanwriter image generate "竖版封面" --size 9:16 --post -o post.jpg
 
   # 指定比例+档位
-  anbanwriter image generate "封面图" --size 3:4:1K -o rednote-cover.jpg
-  anbanwriter image generate "封面图" --size 3:4:4K -o cover-4k.jpg
+  anbanwriter image generate "封面图" --size 3:4:2K -o cover.jpg
 
   # 组图模式：一次生成 4 张风格一致的图片到目录
-  anbanwriter image generate "小绿书内容图" --post --count 4 -o ./output/images/
-
-  # 组图变体模式：为每张图指定不同内容描述
-  anbanwriter image generate "清新扁平风格，莫兰迪色系" \
-    --post --count 4 \
-    --variants "封面：茶园晨景，阳光洒在茶树上","图2：采茶姑娘手部特写","图3：传统制茶工艺","图4：一杯清香绿茶" \
-    -o ./rednote_post_images/
+  anbanwriter image generate "小绿书内容图" --mode xls --count 4 -o ./output/images/
 
   # 生成后自动上传到微信
   anbanwriter image generate "封面图" --upload`,
@@ -232,6 +223,15 @@ Prompt 构建优先级（从高到低）：
 		Run: func(cmd *cobra.Command, args []string) {
 			prompt := args[0]
 
+			// 验证 mode
+			switch mode {
+			case "article", "xls", "xhs":
+				// valid
+			default:
+				responseError(fmt.Errorf("无效的 --mode 值: %q（有效值: article, xls, xhs）", mode))
+				return
+			}
+
 			// 验证参考图（如果指定）
 			if refer != "" {
 				if _, err := os.Stat(refer); os.IsNotExist(err) {
@@ -244,15 +244,22 @@ Prompt 构建优先级（从高到低）：
 				}
 			}
 
-			// 选择 article 还是 post 的图片配置
+			// 选择图片配置
 			var apiCfg *config.ImageAPI
-			if postMode {
+			switch mode {
+			case "xls":
 				resolved := cfg.ResolvedPostContentImage()
 				apiCfg = &resolved
 				if size == "" {
 					size = cfg.PostImageSize()
 				}
-			} else {
+			case "xhs":
+				resolved := cfg.ResolvedRednoteContentImage()
+				apiCfg = &resolved
+				if size == "" {
+					size = cfg.RednoteImageSize()
+				}
+			default: // "article"
 				apiCfg = &cfg.Wechat.Article.Content.Image
 				if size == "" {
 					size = cfg.ArticleImageSize()
@@ -269,21 +276,34 @@ Prompt 构建优先级（从高到低）：
 				processor.SetStylePrompt(stylePrompt)
 			}
 
-			// 解析预设 prompt（post 模式、无显式 --style、有配置预设时）
-			postStyle := cfg.Wechat.Post.Style
-			if postStyle == "" && cfg.Rednote != nil {
-				postStyle = cfg.Rednote.Style
-			}
-			if postMode && stylePrompt == "" && postStyle != "" {
-				pm := image.NewStylePresetManager()
-				if err := pm.LoadPresets(); err == nil {
-					if preset, err := pm.GetPreset(postStyle); err == nil {
-						processor.SetPresetPrompt(preset.Prompt)
+			// 解析预设 prompt（xls/xhs 模式、无显式 --style、有配置预设时）
+			if (mode == "xls" || mode == "xhs") && stylePrompt == "" {
+				var presetStyle string
+				if mode == "xhs" {
+					// xhs 模式：rednote style 优先，wechat.post style 兜底
+					if cfg.Rednote != nil && cfg.Rednote.Style != "" {
+						presetStyle = cfg.Rednote.Style
+					} else {
+						presetStyle = cfg.Wechat.Post.Style
+					}
+				} else {
+					// xls 模式：wechat.post style 优先，rednote style 兜底
+					presetStyle = cfg.Wechat.Post.Style
+					if presetStyle == "" && cfg.Rednote != nil {
+						presetStyle = cfg.Rednote.Style
+					}
+				}
+				if presetStyle != "" {
+					pm := image.NewStylePresetManager()
+					if err := pm.LoadPresets(); err == nil {
+						if preset, err := pm.GetPreset(presetStyle); err == nil {
+							processor.SetPresetPrompt(preset.Prompt)
+						}
 					}
 				}
 			}
 
-			// 组图模式：count > 1 时调用 GenerateBatchOnly 或 GenerateBatchWithVariants
+			// 组图模式：count > 1 时调用 GenerateBatchOnly
 			if count > 1 {
 				outputDir := output
 				if outputDir == "" {
@@ -294,16 +314,7 @@ Prompt 构建优先级（从高到低）：
 					return
 				}
 
-				var batchResults []*image.BatchImageResult
-				var err error
-
-				// 如果提供了 variants，使用 GenerateBatchWithVariants
-				if len(variants) > 0 {
-					batchResults, err = processor.GenerateBatchWithVariants(prompt, variants, outputDir)
-				} else {
-					batchResults, err = processor.GenerateBatchOnly(prompt, count, outputDir)
-				}
-
+				batchResults, err := processor.GenerateBatchOnly(prompt, count, outputDir)
 				if err != nil {
 					responseError(err)
 					return
@@ -315,17 +326,13 @@ Prompt 构建优先级（从高到低）：
 				}
 
 				if store != nil {
-					for i, r := range batchResults {
+					for _, r := range batchResults {
 						imgRecord := &storage.Image{
 							Prompt:      prompt,
 							Provider:    apiCfg.Provider,
 							LocalPath:   r.FilePath,
 							StylePreset: stylePrompt,
 							CreatedAt:   time.Now(),
-						}
-						// 如果有 variants，记录具体变体 prompt
-						if len(variants) > 0 && i < len(variants) {
-							imgRecord.Prompt = fmt.Sprintf("%s\n\n[变体]: %s", prompt, variants[i])
 						}
 						if info, infoErr := image.GetImageInfo(r.FilePath); infoErr == nil {
 							imgRecord.Width = info.Width
@@ -420,13 +427,12 @@ Prompt 构建优先级（从高到低）：
 	}
 
 	cmd.Flags().StringVarP(&size, "size", "s", "", "图片尺寸（比例格式 16:9/9:16/1:1/3:4/4:3，可加档位 3:4:1K/3:4:2K/3:4:4K，默认档位 2K）")
-	cmd.Flags().BoolVar(&postMode, "post", false, "使用小绿书图片尺寸（默认 3:4）")
+	cmd.Flags().StringVar(&mode, "mode", "article", "图片模式（article: 图文文章，xls: 小绿书，xhs: 小红书）")
 	cmd.Flags().StringVar(&stylePrompt, "style", "", "风格提示词（文字描述），前置于 prompt 以保持多图视觉风格一致。可与 --ref 同时使用")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "单图模式：输出文件路径；组图模式（--count>1）：输出目录（默认当前目录）")
 	cmd.Flags().BoolVar(&upload, "upload", false, "生成后自动上传到微信素材库（需要配置微信 AppID/Secret，仅单图模式）")
 	cmd.Flags().StringVar(&refer, "ref", "", "参考图本地路径（支持 JPG, PNG, WebP, GIF）。生成图片会参考此图的视觉风格和内容。可与 --style 同时使用：--ref 提供视觉参考，--style 提供文字风格描述")
 	cmd.Flags().IntVar(&count, "count", 1, "生成图片数量（>1 时启用组图模式，支持 volcengine 原生批量 API）")
-	cmd.Flags().StringArrayVar(&variants, "variants", nil, "组图变体描述，每张图的内容描述（与 --count 一起使用）。例如：--variants \"封面：茶园晨景\",\"图2：采茶特写\"")
 
 	return cmd
 }
@@ -437,7 +443,7 @@ func imageBatchCmd() *cobra.Command {
 	var noUpload bool
 	var output string
 	var size string
-	var postMode bool
+	var mode string
 
 	cmd := &cobra.Command{
 		Use:   "batch <markdown_file>",
@@ -493,13 +499,20 @@ func imageBatchCmd() *cobra.Command {
 
 			// Select image config
 			var apiCfg *config.ImageAPI
-			if postMode {
+			switch mode {
+			case "xls":
 				resolved := cfg.ResolvedPostContentImage()
 				apiCfg = &resolved
 				if size == "" {
 					size = cfg.PostImageSize()
 				}
-			} else {
+			case "xhs":
+				resolved := cfg.ResolvedRednoteContentImage()
+				apiCfg = &resolved
+				if size == "" {
+					size = cfg.RednoteImageSize()
+				}
+			default: // "article"
 				apiCfg = &cfg.Wechat.Article.Content.Image
 				if size == "" {
 					size = cfg.ArticleImageSize()
@@ -514,16 +527,27 @@ func imageBatchCmd() *cobra.Command {
 				processor.SetRefImage(apiCfg.Refer)
 			}
 
-			// 解析预设 prompt（post 模式、无显式 --style、有配置预设时）
-			postStyle := cfg.Wechat.Post.Style
-			if postStyle == "" && cfg.Rednote != nil {
-				postStyle = cfg.Rednote.Style
-			}
-			if postMode && stylePrompt == "" && postStyle != "" {
-				pm := image.NewStylePresetManager()
-				if err := pm.LoadPresets(); err == nil {
-					if preset, err := pm.GetPreset(postStyle); err == nil {
-						processor.SetPresetPrompt(preset.Prompt)
+			// 解析预设 prompt（xls/xhs 模式、无显式 --style、有配置预设时）
+			if (mode == "xls" || mode == "xhs") && stylePrompt == "" {
+				var presetStyle string
+				if mode == "xhs" {
+					if cfg.Rednote != nil && cfg.Rednote.Style != "" {
+						presetStyle = cfg.Rednote.Style
+					} else {
+						presetStyle = cfg.Wechat.Post.Style
+					}
+				} else {
+					presetStyle = cfg.Wechat.Post.Style
+					if presetStyle == "" && cfg.Rednote != nil {
+						presetStyle = cfg.Rednote.Style
+					}
+				}
+				if presetStyle != "" {
+					pm := image.NewStylePresetManager()
+					if err := pm.LoadPresets(); err == nil {
+						if preset, err := pm.GetPreset(presetStyle); err == nil {
+							processor.SetPresetPrompt(preset.Prompt)
+						}
 					}
 				}
 			}
@@ -630,7 +654,7 @@ func imageBatchCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noUpload, "no-upload", false, "仅生成不上传到微信（输出本地路径）")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "输出 JSON URL 数组文件路径（默认 stdout）")
 	cmd.Flags().StringVarP(&size, "size", "s", "", "图片尺寸（宽高比 16:9/9:16/1:1/3:4 等）")
-	cmd.Flags().BoolVar(&postMode, "post", false, "使用小绿书图片尺寸配置")
+	cmd.Flags().StringVar(&mode, "mode", "article", "图片模式（article: 图文文章，xls: 小绿书，xhs: 小红书）")
 
 	return cmd
 }

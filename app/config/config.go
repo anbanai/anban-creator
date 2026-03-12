@@ -81,7 +81,7 @@ func NewDefaultConfig() *Config {
 	c.Wechat.Article.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
 
 	// 小绿书
-	c.Wechat.Post.Style = "morandi-flat"
+	c.Wechat.Post.Style = "flat-vector"
 	// 小绿书封面图
 	c.Wechat.Post.Cover.Image.Provider = DefaultImageProvider
 	c.Wechat.Post.Cover.Image.Key = "your_image_api_key"
@@ -98,14 +98,14 @@ func NewDefaultConfig() *Config {
 	c.Wechat.Post.Content.Image.Model = "gemini-3-pro-image-preview"
 	c.Wechat.Post.Content.Image.Size = DefaultPostImageSize
 	c.Wechat.Post.Content.Image.Refer = "path/to/refer.png"
-	c.Wechat.Post.Content.Image.StylePrompt = "扁平插画风格，莫兰迪色系，圆角卡片"
+	c.Wechat.Post.Content.Image.StylePrompt = "扁平矢量插画风格，低饱和现代配色，简洁构图"
 	c.Wechat.Post.Content.Image.Compress = true
 	c.Wechat.Post.Content.Image.MaxWidth = DefaultImageMaxWidth
 	c.Wechat.Post.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
 
 	// 小红书（可选平台）
 	c.Rednote = &RednoteConfig{}
-	c.Rednote.Style = "casual-warm"
+	c.Rednote.Style = "cute-doodle"
 	c.Rednote.Cover.Image.Provider = DefaultImageProvider
 	c.Rednote.Cover.Image.Key = "your_image_api_key"
 	c.Rednote.Cover.Image.Model = "gemini-3-pro-image-preview"
@@ -499,6 +499,33 @@ func (c *Config) ArticleImageSize() string {
 		return c.Wechat.Article.Content.Image.Size
 	}
 	return DefaultArticleImageSize
+}
+
+// RednoteImageSize 返回小红书图片尺寸，默认 3:4:1K 竖版 1K
+// 优先级: rednote.content.image.size > 默认值
+func (c *Config) RednoteImageSize() string {
+	if c.Rednote != nil && c.Rednote.Content.Image.Size != "" {
+		return c.Rednote.Content.Image.Size
+	}
+	return DefaultRednoteImageSize
+}
+
+// RednoteImageCount 返回小红书图片数量，默认 6 张
+// 优先级: rednote.content.count > 默认值
+func (c *Config) RednoteImageCount() int {
+	if c.Rednote != nil && c.Rednote.Content.Count > 0 {
+		return c.Rednote.Content.Count
+	}
+	return DefaultRednoteImageCount
+}
+
+// ResolvedRednoteContentImage 返回合并后的小红书内容图配置
+// rednote.content.image 字段优先，wechat.post.content.image 作为 fallback
+func (c *Config) ResolvedRednoteContentImage() ImageAPI {
+	if c.Rednote == nil {
+		return c.Wechat.Post.Content.Image
+	}
+	return mergeImageAPI(c.Rednote.Content.Image, c.Wechat.Post.Content.Image)
 }
 
 // SaveConfig 保存配置到文件（JSON 格式）

@@ -370,47 +370,6 @@ func (p *Processor) GenerateBatchOnly(prompt string, count int, outputDir string
 	return p.processBatchConcurrent(rawResults, outputDir)
 }
 
-// GenerateBatchWithVariants 组图生成支持多内容描述变体
-// basePrompt 为基础风格描述，variants 为每张图的具体内容描述
-// outputDir 为已存在的输出目录
-func (p *Processor) GenerateBatchWithVariants(basePrompt string, variants []string, outputDir string) ([]*BatchImageResult, error) {
-	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
-		return nil, err
-	}
-	if p.provider == nil {
-		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
-	}
-
-	p.log.Info("using batch generation with variants",
-		zap.Int("count", len(variants)),
-		zap.String("provider", p.provider.Name()))
-
-	ctx := context.Background()
-	baseStyle := p.buildPrompt(basePrompt)
-
-	// 为每张图生成：基础风格 + 具体变体
-	var rawResults []*GenerateResult
-	singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
-
-	for i, variant := range variants {
-		// 组合 prompt：基础风格 + 变体描述
-		fullPrompt := baseStyle
-		if strings.TrimSpace(variant) != "" {
-			fullPrompt = baseStyle + "\n\n" + strings.TrimSpace(variant)
-		}
-
-		p.log.Debug("generating variant", zap.Int("index", i+1), zap.String("prompt", fullPrompt))
-		result, err := p.provider.Generate(ctx, fullPrompt, singleOpts)
-		if err != nil {
-			return nil, fmt.Errorf("generate image %d: %w", i+1, err)
-		}
-		rawResults = append(rawResults, result)
-	}
-
-	// 并发处理生成的图片（下载、裁水印、压缩）
-	return p.processBatchConcurrent(rawResults, outputDir)
-}
-
 // processBatchConcurrent 并发处理批量图片生成结果
 func (p *Processor) processBatchConcurrent(rawResults []*GenerateResult, outputDir string) ([]*BatchImageResult, error) {
 	count := len(rawResults)

@@ -105,7 +105,7 @@ Post 状态流转:    created → planned → images_ready → published
 	}
 
 	cmd.Flags().StringVar(&dir, "dir", "", "项目目录路径（必填）")
-	cmd.Flags().StringVar(&ctype, "type", "article", "内容类型 (article/post)")
+	cmd.Flags().StringVar(&ctype, "type", "article", "内容类型 (article/xls)")
 	cmd.Flags().StringVar(&status, "status", "", "内容状态（必填）")
 	cmd.Flags().StringVar(&title, "title", "", "标题")
 	cmd.Flags().StringVar(&digest, "digest", "", "摘要")
@@ -168,7 +168,7 @@ func contentListCmd() *cobra.Command {
 			rows := make([][]string, len(items))
 			for i, item := range items {
 				typeLabel := "文章"
-				if item.Type == "post" {
+				if item.Type == "xls" {
 					typeLabel = "小绿书"
 				}
 				titleDisplay := item.Title

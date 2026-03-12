@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to AI coding assistants when working with code in this repository.
 
 ## Project Overview
 
@@ -88,14 +88,14 @@ app/
 ├── doctor.go               # Diagnostic checks (config, env, network)
 │
 ├── ai/                    # AI text generation client
-│   └── client.go          # OpenAI-compatible chat completions (default model: Codex-sonnet-4-6)
+│   └── client.go          # OpenAI-compatible chat completions (default model: claude-sonnet-4-6)
 │
 ├── config/                 # Configuration management
 │   └── config.go          # Single-account config (JSON only)
 │
 ├── converter/             # Markdown → WeChat HTML conversion
 │   ├── converter.go       # Core conversion interface & orchestration
-│   ├── ai.go             # AI mode implementation (Codex-based)
+│   ├── ai.go             # AI mode implementation (Claude-based)
 │   ├── image.go          # Image reference extraction & placeholder handling
 │   ├── prompt.go         # AI prompt building with theme support
 │   └── theme.go          # Theme management system
@@ -145,7 +145,7 @@ The converter module orchestrates a multi-step process:
 
 1. **Image Extraction**: Parse Markdown for image references (local/online/AI-generated)
 2. **Markdown → HTML**: Generate WeChat-compatible HTML with theme styling
-   - **AI Mode**: Uses Codex with theme-specific prompts (autumn-warm, spring-fresh, ocean-calm, custom)
+   - **AI Mode**: Uses Claude with theme-specific prompts (autumn-warm, spring-fresh, ocean-calm, custom)
    - All CSS must be inlined (no external stylesheets)
    - Safe HTML tags only (no script, iframe, form elements)
 3. **Image Placeholders**: Replace image references with `<!-- IMG:0 -->` format
@@ -352,7 +352,7 @@ func TestFeature(t *testing.T) {
 
 ## Skills Integration
 
-The project includes Codex skills in `skills/` directory:
+The project includes Claude Code skills in `skills/` directory:
 
 - `content-writing` - Article writing workflow
 - `visual-design` - Image and theme management
@@ -361,6 +361,8 @@ The project includes Codex skills in `skills/` directory:
 - `article-publishing` - Article draft publishing workflows
 - `post-publishing` - Image post (小绿书) publishing workflows
 - `content-analysis` - Content quality analysis
+- `rednote-research` - 小红书热门内容研究与评分
+- `rednote-writing` - 小红书文案写作、标题优化、爆款改写
 
 Skills are auto-loaded when working in this repository or via plugin marketplace.
 
@@ -376,7 +378,7 @@ Skills are auto-loaded when working in this repository or via plugin marketplace
 ## Plugin & Agent Ecosystem
 
 ```
-.Codex-plugin/
+.claude-plugin/
 ├── plugin.json          # Plugin manifest v2.3.0
 └── marketplace.json     # Marketplace listing
 
@@ -384,7 +386,8 @@ hooks/hooks.json         # SessionStart (env setup), SubagentStop, TaskCompleted
 
 agents/
 ├── wechatarticle.md    # Full article pipeline agent (maxTurns: 50)
-└── wechatpost.md      # Image post pipeline agent (maxTurns: 25)
+├── wechatpost.md       # Image post pipeline agent (maxTurns: 25)
+└── rednote.md          # 小红书创作引擎，支持原创+复刻双模式 (maxTurns: 20)
 
 output-styles/
 └── wechat-creator.md    # WeChat creator output style

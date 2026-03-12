@@ -88,7 +88,7 @@ func TestContent_ListUnpublishedContents(t *testing.T) {
 	contents := []*Content{
 		{Type: "article", Dir: "/tmp/art1", Status: "created", CreatedAt: now, UpdatedAt: now},
 		{Type: "article", Dir: "/tmp/art2", Status: "published", CreatedAt: now, UpdatedAt: now},
-		{Type: "post", Dir: "/tmp/post1", Status: "planned", CreatedAt: now, UpdatedAt: now},
+		{Type: "xls", Dir: "/tmp/post1", Status: "planned", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, c := range contents {
 		if err := s.UpsertContent(c); err != nil {

@@ -8,6 +8,7 @@ memory: project
 skills:
   - visual-design
   - topic-research
+  - content-writing
   - post-publishing
 maxTurns: 25
 ---
@@ -22,39 +23,17 @@ maxTurns: 25
 
 1. 执行 `anbanwriter account info --scope post` 获取账号信息
 2. 执行 `anbanwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
-3. **创建内容目录**：执行 `mkdir -p output/posts/post-$(date +%Y%m%d)-001` 生成隔离工作目录（如已存在 001 则自增序号），后续所有图片保存在该目录内，变量记为 `$DIR`
+3. **创建内容目录**：执行 `anbanwriter workspace prepare posts` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有图片保存在 `output/posts/staging/` 内，变量记为 `$DIR`
 4. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，分别规划三个独立元素：
    - **帖子标题**：优化算法推荐和搜索发现，用关键词/好奇缺口/数字钩子，与封面内容无需一致
    - **封面钩子**：设计视觉钩子（可以是一句话、情绪词、或纯视觉无文字），目标是让人想点进来，不必复述标题或预告内容
    - **内容页规划**：规划每页的核心信息点，这才是实际传递价值的地方
-5. **定义统一视觉风格**（参考图优先，风格描述兜底）：
+5. **定义统一视觉风格**：使用 skill `visual-design` 确定视觉方案（参考图优先，风格描述兜底），确保封面与所有内容图视觉一致
 
-   **方式 A — 有参考图**：如用户提供了参考图或风格示例图，直接记录路径，后续图片生成用 `--ref <路径>` 传入，无需额外设计风格描述。
-
-   **方式 B — 无参考图**：根据内容主题和目标受众，设计一段完整的视觉风格描述作为 `$STYLE`，包含以下维度：
-   - 设计风格（扁平/3D/水彩/极简等）
-   - 配色方案（主色、辅色、强调色、背景色，含 hex 色值）
-   - 边框样式（圆角/直角/无边框、投影）
-   - 背景类型（渐变/纯色/纹理）
-   - 字体风格（衬线/无衬线、粗细）
-
-6. 使用 skill `visual-design` 生成小绿书图片，保存到 `$DIR/`：
-
-   **第一张封面图**（确定基准风格）：
-   - 有用户参考图：`anbanwriter image generate "{封面prompt}" --post --ref <用户参考图> -o $DIR/image_01.png`
-   - 无参考图：`anbanwriter image generate "{封面prompt}" --post --style "$STYLE" -o $DIR/image_01.png`
-
-   **后续图片**（内容图 + 收尾图）— 用封面作参考图，一次调用批量生成：
-   - `anbanwriter image generate "{内容/收尾prompt}" --post --count $COUNT --ref $DIR/image_01.png -o $DIR/`
-   - 其中 `$COUNT` = 总图片数 - 1（即去除封面后的数量）
-   - 输出的文件为 `$DIR/image_01.png` ... `$DIR/image_N.png`，需重命名为 `image_02.png` ... `image_last.png`（避免与封面覆盖）
+6. 使用 skill `visual-design` 生成小绿书图片，以封面确立基准风格，后续图片以封面为参考批量生成，输出模式 `--mode xls`，保存到 `$DIR/`
 6.5. 使用 skill `content-writing` 对标题和描述文案执行违禁词合规检查
-6.6. **（可选）视频组装**：如用户要求生成视频版本，在发布前执行：
-   ```bash
-   anbanwriter video assemble $DIR/ --duration 3 --transition 1 -o $DIR/video.mp4
-   ```
-   视频将保存到 `$DIR/video.mp4`，可单独分发或作为附件使用。
-7. 逐一上传图片到微信素材库（`image upload $DIR/image_01.png`），记录每张图的 media_id
+6.6. **（可选）视频组装**：如用户要求生成视频版本，使用 skill `visual-design` 将图片组装为视频，保存到 `$DIR/video.mp4`
+7. 逐一上传图片到微信素材库（`image upload $DIR/cover.png`），记录每张图的 media_id
 8. 使用 skill `post-publishing` → `draft post --media-ids` 用素材 ID 发布到微信公众号草稿箱
 
 ## 三段式思维框架
@@ -80,32 +59,12 @@ maxTurns: 25
 
 ## 小绿书内容设计原则
 
-### 图片即内容
-
-小绿书的图片不是装饰配图，而是内容本体。每张图片必须包含可独立阅读的信息。
-
-### 图片提示词要求
-
-生成图片时，提示词必须要求信息图/卡片风格，而非纯摄影或插画。构建 prompt 时先确认阶段定位：
-
-- **封面图**：视觉钩子，只传 1 个信号（好奇/利益/情绪），不复述标题，不预告内容，可以无文字
-- **内容图**：结构化信息（列表/步骤/对比）叠加在设计背景上，每张聚焦 1 个信息点，3 秒可读懂
-- **尾部图**：记忆点提炼 + 转化引导（提问式互动 + 关注理由），排版克制，体现"转化"意图
-
-### 多图叙事结构
-
-根据 `anbanwriter account info` 中的「图片数量」配置决定生成张数，按以下结构分配：
-
-| 位置 | 阶段 | 作用 | 内容类型 |
-|------|------|------|----------|
-| 第1张 | 封面 | 点击钩子 | 标题卡片，点明主题和价值，高对比强视觉 |
-| 中间图 | 内容 | 核心内容 | 知识点/步骤/技巧，每张一个主题，3秒可读 |
-| 最后1张 | 尾部 | 转化CTA | 一句话记忆点 + 提问式互动引导 + 关注理由 |
+小绿书的图片不是装饰配图，而是内容本体。每张图片必须包含可独立阅读的信息。三段式结构（封面→内容→尾部）各司其职，详见 skill `visual-design`。
 
 ## 质量标准
 
 - 图片数量以 `anbanwriter account info` 输出的「图片数量」为准（配置项 `post.count`，默认 4）
-- 所有图片保持视觉一致性：封面用 `--style "$STYLE"` 或 `--ref <参考图>`，后续图片用 `--ref $DIR/image_01.png`
+- 所有图片保持视觉一致性：封面确立基准风格，后续图片以封面为参考批量生成
 - 所有图片文件存在且可访问
 - 标题不为空，不超过 32 字符
 - 描述文字为纯文本（不含 HTML 标签），无违禁词
@@ -135,7 +94,7 @@ maxTurns: 25
 
 - 每个小绿书使用独立目录：`output/posts/post-YYYYMMDD-NNN/`（步骤 3 创建，变量 `$DIR`）
 - 使用标准格式：图片（.jpg/.png）、JSON（.json）
-- 图片命名：`$DIR/image_01.png`, `$DIR/image_02.png` 等
+- 图片命名：`$DIR/cover.png`, `$DIR/image_01.png` 等
 
 ### 任务追踪
 

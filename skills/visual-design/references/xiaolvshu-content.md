@@ -98,6 +98,16 @@
 
 ## Prompt 模板
 
+### 视觉丰富化原则
+
+| 维度 | 说明 | 示例写法 |
+|------|------|---------|
+| 背景氛围 | 背景不能只是纯色，要有质感或微妙渐变 | 细纹亚麻布纹、米白水彩晕染底、磨砂毛玻璃质感 |
+| 装饰元素 | 添加锚定视觉的装饰性细节 | 右下角小植物插画、左侧彩色竖条、标题下的手绘下划线 |
+| 色彩层次 | 至少 3 层色彩（底色、主色、点缀色） | 米白底 + 莫兰迪绿主色块 + 金色小标签点缀 |
+| 材质暗示 | 图片元素有具体材质感 | 卡片有投影感和圆角、文字区有轻微纸张纹理 |
+| 空间纵深 | 通过元素大小差异营造层次感 | 背景大区域底色 + 中景卡片 + 前景重点数字 |
+
 ```
 请生成一张微信小绿书内容图片。
 页面内容：{page_content}
@@ -111,6 +121,12 @@
 5. 风格与封面严格统一
 6. 竖版 3:4 比例
 7. [如为尾部] 一句话记忆点提炼，提问式互动引导，排版克制收敛
+视觉丰富化要求：
+- 背景质感：不要纯色背景，使用细纹纸质/布纹/水彩晕染等质感底色
+- 卡片投影：信息卡片加轻微投影和圆角（约 8-12px），营造立体感
+- 装饰锚点：至少 1 个装饰性元素（植物插画/手绘线条/图标角标）
+- 色彩分层：底色 + 主色块 + 点缀色，至少 3 层色彩层次
+- 关键词特殊处理：数字/关键词用特殊字体或色块高亮，不能等比普通文字
 ```
 
 **变量说明**：
@@ -123,12 +139,20 @@
 ## CLI 命令
 
 ```bash
-# 生成内容图（使用与封面相同的 $STYLE）
-anbanwriter image generate "内容：{content}" --post --style "$STYLE" -o ./image_02.png
+# 计算内容图总数（封面之外所有页数）
+COUNT=<内容图总张数>
 
-# 生成尾部图
-anbanwriter image generate "尾部：{tail}" --post --style "$STYLE" -o ./image_last.png
+# 【必须使用组图模式】一次生成所有内容图（--count 指定张数）
+# 输出到目录，自动命名 image_01.png ... image_0N.png
+# 禁止逐张调用 image generate
+anbanwriter image generate "{unified_content_description}" \
+  --count $COUNT \
+  --mode xls --style "$STYLE" -o ./content_images/
 
-# 上传到微信素材库
-anbanwriter image upload ./image_02.png
+# 逐张上传到微信素材库
+anbanwriter image upload ./content_images/image_01.png
+anbanwriter image upload ./content_images/image_02.png
+# ... 依次上传
 ```
+
+> **注意**：封面图单独生成（`image generate ... -o ./cover.png`），内容图使用组图模式统一生成，确保风格一致。

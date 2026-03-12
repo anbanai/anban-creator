@@ -154,7 +154,7 @@ func draftPostCmd() *cobra.Command {
 					MediaID:   result.MediaID,
 					DraftURL:  result.DraftURL,
 					Title:     req.Title,
-					Type:      "post",
+					Type:      "xls",
 					CreatedAt: time.Now(),
 				})
 

@@ -137,6 +137,7 @@ Configuration:
 	rootCmd.AddCommand(videoCmd())
 	rootCmd.AddCommand(doctorCmd())
 	rootCmd.AddCommand(contentCmd())
+	rootCmd.AddCommand(workspaceCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		responseError(err)

@@ -5,7 +5,7 @@ import "time"
 // Image 图片操作记录
 type Image struct {
 	ID          uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	Role        string    `gorm:"default:'standalone'" json:"role"` // cover / content / post / standalone
+	Role        string    `gorm:"default:'standalone'" json:"role"` // cover / content / xls / standalone
 	Prompt      string    `json:"prompt,omitempty"`
 	Provider    string    `json:"provider,omitempty"`
 	LocalPath   string    `json:"local_path,omitempty"`
@@ -25,7 +25,7 @@ type Draft struct {
 	DraftURL  string    `json:"draft_url,omitempty"`
 	Title     string    `gorm:"default:''" json:"title"`
 	Digest    string    `json:"digest,omitempty"`
-	Type      string    `gorm:"default:'article'" json:"type"` // article / post
+	Type      string    `gorm:"default:'article'" json:"type"` // article / xls
 	Dir       string    `json:"dir,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -47,7 +47,7 @@ type History struct {
 // Post 状态流转:    created → planned → images_ready → published
 type Content struct {
 	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	Type      string    `gorm:"not null;index" json:"type"`               // "article" / "post"
+	Type      string    `gorm:"not null;index" json:"type"`               // "article" / "xls"
 	Dir       string    `gorm:"uniqueIndex" json:"dir"`                   // 项目目录路径（唯一标识）
 	Status    string    `gorm:"not null;default:'created'" json:"status"` // 见状态流转
 	Title     string    `json:"title,omitempty"`
