@@ -166,7 +166,7 @@ maxTurns: 20
 ### 文件组织
 
 - 当前运行使用 `output/rednote/staging/`（创建工作目录步骤，变量 `$DIR`），完成后自动归档为 `output/rednote/YYYYMMDD-NNN/`
-- 图片命名：`$DIR/cover.png`, `$DIR/image_02.png`, `$DIR/image_03.png` 等
+- 图片命名：`$DIR/cover.png`, `$DIR/image_01.png` ... `$DIR/image_0{N-1}.png`（N 由 image-plan.md 决定）
 - 内容草稿：`$DIR/content.md`（含标题/正文/话题标签）
 - 决策记录：`$DIR/topic-analysis.md`（原创模式：选题评分 + 风格选择）或 `$DIR/source-analysis.md`（复刻模式：源笔记模板分析）
 
