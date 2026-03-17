@@ -129,6 +129,7 @@ maxTurns: 20
    - **正文模板**：开场金句、段落数量、结尾 CTA
    - **互动模板**：评论区高频动作词、参与门槛
    - **标签模板**：核心话题 + 长尾话题
+   - **视觉结构模板**：图片总张数（含封面）、各内容页主题关键词（按顺序）；若源笔记图片信息无法从 API 返回数据中提取，记录"视觉结构：无法提取"，`tight` 模式图片规划自动降级为 `medium` 行为
 
 4. **创建工作目录**：执行命令 `anbanwriter workspace prepare rednote` 生成隔离工作目录，变量记为 `$DIR`
 
@@ -142,11 +143,23 @@ maxTurns: 20
 
    内部生成 3 个标题候选，爆款因子评分自动选 Top 1（≤20 字）；正文不含话题标签；5-8 个话题标签单独列出。内容保存到 `$DIR/content.md`，决策记录到 `$DIR/source-analysis.md`
 
+5.5. **图片内容规划**：基于选题方向、最终标题和目标受众，独立规划每张图的具体内容，写入 `$DIR/image-plan.md`。规划规则与原创模式步骤 4.5 相同，但根据改写模式调整参考依据：
+
+   | 模式 | 图片规划依据 |
+   |------|------------|
+   | `style-only`（默认） | 独立规划，不复用源笔记具体内容（可参考其页数作为参考上限） |
+   | `medium` | 参考 `source-analysis.md` 中源笔记信息结构，内容重新设计 |
+   | `tight` | 参照 `source-analysis.md` 第6维度（视觉结构模板）的页数和主题结构；若标记"无法提取"则按 `medium` 处理 |
+
 6. **生成图片**：使用 skill `/visual-design` 生成小红书图片。`style-only` 模式：仅参考源笔记封面的风格/色调/信息层级，禁止复用具体元素；其他模式：参考源笔记整体视觉风格。输出模式 `--mode xhs`，保存到 `$DIR/`：
 
    **图片生成流程**：
    - **有配置参考图**（步骤 1 的 `account info` 显示 rednote.Cover.Image.Refer 或 rednote.Content.Image.Refer 已配置）：所有图片基于配置的参考图生成，确保组图视觉一致
    - **无配置参考图**：先生成封面确立基准，再以封面为参考图批量生成其余图片
+
+   **内容图 prompt 构建**：将 `image-plan.md` 中所有内容页（image_01 至 image_0{N-2}）和尾部页（image_0{N-1}）合并，构建统一分页描述（每页列出主题、信息点和推荐布局），作为 `--count N-1` 批量生成的 prompt。封面 `{page_content}` 使用 image-plan.md 封面规划：`{钩子} | {辅助信息}`；封面的 `{full_outline}` 仍使用 `content.md` 正文（不替换）。`--count` 使用 image-plan.md 中"计划图片数量"减 1。
+
+   生成后检查每张图片：`$DIR/cover.png`（封面）、`$DIR/image_01.png` ... `$DIR/image_0{N-1}.png`
 
 7. **违禁词合规检查**：使用 skill `/rednote-writing` 第7节扫描标题与正文，按风险等级替换/删除，生成 `$DIR/compliance-report.md`
 
