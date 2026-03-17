@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -39,7 +40,7 @@ func workspacePrepareCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			contentType := args[0]
 			if !validContentTypes[contentType] {
-				return fmt.Errorf("invalid content type %q: must be one of rednote, articles, posts", contentType)
+				return fmt.Errorf("invalid content type %q: must be one of rednote, articles, xls", contentType)
 			}
 
 			stagingDir := filepath.Join("output", contentType, "staging")
@@ -58,10 +59,13 @@ func workspacePrepareCmd() *cobra.Command {
 					if err != nil {
 						return fmt.Errorf("compute archive dir: %w", err)
 					}
+					// 记录归档前的状态（用于调试）
+					entriesBefore, _ := os.ReadDir(stagingDir)
 					if err := os.Rename(stagingDir, archiveDir); err != nil {
 						return fmt.Errorf("archive staging: %w", err)
 					}
 					result["archived"] = filepath.Base(archiveDir)
+					result["files_count"] = fmt.Sprintf("%d", len(entriesBefore))
 				}
 			}
 
@@ -102,18 +106,64 @@ func workspaceArchiveCmd() *cobra.Command {
 				return fmt.Errorf("compute archive dir: %w", err)
 			}
 
+			// 记录归档前的状态（用于调试）
+			entriesBefore, _ := os.ReadDir(stagingDir)
 			if err := os.Rename(stagingDir, archiveDir); err != nil {
 				return fmt.Errorf("archive staging: %w", err)
 			}
 
 			responseSuccess(map[string]string{
-				"from":     stagingDir,
-				"to":       archiveDir,
-				"archived": filepath.Base(archiveDir),
+				"from":        stagingDir,
+				"to":          archiveDir,
+				"archived":    filepath.Base(archiveDir),
+				"files_count": fmt.Sprintf("%d", len(entriesBefore)),
 			})
 			return nil
 		},
 	}
+}
+
+// copyDir 递归复制目录内容（跨文件系统兼容）
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// 计算目标路径
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		dstPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		return copyFile(path, dstPath, info.Mode())
+	})
+}
+
+// copyFile 复制单个文件
+func copyFile(src, dst string, mode os.FileMode) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+
+	return dstFile.Sync()
 }
 
 // nextArchiveDir 计算下一个可用的归档目录路径，格式为 output/<type>/YYYYMMDD-NNN

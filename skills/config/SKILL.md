@@ -1,10 +1,8 @@
 ---
 name: config
-description: 初始化或查看 anbanwriter 配置。Use when user says "配置"、"config"、"设置"、"账号信息"、"account"。
+description: Use when user wants to initialize, view, or modify anbanwriter configuration. Triggers on "配置", "config", "设置", "账号信息", "account", "init".
 user-invocable: true
-metadata:
-  author: Rick
-  version: 2.4.0
+argument-hint: "[init|info]"
 ---
 
 # anbanwriter 配置管理

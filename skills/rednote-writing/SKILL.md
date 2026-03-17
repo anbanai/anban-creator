@@ -1,12 +1,8 @@
 ---
 name: rednote-writing
-description: |
-  小红书内容创作知识库——文案写作公式、标题心理学、行业模板。
-  Use when user mentions "小红书文案", "小红书标题", "种草文案", "笔记写作", "rednote copywriting"
+description: Use when writing Xiaohongshu (小红书) content, optimizing rednote titles, or rewriting viral notes. Triggers on "小红书文案", "小红书标题", "种草文案", "笔记写作", "rednote copywriting", "爆款改写".
 user-invocable: false
-metadata:
-  author: Rick
-  version: 1.0.0
+disable-model-invocation: true
 ---
 
 # 小红书内容写作知识库
@@ -157,6 +153,7 @@ title_score = 情绪强度(0-3) + 关键词密度(0-1) + 字数优化(0-1) + 句
 1. **标题**：自动评分选定的最优标题（≤20 字）
 2. **正文**：1 版可直接发布，遵循本 SKILL 正文结构（不含话题标签）
 3. **话题**：5-8 个（单独列出）
+3. **字数**：最多1000字，超过后无法发布！
 
 ### 9.5 合规检查
 

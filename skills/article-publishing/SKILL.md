@@ -1,10 +1,8 @@
 ---
 name: article-publishing
-description: 微信公众号图文文章（news）草稿创建与管理。Use when user says "发布文章"、"创建草稿"、"draft"、"publish"、"推送"。
+description: Use when creating or managing WeChat news article drafts. Triggers on "发布文章", "创建草稿", "draft article", "publish", "推送".
 user-invocable: false
-metadata:
-  author: Rick
-  version: 2.3.0
+disable-model-invocation: true
 ---
 
 # 微信公众号图文文章发布
@@ -13,7 +11,7 @@ metadata:
 
 ## 草稿管理
 
-查看现发布历史：`anbanwriter account history`
+查看发布历史：`anbanwriter account history`
 
 ## 命令
 

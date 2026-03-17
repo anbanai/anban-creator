@@ -1,10 +1,8 @@
 ---
 name: xls-publishing
-description: 微信公众号小绿书（newspic）图片帖子的创建与管理。Use when user mentions "小绿书"、"图片帖"、"newspic"、"image post"。
+description: Use when creating or managing WeChat Xiaolvshu (newspic) image post drafts. Triggers on "小绿书", "图片帖", "newspic", "image post", "draft xls".
 user-invocable: false
-metadata:
-  author: Rick
-  version: 2.3.0
+disable-model-invocation: true
 ---
 
 # 微信公众号小绿书发布
@@ -13,7 +11,7 @@ metadata:
 
 ## 草稿管理
 
-查看现查看现发布历史：`anbanwriter account history`
+查看发布历史：`anbanwriter account history`
 
 ## 命令
 

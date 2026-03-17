@@ -209,7 +209,7 @@ Prompt 构建优先级（从高到低）：
   anbanwriter image generate "封面图" --size 3:4:2K -o cover.jpg
 
   # 组图模式：一次生成 4 张风格一致的图片到目录
-  anbanwriter image generate "小绿书内容图" --mode xls --count 4 -o ./output/images/
+  anbanwriter image generate "小红书内容图" --count 4 -o ./output/images/
 
   # 生成后自动上传到微信
   anbanwriter image generate "封面图" --upload`,
@@ -523,6 +523,7 @@ func imageBatchCmd() *cobra.Command {
 			if stylePrompt != "" {
 				processor.SetStylePrompt(stylePrompt)
 			}
+
 			if apiCfg.Refer != "" {
 				processor.SetRefImage(apiCfg.Refer)
 			}

@@ -1,12 +1,8 @@
 ---
 name: rednote-research
-description: |
-  小红书选题研究知识库——MCP 数据采集方法、互动率评分模型、内容分析维度。
-  Use when analyzing rednote topics, scoring engagement, or researching trending content.
+description: Use when analyzing Xiaohongshu (小红书) topics, scoring engagement via MCP data, or researching trending rednote content. Triggers on "小红书选题", "rednote research", "互动率", "engagement score".
 user-invocable: false
-metadata:
-  author: Rick
-  version: 1.0.0
+disable-model-invocation: true
 ---
 
 # 小红书选题研究知识库

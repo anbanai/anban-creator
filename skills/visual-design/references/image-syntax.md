@@ -139,12 +139,8 @@ anbanwriter image generate "prompt"
 # 16:9 比例（推荐用于公众号封面）
 anbanwriter image generate -s 2k "prompt"
 
-# 【多图场景必须使用】组图模式：一次生成 N 张风格一致的图片
-# --count 指定张数，-o 指定输出目录
+# 组图模式：一次生成 N 张风格一致的图片
 anbanwriter image generate "prompt" --count 5 --mode xls --style "$STYLE" -o ./output_dir/
-
-# 组图 + 参考图模式（基于封面风格生成内容图）
-anbanwriter image generate "prompt" --count 4 --mode xls --ref ./cover.png -o ./output_dir/
 ```
 
 ## 图片占位符

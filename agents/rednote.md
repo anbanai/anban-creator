@@ -41,15 +41,15 @@ maxTurns: 20
 
 ### 原创模式（默认）
 
-1. 执行 `anbanwriter account info --scope xls` 获取账号信息
+1. 执行 `anbanwriter account info --scope rednote` 获取账号信息
 
-2. **研究选题**：使用 skill `rednote-research` 采集热门笔记数据，按互动率评分公式自动选 Top 1 选题（无需用户确认），评分结果与选题理由写入 `$DIR/topic-analysis.md`
+2. **研究选题**：使用 skill `/rednote-research` 采集热门笔记数据，按互动率评分公式自动选 Top 1 选题（无需用户确认），评分结果与选题理由写入 `$DIR/topic-analysis.md`
 
 3. **创建工作目录**：执行命令 `anbanwriter workspace prepare rednote` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有文件保存在 `output/rednote/staging/` 内，变量记为 `$DIR`
 
-4. **创作内容**：使用 skill `rednote-writing` 生成标题（内部 3 选 1，≤20 字）、正文（不含话题标签）和话题标签（5-8 个，单独列出），内容保存到 `$DIR/content.md`
+4. **创作内容**：使用 skill `/rednote-writing` 生成标题（内部 3 选 1，≤20 字）、正文（不含话题标签）和话题标签（5-8 个，单独列出），内容保存到 `$DIR/content.md`
 
-5. **生成图片**：使用 skill `visual-design` 生成小红书图片，输出模式 `--mode xhs`，保存到 `$DIR/`：
+5. **生成图片**：使用 skill `/visual-design` 生成小红书图片，输出模式 `--mode xhs`，保存到 `$DIR/`：
 
    **确定视觉风格**（预设优先 > 配置参考图 > 动态设计）：
    - **方式 0 — 有配置预设**：步骤 1 的 `account info` 包含「视觉风格预设」章节，提取「风格提示词」作为 `$STYLE`
@@ -57,9 +57,9 @@ maxTurns: 20
    - **方式 B — 无配置参考图**：根据标题、正文内容和目标受众，设计完整视觉风格描述作为 `$STYLE`，先生成封面图确定基准风格，再以封面作参考图批量生成其余图片
 
    **图片数量**：根据内容规划，一般 5-7 张（奇数效果更好）：
-   - 封面图: 最吸引眼球的标题+核心信息
-   - 内容图: 多张图高密度信息图分点展示核心内容
-   - 收尾图: 总结、CTA、互动引导
+   - 封面图: 只放标题+1个钩子信息，文字≤30%，留白≥50%，目标是吸引点击
+   - 内容图: 每页2-4个结构化信息点，文字35-50%，用编号清单/对比双栏/步骤流程等布局，高密度知识卡片风格，与封面必须有明显的信息密度差异
+   - 收尾图: 全文核心要点汇总页，提炼前面所有内容图的精华，用精简条目列出关键 takeaway
 
    **图片生成流程**：
    - **有配置参考图**：所有图片（封面+内容图）都基于配置的参考图生成，确保组图视觉一致
@@ -71,9 +71,9 @@ maxTurns: 20
 
 ### 复刻模式（用户提供笔记 ID 或链接时）
 
-1. 执行 `anbanwriter account info --scope xls` 获取账号信息
+1. 执行 `anbanwriter account info --scope rednote` 获取账号信息
 
-2. **获取源笔记**：使用 skill `rednote-research` 先获取 xsec_token，再调用 MCP `get_feed_detail(feed_id="<ID>", xsec_token="<token>")` 获取笔记详情
+2. **获取源笔记**：使用 skill `/rednote-research` 先获取 xsec_token，再调用 MCP `get_feed_detail(feed_id="<ID>", xsec_token="<token>")` 获取笔记详情
 
 3. **分析源笔记模板**（5 维模板提取），结果写入 `$DIR/source-analysis.md`：
    - **标题模板**：年份/动作词/情绪词/句式
@@ -84,7 +84,7 @@ maxTurns: 20
 
 4. **创建工作目录**：执行命令 `anbanwriter workspace prepare rednote` 生成隔离工作目录，变量记为 `$DIR`
 
-5. **按改写模式生成内容**（使用 skill `rednote-writing` 第9节规则）：
+5. **按改写模式生成内容**（使用 skill `/rednote-writing` 第9节规则）：
 
    | 模式 | 选择条件 | 说明 |
    |------|----------|------|
@@ -94,13 +94,13 @@ maxTurns: 20
 
    内部生成 3 个标题候选，爆款因子评分自动选 Top 1（≤20 字）；正文不含话题标签；5-8 个话题标签单独列出。内容保存到 `$DIR/content.md`，决策记录到 `$DIR/source-analysis.md`
 
-6. **生成图片**：使用 skill `visual-design` 生成小红书图片。`style-only` 模式：仅参考源笔记封面的风格/色调/信息层级，禁止复用具体元素；其他模式：参考源笔记整体视觉风格。输出模式 `--mode xhs`，保存到 `$DIR/`：
+6. **生成图片**：使用 skill `/visual-design` 生成小红书图片。`style-only` 模式：仅参考源笔记封面的风格/色调/信息层级，禁止复用具体元素；其他模式：参考源笔记整体视觉风格。输出模式 `--mode xhs`，保存到 `$DIR/`：
 
    **图片生成流程**：
    - **有配置参考图**（步骤 1 的 `account info` 显示 rednote.Cover.Image.Refer 或 rednote.Content.Image.Refer 已配置）：所有图片基于配置的参考图生成，确保组图视觉一致
    - **无配置参考图**：先生成封面确立基准，再以封面为参考图批量生成其余图片
 
-7. **违禁词合规检查**：使用 skill `rednote-writing` 第7节扫描标题与正文，按风险等级替换/删除，生成 `$DIR/compliance-report.md`
+7. **违禁词合规检查**：使用 skill `/rednote-writing` 第7节扫描标题与正文，按风险等级替换/删除，生成 `$DIR/compliance-report.md`
 
 ---
 

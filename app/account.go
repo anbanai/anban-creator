@@ -54,6 +54,8 @@ func accountInfoCmd() *cobra.Command {
 --scope 可选值：
   article  仅输出账号信息 + 写作风格
   xls      仅输出账号信息 + 小绿书配置
+  rednote  仅输出账号信息 + 小红书配置
+  flower   仅输出账号信息 + 花卉图片配置
   (不传)   输出全部章节`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := showAccountInfo(scope); err != nil {
@@ -62,7 +64,7 @@ func accountInfoCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&scope, "scope", "", "按场景过滤输出 (article/xls)")
+	cmd.Flags().StringVar(&scope, "scope", "", "按场景过滤输出 (article/xls/rednote/flower)")
 
 	return cmd
 }
@@ -119,6 +121,14 @@ func showAccountInfo(scope string) error {
 				provider = config.DefaultImageProvider
 			}
 			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
+			// 检查 refer 配置（优先用于组图模式）
+			contentRefer := cfg.Wechat.Xls.Content.Image.Refer
+			if cfg.Rednote != nil && cfg.Rednote.Content.Image.Refer != "" {
+				contentRefer = cfg.Rednote.Content.Image.Refer
+			}
+			if contentRefer != "" {
+				fmt.Printf("- 组图参考图: 已配置（%s）\n", contentRefer)
+			}
 		} else {
 			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.xls.content.image.key）\n")
 		}
@@ -141,6 +151,7 @@ func showAccountInfo(scope string) error {
 			}
 			if cfg.Rednote.Content.Image.Refer != "" {
 				fmt.Printf("- 小红书内容参考图: %s\n", cfg.Rednote.Content.Image.Refer)
+				fmt.Printf("  💡 组图生成时优先使用此参考图\n")
 			}
 		}
 		if cfg.Wechat.Xls.Cover.Image.Refer != "" {
@@ -148,10 +159,13 @@ func showAccountInfo(scope string) error {
 		}
 		if cfg.Wechat.Xls.Content.Image.Refer != "" {
 			fmt.Printf("- 小绿书内容参考图: %s\n", cfg.Wechat.Xls.Content.Image.Refer)
+			fmt.Printf("  💡 组图生成时优先使用此参考图\n")
 		}
 		if (cfg.Rednote == nil || (cfg.Rednote.Cover.Image.Refer == "" && cfg.Rednote.Content.Image.Refer == "")) &&
 			cfg.Wechat.Xls.Cover.Image.Refer == "" && cfg.Wechat.Xls.Content.Image.Refer == "" {
 			fmt.Printf("- (未配置)\n")
+			fmt.Printf("  💡 建议配置 rednote.content.image.refer 或 wechat.xls.content.image.refer\n")
+			fmt.Printf("     用于组图模式保持风格一致性\n")
 		}
 
 		if cfg.Wechat.Xls.Style != "" {
@@ -172,6 +186,105 @@ func showAccountInfo(scope string) error {
 			fmt.Printf("- 自定义风格提示词: %s\n", cfg.Wechat.Xls.Content.Image.StylePrompt)
 		} else {
 			fmt.Printf("- 视觉风格: (未配置)\n")
+		}
+
+	case "rednote":
+		fmt.Printf("\n# 小红书配置\n\n")
+		fmt.Printf("- 图片数量: %d\n", cfg.RednoteImageCount())
+		fmt.Printf("- 图片尺寸: %s\n", cfg.RednoteImageSize())
+
+		// 图片生成就绪状态
+		resolvedRednote := cfg.ResolvedRednoteContentImage()
+		if resolvedRednote.Key != "" {
+			provider := resolvedRednote.Provider
+			if provider == "" {
+				provider = config.DefaultImageProvider
+			}
+			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
+		} else {
+			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.xls.content.image.key）\n")
+		}
+
+		// 参考图配置
+		fmt.Printf("\n## 参考图配置\n\n")
+		hasRefer := false
+		if cfg.Rednote != nil {
+			if cfg.Rednote.Cover.Image.Refer != "" {
+				fmt.Printf("- 封面参考图: %s\n", cfg.Rednote.Cover.Image.Refer)
+				hasRefer = true
+			}
+			if cfg.Rednote.Content.Image.Refer != "" {
+				fmt.Printf("- 内容参考图: %s\n", cfg.Rednote.Content.Image.Refer)
+				fmt.Printf("  💡 组图生成时优先使用此参考图\n")
+				hasRefer = true
+			}
+		}
+		if !hasRefer {
+			fmt.Printf("- (未配置)\n")
+			fmt.Printf("  💡 建议配置 rednote.content.image.refer 用于组图模式保持风格一致性\n")
+		}
+
+		// 发布通道
+		fmt.Printf("\n## 发布通道\n\n")
+		fmt.Printf("- 小红书: 通过 MCP 工具 publish_content()\n")
+		fmt.Printf("  💡 确保已配置 rednote MCP 服务器\n")
+
+		// 视觉风格预设
+		rednoteStyle := ""
+		if cfg.Rednote != nil {
+			rednoteStyle = cfg.Rednote.Style
+		}
+		if rednoteStyle == "" {
+			rednoteStyle = "cute-doodle"
+		}
+		pm := image.NewStylePresetManager()
+		if err := pm.LoadPresets(); err == nil {
+			if preset, err := pm.GetPreset(rednoteStyle); err == nil {
+				fmt.Printf("\n## 视觉风格预设\n\n")
+				fmt.Printf("- 名称: %s (%s)\n", preset.Name, preset.EnglishName)
+				fmt.Printf("- 说明: %s\n", preset.Description)
+				fmt.Printf("- 适用类型: %s\n", preset.Category)
+				fmt.Printf("- 风格提示词:\n\n```\n%s```\n", preset.Prompt)
+				fmt.Printf("\n- 可用预设: %s\n", strings.Join(pm.ListPresetNames(), ", "))
+			} else {
+				fmt.Printf("- 视觉风格: %s（预设未找到）\n", rednoteStyle)
+			}
+		}
+
+	case "flower":
+		fmt.Printf("\n# 花卉图片配置\n\n")
+		fmt.Printf("- 花卉种数: %d\n", cfg.FlowerImageCount())
+		fmt.Printf("- 图片尺寸: %s\n", cfg.FlowerImageSize())
+
+		// 图片生成就绪状态
+		resolvedFlower := cfg.ResolvedFlowerImage()
+		if resolvedFlower.Key != "" {
+			provider := resolvedFlower.Provider
+			if provider == "" {
+				provider = config.DefaultImageProvider
+			}
+			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
+		} else {
+			fmt.Printf("- 图片生成: 未配置（需设置 flower.content.image.key）\n")
+		}
+
+		// 参考图配置
+		fmt.Printf("\n## 参考图配置\n\n")
+		if cfg.Flower != nil && cfg.Flower.Content.Image.Refer != "" {
+			fmt.Printf("- 参考图: %s\n", cfg.Flower.Content.Image.Refer)
+			fmt.Printf("  💡 所有花卉图片将基于此参考图保持风格一致\n")
+		} else {
+			fmt.Printf("- (未配置)\n")
+			fmt.Printf("  💡 建议配置 flower.content.image.refer 用于保持多张花卉图片风格一致\n")
+			fmt.Printf("     未配置时，第一张图片自动作为后续图片的参考图\n")
+		}
+
+		// 风格提示词
+		fmt.Printf("\n## 风格提示词\n\n")
+		if cfg.Flower != nil && cfg.Flower.Content.Image.StylePrompt != "" {
+			fmt.Printf("- 统一风格: %s\n", cfg.Flower.Content.Image.StylePrompt)
+		} else {
+			fmt.Printf("- 统一风格: (未配置，将由 AI 根据主题动态生成)\n")
 		}
 
 	default:
@@ -202,6 +315,14 @@ func showAccountInfo(scope string) error {
 				provider = config.DefaultImageProvider
 			}
 			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
+			// 检查 refer 配置（优先用于组图模式）
+			contentRefer := cfg.Wechat.Xls.Content.Image.Refer
+			if cfg.Rednote != nil && cfg.Rednote.Content.Image.Refer != "" {
+				contentRefer = cfg.Rednote.Content.Image.Refer
+			}
+			if contentRefer != "" {
+				fmt.Printf("- 组图参考图: 已配置（%s）\n", contentRefer)
+			}
 		} else {
 			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.xls.content.image.key）\n")
 		}

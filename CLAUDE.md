@@ -121,6 +121,14 @@ app/
 │   ├── openrouter.go     # OpenRouter multi-model gateway provider
 │   └── volcengine.go     # Volcengine Seedream provider (async polling)
 │
+├── storage/              # Persistent storage (SQLite via GORM)
+│   ├── store.go          # Database init, Store struct
+│   ├── models.go         # Content, Draft, Image data models
+│   ├── content.go        # Content lifecycle CRUD (upsert, list, find)
+│   ├── draft.go          # Draft record storage
+│   ├── history.go        # Unified history queries
+│   └── image.go          # Image record storage
+│
 ├── draft/                # WeChat draft management
 │   └── service.go        # Draft creation & publishing
 │
@@ -184,7 +192,7 @@ The converter module orchestrates a multi-step process:
 **Volcengine/Seedream** (provider: `volcengine`, `volc`, or `seedream`):
 
 - Bytedance's image generation model with async task polling
-- Default model: `doubao-seedream-4-5-251128`
+- Default model: `doubao-seedream-5-0-250128`
 - Default base URL: `https://ark.cn-beijing.volces.com/api/v3`
 - Temp file prefix: `anbanwriter_volcengine_`
 
@@ -336,6 +344,7 @@ func TestFeature(t *testing.T) {
 ## CLI Commands Overview
 
 - `./bin/anbanwriter account init` - Create config file with guided setup
+- `./bin/anbanwriter account info [--scope article|xls|rednote]` - Show account profile for AI context
 - `./bin/anbanwriter account history` - View unified history of drafts and published articles
 - `./bin/anbanwriter convert <file>` - Convert Markdown to WeChat HTML
 - `./bin/anbanwriter write` - Style-based writing assistance
@@ -349,6 +358,13 @@ func TestFeature(t *testing.T) {
 - `./bin/anbanwriter image upload <file>` - Upload image to WeChat CDN
 - `./bin/anbanwriter image download <url>` - Download image
 - `./bin/anbanwriter video assemble <images_or_dir>` - Assemble images into video with xfade transitions (requires ffmpeg)
+- `./bin/anbanwriter content track` - Track content lifecycle status (created → drafted → published)
+- `./bin/anbanwriter content list` - List tracked content (default: unpublished only)
+- `./bin/anbanwriter workspace prepare <type>` - Archive stale staging and create clean workspace (rednote/articles/xls)
+- `./bin/anbanwriter workspace archive <type>` - Archive staging dir to YYYYMMDD-NNN format
+- `./bin/anbanwriter rednote` - 小红书内容创作
+- `./bin/anbanwriter topics` - Topic research and generation
+- `./bin/anbanwriter seo` - SEO analysis and optimization
 - `./bin/anbanwriter doctor` - Diagnose config and connection issues
 
 ## Skills Integration
@@ -361,7 +377,7 @@ The project includes Claude Code skills in `skills/` directory:
 - `seo-optimization` - SEO best practices
 - `article-publishing` - Article draft publishing workflows
 - `xls-publishing` - Image post (小绿书) publishing workflows
-- `content-analysis` - Content quality analysis
+- `config` - Configuration management
 - `rednote-research` - 小红书热门内容研究与评分
 - `rednote-writing` - 小红书文案写作、标题优化、爆款改写
 
@@ -389,7 +405,4 @@ agents/
 ├── wechatarticle.md    # Full article pipeline agent (maxTurns: 50)
 ├── wechatxls.md       # Image post pipeline agent (maxTurns: 25)
 └── rednote.md          # 小红书创作引擎，支持原创+复刻双模式 (maxTurns: 20)
-
-output-styles/
-└── wechat-creator.md    # WeChat creator output style
 ```

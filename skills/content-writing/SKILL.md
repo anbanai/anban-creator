@@ -1,10 +1,7 @@
 ---
 name: content-writing
-description: 微信公众号写作知识库。当用户需要写文章、去除AI痕迹、或转换格式时自动加载。提供风格参考、写作规范和质量标准。Do NOT use for SEO optimization (use seo-optimization) or topic scoring (use topic-research).
+description: Use when writing articles, removing AI traces, converting Markdown to WeChat HTML, or checking content compliance. Triggers on "写文章", "去AI痕迹", "humanize", "convert", "违禁词", "写作风格". Do NOT use for SEO (use seo-optimization) or topic scoring (use topic-research).
 user-invocable: false
-metadata:
-  author: Rick
-  version: 2.3.0
 ---
 
 # 微信公众号内容写作知识库

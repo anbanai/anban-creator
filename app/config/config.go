@@ -46,6 +46,12 @@ const DefaultRednoteImageSize = "3:4:1K"
 // DefaultRednoteImageCount 默认小红书图片数量
 const DefaultRednoteImageCount = 6
 
+// DefaultFlowerImageSize 默认花卉图片尺寸（9:16 竖版 2K）
+const DefaultFlowerImageSize = "9:16"
+
+// DefaultFlowerImageCount 默认花卉图片数量（每次生成的花卉种数）
+const DefaultFlowerImageCount = 5
+
 // NewDefaultConfig 返回带有推荐默认值的 Config，用于生成配置文件模板
 func NewDefaultConfig() *Config {
 	c := &Config{}
@@ -119,6 +125,19 @@ func NewDefaultConfig() *Config {
 	c.Rednote.Content.Image.Refer = "path/to/refer.png"
 	c.Rednote.Content.Image.Compress = true
 	c.Rednote.Content.Count = DefaultRednoteImageCount
+
+	// 花卉图片生成（可选）
+	c.Flower = &FlowerConfig{}
+	c.Flower.Content.Image.Provider = DefaultImageProvider
+	c.Flower.Content.Image.Key = "your_image_api_key"
+	c.Flower.Content.Image.Model = "gemini-3-pro-image-preview"
+	c.Flower.Content.Image.Size = DefaultFlowerImageSize
+	c.Flower.Content.Image.Refer = "path/to/refer.png"
+	c.Flower.Content.Image.StylePrompt = "hyper-realistic vertical macro flower photography, soft morning light, warm green and gold bokeh, dew droplets on petals"
+	c.Flower.Content.Image.Compress = true
+	c.Flower.Content.Image.MaxWidth = DefaultImageMaxWidth
+	c.Flower.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
+	c.Flower.Content.Count = DefaultFlowerImageCount
 
 	return c
 }
@@ -214,6 +233,17 @@ type RednoteConfig struct {
 	Content XlsContentSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
+// FlowerContentSection 花卉图片内容配置
+type FlowerContentSection struct {
+	Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
+	Count int      `json:"count,omitempty" yaml:"count,omitempty"`
+}
+
+// FlowerConfig 花卉图片生成配置
+type FlowerConfig struct {
+	Content FlowerContentSection `json:"content,omitempty" yaml:"content,omitempty"`
+}
+
 // Config 应用配置（嵌套结构，直接对应 JSON 文件）
 type Config struct {
 	Name        string   `json:"name,omitempty" yaml:"name,omitempty"`
@@ -222,6 +252,7 @@ type Config struct {
 
 	Wechat  WechatConfig   `json:"wechat,omitempty" yaml:"wechat,omitempty"`
 	Rednote *RednoteConfig `json:"rednote,omitempty" yaml:"rednote,omitempty"`
+	Flower  *FlowerConfig  `json:"flower,omitempty" yaml:"flower,omitempty"`
 
 	configPath string
 }
@@ -367,6 +398,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// 验证花卉图片数量
+	if c.Flower != nil && c.Flower.Content.Count != 0 && (c.Flower.Content.Count < 1 || c.Flower.Content.Count > 50) {
+		return &ConfigError{
+			Field:   "FlowerImageCount",
+			Message: "花卉图片数量必须在 1 到 50 之间",
+			HintMsg: "配置文件中设置 flower.content.count: 5",
+		}
+	}
+
 	return nil
 }
 
@@ -387,6 +427,15 @@ func (c *Config) ValidateMinimal() error {
 			Field:   "XlsImageCount",
 			Message: "小绿书图片数量必须在 1 到 20 之间",
 			HintMsg: "配置文件中设置 wechat.xls.content.count: 4",
+		}
+	}
+
+	// 验证花卉图片数量
+	if c.Flower != nil && c.Flower.Content.Count != 0 && (c.Flower.Content.Count < 1 || c.Flower.Content.Count > 50) {
+		return &ConfigError{
+			Field:   "FlowerImageCount",
+			Message: "花卉图片数量必须在 1 到 50 之间",
+			HintMsg: "配置文件中设置 flower.content.count: 5",
 		}
 	}
 
@@ -526,6 +575,37 @@ func (c *Config) ResolvedRednoteContentImage() ImageAPI {
 		return c.Wechat.Xls.Content.Image
 	}
 	return mergeImageAPI(c.Rednote.Content.Image, c.Wechat.Xls.Content.Image)
+}
+
+// FlowerImageSize 返回花卉图片尺寸，默认 9:16 竖版
+func (c *Config) FlowerImageSize() string {
+	if c.Flower != nil && c.Flower.Content.Image.Size != "" {
+		return c.Flower.Content.Image.Size
+	}
+	return DefaultFlowerImageSize
+}
+
+// FlowerImageCount 返回花卉图片数量（花卉种数），默认 5
+func (c *Config) FlowerImageCount() int {
+	if c.Flower != nil && c.Flower.Content.Count > 0 {
+		return c.Flower.Content.Count
+	}
+	return DefaultFlowerImageCount
+}
+
+// ResolvedFlowerImage 返回花卉图片生成配置
+// flower.content.image 字段优先，rednote.content.image 作为 fallback
+func (c *Config) ResolvedFlowerImage() ImageAPI {
+	if c.Flower == nil {
+		if c.Rednote != nil {
+			return c.Rednote.Content.Image
+		}
+		return c.Wechat.Xls.Content.Image
+	}
+	if c.Rednote != nil {
+		return mergeImageAPI(c.Flower.Content.Image, c.Rednote.Content.Image)
+	}
+	return mergeImageAPI(c.Flower.Content.Image, c.Wechat.Xls.Content.Image)
 }
 
 // SaveConfig 保存配置到文件（JSON 格式）

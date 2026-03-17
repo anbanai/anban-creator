@@ -23,18 +23,18 @@ maxTurns: 25
 
 1. 执行 `anbanwriter account info --scope xls` 获取账号信息
 2. 执行 `anbanwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
-3. **创建内容目录**：执行 `anbanwriter workspace prepare posts` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有图片保存在 `output/xls/staging/` 内，变量记为 `$DIR`
-4. 使用 skill `topic-research` 结合账号关键词和用户需求搜索热门话题，分别规划三个独立元素：
+3. **创建内容目录**：执行 `anbanwriter workspace prepare xls` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有图片保存在 `output/xls/staging/` 内，变量记为 `$DIR`
+4. 使用 skill `/topic-research` 结合账号关键词和用户需求搜索热门话题，分别规划三个独立元素：
    - **帖子标题**：优化算法推荐和搜索发现，用关键词/好奇缺口/数字钩子，与封面内容无需一致
    - **封面钩子**：设计视觉钩子（可以是一句话、情绪词、或纯视觉无文字），目标是让人想点进来，不必复述标题或预告内容
    - **内容页规划**：规划每页的核心信息点，这才是实际传递价值的地方
-5. **定义统一视觉风格**：使用 skill `visual-design` 确定视觉方案（参考图优先，风格描述兜底），确保封面与所有内容图视觉一致
+5. **定义统一视觉风格**：使用 skill `/visual-design` 确定视觉方案（参考图优先，风格描述兜底），确保封面与所有内容图视觉一致
 
-6. 使用 skill `visual-design` 生成小绿书图片，以封面确立基准风格，后续图片以封面为参考批量生成，输出模式 `--mode xls`，保存到 `$DIR/`
-6.5. 使用 skill `content-writing` 对标题和描述文案执行违禁词合规检查
-6.6. **（可选）视频组装**：如用户要求生成视频版本，使用 skill `visual-design` 将图片组装为视频，保存到 `$DIR/video.mp4`
+6. 使用 skill `/visual-design` 生成小绿书图片，以封面确立基准风格，后续图片以封面为参考批量生成，输出模式 `--mode xls`，保存到 `$DIR/`
+6.5. 使用 skill `/content-writing` 对标题和描述文案执行违禁词合规检查
+6.6. **（可选）视频组装**：如用户要求生成视频版本，使用 skill `/visual-design` 将图片组装为视频，保存到 `$DIR/video.mp4`
 7. 逐一上传图片到微信素材库（`image upload $DIR/cover.png`），记录每张图的 media_id
-8. 使用 skill `xls-publishing` → `draft xls --media-ids` 用素材 ID 发布到微信公众号草稿箱
+8. 使用 skill `/xls-publishing` → `draft xls --media-ids` 用素材 ID 发布到微信公众号草稿箱
 
 ## 三段式思维框架
 

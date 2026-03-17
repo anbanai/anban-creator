@@ -1,10 +1,7 @@
 ---
 name: visual-design
-description: 微信公众号视觉设计工具，提供配图建议、封面设计和版式优化服务。Use when user mentions "封面"、"配图"、"主题"、"theme"、"图片生成"、"cover image"。
+description: Use when generating images, designing covers, or managing visual styles for WeChat/Xiaolvshu/Rednote. Triggers on "封面", "配图", "图片生成", "cover image", "theme", "主题", "风格预设", "style preset", "视频组装".
 user-invocable: false
-metadata:
-  author: Rick
-  version: 3.0.0
 ---
 
 # 微信公众号视觉设计工具
@@ -43,6 +40,8 @@ metadata:
   - `monet-impressionism`：莫奈印象派风格（自然/艺术/情感）
   - `heavy-color-freehand`：重彩写意风格（文化/国潮/艺术）
 
+> **内容密度提示**：所有风格预设定义的是视觉美学，不限制信息密度。内容图应在预设风格基础上采用结构化布局，每页承载 2-4 个信息点。
+
 ---
 
 ## 核心命令
@@ -60,8 +59,8 @@ anbanwriter image generate "{prompt}" --mode xhs --style "$STYLE"
 # 【多图场景必须使用】组图模式：一次生成 N 张风格一致的图片（--count 指定张数）
 anbanwriter image generate "{prompt}" --count 5 --mode xls --style "$STYLE" -o ./output_dir/
 
-# 【多图场景必须使用】组图 + 参考图模式：基于封面风格批量生成内容图
-anbanwriter image generate "{prompt}" --count 4 --mode xls --ref ./cover.png -o ./output_dir/
+# 组图模式：多图场景使用
+anbanwriter image generate "{prompt}" --count 4 --mode xls -o ./output_dir/
 
 # 上传到微信素材库
 anbanwriter image upload ./image.png

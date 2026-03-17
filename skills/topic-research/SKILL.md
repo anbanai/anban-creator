@@ -1,10 +1,7 @@
 ---
 name: topic-research
-description: 微信公众号选题分析工具，提供热点评估和数据驱动的选题建议。Use when user says "选题"、"评分"、"大纲"、"outline"、"score"、"热点分析"。
+description: Use when researching topics, scoring engagement potential, or generating content outlines. Triggers on "选题", "评分", "大纲", "outline", "score", "热点分析", "话题".
 user-invocable: false
-metadata:
-  author: Rick
-  version: 2.3.0
 ---
 
 # 微信公众号选题分析工具

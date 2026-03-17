@@ -1,4 +1,5 @@
 {
+  "description": "AnbanWriter plugin lifecycle hooks for workspace management, agent delivery summaries, and quality verification",
   "hooks": {
     "SessionStart": [
       {
@@ -7,12 +8,14 @@
           {
             "type": "command",
             "command": "[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && [ -n \"$CLAUDE_ENV_FILE\" ] && { echo \"export CLAUDE_PLUGIN_ROOT=$CLAUDE_PLUGIN_ROOT\" >> \"$CLAUDE_ENV_FILE\"; echo \"export PATH=$CLAUDE_PLUGIN_ROOT/bin:\\$PATH\" >> \"$CLAUDE_ENV_FILE\"; bash \"$CLAUDE_PLUGIN_ROOT/scripts/bootstrap.sh\" & } || true",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "初始化 anbanwriter 环境..."
           },
           {
             "type": "command",
-            "command": "[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && [ -x \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" ] && for t in rednote articles posts; do \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" workspace archive $t 2>/dev/null; done || true",
-            "timeout": 5
+            "command": "[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && [ -x \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" ] && for t in rednote articles xls; do \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" workspace archive $t 2>/dev/null; done || true",
+            "timeout": 5,
+            "statusMessage": "归档残留工作目录..."
           }
         ]
       }
@@ -24,11 +27,12 @@
           {
             "type": "command",
             "command": "[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && [ -x \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" ] && \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" workspace archive articles 2>/dev/null || true",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "归档产出文件..."
           },
           {
             "type": "prompt",
-            "prompt": "wechatarticle agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些文件、文章字数、是否成功创建草稿。如发现问题请提醒用户。"
+            "prompt": "wechatarticle agent 已完成执行。请检查 output/ 目录下的产出文件，生成结构化交付摘要：\n\n1. **产出文件**：列出所有生成的文件（HTML、draft.json、图片）及其路径\n2. **文章概要**：标题、字数、章节数\n3. **草稿状态**：是否成功创建草稿，draft_url 是什么\n4. **问题检查**：文件是否完整、HTML 是否符合微信规范\n\n如发现问题请明确指出并建议修复方案。"
           }
         ]
       },
@@ -37,12 +41,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && [ -x \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" ] && \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" workspace archive posts 2>/dev/null || true",
-            "timeout": 5
+            "command": "[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && [ -x \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" ] && \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" workspace archive xls 2>/dev/null || true",
+            "timeout": 5,
+            "statusMessage": "归档产出文件..."
           },
           {
             "type": "prompt",
-            "prompt": "wechatxls agent 已完成执行。请检查 output/ 目录下的产出文件，生成一个简要的交付摘要，包括：生成了哪些图片、图片数量、是否成功创建草稿。如发现问题请提醒用户。"
+            "prompt": "wechatxls agent 已完成执行。请检查 output/ 目录下的产出文件，生成结构化交付摘要：\n\n1. **产出文件**：列出所有生成的图片文件及其路径\n2. **图片数量**：共生成 N 张，封面图是哪个\n3. **草稿状态**：是否成功创建草稿，draft_url 是什么\n4. **问题检查**：图片文件是否齐全、数量是否符合预期\n\n如发现问题请明确指出并建议修复方案。"
           }
         ]
       },
@@ -52,11 +57,12 @@
           {
             "type": "command",
             "command": "[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && [ -x \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" ] && \"$CLAUDE_PLUGIN_ROOT/bin/anbanwriter\" workspace archive rednote 2>/dev/null || true",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "归档产出文件..."
           },
           {
             "type": "prompt",
-            "prompt": "rednote agent 已完成执行。请检查 output/rednote/ 目录下的产出文件，生成一个简要的交付摘要，包括：创作的笔记标题、生成的图片数量、内容文件路径、以及任何需要用户关注的问题。"
+            "prompt": "rednote agent 已完成执行。请检查 output/rednote/ 目录下的产出文件，生成结构化交付摘要：\n\n1. **笔记标题**：最终选定的标题\n2. **内容文件**：content.md 路径及正文字数\n3. **图片列表**：列出所有生成的图片文件（封面 + 内容图），共 N 张\n4. **决策记录**：topic-analysis.md 或 source-analysis.md 是否已生成\n5. **问题检查**：图片数量是否 ≥3、content.md 是否包含话题标签\n\n如发现问题请明确指出并建议修复方案。"
           }
         ]
       }
@@ -67,7 +73,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "任务已完成。请检查任务结果是否符合预期质量标准。如发现问题（如文件不存在、内容不完整、格式错误等），请提醒用户并建议解决方案。"
+            "prompt": "任务已完成。请验证以下质量维度：\n1. 产出文件是否存在且内容完整\n2. 命令执行是否有报错\n3. 格式是否符合目标平台规范（微信 HTML / 小红书文案）\n如发现问题请提醒用户并建议修复方案。"
           }
         ]
       }
