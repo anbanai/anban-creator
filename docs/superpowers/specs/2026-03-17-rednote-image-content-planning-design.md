@@ -89,7 +89,7 @@ Agent 基于主题、标题、目标受众**独立规划**每张图的具体内�
 
 ---
 
-## image_02 [内容] 主题：xxx
+## image_01 [内容] 主题：xxx
 - 信息点1: （具体内容，20-60字，含数字/场景/细节）
 - 信息点2: （具体内容）
 - 信息点3: （具体内容）
@@ -97,12 +97,12 @@ Agent 基于主题、标题、目标受众**独立规划**每张图的具体内�
 
 ---
 
-## image_03 [内容] 主题：xxx
+## image_02 [内容] 主题：xxx
 （同上结构）
 
 ---
 
-## image_0N [尾部]
+## image_0{N-1} [尾部]
 - 总结条目1: （核心 takeaway，20-40字）
 - 总结条目2:
 - 总结条目3:
@@ -155,7 +155,7 @@ Agent 基于主题、标题、目标受众**独立规划**每张图的具体内�
 
 ### 2. 内容图批量生成（--count）
 
-将 image-plan.md 中所有内容页（image_02 至 image_0N-1）和尾部页（image_0N）合并，构建一个统一的分页描述 prompt：
+将 image-plan.md 中所有内容页（image_01 至 image_0{N-2}）和尾部页（image_0{N-1}）合并，构建一个统一的分页描述 prompt：
 
 ```
 生成 {N-1} 张小红书内容图，按以下分页规划（请严格按序生成）：
@@ -193,9 +193,10 @@ anbanwriter image generate "{unified_content_description}" \
 > **步骤 4.5 — 图片内容规划**：基于选题方向、最终标题和目标受众，独立规划每张图的具体内容。规划时不依赖文案正文的叙述，围绕主题自主展开知识内容。每个信息点 20-60 字，包含具体数字/场景/可操作细节。情感/体验类主题须知识化扩展（将体验转化为干货）。确定图片总数 N（奇数，5-7 张），此数值后续作为 `--count` 参数。结果保存到 `$DIR/image-plan.md`。
 
 步骤 5 更新：
-- 封面 `{page_content}` 使用 image-plan.md 封面规划内容
-- 内容图批量 prompt 由 image-plan.md 各页规划合并构建（见"图片生成 Prompt 构建方式"）
+- 封面 `{page_content}` 使用 image-plan.md 封面规划内容；封面 `{full_outline}` 仍使用 `content.md` 正文（与现有行为一致，不替换）
+- 内容图批量 prompt 由 image-plan.md 各页规划（image_01 至 image_0{N-1}）合并构建（见"图片生成 Prompt 构建方式"）
 - `--count` 使用 image-plan.md 中规定的 N-1（封面单独生成）
+- 生成后检查文件：`$DIR/cover.png`（封面）、`$DIR/image_01.png` ... `$DIR/image_0{N-1}.png`（content 起始从 `image_01` 而非原来的 `image_02`）
 
 **复刻模式**，在步骤 5 和步骤 6 之间插入步骤 5.5，内容同原创模式步骤 4.5，区别：
 - `style-only`：独立规划，不复用源笔记具体内容（可参考其页数作为参考上限）
