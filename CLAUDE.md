@@ -360,7 +360,7 @@ func TestFeature(t *testing.T) {
 - `./bin/anbanwriter video assemble <images_or_dir>` - Assemble images into video with xfade transitions (requires ffmpeg)
 - `./bin/anbanwriter content track` - Track content lifecycle status (created → drafted → published)
 - `./bin/anbanwriter content list` - List tracked content (default: unpublished only)
-- `./bin/anbanwriter workspace prepare <type>` - Archive stale staging and create clean workspace (rednote/articles/xls)
+- `./bin/anbanwriter workspace prepare <type>` - Archive stale staging and create clean workspace (any type)
 - `./bin/anbanwriter workspace archive <type>` - Archive staging dir to YYYYMMDD-NNN format
 - `./bin/anbanwriter rednote` - 小红书内容创作
 - `./bin/anbanwriter topics` - Topic research and generation

@@ -93,7 +93,7 @@ prompt: |
   第四部分：最终交付要求 (Final Delivery Requirements)
 
   输出格式: 提供一个完整的、独立的 HTML 内容
-  代码封装: 将完整的HTML代码包裹在Markdown的代码块中
+  代码封装: 将完整的HTML代码包裹在 Markdown 的代码块中
   无外部依赖: 确保代码自包含，字体通过CDN链接，无本地图片
 
   重要补充规则:

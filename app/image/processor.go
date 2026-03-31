@@ -31,7 +31,6 @@ type Processor struct {
 	compressor   *Compressor
 	provider     Provider
 	stylePrompt  string
-	presetPrompt string // 来自 config 预设（第三优先级）
 	refImagePath string // 参考图本地路径（可选）
 }
 
@@ -42,7 +41,7 @@ func NewProcessor(cfg *config.Config, apiCfg *config.ImageAPI, log *zap.Logger) 
 	var provider Provider
 	if apiCfg != nil {
 		var err error
-		provider, err = NewProvider(apiCfg)
+		provider, err = NewProvider(apiCfg, log)
 		if err != nil {
 			// 如果配置了 API Key 但创建失败，记录警告
 			if apiCfg.Key != "" {
@@ -72,11 +71,6 @@ func (p *Processor) SetStylePrompt(prompt string) {
 	p.stylePrompt = prompt
 }
 
-// SetPresetPrompt 设置预设风格提示词（来自 config 预设，优先级低于 CLI --style 和 config style_prompt）
-func (p *Processor) SetPresetPrompt(prompt string) {
-	p.presetPrompt = prompt
-}
-
 // SetRefImage 设置参考图路径（CLI --ref 传入）
 func (p *Processor) SetRefImage(path string) {
 	p.refImagePath = path
@@ -85,12 +79,6 @@ func (p *Processor) SetRefImage(path string) {
 // 优先级：CLI --style > config style_prompt > preset prompt > 无风格（原样返回）
 func (p *Processor) buildPrompt(userPrompt string) string {
 	style := strings.TrimSpace(p.stylePrompt)
-	if style == "" && p.apiCfg != nil {
-		style = strings.TrimSpace(p.apiCfg.StylePrompt)
-	}
-	if style == "" {
-		style = strings.TrimSpace(p.presetPrompt)
-	}
 	userPrompt = strings.TrimSpace(userPrompt)
 
 	var prompt string
@@ -306,7 +294,7 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 		apiCfgWithSize := *p.apiCfg
 		apiCfgWithSize.Size = size
 		var err error
-		activeProvider, err = NewProvider(&apiCfgWithSize)
+		activeProvider, err = NewProvider(&apiCfgWithSize, p.log)
 		if err != nil {
 			return nil, fmt.Errorf("create provider with size: %w", err)
 		}

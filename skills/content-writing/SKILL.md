@@ -1,7 +1,6 @@
 ---
 name: content-writing
-description: Use when writing articles, removing AI traces, converting Markdown to WeChat HTML, or checking content compliance. Triggers on "写文章", "去AI痕迹", "humanize", "convert", "违禁词", "写作风格". Do NOT use for SEO (use seo-optimization) or topic scoring (use topic-research).
-user-invocable: false
+description: Writes articles with style guidance, removes AI traces, converts Markdown to WeChat HTML, and checks content compliance. Use when writing articles, removing AI traces, converting Markdown to WeChat HTML, or checking content compliance.
 ---
 
 # 微信公众号内容写作知识库

@@ -1,8 +1,6 @@
 ---
 name: rednote-research
-description: Use when analyzing Xiaohongshu (小红书) topics, scoring engagement via MCP data, or researching trending rednote content. Triggers on "小红书选题", "rednote research", "互动率", "engagement score".
-user-invocable: false
-disable-model-invocation: true
+description: Analyzes Xiaohongshu (小红书) topics and scores engagement potential. Use when analyzing Xiaohongshu (小红书) topics, scoring engagement, or researching trending rednote content.
 ---
 
 # 小红书选题研究知识库

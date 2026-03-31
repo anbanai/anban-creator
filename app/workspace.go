@@ -5,16 +5,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 )
-
-var validContentTypes = map[string]bool{
-	"rednote":  true,
-	"articles": true,
-	"xls":      true,
-}
 
 func workspaceCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -32,17 +28,10 @@ func workspacePrepareCmd() *cobra.Command {
 		Short: "归档残留 staging 并创建干净的工作目录",
 		Long: `原子性完成：归档残留 staging（若非空）→ 创建干净 staging 目录。
 
-类型:
-  rednote   小红书内容 (output/rednote/staging/)
-  articles  微信文章 (output/articles/staging/)
-  xls     微信小绿书图片帖 (output/xls/staging/)`,
+任意类型均可使用，将在 output/<type>/staging/ 下创建工作目录。`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			contentType := args[0]
-			if !validContentTypes[contentType] {
-				return fmt.Errorf("invalid content type %q: must be one of rednote, articles, xls", contentType)
-			}
-
 			stagingDir := filepath.Join("output", contentType, "staging")
 			result := map[string]string{
 				"path":     stagingDir,
@@ -80,15 +69,15 @@ func workspacePrepareCmd() *cobra.Command {
 }
 
 func workspaceArchiveCmd() *cobra.Command {
-	return &cobra.Command{
+	var name string
+	cmd := &cobra.Command{
 		Use:   "archive <type>",
-		Short: "归档 staging 目录为带日期编号的目录",
-		Long: `将 output/<type>/staging/ 目录归档为 output/<type>/YYYYMMDD-NNN/ 格式。
+		Short: "归档 staging 目录",
+		Long: `将 output/<type>/staging/ 目录归档。
 
-类型:
-  rednote   小红书内容 (output/rednote/staging/)
-  articles  微信文章 (output/articles/staging/)
-  xls     微信小绿书图片帖 (output/xls/staging/)`,
+使用 --name 按笔记标题命名归档目录（推荐），否则使用 YYYYMMDD-NNN 格式。
+
+任意类型均可使用。`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			contentType := args[0]
@@ -101,12 +90,17 @@ func workspaceArchiveCmd() *cobra.Command {
 				return nil
 			}
 
-			archiveDir, err := nextArchiveDir(contentType)
+			var archiveDir string
+			var err error
+			if name != "" {
+				archiveDir, err = namedArchiveDir(contentType, name)
+			} else {
+				archiveDir, err = nextArchiveDir(contentType)
+			}
 			if err != nil {
 				return fmt.Errorf("compute archive dir: %w", err)
 			}
 
-			// 记录归档前的状态（用于调试）
 			entriesBefore, _ := os.ReadDir(stagingDir)
 			if err := os.Rename(stagingDir, archiveDir); err != nil {
 				return fmt.Errorf("archive staging: %w", err)
@@ -121,6 +115,8 @@ func workspaceArchiveCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&name, "name", "", "归档目录名（如笔记标题），不指定时使用日期格式")
+	return cmd
 }
 
 // copyDir 递归复制目录内容（跨文件系统兼容）
@@ -164,6 +160,46 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	}
 
 	return dstFile.Sync()
+}
+
+// sanitizeDirName 将标题清理为合法目录名：去除非法字符，截断至 50 字符
+func sanitizeDirName(name string) string {
+	illegal := strings.ContainsAny
+	var b strings.Builder
+	for _, r := range name {
+		if illegal(string(r), `/\:*?"<>|`) || unicode.IsControl(r) {
+			b.WriteRune('_')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	result := strings.TrimSpace(b.String())
+	// 截断至 50 字符（按 rune 计算）
+	runes := []rune(result)
+	if len(runes) > 50 {
+		runes = runes[:50]
+	}
+	return string(runes)
+}
+
+// namedArchiveDir 计算按标题命名的归档目录路径，重名时追加 -2、-3 后缀
+func namedArchiveDir(contentType, name string) (string, error) {
+	base := filepath.Join("output", contentType)
+	clean := sanitizeDirName(name)
+	if clean == "" {
+		return nextArchiveDir(contentType)
+	}
+	path := filepath.Join(base, clean)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return path, nil
+	}
+	for n := 2; n <= 999; n++ {
+		candidate := filepath.Join(base, fmt.Sprintf("%s-%d", clean, n))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no available archive slot for name %q under %s", name, base)
 }
 
 // nextArchiveDir 计算下一个可用的归档目录路径，格式为 output/<type>/YYYYMMDD-NNN

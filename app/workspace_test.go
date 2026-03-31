@@ -40,10 +40,9 @@ func TestWorkspacePrepareCmd(t *testing.T) {
 			wantArchive: true,
 		},
 		{
-			name:        "invalid contentType → error",
-			contentType: "invalid",
-			wantErr:     true,
-			wantErrMsg:  "invalid content type",
+			name:        "arbitrary contentType works",
+			contentType: "flower",
+			wantArchive: false,
 		},
 	}
 

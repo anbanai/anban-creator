@@ -1,8 +1,6 @@
 ---
 name: config
-description: Use when user wants to initialize, view, or modify anbanwriter configuration. Triggers on "配置", "config", "设置", "账号信息", "account", "init".
-user-invocable: true
-argument-hint: "[init|info]"
+description: Initializes, views, and modifies anbanwriter configuration settings. Use when user wants to initialize, view, or modify anbanwriter configuration.
 ---
 
 # anbanwriter 配置管理

@@ -1,7 +1,6 @@
 ---
-name: flower-design
-description: 花卉图片 prompt 工程——调研花卉种类、生成专业摄影级 prompt。用于花卉图片生成流水线。用户提到"花卉图片"、"鲜花设计"、"flower prompt"时触发。
-user-invocable: false
+name: flower-content-design
+description: Researches flower varieties and generates professional photography-level prompts for flower image generation. Use when creating flower image prompts, researching flower types, or designing floral photography concepts.
 ---
 
 # 花卉图片设计工具

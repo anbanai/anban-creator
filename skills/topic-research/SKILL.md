@@ -1,7 +1,6 @@
 ---
 name: topic-research
-description: Use when researching topics, scoring engagement potential, or generating content outlines. Triggers on "选题", "评分", "大纲", "outline", "score", "热点分析", "话题".
-user-invocable: false
+description: Researches topics, scores engagement potential, and generates content outlines. Use when researching topics, scoring engagement potential, or generating content outlines.
 ---
 
 # 微信公众号选题分析工具

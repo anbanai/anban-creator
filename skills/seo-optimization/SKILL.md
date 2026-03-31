@@ -1,7 +1,6 @@
 ---
 name: seo-optimization
-description: Use when optimizing titles, keywords, or writing article digests for search ranking. Triggers on "SEO", "关键词", "标题优化", "摘要", "搜索排名", "keyword", "digest".
-user-invocable: false
+description: Optimizes titles, keywords, and article digests for WeChat search ranking. Use when optimizing titles, keywords, or writing article digests for search ranking.
 ---
 
 # 微信公众号 SEO 优化

@@ -10,7 +10,6 @@ import (
 
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/app/draft"
-	"github.com/royalrick/anbanwriter/app/image"
 	"github.com/royalrick/anbanwriter/app/storage"
 	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/spf13/cobra"
@@ -86,13 +85,6 @@ func showAccountInfo(scope string) error {
 		positioning = "(未配置)"
 	}
 
-	// 始终输出账号信息
-	fmt.Printf("# 账号信息\n\n")
-	fmt.Printf("- 公众号: %s\n", cfg.Name)
-	fmt.Printf("- 作者: %s\n", cfg.Wechat.Article.Author)
-	fmt.Printf("- 关键词: %s\n", keywords)
-	fmt.Printf("- 账号定位: %s\n", positioning)
-
 	// 按 scope 输出各章节
 	switch scope {
 	case "article":
@@ -133,16 +125,6 @@ func showAccountInfo(scope string) error {
 			fmt.Printf("- 图片生成: 未配置（需设置 rednote.content.image.key 或 wechat.xls.content.image.key）\n")
 		}
 
-		// 发布能力状态
-		fmt.Printf("\n## 发布通道\n\n")
-		if cfg.Wechat.AppID != "" && cfg.Wechat.Secret != "" {
-			fmt.Printf("- 微信小绿书: 就绪（使用 draft xls 命令）\n")
-		} else {
-			fmt.Printf("- 微信小绿书: 未配置（需设置 wechat.appid 和 wechat.secret）\n")
-		}
-		fmt.Printf("- 小红书: 通过 MCP 工具 publish_content()\n")
-		fmt.Printf("  💡 确保已配置 rednote MCP 服务器\n")
-
 		// 参考图配置
 		fmt.Printf("\n## 参考图配置\n\n")
 		if cfg.Rednote != nil {
@@ -168,25 +150,8 @@ func showAccountInfo(scope string) error {
 			fmt.Printf("     用于组图模式保持风格一致性\n")
 		}
 
-		if cfg.Wechat.Xls.Style != "" {
-			pm := image.NewStylePresetManager()
-			if err := pm.LoadPresets(); err == nil {
-				if preset, err := pm.GetPreset(cfg.Wechat.Xls.Style); err == nil {
-					fmt.Printf("\n## 视觉风格预设\n\n")
-					fmt.Printf("- 名称: %s (%s)\n", preset.Name, preset.EnglishName)
-					fmt.Printf("- 说明: %s\n", preset.Description)
-					fmt.Printf("- 适用类型: %s\n", preset.Category)
-					fmt.Printf("- 风格提示词:\n\n```\n%s```\n", preset.Prompt)
-					fmt.Printf("\n- 可用预设: %s\n", strings.Join(pm.ListPresetNames(), ", "))
-				} else {
-					fmt.Printf("- 视觉风格: %s（预设未找到）\n", cfg.Wechat.Xls.Style)
-				}
-			}
-		} else if cfg.Wechat.Xls.Content.Image.StylePrompt != "" {
-			fmt.Printf("- 自定义风格提示词: %s\n", cfg.Wechat.Xls.Content.Image.StylePrompt)
-		} else {
-			fmt.Printf("- 视觉风格: (未配置)\n")
-		}
+		fmt.Printf("\n## 视觉风格\n\n")
+		fmt.Printf("- 风格描述: %s\n", cfg.Wechat.Xls.Style)
 
 	case "rednote":
 		fmt.Printf("\n# 小红书配置\n\n")
@@ -207,48 +172,26 @@ func showAccountInfo(scope string) error {
 
 		// 参考图配置
 		fmt.Printf("\n## 参考图配置\n\n")
-		hasRefer := false
 		if cfg.Rednote != nil {
 			if cfg.Rednote.Cover.Image.Refer != "" {
 				fmt.Printf("- 封面参考图: %s\n", cfg.Rednote.Cover.Image.Refer)
-				hasRefer = true
 			}
 			if cfg.Rednote.Content.Image.Refer != "" {
 				fmt.Printf("- 内容参考图: %s\n", cfg.Rednote.Content.Image.Refer)
 				fmt.Printf("  💡 组图生成时优先使用此参考图\n")
-				hasRefer = true
 			}
 		}
-		if !hasRefer {
-			fmt.Printf("- (未配置)\n")
-			fmt.Printf("  💡 建议配置 rednote.content.image.refer 用于组图模式保持风格一致性\n")
-		}
 
-		// 发布通道
-		fmt.Printf("\n## 发布通道\n\n")
-		fmt.Printf("- 小红书: 通过 MCP 工具 publish_content()\n")
-		fmt.Printf("  💡 确保已配置 rednote MCP 服务器\n")
-
-		// 视觉风格预设
+		// 视觉风格
+		fmt.Printf("\n## 视觉风格\n\n")
 		rednoteStyle := ""
 		if cfg.Rednote != nil {
 			rednoteStyle = cfg.Rednote.Style
 		}
-		if rednoteStyle == "" {
-			rednoteStyle = "cute-doodle"
-		}
-		pm := image.NewStylePresetManager()
-		if err := pm.LoadPresets(); err == nil {
-			if preset, err := pm.GetPreset(rednoteStyle); err == nil {
-				fmt.Printf("\n## 视觉风格预设\n\n")
-				fmt.Printf("- 名称: %s (%s)\n", preset.Name, preset.EnglishName)
-				fmt.Printf("- 说明: %s\n", preset.Description)
-				fmt.Printf("- 适用类型: %s\n", preset.Category)
-				fmt.Printf("- 风格提示词:\n\n```\n%s```\n", preset.Prompt)
-				fmt.Printf("\n- 可用预设: %s\n", strings.Join(pm.ListPresetNames(), ", "))
-			} else {
-				fmt.Printf("- 视觉风格: %s（预设未找到）\n", rednoteStyle)
-			}
+		if rednoteStyle != "" {
+			fmt.Printf("- 风格描述: %s\n", rednoteStyle)
+		} else {
+			fmt.Printf("- 风格描述: (未配置，AI 将根据内容动态设计)\n")
 		}
 
 	case "flower":
@@ -263,7 +206,6 @@ func showAccountInfo(scope string) error {
 			if provider == "" {
 				provider = config.DefaultImageProvider
 			}
-			fmt.Printf("- 图片生成: 就绪（%s）\n", provider)
 		} else {
 			fmt.Printf("- 图片生成: 未配置（需设置 flower.content.image.key）\n")
 		}
@@ -279,16 +221,15 @@ func showAccountInfo(scope string) error {
 			fmt.Printf("     未配置时，第一张图片自动作为后续图片的参考图\n")
 		}
 
-		// 风格提示词
-		fmt.Printf("\n## 风格提示词\n\n")
-		if cfg.Flower != nil && cfg.Flower.Content.Image.StylePrompt != "" {
-			fmt.Printf("- 统一风格: %s\n", cfg.Flower.Content.Image.StylePrompt)
-		} else {
-			fmt.Printf("- 统一风格: (未配置，将由 AI 根据主题动态生成)\n")
-		}
-
 	default:
 		// 全量输出（向后兼容）
+		// 输出账号信息
+		fmt.Printf("# 账号信息\n\n")
+		fmt.Printf("- 公众号: %s\n", cfg.Name)
+		fmt.Printf("- 作者: %s\n", cfg.Wechat.Article.Author)
+		fmt.Printf("- 关键词: %s\n", keywords)
+		fmt.Printf("- 账号定位: %s\n", positioning)
+
 		sm := writer.NewStyleManager()
 		if err := sm.LoadStyles(); err != nil {
 			return err
@@ -334,25 +275,8 @@ func showAccountInfo(scope string) error {
 			fmt.Printf("- 微信发布: 未配置（仅微信小绿书需要；小红书发布通过 MCP 工具，无需此配置）\n")
 		}
 
-		if cfg.Wechat.Xls.Style != "" {
-			pm := image.NewStylePresetManager()
-			if err := pm.LoadPresets(); err == nil {
-				if preset, err := pm.GetPreset(cfg.Wechat.Xls.Style); err == nil {
-					fmt.Printf("\n## 视觉风格预设\n\n")
-					fmt.Printf("- 名称: %s (%s)\n", preset.Name, preset.EnglishName)
-					fmt.Printf("- 说明: %s\n", preset.Description)
-					fmt.Printf("- 适用类型: %s\n", preset.Category)
-					fmt.Printf("- 风格提示词:\n\n```\n%s```\n", preset.Prompt)
-					fmt.Printf("\n- 可用预设: %s\n", strings.Join(pm.ListPresetNames(), ", "))
-				} else {
-					fmt.Printf("- 视觉风格: %s（预设未找到）\n", cfg.Wechat.Xls.Style)
-				}
-			}
-		} else if cfg.Wechat.Xls.Content.Image.StylePrompt != "" {
-			fmt.Printf("- 自定义风格提示词: %s\n", cfg.Wechat.Xls.Content.Image.StylePrompt)
-		} else {
-			fmt.Printf("- 视觉风格: (未配置)\n")
-		}
+		fmt.Printf("\n## 视觉风格\n\n")
+		fmt.Printf("- 风格描述: %s\n", cfg.Wechat.Xls.Style)
 	}
 
 	return nil

@@ -104,13 +104,12 @@ func NewDefaultConfig() *Config {
 	c.Wechat.Xls.Content.Image.Model = "gemini-3-pro-image-preview"
 	c.Wechat.Xls.Content.Image.Size = DefaultXlsImageSize
 	c.Wechat.Xls.Content.Image.Refer = "path/to/refer.png"
-	c.Wechat.Xls.Content.Image.StylePrompt = "扁平矢量插画风格，低饱和现代配色，简洁构图"
 	c.Wechat.Xls.Content.Image.Compress = true
 	c.Wechat.Xls.Content.Image.MaxWidth = DefaultImageMaxWidth
 	c.Wechat.Xls.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
 
 	// 小红书（可选平台）
-	c.Rednote = &RednoteConfig{}
+	c.Rednote = new(RednoteConfig)
 	c.Rednote.Style = "cute-doodle"
 	c.Rednote.Cover.Image.Provider = DefaultImageProvider
 	c.Rednote.Cover.Image.Key = "your_image_api_key"
@@ -133,7 +132,6 @@ func NewDefaultConfig() *Config {
 	c.Flower.Content.Image.Model = "gemini-3-pro-image-preview"
 	c.Flower.Content.Image.Size = DefaultFlowerImageSize
 	c.Flower.Content.Image.Refer = "path/to/refer.png"
-	c.Flower.Content.Image.StylePrompt = "hyper-realistic vertical macro flower photography, soft morning light, warm green and gold bokeh, dew droplets on petals"
 	c.Flower.Content.Image.Compress = true
 	c.Flower.Content.Image.MaxWidth = DefaultImageMaxWidth
 	c.Flower.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
@@ -153,17 +151,16 @@ type VolcengineConfig struct {
 
 // ImageAPI 图片生成 API 配置（cover 和 content 各自独立）
 type ImageAPI struct {
-	Key         string            `json:"key,omitempty" yaml:"key,omitempty"`
-	BaseURL     string            `json:"base_url,omitempty" yaml:"base_url,omitempty"`
-	Provider    string            `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Model       string            `json:"model,omitempty" yaml:"model,omitempty"`
-	Size        string            `json:"size,omitempty" yaml:"size,omitempty"`
-	Refer       string            `json:"refer,omitempty" yaml:"refer,omitempty"`
-	StylePrompt string            `json:"style_prompt,omitempty" yaml:"style_prompt,omitempty"`
-	Compress    bool              `json:"compress,omitempty" yaml:"compress,omitempty"`
-	MaxWidth    int               `json:"max_width,omitempty" yaml:"max_width,omitempty"`
-	MaxSizeMB   int               `json:"max_size_mb,omitempty" yaml:"max_size_mb,omitempty"`
-	Volcengine  *VolcengineConfig `json:"volcengine,omitempty" yaml:"volcengine,omitempty"`
+	Key        string            `json:"key,omitempty" yaml:"key,omitempty"`
+	BaseURL    string            `json:"base_url,omitempty" yaml:"base_url,omitempty"`
+	Provider   string            `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Model      string            `json:"model,omitempty" yaml:"model,omitempty"`
+	Size       string            `json:"size,omitempty" yaml:"size,omitempty"`
+	Refer      string            `json:"refer,omitempty" yaml:"refer,omitempty"`
+	Compress   bool              `json:"compress,omitempty" yaml:"compress,omitempty"`
+	MaxWidth   int               `json:"max_width,omitempty" yaml:"max_width,omitempty"`
+	MaxSizeMB  int               `json:"max_size_mb,omitempty" yaml:"max_size_mb,omitempty"`
+	Volcengine *VolcengineConfig `json:"volcengine,omitempty" yaml:"volcengine,omitempty"`
 }
 
 // MaxSizeBytes 返回图片最大尺寸（字节）
@@ -504,9 +501,6 @@ func mergeImageAPI(base, fallback ImageAPI) ImageAPI {
 	if result.Refer == "" {
 		result.Refer = fallback.Refer
 	}
-	if result.StylePrompt == "" {
-		result.StylePrompt = fallback.StylePrompt
-	}
 	if !result.Compress && fallback.Compress {
 		result.Compress = fallback.Compress
 	}
@@ -575,6 +569,15 @@ func (c *Config) ResolvedRednoteContentImage() ImageAPI {
 		return c.Wechat.Xls.Content.Image
 	}
 	return mergeImageAPI(c.Rednote.Content.Image, c.Wechat.Xls.Content.Image)
+}
+
+// ResolvedRednoteCoverImage 返回合并后的小红书封面图配置
+// rednote.cover.image 字段优先，wechat.xls.cover.image 作为 fallback
+func (c *Config) ResolvedRednoteCoverImage() ImageAPI {
+	if c.Rednote == nil {
+		return c.Wechat.Xls.Cover.Image
+	}
+	return mergeImageAPI(c.Rednote.Cover.Image, c.Wechat.Xls.Cover.Image)
 }
 
 // FlowerImageSize 返回花卉图片尺寸，默认 9:16 竖版

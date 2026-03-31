@@ -164,6 +164,7 @@ func imageGenerateCmd() *cobra.Command {
 	var upload bool
 	var refer string
 	var count int
+	var cover bool
 
 	cmd := &cobra.Command{
 		Use:   "generate <prompt>",
@@ -205,6 +206,9 @@ Prompt 构建优先级（从高到低）：
   # 指定尺寸（比例格式，默认 2K 档位）
   anbanwriter image generate "清晨茶园" --size 16:9 -o cover.jpg
 
+  # 使用封面图配置（而非内容图配置）
+  anbanwriter image generate "封面图" --cover -o cover.jpg
+
   # 指定比例+档位
   anbanwriter image generate "封面图" --size 3:4:2K -o cover.jpg
 
@@ -244,23 +248,37 @@ Prompt 构建优先级（从高到低）：
 				}
 			}
 
-			// 选择图片配置
+			// 选择图片配置（根据 --cover 标志选择 cover 或 content 配置）
 			var apiCfg *config.ImageAPI
 			switch mode {
 			case "xls":
-				resolved := cfg.ResolvedXlsContentImage()
-				apiCfg = &resolved
+				if cover {
+					resolved := cfg.ResolvedXlsCoverImage()
+					apiCfg = &resolved
+				} else {
+					resolved := cfg.ResolvedXlsContentImage()
+					apiCfg = &resolved
+				}
 				if size == "" {
 					size = cfg.XlsImageSize()
 				}
 			case "xhs":
-				resolved := cfg.ResolvedRednoteContentImage()
-				apiCfg = &resolved
+				if cover {
+					resolved := cfg.ResolvedRednoteCoverImage()
+					apiCfg = &resolved
+				} else {
+					resolved := cfg.ResolvedRednoteContentImage()
+					apiCfg = &resolved
+				}
 				if size == "" {
 					size = cfg.RednoteImageSize()
 				}
 			default: // "article"
-				apiCfg = &cfg.Wechat.Article.Content.Image
+				if cover {
+					apiCfg = &cfg.Wechat.Article.Cover.Image
+				} else {
+					apiCfg = &cfg.Wechat.Article.Content.Image
+				}
 				if size == "" {
 					size = cfg.ArticleImageSize()
 				}
@@ -269,38 +287,9 @@ Prompt 构建优先级（从高到低）：
 			processor := image.NewProcessor(cfg, apiCfg, log)
 			if refer != "" {
 				processor.SetRefImage(refer)
-			} else if apiCfg.Refer != "" {
-				processor.SetRefImage(apiCfg.Refer)
 			}
 			if stylePrompt != "" {
 				processor.SetStylePrompt(stylePrompt)
-			}
-
-			// 解析预设 prompt（xls/xhs 模式、无显式 --style、有配置预设时）
-			if (mode == "xls" || mode == "xhs") && stylePrompt == "" {
-				var presetStyle string
-				if mode == "xhs" {
-					// xhs 模式：rednote style 优先，wechat.xls style 兜底
-					if cfg.Rednote != nil && cfg.Rednote.Style != "" {
-						presetStyle = cfg.Rednote.Style
-					} else {
-						presetStyle = cfg.Wechat.Xls.Style
-					}
-				} else {
-					// xls 模式：wechat.xls style 优先，rednote style 兜底
-					presetStyle = cfg.Wechat.Xls.Style
-					if presetStyle == "" && cfg.Rednote != nil {
-						presetStyle = cfg.Rednote.Style
-					}
-				}
-				if presetStyle != "" {
-					pm := image.NewStylePresetManager()
-					if err := pm.LoadPresets(); err == nil {
-						if preset, err := pm.GetPreset(presetStyle); err == nil {
-							processor.SetPresetPrompt(preset.Prompt)
-						}
-					}
-				}
 			}
 
 			// 组图模式：count > 1 时调用 GenerateBatchOnly
@@ -433,6 +422,7 @@ Prompt 构建优先级（从高到低）：
 	cmd.Flags().BoolVar(&upload, "upload", false, "生成后自动上传到微信素材库（需要配置微信 AppID/Secret，仅单图模式）")
 	cmd.Flags().StringVar(&refer, "ref", "", "参考图本地路径（支持 JPG, PNG, WebP, GIF）。生成图片会参考此图的视觉风格和内容。可与 --style 同时使用：--ref 提供视觉参考，--style 提供文字风格描述")
 	cmd.Flags().IntVar(&count, "count", 1, "生成图片数量（>1 时启用组图模式，支持 volcengine 原生批量 API）")
+	cmd.Flags().BoolVar(&cover, "cover", false, "使用封面图配置（cover 而非 content）")
 
 	return cmd
 }
@@ -522,35 +512,6 @@ func imageBatchCmd() *cobra.Command {
 			processor := image.NewProcessor(cfg, apiCfg, log)
 			if stylePrompt != "" {
 				processor.SetStylePrompt(stylePrompt)
-			}
-
-			if apiCfg.Refer != "" {
-				processor.SetRefImage(apiCfg.Refer)
-			}
-
-			// 解析预设 prompt（xls/xhs 模式、无显式 --style、有配置预设时）
-			if (mode == "xls" || mode == "xhs") && stylePrompt == "" {
-				var presetStyle string
-				if mode == "xhs" {
-					if cfg.Rednote != nil && cfg.Rednote.Style != "" {
-						presetStyle = cfg.Rednote.Style
-					} else {
-						presetStyle = cfg.Wechat.Xls.Style
-					}
-				} else {
-					presetStyle = cfg.Wechat.Xls.Style
-					if presetStyle == "" && cfg.Rednote != nil {
-						presetStyle = cfg.Rednote.Style
-					}
-				}
-				if presetStyle != "" {
-					pm := image.NewStylePresetManager()
-					if err := pm.LoadPresets(); err == nil {
-						if preset, err := pm.GetPreset(presetStyle); err == nil {
-							processor.SetPresetPrompt(preset.Prompt)
-						}
-					}
-				}
 			}
 
 			// Determine output dir (same directory as markdown file)

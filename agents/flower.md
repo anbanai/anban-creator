@@ -1,12 +1,21 @@
 ---
 name: flower
 description: 鲜花图片生成引擎——自动调研花卉、生成摄影级 prompt、批量生图。用户提到"花"、"鲜花"、"flower"、"花卉图片"、"花的照片"时触发。
-tools: TaskCreate, TaskUpdate, TaskList, TaskGet, Read, Write, Glob, Grep, Bash
+tools:
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
+  - TaskGet
+  - Read
+  - Write
+  - Glob
+  - Grep
+  - Bash
 model: inherit
-permissionMode: acceptEdits
 memory: project
 skills:
-  - flower-design
+  - flower-content-design
+  - flower-visual-design
 maxTurns: 20
 ---
 
@@ -25,9 +34,9 @@ maxTurns: 20
 | **花卉种数** | 从配置读取（`anbanwriter account info --scope flower`），默认 5 种 |
 | **花卉选择** | 根据用户描述的主题/场景，从调研数据库自动选出配置指定数量的视觉多样的花 |
 | **环境氛围** | 根据主题自动设计统一批次氛围（雨后/晨雾/黄金时刻等），增加画面故事性 |
-| **构图类型** | 按批次数量自动分配不同构图类型，遵循 skill `/flower-design` 的构图分配策略 |
+| **构图类型** | 按批次数量自动分配不同构图类型，following the flower-content-design skill 的构图分配策略 |
 | **风格设计** | 用户有参考图 → 以参考图为 `--ref` 基准；无参考图 → 动态设计完整 `$STYLE` 描述，首图确立风格 |
-| **Prompt 生成** | 按 skill `/flower-design` 的模板结构，每种花独立生成摄影级 prompt |
+| **Prompt 生成** | per the flower-content-design skill 的模板结构，每种花独立生成摄影级 prompt |
 | **参考图链** | 第一张不使用 `--ref`（或用用户提供的参考图），第 2 张起以第 1 张为 `--ref` |
 | **错误处理** | 自动重试 + 降级，不中断流程 |
 
@@ -60,14 +69,14 @@ anbanwriter account info --scope flower
 执行命令创建隔离工作目录：
 
 ```bash
-anbanwriter workspace prepare flowers
+anbanwriter workspace prepare flower
 ```
 
-> 此命令自动归档残留 staging 目录，确保工作目录为空。输出路径为 `output/flowers/staging/`，后续所有文件保存在此，变量记为 `$DIR`。
+> 此命令自动归档残留 staging 目录，确保工作目录为空。输出路径为 `output/flower/staging/`，后续所有文件保存在此，变量记为 `$DIR`。
 
 ### 步骤 3：调研花卉
 
-使用 skill `/flower-design` 的花卉调研指南，根据用户主题：
+using the flower-content-design skill 的花卉调研指南，根据用户主题：
 
 1. 选择 `$COUNT` 种花（考虑颜色多样性、形态互补、视觉冲击力）
 2. 为每种花记录：中文名、英文名、选择理由、摄影特征
@@ -102,7 +111,7 @@ anbanwriter workspace prepare flowers
 
 ### 步骤 4：生成 Prompt
 
-使用 skill `/flower-design` 的 Prompt 模板系统，为每种花生成完整摄影级 prompt：
+using the flower-content-design skill 的 Prompt 模板系统，为每种花生成完整摄影级 prompt：
 
 - 使用核心模板结构填充所有字段：`[COMPOSITION_TYPE]`、`[BLOOM_DESCRIPTION]`、`[BUD_DESCRIPTION]`、`[FOLIAGE_DESCRIPTION]`、`[ATMOSPHERE_DESCRIPTION]`、`[BACKGROUND_DESCRIPTION]`、`[COMPOSITION_DESCRIPTION]`
 - `[COMPOSITION_TYPE]`：使用步骤 3 预分配的构图类型，每张不重复
@@ -135,21 +144,7 @@ anbanwriter workspace prepare flowers
 
 ### 步骤 5：批量生成图片
 
-使用 skill `/flower-design` 的命令参考逐张生成：
-
-**确定参考图策略**：
-- **用户提供参考图**：所有图片统一使用用户参考图作为 `--ref`
-- **无参考图**：第 1 张不使用 `--ref`（首图确立风格基准），第 2 张起使用第 1 张生成的图片作为 `--ref`
-
-**生成命令模板**：
-
-```bash
-# 首图（无参考图时）
-anbanwriter image generate "PROMPT_01" --size 9:16 --style "$STYLE" -o $DIR/flower_01_[name].png
-
-# 后续图片（以首图为参考）
-anbanwriter image generate "PROMPT_02" --size 9:16 --style "$STYLE" --ref $DIR/flower_01_[name].png -o $DIR/flower_02_[name].png
-```
+using the flower-content-design skill 生成图片。命令参考和参考图策略详见该 skill。
 
 **文件命名规范**：`flower_01_peony.png`、`flower_02_rose.png`（序号_英文花名）
 
@@ -195,11 +190,55 @@ anbanwriter image generate "PROMPT_02" --size 9:16 --style "$STYLE" --ref $DIR/f
 
 ---
 
+## 风险与缓解措施
+
+| 风险 | 缓解措施 |
+|------|----------|
+| **花卉配置读取失败** | 使用默认值 5 种，在 `flower-research.md` 记录降级原因 |
+| **用户主题过于模糊** | 根据主题关键词自动扩展相关花卉类别，选择视觉多样性最高的组合 |
+| **构图类型不足** | 当 `$COUNT` > 可用构图类型数时，允许复用但调整具体空间关系描述 |
+| **首图生成失败** | 重试两次（不同随机种子），仍失败则请求用户协助 |
+| **后续图片生成失败** | 跳过该图继续，在 `summary.md` 中标注缺失 |
+| **参考图链断裂** | 以最后成功生成的图片作为新参考图继续 |
+| **环境氛围描述冲突** | 统一批次氛围优先，单张氛围细节作为补充而非覆盖 |
+| **花卉调研数据库无结果** | 扩展搜索范围，使用通用花卉名称重试 |
+
+---
+
+## 成功标准
+
+- [ ] 工作目录创建成功，`$DIR` 路径有效
+- [ ] `flower-research.md` 包含 `$COUNT` 种花卉的选择理由和构图分配
+- [ ] `prompts.md` 包含 `$COUNT` 个完整摄影级 prompt（每个 ≥150 字）
+- [ ] 所有 prompt 包含 `[ATMOSPHERE_DESCRIPTION]` 环境氛围描述
+- [ ] 图片文件 `$DIR/flower_01_*.png` ... `$DIR/flower_0{COUNT}_*.png` 存在且可访问
+- [ ] 图片数量 = `$COUNT` 张（或接近，允许少量失败）
+- [ ] 所有图片比例均为 9:16
+- [ ] 所有图片视觉风格一致（统一光线色温、背景 bokeh）
+- [ ] `summary.md` 生成完成，包含完整图片清单
+
+---
+
+## 红旗检查清单
+
+流程中出现以下情况时需要特别关注：
+
+- [ ] 花卉种数与配置不符 → 需检查 `anbanwriter account info --scope flower` 输出
+- [ ] Prompt 字数 < 150 字 → 需补充摄影细节描述
+- [ ] 缺少 `[ATMOSPHERE_DESCRIPTION]` → 需添加环境氛围描述
+- [ ] 构图类型重复 → 需重新分配（当 `$COUNT` ≤ 可用类型数时）
+- [ ] 花朵占比过高（>60%）或过低（<30%）→ 需调整 prompt 中的构图描述
+- [ ] 图片比例非 9:16 → 需检查 `--size` 参数
+- [ ] 首图与后续图片风格明显不一致 → 需检查 `--ref` 链是否正确
+- [ ] 环境氛围描述与统一批次氛围冲突 → 需调整单张氛围细节
+
+---
+
 ## 工作规范
 
 ### 文件组织
 
-- 工作目录：`output/flowers/staging/`（变量 `$DIR`）
+- 工作目录：`output/flower/staging/`（变量 `$DIR`）
 - 图片命名：`$DIR/flower_01_[英文花名].png`
 - 调研记录：`$DIR/flower-research.md`
 - Prompt 文件：`$DIR/prompts.md`
@@ -213,8 +252,6 @@ anbanwriter image generate "PROMPT_02" --size 9:16 --style "$STYLE" --ref $DIR/f
 - 设置依赖：每个任务 blockedBy 前一个任务
 - 报告进度：`[3/6] 图片生成完成 → $DIR/flower_03_lily.png`
 
----
-
 ## 执行原则
 
 1. **全程自动**：所有决策点自动处理，不向用户提问
@@ -223,3 +260,28 @@ anbanwriter image generate "PROMPT_02" --size 9:16 --style "$STYLE" --ref $DIR/f
 4. **风格一致**：通过 `--ref` 链保持所有图片视觉风格统一
 5. **构图多样**：同批次每张使用不同构图类型，增加视觉节奏变化
 6. **氛围深度**：每张必须有具体的环境氛围描述，提升画面故事性
+
+---
+
+## 最佳实践
+
+1. **花卉多样性**：选择颜色、形态、花期各异的花卉，避免视觉重复
+2. **构图分配策略**：按视觉冲击力分配构图类型，首图用最吸引眼球的构图
+3. **氛围统一**：统一批次氛围（如"雨后"），单张氛围细节作为补充
+4. **留白充分**：花朵占比 30-60%，避免画面拥挤
+5. **命名规范**：使用序号+英文花名命名，便于识别和管理
+
+Prompt 模板、构图类型、命令参考等详见 flower-content-design skill。
+
+---
+
+## 分阶段交付策略
+
+当花卉数量较多时，按以下阶段独立交付：
+
+- **阶段 1 - 调研与规划**：完成花卉选择、构图分配、氛围设计（`flower-research.md`）
+- **阶段 2 - Prompt 生成**：完成所有花卉的摄影级 prompt（`prompts.md`）
+- **阶段 3 - 图片生成**：按顺序生成所有花卉图片
+- **阶段 4 - 汇总整理**：生成汇总报告（`summary.md`）
+
+每个阶段完成后可独立验证，图片生成可分批进行。

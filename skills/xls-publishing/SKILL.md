@@ -1,8 +1,6 @@
 ---
 name: xls-publishing
-description: Use when creating or managing WeChat Xiaolvshu (newspic) image post drafts. Triggers on "小绿书", "图片帖", "newspic", "image post", "draft xls".
-user-invocable: false
-disable-model-invocation: true
+description: Creates and manages WeChat Xiaolvshu (newspic) image post drafts with up to 20 images. Use when creating or managing WeChat Xiaolvshu (newspic) image post drafts.
 ---
 
 # 微信公众号小绿书发布

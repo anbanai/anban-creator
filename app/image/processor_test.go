@@ -116,79 +116,17 @@ func TestProcessor_buildPrompt(t *testing.T) {
 			userPrompt:    "内容图",
 			want:          "config 风格\n\n内容图",
 		},
-		{
-			name:       "preset prompt 在无其他风格时生效",
-			userPrompt: "封面图",
-			want:       "预设风格\n\n封面图",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			apiCfg := &config.ImageAPI{
-				StylePrompt: tt.configStyle,
-				Size:        tt.size,
+				Size: tt.size,
 			}
 			p := newTestProcessor(apiCfg)
 			if tt.overrideStyle != "" {
 				p.stylePrompt = tt.overrideStyle
 			}
-			// 对"preset prompt"测试用例注入预设 prompt
-			if tt.name == "preset prompt 在无其他风格时生效" {
-				p.presetPrompt = "预设风格"
-			}
-			got := p.buildPrompt(tt.userPrompt)
-			if got != tt.want {
-				t.Errorf("buildPrompt(%q) =\n  %q\nwant\n  %q", tt.userPrompt, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestProcessor_buildPrompt_preset 验证预设 prompt 三层回落链
-func TestProcessor_buildPrompt_preset(t *testing.T) {
-	tests := []struct {
-		name         string
-		configStyle  string
-		cliStyle     string
-		presetPrompt string
-		userPrompt   string
-		want         string
-	}{
-		{
-			name:         "仅 preset 无其他风格",
-			presetPrompt: "预设风格",
-			userPrompt:   "封面图",
-			want:         "预设风格\n\n封面图",
-		},
-		{
-			name:         "config style_prompt 优先于 preset",
-			configStyle:  "config风格",
-			presetPrompt: "预设风格",
-			userPrompt:   "封面图",
-			want:         "config风格\n\n封面图",
-		},
-		{
-			name:         "CLI --style 优先于 preset 和 config",
-			cliStyle:     "CLI风格",
-			configStyle:  "config风格",
-			presetPrompt: "预设风格",
-			userPrompt:   "封面图",
-			want:         "CLI风格\n\n封面图",
-		},
-		{
-			name:       "三者均空时直接返回 prompt",
-			userPrompt: "封面图",
-			want:       "封面图",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			apiCfg := &config.ImageAPI{StylePrompt: tt.configStyle}
-			p := newTestProcessor(apiCfg)
-			p.stylePrompt = tt.cliStyle
-			p.presetPrompt = tt.presetPrompt
 			got := p.buildPrompt(tt.userPrompt)
 			if got != tt.want {
 				t.Errorf("buildPrompt(%q) =\n  %q\nwant\n  %q", tt.userPrompt, got, tt.want)

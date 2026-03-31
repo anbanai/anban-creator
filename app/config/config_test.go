@@ -515,38 +515,6 @@ func TestFindConfigFile_PriorityOrder(t *testing.T) {
 	}
 }
 
-func TestLoad_JSONConfig_WithStylePrompt(t *testing.T) {
-	configContent := `{
-  "wechat": {
-    "appid": "wx123456",
-    "secret": "secret123",
-    "xls": {
-      "content": {
-        "image": {
-          "key": "test_key",
-          "style_prompt": "扁平插画风格，莫兰迪色系，圆角卡片"
-        }
-      }
-    }
-  }
-}`
-
-	tmpFile := filepath.Join(t.TempDir(), "test.json")
-	if err := os.WriteFile(tmpFile, []byte(configContent), 0644); err != nil {
-		t.Fatalf("Failed to create temp config file: %v", err)
-	}
-
-	cfg, err := LoadWithDefaults(tmpFile)
-	if err != nil {
-		t.Fatalf("LoadWithDefaults() error = %v", err)
-	}
-
-	want := "扁平插画风格，莫兰迪色系，圆角卡片"
-	if cfg.Wechat.Xls.Content.Image.StylePrompt != want {
-		t.Errorf("Wechat.Xls.Content.Image.StylePrompt = %q, want %q", cfg.Wechat.Xls.Content.Image.StylePrompt, want)
-	}
-}
-
 func TestNewDefaultConfig(t *testing.T) {
 	c := NewDefaultConfig()
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/royalrick/anbanwriter/app/config"
+	"go.uber.org/zap"
 )
 
 // 各图片生成服务商的默认模型和 API 地址
@@ -100,7 +101,7 @@ func isContentSafetyError(errMsg string) bool {
 }
 
 // NewProvider 根据 ImageAPI 配置创建对应的 Provider
-func NewProvider(apiCfg *config.ImageAPI) (Provider, error) {
+func NewProvider(apiCfg *config.ImageAPI, log *zap.Logger) (Provider, error) {
 	switch apiCfg.Provider {
 	case "openai", "":
 		if err := validateOpenAIConfig(apiCfg); err != nil {
@@ -112,7 +113,7 @@ func NewProvider(apiCfg *config.ImageAPI) (Provider, error) {
 	case "openrouter", "or":
 		return NewOpenRouterProvider(apiCfg)
 	case "volcengine", "volc", "seedream":
-		return NewVolcengineProvider(apiCfg)
+		return NewVolcengineProvider(apiCfg, log)
 	default:
 		return nil, &config.ConfigError{
 			Field:   "ImageProvider",

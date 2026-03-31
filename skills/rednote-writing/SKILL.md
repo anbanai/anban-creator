@@ -1,8 +1,6 @@
 ---
 name: rednote-writing
-description: Use when writing Xiaohongshu (小红书) content, optimizing rednote titles, or rewriting viral notes. Triggers on "小红书文案", "小红书标题", "种草文案", "笔记写作", "rednote copywriting", "爆款改写".
-user-invocable: false
-disable-model-invocation: true
+description: Writes and optimizes Xiaohongshu (小红书) content including titles and viral note rewrites. Use when writing Xiaohongshu (小红书) content, optimizing rednote titles, or rewriting viral notes.
 ---
 
 # 小红书内容写作知识库
@@ -42,6 +40,65 @@ title_score = 情绪强度(0-3) + 关键词密度(0-1) + 字数优化(0-1) + 句
 - 短段落，每段 2-4 行，避免大段文字堆砌
 - 适当使用 emoji 增加趣味性（尤其针对年轻女性受众）
 - 语气因受众而异：年轻女性→幽默温柔感性；职场内容→专业严谨
+
+---
+
+## 2.5 正文格式（关键 Gotcha）
+
+**平台陷阱**：小红书不渲染 Markdown。`**粗体**` 在用户手机屏幕上就是 `**粗体**` 四个字符，`---` 就是三个横杠。这是平台硬限制，不是风格偏好。
+
+发布到平台的正文必须是**纯文本 + emoji**。内部文档（topic-analysis.md、source-analysis.md、image-plan.md）不发布，可用 Markdown。
+
+**格式设计三原则**：
+
+1. **emoji 是视觉锚点** — 用户刷信息流时，emoji 先于文字被注意到。把 emoji 放在段落开头或关键词旁，引导注意力
+2. **空行是唯一可靠分隔** — 没有 `<hr>`，没有 `---`，换行两次就是分段，这是唯一有效的视觉分隔
+3. **格式跟随内容调性** — 知识干货用序号 emoji（逻辑感强）；情感故事用氛围 emoji（松散排列）；测评对比用表格式 emoji 对比（直观）
+
+**三种内容类型范例**：
+
+知识类（咖啡馆选址攻略）：
+```
+选址是开店成败的第一关 📍
+
+📊 三个核心指标
+
+1️⃣ 人流量 — 早高峰过人数 > 500 是基准线
+2️⃣ 租金比 — 月租不超过预期月营业额的 15%
+3️⃣ 竞争密度 — 500m 内同类型咖啡馆 ≤ 2 家
+
+💡 选址前先蹲点，连续 3 天统计早中晚客流
+```
+
+情感/生活类（旅行记录）：
+```
+第一次一个人去京都
+
+到的那天下着小雨，祇园的石板路全是水光 🌧️
+
+没有行程表，没有攻略，就这样走着
+
+路过一家小店，老板不会说中文
+我不会说日语
+但他给我倒了一杯热茶 🍵
+
+有些瞬间，不需要语言
+```
+
+测评/对比类（手机摄影 App 测评）：
+```
+用了半年终于敢说哪个最好使 📱
+
+Snapseed  ✅ 免费 / 曲线精准 / 学习成本高
+VSCO      ✅ 滤镜漂亮 / 有社区 / 订阅才能用高级功能
+Lightroom ✅ 专业全面 / 适合 raw 格式 / 稍重
+
+日常随手拍 → Snapseed
+追求氛围感 → VSCO
+认真摄影 → Lightroom
+
+别三个都装，根据自己定位选一个用熟
+```
 
 ---
 

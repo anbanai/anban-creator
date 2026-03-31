@@ -1,8 +1,6 @@
 ---
 name: article-publishing
-description: Use when creating or managing WeChat news article drafts. Triggers on "发布文章", "创建草稿", "draft article", "publish", "推送".
-user-invocable: false
-disable-model-invocation: true
+description: Creates and manages WeChat news article drafts with HTML formatting. Use when creating or managing WeChat news article drafts.
 ---
 
 # 微信公众号图文文章发布
