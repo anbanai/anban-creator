@@ -11,27 +11,6 @@ description: Generates cover and content images for Xiaohongshu (小红书) post
 
 ---
 
-## CLI 命令
-
-```bash
-# 生成封面（单张）
-anbanwriter image generate "{prompt}" --mode xhs --cover -o ./cover.png
-
-# 批量生成内容图（N-1 张 + 尾图）
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-1 -o ./
-
-# 带参考图（保持风格一致）
-anbanwriter image generate "{prompt}" --mode xhs --cover --ref ./cover.png -o ./cover.png
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-1 --ref ./cover.png -o ./
-
-# 带风格描述
-anbanwriter image generate "{prompt}" --mode xhs --cover --style "手绘感，暖色调，小清新" -o ./cover.png
-```
-
-**关键规则**：内容图必须用 `--count`，不逐张生成。`--mode xhs` 自动使用 3:4:1K 规格。
-
----
-
 ## 视觉风格设计原则
 
 风格无固定预设，每次根据账号定位和内容动态设计：
@@ -56,3 +35,33 @@ anbanwriter image generate "{prompt}" --mode xhs --cover --style "手绘感，�
 ## 内容图设计规范
 
 见 [references/content.md](references/content.md)
+
+---
+
+## 尾图设计规范
+
+见 [references/tail.md](references/tail.md)
+
+---
+
+## CLI 命令
+
+```bash
+# 生成封面（单张）
+anbanwriter image generate "{prompt}" --mode xhs --cover -o ./cover.png
+
+# 批量生成内容图（N-2 张，不含尾图）
+anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 -o ./
+
+# 单独生成尾图
+anbanwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
+
+# 带参考图（保持风格一致）
+anbanwriter image generate "{prompt}" --mode xhs --cover --ref ./cover.png -o ./cover.png
+anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
+
+# 带风格描述
+anbanwriter image generate "{prompt}" --mode xhs --cover --style "手绘感，暖色调，小清新" -o ./cover.png
+```
+
+**关键规则**：内容图必须用 `--count` 批量生成，尾图单独生成（`tail.png`），封面单独生成（`cover.png`）。`--mode xhs` 自动使用 3:4:1K 规格。
