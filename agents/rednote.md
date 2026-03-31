@@ -56,7 +56,7 @@ maxTurns: 20
 
 5. **图片规划与生成**：using the rednote-visual-design skill 完成图片内容规划（`$DIR/image-plan.md`）并生成所有图片，保存到 `$DIR/`
 
-   生成后检查每张图片：`$DIR/cover.png`（封面）、`$DIR/image_01.png` ... `$DIR/image_0{N-1}.png`
+   生成后检查每张图片：`$DIR/cover.png`（封面）、`$DIR/image_01.png` ... `$DIR/image_0{N-2}.png`（内容图）、`$DIR/tail.png`（尾图）
 
 ---
 
@@ -112,7 +112,8 @@ maxTurns: 20
 - [ ] `content.md` 包含标题、正文、话题标签三部分
 - [ ] `image-plan.md` 包含封面 + N-1 张内容页规划
 - [ ] 封面图 `$DIR/cover.png` 存在且可访问
-- [ ] 所有内容图 `$DIR/image_01.png` ... `$DIR/image_0{N-1}.png` 存在且可访问
+- [ ] 所有内容图 `$DIR/image_01.png` ... `$DIR/image_0{N-2}.png` 存在且可访问
+- [ ] 尾图 `$DIR/tail.png` 存在且可访问
 - [ ] 图片总数 ≥3 张（封面 + 至少 2 张内容图）
 - [ ] 所有图片视觉风格一致（同色系、同字体、同布局风格）
 - [ ] 复刻模式下 `source-analysis.md` 包含源笔记模板分析
@@ -139,7 +140,7 @@ maxTurns: 20
 ### 文件组织
 
 - 当前运行使用 `output/rednote/staging/`（创建工作目录步骤，变量 `$DIR`），完成后按笔记标题归档为 `output/rednote/{标题}/`
-- 图片命名：`$DIR/cover.png`, `$DIR/image_01.png` ... `$DIR/image_0{N-1}.png`（N 由 image-plan.md 决定）
+- 图片命名：`$DIR/cover.png`（封面）, `$DIR/image_01.png` ... `$DIR/image_0{N-2}.png`（内容图）, `$DIR/tail.png`（尾图）（N 由 image-plan.md 决定）
 - 内容草稿：`$DIR/content.md`（含标题/正文/话题标签）
 - 图片规划：`$DIR/image-plan.md`（步骤 5/6 产物，包含每页具体知识内容）
 - 决策记录：`$DIR/topic-analysis.md`（原创模式：选题评分 + 风格选择）或 `$DIR/source-analysis.md`（复刻模式：源笔记模板分析）
