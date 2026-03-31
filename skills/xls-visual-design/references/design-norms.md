@@ -49,7 +49,7 @@
 ```
 {cover_hook} | {auxiliary_info}
 
-风格：{style_description}
+风格：{style}
 
 微信图片帖封面规范：
 - 3:4 竖版构图
@@ -57,15 +57,15 @@
 - 文字≤25%，字体清晰可读
 - 适合在微信信息流中吸引点击
 
-主题：{user_topic}
+主题：{topic}
 ```
 
 内容图（批量）：
 ```
 {paged_content_description}
 
-风格延续：{style_description}
+风格延续：{style}
 微信图片帖内容图，与封面风格一致，3:4 竖版
 
-主题：{user_topic}
+主题：{topic}
 ```

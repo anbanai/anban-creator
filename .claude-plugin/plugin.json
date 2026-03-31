@@ -1,7 +1,7 @@
 {
   "name": "anbanwriter",
   "description": "Professional WeChat and Xiaohongshu (小红书) content creation toolkit with AI-powered writing, visual design, and multi-platform publishing optimization",
-  "version": "2.3.0",
+  "version": "2.3.2",
   "author": {
     "name": "Rick",
     "email": "medivhzhan@gmail.com",
