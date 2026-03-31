@@ -54,7 +54,7 @@ maxTurns: 20
 
 4. **创作内容**：using the rednote-writing skill 生成标题、正文和话题标签，内容保存到 `$DIR/content.md`
 
-5. **图片规划与生成**：using the rednote-visual-design skill 完成图片内容规划（`$DIR/image-plan.md`）并生成所有图片，保存到 `$DIR/`
+5. **图片生成**：using the rednote-visual-design skill，传入 `$DIR/content.md`，技能内部完成图片内容规划（`$DIR/image-plan.md`）和全部图片生成。保存到 `$DIR/`
 
    生成后检查每张图片：`$DIR/cover.png`（封面）、`$DIR/image_01.png` ... `$DIR/image_0{N-2}.png`（内容图）、`$DIR/tail.png`（尾图）
 
@@ -72,7 +72,7 @@ maxTurns: 20
 
 5. **按改写模式生成内容**：using the rednote-writing skill 根据用户指定或默认模式改写，内容保存到 `$DIR/content.md`，决策记录到 `$DIR/source-analysis.md`
 
-6. **图片规划与生成**：using the rednote-visual-design skill 完成图片内容规划（`$DIR/image-plan.md`）并生成所有图片。改写模式下根据模式调整参考依据：`style-only` 独立规划；`medium` 参考源笔记信息结构重新设计；`tight` 参照视觉结构模板（若标记"无法提取"则按 `medium` 处理）。保存到 `$DIR/`
+6. **图片生成**：using the rednote-visual-design skill，传入 `$DIR/content.md`、改写模式和源笔记视觉结构，技能内部自动适配并完成规划与生成。保存到 `$DIR/`
 
 7. **违禁词合规检查**：using the rednote-writing skill 扫描标题与正文，生成 `$DIR/compliance-report.md`
 
@@ -142,7 +142,7 @@ maxTurns: 20
 - 当前运行使用 `output/rednote/staging/`（创建工作目录步骤，变量 `$DIR`），完成后按笔记标题归档为 `output/rednote/{标题}/`
 - 图片命名：`$DIR/cover.png`（封面）, `$DIR/image_01.png` ... `$DIR/image_0{N-2}.png`（内容图）, `$DIR/tail.png`（尾图）（N 由 image-plan.md 决定）
 - 内容草稿：`$DIR/content.md`（含标题/正文/话题标签）
-- 图片规划：`$DIR/image-plan.md`（步骤 5/6 产物，包含每页具体知识内容）
+- 图片规划：`$DIR/image-plan.md`（rednote-visual-design 技能内部产物，包含每页具体知识内容）
 - 决策记录：`$DIR/topic-analysis.md`（原创模式：选题评分 + 风格选择）或 `$DIR/source-analysis.md`（复刻模式：源笔记模板分析）
 
 ### 任务追踪
@@ -166,9 +166,8 @@ maxTurns: 20
 
 ## 最佳实践
 
-1. **信息点具体化**：每个信息点 8-15 字，包含具体数字/场景/可操作细节
+1. **内容质量优先**：确保 content.md 信息点具体、有收藏价值
 3. **知识化扩展**：情感/体验类主题须扩展为实用干货，增加收藏价值
-4. **内容不重叠**：每张图主题和内容不重叠，确保信息密度合理
 5. **决策透明记录**：所有评分、选择、降级决策写入文件，便于追溯
 
 标题规范、视觉风格、违禁词检查等详见各 skill 文档。

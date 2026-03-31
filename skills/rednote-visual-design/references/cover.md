@@ -63,7 +63,7 @@
 ```
 {page_content}
 
-风格要求：{style_description}
+风格要求：{style}
 
 平台规范：
 - 3:4 竖版构图，小红书信息流封面
@@ -73,10 +73,11 @@
 - 手绘批注或荧光笔标记核心词
 - 实拍质感背景（勿用纯色/3D/渐变）
 
-内容主题：{user_topic}
+内容主题：{topic}
 ```
 
 **CLI 命令**：
+
 ```bash
 anbanwriter image generate "{prompt}" --mode xhs --cover -o ./cover.png
 ```
