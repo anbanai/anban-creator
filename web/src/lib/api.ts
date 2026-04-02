@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-// --- Types ---
+// --- Core Types ---
 
 export interface User {
   id: string
@@ -23,6 +23,140 @@ export interface ApiResponse<T = unknown> {
   code: number
   message: string
   data: T
+}
+
+// --- Plan Types ---
+
+export type PlanType = 'rednote' | 'article' | 'xls'
+export type PlanStatus = 'active' | 'paused'
+
+export interface Plan {
+  id: number
+  type: PlanType
+  title: string
+  description: string
+  cron_expr: string
+  topic_hint: string
+  status: PlanStatus
+  next_run_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CreatePlanRequest {
+  type: PlanType
+  title: string
+  description?: string
+  cron_expr: string
+  topic_hint?: string
+}
+
+export interface UpdatePlanRequest {
+  title?: string
+  description?: string
+  cron_expr?: string
+  topic_hint?: string
+}
+
+// --- Task Types ---
+
+export type TaskType = 'rednote' | 'article' | 'xls'
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface Task {
+  id: string
+  type: TaskType
+  topic: string
+  status: TaskStatus
+  progress: number
+  error: string
+  plan_id: number | null
+  result: TaskResult
+  created_at: string
+  started_at: string
+  completed_at: string
+}
+
+export interface TaskResult {
+  files: TaskFile[]
+  output: string
+}
+
+export interface TaskFile {
+  name: string
+  type: string
+  url: string
+  size: number
+}
+
+export interface CreateTaskRequest {
+  type: TaskType
+  topic: string
+}
+
+// --- Timeline Types ---
+
+export type TimelineItemType = 'task' | 'plan'
+
+export interface TimelineItem {
+  id: string
+  type: TimelineItemType
+  content_type: TaskType | PlanType
+  title: string
+  status: TaskStatus | PlanStatus
+  scheduled_at: string
+  completed_at: string
+  plan_id?: number
+  task_id?: string
+  progress?: number
+  error?: string
+}
+
+export interface TimelineResponse {
+  items: TimelineItem[]
+}
+
+// --- Config Types ---
+
+export type ConfigScope = 'article' | 'xls' | 'rednote'
+
+export interface ImageApiConfig {
+  provider: string
+  model?: string
+  base_url?: string
+  api_key?: string
+}
+
+export interface UserConfig {
+  scope: ConfigScope
+  name: string
+  keywords: string
+  positioning: string
+  style: string
+  theme: string
+  author: string
+  wechat_app_id: string
+  wechat_secret: string
+  image_api_config: ImageApiConfig
+}
+
+export interface UpdateConfigRequest {
+  name?: string
+  keywords?: string
+  positioning?: string
+  style?: string
+  theme?: string
+  author?: string
+  wechat_app_id?: string
+  wechat_secret?: string
+  image_api_config?: ImageApiConfig
+}
+
+// --- Paginated Response ---
+
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
 }
 
 // --- Axios instance ---
@@ -89,28 +223,66 @@ export const api = {
       unwrap<AuthResponse>(http.post('/auth/wx-login', { code, nickname, avatar })),
   },
 
-  // Placeholder for future API groups
-  tasks: {
-    list: () =>
-      unwrap<unknown[]>(http.get('/tasks')),
-    get: (id: string) =>
-      unwrap<unknown>(http.get(`/tasks/${id}`)),
-    create: (data: unknown) =>
-      unwrap<unknown>(http.post('/tasks', data)),
-  },
-
+  // Plans
   plans: {
-    list: () =>
-      unwrap<unknown[]>(http.get('/plans')),
-    get: (id: string) =>
-      unwrap<unknown>(http.get(`/plans/${id}`)),
+    create: (data: CreatePlanRequest) =>
+      unwrap<Plan>(http.post('/plans', data)),
+
+    list: (params?: { offset?: number; limit?: number }) =>
+      unwrap<PaginatedResponse<Plan>>(http.get('/plans', { params })),
+
+    get: (id: number) =>
+      unwrap<Plan>(http.get(`/plans/${id}`)),
+
+    update: (id: number, data: UpdatePlanRequest) =>
+      unwrap<Plan>(http.put(`/plans/${id}`, data)),
+
+    delete: (id: number) =>
+      unwrap<void>(http.delete(`/plans/${id}`)),
+
+    pause: (id: number) =>
+      unwrap<void>(http.post(`/plans/${id}/pause`)),
+
+    resume: (id: number) =>
+      unwrap<void>(http.post(`/plans/${id}/resume`)),
   },
 
-  settings: {
-    get: () =>
-      unwrap<unknown>(http.get('/settings')),
-    update: (data: unknown) =>
-      unwrap<unknown>(http.put('/settings', data)),
+  // Tasks
+  tasks: {
+    create: (data: CreateTaskRequest) =>
+      unwrap<Task>(http.post('/tasks', data)),
+
+    list: (params?: { offset?: number; limit?: number; status?: string }) =>
+      unwrap<PaginatedResponse<Task>>(http.get('/tasks', { params })),
+
+    get: (id: string) =>
+      unwrap<Task>(http.get(`/tasks/${id}`)),
+
+    cancel: (id: string) =>
+      unwrap<void>(http.post(`/tasks/${id}/cancel`)),
+
+    files: (id: string) =>
+      unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),
+
+    streamUrl: (id: string) => `/api/v1/tasks/${id}/stream`,
+  },
+
+  // Timeline
+  timeline: {
+    get: (from: string, to: string) =>
+      unwrap<TimelineResponse>(http.get('/timeline', { params: { from, to } })),
+  },
+
+  // Configs
+  configs: {
+    list: () =>
+      unwrap<UserConfig[]>(http.get('/configs')),
+
+    get: (scope: string) =>
+      unwrap<UserConfig>(http.get(`/configs/${scope}`)),
+
+    update: (scope: string, data: UpdateConfigRequest) =>
+      unwrap<UserConfig>(http.put(`/configs/${scope}`, data)),
   },
 }
 

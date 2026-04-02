@@ -7,6 +7,7 @@ import DashboardPage from '@/pages/DashboardPage'
 import TimelinePage from '@/pages/TimelinePage'
 import PlansPage from '@/pages/PlansPage'
 import TasksPage from '@/pages/TasksPage'
+import TaskDetailPage from '@/pages/TaskDetailPage'
 import SettingsPage from '@/pages/SettingsPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -60,6 +61,7 @@ function AppRoutes() {
         <Route path="timeline" element={<TimelinePage />} />
         <Route path="plans" element={<PlansPage />} />
         <Route path="tasks" element={<TasksPage />} />
+        <Route path="tasks/:id" element={<TaskDetailPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
