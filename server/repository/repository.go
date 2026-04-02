@@ -58,6 +58,7 @@ type PlanRepository interface {
 	Delete(ctx context.Context, id string) error
 	ListActive(ctx context.Context) ([]*model.Plan, error)
 	ListActiveByUserID(ctx context.Context, userID string) ([]*model.Plan, error)
+	ListDue(ctx context.Context, now time.Time) ([]*model.Plan, error)
 	CountByUserID(ctx context.Context, userID string) (int64, error)
 }
 

@@ -155,6 +155,13 @@ func main() {
 		asynqServer = startAsynqServer(taskSvc, cfg, log)
 	}
 
+	// 15.1 Start plan checker if repository and task service are available.
+	if repo != nil && taskSvc != nil {
+		schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+		defer schedulerCancel()
+		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log)
+	}
+
 	// 16. Build Services struct.
 	svcs := &router.Services{
 		Config:          cfg,

@@ -15,11 +15,29 @@ import (
 // full MCP streamable HTTP implementation comes in Phase 5.
 func NewMCPHttpHandler(repo repository.Repository, logger *zerolog.Logger) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		userID := c.Locals("user_id").(string)
+		// user_id is set by MCPAuthMiddleware. It may be "mcp-api-key" for
+		// API key authentication, in which case we list all available tools.
+		userID, _ := c.Locals("user_id").(string)
 
 		// List user configs to determine available scopes.
 		ctx := c.Context()
 		configs, err := repo.UserConfigs().ListByUserID(ctx, userID)
+		if err != nil {
+			logger.Error().Err(err).Str("user_id", userID).Msg("failed to list user configs")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "failed to load user configs",
+			})
+		}
+
+		// If authenticated via API key, include all scope tools regardless of config.
+		authMethod, _ := c.Locals("auth_method").(string)
+		if authMethod == "api_key" {
+			configs = append(configs,
+				&model.UserConfig{Scope: model.ScopeArticle},
+				&model.UserConfig{Scope: model.ScopeXls},
+				&model.UserConfig{Scope: model.ScopeRednote},
+			)
+		}
 		if err != nil {
 			logger.Error().Err(err).Str("user_id", userID).Msg("failed to list user configs")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

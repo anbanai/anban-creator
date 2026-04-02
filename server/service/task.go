@@ -74,6 +74,36 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, taskType, topic 
 	return task, nil
 }
 
+// CreateFromPlan creates a task linked to a plan and enqueues it for execution.
+func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
+	taskID := generateTaskID()
+
+	topic := plan.TopicHint
+	if topic == "" {
+		topic = plan.Title
+	}
+
+	task := &model.Task{
+		ID:     taskID,
+		UserID: plan.UserID,
+		Type:   plan.Type,
+		Status: model.TaskStatusPending,
+		Topic:  topic,
+	}
+
+	if err := s.repo.Tasks().Create(ctx, task); err != nil {
+		return nil, fmt.Errorf("create task from plan: %w", err)
+	}
+
+	if err := s.EnqueueExecution(ctx, task, nil); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Str("plan_id", plan.ID).Msg("failed to enqueue plan task")
+		_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to enqueue: "+err.Error())
+		return task, nil
+	}
+
+	return task, nil
+}
+
 // GetByID returns a task by its ID.
 func (s *TaskService) GetByID(ctx context.Context, id string) (*model.Task, error) {
 	task, err := s.repo.Tasks().FindByID(ctx, id)

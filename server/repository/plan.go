@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/royalrick/anbanwriter/server/model"
 
@@ -70,4 +71,16 @@ func (r *planRepository) CountByUserID(ctx context.Context, userID string) (int6
 		return 0, err
 	}
 	return count, nil
+}
+
+// ListDue returns all active plans whose next_run_at is at or before the given time.
+func (r *planRepository) ListDue(ctx context.Context, now time.Time) ([]*model.Plan, error) {
+	var plans []*model.Plan
+	if err := r.db.WithContext(ctx).
+		Where("status = ? AND next_run_at IS NOT NULL AND next_run_at <= ?",
+			model.PlanStatusActive, now).
+		Find(&plans).Error; err != nil {
+		return nil, err
+	}
+	return plans, nil
 }

@@ -61,6 +61,11 @@ func NewRouter(svc *Services) *fiber.App {
 	// Security headers.
 	app.Use(helmet.New())
 
+	// Request logging: log method, path, status, duration for all requests.
+	if svc.Logger != nil {
+		app.Use(appmiddleware.RequestLogger(svc.Logger))
+	}
+
 	// ---------------------------------------------------------------------------
 	// Health check
 	// ---------------------------------------------------------------------------
@@ -130,8 +135,9 @@ func NewRouter(svc *Services) *fiber.App {
 	// ---------------------------------------------------------------------------
 
 	authMiddleware := appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger)
+	rateLimiter := appmiddleware.RateLimit(svc.Redis, 100, 1*time.Minute)
 
-	apiV1 := app.Group("/api/v1", authMiddleware)
+	apiV1 := app.Group("/api/v1", authMiddleware, rateLimiter)
 
 	if svc.AuthHandler != nil {
 		apiV1.Get("/auth/me", svc.AuthHandler.Me)
@@ -182,9 +188,13 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/timeline", svc.TimelineHandler.GetTimeline)
 	}
 
-	// MCP tools endpoint (placeholder for Phase 5 full MCP streamable HTTP).
+	// MCP tools endpoint with API key or JWT authentication.
 	if svc.Repo != nil && svc.Logger != nil {
-		apiV1.Get("/mcp/tools", mcp.NewMCPHttpHandler(svc.Repo, svc.Logger))
+		mcpAuth := appmiddleware.MCPAuthMiddleware(
+			svc.JWTService, svc.Repo, svc.Config.MCP.APIKey, svc.Logger,
+		)
+		mcpGroup := app.Group("/api/v1/mcp", mcpAuth)
+		mcpGroup.Get("/tools", mcp.NewMCPHttpHandler(svc.Repo, svc.Logger))
 	}
 
 	return app

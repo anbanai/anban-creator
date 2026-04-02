@@ -44,10 +44,13 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	}
 
 	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
 	task, err := h.service.CreateManual(c.Context(), userID, req.Type, req.Topic)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("create task failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to create task")
 	}
 
 	return Success(c, task)

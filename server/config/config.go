@@ -17,6 +17,7 @@ type Config struct {
 	Redis    RedisConfig    `yaml:"redis"`
 	JWT      JWTConfig      `yaml:"jwt"`
 	WeChat   WeChatConfig   `yaml:"wechat"`
+	MCP      MCPConfig      `yaml:"mcp"`
 }
 
 type ServerConfig struct {
@@ -46,6 +47,14 @@ type JWTConfig struct {
 type WeChatConfig struct {
 	AppID     string `yaml:"app_id"`
 	AppSecret string `yaml:"app_secret"`
+}
+
+// MCPConfig holds configuration for the MCP (Model Context Protocol) endpoint.
+type MCPConfig struct {
+	// APIKey is a server-level API key for Claude Code integration.
+	// When set, the MCP endpoint accepts X-API-Key header authentication
+	// alongside the standard JWT Bearer token.
+	APIKey string `yaml:"api_key"`
 }
 
 // NewConfig loads configuration from a YAML file, applies defaults, then
@@ -165,6 +174,10 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "WECHAT_APP_SECRET"); v != "" {
 		c.WeChat.AppSecret = v
+	}
+
+	if v := os.Getenv(prefix + "MCP_API_KEY"); v != "" {
+		c.MCP.APIKey = v
 	}
 }
 

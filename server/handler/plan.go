@@ -52,8 +52,8 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	plan, err := h.service.Create(c.Context(), userID, req.Type, req.Title, req.Description, req.CronExpr, req.TopicHint)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("create plan failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
 	}
 
 	return Success(c, plan)
@@ -114,8 +114,8 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 
 	plan, err := h.service.Update(c.Context(), id, req.Title, req.Description, req.CronExpr, req.TopicHint)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("update plan failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to update plan")
 	}
 
 	return Success(c, plan)
@@ -144,8 +144,8 @@ func (h *PlanHandler) Pause(c fiber.Ctx) error {
 	}
 
 	if err := h.service.Pause(c.Context(), id); err != nil {
-		h.logger.Error().Err(err).Msg("pause plan failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		h.logger.Error().Err(err).Str("plan_id", id).Msg("pause plan failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to pause plan")
 	}
 
 	return Success(c, fiber.Map{"message": "plan paused"})
@@ -159,8 +159,8 @@ func (h *PlanHandler) Resume(c fiber.Ctx) error {
 	}
 
 	if err := h.service.Resume(c.Context(), id); err != nil {
-		h.logger.Error().Err(err).Msg("resume plan failed")
-		return Error(c, fiber.StatusInternalServerError, err.Error())
+		h.logger.Error().Err(err).Str("plan_id", id).Msg("resume plan failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to resume plan")
 	}
 
 	return Success(c, fiber.Map{"message": "plan resumed"})
