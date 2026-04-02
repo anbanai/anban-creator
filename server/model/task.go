@@ -13,8 +13,11 @@ type Task struct {
 	ProgressLog  string     `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Result       string     `gorm:"type:json" json:"result,omitempty"`
 	ErrorMessage string     `gorm:"type:text" json:"error_message,omitempty"`
-	StartedAt    *time.Time `json:"started_at"`
-	CompletedAt  *time.Time `json:"completed_at"`
+	StartedAt    *time.Time `gorm:"index" json:"started_at"`
+	CompletedAt  *time.Time `gorm:"index" json:"completed_at"`
+	CleanedUpAt  *time.Time `gorm:"index" json:"cleaned_up_at"`
+	RetryCount   int        `gorm:"default:0" json:"retry_count"`
+	MaxRetries   int        `gorm:"default:3" json:"max_retries"`
 	CreatedAt    time.Time  `json:"created_at"`
 	Plan         *Plan      `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
 }

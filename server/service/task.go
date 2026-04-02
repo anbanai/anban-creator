@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -16,6 +18,7 @@ import (
 // TaskEnqueuer abstracts the async task enqueue mechanism (Asynq, in-process, etc.).
 type TaskEnqueuer interface {
 	Enqueue(taskType string, payload []byte) error
+	EnqueueIn(taskType string, payload []byte, delay time.Duration) error
 }
 
 // TypeContentGenerate is the Asynq task type for content generation.
@@ -235,9 +238,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, use
 
 	if execErr != nil {
 		s.logger.Error().Err(execErr).Str("task_id", taskID).Msg("task execution failed")
-		_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error())
-		_ = s.repo.Tasks().SetCompletedAt(ctx, taskID)
-		return execErr
+		return s.HandleExecutionFailure(ctx, task, execErr)
 	}
 
 	if !result.Success {
@@ -246,9 +247,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, use
 			errMsg = "execution returned unsuccessful result"
 		}
 		s.logger.Error().Str("task_id", taskID).Str("error", errMsg).Msg("task execution returned failure")
-		_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, errMsg)
-		_ = s.repo.Tasks().SetCompletedAt(ctx, taskID)
-		return nil
+		return s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
 	}
 
 	// Success.
@@ -283,4 +282,96 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 // generateTaskID generates a unique task ID using UUID v4.
 func generateTaskID() string {
 	return uuid.New().String()
+}
+
+// retryBackoffs defines exponential backoff delays for retries.
+var retryBackoffs = []time.Duration{
+	1 * time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+}
+
+// HandleExecutionFailure handles task execution failures with retry logic.
+// If the task has not exceeded max retries, it schedules a delayed retry.
+// Otherwise, it marks the task as permanently failed.
+func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Task, execErr error) error {
+	taskID := task.ID
+
+	// Set defaults for retry configuration.
+	if task.MaxRetries <= 0 {
+		task.MaxRetries = model.DefaultRetries
+	}
+
+	// Check if retry is possible.
+	if task.RetryCount >= task.MaxRetries {
+		s.logger.Error().
+			Err(execErr).
+			Str("task_id", taskID).
+			Int("retry_count", task.RetryCount).
+			Int("max_retries", task.MaxRetries).
+			Msg("task permanently failed after max retries")
+		_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error())
+		_ = s.repo.Tasks().SetCompletedAt(ctx, taskID)
+		return execErr
+	}
+
+	// Increment retry count.
+	task.RetryCount++
+	_ = s.repo.Tasks().Update(ctx, task)
+
+	// Calculate backoff delay.
+	idx := task.RetryCount - 1
+	if idx >= len(retryBackoffs) {
+		idx = len(retryBackoffs) - 1
+	}
+	delay := retryBackoffs[idx]
+
+	s.logger.Info().
+		Err(execErr).
+		Str("task_id", taskID).
+		Int("retry_count", task.RetryCount).
+		Dur("backoff", delay).
+		Msg("scheduling task retry")
+
+	// Schedule retry via enqueuer with delay.
+	if s.enqueuer != nil {
+		payload, _ := json.Marshal(map[string]string{
+			"task_id": task.ID,
+			"user_id": task.UserID,
+		})
+		_ = s.enqueuer.EnqueueIn(TypeContentGenerate, payload, delay)
+	}
+
+	// Update status back to pending so it will be picked up.
+	return s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusPending)
+}
+
+// CleanupExpiredWorkspaces cleans up workspace directories for completed/failed
+// tasks that are older than the specified threshold.
+func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
+	threshold := time.Now().Add(-1 * time.Hour)
+	tasks, err := s.repo.Tasks().FindCompletedOlderThan(ctx, threshold)
+	if err != nil {
+		return fmt.Errorf("find completed tasks for cleanup: %w", err)
+	}
+
+	s.logger.Info().Int("count", len(tasks)).Msg("found tasks eligible for cleanup")
+
+	for _, task := range tasks {
+		workDir := fmt.Sprintf("/tmp/anbanwriter/%s", task.ID)
+		if err := os.RemoveAll(workDir); err != nil {
+			s.logger.Warn().Err(err).Str("task_id", task.ID).Str("path", workDir).Msg("failed to remove workspace directory")
+			continue
+		}
+
+		now := time.Now()
+		if err := s.repo.Tasks().UpdateCleanedUpAt(ctx, task.ID, now); err != nil {
+			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("failed to update cleaned_up_at")
+			continue
+		}
+
+		s.logger.Info().Str("task_id", task.ID).Str("path", workDir).Msg("cleaned up workspace directory")
+	}
+
+	return nil
 }

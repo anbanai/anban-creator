@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/rs/zerolog"
@@ -21,6 +22,7 @@ const (
 // TaskEnqueuer abstracts the async task enqueue mechanism.
 type TaskEnqueuer interface {
 	Enqueue(taskType string, payload []byte) error
+	EnqueueIn(taskType string, payload []byte, delay time.Duration) error
 }
 
 // AsynqClient wraps an asynq.Client for enqueuing tasks.
@@ -41,6 +43,15 @@ func NewAsynqClient(redisAddr, redisPassword string, redisDB int) *AsynqClient {
 // Enqueue creates an Asynq task and enqueues it.
 func (c *AsynqClient) Enqueue(taskType string, payload []byte) error {
 	_, err := c.client.Enqueue(asynq.NewTask(taskType, payload))
+	return err
+}
+
+// EnqueueIn creates an Asynq task and enqueues it with a delay.
+func (c *AsynqClient) EnqueueIn(taskType string, payload []byte, delay time.Duration) error {
+	_, err := c.client.Enqueue(
+		asynq.NewTask(taskType, payload),
+		asynq.ProcessIn(delay),
+	)
 	return err
 }
 

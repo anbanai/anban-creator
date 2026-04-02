@@ -162,6 +162,13 @@ func main() {
 		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log)
 	}
 
+	// 15.2 Start periodic workspace cleanup (every hour).
+	if repo != nil && taskSvc != nil {
+		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+		defer cleanupCancel()
+		go startPeriodicCleanup(cleanupCtx, taskSvc, log)
+	}
+
 	// 16. Build Services struct.
 	svcs := &router.Services{
 		Config:          cfg,
@@ -301,8 +308,7 @@ func startAsynqServer(taskSvc *service.TaskService, cfg *config.Config, log *zer
 			return nil
 		},
 		func(ctx context.Context) error {
-			log.Info().Msg("task cleanup: placeholder")
-			return nil
+			return taskSvc.CleanupExpiredWorkspaces(ctx)
 		},
 		cfg.Redis.Addr,
 		cfg.Redis.Password,
@@ -334,5 +340,28 @@ func parseLogLevel(level string) zerolog.Level {
 		return zerolog.TraceLevel
 	default:
 		return zerolog.InfoLevel
+	}
+}
+
+// startPeriodicCleanup runs CleanupExpiredWorkspaces on a ticker until ctx is cancelled.
+func startPeriodicCleanup(ctx context.Context, taskSvc *service.TaskService, log *zerolog.Logger) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	// Run once at startup.
+	if err := taskSvc.CleanupExpiredWorkspaces(ctx); err != nil {
+		log.Error().Err(err).Msg("initial workspace cleanup failed")
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("periodic cleanup stopped")
+			return
+		case <-ticker.C:
+			if err := taskSvc.CleanupExpiredWorkspaces(ctx); err != nil {
+				log.Error().Err(err).Msg("periodic workspace cleanup failed")
+			}
+		}
 	}
 }

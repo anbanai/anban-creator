@@ -73,6 +73,32 @@ func (r *taskRepository) FindRunning(ctx context.Context) ([]*model.Task, error)
 	return tasks, nil
 }
 
+func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string) ([]*model.Task, error) {
+	var tasks []*model.Task
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Where("status = ?", model.TaskStatusRunning).
+		Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+// FindCompletedOlderThan finds completed or failed tasks whose completed_at
+// is before the given time and which have not yet been cleaned up.
+func (r *taskRepository) FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.Task, error) {
+	var tasks []*model.Task
+	err := r.db.WithContext(ctx).
+		Where("status IN ?", []string{model.TaskStatusCompleted, model.TaskStatusFailed}).
+		Where("completed_at IS NOT NULL AND completed_at < ?", before).
+		Where("cleaned_up_at IS NULL").
+		Find(&tasks).Error
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
 func (r *taskRepository) UpdateStatus(ctx context.Context, id, status string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("status", status).Error
 }
@@ -91,6 +117,16 @@ func (r *taskRepository) UpdateProgressLog(ctx context.Context, id, log string) 
 
 func (r *taskRepository) UpdateResult(ctx context.Context, id, result string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("result", result).Error
+}
+
+// Update saves the full task object.
+func (r *taskRepository) Update(ctx context.Context, task *model.Task) error {
+	return r.db.WithContext(ctx).Save(task).Error
+}
+
+// UpdateCleanedUpAt sets the cleaned_up_at timestamp for a task.
+func (r *taskRepository) UpdateCleanedUpAt(ctx context.Context, id string, t time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("cleaned_up_at", t).Error
 }
 
 func (r *taskRepository) SetStartedAt(ctx context.Context, id string) error {

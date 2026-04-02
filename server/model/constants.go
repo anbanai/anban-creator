@@ -16,6 +16,12 @@ const (
 	PlanStatusCompleted = "completed"
 )
 
+// Retry constants.
+const (
+	MaxRetries     = 3
+	DefaultRetries = 3
+)
+
 // Config scope constants.
 const (
 	ScopeArticle = "article"

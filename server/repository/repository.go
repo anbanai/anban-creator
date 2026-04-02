@@ -70,10 +70,14 @@ type TaskRepository interface {
 	FindByUserIDAndStatus(ctx context.Context, userID, status string, offset, limit int) ([]*model.Task, error)
 	FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindRunning(ctx context.Context) ([]*model.Task, error)
+	FindRunningByUser(ctx context.Context, userID string) ([]*model.Task, error)
+	FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.Task, error)
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
 	UpdateProgressLog(ctx context.Context, id, log string) error
 	UpdateResult(ctx context.Context, id, result string) error
+	Update(ctx context.Context, task *model.Task) error
+	UpdateCleanedUpAt(ctx context.Context, id string, t time.Time) error
 	SetStartedAt(ctx context.Context, id string) error
 	SetCompletedAt(ctx context.Context, id string) error
 	CountByUserID(ctx context.Context, userID string) (int64, error)
