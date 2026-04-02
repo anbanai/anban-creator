@@ -118,15 +118,12 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 		}
 	}
 
-	// 3. Running tasks (always included if owned by user).
-	running, err := h.repo.Tasks().FindRunning(ctx)
+	// 3. Running tasks for this user (scoped query to prevent information leak).
+	running, err := h.repo.Tasks().FindRunningByUser(ctx, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to fetch running tasks")
 	} else {
 		for _, t := range running {
-			if t.UserID != userID {
-				continue
-			}
 			// Avoid duplicates with items already added.
 			alreadyAdded := false
 			for _, item := range items {
