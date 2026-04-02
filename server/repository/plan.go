@@ -63,3 +63,11 @@ func (r *planRepository) ListActiveByUserID(ctx context.Context, userID string) 
 	}
 	return plans, nil
 }
+
+func (r *planRepository) CountByUserID(ctx context.Context, userID string) (int64, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&model.Plan{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}

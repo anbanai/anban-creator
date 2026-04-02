@@ -12,24 +12,34 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
+	"github.com/royalrick/anbanwriter/server/agent"
 	"github.com/royalrick/anbanwriter/server/auth"
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/handler"
 	appmiddleware "github.com/royalrick/anbanwriter/server/middleware"
+	"github.com/royalrick/anbanwriter/server/mcp"
 	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/royalrick/anbanwriter/server/service"
 )
 
 // Services aggregates all service dependencies required by the router.
 type Services struct {
-	Config      *config.Config
-	Logger      *zerolog.Logger
-	DB          *gorm.DB
-	Redis       *redis.Client
-	Repo        repository.Repository
-	JWTService  *auth.JWTService
-	WechatSvc   *auth.WeChatService
-	WSHub       *handler.WebSocketHub
-	AuthHandler *handler.AuthHandler
+	Config       *config.Config
+	Logger       *zerolog.Logger
+	DB           *gorm.DB
+	Redis        *redis.Client
+	Repo         repository.Repository
+	JWTService   *auth.JWTService
+	WechatSvc    *auth.WeChatService
+	WSHub        *handler.WebSocketHub
+	AuthHandler  *handler.AuthHandler
+	Executor     *agent.Executor
+	PlanService  *service.PlanService
+	TaskService  *service.TaskService
+	PlanHandler  *handler.PlanHandler
+	TaskHandler  *handler.TaskHandler
+	ConfigHandler *handler.ConfigHandler
+	TimelineHandler *handler.TimelineHandler
 }
 
 // NewRouter creates a new Fiber app with middleware and route groups.
@@ -127,12 +137,55 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/auth/me", svc.AuthHandler.Me)
 	}
 
-	// Placeholder groups for future modules.
-	_ = apiV1.Group("/configs")  // user config CRUD
-	_ = apiV1.Group("/plans")    // plan CRUD
-	_ = apiV1.Group("/tasks")    // task CRUD
-	_ = apiV1.Group("/timeline") // task timeline
+	// ---------------------------------------------------------------------------
+	// User Config endpoints
+	// ---------------------------------------------------------------------------
+
+	if svc.ConfigHandler != nil {
+		apiV1.Get("/configs", svc.ConfigHandler.List)
+		apiV1.Get("/configs/:scope", svc.ConfigHandler.GetByScope)
+		apiV1.Put("/configs/:scope", svc.ConfigHandler.Upsert)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Plan endpoints
+	// ---------------------------------------------------------------------------
+
+	if svc.PlanHandler != nil {
+		apiV1.Post("/plans", svc.PlanHandler.Create)
+		apiV1.Get("/plans", svc.PlanHandler.List)
+		apiV1.Get("/plans/:id", svc.PlanHandler.GetByID)
+		apiV1.Put("/plans/:id", svc.PlanHandler.Update)
+		apiV1.Delete("/plans/:id", svc.PlanHandler.Delete)
+		apiV1.Post("/plans/:id/pause", svc.PlanHandler.Pause)
+		apiV1.Post("/plans/:id/resume", svc.PlanHandler.Resume)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Task endpoints
+	// ---------------------------------------------------------------------------
+
+	if svc.TaskHandler != nil {
+		apiV1.Post("/tasks", svc.TaskHandler.Create)
+		apiV1.Get("/tasks", svc.TaskHandler.List)
+		apiV1.Get("/tasks/:id", svc.TaskHandler.GetByID)
+		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)
+		apiV1.Get("/tasks/:id/files", svc.TaskHandler.GetFiles)
+		apiV1.Get("/tasks/:id/stream", svc.TaskHandler.Stream)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Timeline endpoint
+	// ---------------------------------------------------------------------------
+
+	if svc.TimelineHandler != nil {
+		apiV1.Get("/timeline", svc.TimelineHandler.GetTimeline)
+	}
+
+	// MCP tools endpoint (placeholder for Phase 5 full MCP streamable HTTP).
+	if svc.Repo != nil && svc.Logger != nil {
+		apiV1.Get("/mcp/tools", mcp.NewMCPHttpHandler(svc.Repo, svc.Logger))
+	}
 
 	return app
 }
-

@@ -9,10 +9,13 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/hibiken/asynq v0.26.0
 	github.com/openai/openai-go/v3 v3.30.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/revrost/go-openrouter v1.1.7
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.0
+	github.com/severity1/claude-agent-sdk-go v0.6.12
 	github.com/silenceper/wechat/v2 v2.1.12
 	github.com/spf13/cobra v1.10.2
 	github.com/volcengine/volcengine-go-sdk v1.2.22
@@ -21,6 +24,7 @@ require (
 	google.golang.org/genai v1.51.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0
+	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
 
@@ -55,6 +59,7 @@ require (
 	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -80,6 +85,7 @@ require (
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
 	google.golang.org/api v0.273.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260319201613-d00831a3d3e7 // indirect

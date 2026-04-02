@@ -41,6 +41,38 @@ func (r *taskRepository) FindByUserID(ctx context.Context, userID string, offset
 	return tasks, nil
 }
 
+func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, offset, limit int) ([]*model.Task, error) {
+	var tasks []*model.Task
+	q := r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, status).Order("created_at DESC")
+	if limit > 0 {
+		q = q.Offset(offset).Limit(limit)
+	}
+	if err := q.Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (r *taskRepository) FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error) {
+	var tasks []*model.Task
+	q := r.db.WithContext(ctx).Where("created_at >= ? AND created_at <= ?", from, to).Order("created_at DESC")
+	if limit > 0 {
+		q = q.Offset(offset).Limit(limit)
+	}
+	if err := q.Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (r *taskRepository) FindRunning(ctx context.Context) ([]*model.Task, error) {
+	var tasks []*model.Task
+	if err := r.db.WithContext(ctx).Where("status = ?", model.TaskStatusRunning).Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
 func (r *taskRepository) UpdateStatus(ctx context.Context, id, status string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("status", status).Error
 }
@@ -74,6 +106,14 @@ func (r *taskRepository) SetCompletedAt(ctx context.Context, id string) error {
 func (r *taskRepository) CountByUserID(ctx context.Context, userID string) (int64, error) {
 	var count int64
 	if err := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, status string) (int64, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ? AND status = ?", userID, status).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil

@@ -15,12 +15,15 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
+	"github.com/royalrick/anbanwriter/server/agent"
 	"github.com/royalrick/anbanwriter/server/auth"
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/handler"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/router"
+	"github.com/royalrick/anbanwriter/server/scheduler"
+	"github.com/royalrick/anbanwriter/server/service"
 )
 
 // defaultConfigPaths lists config file locations to try when -config is not set.
@@ -109,23 +112,73 @@ func main() {
 		authHandler = handler.NewAuthHandler(jwtSvc, wechatSvc, repo, log, wsHub)
 	}
 
-	// 12. Build Services struct.
-	svcs := &router.Services{
-		Config:      cfg,
-		Logger:      log,
-		DB:          mysqlDB,
-		Redis:       rdb,
-		Repo:        repo,
-		JWTService:  jwtSvc,
-		WechatSvc:   wechatSvc,
-		WSHub:       wsHub,
-		AuthHandler: authHandler,
+	// 12. Create agent executor.
+	agentExecutor := agent.NewExecutor(log)
+
+	// 13. Create services.
+	var planSvc *service.PlanService
+	var taskSvc *service.TaskService
+	var asynqClient *scheduler.AsynqClient
+
+	if repo != nil {
+		planSvc = service.NewPlanService(repo, log)
+
+		// Create Asynq client if Redis is available.
+		if rdb != nil {
+			asynqClient = scheduler.NewAsynqClient(
+				cfg.Redis.Addr,
+				cfg.Redis.Password,
+				cfg.Redis.DB,
+			)
+			log.Info().Msg("Asynq client initialized")
+		}
+
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, log)
 	}
 
-	// 13. Create router.
+	// 14. Create handlers.
+	var planHandler *handler.PlanHandler
+	var taskHandler *handler.TaskHandler
+	var configHandler *handler.ConfigHandler
+	var timelineHandler *handler.TimelineHandler
+
+	if repo != nil {
+		planHandler = handler.NewPlanHandler(planSvc, log)
+		taskHandler = handler.NewTaskHandler(taskSvc, log)
+		configHandler = handler.NewConfigHandler(repo, log)
+		timelineHandler = handler.NewTimelineHandler(repo, log)
+	}
+
+	// 15. Start Asynq worker if Redis is available.
+	var asynqServer *scheduler.TaskProcessor
+	if rdb != nil && taskSvc != nil {
+		asynqServer = startAsynqServer(taskSvc, cfg, log)
+	}
+
+	// 16. Build Services struct.
+	svcs := &router.Services{
+		Config:          cfg,
+		Logger:          log,
+		DB:              mysqlDB,
+		Redis:           rdb,
+		Repo:            repo,
+		JWTService:      jwtSvc,
+		WechatSvc:       wechatSvc,
+		WSHub:           wsHub,
+		AuthHandler:     authHandler,
+		Executor:        agentExecutor,
+		PlanService:     planSvc,
+		TaskService:     taskSvc,
+		PlanHandler:     planHandler,
+		TaskHandler:     taskHandler,
+		ConfigHandler:   configHandler,
+		TimelineHandler: timelineHandler,
+	}
+
+	// 17. Create router.
 	app := router.NewRouter(svcs)
 
-	// 14. Start HTTP server with graceful shutdown.
+	// 18. Start HTTP server with graceful shutdown.
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
 	// Use signal.NotifyContext for graceful shutdown.
@@ -141,6 +194,19 @@ func main() {
 
 		if err := app.ShutdownWithContext(shutdownCtx); err != nil {
 			log.Error().Err(err).Msg("server shutdown error")
+		}
+
+		// Stop Asynq server.
+		if asynqServer != nil {
+			asynqServer.Shutdown()
+			log.Info().Msg("Asynq server stopped")
+		}
+
+		// Close Asynq client.
+		if asynqClient != nil {
+			if err := asynqClient.Close(); err != nil {
+				log.Error().Err(err).Msg("failed to close Asynq client")
+			}
 		}
 
 		if repo != nil {
@@ -215,6 +281,37 @@ func connectRedis(ctx context.Context, cfg *config.Config, log *zerolog.Logger) 
 
 	log.Info().Str("addr", cfg.Redis.Addr).Msg("Redis connection established")
 	return rdb
+}
+
+// startAsynqServer starts the Asynq task processor in a background goroutine.
+func startAsynqServer(taskSvc *service.TaskService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+	srv := scheduler.NewTaskProcessor(
+		func(ctx context.Context, taskID, userID string) error {
+			return taskSvc.HandleExecutionFromPayload(ctx, taskID, userID)
+		},
+		func(ctx context.Context, planID string) error {
+			log.Info().Str("plan_id", planID).Msg("plan trigger: placeholder")
+			return nil
+		},
+		func(ctx context.Context) error {
+			log.Info().Msg("task cleanup: placeholder")
+			return nil
+		},
+		cfg.Redis.Addr,
+		cfg.Redis.Password,
+		cfg.Redis.DB,
+		1,
+		log,
+	)
+
+	go func() {
+		log.Info().Msg("starting Asynq task processor")
+		if err := srv.Start(); err != nil {
+			log.Error().Err(err).Msg("Asynq server start error")
+		}
+	}()
+
+	return srv
 }
 
 // parseLogLevel converts a LOG_LEVEL string to a zerolog level.

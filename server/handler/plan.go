@@ -1,0 +1,167 @@
+package handler
+
+import (
+	"strconv"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/rs/zerolog"
+
+	"github.com/royalrick/anbanwriter/server/scheduler"
+	"github.com/royalrick/anbanwriter/server/service"
+)
+
+// PlanHandler handles plan-related HTTP endpoints.
+type PlanHandler struct {
+	service *service.PlanService
+	logger  *zerolog.Logger
+}
+
+// NewPlanHandler creates a new PlanHandler.
+func NewPlanHandler(svc *service.PlanService, logger *zerolog.Logger) *PlanHandler {
+	return &PlanHandler{service: svc, logger: logger}
+}
+
+// Request types.
+
+type createPlanRequest struct {
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	CronExpr    string `json:"cron_expr"`
+	TopicHint   string `json:"topic_hint"`
+}
+
+type updatePlanRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	CronExpr    string `json:"cron_expr"`
+	TopicHint   string `json:"topic_hint"`
+}
+
+// Create handles POST /api/v1/plans.
+func (h *PlanHandler) Create(c fiber.Ctx) error {
+	var req createPlanRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	if !scheduler.IsValidType(req.Type) {
+		return Error(c, fiber.StatusBadRequest, "type must be one of: article, xls, rednote")
+	}
+
+	userID := GetUserID(c)
+	plan, err := h.service.Create(c.Context(), userID, req.Type, req.Title, req.Description, req.CronExpr, req.TopicHint)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("create plan failed")
+		return Error(c, fiber.StatusInternalServerError, err.Error())
+	}
+
+	return Success(c, plan)
+}
+
+// List handles GET /api/v1/plans.
+func (h *PlanHandler) List(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	offset, _ := strconv.Atoi(c.Query("offset", "0"))
+	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	plans, total, err := h.service.List(c.Context(), userID, offset, limit)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("list plans failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to list plans")
+	}
+
+	return Success(c, fiber.Map{
+		"items": plans,
+		"total": total,
+	})
+}
+
+// GetByID handles GET /api/v1/plans/:id.
+func (h *PlanHandler) GetByID(c fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
+	}
+
+	plan, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "plan not found")
+	}
+
+	return Success(c, plan)
+}
+
+// Update handles PUT /api/v1/plans/:id.
+func (h *PlanHandler) Update(c fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
+	}
+
+	var req updatePlanRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	plan, err := h.service.Update(c.Context(), id, req.Title, req.Description, req.CronExpr, req.TopicHint)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("update plan failed")
+		return Error(c, fiber.StatusInternalServerError, err.Error())
+	}
+
+	return Success(c, plan)
+}
+
+// Delete handles DELETE /api/v1/plans/:id.
+func (h *PlanHandler) Delete(c fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
+	}
+
+	if err := h.service.Delete(c.Context(), id); err != nil {
+		h.logger.Error().Err(err).Msg("delete plan failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to delete plan")
+	}
+
+	return Success(c, fiber.Map{"message": "plan deleted"})
+}
+
+// Pause handles POST /api/v1/plans/:id/pause.
+func (h *PlanHandler) Pause(c fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
+	}
+
+	if err := h.service.Pause(c.Context(), id); err != nil {
+		h.logger.Error().Err(err).Msg("pause plan failed")
+		return Error(c, fiber.StatusInternalServerError, err.Error())
+	}
+
+	return Success(c, fiber.Map{"message": "plan paused"})
+}
+
+// Resume handles POST /api/v1/plans/:id/resume.
+func (h *PlanHandler) Resume(c fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
+	}
+
+	if err := h.service.Resume(c.Context(), id); err != nil {
+		h.logger.Error().Err(err).Msg("resume plan failed")
+		return Error(c, fiber.StatusInternalServerError, err.Error())
+	}
+
+	return Success(c, fiber.Map{"message": "plan resumed"})
+}

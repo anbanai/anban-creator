@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/royalrick/anbanwriter/server/model"
 
@@ -57,6 +58,7 @@ type PlanRepository interface {
 	Delete(ctx context.Context, id string) error
 	ListActive(ctx context.Context) ([]*model.Plan, error)
 	ListActiveByUserID(ctx context.Context, userID string) ([]*model.Plan, error)
+	CountByUserID(ctx context.Context, userID string) (int64, error)
 }
 
 // TaskRepository provides access to the tasks table.
@@ -64,6 +66,9 @@ type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	FindByID(ctx context.Context, id string) (*model.Task, error)
 	FindByUserID(ctx context.Context, userID string, offset, limit int) ([]*model.Task, error)
+	FindByUserIDAndStatus(ctx context.Context, userID, status string, offset, limit int) ([]*model.Task, error)
+	FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error)
+	FindRunning(ctx context.Context) ([]*model.Task, error)
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
 	UpdateProgressLog(ctx context.Context, id, log string) error
@@ -71,6 +76,7 @@ type TaskRepository interface {
 	SetStartedAt(ctx context.Context, id string) error
 	SetCompletedAt(ctx context.Context, id string) error
 	CountByUserID(ctx context.Context, userID string) (int64, error)
+	CountByUserIDAndStatus(ctx context.Context, userID, status string) (int64, error)
 }
 
 // TaskFileRepository provides access to the task_files table.
