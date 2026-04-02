@@ -38,12 +38,6 @@ func NewMCPHttpHandler(repo repository.Repository, logger *zerolog.Logger) fiber
 				&model.UserConfig{Scope: model.ScopeRednote},
 			)
 		}
-		if err != nil {
-			logger.Error().Err(err).Str("user_id", userID).Msg("failed to list user configs")
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "failed to load user configs",
-			})
-		}
 
 		// Build tool list based on configured scopes.
 		tools := buildToolList(configs)

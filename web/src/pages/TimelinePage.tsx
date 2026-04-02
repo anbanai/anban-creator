@@ -106,6 +106,11 @@ function itemTypeIcon(item: TimelineItem) {
   return item.type === 'plan' ? 'plan' : 'task'
 }
 
+const getItemDate = (item: TimelineItem) => {
+  // Tasks use created_at, plans use scheduled_at (next_run_at)
+  return item.scheduled_at || item.created_at || new Date().toISOString()
+}
+
 interface GroupedItems {
   [dateKey: string]: TimelineItem[]
 }
@@ -141,7 +146,7 @@ export default function TimelinePage() {
   const grouped = useMemo((): MonthGroup[] => {
     const byDate: GroupedItems = {}
     for (const item of items) {
-      const dateKey = item.scheduled_at.split('T')[0]
+      const dateKey = getItemDate(item).split('T')[0]
       if (!byDate[dateKey]) byDate[dateKey] = []
       byDate[dateKey].push(item)
     }
@@ -149,7 +154,7 @@ export default function TimelinePage() {
     // Sort items within each date by time
     for (const key of Object.keys(byDate)) {
       byDate[key].sort((a, b) =>
-        new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+        new Date(getItemDate(a)).getTime() - new Date(getItemDate(b)).getTime()
       )
     }
 
@@ -292,7 +297,7 @@ export default function TimelinePage() {
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs text-gray-500">
-                                      {formatTime(item.scheduled_at)}
+                                      {formatTime(getItemDate(item))}
                                     </span>
                                     <Badge variant="outline" className="text-[10px]">
                                       {contentTypeIcon(item.content_type)}
@@ -327,7 +332,7 @@ export default function TimelinePage() {
                                     className="text-xs text-amber-400 hover:text-amber-300"
                                     onClick={(e) => {
                                       e.preventDefault()
-                                      api.plans.pause(Number(item.id)).then(() => refetch())
+                                      api.plans.pause(item.id).then(() => refetch())
                                     }}
                                   >
                                     Pause
@@ -338,7 +343,7 @@ export default function TimelinePage() {
                                     className="text-xs text-green-400 hover:text-green-300"
                                     onClick={(e) => {
                                       e.preventDefault()
-                                      api.plans.resume(Number(item.id)).then(() => refetch())
+                                      api.plans.resume(item.id).then(() => refetch())
                                     }}
                                   >
                                     Resume

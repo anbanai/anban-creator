@@ -147,6 +147,14 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "email and password are required")
 	}
 
+	if req.Email != "" && !strings.Contains(req.Email, "@") {
+		return Error(c, fiber.StatusBadRequest, "invalid email format")
+	}
+
+	if len(req.Password) < 6 {
+		return Error(c, fiber.StatusBadRequest, "password must be at least 6 characters")
+	}
+
 	// Check if user already exists.
 	ctx := c.Context()
 	existing, err := h.repo.Users().FindByEmail(ctx, req.Email)

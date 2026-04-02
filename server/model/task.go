@@ -4,7 +4,7 @@ import "time"
 
 // Task represents a content generation task.
 type Task struct {
-	ID           string     `gorm:"type:char(26);primaryKey" json:"id"`
+	ID           string     `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID       string     `gorm:"type:char(36);index;not null" json:"user_id"`
 	PlanID       *uint      `gorm:"index" json:"plan_id"`
 	Type         string     `gorm:"type:varchar(20);not null" json:"type"`

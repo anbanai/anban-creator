@@ -20,6 +20,16 @@ import (
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
+// safePath resolves path relative to workDir and ensures it does not escape workDir.
+func safePath(workDir, path string) (string, error) {
+	absWorkDir, _ := filepath.Abs(workDir)
+	fullPath, _ := filepath.Abs(filepath.Join(workDir, path))
+	if !strings.HasPrefix(fullPath, absWorkDir+string(os.PathSeparator)) {
+		return "", fmt.Errorf("access denied: path escapes workspace")
+	}
+	return fullPath, nil
+}
+
 // BuildAppConfig constructs an app/config.Config from a UserConfig DB record.
 // This bridges the multi-user server config to the single-account app config.
 func BuildAppConfig(userConfig *model.UserConfig) (*config.Config, error) {
@@ -137,6 +147,10 @@ func getCoverImageAPI(cfg *config.Config, scope string) *config.ImageAPI {
 
 // CreateMCPTools creates an SDK MCP server with tools that wrap the app/ packages.
 func CreateMCPTools(workDir string, userConfig *model.UserConfig, logger *zerolog.Logger) (*claudecode.McpSdkServerConfig, error) {
+	if userConfig == nil {
+		return nil, fmt.Errorf("user config is required")
+	}
+
 	cfg, err := BuildAppConfig(userConfig)
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
@@ -368,7 +382,13 @@ func CreateMCPTools(workDir string, userConfig *model.UserConfig, logger *zerolo
 			path := args["path"].(string)
 			content := args["content"].(string)
 
-			fullPath := filepath.Join(workDir, path)
+			fullPath, err := safePath(workDir, path)
+			if err != nil {
+				return &claudecode.McpToolResult{
+					Content: []claudecode.McpContent{{Type: "text", Text: fmt.Sprintf("access denied: %v", err)}},
+					IsError: true,
+				}, nil
+			}
 			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 				return &claudecode.McpToolResult{
 					Content: []claudecode.McpContent{{Type: "text", Text: fmt.Sprintf("mkdir failed: %v", err)}},
@@ -403,7 +423,13 @@ func CreateMCPTools(workDir string, userConfig *model.UserConfig, logger *zerolo
 		},
 		func(ctx context.Context, args map[string]any) (*claudecode.McpToolResult, error) {
 			path := args["path"].(string)
-			fullPath := filepath.Join(workDir, path)
+			fullPath, err := safePath(workDir, path)
+			if err != nil {
+				return &claudecode.McpToolResult{
+					Content: []claudecode.McpContent{{Type: "text", Text: fmt.Sprintf("access denied: %v", err)}},
+					IsError: true,
+				}, nil
+			}
 
 			data, err := os.ReadFile(fullPath)
 			if err != nil {
@@ -434,7 +460,14 @@ func CreateMCPTools(workDir string, userConfig *model.UserConfig, logger *zerolo
 		func(ctx context.Context, args map[string]any) (*claudecode.McpToolResult, error) {
 			dir := workDir
 			if p, ok := args["path"].(string); ok && p != "" {
-				dir = filepath.Join(workDir, p)
+				safeDir, err := safePath(workDir, p)
+				if err != nil {
+					return &claudecode.McpToolResult{
+						Content: []claudecode.McpContent{{Type: "text", Text: fmt.Sprintf("access denied: %v", err)}},
+						IsError: true,
+					}, nil
+				}
+				dir = safeDir
 			}
 
 			entries, err := os.ReadDir(dir)

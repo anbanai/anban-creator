@@ -13,6 +13,11 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		// In production, check against allowed origins
+		// For now, allow all during development
+		return true
+	},
 }
 
 // WSClient represents a connected WebSocket client in a scene group.
@@ -75,31 +80,25 @@ func (h *WebSocketHub) run() {
 			h.mu.Unlock()
 
 		case msg := <-h.broadcast:
-			h.mu.RLock()
+			h.mu.Lock()
+			defer h.mu.Unlock()
 			conns := h.clients[msg.Scene]
 			if conns == nil {
-				h.mu.RUnlock()
 				continue
 			}
 			data, err := json.Marshal(msg)
 			if err != nil {
-				h.mu.RUnlock()
 				continue
 			}
+			var toClose []*websocket.Conn
 			for conn := range conns {
-				err := conn.WriteMessage(websocket.TextMessage, data)
-				if err != nil {
-					conn.Close()
-					delete(conns, conn)
+				if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+					toClose = append(toClose, conn)
 				}
 			}
-			if len(conns) == 0 {
-				h.mu.RUnlock()
-				h.mu.Lock()
-				delete(h.clients, msg.Scene)
-				h.mu.Unlock()
-			} else {
-				h.mu.RUnlock()
+			for _, conn := range toClose {
+				delete(conns, conn)
+				conn.Close()
 			}
 		}
 	}

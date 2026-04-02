@@ -92,9 +92,18 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "plan id is required")
 	}
 
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
 	plan, err := h.service.GetByID(c.Context(), id)
 	if err != nil {
 		return Error(c, fiber.StatusNotFound, "plan not found")
+	}
+
+	if plan.UserID != userID {
+		return Forbidden(c, "you do not have access to this plan")
 	}
 
 	return Success(c, plan)
@@ -107,9 +116,23 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "plan id is required")
 	}
 
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
 	var req updatePlanRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	// Verify ownership before update.
+	existing, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "plan not found")
+	}
+	if existing.UserID != userID {
+		return Forbidden(c, "you do not have access to this plan")
 	}
 
 	plan, err := h.service.Update(c.Context(), id, req.Title, req.Description, req.CronExpr, req.TopicHint)
@@ -128,6 +151,20 @@ func (h *PlanHandler) Delete(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "plan id is required")
 	}
 
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Verify ownership before delete.
+	existing, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "plan not found")
+	}
+	if existing.UserID != userID {
+		return Forbidden(c, "you do not have access to this plan")
+	}
+
 	if err := h.service.Delete(c.Context(), id); err != nil {
 		h.logger.Error().Err(err).Msg("delete plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to delete plan")
@@ -143,6 +180,20 @@ func (h *PlanHandler) Pause(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "plan id is required")
 	}
 
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Verify ownership before pause.
+	existing, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "plan not found")
+	}
+	if existing.UserID != userID {
+		return Forbidden(c, "you do not have access to this plan")
+	}
+
 	if err := h.service.Pause(c.Context(), id); err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("pause plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to pause plan")
@@ -156,6 +207,20 @@ func (h *PlanHandler) Resume(c fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
 		return Error(c, fiber.StatusBadRequest, "plan id is required")
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Verify ownership before resume.
+	existing, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "plan not found")
+	}
+	if existing.UserID != userID {
+		return Forbidden(c, "you do not have access to this plan")
 	}
 
 	if err := h.service.Resume(c.Context(), id); err != nil {

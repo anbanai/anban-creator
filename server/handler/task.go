@@ -90,9 +90,18 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "task id is required")
 	}
 
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
 	task, err := h.service.GetByID(c.Context(), id)
 	if err != nil {
 		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
 	}
 
 	return Success(c, task)
@@ -103,6 +112,20 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
 		return Error(c, fiber.StatusBadRequest, "task id is required")
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Verify ownership before cancel.
+	task, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
 	}
 
 	if err := h.service.Cancel(c.Context(), id); err != nil {
@@ -118,6 +141,20 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
 		return Error(c, fiber.StatusBadRequest, "task id is required")
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Verify ownership before getting files.
+	task, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
 	}
 
 	files, err := h.service.GetFiles(c.Context(), id)
@@ -139,6 +176,20 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 	taskID := c.Params("id")
 	if taskID == "" {
 		return Error(c, fiber.StatusBadRequest, "task id is required")
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Verify ownership before streaming.
+	task, err := h.service.GetByID(c.Context(), taskID)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
 	}
 
 	ctx := c.Context()

@@ -108,7 +108,7 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 
 	// 6. Build allowed MCP tool names.
 	allowedTools := []string{
-		"Read", "Write", "Glob", "Grep", "Bash", "Glob", "Edit",
+		"Read", "Write", "Glob", "Grep", "Bash", "Edit",
 		// Our MCP tools.
 		"mcp__anbanwriter__generate_image",
 		"mcp__anbanwriter__generate_cover_image",

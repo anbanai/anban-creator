@@ -27,3 +27,8 @@ func Error(c fiber.Ctx, status int, msg string) error {
 func Errorf(c fiber.Ctx, status int, format string, args ...interface{}) error {
 	return c.Status(status).JSON(Response{Code: status*100, Msg: fmt.Sprintf(format, args...)})
 }
+
+// Forbidden returns a 403 JSON error response.
+func Forbidden(c fiber.Ctx, msg string) error {
+	return c.Status(fiber.StatusForbidden).JSON(Response{Code: 40300, Msg: msg})
+}

@@ -21,17 +21,17 @@ export interface AuthResponse {
 
 export interface ApiResponse<T = unknown> {
   code: number
-  message: string
+  msg: string
   data: T
 }
 
 // --- Plan Types ---
 
 export type PlanType = 'rednote' | 'article' | 'xls'
-export type PlanStatus = 'active' | 'paused'
+export type PlanStatus = 'active' | 'paused' | 'completed'
 
 export interface Plan {
-  id: number
+  id: string
   type: PlanType
   title: string
   description: string
@@ -231,19 +231,19 @@ export const api = {
     list: (params?: { offset?: number; limit?: number }) =>
       unwrap<PaginatedResponse<Plan>>(http.get('/plans', { params })),
 
-    get: (id: number) =>
+    get: (id: string) =>
       unwrap<Plan>(http.get(`/plans/${id}`)),
 
-    update: (id: number, data: UpdatePlanRequest) =>
+    update: (id: string, data: UpdatePlanRequest) =>
       unwrap<Plan>(http.put(`/plans/${id}`, data)),
 
-    delete: (id: number) =>
+    delete: (id: string) =>
       unwrap<void>(http.delete(`/plans/${id}`)),
 
-    pause: (id: number) =>
+    pause: (id: string) =>
       unwrap<void>(http.post(`/plans/${id}/pause`)),
 
-    resume: (id: number) =>
+    resume: (id: string) =>
       unwrap<void>(http.post(`/plans/${id}/resume`)),
   },
 

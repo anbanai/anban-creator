@@ -84,7 +84,7 @@ export default function PlansPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: CreatePlanRequest }) => api.plans.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: CreatePlanRequest }) => api.plans.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] })
       closeModal()
@@ -95,21 +95,21 @@ export default function PlansPage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.plans.delete(id),
+    mutationFn: (id: string) => api.plans.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] })
     },
   })
 
   const pauseMutation = useMutation({
-    mutationFn: (id: number) => api.plans.pause(id),
+    mutationFn: (id: string) => api.plans.pause(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] })
     },
   })
 
   const resumeMutation = useMutation({
-    mutationFn: (id: number) => api.plans.resume(id),
+    mutationFn: (id: string) => api.plans.resume(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] })
     },

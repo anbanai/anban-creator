@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"sort"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -155,6 +156,17 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	if items == nil {
 		items = []TimelineItem{}
 	}
+
+	// Sort items by date (scheduled_at > created_at) for consistent ordering.
+	sort.Slice(items, func(i, j int) bool {
+		getDate := func(item TimelineItem) time.Time {
+			if item.ScheduledAt != nil {
+				return *item.ScheduledAt
+			}
+			return item.CreatedAt
+		}
+		return getDate(items[i]).Before(getDate(items[j]))
+	})
 
 	return Success(c, fiber.Map{
 		"items": items,
