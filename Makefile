@@ -1,7 +1,7 @@
 # Writer CLI Makefile
 # 微信公众号写作工具统一构建
 
-.PHONY: all build clean test install help lint fmt vet release sync
+.PHONY: all build clean test install help lint fmt vet release sync server-build server-run server-dev
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -s -w -X main.version=$(VERSION)
@@ -115,5 +115,22 @@ help:
 	@echo "文档同步:"
 	@echo "  make sync        - 同步 Skill 目录到插件目录"
 	@echo ""
+	@echo "  make server-build - 构建 server 二进制到 bin/anbanwriter-server"
+	@echo "  make server-run   - 构建并运行 server"
+	@echo "  make server-dev   - go run 运行 server（开发用）"
+	@echo ""
 	@echo "用户快速安装:"
 	@echo "  go install github.com/royalrick/anbanwriter/app/cmd/writer@latest"
+
+# Server 构建
+server-build:
+	@echo "🔨 构建 server..."
+	@mkdir -p bin
+	@go build -o bin/anbanwriter-server ./server
+	@echo "✅ 构建完成: bin/anbanwriter-server"
+
+server-run: server-build
+	@./bin/anbanwriter-server
+
+server-dev:
+	@cd server && go run .
