@@ -1,0 +1,69 @@
+# AnbanWriter Online Service Configuration
+# Copy this file to config.yaml and adjust values as needed.
+# All fields can also be set via ANBAN_SERVER_ prefixed environment variables
+# (e.g. ANBAN_SERVER_DATABASE_DSN, ANBAN_SERVER_JWT_SECRET_KEY).
+
+# ---------------------------------------------------------------------------
+# Server: HTTP listen configuration
+# ---------------------------------------------------------------------------
+server:
+  port: 8080
+  host: "0.0.0.0"
+
+# ---------------------------------------------------------------------------
+# Database: MySQL connection
+# Required. The server will not start without a valid DSN.
+# ---------------------------------------------------------------------------
+database:
+  dsn: "root:password@tcp(localhost:3306)/anbanwriter?charset=utf8mb4&parseTime=True&loc=Local"
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 3600
+
+# ---------------------------------------------------------------------------
+# Redis: Cache and async task queue (Asynq)
+# Optional. Falls back to in-process execution if unavailable.
+# ---------------------------------------------------------------------------
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+
+# ---------------------------------------------------------------------------
+# JWT: JSON Web Token authentication
+# Required. secret_key must be set.
+# Generate with: openssl rand -hex 32
+# ---------------------------------------------------------------------------
+jwt:
+  secret_key: ""  # REQUIRED: set your own key
+  access_expiry: "24h"
+  refresh_expiry: "168h"
+
+# ---------------------------------------------------------------------------
+# WeChat: Optional WeChat mini-program login integration
+# ---------------------------------------------------------------------------
+wechat:
+  app_id: ""
+  app_secret: ""
+
+# ---------------------------------------------------------------------------
+# Storage: File storage configuration
+# Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
+# ---------------------------------------------------------------------------
+storage:
+  provider: "local"
+  endpoint: ""
+  access_key_id: ""
+  access_key_secret: ""
+  bucket_name: ""
+  region: ""
+  custom_domain: ""
+  local_data_dir: "./data/files"
+
+# ---------------------------------------------------------------------------
+# MCP: Model Context Protocol endpoint configuration
+# Optional. Set api_key to enable X-API-Key authentication.
+# Generate with: openssl rand -hex 32
+# ---------------------------------------------------------------------------
+mcp:
+  api_key: ""  # Optional: set for Claude Code integration

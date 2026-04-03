@@ -159,7 +159,6 @@ func main() {
 	var planHandler *handler.PlanHandler
 	var taskHandler *handler.TaskHandler
 	var channelHandler *handler.ChannelHandler
-	var configHandler *handler.ConfigHandler
 	var timelineHandler *handler.TimelineHandler
 
 	if repo != nil {
@@ -167,7 +166,6 @@ func main() {
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
 		channelHandler = handler.NewChannelHandler(channelSvc, log)
-		configHandler = handler.NewConfigHandler(repo, log)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 	}
 
@@ -208,7 +206,6 @@ func main() {
 		ChannelHandler:  channelHandler,
 		PlanHandler:     planHandler,
 		TaskHandler:     taskHandler,
-		ConfigHandler:   configHandler,
 		TimelineHandler: timelineHandler,
 		StorageProvider: store,
 	}

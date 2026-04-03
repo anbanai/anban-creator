@@ -69,7 +69,6 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		authHandler := handler.NewAuthHandler(jwtSvc, nil, repo, &logger, wsHub)
 		planHandler := handler.NewPlanHandler(planSvc, &logger)
 		taskHandler := handler.NewTaskHandler(taskSvc, &logger)
-		configHandler := handler.NewConfigHandler(repo, &logger)
 		timelineHandler := handler.NewTimelineHandler(repo, &logger)
 
 		svcs = &Services{
@@ -84,7 +83,6 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 			TaskService:     taskSvc,
 			PlanHandler:     planHandler,
 			TaskHandler:     taskHandler,
-			ConfigHandler:   configHandler,
 			TimelineHandler: timelineHandler,
 		}
 	} else {

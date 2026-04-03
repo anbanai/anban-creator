@@ -106,7 +106,6 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	authHandler := handler.NewAuthHandler(jwtSvc, nil, repo, &logger, wsHub)
 	planHandler := handler.NewPlanHandler(planSvc, &logger)
 	taskHandler := handler.NewTaskHandler(taskSvc, &logger)
-	configHandler := handler.NewConfigHandler(repo, &logger)
 	timelineHandler := handler.NewTimelineHandler(repo, &logger)
 
 	svcs := &router.Services{
@@ -121,7 +120,6 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 		TaskService:     taskSvc,
 		PlanHandler:     planHandler,
 		TaskHandler:     taskHandler,
-		ConfigHandler:   configHandler,
 		TimelineHandler: timelineHandler,
 		// Redis nil: rate limiter becomes pass-through.
 		// Executor nil: TaskService won't execute tasks.
@@ -452,82 +450,6 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 	}
 }
 
-// TestE2E_UserConfigManagement tests creating and retrieving user configs.
-func TestE2E_UserConfigManagement(t *testing.T) {
-	app, closeFunc, _ := setupTestRouter(t)
-	defer closeFunc()
-
-	token, _ := registerUser(t, app, "config@example.com", "testpassword123", "Config User")
-
-	// Step 1: Upsert a config for "rednote" scope.
-	configBody, _ := json.Marshal(map[string]string{
-		"name":        "Test Account",
-		"keywords":    "fashion,lifestyle",
-		"positioning": "young trendy women",
-		"style":       "casual",
-		"theme":       "spring-fresh",
-		"author":      "TestAuthor",
-	})
-	upsertReq := httptest.NewRequest("PUT", "/api/v1/configs/rednote", strings.NewReader(string(configBody)))
-	upsertReq.Header.Set("Content-Type", "application/json")
-	upsertReq.Header.Set("Authorization", "Bearer "+token)
-	upsertResp, err := app.Test(upsertReq)
-	if err != nil {
-		t.Fatalf("upsert config request failed: %v", err)
-	}
-	if upsertResp.StatusCode != fiber.StatusOK {
-		result := parseJSONBody(t, upsertResp)
-		t.Fatalf("upsert config returned %d: %s", upsertResp.StatusCode, result["msg"])
-	}
-
-	// Step 2: Get the config back.
-	getReq := httptest.NewRequest("GET", "/api/v1/configs/rednote", nil)
-	getReq.Header.Set("Authorization", "Bearer "+token)
-	getResp, err := app.Test(getReq)
-	if err != nil {
-		t.Fatalf("get config request failed: %v", err)
-	}
-	if getResp.StatusCode != fiber.StatusOK {
-		result := parseJSONBody(t, getResp)
-		t.Fatalf("get config returned %d: %s", getResp.StatusCode, result["msg"])
-	}
-
-	getResult := parseJSONBody(t, getResp)
-	configData := getResult["data"].(map[string]interface{})
-
-	// Verify fields match.
-	if configData["scope"].(string) != "rednote" {
-		t.Errorf("expected scope 'rednote', got %s", configData["scope"])
-	}
-	if configData["name"].(string) != "Test Account" {
-		t.Errorf("expected name 'Test Account', got %s", configData["name"])
-	}
-	if configData["keywords"].(string) != "fashion,lifestyle" {
-		t.Errorf("expected keywords 'fashion,lifestyle', got %s", configData["keywords"])
-	}
-	if configData["author"].(string) != "TestAuthor" {
-		t.Errorf("expected author 'TestAuthor', got %s", configData["author"])
-	}
-
-	// Step 3: List all configs.
-	listReq := httptest.NewRequest("GET", "/api/v1/configs", nil)
-	listReq.Header.Set("Authorization", "Bearer "+token)
-	listResp, err := app.Test(listReq)
-	if err != nil {
-		t.Fatalf("list configs request failed: %v", err)
-	}
-	if listResp.StatusCode != fiber.StatusOK {
-		result := parseJSONBody(t, listResp)
-		t.Fatalf("list configs returned %d: %s", listResp.StatusCode, result["msg"])
-	}
-
-	listResult := parseJSONBody(t, listResp)
-	configs := listResult["data"].([]interface{})
-	if len(configs) == 0 {
-		t.Fatal("expected at least 1 config in list, got 0")
-	}
-}
-
 // TestE2E_AuthLifecycle tests registration, login, token refresh, and logout.
 func TestE2E_AuthLifecycle(t *testing.T) {
 	app, closeFunc, _ := setupTestRouter(t)
@@ -840,14 +762,6 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			method:     "POST",
 			path:       "/api/v1/plans",
 			body:       `{"title":"test"}`,
-			auth:       true,
-			wantStatus: fiber.StatusBadRequest,
-		},
-		{
-			name:       "get config with invalid scope",
-			method:     "GET",
-			path:       "/api/v1/configs/invalidscope",
-			body:       "",
 			auth:       true,
 			wantStatus: fiber.StatusBadRequest,
 		},

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/app/converter"
@@ -195,13 +197,13 @@ func runConvert(cmd *cobra.Command, args []string) error {
 
 	// 输出结果
 	if convertSaveDraft != "" {
-		if err := saveDraft(result); err != nil {
+		if err := saveDraft(result, string(markdown)); err != nil {
 			return fmt.Errorf("save draft: %w", err)
 		}
 	}
 
 	if convertDraft {
-		if err := createWeChatDraft(result, convertCoverImage); err != nil {
+		if err := createWeChatDraft(result, convertCoverImage, string(markdown)); err != nil {
 			return fmt.Errorf("create draft: %w", err)
 		}
 	}
@@ -298,10 +300,10 @@ func processImages(result *converter.ConvertResult) error {
 }
 
 // saveDraft 保存草稿 JSON 到文件
-func saveDraft(result *converter.ConvertResult) error {
+func saveDraft(result *converter.ConvertResult, markdown string) error {
 	articles := []draft.Article{
 		{
-			Title:   "Draft Article", // TODO: 从 markdown 提取标题
+			Title:   extractTitle(markdown),
 			Content: result.HTML,
 		},
 	}
@@ -324,7 +326,7 @@ func saveDraft(result *converter.ConvertResult) error {
 }
 
 // createWeChatDraft 创建微信草稿
-func createWeChatDraft(result *converter.ConvertResult, coverImagePath string) error {
+func createWeChatDraft(result *converter.ConvertResult, coverImagePath, markdown string) error {
 	svc := draft.NewService(cfg, log)
 
 	// 检查封面图片（微信要求必须有封面图）
@@ -344,8 +346,8 @@ func createWeChatDraft(result *converter.ConvertResult, coverImagePath string) e
 	}
 	log.Info("cover image uploaded", zap.String("media_id", maskMediaID(coverMediaID)))
 
-	// 提取标题（TODO: 从 markdown frontmatter 或第一个标题获取）
-	title := "Article Title"
+	// 提取标题
+	title := extractTitle(markdown)
 
 	draftResult, err := svc.CreateDraft([]draft.Article{
 		{
@@ -368,6 +370,45 @@ func createWeChatDraft(result *converter.ConvertResult, coverImagePath string) e
 	return nil
 }
 
+// extractTitle 从 Markdown 内容中提取标题。
+// 优先从 frontmatter 的 title 字段获取，其次取第一个 H1 标题。
+func extractTitle(markdown string) string {
+	scanner := bufio.NewScanner(strings.NewReader(markdown))
+
+	inFrontmatter := false
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// 检测 frontmatter 开始
+		if line == "---" {
+			if !inFrontmatter {
+				inFrontmatter = true
+				continue
+			}
+			break // frontmatter 结束
+		}
+
+		if inFrontmatter {
+			if strings.HasPrefix(line, "title:") {
+				title := strings.TrimSpace(strings.TrimPrefix(line, "title:"))
+				// 去除引号
+				title = strings.Trim(title, `"'`)
+				if title != "" {
+					return title
+				}
+			}
+			continue
+		}
+
+		// frontmatter 外：取第一个 H1
+		if strings.HasPrefix(line, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		}
+	}
+
+	return "Untitled"
+}
+
 // uploadCoverImage 上传封面图片到微信素材库
 func uploadCoverImage(imagePath string) (string, error) {
 	svc := wechat.NewService(cfg, log)
@@ -377,22 +418,6 @@ func uploadCoverImage(imagePath string) (string, error) {
 	}
 	return result.MediaID, nil
 }
-
-// DraftError 草稿错误
-type DraftError struct {
-	Message string
-	HintMsg string
-}
-
-func (e *DraftError) Error() string {
-	msg := fmt.Sprintf("草稿错误: %s", e.Message)
-	if e.HintMsg != "" {
-		msg += fmt.Sprintf("\n💡 提示:\n   %s", e.HintMsg)
-	}
-	return msg
-}
-
-func (e *DraftError) Hint() string { return e.HintMsg }
 
 // outputHTML 输出 HTML
 func outputHTML(html, outputPath string, preview bool) {

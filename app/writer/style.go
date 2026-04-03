@@ -26,7 +26,9 @@ func NewStyleManager() *StyleManager {
 
 // LoadStyles 加载所有风格配置
 func (sm *StyleManager) LoadStyles() error {
-	sm.writersDir = sm.getWritersDir()
+	if sm.writersDir == "" {
+		sm.writersDir = sm.getWritersDir()
+	}
 
 	// 检查目录是否存在
 	if _, err := os.Stat(sm.writersDir); os.IsNotExist(err) {

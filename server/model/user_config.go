@@ -1,24 +1,22 @@
 package model
 
-import "time"
-
-// UserConfig stores per-scope configuration for a user (e.g. WeChat credentials per content type).
+// UserConfig is a legacy model retained only for data migration.
+// New code should use Channel instead.
 type UserConfig struct {
-	ID             uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID         string    `gorm:"type:char(36);index;not null" json:"user_id"`
-	Scope          string    `gorm:"type:varchar(20);not null" json:"scope"` // article, xls, rednote
-	WechatAppID    string    `gorm:"type:varchar(100)" json:"wechat_app_id"`
-	WechatSecret   string    `gorm:"type:varchar(200)" json:"wechat_secret"`
-	Name           string    `gorm:"type:varchar(100)" json:"name"`
-	Keywords       string    `gorm:"type:text" json:"keywords"`
-	Positioning    string    `gorm:"type:text" json:"positioning"`
-	Style          string    `gorm:"type:varchar(50)" json:"style"`
-	Theme          string    `gorm:"type:varchar(50)" json:"theme"`
-	Author         string    `gorm:"type:varchar(50)" json:"author"`
-	ImageAPIConfig string    `gorm:"type:json" json:"image_api_config"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `gorm:"primaryKey;size:64"`
+	UserID         string `gorm:"size:64;index"`
+	Scope          string `gorm:"size:32"`
+	Name           string `gorm:"size:128"`
+	WechatAppID    string `gorm:"column:wechat_app_id;size:64"`
+	WechatSecret   string `gorm:"column:wechat_secret;size:128"`
+	Keywords       string `gorm:"type:text"`
+	Positioning    string `gorm:"type:text"`
+	Style          string `gorm:"size:64"`
+	Theme          string `gorm:"size:64"`
+	Author         string `gorm:"size:128"`
+	ImageAPIConfig string `gorm:"column:image_api_config;type:text"`
 }
 
-// TableName returns the database table name for UserConfig.
-func (UserConfig) TableName() string { return "user_configs" }
+func (UserConfig) TableName() string {
+	return "user_configs"
+}

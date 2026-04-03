@@ -1,0 +1,244 @@
+package service
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/royalrick/anbanwriter/server/model"
+)
+
+// mimeTypes maps file extensions to MIME types.
+var mimeTypes = map[string]string{
+	".html":     "text/html",
+	".htm":      "text/html",
+	".css":      "text/css",
+	".js":       "application/javascript",
+	".json":     "application/json",
+	".md":       "text/markdown",
+	".markdown": "text/markdown",
+	".png":      "image/png",
+	".jpg":      "image/jpeg",
+	".jpeg":     "image/jpeg",
+	".gif":      "image/gif",
+	".webp":     "image/webp",
+	".svg":      "image/svg+xml",
+	".mp4":      "video/mp4",
+	".pdf":      "application/pdf",
+	".zip":      "application/zip",
+}
+
+// detectMimeType returns the MIME type for a file based on its extension.
+// Falls back to net/http.DetectContentType by reading the first 512 bytes.
+func detectMimeType(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if mime, ok := mimeTypes[ext]; ok {
+		return mime
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "application/octet-stream"
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	return http.DetectContentType(buf[:n])
+}
+
+// determineFileRole returns the role for a file based on its name and MIME type.
+func determineFileRole(filename, mimeType string) string {
+	base := strings.ToLower(filepath.Base(filename))
+	if strings.HasPrefix(base, "cover") {
+		return model.FileRoleCover
+	}
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext == ".html" || ext == ".htm" {
+		return model.FileRoleHTML
+	}
+	if ext == ".md" || ext == ".markdown" {
+		return model.FileRoleMarkdown
+	}
+	if strings.HasPrefix(mimeType, "image/") {
+		return model.FileRoleImage
+	}
+	return model.FileRoleOther
+}
+
+// UploadTaskFiles uploads all files from a task's work directory to storage.
+// Individual upload failures are logged but do not abort the remaining uploads.
+// Returns an error only if the work directory cannot be read at all.
+func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workDir string) error {
+	if s.store == nil {
+		s.logger.Warn().Msg("no storage provider configured, skipping file upload")
+		return nil
+	}
+
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return fmt.Errorf("read work directory %s: %w", workDir, err)
+	}
+
+	var batch []*model.TaskFile
+	providerName := s.store.Name()
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		filename := entry.Name()
+		filePath := filepath.Join(workDir, filename)
+
+		info, err := entry.Info()
+		if err != nil {
+			s.logger.Warn().Err(err).Str("file", filename).Msg("failed to get file info, skipping")
+			continue
+		}
+
+		mimeType := detectMimeType(filePath)
+		role := determineFileRole(filename, mimeType)
+		ossKey := fmt.Sprintf("%s/%s/%s", userID, taskID, filename)
+
+		uploadResult, err := s.store.UploadFile(ctx, ossKey, filePath, mimeType)
+		if err != nil {
+			s.logger.Error().Err(err).
+				Str("file", filename).
+				Str("key", ossKey).
+				Msg("failed to upload file, skipping")
+			continue
+		}
+
+		fileSize := info.Size()
+		if uploadResult.Size > 0 {
+			fileSize = uploadResult.Size
+		}
+
+		batch = append(batch, &model.TaskFile{
+			TaskID:          taskID,
+			Role:            role,
+			FileName:        filename,
+			MimeType:        mimeType,
+			FileSize:        fileSize,
+			OSSKey:          ossKey,
+			OSSURL:          uploadResult.URL,
+			StorageProvider: providerName,
+			FilePath:        filePath,
+		})
+	}
+
+	if len(batch) > 0 {
+		if err := s.repo.TaskFiles().BatchCreate(ctx, batch); err != nil {
+			s.logger.Error().Err(err).
+				Str("task_id", taskID).
+				Int("count", len(batch)).
+				Msg("failed to persist task file records")
+		} else {
+			s.logger.Info().
+				Str("task_id", taskID).
+				Int("count", len(batch)).
+				Msg("task files uploaded to storage")
+		}
+	}
+
+	return nil
+}
+
+// GetFileStream returns a ReadCloser for a task file's content and the TaskFile metadata.
+func (s *TaskService) GetFileStream(ctx context.Context, fileID string) (io.ReadCloser, *model.TaskFile, error) {
+	file, err := s.repo.TaskFiles().FindByID(ctx, fileID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("find task file: %w", err)
+	}
+
+	data, err := s.getFileContent(ctx, file)
+	if err != nil {
+		return nil, file, fmt.Errorf("read file content: %w", err)
+	}
+
+	return io.NopCloser(bytes.NewReader(data)), file, nil
+}
+
+// DownloadZip creates a ZIP archive of all files belonging to a task.
+// Returns the ZIP buffer and the suggested download filename.
+func (s *TaskService) DownloadZip(ctx context.Context, taskID string) (*bytes.Buffer, string, error) {
+	files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, "", fmt.Errorf("find task files: %w", err)
+	}
+	if len(files) == 0 {
+		return nil, "", fmt.Errorf("no files found for task %s", taskID)
+	}
+
+	var buf bytes.Buffer
+	zipWriter := zip.NewWriter(&buf)
+
+	for _, file := range files {
+		data, err := s.getFileContent(ctx, file)
+		if err != nil {
+			s.logger.Warn().Err(err).
+				Str("file_name", file.FileName).
+				Str("oss_key", file.OSSKey).
+				Msg("failed to read file for zip, skipping")
+			continue
+		}
+
+		w, err := zipWriter.Create(file.FileName)
+		if err != nil {
+			s.logger.Warn().Err(err).
+				Str("file_name", file.FileName).
+				Msg("failed to create zip entry, skipping")
+			continue
+		}
+
+		if _, err := w.Write(data); err != nil {
+			s.logger.Warn().Err(err).
+				Str("file_name", file.FileName).
+				Msg("failed to write file to zip, skipping")
+			continue
+		}
+	}
+
+	if err := zipWriter.Close(); err != nil {
+		return nil, "", fmt.Errorf("close zip writer: %w", err)
+	}
+
+	zipName := fmt.Sprintf("task_%s_files.zip", taskID)
+	return &buf, zipName, nil
+}
+
+// getFileContent reads the full content of a task file based on its storage provider.
+func (s *TaskService) getFileContent(ctx context.Context, file *model.TaskFile) ([]byte, error) {
+	if s.store == nil {
+		return nil, fmt.Errorf("no storage provider configured")
+	}
+
+	if s.store.Name() == "local" {
+		return os.ReadFile(file.FilePath)
+	}
+
+	// For OSS and other remote providers, use a signed URL.
+	signedURL, err := s.store.DownloadURL(ctx, file.OSSKey, 3600)
+	if err != nil {
+		return nil, fmt.Errorf("get download URL for %s: %w", file.OSSKey, err)
+	}
+
+	resp, err := http.Get(signedURL)
+	if err != nil {
+		return nil, fmt.Errorf("download file from %s: %w", signedURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download file from %s: unexpected status %d", signedURL, resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
+}
