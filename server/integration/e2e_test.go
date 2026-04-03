@@ -98,7 +98,7 @@ func setupTestRouter(t *testing.T) (*fiber.App, func()) {
 	}
 
 	planSvc := service.NewPlanService(repo, &logger)
-	taskSvc := service.NewTaskService(repo, nil, &noopEnqueuer{}, &logger)
+	taskSvc := service.NewTaskService(repo, nil, &noopEnqueuer{}, nil, &logger)
 
 	wsHub := handler.NewWebSocketHub()
 	authHandler := handler.NewAuthHandler(jwtSvc, nil, repo, &logger, wsHub)

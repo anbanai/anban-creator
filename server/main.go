@@ -133,7 +133,7 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, log)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, nil, log)
 	}
 
 	// 14. Create handlers.
