@@ -28,3 +28,12 @@ const (
 	ScopeXls     = "xls"
 	ScopeRednote = "rednote"
 )
+
+// File role constants.
+const (
+	FileRoleImage    = "image"
+	FileRoleCover    = "cover"
+	FileRoleHTML     = "html"
+	FileRoleMarkdown = "markdown"
+	FileRoleOther    = "other"
+)

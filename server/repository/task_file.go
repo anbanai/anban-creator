@@ -34,3 +34,19 @@ func (r *taskFileRepository) BatchCreate(ctx context.Context, files []*model.Tas
 	}
 	return r.db.WithContext(ctx).Create(files).Error
 }
+
+func (r *taskFileRepository) FindByID(ctx context.Context, id string) (*model.TaskFile, error) {
+	var file model.TaskFile
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&file).Error; err != nil {
+		return nil, err
+	}
+	return &file, nil
+}
+
+func (r *taskFileRepository) FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error) {
+	var files []*model.TaskFile
+	if err := r.db.WithContext(ctx).Where("task_id = ? AND role = ?", taskID, role).Find(&files).Error; err != nil {
+		return nil, err
+	}
+	return files, nil
+}
