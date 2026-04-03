@@ -17,6 +17,7 @@ type Repository interface {
 	Plans() PlanRepository
 	Tasks() TaskRepository
 	TaskFiles() TaskFileRepository
+	Channels() ChannelRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -105,6 +106,7 @@ type repository struct {
 	plans    PlanRepository
 	tasks    TaskRepository
 	files    TaskFileRepository
+	channels ChannelRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -115,6 +117,7 @@ func New(db *gorm.DB) Repository {
 	plans := newPlanRepository(db)
 	tasks := newTaskRepository(db)
 	files := newTaskFileRepository(db)
+	channels := newChannelRepository(db)
 
 	return &repository{
 		db:       db,
@@ -124,6 +127,7 @@ func New(db *gorm.DB) Repository {
 		plans:    plans,
 		tasks:    tasks,
 		files:    files,
+		channels: channels,
 	}
 }
 
@@ -133,6 +137,7 @@ func (r *repository) UserConfigs() UserConfigRepository { return r.configs }
 func (r *repository) Plans() PlanRepository         { return r.plans }
 func (r *repository) Tasks() TaskRepository         { return r.tasks }
 func (r *repository) TaskFiles() TaskFileRepository { return r.files }
+func (r *repository) Channels() ChannelRepository    { return r.channels }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -165,6 +170,7 @@ type txRepository struct {
 	plans    PlanRepository
 	tasks    TaskRepository
 	files    TaskFileRepository
+	channels ChannelRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -176,6 +182,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		plans:    newPlanRepository(tx),
 		tasks:    newTaskRepository(tx),
 		files:    newTaskFileRepository(tx),
+		channels: newChannelRepository(tx),
 	}
 }
 
@@ -185,6 +192,7 @@ func (r *txRepository) UserConfigs() UserConfigRepository { return r.configs }
 func (r *txRepository) Plans() PlanRepository         { return r.plans }
 func (r *txRepository) Tasks() TaskRepository         { return r.tasks }
 func (r *txRepository) TaskFiles() TaskFileRepository { return r.files }
+func (r *txRepository) Channels() ChannelRepository    { return r.channels }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.
