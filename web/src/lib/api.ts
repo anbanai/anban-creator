@@ -78,15 +78,23 @@ export interface Task {
 }
 
 export interface TaskResult {
-  files: TaskFile[]
+  files: TaskFile[] | null
   output: string
 }
 
 export interface TaskFile {
-  name: string
-  type: string
-  url: string
-  size: number
+  id: string
+  task_id: string
+  role: string            // "image", "cover", "html", "markdown", "other"
+  file_name: string
+  mime_type: string
+  file_size: number
+  oss_url: string
+  oss_key: string
+  storage_provider: string // "oss" or "local"
+  media_id?: string
+  wechat_url?: string
+  created_at: string
 }
 
 export interface CreateTaskRequest {
@@ -265,6 +273,27 @@ export const api = {
       unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),
 
     streamUrl: (id: string) => `/api/v1/tasks/${id}/stream`,
+
+    downloadFileBlob: async (taskId: string, fileId: string): Promise<Blob> => {
+      const response = await http.get(`/tasks/${taskId}/files/${fileId}/download`, {
+        responseType: 'blob',
+      })
+      return response.data
+    },
+
+    downloadZipBlob: async (taskId: string): Promise<Blob> => {
+      const response = await http.get(`/tasks/${taskId}/files/zip`, {
+        responseType: 'blob',
+      })
+      return response.data
+    },
+
+    fetchPreviewHTML: async (taskId: string): Promise<string> => {
+      const response = await http.get(`/tasks/${taskId}/preview`, {
+        responseType: 'text',
+      })
+      return response.data
+    },
   },
 
   // Timeline

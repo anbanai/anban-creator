@@ -2,11 +2,13 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import type { TaskFile } from '@/lib/api'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
+import { FilePreview } from '@/components/FilePreview'
 
 function statusBadgeVariant(status: string) {
   switch (status) {
@@ -27,19 +29,6 @@ function formatDateTime(dateStr: string): string {
     minute: '2-digit',
     second: '2-digit',
   })
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function fileIcon(type: string) {
-  if (type.includes('image')) return 'Image'
-  if (type.includes('markdown') || type.includes('text')) return 'Doc'
-  if (type.includes('json')) return 'JSON'
-  return 'File'
 }
 
 export default function TaskDetailPage() {
@@ -328,30 +317,73 @@ export default function TaskDetailPage() {
       {/* Files */}
       {files && files.length > 0 && (
         <Card>
-          <div className="border-b border-gray-700 px-4 py-3">
+          <div className="border-b border-gray-700 px-4 py-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-200">Generated Files ({files.length})</h2>
+            <button
+              onClick={async () => {
+                try {
+                  const blob = await api.tasks.downloadZipBlob(task.id)
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `task_${task.id}_files.zip`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                } catch (err) {
+                  console.error('Failed to download ZIP:', err)
+                }
+              }}
+              className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Download All (ZIP)
+            </button>
           </div>
-          <div className="divide-y divide-gray-700">
-            {files.map((file, idx) => (
-              <a
-                key={idx}
-                href={file.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-between px-4 py-3 transition-colors hover:bg-gray-750"
-              >
-                <div className="flex items-center gap-3">
-                  <Badge variant="outline" className="text-[10px]">
-                    {fileIcon(file.type)}
-                  </Badge>
-                  <div>
-                    <p className="text-sm font-medium text-gray-100">{file.name}</p>
-                    <p className="text-xs text-gray-500">{file.type}</p>
+          <div className="p-4 space-y-4">
+            {/* Image files in grid */}
+            {(() => {
+              const imageFiles = files.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
+              if (imageFiles.length === 0) return null
+              return (
+                <div>
+                  <h3 className="text-xs font-medium text-gray-400 mb-2">Images</h3>
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                    {imageFiles.map((file: TaskFile) => (
+                      <FilePreview key={file.id} file={file} taskId={task.id} />
+                    ))}
                   </div>
                 </div>
-                <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
-              </a>
-            ))}
+              )
+            })()}
+            {/* HTML files */}
+            {(() => {
+              const htmlFiles = files.filter((f: TaskFile) => f.mime_type === 'text/html')
+              if (htmlFiles.length === 0) return null
+              return (
+                <div>
+                  <h3 className="text-xs font-medium text-gray-400 mb-2">HTML Output</h3>
+                  <div className="space-y-3">
+                    {htmlFiles.map((file: TaskFile) => (
+                      <FilePreview key={file.id} file={file} taskId={task.id} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+            {/* Other files */}
+            {(() => {
+              const otherFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/') && f.mime_type !== 'text/html')
+              if (otherFiles.length === 0) return null
+              return (
+                <div>
+                  <h3 className="text-xs font-medium text-gray-400 mb-2">Other Files</h3>
+                  <div className="space-y-2">
+                    {otherFiles.map((file: TaskFile) => (
+                      <FilePreview key={file.id} file={file} taskId={task.id} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         </Card>
       )}
