@@ -1,0 +1,18 @@
+package storage
+
+import (
+	"github.com/rs/zerolog"
+	"github.com/royalrick/anbanwriter/server/config"
+)
+
+// NewProvider creates a storage Provider based on the configuration.
+// Supported providers: "oss" (Alibaba Cloud OSS), anything else falls back
+// to "local" (filesystem).
+func NewProvider(cfg config.StorageConfig, logger *zerolog.Logger) (Provider, error) {
+	switch cfg.Provider {
+	case "oss":
+		return NewOSSProvider(cfg, logger)
+	default:
+		return NewLocalProviderWithLogger(cfg.LocalDataDir, logger)
+	}
+}
