@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
-import { api, type TaskType, type CreateTaskRequest, type TaskStatus } from '@/lib/api'
+import { api, type TaskType, type CreateTaskRequest, type TaskStatus, type Channel } from '@/lib/api'
+import { ChannelSelector } from '@/components/ChannelSelector'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
@@ -52,10 +53,13 @@ export default function TasksPage() {
   const shouldCreate = searchParams.get('create') === 'true'
 
   const [statusFilter, setStatusFilter] = useState(initialStatus)
+  const [channelFilter, setChannelFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(shouldCreate)
-  const [form, setForm] = useState<{ type: TaskType; topic: string }>({
+  const [form, setForm] = useState<{ type: TaskType; topic: string; channel_id: string; channel_platform: string }>({
     type: 'rednote',
     topic: '',
+    channel_id: '',
+    channel_platform: '',
   })
   const [formError, setFormError] = useState('')
 
@@ -67,11 +71,12 @@ export default function TasksPage() {
   }, [shouldCreate, setSearchParams])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['tasks', statusFilter],
+    queryKey: ['tasks', statusFilter, channelFilter],
     queryFn: () =>
       api.tasks.list({
         limit: 50,
         status: statusFilter === 'all' ? undefined : statusFilter,
+        channel_id: channelFilter || undefined,
       }),
     refetchInterval: statusFilter === 'all' || statusFilter === 'running' ? 10000 : undefined,
   })
@@ -92,14 +97,14 @@ export default function TasksPage() {
   })
 
   function openCreate() {
-    setForm({ type: 'rednote', topic: '' })
+    setForm({ type: 'rednote', topic: '', channel_id: '', channel_platform: '' })
     setFormError('')
     setModalOpen(true)
   }
 
   function closeModal() {
     setModalOpen(false)
-    setForm({ type: 'rednote', topic: '' })
+    setForm({ type: 'rednote', topic: '', channel_id: '', channel_platform: '' })
     setFormError('')
   }
 
@@ -110,7 +115,11 @@ export default function TasksPage() {
       setFormError('Topic is required.')
       return
     }
-    createMutation.mutate({ type: form.type, topic: form.topic.trim() })
+    createMutation.mutate({
+      type: form.type,
+      topic: form.topic.trim(),
+      channel_id: form.channel_id || undefined,
+    })
   }
 
   const runningCount = tasks.filter((t) => t.status === 'running').length
@@ -135,28 +144,39 @@ export default function TasksPage() {
         </Button>
       </div>
 
-      {/* Status filter tabs */}
-      <div className="flex gap-1 overflow-x-auto rounded-lg border border-gray-700 bg-gray-800 p-1">
-        {statusTabs.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => {
-              setStatusFilter(tab.value)
-              if (tab.value !== 'all') {
-                setSearchParams({ status: tab.value })
-              } else {
-                setSearchParams({}, { replace: true })
-              }
-            }}
-            className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              statusFilter === tab.value
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-400 hover:bg-gray-700/50 hover:text-gray-200'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* Filters row */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        {/* Status filter tabs */}
+        <div className="flex gap-1 overflow-x-auto rounded-lg border border-gray-700 bg-gray-800 p-1">
+          {statusTabs.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => {
+                setStatusFilter(tab.value)
+                if (tab.value !== 'all') {
+                  setSearchParams({ status: tab.value })
+                } else {
+                  setSearchParams({}, { replace: true })
+                }
+              }}
+              className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                statusFilter === tab.value
+                  ? 'bg-gray-700 text-white'
+                  : 'text-gray-400 hover:bg-gray-700/50 hover:text-gray-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Channel filter */}
+        <div className="w-full sm:w-48">
+          <ChannelSelector
+            value={channelFilter}
+            onChange={(id) => setChannelFilter(id)}
+          />
+        </div>
       </div>
 
       {isLoading ? (
@@ -238,6 +258,23 @@ export default function TasksPage() {
         }
       >
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-gray-300">Channel</label>
+            <ChannelSelector
+              value={form.channel_id}
+              onChange={(id, platform) => {
+                setForm({
+                  ...form,
+                  channel_id: id,
+                  channel_platform: id ? platform : '',
+                  // Auto-set type from channel platform
+                  type: id ? (platform as TaskType) || form.type : form.type,
+                })
+              }}
+            />
+            <p className="mt-1 text-xs text-gray-500">Select a channel to auto-fill content type and config.</p>
+          </div>
+
           <Select
             label="Content Type"
             options={taskTypeOptions}

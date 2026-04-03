@@ -5,6 +5,7 @@ import LoginPage from '@/pages/LoginPage'
 import RegisterPage from '@/pages/RegisterPage'
 import DashboardPage from '@/pages/DashboardPage'
 import TimelinePage from '@/pages/TimelinePage'
+import ChannelsPage from '@/pages/ChannelsPage'
 import PlansPage from '@/pages/PlansPage'
 import TasksPage from '@/pages/TasksPage'
 import TaskDetailPage from '@/pages/TaskDetailPage'
@@ -59,6 +60,7 @@ function AppRoutes() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="timeline" element={<TimelinePage />} />
+        <Route path="channels" element={<ChannelsPage />} />
         <Route path="plans" element={<PlansPage />} />
         <Route path="tasks" element={<TasksPage />} />
         <Route path="tasks/:id" element={<TaskDetailPage />} />

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Plan, type PlanType, type CreatePlanRequest } from '@/lib/api'
+import { ChannelSelector } from '@/components/ChannelSelector'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
@@ -48,6 +49,8 @@ interface PlanFormData {
   description: string
   cron_expr: string
   topic_hint: string
+  channel_id: string
+  channel_platform: string
 }
 
 const emptyForm: PlanFormData = {
@@ -56,18 +59,24 @@ const emptyForm: PlanFormData = {
   description: '',
   cron_expr: '0 9 * * 1,3,5',
   topic_hint: '',
+  channel_id: '',
+  channel_platform: '',
 }
 
 export default function PlansPage() {
   const queryClient = useQueryClient()
+  const [channelFilter, setChannelFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
   const [form, setForm] = useState<PlanFormData>(emptyForm)
   const [formError, setFormError] = useState('')
 
   const { data, isLoading } = useQuery({
-    queryKey: ['plans'],
-    queryFn: () => api.plans.list({ limit: 100 }),
+    queryKey: ['plans', channelFilter],
+    queryFn: () => api.plans.list({
+      limit: 100,
+      channel_id: channelFilter || undefined,
+    }),
   })
 
   const plans = data?.items ?? []
@@ -130,6 +139,8 @@ export default function PlansPage() {
       description: plan.description,
       cron_expr: plan.cron_expr,
       topic_hint: plan.topic_hint,
+      channel_id: plan.channel_id || '',
+      channel_platform: '',
     })
     setFormError('')
     setModalOpen(true)
@@ -161,6 +172,7 @@ export default function PlansPage() {
       description: form.description.trim() || undefined,
       cron_expr: form.cron_expr.trim(),
       topic_hint: form.topic_hint.trim() || undefined,
+      channel_id: form.channel_id || undefined,
     }
 
     if (editingPlan) {
@@ -185,6 +197,14 @@ export default function PlansPage() {
           </svg>
           New Plan
         </Button>
+      </div>
+
+      {/* Channel filter */}
+      <div className="w-full sm:w-48">
+        <ChannelSelector
+          value={channelFilter}
+          onChange={(id) => setChannelFilter(id)}
+        />
       </div>
 
       {isLoading ? (
@@ -277,6 +297,22 @@ export default function PlansPage() {
         }
       >
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-gray-300">Channel</label>
+            <ChannelSelector
+              value={form.channel_id}
+              onChange={(id, platform) => {
+                setForm({
+                  ...form,
+                  channel_id: id,
+                  channel_platform: id ? platform : '',
+                  type: id ? (platform as PlanType) || form.type : form.type,
+                })
+              }}
+            />
+            <p className="mt-1 text-xs text-gray-500">Select a channel to auto-fill content type and config.</p>
+          </div>
+
           <Select
             label="Content Type"
             options={planTypeOptions}

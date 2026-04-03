@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { TaskFile } from '@/lib/api'
@@ -57,6 +57,14 @@ export default function TaskDetailPage() {
     queryFn: () => api.tasks.files(id!),
     enabled: !!id && task?.status === 'completed',
   })
+
+  // Resolve channel info for the task
+  const { data: channelDetail } = useQuery({
+    queryKey: ['channel', task?.channel_id],
+    queryFn: () => api.channels.get(task!.channel_id),
+    enabled: !!task?.channel_id,
+  })
+  const channel = channelDetail?.channel
 
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
@@ -176,6 +184,21 @@ export default function TaskDetailPage() {
             <h1 className="text-xl font-bold text-gray-100">{task.topic}</h1>
             <Badge variant="outline">{task.type}</Badge>
             <Badge variant={statusBadgeVariant(task.status)}>{task.status}</Badge>
+            {channel && (
+              <Link
+                to={`/channels`}
+                className="flex items-center gap-1.5 rounded-md bg-gray-800 px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-gray-700 hover:text-gray-200"
+              >
+                {channel.avatar_url ? (
+                  <img src={channel.avatar_url} alt="" className="h-4 w-4 rounded-full object-cover" />
+                ) : (
+                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-600 text-[8px] font-medium">
+                    {channel.name.charAt(0)}
+                  </span>
+                )}
+                {channel.name}
+              </Link>
+            )}
           </div>
         </div>
         {canCancel && (

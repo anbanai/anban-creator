@@ -3,6 +3,7 @@ import UserAccountPopover from '@/components/auth/UserAccountPopover'
 
 const navItems = [
   { to: '/', label: 'Dashboard', end: true },
+  { to: '/channels', label: 'Channels' },
   { to: '/timeline', label: 'Timeline' },
   { to: '/plans', label: 'Plans' },
   { to: '/tasks', label: 'Tasks' },

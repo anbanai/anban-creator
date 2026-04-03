@@ -25,6 +25,60 @@ export interface ApiResponse<T = unknown> {
   data: T
 }
 
+// --- Channel Types ---
+
+export type ChannelPlatform = 'article' | 'xls' | 'rednote'
+export type ChannelStatus = 'active' | 'archived'
+
+export interface Channel {
+  id: string
+  user_id: string
+  platform: ChannelPlatform
+  name: string
+  avatar_url: string
+  description: string
+  wechat_app_id: string
+  keywords: string
+  positioning: string
+  style: string
+  theme: string
+  author: string
+  image_api_config: string
+  status: ChannelStatus
+  created_at: string
+  updated_at: string
+}
+
+export interface ChannelStats {
+  total_tasks: number
+  completed_tasks: number
+  failed_tasks: number
+  running_tasks: number
+  pending_tasks: number
+  success_rate: number
+  last_activity_at: string
+}
+
+export interface ChannelDetail {
+  channel: Channel
+  stats: ChannelStats
+}
+
+export interface CreateChannelRequest {
+  platform: string
+  name: string
+  wechat_app_id?: string
+  wechat_secret?: string
+  keywords?: string
+  positioning?: string
+  style?: string
+  theme?: string
+  author?: string
+  image_api_config?: string
+  description?: string
+  avatar_url?: string
+}
+
 // --- Plan Types ---
 
 export type PlanType = 'rednote' | 'article' | 'xls'
@@ -39,6 +93,7 @@ export interface Plan {
   topic_hint: string
   status: PlanStatus
   next_run_at: string
+  channel_id: string
   created_at: string
   updated_at: string
 }
@@ -49,6 +104,7 @@ export interface CreatePlanRequest {
   description?: string
   cron_expr: string
   topic_hint?: string
+  channel_id?: string
 }
 
 export interface UpdatePlanRequest {
@@ -71,6 +127,7 @@ export interface Task {
   progress: number
   error: string
   plan_id: number | null
+  channel_id: string
   result: TaskResult
   created_at: string
   started_at: string
@@ -100,6 +157,7 @@ export interface TaskFile {
 export interface CreateTaskRequest {
   type: TaskType
   topic: string
+  channel_id?: string
 }
 
 // --- Timeline Types ---
@@ -236,7 +294,7 @@ export const api = {
     create: (data: CreatePlanRequest) =>
       unwrap<Plan>(http.post('/plans', data)),
 
-    list: (params?: { offset?: number; limit?: number }) =>
+    list: (params?: { offset?: number; limit?: number; channel_id?: string }) =>
       unwrap<PaginatedResponse<Plan>>(http.get('/plans', { params })),
 
     get: (id: string) =>
@@ -260,7 +318,7 @@ export const api = {
     create: (data: CreateTaskRequest) =>
       unwrap<Task>(http.post('/tasks', data)),
 
-    list: (params?: { offset?: number; limit?: number; status?: string }) =>
+    list: (params?: { offset?: number; limit?: number; status?: string; channel_id?: string }) =>
       unwrap<PaginatedResponse<Task>>(http.get('/tasks', { params })),
 
     get: (id: string) =>
@@ -300,6 +358,30 @@ export const api = {
   timeline: {
     get: (from: string, to: string) =>
       unwrap<TimelineResponse>(http.get('/timeline', { params: { from, to } })),
+  },
+
+  // Channels
+  channels: {
+    list: (params?: { status?: string; platform?: string }) =>
+      unwrap<Channel[]>(http.get('/channels', { params })),
+
+    get: (id: string) =>
+      unwrap<ChannelDetail>(http.get(`/channels/${id}`)),
+
+    create: (data: CreateChannelRequest) =>
+      unwrap<Channel>(http.post('/channels', data)),
+
+    update: (id: string, data: Partial<CreateChannelRequest>) =>
+      unwrap<Channel>(http.put(`/channels/${id}`, data)),
+
+    archive: (id: string) =>
+      unwrap<void>(http.patch(`/channels/${id}/archive`)),
+
+    restore: (id: string) =>
+      unwrap<void>(http.patch(`/channels/${id}/restore`)),
+
+    delete: (id: string) =>
+      unwrap<void>(http.delete(`/channels/${id}`)),
   },
 
   // Configs
