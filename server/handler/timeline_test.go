@@ -156,7 +156,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	})
 
 	t.Run("plans within date range", func(t *testing.T) {
-		plans, err := repo.Plans().ListActiveByUserID(ctx, userID)
+		plans, err := repo.Plans().ListActiveByUserID(ctx, userID, "")
 		if err != nil {
 			t.Fatalf("list active plans: %v", err)
 		}
@@ -224,7 +224,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 			})
 		}
 
-		plans, err := repo.Plans().ListActiveByUserID(ctx, userID)
+		plans, err := repo.Plans().ListActiveByUserID(ctx, userID, "")
 		if err != nil {
 			t.Fatalf("list active plans: %v", err)
 		}

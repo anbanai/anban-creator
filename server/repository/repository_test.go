@@ -313,7 +313,7 @@ func TestTaskRepository_CRUD(t *testing.T) {
 	}
 
 	// CountByUserID
-	count, err := repo.Tasks().CountByUserID(ctx, "user-task-1")
+	count, err := repo.Tasks().CountByUserID(ctx, "user-task-1", "")
 	if err != nil {
 		t.Fatalf("CountByUserID: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestPlanRepository_CRUD(t *testing.T) {
 	}
 
 	// ListActiveByUserID
-	activePlans, err := repo.Plans().ListActiveByUserID(ctx, "user-plan-1")
+	activePlans, err := repo.Plans().ListActiveByUserID(ctx, "user-plan-1", "")
 	if err != nil {
 		t.Fatalf("ListActiveByUserID: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestPlanRepository_CRUD(t *testing.T) {
 	if err := repo.Plans().Update(ctx, plan); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	activePlans, _ = repo.Plans().ListActiveByUserID(ctx, "user-plan-1")
+	activePlans, _ = repo.Plans().ListActiveByUserID(ctx, "user-plan-1", "")
 	if len(activePlans) != 0 {
 		t.Errorf("expected 0 active plans after pause, got %d", len(activePlans))
 	}

@@ -71,12 +71,12 @@ func (s *PlanService) GetByID(ctx context.Context, id string) (*model.Plan, erro
 
 // List returns plans for a user with pagination. Returns plans and total count.
 func (s *PlanService) List(ctx context.Context, userID string, offset, limit int) ([]*model.Plan, int64, error) {
-	plans, err := s.repo.Plans().FindByUserID(ctx, userID, offset, limit)
+	plans, err := s.repo.Plans().FindByUserID(ctx, userID, "", offset, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list plans: %w", err)
 	}
 
-	total, err := s.repo.Plans().CountByUserID(ctx, userID)
+	total, err := s.repo.Plans().CountByUserID(ctx, userID, "")
 	if err != nil {
 		return nil, 0, fmt.Errorf("count plans: %w", err)
 	}

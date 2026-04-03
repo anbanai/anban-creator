@@ -132,9 +132,9 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 	var err error
 
 	if status != "" {
-		tasks, err = s.repo.Tasks().FindByUserIDAndStatus(ctx, userID, status, offset, limit)
+		tasks, err = s.repo.Tasks().FindByUserIDAndStatus(ctx, userID, status, "", offset, limit)
 	} else {
-		tasks, err = s.repo.Tasks().FindByUserID(ctx, userID, offset, limit)
+		tasks, err = s.repo.Tasks().FindByUserID(ctx, userID, "", offset, limit)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("list tasks: %w", err)
@@ -142,9 +142,9 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 
 	var total int64
 	if status != "" {
-		total, err = s.repo.Tasks().CountByUserIDAndStatus(ctx, userID, status)
+		total, err = s.repo.Tasks().CountByUserIDAndStatus(ctx, userID, status, "")
 	} else {
-		total, err = s.repo.Tasks().CountByUserID(ctx, userID)
+		total, err = s.repo.Tasks().CountByUserID(ctx, userID, "")
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("count tasks: %w", err)

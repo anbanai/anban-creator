@@ -29,9 +29,12 @@ func (r *taskRepository) FindByID(ctx context.Context, id string) (*model.Task, 
 	return &task, nil
 }
 
-func (r *taskRepository) FindByUserID(ctx context.Context, userID string, offset, limit int) ([]*model.Task, error) {
+func (r *taskRepository) FindByUserID(ctx context.Context, userID string, channelID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
 	q := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC")
+	if channelID != "" {
+		q = q.Where("channel_id = ?", channelID)
+	}
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
 	}
@@ -41,9 +44,12 @@ func (r *taskRepository) FindByUserID(ctx context.Context, userID string, offset
 	return tasks, nil
 }
 
-func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, offset, limit int) ([]*model.Task, error) {
+func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, channelID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
 	q := r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, status).Order("created_at DESC")
+	if channelID != "" {
+		q = q.Where("channel_id = ?", channelID)
+	}
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
 	}
@@ -73,12 +79,15 @@ func (r *taskRepository) FindRunning(ctx context.Context) ([]*model.Task, error)
 	return tasks, nil
 }
 
-func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string) ([]*model.Task, error) {
+func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string, channelID string) ([]*model.Task, error) {
 	var tasks []*model.Task
-	if err := r.db.WithContext(ctx).
+	q := r.db.WithContext(ctx).
 		Where("user_id = ?", userID).
-		Where("status = ?", model.TaskStatusRunning).
-		Find(&tasks).Error; err != nil {
+		Where("status = ?", model.TaskStatusRunning)
+	if channelID != "" {
+		q = q.Where("channel_id = ?", channelID)
+	}
+	if err := q.Find(&tasks).Error; err != nil {
 		return nil, err
 	}
 	return tasks, nil
@@ -139,17 +148,25 @@ func (r *taskRepository) SetCompletedAt(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("completed_at", now).Error
 }
 
-func (r *taskRepository) CountByUserID(ctx context.Context, userID string) (int64, error) {
+func (r *taskRepository) CountByUserID(ctx context.Context, userID string, channelID string) (int64, error) {
 	var count int64
-	if err := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ?", userID)
+	if channelID != "" {
+		q = q.Where("channel_id = ?", channelID)
+	}
+	if err := q.Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, status string) (int64, error) {
+func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, status string, channelID string) (int64, error) {
 	var count int64
-	if err := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ? AND status = ?", userID, status).Count(&count).Error; err != nil {
+	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ? AND status = ?", userID, status)
+	if channelID != "" {
+		q = q.Where("channel_id = ?", channelID)
+	}
+	if err := q.Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil

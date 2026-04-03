@@ -6,6 +6,7 @@ import "time"
 type Task struct {
 	ID           string     `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID       string     `gorm:"type:char(36);index;not null" json:"user_id"`
+	ChannelID    string     `gorm:"type:char(36);index" json:"channel_id"`
 	PlanID       *uint      `gorm:"index" json:"plan_id"`
 	Type         string     `gorm:"type:varchar(20);not null" json:"type"`
 	Status       string     `gorm:"type:varchar(20);default:pending" json:"status"`

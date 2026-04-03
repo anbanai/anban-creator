@@ -91,7 +91,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	}
 
 	// 2. Active plans with next_run_at within range.
-	plans, err := h.repo.Plans().ListActiveByUserID(ctx, userID)
+	plans, err := h.repo.Plans().ListActiveByUserID(ctx, userID, "")
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to fetch plans for timeline")
 		// Non-fatal: return what we have.
@@ -119,7 +119,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	}
 
 	// 3. Running tasks for this user (scoped query to prevent information leak).
-	running, err := h.repo.Tasks().FindRunningByUser(ctx, userID)
+	running, err := h.repo.Tasks().FindRunningByUser(ctx, userID, "")
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to fetch running tasks")
 	} else {
