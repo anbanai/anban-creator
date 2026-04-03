@@ -17,6 +17,7 @@ type Config struct {
 	Redis    RedisConfig    `yaml:"redis"`
 	JWT      JWTConfig      `yaml:"jwt"`
 	WeChat   WeChatConfig   `yaml:"wechat"`
+	Storage  StorageConfig  `yaml:"storage"`
 	MCP      MCPConfig      `yaml:"mcp"`
 }
 
@@ -47,6 +48,19 @@ type JWTConfig struct {
 type WeChatConfig struct {
 	AppID     string `yaml:"app_id"`
 	AppSecret string `yaml:"app_secret"`
+}
+
+// StorageConfig holds file storage configuration.
+// Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
+type StorageConfig struct {
+	Provider        string `yaml:"provider"`          // "oss" or "local", default "local"
+	Endpoint        string `yaml:"endpoint"`          // OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
+	AccessKeyID     string `yaml:"access_key_id"`
+	AccessKeySecret string `yaml:"access_key_secret"`
+	BucketName      string `yaml:"bucket_name"`
+	Region          string `yaml:"region"`
+	CustomDomain    string `yaml:"custom_domain"`     // Optional CDN domain for public file URLs
+	LocalDataDir    string `yaml:"local_data_dir"`    // Default "./data/files"
 }
 
 // MCPConfig holds configuration for the MCP (Model Context Protocol) endpoint.
@@ -105,6 +119,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.JWT.RefreshExpiry == "" {
 		c.JWT.RefreshExpiry = "168h"
+	}
+	if c.Storage.Provider == "" {
+		c.Storage.Provider = "local"
+	}
+	if c.Storage.LocalDataDir == "" {
+		c.Storage.LocalDataDir = "./data/files"
 	}
 }
 
@@ -176,6 +196,31 @@ func (c *Config) applyEnvOverrides() {
 		c.WeChat.AppSecret = v
 	}
 
+	if v := os.Getenv(prefix + "STORAGE_PROVIDER"); v != "" {
+		c.Storage.Provider = v
+	}
+	if v := os.Getenv(prefix + "STORAGE_ENDPOINT"); v != "" {
+		c.Storage.Endpoint = v
+	}
+	if v := os.Getenv(prefix + "STORAGE_ACCESS_KEY_ID"); v != "" {
+		c.Storage.AccessKeyID = v
+	}
+	if v := os.Getenv(prefix + "STORAGE_ACCESS_KEY_SECRET"); v != "" {
+		c.Storage.AccessKeySecret = v
+	}
+	if v := os.Getenv(prefix + "STORAGE_BUCKET_NAME"); v != "" {
+		c.Storage.BucketName = v
+	}
+	if v := os.Getenv(prefix + "STORAGE_REGION"); v != "" {
+		c.Storage.Region = v
+	}
+	if v := os.Getenv(prefix + "STORAGE_CUSTOM_DOMAIN"); v != "" {
+		c.Storage.CustomDomain = v
+	}
+	if v := os.Getenv(prefix + "STORAGE_LOCAL_DATA_DIR"); v != "" {
+		c.Storage.LocalDataDir = v
+	}
+
 	if v := os.Getenv(prefix + "MCP_API_KEY"); v != "" {
 		c.MCP.APIKey = v
 	}
@@ -196,6 +241,21 @@ func (c *Config) Validate() error {
 	}
 	if _, err := time.ParseDuration(c.JWT.RefreshExpiry); err != nil {
 		errs = append(errs, fmt.Sprintf("jwt.refresh_expiry is not a valid duration: %s", c.JWT.RefreshExpiry))
+	}
+
+	if c.Storage.Provider == "oss" {
+		if strings.TrimSpace(c.Storage.Endpoint) == "" {
+			errs = append(errs, "storage.endpoint is required when provider is \"oss\"")
+		}
+		if strings.TrimSpace(c.Storage.AccessKeyID) == "" {
+			errs = append(errs, "storage.access_key_id is required when provider is \"oss\"")
+		}
+		if strings.TrimSpace(c.Storage.AccessKeySecret) == "" {
+			errs = append(errs, "storage.access_key_secret is required when provider is \"oss\"")
+		}
+		if strings.TrimSpace(c.Storage.BucketName) == "" {
+			errs = append(errs, "storage.bucket_name is required when provider is \"oss\"")
+		}
 	}
 
 	if len(errs) > 0 {

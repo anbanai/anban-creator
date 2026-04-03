@@ -52,6 +52,21 @@ wechat:
   app_secret: ""            # WeChat Mini Program AppSecret.
 
 # ---------------------------------------------------------------------------
+# Storage: File storage configuration
+# Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
+# Default is "local" for development.
+# ---------------------------------------------------------------------------
+storage:
+  provider: "local"
+  endpoint: ""                # OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
+  access_key_id: ""           # Alibaba Cloud AccessKey ID
+  access_key_secret: ""       # Alibaba Cloud AccessKey Secret
+  bucket_name: ""             # OSS bucket name
+  region: ""                  # OSS region, e.g. "cn-hangzhou"
+  custom_domain: ""           # Optional CDN domain for public file URLs
+  local_data_dir: "./data/files"  # Local provider: where to store files
+
+# ---------------------------------------------------------------------------
 # MCP: Model Context Protocol endpoint configuration
 # Optional. The MCP endpoint (/api/v1/mcp/tools) supports two auth methods:
 #   1. JWT Bearer token (standard user authentication)
