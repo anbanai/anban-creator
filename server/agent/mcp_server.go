@@ -30,17 +30,17 @@ func safePath(workDir, path string) (string, error) {
 	return fullPath, nil
 }
 
-// BuildAppConfig constructs an app/config.Config from a UserConfig DB record.
+// BuildAppConfig constructs an app/config.Config from a Channel DB record.
 // This bridges the multi-user server config to the single-account app config.
-func BuildAppConfig(userConfig *model.UserConfig) (*config.Config, error) {
+func BuildAppConfig(ch *model.Channel) (*config.Config, error) {
 	cfg := &config.Config{
-		Name:        userConfig.Name,
-		Positioning: userConfig.Positioning,
+		Name:        ch.Name,
+		Positioning: ch.Positioning,
 	}
 
 	// Parse keywords (comma or space separated).
-	if userConfig.Keywords != "" {
-		for _, kw := range strings.Split(userConfig.Keywords, ",") {
+	if ch.Keywords != "" {
+		for _, kw := range strings.Split(ch.Keywords, ",") {
 			kw = strings.TrimSpace(kw)
 			if kw != "" {
 				cfg.Keywords = append(cfg.Keywords, kw)
@@ -49,32 +49,32 @@ func BuildAppConfig(userConfig *model.UserConfig) (*config.Config, error) {
 	}
 
 	// WeChat credentials.
-	cfg.Wechat.AppID = userConfig.WechatAppID
-	cfg.Wechat.Secret = userConfig.WechatSecret
+	cfg.Wechat.AppID = ch.WechatAppID
+	cfg.Wechat.Secret = ch.WechatSecret
 
-	// Scope-specific fields.
-	switch userConfig.Scope {
+	// Platform-specific fields.
+	switch ch.Platform {
 	case model.ScopeArticle:
-		cfg.Wechat.Article.Author = userConfig.Author
-		cfg.Wechat.Article.Style = userConfig.Style
-		cfg.Wechat.Article.Theme = userConfig.Theme
+		cfg.Wechat.Article.Author = ch.Author
+		cfg.Wechat.Article.Style = ch.Style
+		cfg.Wechat.Article.Theme = ch.Theme
 	case model.ScopeXls:
-		cfg.Wechat.Xls.Style = userConfig.Style
+		cfg.Wechat.Xls.Style = ch.Style
 	case model.ScopeRednote:
 		if cfg.Rednote == nil {
 			cfg.Rednote = &config.RednoteConfig{}
 		}
-		cfg.Rednote.Style = userConfig.Style
+		cfg.Rednote.Style = ch.Style
 	}
 
 	// Parse image_api_config JSON into ImageAPI structs.
-	if userConfig.ImageAPIConfig != "" {
+	if ch.ImageAPIConfig != "" {
 		var imageCfgs map[string]config.ImageAPI
-		if err := json.Unmarshal([]byte(userConfig.ImageAPIConfig), &imageCfgs); err != nil {
+		if err := json.Unmarshal([]byte(ch.ImageAPIConfig), &imageCfgs); err != nil {
 			return nil, fmt.Errorf("parse image_api_config: %w", err)
 		}
 		if coverCfg, ok := imageCfgs["cover"]; ok {
-			switch userConfig.Scope {
+			switch ch.Platform {
 			case model.ScopeArticle:
 				cfg.Wechat.Article.Cover.Image = coverCfg
 			case model.ScopeXls:
@@ -87,7 +87,7 @@ func BuildAppConfig(userConfig *model.UserConfig) (*config.Config, error) {
 			}
 		}
 		if contentCfg, ok := imageCfgs["content"]; ok {
-			switch userConfig.Scope {
+			switch ch.Platform {
 			case model.ScopeArticle:
 				cfg.Wechat.Article.Content.Image = contentCfg
 			case model.ScopeXls:
@@ -146,17 +146,17 @@ func getCoverImageAPI(cfg *config.Config, scope string) *config.ImageAPI {
 }
 
 // CreateMCPTools creates an SDK MCP server with tools that wrap the app/ packages.
-func CreateMCPTools(workDir string, userConfig *model.UserConfig, logger *zerolog.Logger) (*claudecode.McpSdkServerConfig, error) {
-	if userConfig == nil {
-		return nil, fmt.Errorf("user config is required")
+func CreateMCPTools(workDir string, channel *model.Channel, logger *zerolog.Logger) (*claudecode.McpSdkServerConfig, error) {
+	if channel == nil {
+		return nil, fmt.Errorf("channel is required")
 	}
 
-	cfg, err := BuildAppConfig(userConfig)
+	cfg, err := BuildAppConfig(channel)
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}
 
-	scope := userConfig.Scope
+	scope := channel.Platform
 	apiCfg := getImageAPI(cfg, scope)
 	coverApiCfg := getCoverImageAPI(cfg, scope)
 	zapLog := toZapLogger(logger)

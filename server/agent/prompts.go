@@ -11,40 +11,40 @@ import (
 const bt = "`"
 
 // GetSystemPrompt returns the system prompt for the given task type.
-func GetSystemPrompt(taskType string, userConfig *model.UserConfig) string {
+func GetSystemPrompt(taskType string, channel *model.Channel) string {
 	switch taskType {
 	case model.ScopeRednote:
-		return rednoteSystemPrompt(userConfig)
+		return rednoteSystemPrompt(channel)
 	case model.ScopeArticle:
-		return articleSystemPrompt(userConfig)
+		return articleSystemPrompt(channel)
 	case model.ScopeXls:
-		return xlsSystemPrompt(userConfig)
+		return xlsSystemPrompt(channel)
 	default:
 		return ""
 	}
 }
 
 // accountInfoBlock builds an account info section for the system prompt.
-func accountInfoBlock(uc *model.UserConfig) string {
+func accountInfoBlock(ch *model.Channel) string {
 	var b strings.Builder
 	b.WriteString("## 账号信息\n\n")
-	if uc.Name != "" {
-		b.WriteString(fmt.Sprintf("- 账号名称: %s\n", uc.Name))
+	if ch.Name != "" {
+		b.WriteString(fmt.Sprintf("- 账号名称: %s\n", ch.Name))
 	}
-	if uc.Keywords != "" {
-		b.WriteString(fmt.Sprintf("- 关键词: %s\n", uc.Keywords))
+	if ch.Keywords != "" {
+		b.WriteString(fmt.Sprintf("- 关键词: %s\n", ch.Keywords))
 	}
-	if uc.Positioning != "" {
-		b.WriteString(fmt.Sprintf("- 定位: %s\n", uc.Positioning))
+	if ch.Positioning != "" {
+		b.WriteString(fmt.Sprintf("- 定位: %s\n", ch.Positioning))
 	}
-	if uc.Author != "" {
-		b.WriteString(fmt.Sprintf("- 作者: %s\n", uc.Author))
+	if ch.Author != "" {
+		b.WriteString(fmt.Sprintf("- 作者: %s\n", ch.Author))
 	}
-	if uc.Style != "" {
-		b.WriteString(fmt.Sprintf("- 写作风格: %s\n", uc.Style))
+	if ch.Style != "" {
+		b.WriteString(fmt.Sprintf("- 写作风格: %s\n", ch.Style))
 	}
-	if uc.Theme != "" {
-		b.WriteString(fmt.Sprintf("- 主题: %s\n", uc.Theme))
+	if ch.Theme != "" {
+		b.WriteString(fmt.Sprintf("- 主题: %s\n", ch.Theme))
 	}
 	b.WriteString("\n")
 	return b.String()
@@ -70,12 +70,12 @@ func toolReferenceBlock() string {
 		"\n所有文件操作相对于工作目录。工作目录由系统自动创建和管理。\n\n"
 }
 
-func rednoteSystemPrompt(uc *model.UserConfig) string {
+func rednoteSystemPrompt(ch *model.Channel) string {
 	return "# 小红书图文全自动创作引擎\n\n" +
 		"## 角色\n\n" +
 		"你是小红书内容创作的全自动引擎，端到端执行从选题到图片生成的完整流水线。" +
 		"专注高质量种草笔记、生活方式、垂直内容的图文创作。支持原创模式和复刻模式两种工作路径。\n\n" +
-		accountInfoBlock(uc) +
+		accountInfoBlock(ch) +
 		toolReferenceBlock() +
 		"## 自动决策原则\n\n" +
 		"**全程零用户交互**。所有决策点自动选择最优解：\n\n" +
@@ -132,11 +132,11 @@ func rednoteSystemPrompt(uc *model.UserConfig) string {
 		"3. **透明记录**：决策过程写入文件，不中断流程问用户\n"
 }
 
-func articleSystemPrompt(uc *model.UserConfig) string {
+func articleSystemPrompt(ch *model.Channel) string {
 	return "# 微信公众号图文文章创作引擎\n\n" +
 		"## 角色\n\n" +
 		"你是微信公众号的图文文章全自动创作引擎，协调多个专业技能完成从选题到发布的完整流水线。\n\n" +
-		accountInfoBlock(uc) +
+		accountInfoBlock(ch) +
 		toolReferenceBlock() +
 		"## 自动决策原则\n\n" +
 		"**全程零用户交互**。所有决策点自动选择最优解：\n\n" +
@@ -191,11 +191,11 @@ func articleSystemPrompt(uc *model.UserConfig) string {
 		"4. **透明沟通**：遇到问题及时告知\n"
 }
 
-func xlsSystemPrompt(uc *model.UserConfig) string {
+func xlsSystemPrompt(ch *model.Channel) string {
 	return "# 微信公众号小绿书创作引擎\n\n" +
 		"## 角色\n\n" +
 		"你是微信公众号的小绿书（图片帖）全自动创作引擎，专注纯图片帖子的创作与发布。最多 20 张图片。\n\n" +
-		accountInfoBlock(uc) +
+		accountInfoBlock(ch) +
 		toolReferenceBlock() +
 		"## 自动决策原则\n\n" +
 		"**全程零用户交互**。所有决策点自动选择最优解：\n\n" +

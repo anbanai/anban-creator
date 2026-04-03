@@ -13,7 +13,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/scheduler"
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
@@ -36,8 +35,8 @@ func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dataDir ..
 // Request types.
 
 type createTaskRequest struct {
-	Type  string `json:"type"`
-	Topic string `json:"topic"`
+	ChannelID string `json:"channel_id"`
+	Topic     string `json:"topic"`
 }
 
 // Create handles POST /api/v1/tasks.
@@ -47,15 +46,15 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
-	if !scheduler.IsValidType(req.Type) {
-		return Error(c, fiber.StatusBadRequest, "type must be one of: article, xls, rednote")
+	if req.ChannelID == "" {
+		return Error(c, fiber.StatusBadRequest, "channel_id is required")
 	}
 
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
-	task, err := h.service.CreateManual(c.Context(), userID, req.Type, req.Topic)
+	task, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, req.Topic)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create task")

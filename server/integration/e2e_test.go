@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -49,7 +50,7 @@ func (n *noopEnqueuer) EnqueueIn(taskType string, payload []byte, delay time.Dur
 // setupTestRouter creates a full Fiber app with in-memory SQLite for E2E tests.
 // ---------------------------------------------------------------------------
 
-func setupTestRouter(t *testing.T) (*fiber.App, func()) {
+func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	t.Helper()
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -63,6 +64,7 @@ func setupTestRouter(t *testing.T) (*fiber.App, func()) {
 		&model.User{},
 		&model.LoginSession{},
 		&model.UserConfig{},
+		&model.Channel{},
 		&model.Plan{},
 		&model.Task{},
 		&model.TaskFile{},
@@ -126,7 +128,7 @@ func setupTestRouter(t *testing.T) (*fiber.App, func()) {
 	}
 
 	app := router.NewRouter(svcs)
-	return app, closeFunc
+	return app, closeFunc, repo
 }
 
 // parseJSONBody reads the response body and unmarshals it into a generic map.
@@ -185,16 +187,28 @@ func registerUser(t *testing.T, app *fiber.App, email, password, nickname string
 // TestE2E_FullUserFlow tests the complete lifecycle: register, create task,
 // list tasks, get task by ID, verify ownership isolation, and timeline access.
 func TestE2E_FullUserFlow(t *testing.T) {
-	app, closeFunc := setupTestRouter(t)
+	app, closeFunc, repo := setupTestRouter(t)
 	defer closeFunc()
 
 	// Step 1: Register user 1.
 	token1, userID1 := registerUser(t, app, "test@example.com", "testpassword123", "Test User")
 
+	// Step 1.5: Create a test channel for the user.
+	testChannel := &model.Channel{
+		ID:       "test-channel-rednote-1",
+		UserID:   userID1,
+		Platform: model.ScopeRednote,
+		Name:     "Test Rednote Channel",
+		Status:   model.ChannelStatusActive,
+	}
+	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
+		t.Fatalf("create test channel: %v", err)
+	}
+
 	// Step 2: Create a manual task.
 	taskBody, _ := json.Marshal(map[string]string{
-		"type":  "rednote",
-		"topic": "TestTopic",
+		"channel_id": testChannel.ID,
+		"topic":      "TestTopic",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -303,7 +317,7 @@ func TestE2E_FullUserFlow(t *testing.T) {
 // TestE2E_PlanLifecycle tests creating, reading, pausing, resuming, and
 // deleting a plan.
 func TestE2E_PlanLifecycle(t *testing.T) {
-	app, closeFunc := setupTestRouter(t)
+	app, closeFunc, _ := setupTestRouter(t)
 	defer closeFunc()
 
 	token, _ := registerUser(t, app, "plan@example.com", "testpassword123", "Plan User")
@@ -428,7 +442,7 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 
 // TestE2E_UserConfigManagement tests creating and retrieving user configs.
 func TestE2E_UserConfigManagement(t *testing.T) {
-	app, closeFunc := setupTestRouter(t)
+	app, closeFunc, _ := setupTestRouter(t)
 	defer closeFunc()
 
 	token, _ := registerUser(t, app, "config@example.com", "testpassword123", "Config User")
@@ -504,7 +518,7 @@ func TestE2E_UserConfigManagement(t *testing.T) {
 
 // TestE2E_AuthLifecycle tests registration, login, token refresh, and logout.
 func TestE2E_AuthLifecycle(t *testing.T) {
-	app, closeFunc := setupTestRouter(t)
+	app, closeFunc, _ := setupTestRouter(t)
 	defer closeFunc()
 
 	// Step 1: Register.
@@ -599,16 +613,28 @@ func TestE2E_AuthLifecycle(t *testing.T) {
 // TestE2E_TaskOwnershipIsolation verifies that a user cannot access another
 // user's tasks via list or get-by-ID endpoints.
 func TestE2E_TaskOwnershipIsolation(t *testing.T) {
-	app, closeFunc := setupTestRouter(t)
+	app, closeFunc, repo := setupTestRouter(t)
 	defer closeFunc()
 
-	token1, _ := registerUser(t, app, "user1@example.com", "password123", "User One")
+	token1, userID1 := registerUser(t, app, "user1@example.com", "password123", "User One")
 	token2, _ := registerUser(t, app, "user2@example.com", "password123", "User Two")
+
+	// Create a test channel for user 1.
+	testChannel := &model.Channel{
+		ID:       "test-channel-ownership-1",
+		UserID:   userID1,
+		Platform: model.ScopeArticle,
+		Name:     "User1 Article Channel",
+		Status:   model.ChannelStatusActive,
+	}
+	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
+		t.Fatalf("create test channel: %v", err)
+	}
 
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
-		"type":  "article",
-		"topic": "User1 Article",
+		"channel_id": testChannel.ID,
+		"topic":      "User1 Article",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -673,7 +699,7 @@ func TestE2E_TaskOwnershipIsolation(t *testing.T) {
 
 // TestE2E_PlanOwnershipIsolation verifies that plan endpoints enforce ownership.
 func TestE2E_PlanOwnershipIsolation(t *testing.T) {
-	app, closeFunc := setupTestRouter(t)
+	app, closeFunc, _ := setupTestRouter(t)
 	defer closeFunc()
 
 	token1, _ := registerUser(t, app, "planuser1@example.com", "password123", "Plan User One")
@@ -740,7 +766,7 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 
 // TestE2E_InvalidInputs tests various invalid input scenarios.
 func TestE2E_InvalidInputs(t *testing.T) {
-	app, closeFunc := setupTestRouter(t)
+	app, closeFunc, _ := setupTestRouter(t)
 	defer closeFunc()
 
 	token, _ := registerUser(t, app, "input@example.com", "password123", "Input User")
@@ -838,16 +864,28 @@ func TestE2E_InvalidInputs(t *testing.T) {
 // TestE2E_FindRunningByUserDoesNotLeak verifies that the timeline endpoint
 // does not leak running tasks from other users.
 func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
-	app, closeFunc := setupTestRouter(t)
+	app, closeFunc, repo := setupTestRouter(t)
 	defer closeFunc()
 
-	token1, _ := registerUser(t, app, "runner1@example.com", "password123", "Runner One")
+	token1, userID1 := registerUser(t, app, "runner1@example.com", "password123", "Runner One")
 	token2, _ := registerUser(t, app, "runner2@example.com", "password123", "Runner Two")
+
+	// Create a test channel for user 1.
+	testChannel := &model.Channel{
+		ID:       "test-channel-leak-1",
+		UserID:   userID1,
+		Platform: model.ScopeRednote,
+		Name:     "Runner1 Rednote Channel",
+		Status:   model.ChannelStatusActive,
+	}
+	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
+		t.Fatalf("create test channel: %v", err)
+	}
 
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
-		"type":  "rednote",
-		"topic": "Runner1 Task",
+		"channel_id": testChannel.ID,
+		"topic":      "Runner1 Task",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")

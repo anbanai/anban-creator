@@ -11,14 +11,14 @@ import (
 func TestBuildAppConfig(t *testing.T) {
 	tests := []struct {
 		name    string
-		uc      *model.UserConfig
+		ch      *model.Channel
 		wantErr bool
 		check   func(t *testing.T, cfg map[string]any)
 	}{
 		{
 			name: "basic article config",
-			uc: &model.UserConfig{
-				Scope:        model.ScopeArticle,
+			ch: &model.Channel{
+				Platform:     model.ScopeArticle,
 				Name:         "Test Account",
 				Keywords:     "写作,效率",
 				Positioning:  "个人成长",
@@ -41,10 +41,10 @@ func TestBuildAppConfig(t *testing.T) {
 		},
 		{
 			name: "rednote config with image API",
-			uc: &model.UserConfig{
-				Scope:        model.ScopeRednote,
-				Name:         "RedNote Account",
-				Style:        "cute-doodle",
+			ch: &model.Channel{
+				Platform: model.ScopeRednote,
+				Name:     "RedNote Account",
+				Style:    "cute-doodle",
 				ImageAPIConfig: `{
 					"cover": {"provider": "gemini", "key": "test_key", "model": "gemini-3-pro-image-preview"},
 					"content": {"provider": "gemini", "key": "test_key", "model": "gemini-3-pro-image-preview"}
@@ -59,9 +59,9 @@ func TestBuildAppConfig(t *testing.T) {
 		},
 		{
 			name: "empty keywords",
-			uc: &model.UserConfig{
-				Scope: model.ScopeXls,
-				Name:  "XLS Account",
+			ch: &model.Channel{
+				Platform: model.ScopeXls,
+				Name:     "XLS Account",
 			},
 			wantErr: false,
 			check: func(t *testing.T, cfg map[string]any) {
@@ -77,8 +77,8 @@ func TestBuildAppConfig(t *testing.T) {
 		},
 		{
 			name: "invalid image_api_config JSON",
-			uc: &model.UserConfig{
-				Scope:        model.ScopeArticle,
+			ch: &model.Channel{
+				Platform:      model.ScopeArticle,
 				ImageAPIConfig: "invalid json",
 			},
 			wantErr: true,
@@ -88,7 +88,7 @@ func TestBuildAppConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.uc)
+			cfg, err := BuildAppConfig(tt.ch)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -112,8 +112,8 @@ func TestBuildAppConfig(t *testing.T) {
 }
 
 func TestGetSystemPrompt(t *testing.T) {
-	uc := &model.UserConfig{
-		Scope:       model.ScopeRednote,
+	ch := &model.Channel{
+		Platform:    model.ScopeRednote,
 		Name:        "Test Name",
 		Keywords:    "写作,效率",
 		Positioning: "个人成长",
@@ -121,18 +121,18 @@ func TestGetSystemPrompt(t *testing.T) {
 
 	tests := []struct {
 		name string
-		uc   *model.UserConfig
+		ch   *model.Channel
 		want string
 	}{
 		{
 			name: "rednote prompt",
-			uc:   uc,
+			ch:   ch,
 			want: "小红书图文全自动创作引擎",
 		},
 		{
 			name: "article prompt",
-			uc: &model.UserConfig{
-				Scope:       model.ScopeArticle,
+			ch: &model.Channel{
+				Platform:    model.ScopeArticle,
 				Name:        "Article Name",
 				Author:      "Test Author",
 			},
@@ -140,16 +140,16 @@ func TestGetSystemPrompt(t *testing.T) {
 		},
 		{
 			name: "xls prompt",
-			uc: &model.UserConfig{
-				Scope:       model.ScopeXls,
-				Name:        "XLS Name",
+			ch: &model.Channel{
+				Platform: model.ScopeXls,
+				Name:     "XLS Name",
 			},
 			want: "微信公众号小绿书创作引擎",
 		},
 		{
 			name: "unknown type",
-			uc: &model.UserConfig{
-				Scope: "unknown",
+			ch: &model.Channel{
+				Platform: "unknown",
 			},
 			want: "",
 		},
@@ -157,7 +157,7 @@ func TestGetSystemPrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GetSystemPrompt(tt.uc.Scope, tt.uc)
+			got := GetSystemPrompt(tt.ch.Platform, tt.ch)
 			if tt.want == "" && got != "" {
 				t.Errorf("expected empty prompt, got non-empty")
 			}

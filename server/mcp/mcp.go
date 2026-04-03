@@ -19,28 +19,28 @@ func NewMCPHttpHandler(repo repository.Repository, logger *zerolog.Logger) fiber
 		// API key authentication, in which case we list all available tools.
 		userID, _ := c.Locals("user_id").(string)
 
-		// List user configs to determine available scopes.
+		// List active channels to determine available platforms.
 		ctx := c.Context()
-		configs, err := repo.UserConfigs().ListByUserID(ctx, userID)
+		channels, err := repo.Channels().ListByUserID(ctx, userID, repository.ChannelListOptions{Status: model.ChannelStatusActive})
 		if err != nil {
-			logger.Error().Err(err).Str("user_id", userID).Msg("failed to list user configs")
+			logger.Error().Err(err).Str("user_id", userID).Msg("failed to list channels")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "failed to load user configs",
+				"error": "failed to load channels",
 			})
 		}
 
-		// If authenticated via API key, include all scope tools regardless of config.
+		// If authenticated via API key, include all platform tools regardless of channel.
 		authMethod, _ := c.Locals("auth_method").(string)
 		if authMethod == "api_key" {
-			configs = append(configs,
-				&model.UserConfig{Scope: model.ScopeArticle},
-				&model.UserConfig{Scope: model.ScopeXls},
-				&model.UserConfig{Scope: model.ScopeRednote},
+			channels = append(channels,
+				&model.Channel{Platform: model.ScopeArticle},
+				&model.Channel{Platform: model.ScopeXls},
+				&model.Channel{Platform: model.ScopeRednote},
 			)
 		}
 
-		// Build tool list based on configured scopes.
-		tools := buildToolList(configs)
+		// Build tool list based on configured platforms.
+		tools := buildToolList(channels)
 
 		return c.JSON(fiber.Map{
 			"server": "anbanwriter",
@@ -56,9 +56,9 @@ type toolDefinition struct {
 	InputSchema map[string]any `json:"inputSchema"`
 }
 
-// buildToolList returns the list of available tools based on user's configured scopes.
-func buildToolList(configs []*model.UserConfig) []toolDefinition {
-	// Core tools available for all scopes.
+// buildToolList returns the list of available tools based on user's active channels.
+func buildToolList(channels []*model.Channel) []toolDefinition {
+	// Core tools available for all platforms.
 	tools := []toolDefinition{
 		{
 			Name:        "get_account_info",
@@ -103,9 +103,9 @@ func buildToolList(configs []*model.UserConfig) []toolDefinition {
 		},
 	}
 
-	// Scope-specific tools.
-	for _, cfg := range configs {
-		switch cfg.Scope {
+	// Platform-specific tools.
+	for _, ch := range channels {
+		switch ch.Platform {
 		case model.ScopeArticle:
 			tools = append(tools, articleTools()...)
 		case model.ScopeXls:

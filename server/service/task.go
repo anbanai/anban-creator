@@ -58,16 +58,30 @@ func NewTaskService(
 }
 
 // CreateManual creates a task without a plan and enqueues it for execution.
-func (s *TaskService) CreateManual(ctx context.Context, userID, taskType, topic string) (*model.Task, error) {
-	if taskType == "" {
-		return nil, fmt.Errorf("type is required")
+func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic string) (*model.Task, error) {
+	if channelID == "" {
+		return nil, fmt.Errorf("channel_id is required")
+	}
+
+	// Load and validate channel.
+	channel, err := s.repo.Channels().FindByID(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("find channel: %w", err)
+	}
+	if channel.UserID != userID {
+		return nil, fmt.Errorf("channel not owned by user")
+	}
+	if channel.Status != model.ChannelStatusActive {
+		return nil, fmt.Errorf("channel is not active")
 	}
 
 	taskID := generateTaskID()
+	taskType := channel.Platform
 
 	task := &model.Task{
 		ID:        taskID,
 		UserID:    userID,
+		ChannelID: channelID,
 		Type:      taskType,
 		Status:    model.TaskStatusPending,
 		Topic:     topic,
@@ -96,12 +110,22 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		topic = plan.Title
 	}
 
+	// Derive task type from the channel if ChannelID is set.
+	taskType := plan.Type
+	if plan.ChannelID != "" {
+		ch, err := s.repo.Channels().FindByID(ctx, plan.ChannelID)
+		if err == nil {
+			taskType = ch.Platform
+		}
+	}
+
 	task := &model.Task{
-		ID:     taskID,
-		UserID: plan.UserID,
-		Type:   plan.Type,
-		Status: model.TaskStatusPending,
-		Topic:  topic,
+		ID:        taskID,
+		UserID:    plan.UserID,
+		ChannelID: plan.ChannelID,
+		Type:      taskType,
+		Status:    model.TaskStatusPending,
+		Topic:     topic,
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -172,7 +196,7 @@ func (s *TaskService) GetFiles(ctx context.Context, taskID string) ([]*model.Tas
 
 // EnqueueExecution enqueues a task for async execution.
 // If no enqueuer is available (nil), it runs synchronously in a goroutine.
-func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, userConfig *model.UserConfig) error {
+func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, channel *model.Channel) error {
 	if s.enqueuer != nil {
 		payload, err := json.Marshal(map[string]string{
 			"task_id": task.ID,
@@ -192,13 +216,13 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, us
 
 	// Fallback: run in goroutine if no enqueuer.
 	s.logger.Warn().Str("task_id", task.ID).Msg("no enqueuer available, running task in goroutine")
-	go s.HandleExecution(context.Background(), task, userConfig)
+	go s.HandleExecution(context.Background(), task, channel)
 	return nil
 }
 
 // HandleExecution is called by the async worker to execute a task.
 // It calls the agent executor and updates status in the DB.
-func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, userConfig *model.UserConfig) error {
+func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, channel *model.Channel) error {
 	taskID := task.ID
 	userID := task.UserID
 
@@ -212,23 +236,29 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, use
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set started_at")
 	}
 
-	// Load user config if not provided.
-	if userConfig == nil {
-		cfg, err := s.repo.UserConfigs().FindByUserAndScope(ctx, userID, task.Type)
-		if err != nil {
-			s.logger.Warn().Err(err).
-				Str("task_id", taskID).
-				Str("scope", task.Type).
-				Msg("no user config found for task type, proceeding without config")
-		} else {
-			userConfig = cfg
+	// Load channel if not provided.
+	if channel == nil {
+		if task.ChannelID == "" {
+			return fmt.Errorf("task has no channel_id, cannot execute")
 		}
+		ch, err := s.repo.Channels().FindByID(ctx, task.ChannelID)
+		if err != nil {
+			s.logger.Error().Err(err).
+				Str("task_id", taskID).
+				Str("channel_id", task.ChannelID).
+				Msg("failed to load channel for task")
+			return fmt.Errorf("load channel: %w", err)
+		}
+		if ch.UserID != userID {
+			return fmt.Errorf("channel not owned by user")
+		}
+		channel = ch
 	}
 
 	// Execute via agent.
 	result, execErr := s.executor.Execute(ctx, &agent.ExecutionOptions{
-		Task:       task,
-		UserConfig: userConfig,
+		Task:    task,
+		Channel: channel,
 		OnProgress: func(id string, message string) {
 			current, err := s.repo.Tasks().FindByID(ctx, id)
 			if err != nil {

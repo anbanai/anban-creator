@@ -45,10 +45,10 @@ func NewExecutor(logger *zerolog.Logger) *Executor {
 
 // ExecutionOptions configures a single agent execution.
 type ExecutionOptions struct {
-	Task       *model.Task
-	UserConfig *model.UserConfig
-	Model      string
-	MaxTurns   int
+	Task    *model.Task
+	Channel *model.Channel
+	Model   string
+	MaxTurns int
 	OnProgress func(taskID string, message string) // callback for SSE
 }
 
@@ -91,14 +91,14 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 		Str("work_dir", workDir).
 		Msg("starting agent execution")
 
-	// 3. Build MCP server with user's config.
-	mcpServer, err := CreateMCPTools(workDir, opts.UserConfig, e.logger)
+	// 3. Build MCP server with channel config.
+	mcpServer, err := CreateMCPTools(workDir, opts.Channel, e.logger)
 	if err != nil {
 		return nil, fmt.Errorf("create MCP tools: %w", err)
 	}
 
 	// 4. Get system prompt.
-	systemPrompt := GetSystemPrompt(opts.Task.Type, opts.UserConfig)
+	systemPrompt := GetSystemPrompt(opts.Task.Type, opts.Channel)
 
 	// 5. Build user prompt from task topic.
 	userPrompt := opts.Task.Topic
