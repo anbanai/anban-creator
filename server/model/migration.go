@@ -1,6 +1,7 @@
 package model
 
 import (
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -97,7 +98,9 @@ func backfillTaskChannelID(db *gorm.DB) error {
 			// No matching channel -- skip this task.
 			continue
 		}
-		db.Model(&Task{}).Where("id = ?", task.ID).Update("channel_id", ch.ID)
+		if err := db.Model(&Task{}).Where("id = ?", task.ID).Update("channel_id", ch.ID).Error; err != nil {
+			log.Printf("migration: failed to backfill channel_id for task %s: %v", task.ID, err)
+		}
 	}
 
 	return nil
@@ -118,7 +121,9 @@ func backfillPlanChannelID(db *gorm.DB) error {
 		if err != nil {
 			continue
 		}
-		db.Model(&Plan{}).Where("id = ?", plan.ID).Update("channel_id", ch.ID)
+		if err := db.Model(&Plan{}).Where("id = ?", plan.ID).Update("channel_id", ch.ID).Error; err != nil {
+			log.Printf("migration: failed to backfill channel_id for plan %s: %v", plan.ID, err)
+		}
 	}
 
 	return nil

@@ -40,7 +40,6 @@ type Services struct {
 	PlanHandler     *handler.PlanHandler
 	TaskHandler     *handler.TaskHandler
 	ChannelHandler  *handler.ChannelHandler
-	ConfigHandler   *handler.ConfigHandler
 	TimelineHandler *handler.TimelineHandler
 	StorageProvider storage.Provider
 }
@@ -144,16 +143,6 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.AuthHandler != nil {
 		apiV1.Get("/auth/me", svc.AuthHandler.Me)
-	}
-
-	// ---------------------------------------------------------------------------
-	// User Config endpoints (deprecated)
-	// ---------------------------------------------------------------------------
-
-	if svc.ConfigHandler != nil {
-		apiV1.Get("/configs", svc.ConfigHandler.List)
-		apiV1.Get("/configs/:scope", svc.ConfigHandler.GetByScope)
-		apiV1.Put("/configs/:scope", svc.ConfigHandler.Upsert)
 	}
 
 	// ---------------------------------------------------------------------------

@@ -1,6 +1,9 @@
 package main
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Hinter 可提供修复建议的错误接口
 type Hinter interface {
@@ -33,3 +36,19 @@ func hintFrom(err error) string {
 	}
 	return ""
 }
+
+// DraftError 草稿错误
+type DraftError struct {
+	Message string
+	HintMsg string
+}
+
+func (e *DraftError) Error() string {
+	msg := fmt.Sprintf("草稿错误: %s", e.Message)
+	if e.HintMsg != "" {
+		msg += fmt.Sprintf("\n💡 提示:\n   %s", e.HintMsg)
+	}
+	return msg
+}
+
+func (e *DraftError) Hint() string { return e.HintMsg }

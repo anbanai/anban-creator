@@ -47,7 +47,7 @@ type UserConfigRepository interface {
 	FindByUserAndScope(ctx context.Context, userID, scope string) (*model.UserConfig, error)
 	Upsert(ctx context.Context, config *model.UserConfig) error
 	ListByUserID(ctx context.Context, userID string) ([]*model.UserConfig, error)
-	Delete(ctx context.Context, id uint) error
+	Delete(ctx context.Context, id string) error
 }
 
 // PlanRepository provides access to the plans table.

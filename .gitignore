@@ -23,6 +23,7 @@ go.work
 
 # Configuration files (contain sensitive information)
 .anbanwriter/
+server/config.yaml
 
 # Log files
 *.log

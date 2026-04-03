@@ -1,7 +1,7 @@
 # Writer CLI Makefile
 # WeChat writing tool unified build
 
-.PHONY: all build clean test install help lint fmt vet release sync \
+.PHONY: all build clean test install help lint fmt vet release sync ci coverage \
         server-build server-run server-dev server-test \
         web-install web-dev web-build \
         docker-up docker-down docker-logs
@@ -38,12 +38,6 @@ build:
 	@go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter ./app
 	@echo "Build complete: bin/anbanwriter"
 
-# Quick build (development)
-fast:
-	@mkdir -p bin
-	@go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter ./app
-	@echo "Build complete: bin/anbanwriter"
-
 # Clean all build artifacts
 clean:
 	@rm -rf bin/ web/dist/ web/node_modules/
@@ -54,9 +48,9 @@ clean:
 test:
 	@go test -v ./...
 
-# Code linting
+# Code linting (requires golangci-lint)
 lint:
-	@golangci-lint run ./... 2>/dev/null || echo "  (requires golangci-lint)"
+	@golangci-lint run ./...
 
 # Format code
 fmt:
@@ -79,6 +73,16 @@ deps:
 # Sync Skill directories
 sync:
 	@bash scripts/sync.sh
+
+# Run all CI checks (format, vet, test, lint)
+ci: fmt vet test lint
+
+# Run tests with coverage report
+coverage:
+	@go test -coverprofile=coverage.out ./...
+	@go tool cover -func=coverage.out
+	@echo ""
+	@echo "Full report: go tool cover -html=coverage.out"
 
 # ---------------------------------------------------------------------------
 # Server targets
@@ -143,12 +147,13 @@ help:
 	@echo ""
 	@echo "CLI targets:"
 	@echo "  make build         - Build current platform CLI binary"
-	@echo "  make fast          - Quick build (development)"
 	@echo "  make release       - Build all platform binaries to bin/"
 	@echo "  make test          - Run all tests"
+	@echo "  make coverage      - Run tests with coverage report"
+	@echo "  make ci            - Run all CI checks (fmt + vet + test + lint)"
 	@echo "  make vet           - Static analysis"
 	@echo "  make fmt           - Format code"
-	@echo "  make lint          - Lint code"
+	@echo "  make lint          - Lint code (requires golangci-lint)"
 	@echo "  make deps          - Download and tidy dependencies"
 	@echo "  make clean         - Remove all build artifacts"
 	@echo ""

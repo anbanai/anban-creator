@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const (
@@ -51,94 +50,6 @@ const DefaultFlowerImageSize = "9:16"
 
 // DefaultFlowerImageCount 默认花卉图片数量（每次生成的花卉种数）
 const DefaultFlowerImageCount = 5
-
-// NewDefaultConfig 返回带有推荐默认值的 Config，用于生成配置文件模板
-func NewDefaultConfig() *Config {
-	c := &Config{}
-
-	// 账号基本信息
-	c.Name = "your_account_name"
-	c.Keywords = []string{"keyword1", "keyword2"}
-	c.Positioning = "your_account_positioning"
-
-	// 微信公众号认证
-	c.Wechat.AppID = "your_wechat_appid"
-	c.Wechat.Secret = "your_wechat_secret"
-
-	// 图文文章
-	c.Wechat.Article.Author = "your_author_name"
-	c.Wechat.Article.Style = DefaultArticleStyle
-	c.Wechat.Article.Theme = DefaultArticleTheme
-	// 文章封面图
-	c.Wechat.Article.Cover.Image.Provider = DefaultImageProvider
-	c.Wechat.Article.Cover.Image.Key = "your_image_api_key"
-	c.Wechat.Article.Cover.Image.Model = "gemini-3-pro-image-preview"
-	c.Wechat.Article.Cover.Image.Size = DefaultArticleImageSize
-	c.Wechat.Article.Cover.Image.Compress = true
-	c.Wechat.Article.Cover.Image.MaxWidth = DefaultImageMaxWidth
-	c.Wechat.Article.Cover.Image.MaxSizeMB = DefaultImageMaxSizeMB
-	// 文章内容配图
-	c.Wechat.Article.Content.Image.Provider = DefaultImageProvider
-	c.Wechat.Article.Content.Image.Key = "your_image_api_key"
-	c.Wechat.Article.Content.Image.Model = "gemini-3-pro-image-preview"
-	c.Wechat.Article.Content.Image.Size = DefaultArticleImageSize
-	c.Wechat.Article.Content.Image.Compress = true
-	c.Wechat.Article.Content.Image.MaxWidth = DefaultImageMaxWidth
-	c.Wechat.Article.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
-
-	// 小绿书
-	c.Wechat.Xls.Style = "flat-vector"
-	// 小绿书封面图
-	c.Wechat.Xls.Cover.Image.Provider = DefaultImageProvider
-	c.Wechat.Xls.Cover.Image.Key = "your_image_api_key"
-	c.Wechat.Xls.Cover.Image.Model = "gemini-3-pro-image-preview"
-	c.Wechat.Xls.Cover.Image.Size = DefaultXlsImageSize
-	c.Wechat.Xls.Cover.Image.Refer = "path/to/refer.png"
-	c.Wechat.Xls.Cover.Image.Compress = true
-	c.Wechat.Xls.Cover.Image.MaxWidth = DefaultImageMaxWidth
-	c.Wechat.Xls.Cover.Image.MaxSizeMB = DefaultImageMaxSizeMB
-	// 小绿书内容图
-	c.Wechat.Xls.Content.Count = DefaultXlsImageCount
-	c.Wechat.Xls.Content.Image.Provider = DefaultImageProvider
-	c.Wechat.Xls.Content.Image.Key = "your_image_api_key"
-	c.Wechat.Xls.Content.Image.Model = "gemini-3-pro-image-preview"
-	c.Wechat.Xls.Content.Image.Size = DefaultXlsImageSize
-	c.Wechat.Xls.Content.Image.Refer = "path/to/refer.png"
-	c.Wechat.Xls.Content.Image.Compress = true
-	c.Wechat.Xls.Content.Image.MaxWidth = DefaultImageMaxWidth
-	c.Wechat.Xls.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
-
-	// 小红书（可选平台）
-	c.Rednote = new(RednoteConfig)
-	c.Rednote.Style = "cute-doodle"
-	c.Rednote.Cover.Image.Provider = DefaultImageProvider
-	c.Rednote.Cover.Image.Key = "your_image_api_key"
-	c.Rednote.Cover.Image.Model = "gemini-3-pro-image-preview"
-	c.Rednote.Cover.Image.Size = DefaultRednoteImageSize
-	c.Rednote.Cover.Image.Refer = "path/to/refer.png"
-	c.Rednote.Cover.Image.Compress = true
-	c.Rednote.Content.Image.Provider = DefaultImageProvider
-	c.Rednote.Content.Image.Key = "your_image_api_key"
-	c.Rednote.Content.Image.Model = "gemini-3-pro-image-preview"
-	c.Rednote.Content.Image.Size = DefaultRednoteImageSize
-	c.Rednote.Content.Image.Refer = "path/to/refer.png"
-	c.Rednote.Content.Image.Compress = true
-	c.Rednote.Content.Count = DefaultRednoteImageCount
-
-	// 花卉图片生成（可选）
-	c.Flower = &FlowerConfig{}
-	c.Flower.Content.Image.Provider = DefaultImageProvider
-	c.Flower.Content.Image.Key = "your_image_api_key"
-	c.Flower.Content.Image.Model = "gemini-3-pro-image-preview"
-	c.Flower.Content.Image.Size = DefaultFlowerImageSize
-	c.Flower.Content.Image.Refer = "path/to/refer.png"
-	c.Flower.Content.Image.Compress = true
-	c.Flower.Content.Image.MaxWidth = DefaultImageMaxWidth
-	c.Flower.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
-	c.Flower.Content.Count = DefaultFlowerImageCount
-
-	return c
-}
 
 // VolcengineConfig 火山方舟 Seedream 高级选项（仅 settings.json 配置，不暴露到 agent/skill 层）
 type VolcengineConfig struct {
@@ -360,7 +271,7 @@ func loadFromJSON(cfg *Config, data []byte) error {
 	return nil
 }
 
-// Validate 验证配置
+// Validate 验证配置（包含微信账号验证）
 func (c *Config) Validate() error {
 	// 验证微信账号配置
 	if c.Wechat.AppID == "" {
@@ -378,38 +289,17 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// 验证图片处理参数
-	if err := c.Wechat.Article.Content.Image.Validate(); err != nil {
-		return err
-	}
-	if err := c.Wechat.Xls.Content.Image.Validate(); err != nil {
-		return err
-	}
-
-	// 验证小绿书图片数量
-	if c.Wechat.Xls.Content.Count != 0 && (c.Wechat.Xls.Content.Count < 1 || c.Wechat.Xls.Content.Count > 20) {
-		return &ConfigError{
-			Field:   "XlsImageCount",
-			Message: "小绿书图片数量必须在 1 到 20 之间",
-			HintMsg: "配置文件中设置 wechat.xls.content.count: 4",
-		}
-	}
-
-	// 验证花卉图片数量
-	if c.Flower != nil && c.Flower.Content.Count != 0 && (c.Flower.Content.Count < 1 || c.Flower.Content.Count > 50) {
-		return &ConfigError{
-			Field:   "FlowerImageCount",
-			Message: "花卉图片数量必须在 1 到 50 之间",
-			HintMsg: "配置文件中设置 flower.content.count: 5",
-		}
-	}
-
-	return nil
+	return c.validateCommon()
 }
 
 // ValidateMinimal 验证基础配置（跳过微信账号验证）
 // 用于不需要微信 API 的命令
 func (c *Config) ValidateMinimal() error {
+	return c.validateCommon()
+}
+
+// validateCommon 公共验证逻辑
+func (c *Config) validateCommon() error {
 	// 验证图片处理参数
 	if err := c.Wechat.Article.Content.Image.Validate(); err != nil {
 		return err
@@ -649,30 +539,3 @@ func (e *ConfigError) Error() string {
 }
 
 func (e *ConfigError) Hint() string { return e.HintMsg }
-
-// getRelativePath 获取相对路径（用于更友好的显示）
-func getRelativePath(fullPath string) string {
-	// 如果是用户目录，显示为 ~/.anbanwriter.yaml
-	homeDir, _ := os.UserHomeDir()
-	if homeDir != "" && strings.HasPrefix(fullPath, homeDir) {
-		rel := strings.TrimPrefix(fullPath, homeDir)
-		if strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, "\\") {
-			rel = rel[1:]
-		}
-		return "~/" + rel
-	}
-
-	// 如果是当前目录，直接显示文件名
-	if cwd, err := os.Getwd(); err == nil {
-		if strings.HasPrefix(fullPath, cwd) {
-			rel := strings.TrimPrefix(fullPath, cwd)
-			if strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, "\\") {
-				rel = rel[1:]
-			}
-			return "./" + rel
-		}
-	}
-
-	// 其他情况返回完整路径
-	return fullPath
-}

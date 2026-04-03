@@ -182,42 +182,6 @@ export interface TimelineResponse {
   items: TimelineItem[]
 }
 
-// --- Config Types ---
-
-export type ConfigScope = 'article' | 'xls' | 'rednote'
-
-export interface ImageApiConfig {
-  provider: string
-  model?: string
-  base_url?: string
-  api_key?: string
-}
-
-export interface UserConfig {
-  scope: ConfigScope
-  name: string
-  keywords: string
-  positioning: string
-  style: string
-  theme: string
-  author: string
-  wechat_app_id: string
-  wechat_secret: string
-  image_api_config: ImageApiConfig
-}
-
-export interface UpdateConfigRequest {
-  name?: string
-  keywords?: string
-  positioning?: string
-  style?: string
-  theme?: string
-  author?: string
-  wechat_app_id?: string
-  wechat_secret?: string
-  image_api_config?: ImageApiConfig
-}
-
 // --- Paginated Response ---
 
 export interface PaginatedResponse<T> {
@@ -384,17 +348,6 @@ export const api = {
       unwrap<void>(http.delete(`/channels/${id}`)),
   },
 
-  // Configs
-  configs: {
-    list: () =>
-      unwrap<UserConfig[]>(http.get('/configs')),
-
-    get: (scope: string) =>
-      unwrap<UserConfig>(http.get(`/configs/${scope}`)),
-
-    update: (scope: string, data: UpdateConfigRequest) =>
-      unwrap<UserConfig>(http.put(`/configs/${scope}`, data)),
-  },
 }
 
 export default http
