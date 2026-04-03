@@ -37,3 +37,16 @@ const (
 	FileRoleMarkdown = "markdown"
 	FileRoleOther    = "other"
 )
+
+// Channel status constants.
+const (
+	ChannelStatusActive   = "active"
+	ChannelStatusArchived = "archived"
+)
+
+// Platform constants.
+const (
+	PlatformArticle = "article"
+	PlatformXLS     = "xls"
+	PlatformRednote = "rednote"
+)
