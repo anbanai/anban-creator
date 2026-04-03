@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -20,7 +21,10 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.Plan{}, &model.Task{}, &model.UserConfig{}, &model.User{}, &model.LoginSession{}, &model.TaskFile{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.Plan{}, &model.Task{}, &model.UserConfig{}, &model.User{},
+		&model.LoginSession{}, &model.TaskFile{}, &model.Channel{},
+	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
 	return db
@@ -42,53 +46,73 @@ func setupTestPlanService(t *testing.T) (*PlanService, repository.Repository) {
 	return svc, repo
 }
 
+// createTestChannel creates a test channel for the given user and returns its ID.
+func createTestChannel(t *testing.T, repo repository.Repository, userID, platform string) string {
+	t.Helper()
+	ch := &model.Channel{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		Platform:  platform,
+		Name:      "Test Channel " + platform,
+		Status:    model.ChannelStatusActive,
+	}
+	if err := repo.Channels().Create(context.Background(), ch); err != nil {
+		t.Fatalf("create test channel: %v", err)
+	}
+	return ch.ID
+}
+
 func TestPlanService_Create(t *testing.T) {
-	svc, _ := setupTestPlanService(t)
+	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
+	// Create test channels for the user.
+	chID1 := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	chID2 := createTestChannel(t, repo, "user-1", model.PlatformArticle)
+
 	tests := []struct {
-		name      string
-		planType  string
-		cronExpr  string
-		wantErr   bool
-		errSubstr string
+		name       string
+		channelID  string
+		cronExpr   string
+		wantErr    bool
+		errSubstr  string
 	}{
 		{
-			name:     "valid plan",
-			planType: model.ScopeRednote,
-			cronExpr: "0 9 * * 1-5",
-			wantErr:  false,
+			name:      "valid plan",
+			channelID: chID1,
+			cronExpr:  "0 9 * * 1-5",
+			wantErr:   false,
 		},
 		{
-			name:     "every minute",
-			planType: model.ScopeArticle,
-			cronExpr: "* * * * *",
-			wantErr:  false,
+			name:      "every minute",
+			channelID: chID2,
+			cronExpr:  "* * * * *",
+			wantErr:   false,
 		},
 		{
-			name:      "empty type",
-			planType:  "",
+			name:      "empty channel_id",
+			channelID: "",
 			cronExpr:  "0 9 * * *",
 			wantErr:   true,
-			errSubstr: "type is required",
+			errSubstr: "channel_id is required",
 		},
 		{
 			name:      "empty cron",
-			planType:  model.ScopeRednote,
+			channelID: chID1,
 			cronExpr:  "",
 			wantErr:   true,
 			errSubstr: "cron_expr is required",
 		},
 		{
 			name:      "invalid cron",
-			planType:  model.ScopeRednote,
+			channelID: chID1,
 			cronExpr:  "invalid cron",
 			wantErr:   true,
 			errSubstr: "invalid cron expression",
 		},
 		{
 			name:      "invalid cron fields",
-			planType:  model.ScopeXls,
+			channelID: chID1,
 			cronExpr:  "60 25 * * *",
 			wantErr:   true,
 			errSubstr: "invalid cron expression",
@@ -97,7 +121,7 @@ func TestPlanService_Create(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := svc.Create(ctx, "user-1", tt.planType, "Test Plan", "Description", tt.cronExpr, "topic hint")
+			plan, err := svc.Create(ctx, "user-1", tt.channelID, "Test Plan", "Description", tt.cronExpr, "topic hint")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -122,16 +146,20 @@ func TestPlanService_Create(t *testing.T) {
 			if plan.CronExpr != tt.cronExpr {
 				t.Errorf("expected cron_expr %q, got %q", tt.cronExpr, plan.CronExpr)
 			}
+			if plan.ChannelID != tt.channelID {
+				t.Errorf("expected channel_id %q, got %q", tt.channelID, plan.ChannelID)
+			}
 		})
 	}
 }
 
 func TestPlanService_GetByID(t *testing.T) {
-	svc, _ := setupTestPlanService(t)
+	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	// Create a plan first.
-	created, err := svc.Create(ctx, "user-1", model.ScopeRednote, "My Plan", "desc", "0 9 * * *", "hint")
+	// Create a test channel and plan.
+	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	created, err := svc.Create(ctx, "user-1", chID, "My Plan", "desc", "0 9 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -153,25 +181,30 @@ func TestPlanService_GetByID(t *testing.T) {
 }
 
 func TestPlanService_List(t *testing.T) {
-	svc, _ := setupTestPlanService(t)
+	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	// Create multiple plans.
+	// Create a test channel for the user.
+	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	// Create a different channel for user-2.
+	chID2 := createTestChannel(t, repo, "user-2", model.PlatformArticle)
+
+	// Create multiple plans for user-1.
 	for i := 0; i < 5; i++ {
-		_, err := svc.Create(ctx, "user-1", model.ScopeRednote, "Plan "+string(rune('A'+i)), "desc", "0 9 * * *", "hint")
+		_, err := svc.Create(ctx, "user-1", chID, "Plan "+string(rune('A'+i)), "desc", "0 9 * * *", "hint")
 		if err != nil {
 			t.Fatalf("create plan %d: %v", i, err)
 		}
 	}
 
 	// Create plans for another user.
-	_, err := svc.Create(ctx, "user-2", model.ScopeArticle, "Other Plan", "desc", "0 10 * * *", "hint")
+	_, err := svc.Create(ctx, "user-2", chID2, "Other Plan", "desc", "0 10 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan for user-2: %v", err)
 	}
 
 	// List user-1 plans.
-	plans, total, err := svc.List(ctx, "user-1", 0, 10)
+	plans, total, err := svc.List(ctx, "user-1", 0, 10, "")
 	if err != nil {
 		t.Fatalf("list plans: %v", err)
 	}
@@ -183,7 +216,7 @@ func TestPlanService_List(t *testing.T) {
 	}
 
 	// Test pagination: offset=0, limit=2.
-	plans, _, err = svc.List(ctx, "user-1", 0, 2)
+	plans, _, err = svc.List(ctx, "user-1", 0, 2, "")
 	if err != nil {
 		t.Fatalf("list plans paginated: %v", err)
 	}
@@ -192,7 +225,7 @@ func TestPlanService_List(t *testing.T) {
 	}
 
 	// List for different user.
-	plans, total, err = svc.List(ctx, "user-2", 0, 10)
+	plans, total, err = svc.List(ctx, "user-2", 0, 10, "")
 	if err != nil {
 		t.Fatalf("list user-2 plans: %v", err)
 	}
@@ -202,10 +235,11 @@ func TestPlanService_List(t *testing.T) {
 }
 
 func TestPlanService_Update(t *testing.T) {
-	svc, _ := setupTestPlanService(t)
+	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	created, err := svc.Create(ctx, "user-1", model.ScopeRednote, "Old Title", "old desc", "0 9 * * *", "old hint")
+	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	created, err := svc.Create(ctx, "user-1", chID, "Old Title", "old desc", "0 9 * * *", "old hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -243,10 +277,11 @@ func TestPlanService_Update(t *testing.T) {
 }
 
 func TestPlanService_Pause_Resume(t *testing.T) {
-	svc, _ := setupTestPlanService(t)
+	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	created, err := svc.Create(ctx, "user-1", model.ScopeRednote, "Plan", "desc", "0 9 * * *", "hint")
+	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	created, err := svc.Create(ctx, "user-1", chID, "Plan", "desc", "0 9 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -288,7 +323,8 @@ func TestPlanService_Delete(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	created, err := svc.Create(ctx, "user-1", model.ScopeRednote, "Plan", "desc", "0 9 * * *", "hint")
+	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	created, err := svc.Create(ctx, "user-1", chID, "Plan", "desc", "0 9 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}

@@ -6,7 +6,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/scheduler"
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
@@ -24,7 +23,7 @@ func NewPlanHandler(svc *service.PlanService, logger *zerolog.Logger) *PlanHandl
 // Request types.
 
 type createPlanRequest struct {
-	Type        string `json:"type"`
+	ChannelID   string `json:"channel_id"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	CronExpr    string `json:"cron_expr"`
@@ -45,12 +44,12 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
-	if !scheduler.IsValidType(req.Type) {
-		return Error(c, fiber.StatusBadRequest, "type must be one of: article, xls, rednote")
+	if req.ChannelID == "" {
+		return Error(c, fiber.StatusBadRequest, "channel_id is required")
 	}
 
 	userID := GetUserID(c)
-	plan, err := h.service.Create(c.Context(), userID, req.Type, req.Title, req.Description, req.CronExpr, req.TopicHint)
+	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.Title, req.Description, req.CronExpr, req.TopicHint)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
@@ -68,12 +67,13 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 
 	offset, _ := strconv.Atoi(c.Query("offset", "0"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+	channelID := c.Query("channel_id", "")
 
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 
-	plans, total, err := h.service.List(c.Context(), userID, offset, limit)
+	plans, total, err := h.service.List(c.Context(), userID, offset, limit, channelID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("list plans failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to list plans")

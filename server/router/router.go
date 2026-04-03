@@ -39,6 +39,7 @@ type Services struct {
 	TaskService     *service.TaskService
 	PlanHandler     *handler.PlanHandler
 	TaskHandler     *handler.TaskHandler
+	ChannelHandler  *handler.ChannelHandler
 	ConfigHandler   *handler.ConfigHandler
 	TimelineHandler *handler.TimelineHandler
 	StorageProvider storage.Provider
@@ -146,13 +147,27 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	// ---------------------------------------------------------------------------
-	// User Config endpoints
+	// User Config endpoints (deprecated)
 	// ---------------------------------------------------------------------------
 
 	if svc.ConfigHandler != nil {
 		apiV1.Get("/configs", svc.ConfigHandler.List)
 		apiV1.Get("/configs/:scope", svc.ConfigHandler.GetByScope)
 		apiV1.Put("/configs/:scope", svc.ConfigHandler.Upsert)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Channel management
+	// ---------------------------------------------------------------------------
+
+	if svc.ChannelHandler != nil {
+		apiV1.Get("/channels", svc.ChannelHandler.List)
+		apiV1.Post("/channels", svc.ChannelHandler.Create)
+		apiV1.Get("/channels/:id", svc.ChannelHandler.Get)
+		apiV1.Put("/channels/:id", svc.ChannelHandler.Update)
+		apiV1.Patch("/channels/:id/archive", svc.ChannelHandler.Archive)
+		apiV1.Patch("/channels/:id/restore", svc.ChannelHandler.Restore)
+		apiV1.Delete("/channels/:id", svc.ChannelHandler.Delete)
 	}
 
 	// ---------------------------------------------------------------------------

@@ -150,15 +150,15 @@ func (s *TaskService) GetByID(ctx context.Context, id string) (*model.Task, erro
 	return task, nil
 }
 
-// List returns tasks for a user with optional status filter and pagination.
-func (s *TaskService) List(ctx context.Context, userID string, offset, limit int, status string) ([]*model.Task, int64, error) {
+// List returns tasks for a user with optional status and channel filters and pagination.
+func (s *TaskService) List(ctx context.Context, userID string, offset, limit int, status, channelID string) ([]*model.Task, int64, error) {
 	var tasks []*model.Task
 	var err error
 
 	if status != "" {
-		tasks, err = s.repo.Tasks().FindByUserIDAndStatus(ctx, userID, status, "", offset, limit)
+		tasks, err = s.repo.Tasks().FindByUserIDAndStatus(ctx, userID, status, channelID, offset, limit)
 	} else {
-		tasks, err = s.repo.Tasks().FindByUserID(ctx, userID, "", offset, limit)
+		tasks, err = s.repo.Tasks().FindByUserID(ctx, userID, channelID, offset, limit)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("list tasks: %w", err)
@@ -166,9 +166,9 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 
 	var total int64
 	if status != "" {
-		total, err = s.repo.Tasks().CountByUserIDAndStatus(ctx, userID, status, "")
+		total, err = s.repo.Tasks().CountByUserIDAndStatus(ctx, userID, status, channelID)
 	} else {
-		total, err = s.repo.Tasks().CountByUserID(ctx, userID, "")
+		total, err = s.repo.Tasks().CountByUserID(ctx, userID, channelID)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("count tasks: %w", err)

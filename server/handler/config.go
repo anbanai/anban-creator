@@ -1,3 +1,5 @@
+// Deprecated: Channel-based configuration replaces per-scope user config.
+// These endpoints map to Channel operations and will be removed in a future version.
 package handler
 
 import (

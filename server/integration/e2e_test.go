@@ -317,14 +317,26 @@ func TestE2E_FullUserFlow(t *testing.T) {
 // TestE2E_PlanLifecycle tests creating, reading, pausing, resuming, and
 // deleting a plan.
 func TestE2E_PlanLifecycle(t *testing.T) {
-	app, closeFunc, _ := setupTestRouter(t)
+	app, closeFunc, repo := setupTestRouter(t)
 	defer closeFunc()
 
-	token, _ := registerUser(t, app, "plan@example.com", "testpassword123", "Plan User")
+	token, userID := registerUser(t, app, "plan@example.com", "testpassword123", "Plan User")
+
+	// Step 0: Create a test channel for the user.
+	testChannel := &model.Channel{
+		ID:       "plan-lifecycle-channel",
+		UserID:   userID,
+		Platform: model.PlatformRednote,
+		Name:     "Plan Lifecycle Channel",
+		Status:   model.ChannelStatusActive,
+	}
+	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
+		t.Fatalf("create test channel: %v", err)
+	}
 
 	// Step 1: Create a plan.
 	planBody, _ := json.Marshal(map[string]string{
-		"type":        "rednote",
+		"channel_id":  testChannel.ID,
 		"title":       "Daily Rednote Plan",
 		"description": "Generate rednote content daily",
 		"cron_expr":   "0 9 * * *",
@@ -699,15 +711,27 @@ func TestE2E_TaskOwnershipIsolation(t *testing.T) {
 
 // TestE2E_PlanOwnershipIsolation verifies that plan endpoints enforce ownership.
 func TestE2E_PlanOwnershipIsolation(t *testing.T) {
-	app, closeFunc, _ := setupTestRouter(t)
+	app, closeFunc, repo := setupTestRouter(t)
 	defer closeFunc()
 
-	token1, _ := registerUser(t, app, "planuser1@example.com", "password123", "Plan User One")
+	token1, userID1 := registerUser(t, app, "planuser1@example.com", "password123", "Plan User One")
 	token2, _ := registerUser(t, app, "planuser2@example.com", "password123", "Plan User Two")
+
+	// Create a test channel for User 1.
+	testChannel := &model.Channel{
+		ID:       "plan-ownership-channel",
+		UserID:   userID1,
+		Platform: model.PlatformXLS,
+		Name:     "User1 XLS Channel",
+		Status:   model.ChannelStatusActive,
+	}
+	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
+		t.Fatalf("create test channel: %v", err)
+	}
 
 	// User 1 creates a plan.
 	planBody, _ := json.Marshal(map[string]string{
-		"type":       "xls",
+		"channel_id": testChannel.ID,
 		"title":      "User1 XLS Plan",
 		"cron_expr":  "0 10 * * *",
 		"topic_hint": "daily inspiration",
@@ -796,7 +820,7 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			wantStatus: fiber.StatusBadRequest,
 		},
 		{
-			name:       "create task without type",
+			name:       "create task without channel_id",
 			method:     "POST",
 			path:       "/api/v1/tasks",
 			body:       `{"topic":"test"}`,
@@ -804,20 +828,20 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			wantStatus: fiber.StatusBadRequest,
 		},
 		{
-			name:       "create task with invalid type",
+			name:       "create task with non-existent channel_id",
 			method:     "POST",
 			path:       "/api/v1/tasks",
-			body:       `{"type":"invalid","topic":"test"}`,
-			auth:       true,
-			wantStatus: fiber.StatusBadRequest,
-		},
-		{
-			name:       "create plan without cron_expr",
-			method:     "POST",
-			path:       "/api/v1/plans",
-			body:       `{"type":"rednote","title":"test"}`,
+			body:       `{"channel_id":"nonexistent-id","topic":"test"}`,
 			auth:       true,
 			wantStatus: fiber.StatusInternalServerError,
+		},
+		{
+			name:       "create plan without channel_id",
+			method:     "POST",
+			path:       "/api/v1/plans",
+			body:       `{"title":"test"}`,
+			auth:       true,
+			wantStatus: fiber.StatusBadRequest,
 		},
 		{
 			name:       "get config with invalid scope",

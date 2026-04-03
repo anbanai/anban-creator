@@ -24,16 +24,29 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 	return &PlanService{repo: repo, logger: logger}
 }
 
-// Create validates the cron expression, computes the next run time, and persists the plan.
+// Create validates the cron expression, resolves the channel, computes the next run
+// time, and persists the plan. The task type is derived from the channel's platform.
 func (s *PlanService) Create(
 	ctx context.Context,
-	userID, planType, title, description, cronExpr, topicHint string,
+	userID, channelID, title, description, cronExpr, topicHint string,
 ) (*model.Plan, error) {
-	if planType == "" {
-		return nil, fmt.Errorf("type is required")
+	if channelID == "" {
+		return nil, fmt.Errorf("channel_id is required")
 	}
 	if cronExpr == "" {
 		return nil, fmt.Errorf("cron_expr is required")
+	}
+
+	// Load channel to derive type and validate ownership.
+	channel, err := s.repo.Channels().FindByID(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("find channel: %w", err)
+	}
+	if channel.UserID != userID {
+		return nil, fmt.Errorf("channel not owned by user")
+	}
+	if channel.Status != model.ChannelStatusActive {
+		return nil, fmt.Errorf("channel is not active")
 	}
 
 	nextRun, err := s.computeNextRun(cronExpr)
@@ -44,7 +57,8 @@ func (s *PlanService) Create(
 	plan := &model.Plan{
 		ID:          uuid.New().String(),
 		UserID:      userID,
-		Type:        planType,
+		ChannelID:   channelID,
+		Type:        channel.Platform,
 		Title:       title,
 		Description: description,
 		CronExpr:    cronExpr,
@@ -69,14 +83,15 @@ func (s *PlanService) GetByID(ctx context.Context, id string) (*model.Plan, erro
 	return plan, nil
 }
 
-// List returns plans for a user with pagination. Returns plans and total count.
-func (s *PlanService) List(ctx context.Context, userID string, offset, limit int) ([]*model.Plan, int64, error) {
-	plans, err := s.repo.Plans().FindByUserID(ctx, userID, "", offset, limit)
+// List returns plans for a user with optional channel filter and pagination.
+// Returns plans and total count.
+func (s *PlanService) List(ctx context.Context, userID string, offset, limit int, channelID string) ([]*model.Plan, int64, error) {
+	plans, err := s.repo.Plans().FindByUserID(ctx, userID, channelID, offset, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list plans: %w", err)
 	}
 
-	total, err := s.repo.Plans().CountByUserID(ctx, userID, "")
+	total, err := s.repo.Plans().CountByUserID(ctx, userID, channelID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count plans: %w", err)
 	}

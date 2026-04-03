@@ -73,12 +73,13 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	offset, _ := strconv.Atoi(c.Query("offset", "0"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
 	status := c.Query("status", "")
+	channelID := c.Query("channel_id", "")
 
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 
-	tasks, total, err := h.service.List(c.Context(), userID, offset, limit, status)
+	tasks, total, err := h.service.List(c.Context(), userID, offset, limit, status, channelID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("list tasks failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to list tasks")

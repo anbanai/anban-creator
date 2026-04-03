@@ -128,10 +128,12 @@ func main() {
 	// 13. Create services.
 	var planSvc *service.PlanService
 	var taskSvc *service.TaskService
+	var channelSvc *service.ChannelService
 	var asynqClient *scheduler.AsynqClient
 
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
+		channelSvc = service.NewChannelService(repo, log)
 
 		// Create Asynq client if Redis is available.
 		if rdb != nil {
@@ -149,6 +151,7 @@ func main() {
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
 	var taskHandler *handler.TaskHandler
+	var channelHandler *handler.ChannelHandler
 	var configHandler *handler.ConfigHandler
 	var timelineHandler *handler.TimelineHandler
 
@@ -156,6 +159,7 @@ func main() {
 		planHandler = handler.NewPlanHandler(planSvc, log)
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
+		channelHandler = handler.NewChannelHandler(channelSvc, log)
 		configHandler = handler.NewConfigHandler(repo, log)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 	}
@@ -194,6 +198,7 @@ func main() {
 		Executor:        agentExecutor,
 		PlanService:     planSvc,
 		TaskService:     taskSvc,
+		ChannelHandler:  channelHandler,
 		PlanHandler:     planHandler,
 		TaskHandler:     taskHandler,
 		ConfigHandler:   configHandler,
