@@ -24,6 +24,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/router"
 	"github.com/royalrick/anbanwriter/server/scheduler"
 	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
 
 // defaultConfigPaths lists config file locations to try when -config is not set.
@@ -86,6 +87,15 @@ func main() {
 		repo = repository.New(mysqlDB)
 	}
 
+	// 7.1 Create storage provider.
+	store, err := storage.NewProvider(cfg.Storage, log)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to create storage provider, using nil")
+		store = nil
+	} else {
+		log.Info().Str("provider", store.Name()).Msg("storage provider initialized")
+	}
+
 	// 8. Create JWT service.
 	jwtSvc, err := auth.NewJWTService(
 		cfg.JWT.SecretKey,
@@ -133,7 +143,7 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, nil, log)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, log)
 	}
 
 	// 14. Create handlers.
@@ -144,7 +154,8 @@ func main() {
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
-		taskHandler = handler.NewTaskHandler(taskSvc, log)
+		// Pass local dataDir so ServeLocalFile can serve files from disk.
+		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
 		configHandler = handler.NewConfigHandler(repo, log)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 	}
@@ -187,6 +198,7 @@ func main() {
 		TaskHandler:     taskHandler,
 		ConfigHandler:   configHandler,
 		TimelineHandler: timelineHandler,
+		StorageProvider: store,
 	}
 
 	// 17. Create router.

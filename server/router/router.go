@@ -20,26 +20,28 @@ import (
 	"github.com/royalrick/anbanwriter/server/mcp"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
 
 // Services aggregates all service dependencies required by the router.
 type Services struct {
-	Config       *config.Config
-	Logger       *zerolog.Logger
-	DB           *gorm.DB
-	Redis        *redis.Client
-	Repo         repository.Repository
-	JWTService   *auth.JWTService
-	WechatSvc    *auth.WeChatService
-	WSHub        *handler.WebSocketHub
-	AuthHandler  *handler.AuthHandler
-	Executor     *agent.Executor
-	PlanService  *service.PlanService
-	TaskService  *service.TaskService
-	PlanHandler  *handler.PlanHandler
-	TaskHandler  *handler.TaskHandler
-	ConfigHandler *handler.ConfigHandler
+	Config          *config.Config
+	Logger          *zerolog.Logger
+	DB              *gorm.DB
+	Redis           *redis.Client
+	Repo            repository.Repository
+	JWTService      *auth.JWTService
+	WechatSvc       *auth.WeChatService
+	WSHub           *handler.WebSocketHub
+	AuthHandler     *handler.AuthHandler
+	Executor        *agent.Executor
+	PlanService     *service.PlanService
+	TaskService     *service.TaskService
+	PlanHandler     *handler.PlanHandler
+	TaskHandler     *handler.TaskHandler
+	ConfigHandler   *handler.ConfigHandler
 	TimelineHandler *handler.TimelineHandler
+	StorageProvider storage.Provider
 }
 
 // NewRouter creates a new Fiber app with middleware and route groups.
@@ -178,6 +180,14 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)
 		apiV1.Get("/tasks/:id/files", svc.TaskHandler.GetFiles)
 		apiV1.Get("/tasks/:id/stream", svc.TaskHandler.Stream)
+		apiV1.Get("/tasks/:id/preview", svc.TaskHandler.PreviewHTML)
+		apiV1.Get("/tasks/:id/files/zip", svc.TaskHandler.DownloadZip)
+		apiV1.Get("/tasks/:id/files/:fileId/download", svc.TaskHandler.DownloadFile)
+	}
+
+	// Local file serving (only when using local storage provider).
+	if svc.TaskHandler != nil && svc.StorageProvider != nil && svc.StorageProvider.Name() == "local" {
+		apiV1.Get("/files/*", svc.TaskHandler.ServeLocalFile)
 	}
 
 	// ---------------------------------------------------------------------------
