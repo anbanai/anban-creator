@@ -79,6 +79,13 @@ func main() {
 		} else {
 			log.Info().Msg("database migration completed")
 		}
+
+		// 6.1. Migrate legacy user_configs to channels (idempotent).
+		if err := model.MigrateUserConfigsToChannels(mysqlDB); err != nil {
+			log.Error().Err(err).Msg("failed to migrate user_configs to channels")
+		} else {
+			log.Info().Msg("user_configs -> channels migration completed")
+		}
 	}
 
 	// 7. Create repository.
