@@ -17,7 +17,6 @@ type Channel struct {
 	Style          string    `gorm:"type:varchar(50)" json:"style"`
 	Theme          string    `gorm:"type:varchar(50)" json:"theme"`
 	Author         string    `gorm:"type:varchar(50)" json:"author"`
-	ImageAPIConfig string    `gorm:"type:json" json:"image_api_config"`
 	Status         string    `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`

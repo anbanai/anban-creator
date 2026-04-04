@@ -130,7 +130,7 @@ func main() {
 	}
 
 	// 12. Create agent executor.
-	agentExecutor := agent.NewExecutor(log)
+	agentExecutor := agent.NewExecutor(log, &cfg.ImageAPI)
 
 	// 13. Create services.
 	var planSvc *service.PlanService

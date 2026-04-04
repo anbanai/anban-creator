@@ -33,7 +33,6 @@ type createChannelRequest struct {
 	Style         string `json:"style"`
 	Theme         string `json:"theme"`
 	Author        string `json:"author"`
-	ImageAPIConfig string `json:"image_api_config"`
 	Description   string `json:"description"`
 	AvatarURL     string `json:"avatar_url"`
 }
@@ -49,7 +48,6 @@ type updateChannelRequest struct {
 	Style         string `json:"style"`
 	Theme         string `json:"theme"`
 	Author        string `json:"author"`
-	ImageAPIConfig string `json:"image_api_config"`
 	Description   string `json:"description"`
 	AvatarURL     string `json:"avatar_url"`
 }
@@ -96,18 +94,17 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 	}
 
 	ch := &model.Channel{
-		Platform:      req.Platform,
-		Name:          req.Name,
-		WechatAppID:   req.WechatAppID,
-		WechatSecret:  req.WechatSecret,
-		Keywords:      req.Keywords,
-		Positioning:   req.Positioning,
-		Style:         req.Style,
-		Theme:         req.Theme,
-		Author:        req.Author,
-		ImageAPIConfig: req.ImageAPIConfig,
-		Description:   req.Description,
-		AvatarURL:     req.AvatarURL,
+		Platform:     req.Platform,
+		Name:         req.Name,
+		WechatAppID:  req.WechatAppID,
+		WechatSecret: req.WechatSecret,
+		Keywords:     req.Keywords,
+		Positioning:  req.Positioning,
+		Style:        req.Style,
+		Theme:        req.Theme,
+		Author:       req.Author,
+		Description:  req.Description,
+		AvatarURL:    req.AvatarURL,
 	}
 
 	created, err := h.service.Create(c.Context(), userID, ch)
@@ -167,18 +164,17 @@ func (h *ChannelHandler) Update(c fiber.Ctx) error {
 	}
 
 	ch := &model.Channel{
-		Platform:      req.Platform,
-		Name:          req.Name,
-		WechatAppID:   req.WechatAppID,
-		WechatSecret:  req.WechatSecret,
-		Keywords:      req.Keywords,
-		Positioning:   req.Positioning,
-		Style:         req.Style,
-		Theme:         req.Theme,
-		Author:        req.Author,
-		ImageAPIConfig: req.ImageAPIConfig,
-		Description:   req.Description,
-		AvatarURL:     req.AvatarURL,
+		Platform:     req.Platform,
+		Name:         req.Name,
+		WechatAppID:  req.WechatAppID,
+		WechatSecret: req.WechatSecret,
+		Keywords:     req.Keywords,
+		Positioning:  req.Positioning,
+		Style:        req.Style,
+		Theme:        req.Theme,
+		Author:       req.Author,
+		Description:  req.Description,
+		AvatarURL:    req.AvatarURL,
 	}
 
 	updated, err := h.service.Update(c.Context(), userID, channelID, ch)

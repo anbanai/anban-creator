@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
@@ -35,12 +36,13 @@ func DefaultModel() string {
 
 // Executor orchestrates Claude Code agent execution for content generation tasks.
 type Executor struct {
-	logger *zerolog.Logger
+	logger      *zerolog.Logger
+	imageAPICfg *srvconfig.ImageAPIConfig
 }
 
 // NewExecutor creates a new Executor.
-func NewExecutor(logger *zerolog.Logger) *Executor {
-	return &Executor{logger: logger}
+func NewExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig) *Executor {
+	return &Executor{logger: logger, imageAPICfg: imageAPICfg}
 }
 
 // ExecutionOptions configures a single agent execution.
@@ -92,7 +94,7 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 		Msg("starting agent execution")
 
 	// 3. Build MCP server with channel config.
-	mcpServer, err := CreateMCPTools(workDir, opts.Channel, e.logger)
+	mcpServer, err := CreateMCPTools(workDir, opts.Channel, e.imageAPICfg, e.logger)
 	if err != nil {
 		return nil, fmt.Errorf("create MCP tools: %w", err)
 	}

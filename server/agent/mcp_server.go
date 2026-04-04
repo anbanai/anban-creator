@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +11,8 @@ import (
 
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/server/model"
+
+	srvconfig "github.com/royalrick/anbanwriter/server/config"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
@@ -28,7 +29,7 @@ func safePath(workDir, path string) (string, error) {
 
 // BuildAppConfig constructs an app/config.Config from a Channel DB record.
 // This bridges the multi-user server config to the single-account app config.
-func BuildAppConfig(ch *model.Channel) (*config.Config, error) {
+func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*config.Config, error) {
 	cfg := &config.Config{
 		Name:        ch.Name,
 		Positioning: ch.Positioning,
@@ -63,36 +64,32 @@ func BuildAppConfig(ch *model.Channel) (*config.Config, error) {
 		cfg.Rednote.Style = ch.Style
 	}
 
-	// Parse image_api_config JSON into ImageAPI structs.
-	if ch.ImageAPIConfig != "" {
-		var imageCfgs map[string]config.ImageAPI
-		if err := json.Unmarshal([]byte(ch.ImageAPIConfig), &imageCfgs); err != nil {
-			return nil, fmt.Errorf("parse image_api_config: %w", err)
-		}
-		if coverCfg, ok := imageCfgs["cover"]; ok {
+	// Apply global image API config from server config.
+	if imageAPICfg != nil {
+		if imageAPICfg.Cover != nil {
 			switch ch.Platform {
 			case model.ScopeArticle:
-				cfg.Wechat.Article.Cover.Image = coverCfg
+				cfg.Wechat.Article.Cover.Image = *imageAPICfg.Cover
 			case model.ScopeXls:
-				cfg.Wechat.Xls.Cover.Image = coverCfg
+				cfg.Wechat.Xls.Cover.Image = *imageAPICfg.Cover
 			case model.ScopeRednote:
 				if cfg.Rednote == nil {
 					cfg.Rednote = &config.RednoteConfig{}
 				}
-				cfg.Rednote.Cover.Image = coverCfg
+				cfg.Rednote.Cover.Image = *imageAPICfg.Cover
 			}
 		}
-		if contentCfg, ok := imageCfgs["content"]; ok {
+		if imageAPICfg.Content != nil {
 			switch ch.Platform {
 			case model.ScopeArticle:
-				cfg.Wechat.Article.Content.Image = contentCfg
+				cfg.Wechat.Article.Content.Image = *imageAPICfg.Content
 			case model.ScopeXls:
-				cfg.Wechat.Xls.Content.Image = contentCfg
+				cfg.Wechat.Xls.Content.Image = *imageAPICfg.Content
 			case model.ScopeRednote:
 				if cfg.Rednote == nil {
 					cfg.Rednote = &config.RednoteConfig{}
 				}
-				cfg.Rednote.Content.Image = contentCfg
+				cfg.Rednote.Content.Image = *imageAPICfg.Content
 			}
 		}
 	}
@@ -152,12 +149,12 @@ type toolEnv struct {
 }
 
 // CreateMCPTools creates an SDK MCP server with tools that wrap the app/ packages.
-func CreateMCPTools(workDir string, channel *model.Channel, logger *zerolog.Logger) (*claudecode.McpSdkServerConfig, error) {
+func CreateMCPTools(workDir string, channel *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, logger *zerolog.Logger) (*claudecode.McpSdkServerConfig, error) {
 	if channel == nil {
 		return nil, fmt.Errorf("channel is required")
 	}
 
-	cfg, err := BuildAppConfig(channel)
+	cfg, err := BuildAppConfig(channel, imageAPICfg)
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}

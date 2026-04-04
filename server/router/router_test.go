@@ -62,7 +62,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		}
 
 		planSvc := service.NewPlanService(repo, &logger)
-		agentExecutor := agent.NewExecutor(&logger)
+		agentExecutor := agent.NewExecutor(&logger, nil)
 		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub()

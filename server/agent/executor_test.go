@@ -45,10 +45,6 @@ func TestBuildAppConfig(t *testing.T) {
 				Platform: model.ScopeRednote,
 				Name:     "RedNote Account",
 				Style:    "cute-doodle",
-				ImageAPIConfig: `{
-					"cover": {"provider": "gemini", "key": "test_key", "model": "gemini-3-pro-image-preview"},
-					"content": {"provider": "gemini", "key": "test_key", "model": "gemini-3-pro-image-preview"}
-				}`,
 			},
 			wantErr: false,
 			check: func(t *testing.T, cfg map[string]any) {
@@ -75,20 +71,11 @@ func TestBuildAppConfig(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "invalid image_api_config JSON",
-			ch: &model.Channel{
-				Platform:      model.ScopeArticle,
-				ImageAPIConfig: "invalid json",
-			},
-			wantErr: true,
-			check:   nil,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.ch)
+			cfg, err := BuildAppConfig(tt.ch, nil)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")

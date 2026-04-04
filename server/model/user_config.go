@@ -14,7 +14,6 @@ type UserConfig struct {
 	Style          string `gorm:"size:64"`
 	Theme          string `gorm:"size:64"`
 	Author         string `gorm:"size:128"`
-	ImageAPIConfig string `gorm:"column:image_api_config;type:text"`
 }
 
 func (UserConfig) TableName() string {

@@ -111,7 +111,6 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	existing.Style = ch.Style
 	existing.Theme = ch.Theme
 	existing.Author = ch.Author
-	existing.ImageAPIConfig = ch.ImageAPIConfig
 
 	if err := s.repo.Channels().Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("update channel: %w", err)

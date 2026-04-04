@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	appconfig "github.com/royalrick/anbanwriter/app/config"
 )
 
 // Config holds all server configuration.
@@ -19,6 +21,7 @@ type Config struct {
 	WeChat   WeChatConfig   `yaml:"wechat"`
 	Storage  StorageConfig  `yaml:"storage"`
 	MCP      MCPConfig      `yaml:"mcp"`
+	ImageAPI ImageAPIConfig `yaml:"image_api"`
 }
 
 type ServerConfig struct {
@@ -69,6 +72,13 @@ type MCPConfig struct {
 	// When set, the MCP endpoint accepts X-API-Key header authentication
 	// alongside the standard JWT Bearer token.
 	APIKey string `yaml:"api_key"`
+}
+
+// ImageAPIConfig holds global image generation API configuration.
+// All channels share this server-level config.
+type ImageAPIConfig struct {
+	Cover   *appconfig.ImageAPI `yaml:"cover"`
+	Content *appconfig.ImageAPI `yaml:"content"`
 }
 
 // NewConfig loads configuration from a YAML file, applies defaults, then

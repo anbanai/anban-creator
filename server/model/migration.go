@@ -54,7 +54,6 @@ func MigrateUserConfigsToChannels(db *gorm.DB) error {
 			Style:          cfg.Style,
 			Theme:          cfg.Theme,
 			Author:         cfg.Author,
-			ImageAPIConfig: cfg.ImageAPIConfig,
 			Status:         ChannelStatusActive,
 		}
 		if err := db.Create(&ch).Error; err != nil {
