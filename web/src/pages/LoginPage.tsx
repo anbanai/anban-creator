@@ -22,9 +22,9 @@ export default function LoginPage() {
       navigate('/', { replace: true })
     } catch (err) {
       if (err instanceof Error) {
-        setError(err.message || 'Invalid email or password')
+        setError(err.message || '邮箱或密码不正确')
       } else {
-        setError('Login failed. Please try again.')
+        setError('登录失败，请重试。')
       }
     } finally {
       setLoading(false)
@@ -36,7 +36,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-blue-400">AnbanWriter</h1>
-          <p className="mt-2 text-sm text-gray-400">Sign in to your account</p>
+          <p className="mt-2 text-sm text-gray-400">登录你的账号</p>
         </div>
 
         <form
@@ -46,7 +46,7 @@ export default function LoginPage() {
           <div className="space-y-4">
             <div>
               <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-300">
-                Email
+                邮箱
               </label>
               <input
                 id="email"
@@ -55,13 +55,13 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="you@example.com"
+                placeholder="请输入邮箱地址"
               />
             </div>
 
             <div>
               <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-300">
-                Password
+                密码
               </label>
               <input
                 id="password"
@@ -70,7 +70,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="Enter your password"
+                placeholder="请输入密码"
               />
             </div>
 
@@ -85,14 +85,14 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? '登录中...' : '登录'}
             </button>
           </div>
 
           <p className="mt-4 text-center text-sm text-gray-400">
-            Don't have an account?{' '}
+            还没有账号？{' '}
             <Link to="/register" className="text-blue-400 hover:text-blue-300">
-              Register
+              注册
             </Link>
           </p>
         </form>

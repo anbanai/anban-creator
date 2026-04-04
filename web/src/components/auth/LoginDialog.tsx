@@ -29,9 +29,9 @@ export default function LoginDialog({ open, onClose }: LoginDialogProps) {
       setPassword('')
     } catch (err) {
       if (err instanceof Error) {
-        setError(err.message || 'Invalid credentials')
+        setError(err.message || '凭证无效')
       } else {
-        setError('Login failed. Please try again.')
+        setError('登录失败，请重试。')
       }
     } finally {
       setLoading(false)
@@ -42,7 +42,7 @@ export default function LoginDialog({ open, onClose }: LoginDialogProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-xl border border-gray-700 bg-gray-800 p-6 shadow-2xl">
         <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-gray-100">Sign In</h2>
+          <h2 className="text-xl font-semibold text-gray-100">登录</h2>
           <button
             onClick={onClose}
             className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-700 hover:text-gray-200"
@@ -56,7 +56,7 @@ export default function LoginDialog({ open, onClose }: LoginDialogProps) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="login-email" className="mb-1 block text-sm font-medium text-gray-300">
-              Email
+              邮箱
             </label>
             <input
               id="login-email"
@@ -65,13 +65,13 @@ export default function LoginDialog({ open, onClose }: LoginDialogProps) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="you@example.com"
+              placeholder="请输入邮箱地址"
             />
           </div>
 
           <div>
             <label htmlFor="login-password" className="mb-1 block text-sm font-medium text-gray-300">
-              Password
+              密码
             </label>
             <input
               id="login-password"
@@ -80,7 +80,7 @@ export default function LoginDialog({ open, onClose }: LoginDialogProps) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="Enter your password"
+              placeholder="请输入密码"
             />
           </div>
 
@@ -95,7 +95,7 @@ export default function LoginDialog({ open, onClose }: LoginDialogProps) {
             disabled={loading}
             className="w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? '登录中...' : '登录'}
           </button>
         </form>
       </div>

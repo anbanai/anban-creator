@@ -223,7 +223,7 @@ export default function ChannelsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-100">Channels</h1>
+          <h1 className="text-2xl font-bold text-gray-100">频道</h1>
           <p className="mt-1 text-sm text-gray-400">管理你的内容频道和账号配置。</p>
         </div>
         <Button onClick={openCreate}>

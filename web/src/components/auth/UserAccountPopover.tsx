@@ -46,7 +46,7 @@ export default function UserAccountPopover() {
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-gray-700 bg-gray-800 py-1 shadow-lg">
           <div className="border-b border-gray-700 px-4 py-2">
-            <p className="truncate text-sm font-medium text-gray-100">{user.nickname || 'User'}</p>
+            <p className="truncate text-sm font-medium text-gray-100">{user.nickname || '用户'}</p>
             <p className="truncate text-xs text-gray-400">{user.email}</p>
           </div>
           <button
@@ -56,7 +56,7 @@ export default function UserAccountPopover() {
             }}
             className="w-full px-4 py-2 text-left text-sm text-gray-300 transition-colors hover:bg-gray-700 hover:text-gray-100"
           >
-            Sign Out
+            退出登录
           </button>
         </div>
       )}

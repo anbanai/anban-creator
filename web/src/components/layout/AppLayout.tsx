@@ -2,12 +2,12 @@ import { NavLink, Outlet } from 'react-router-dom'
 import UserAccountPopover from '@/components/auth/UserAccountPopover'
 
 const navItems = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/channels', label: 'Channels' },
-  { to: '/timeline', label: 'Timeline' },
-  { to: '/plans', label: 'Plans' },
-  { to: '/tasks', label: 'Tasks' },
-  { to: '/settings', label: 'Settings' },
+  { to: '/', label: '仪表盘', end: true },
+  { to: '/channels', label: '频道' },
+  { to: '/timeline', label: '时间线' },
+  { to: '/plans', label: '计划' },
+  { to: '/tasks', label: '任务' },
+  { to: '/settings', label: '设置' },
 ]
 
 export default function AppLayout() {

@@ -24,9 +24,9 @@ export default function RegisterPage() {
       navigate('/', { replace: true })
     } catch (err) {
       if (err instanceof Error) {
-        setError(err.message || 'Registration failed')
+        setError(err.message || '注册失败')
       } else {
-        setError('Registration failed. Please try again.')
+        setError('注册失败，请重试。')
       }
     } finally {
       setLoading(false)
@@ -38,7 +38,7 @@ export default function RegisterPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-blue-400">AnbanWriter</h1>
-          <p className="mt-2 text-sm text-gray-400">Create your account</p>
+          <p className="mt-2 text-sm text-gray-400">创建你的账号</p>
         </div>
 
         <form
@@ -48,7 +48,7 @@ export default function RegisterPage() {
           <div className="space-y-4">
             <div>
               <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-300">
-                Email
+                邮箱
               </label>
               <input
                 id="email"
@@ -57,13 +57,13 @@ export default function RegisterPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="you@example.com"
+                placeholder="请输入邮箱地址"
               />
             </div>
 
             <div>
               <label htmlFor="nickname" className="mb-1 block text-sm font-medium text-gray-300">
-                Nickname
+                昵称
               </label>
               <input
                 id="nickname"
@@ -71,13 +71,13 @@ export default function RegisterPage() {
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
                 className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="Optional display name"
+                placeholder="可选的显示名称"
               />
             </div>
 
             <div>
               <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-300">
-                Password
+                密码
               </label>
               <input
                 id="password"
@@ -87,7 +87,7 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="At least 8 characters"
+                placeholder="至少 8 个字符"
               />
             </div>
 
@@ -102,14 +102,14 @@ export default function RegisterPage() {
               disabled={loading}
               className="w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? 'Creating account...' : 'Create Account'}
+              {loading ? '创建中...' : '创建账号'}
             </button>
           </div>
 
           <p className="mt-4 text-center text-sm text-gray-400">
-            Already have an account?{' '}
+            已有账号？{' '}
             <Link to="/login" className="text-blue-400 hover:text-blue-300">
-              Sign In
+              登录
             </Link>
           </p>
         </form>

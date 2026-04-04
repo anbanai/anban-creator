@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/lib/api'
+import { taskStatusLabel, contentTypeLabel, formatDateTimeCN } from '@/lib/labels'
 import { Card, CardBody } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 
@@ -12,15 +13,6 @@ function statusBadgeVariant(status: string) {
     case 'running': return 'warning'
     case 'cancelled': return 'neutral'
     default: return 'neutral'
-  }
-}
-
-function contentTypeLabel(type: string) {
-  switch (type) {
-    case 'rednote': return 'RedNote'
-    case 'article': return 'Article'
-    case 'xls': return 'XLS'
-    default: return type
   }
 }
 
@@ -58,10 +50,10 @@ export default function DashboardPage() {
     .slice(0, 5)
 
   const stats = [
-    { label: 'Active Plans', value: activePlans, description: 'Running schedules' },
-    { label: "Today's Tasks", value: totalToday, description: `${completedToday} completed, ${failedToday} failed` },
-    { label: 'Success Rate', value: `${successRate}%`, description: 'Today only' },
-    { label: 'Total Tasks', value: tasks.length, description: 'All time' },
+    { label: '活跃计划', value: activePlans, description: '运行中的调度' },
+    { label: '今日任务', value: totalToday, description: `${completedToday} 已完成, ${failedToday} 失败` },
+    { label: '成功率', value: `${successRate}%`, description: '仅今日' },
+    { label: '总任务数', value: tasks.length, description: '全部时间' },
   ]
 
   return (
@@ -69,9 +61,9 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">
-            Welcome{user?.nickname ? `, ${user.nickname}` : ''}
+            欢迎{user?.nickname ? `，${user.nickname}` : ''}
           </h1>
-          <p className="mt-1 text-sm text-gray-400">Here is an overview of your content workspace.</p>
+          <p className="mt-1 text-sm text-gray-400">以下是你的内容工作区概览。</p>
         </div>
         <Link
           to="/tasks?create=true"
@@ -80,7 +72,7 @@ export default function DashboardPage() {
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Create Task
+          创建任务
         </Link>
       </div>
 
@@ -100,15 +92,15 @@ export default function DashboardPage() {
       {/* Recent tasks */}
       <Card>
         <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
-          <h2 className="font-semibold text-gray-100">Recent Tasks</h2>
+          <h2 className="font-semibold text-gray-100">最近任务</h2>
           <Link to="/tasks" className="text-sm text-blue-400 hover:text-blue-300">
-            View all
+            查看全部
           </Link>
         </div>
         <div className="divide-y divide-gray-700">
           {recentTasks.length === 0 ? (
             <div className="py-8 text-center text-sm text-gray-500">
-              No tasks yet. Create your first task to get started.
+              还没有任务。创建你的第一个任务开始创作。
             </div>
           ) : (
             recentTasks.map((task) => (
@@ -121,14 +113,14 @@ export default function DashboardPage() {
                   <p className="truncate text-sm font-medium text-gray-100">{task.topic}</p>
                   <div className="mt-1 flex items-center gap-2">
                     <span className="text-xs text-gray-500">
-                      {new Date(task.created_at).toLocaleString()}
+                      {formatDateTimeCN(task.created_at)}
                     </span>
                     <span className="text-xs text-gray-600">|</span>
-                    <span className="text-xs text-gray-500">{contentTypeLabel(task.type)}</span>
+                    <span className="text-xs text-gray-500">{contentTypeLabel[task.type]}</span>
                   </div>
                 </div>
                 <Badge variant={statusBadgeVariant(task.status)}>
-                  {task.status}
+                  {taskStatusLabel[task.status]}
                 </Badge>
               </Link>
             ))
@@ -138,28 +130,28 @@ export default function DashboardPage() {
 
       {/* Quick actions */}
       <div>
-        <h2 className="mb-3 text-lg font-semibold text-gray-100">Quick Actions</h2>
+        <h2 className="mb-3 text-lg font-semibold text-gray-100">快捷操作</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Link
             to="/tasks?create=true"
             className="rounded-xl border border-gray-700 bg-gray-800 p-4 transition-colors hover:border-gray-600 hover:bg-gray-750"
           >
-            <p className="font-medium text-gray-100">New Task</p>
-            <p className="mt-1 text-sm text-gray-400">Create a content task</p>
+            <p className="font-medium text-gray-100">新建任务</p>
+            <p className="mt-1 text-sm text-gray-400">创建内容任务</p>
           </Link>
           <Link
             to="/plans"
             className="rounded-xl border border-gray-700 bg-gray-800 p-4 transition-colors hover:border-gray-600 hover:bg-gray-750"
           >
-            <p className="font-medium text-gray-100">New Plan</p>
-            <p className="mt-1 text-sm text-gray-400">Plan new content schedule</p>
+            <p className="font-medium text-gray-100">新建计划</p>
+            <p className="mt-1 text-sm text-gray-400">规划新的内容排期</p>
           </Link>
           <Link
             to="/timeline"
             className="rounded-xl border border-gray-700 bg-gray-800 p-4 transition-colors hover:border-gray-600 hover:bg-gray-750"
           >
-            <p className="font-medium text-gray-100">View Timeline</p>
-            <p className="mt-1 text-sm text-gray-400">See scheduled content</p>
+            <p className="font-medium text-gray-100">查看时间线</p>
+            <p className="mt-1 text-sm text-gray-400">查看已排期内容</p>
           </Link>
         </div>
       </div>

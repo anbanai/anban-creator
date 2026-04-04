@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
 import { FilePreview } from '@/components/FilePreview'
+import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN } from '@/lib/labels'
 
 function statusBadgeVariant(status: string) {
   switch (status) {
@@ -18,17 +19,6 @@ function statusBadgeVariant(status: string) {
     case 'cancelled': return 'neutral'
     default: return 'neutral'
   }
-}
-
-function formatDateTime(dateStr: string): string {
-  if (!dateStr) return '--'
-  return new Date(dateStr).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
 }
 
 export default function TaskDetailPage() {
@@ -85,7 +75,7 @@ export default function TaskDetailPage() {
       }
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        setSseError('Connection lost. Refreshing task status...')
+        setSseError('连接断开，正在刷新任务状态...')
       }
     }
   }, [id, token])
@@ -110,13 +100,13 @@ export default function TaskDetailPage() {
       }
       case 'error': {
         const data = typeof parsed === 'string' ? parsed : (parsed as { error?: string }).error || 'Unknown error'
-        setSseLogs((prev) => [...prev, `Error: ${data}`])
+        setSseLogs((prev) => [...prev, `错误：${data}`])
         break
       }
       case 'done': {
         queryClient.invalidateQueries({ queryKey: ['task', id] })
         queryClient.invalidateQueries({ queryKey: ['task-files', id] })
-        setSseLogs((prev) => [...prev, '--- Task completed ---'])
+        setSseLogs((prev) => [...prev, '--- 任务完成 ---'])
         break
       }
       default: {
@@ -156,9 +146,9 @@ export default function TaskDetailPage() {
   if (!task) {
     return (
       <div className="text-center py-16">
-        <p className="text-gray-400">Task not found</p>
+        <p className="text-gray-400">任务未找到</p>
         <Button variant="ghost" className="mt-3" onClick={() => navigate('/tasks')}>
-          Back to Tasks
+          返回任务列表
         </Button>
       </div>
     )
@@ -178,12 +168,12 @@ export default function TaskDetailPage() {
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            Back to Tasks
+            返回任务列表
           </button>
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-gray-100">{task.topic}</h1>
-            <Badge variant="outline">{task.type}</Badge>
-            <Badge variant={statusBadgeVariant(task.status)}>{task.status}</Badge>
+            <Badge variant="outline">{contentTypeLabel[task.type] || task.type}</Badge>
+            <Badge variant={statusBadgeVariant(task.status)}>{taskStatusLabel[task.status] || task.status}</Badge>
             {channel && (
               <Link
                 to={`/channels`}
@@ -207,12 +197,12 @@ export default function TaskDetailPage() {
             size="sm"
             loading={cancelMutation.isPending}
             onClick={() => {
-              if (window.confirm('Cancel this task?')) {
+              if (window.confirm('确定取消此任务？')) {
                 cancelMutation.mutate()
               }
             }}
           >
-            Cancel Task
+            取消任务
           </Button>
         )}
       </div>
@@ -223,7 +213,7 @@ export default function TaskDetailPage() {
           {task.status === 'running' ? (
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-300">Progress</span>
+                <span className="text-sm font-medium text-gray-300">进度</span>
                 <span className="text-sm text-amber-400">{task.progress}%</span>
               </div>
               <div className="h-2 w-full rounded-full bg-gray-700">
@@ -238,7 +228,7 @@ export default function TaskDetailPage() {
               <svg className="h-5 w-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              <span className="text-sm text-green-400">Task completed successfully</span>
+              <span className="text-sm text-green-400">任务执行成功</span>
             </div>
           ) : task.status === 'failed' ? (
             <div>
@@ -246,7 +236,7 @@ export default function TaskDetailPage() {
                 <svg className="h-5 w-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-                <span className="text-sm text-red-400">Task failed</span>
+                <span className="text-sm text-red-400">任务失败</span>
               </div>
               {task.error && (
                 <p className="mt-2 rounded-lg bg-red-900/30 px-3 py-2 text-sm text-red-300">
@@ -259,14 +249,14 @@ export default function TaskDetailPage() {
               <svg className="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-              <span className="text-sm text-gray-400">Task was cancelled</span>
+              <span className="text-sm text-gray-400">任务已取消</span>
             </div>
           ) : (
             <div className="flex items-center gap-2">
               <svg className="h-5 w-5 text-gray-500 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10" strokeWidth={2} />
               </svg>
-              <span className="text-sm text-gray-400">Task is pending...</span>
+              <span className="text-sm text-gray-400">任务等待执行中...</span>
             </div>
           )}
         </CardBody>
@@ -276,26 +266,26 @@ export default function TaskDetailPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardBody>
-            <p className="text-xs text-gray-500">Created</p>
-            <p className="mt-1 text-sm text-gray-200">{formatDateTime(task.created_at)}</p>
+            <p className="text-xs text-gray-500">创建时间</p>
+            <p className="mt-1 text-sm text-gray-200">{formatFullDateTimeCN(task.created_at)}</p>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
-            <p className="text-xs text-gray-500">Started</p>
-            <p className="mt-1 text-sm text-gray-200">{formatDateTime(task.started_at)}</p>
+            <p className="text-xs text-gray-500">开始时间</p>
+            <p className="mt-1 text-sm text-gray-200">{formatFullDateTimeCN(task.started_at)}</p>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
-            <p className="text-xs text-gray-500">Completed</p>
-            <p className="mt-1 text-sm text-gray-200">{formatDateTime(task.completed_at)}</p>
+            <p className="text-xs text-gray-500">完成时间</p>
+            <p className="mt-1 text-sm text-gray-200">{formatFullDateTimeCN(task.completed_at)}</p>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
-            <p className="text-xs text-gray-500">Plan ID</p>
-            <p className="mt-1 text-sm text-gray-200">{task.plan_id ?? 'Manual'}</p>
+            <p className="text-xs text-gray-500">来源</p>
+            <p className="mt-1 text-sm text-gray-200">{task.plan_id ? '计划任务' : '手动创建'}</p>
           </CardBody>
         </Card>
       </div>
@@ -304,14 +294,14 @@ export default function TaskDetailPage() {
       {task.status === 'running' && (
         <Card>
           <div className="border-b border-gray-700 px-4 py-3">
-            <h2 className="text-sm font-semibold text-gray-200">Live Output</h2>
+            <h2 className="text-sm font-semibold text-gray-200">执行日志</h2>
           </div>
           <div className="max-h-96 overflow-y-auto bg-gray-900 px-4 py-3">
             {sseError && (
               <p className="mb-2 text-xs text-amber-400">{sseError}</p>
             )}
             {sseLogs.length === 0 ? (
-              <p className="text-xs text-gray-500">Waiting for output...</p>
+              <p className="text-xs text-gray-500">等待输出中...</p>
             ) : (
               sseLogs.map((log, idx) => (
                 <pre key={idx} className="mb-1 whitespace-pre-wrap font-mono text-xs text-gray-300">
@@ -327,7 +317,7 @@ export default function TaskDetailPage() {
       {task.status === 'completed' && task.result?.output && (
         <Card>
           <div className="border-b border-gray-700 px-4 py-3">
-            <h2 className="text-sm font-semibold text-gray-200">Result</h2>
+            <h2 className="text-sm font-semibold text-gray-200">执行结果</h2>
           </div>
           <div className="max-h-64 overflow-y-auto bg-gray-900 px-4 py-3">
             <pre className="whitespace-pre-wrap font-mono text-xs text-gray-300">
@@ -341,7 +331,7 @@ export default function TaskDetailPage() {
       {files && files.length > 0 && (
         <Card>
           <div className="border-b border-gray-700 px-4 py-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-200">Generated Files ({files.length})</h2>
+            <h2 className="text-sm font-semibold text-gray-200">生成文件 ({files.length})</h2>
             <button
               onClick={async () => {
                 try {
@@ -358,7 +348,7 @@ export default function TaskDetailPage() {
               }}
               className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
             >
-              Download All (ZIP)
+              下载全部 (ZIP)
             </button>
           </div>
           <div className="p-4 space-y-4">
@@ -368,7 +358,7 @@ export default function TaskDetailPage() {
               if (imageFiles.length === 0) return null
               return (
                 <div>
-                  <h3 className="text-xs font-medium text-gray-400 mb-2">Images</h3>
+                  <h3 className="text-xs font-medium text-gray-400 mb-2">图片</h3>
                   <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                     {imageFiles.map((file: TaskFile) => (
                       <FilePreview key={file.id} file={file} taskId={task.id} />
@@ -383,7 +373,7 @@ export default function TaskDetailPage() {
               if (htmlFiles.length === 0) return null
               return (
                 <div>
-                  <h3 className="text-xs font-medium text-gray-400 mb-2">HTML Output</h3>
+                  <h3 className="text-xs font-medium text-gray-400 mb-2">HTML 文件</h3>
                   <div className="space-y-3">
                     {htmlFiles.map((file: TaskFile) => (
                       <FilePreview key={file.id} file={file} taskId={task.id} />
@@ -398,7 +388,7 @@ export default function TaskDetailPage() {
               if (otherFiles.length === 0) return null
               return (
                 <div>
-                  <h3 className="text-xs font-medium text-gray-400 mb-2">Other Files</h3>
+                  <h3 className="text-xs font-medium text-gray-400 mb-2">其他文件</h3>
                   <div className="space-y-2">
                     {otherFiles.map((file: TaskFile) => (
                       <FilePreview key={file.id} file={file} taskId={task.id} />
@@ -415,7 +405,7 @@ export default function TaskDetailPage() {
       {task.status === 'completed' && (!files || files.length === 0) && (
         <Card>
           <CardBody>
-            <p className="text-center text-sm text-gray-500">No files generated</p>
+            <p className="text-center text-sm text-gray-500">没有生成文件</p>
           </CardBody>
         </Card>
       )}

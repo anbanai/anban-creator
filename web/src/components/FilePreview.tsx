@@ -77,13 +77,13 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
             disabled={loading}
             className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            {showPreview ? 'Close Preview' : 'Preview'}
+            {showPreview ? '关闭预览' : '预览'}
           </button>
           <button
             onClick={handleDownload}
             className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
           >
-            Download
+            下载
           </button>
           <span className="text-sm text-gray-500">{file.file_name} ({formatSize(file.file_size)})</span>
         </div>
@@ -93,10 +93,10 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
             sandbox="allow-scripts"
             className="w-full border border-gray-200 rounded-lg bg-white"
             style={{ height: '600px' }}
-            title="Article Preview"
+            title="文章预览"
           />
         )}
-        {loading && <p className="text-sm text-gray-400">Loading preview...</p>}
+        {loading && <p className="text-sm text-gray-400">加载预览中...</p>}
       </div>
     )
   }
@@ -117,7 +117,7 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
         onClick={handleDownload}
         className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
       >
-        Download
+        下载
       </button>
     </div>
   )
