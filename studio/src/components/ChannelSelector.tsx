@@ -25,7 +25,7 @@ export function ChannelSelector({ value, onChange, platform }: ChannelSelectorPr
   }, [platform])
 
   if (loading) {
-    return <div className="h-10 animate-pulse rounded-lg bg-gray-200" />
+    return <div className="h-10 animate-pulse rounded-lg bg-gray-700" />
   }
 
   // Group by platform
@@ -43,7 +43,7 @@ export function ChannelSelector({ value, onChange, platform }: ChannelSelectorPr
         const ch = channels.find(c => c.id === e.target.value)
         if (ch) onChange(ch.id, ch.platform)
       }}
-      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-gray-100 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
     >
       <option value="">选择频道...</option>
       {Object.entries(groups).map(([label, items]) => (

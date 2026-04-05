@@ -1,6 +1,13 @@
-import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
+import { loginSchema, type LoginFormValues } from '@/lib/schemas'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
 
 interface LoginDialogProps {
   open: boolean
@@ -9,96 +16,49 @@ interface LoginDialogProps {
 
 export default function LoginDialog({ open, onClose }: LoginDialogProps) {
   const { login } = useAuth()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const form = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '' },
+  })
 
-  if (!open) return null
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
-
+  async function onSubmit(values: LoginFormValues) {
     try {
-      const response = await api.auth.login(email, password)
+      const response = await api.auth.login(values.email, values.password)
       login(response.token, response.refresh_token, response.user)
+      form.reset()
       onClose()
-      setEmail('')
-      setPassword('')
     } catch (err) {
-      if (err instanceof Error) {
-        setError(err.message || '凭证无效')
-      } else {
-        setError('登录失败，请重试。')
-      }
-    } finally {
-      setLoading(false)
+      const message = err instanceof Error ? err.message : '登录失败，请重试。'
+      toast.error(message)
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-xl border border-gray-700 bg-gray-800 p-6 shadow-2xl">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-gray-100">登录</h2>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-700 hover:text-gray-200"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="login-email" className="mb-1 block text-sm font-medium text-gray-300">
-              邮箱
-            </label>
-            <input
-              id="login-email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="请输入邮箱地址"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="login-password" className="mb-1 block text-sm font-medium text-gray-300">
-              密码
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="请输入密码"
-            />
-          </div>
-
-          {error && (
-            <div className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? '登录中...' : '登录'}
-          </button>
-        </form>
-      </div>
-    </div>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>登录</DialogTitle>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField control={form.control} name="email" render={({ field }) => (
+              <FormItem>
+                <FormLabel>邮箱</FormLabel>
+                <FormControl><Input type="email" placeholder="请输入邮箱地址" {...field} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="password" render={({ field }) => (
+              <FormItem>
+                <FormLabel>密码</FormLabel>
+                <FormControl><Input type="password" placeholder="请输入密码" {...field} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>登录</Button>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   )
 }

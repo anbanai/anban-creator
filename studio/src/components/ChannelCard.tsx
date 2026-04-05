@@ -1,4 +1,6 @@
 import { type Channel, type ChannelStats } from '@/lib/api'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 
 interface ChannelCardProps {
   channel: Channel
@@ -15,18 +17,18 @@ const platformLabels: Record<string, string> = {
   rednote: '小红书',
 }
 
-const platformColors: Record<string, string> = {
-  article: 'bg-green-100 text-green-800',
-  xls: 'bg-blue-100 text-blue-800',
-  rednote: 'bg-red-100 text-red-800',
+const platformBadgeVariant: Record<string, 'success' | 'info' | 'danger' | 'neutral'> = {
+  article: 'success',
+  xls: 'info',
+  rednote: 'danger',
 }
 
 export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDelete }: ChannelCardProps) {
   const platformLabel = platformLabels[channel.platform] || channel.platform
-  const platformColor = platformColors[channel.platform] || 'bg-gray-100 text-gray-800'
+  const platformBadge = platformBadgeVariant[channel.platform] || ('neutral' as const)
 
   return (
-    <div className="rounded-lg border border-gray-200 p-4 transition-shadow hover:shadow-md">
+    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 transition-shadow hover:border-gray-600 hover:shadow-md">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           {channel.avatar_url ? (
@@ -36,26 +38,26 @@ export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDe
               className="h-12 w-12 rounded-full object-cover"
             />
           ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-200 text-lg font-medium text-gray-500">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-700 text-lg font-medium text-gray-300">
               {channel.name.charAt(0)}
             </div>
           )}
           <div>
-            <h3 className="font-medium text-gray-900">{channel.name}</h3>
-            <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${platformColor}`}>
+            <h3 className="font-medium text-gray-100">{channel.name}</h3>
+            <Badge variant={platformBadge} className="text-[10px]">
               {platformLabel}
-            </span>
+            </Badge>
           </div>
         </div>
         {channel.status === 'archived' && (
-          <span className="rounded bg-yellow-100 px-2 py-1 text-xs text-yellow-800">已归档</span>
+          <Badge variant="warning" className="text-[10px]">已归档</Badge>
         )}
       </div>
       {channel.description && (
-        <p className="mt-2 line-clamp-2 text-sm text-gray-500">{channel.description}</p>
+        <p className="mt-2 line-clamp-2 text-sm text-gray-400">{channel.description}</p>
       )}
       {stats && (
-        <div className="mt-3 flex gap-4 border-t border-gray-100 pt-3 text-xs text-gray-500">
+        <div className="mt-3 flex gap-4 border-t border-gray-700 pt-3 text-xs text-gray-400">
           <span>任务 {stats.total_tasks}</span>
           <span>完成 {stats.completed_tasks}</span>
           {stats.total_tasks > 0 && <span>成功率 {(stats.success_rate * 100).toFixed(0)}%</span>}
@@ -63,36 +65,24 @@ export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDe
       )}
       <div className="mt-3 flex gap-2">
         {onEdit && (
-          <button
-            onClick={() => onEdit(channel)}
-            className="rounded bg-gray-100 px-2 py-1 text-xs hover:bg-gray-200"
-          >
+          <Button variant="ghost" size="xs" onClick={() => onEdit(channel)}>
             编辑
-          </button>
+          </Button>
         )}
         {channel.status === 'active' && onArchive && (
-          <button
-            onClick={() => onArchive(channel.id)}
-            className="rounded bg-yellow-100 px-2 py-1 text-xs text-yellow-800 hover:bg-yellow-200"
-          >
+          <Button variant="ghost" size="xs" onClick={() => onArchive(channel.id)}>
             归档
-          </button>
+          </Button>
         )}
         {channel.status === 'archived' && onRestore && (
-          <button
-            onClick={() => onRestore(channel.id)}
-            className="rounded bg-green-100 px-2 py-1 text-xs text-green-800 hover:bg-green-200"
-          >
+          <Button variant="ghost" size="xs" onClick={() => onRestore(channel.id)}>
             恢复
-          </button>
+          </Button>
         )}
         {onDelete && (
-          <button
-            onClick={() => onDelete(channel.id)}
-            className="rounded bg-red-100 px-2 py-1 text-xs text-red-800 hover:bg-red-200"
-          >
+          <Button variant="danger" size="xs" onClick={() => onDelete(channel.id)}>
             删除
-          </button>
+          </Button>
         )}
       </div>
     </div>

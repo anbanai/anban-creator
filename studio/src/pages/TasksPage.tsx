@@ -1,15 +1,20 @@
 import { useState, useEffect } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { api, type TaskType, type CreateTaskRequest, type TaskStatus } from '@/lib/api'
 import { ChannelSelector } from '@/components/ChannelSelector'
-import Button from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
-import Modal from '@/components/ui/Modal'
-import { Input } from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import SimpleSelect from '@/components/ui/Select'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { taskStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN } from '@/lib/labels'
+import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -40,13 +45,11 @@ export default function TasksPage() {
   const [statusFilter, setStatusFilter] = useState(initialStatus)
   const [channelFilter, setChannelFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(shouldCreate)
-  const [form, setForm] = useState<{ type: TaskType; topic: string; channel_id: string; channel_platform: string }>({
-    type: 'rednote',
-    topic: '',
-    channel_id: '',
-    channel_platform: '',
+
+  const form = useForm<CreateTaskFormValues>({
+    resolver: zodResolver(createTaskSchema),
+    defaultValues: { type: 'rednote', topic: '', channel_id: '' },
   })
-  const [formError, setFormError] = useState('')
 
   // Clear create param on mount
   useEffect(() => {
@@ -77,33 +80,25 @@ export default function TasksPage() {
       window.location.href = `/tasks/${task.id}`
     },
     onError: () => {
-      setFormError('创建任务失败，请重试。')
+      toast.error('创建任务失败，请重试')
     },
   })
 
   function openCreate() {
-    setForm({ type: 'rednote', topic: '', channel_id: '', channel_platform: '' })
-    setFormError('')
+    form.reset({ type: 'rednote', topic: '', channel_id: '' })
     setModalOpen(true)
   }
 
   function closeModal() {
     setModalOpen(false)
-    setForm({ type: 'rednote', topic: '', channel_id: '', channel_platform: '' })
-    setFormError('')
+    form.reset({ type: 'rednote', topic: '', channel_id: '' })
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setFormError('')
-    if (!form.topic.trim()) {
-      setFormError('主题不能为空。')
-      return
-    }
+  async function onSubmit(values: CreateTaskFormValues) {
     createMutation.mutate({
-      type: form.type,
-      topic: form.topic.trim(),
-      channel_id: form.channel_id || undefined,
+      type: values.type,
+      topic: values.topic.trim(),
+      channel_id: values.channel_id || undefined,
     })
   }
 
@@ -228,60 +223,63 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* Create Task Modal */}
-      <Modal
-        open={modalOpen}
-        onClose={closeModal}
-        title="新建任务"
-        footer={
-          <>
+      {/* Create Task Dialog */}
+      <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建任务</DialogTitle>
+          </DialogHeader>
+          <Form {...form}>
+            <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
+              <FormField control={form.control} name="channel_id" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>频道</FormLabel>
+                  <FormControl>
+                    <ChannelSelector
+                      value={field.value || ''}
+                      onChange={(id, platform) => {
+                        field.onChange(id)
+                        if (id) form.setValue('type', platform as TaskType)
+                      }}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="type" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>内容类型</FormLabel>
+                  <FormControl>
+                    <SimpleSelect
+                      options={contentTypeOptions}
+                      value={field.value}
+                      onChange={(e) => field.onChange(e.target.value as TaskType)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="topic" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>主题</FormLabel>
+                  <FormControl>
+                    <Input placeholder="例如：2026夏季最佳护肤指南" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </form>
+          </Form>
+          <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button onClick={handleSubmit} loading={createMutation.isPending}>
+            <Button type="submit" form="task-create-form" loading={createMutation.isPending}>
               创建
             </Button>
-          </>
-        }
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-300">频道</label>
-            <ChannelSelector
-              value={form.channel_id}
-              onChange={(id, platform) => {
-                setForm({
-                  ...form,
-                  channel_id: id,
-                  channel_platform: id ? platform : '',
-                  // Auto-set type from channel platform
-                  type: id ? (platform as TaskType) || form.type : form.type,
-                })
-              }}
-            />
-            <p className="mt-1 text-xs text-gray-500">选择频道以自动填充内容类型和配置。</p>
-          </div>
-
-          <Select
-            label="内容类型"
-            options={contentTypeOptions}
-            value={form.type}
-            onChange={(e) => setForm({ ...form, type: e.target.value as TaskType })}
-          />
-
-          <Input
-            label="主题"
-            placeholder="例如：2026夏季最佳护肤指南"
-            value={form.topic}
-            onChange={(e) => setForm({ ...form, topic: e.target.value })}
-            required
-          />
-
-          {formError && (
-            <div className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
-              {formError}
-            </div>
-          )}
-        </form>
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

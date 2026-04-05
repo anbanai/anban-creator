@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Plan, type PlanType, type CreatePlanRequest } from '@/lib/api'
 import { ChannelSelector } from '@/components/ChannelSelector'
-import Button from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
-import Modal from '@/components/ui/Modal'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
@@ -266,81 +266,82 @@ export default function PlansPage() {
         </div>
       )}
 
-      {/* Create/Edit Modal */}
-      <Modal
-        open={modalOpen}
-        onClose={closeModal}
-        title={editingPlan ? '编辑计划' : '新建计划'}
-        footer={
-          <>
+      {/* Create/Edit Dialog */}
+      <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-300">频道</label>
+                <ChannelSelector
+                  value={form.channel_id}
+                  onChange={(id, platform) => {
+                    setForm({
+                      ...form,
+                      channel_id: id,
+                      channel_platform: id ? platform : '',
+                      type: id ? (platform as PlanType) || form.type : form.type,
+                    })
+                  }}
+                />
+                <p className="mt-1 text-xs text-gray-500">选择频道以自动填充内容类型和配置。</p>
+              </div>
+
+              <Select
+                label="内容类型"
+                options={contentTypeOptions}
+                value={form.type}
+                onChange={(e) => setForm({ ...form, type: e.target.value as PlanType })}
+              />
+
+              <Input
+                label="标题"
+                placeholder="例如：每周小红书发布"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                required
+              />
+
+              <Textarea
+                label="描述"
+                placeholder="可选的计划描述"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+              />
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-300">排期设置</label>
+                <SchedulePicker
+                  value={form.cron_expr}
+                  onChange={(cron) => setForm({ ...form, cron_expr: cron })}
+                />
+              </div>
+
+              <Input
+                label="主题方向（可选）"
+                placeholder="例如：美妆技巧、科技评测"
+                value={form.topic_hint}
+                onChange={(e) => setForm({ ...form, topic_hint: e.target.value })}
+              />
+
+              {formError && (
+                <div className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
+                  {formError}
+                </div>
+              )}
+            </form>
+          </div>
+          <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
             <Button onClick={handleSubmit} loading={isSubmitting}>
               {editingPlan ? '更新' : '创建'}
             </Button>
-          </>
-        }
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-300">频道</label>
-            <ChannelSelector
-              value={form.channel_id}
-              onChange={(id, platform) => {
-                setForm({
-                  ...form,
-                  channel_id: id,
-                  channel_platform: id ? platform : '',
-                  type: id ? (platform as PlanType) || form.type : form.type,
-                })
-              }}
-            />
-            <p className="mt-1 text-xs text-gray-500">选择频道以自动填充内容类型和配置。</p>
-          </div>
-
-          <Select
-            label="内容类型"
-            options={contentTypeOptions}
-            value={form.type}
-            onChange={(e) => setForm({ ...form, type: e.target.value as PlanType })}
-          />
-
-          <Input
-            label="标题"
-            placeholder="例如：每周小红书发布"
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-            required
-          />
-
-          <Textarea
-            label="描述"
-            placeholder="可选的计划描述"
-            value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
-          />
-
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-300">排期设置</label>
-            <SchedulePicker
-              value={form.cron_expr}
-              onChange={(cron) => setForm({ ...form, cron_expr: cron })}
-            />
-          </div>
-
-          <Input
-            label="主题方向（可选）"
-            placeholder="例如：美妆技巧、科技评测"
-            value={form.topic_hint}
-            onChange={(e) => setForm({ ...form, topic_hint: e.target.value })}
-          />
-
-          {formError && (
-            <div className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
-              {formError}
-            </div>
-          )}
-        </form>
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

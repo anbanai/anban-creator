@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Channel, type ChannelStats, type CreateChannelRequest } from '@/lib/api'
 import { ChannelCard } from '@/components/ChannelCard'
-import Button from '@/components/ui/Button'
-import Modal from '@/components/ui/Modal'
+import { Button } from '@/components/ui/Button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
@@ -270,113 +270,114 @@ export default function ChannelsPage() {
         </div>
       )}
 
-      {/* Create/Edit Modal */}
-      <Modal
-        open={modalOpen}
-        onClose={closeModal}
-        title={editingChannel ? '编辑频道' : '新建频道'}
-        footer={
-          <>
+      {/* Create/Edit Dialog */}
+      <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingChannel ? '编辑频道' : '新建频道'}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto">
+            <form onSubmit={handleSubmit} className="space-y-4 pr-1">
+              <Select
+                label="平台"
+                options={platformOptions}
+                value={form.platform}
+                onChange={(e) => setForm({ ...form, platform: e.target.value })}
+                disabled={!!editingChannel}
+              />
+
+              <Input
+                label="频道名称"
+                placeholder="e.g. 我的科技博客"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                required
+              />
+
+              <Textarea
+                label="简介"
+                placeholder="可选的频道描述"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+              />
+
+              <Input
+                label="头像 URL"
+                placeholder="https://example.com/avatar.jpg"
+                value={form.avatar_url}
+                onChange={(e) => setForm({ ...form, avatar_url: e.target.value })}
+              />
+
+              <Input
+                label="WeChat App ID"
+                placeholder="wx..."
+                value={form.wechat_app_id}
+                onChange={(e) => setForm({ ...form, wechat_app_id: e.target.value })}
+              />
+
+              {!editingChannel && (
+                <Input
+                  label="WeChat App Secret"
+                  type="password"
+                  placeholder="创建后不可查看"
+                  value={form.wechat_secret}
+                  onChange={(e) => setForm({ ...form, wechat_secret: e.target.value })}
+                />
+              )}
+
+              <Textarea
+                label="关键词"
+                placeholder="e.g. 科技, AI, 软件工程"
+                hint="逗号分隔的关键词，用于内容生成"
+                value={form.keywords}
+                onChange={(e) => setForm({ ...form, keywords: e.target.value })}
+              />
+
+              <Textarea
+                label="定位"
+                placeholder="e.g. 面向开发者的实用 AI 教程科技博客"
+                value={form.positioning}
+                onChange={(e) => setForm({ ...form, positioning: e.target.value })}
+              />
+
+              <Input
+                label="写作风格"
+                placeholder="e.g. casual-science, dan-koe"
+                hint="内置风格: casual-science, dan-koe, cultural-depth"
+                value={form.style}
+                onChange={(e) => setForm({ ...form, style: e.target.value })}
+              />
+
+              <Input
+                label="主题"
+                placeholder="e.g. autumn-warm, spring-fresh"
+                hint="内置主题: autumn-warm, spring-fresh, ocean-calm"
+                value={form.theme}
+                onChange={(e) => setForm({ ...form, theme: e.target.value })}
+              />
+
+              <Input
+                label="作者名"
+                placeholder="e.g. 张三"
+                value={form.author}
+                onChange={(e) => setForm({ ...form, author: e.target.value })}
+              />
+
+              {formError && (
+                <div className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
+                  {formError}
+                </div>
+              )}
+            </form>
+          </div>
+          <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
             <Button onClick={handleSubmit} loading={isSubmitting}>
               {editingChannel ? '更新' : '创建'}
             </Button>
-          </>
-        }
-      >
-        <form onSubmit={handleSubmit} className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
-          <Select
-            label="平台"
-            options={platformOptions}
-            value={form.platform}
-            onChange={(e) => setForm({ ...form, platform: e.target.value })}
-            disabled={!!editingChannel}
-          />
-
-          <Input
-            label="频道名称"
-            placeholder="e.g. 我的科技博客"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            required
-          />
-
-          <Textarea
-            label="简介"
-            placeholder="可选的频道描述"
-            value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
-          />
-
-          <Input
-            label="头像 URL"
-            placeholder="https://example.com/avatar.jpg"
-            value={form.avatar_url}
-            onChange={(e) => setForm({ ...form, avatar_url: e.target.value })}
-          />
-
-          <Input
-            label="WeChat App ID"
-            placeholder="wx..."
-            value={form.wechat_app_id}
-            onChange={(e) => setForm({ ...form, wechat_app_id: e.target.value })}
-          />
-
-          {!editingChannel && (
-            <Input
-              label="WeChat App Secret"
-              type="password"
-              placeholder="创建后不可查看"
-              value={form.wechat_secret}
-              onChange={(e) => setForm({ ...form, wechat_secret: e.target.value })}
-            />
-          )}
-
-          <Textarea
-            label="关键词"
-            placeholder="e.g. 科技, AI, 软件工程"
-            hint="逗号分隔的关键词，用于内容生成"
-            value={form.keywords}
-            onChange={(e) => setForm({ ...form, keywords: e.target.value })}
-          />
-
-          <Textarea
-            label="定位"
-            placeholder="e.g. 面向开发者的实用 AI 教程科技博客"
-            value={form.positioning}
-            onChange={(e) => setForm({ ...form, positioning: e.target.value })}
-          />
-
-          <Input
-            label="写作风格"
-            placeholder="e.g. casual-science, dan-koe"
-            hint="内置风格: casual-science, dan-koe, cultural-depth"
-            value={form.style}
-            onChange={(e) => setForm({ ...form, style: e.target.value })}
-          />
-
-          <Input
-            label="主题"
-            placeholder="e.g. autumn-warm, spring-fresh"
-            hint="内置主题: autumn-warm, spring-fresh, ocean-calm"
-            value={form.theme}
-            onChange={(e) => setForm({ ...form, theme: e.target.value })}
-          />
-
-          <Input
-            label="作者名"
-            placeholder="e.g. 张三"
-            value={form.author}
-            onChange={(e) => setForm({ ...form, author: e.target.value })}
-          />
-
-          {formError && (
-            <div className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
-              {formError}
-            </div>
-          )}
-        </form>
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
