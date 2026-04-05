@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import type { TaskFile } from '@/lib/api'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
@@ -9,6 +10,7 @@ import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
 import { FilePreview } from '@/components/FilePreview'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN } from '@/lib/labels'
 
 function statusBadgeVariant(status: string) {
@@ -29,6 +31,7 @@ export default function TaskDetailPage() {
 
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
+  const [showCancelDialog, setShowCancelDialog] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
   const { data: task, isLoading } = useQuery({
@@ -59,7 +62,9 @@ export default function TaskDetailPage() {
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
     onSuccess: () => {
+      toast.success('任务已取消')
       queryClient.invalidateQueries({ queryKey: ['task', id] })
+      setShowCancelDialog(false)
     },
   })
 
@@ -196,11 +201,7 @@ export default function TaskDetailPage() {
             variant="danger"
             size="sm"
             loading={cancelMutation.isPending}
-            onClick={() => {
-              if (window.confirm('确定取消此任务？')) {
-                cancelMutation.mutate()
-              }
-            }}
+            onClick={() => setShowCancelDialog(true)}
           >
             取消任务
           </Button>
@@ -409,6 +410,22 @@ export default function TaskDetailPage() {
           </CardBody>
         </Card>
       )}
+
+      {/* Cancel confirmation */}
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定取消此任务？</AlertDialogTitle>
+            <AlertDialogDescription>取消后任务将停止执行，此操作不可撤销。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>再想想</AlertDialogCancel>
+            <AlertDialogAction variant="danger" onClick={() => cancelMutation.mutate()}>
+              确定取消
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

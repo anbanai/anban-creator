@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api, type Channel, type ChannelStats, type CreateChannelRequest } from '@/lib/api'
 import { ChannelCard } from '@/components/ChannelCard'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
-import { Textarea } from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
+import { Textarea } from '@/components/ui/textarea'
+import SimpleSelect from '@/components/ui/Select'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { channelSchema, type ChannelFormValues } from '@/lib/schemas'
 
 const platformOptions = [
   { value: 'article', label: '公众号 (Article)' },
@@ -20,35 +26,7 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已归档', value: 'archived' },
 ]
 
-interface ChannelFormData {
-  platform: string
-  name: string
-  description: string
-  avatar_url: string
-  wechat_app_id: string
-  wechat_secret: string
-  keywords: string
-  positioning: string
-  style: string
-  theme: string
-  author: string
-}
-
-const emptyForm: ChannelFormData = {
-  platform: 'article',
-  name: '',
-  description: '',
-  avatar_url: '',
-  wechat_app_id: '',
-  wechat_secret: '',
-  keywords: '',
-  positioning: '',
-  style: '',
-  theme: '',
-  author: '',
-}
-
-function channelToForm(ch: Channel): ChannelFormData {
+function channelToForm(ch: Channel): ChannelFormValues {
   return {
     platform: ch.platform,
     name: ch.name,
@@ -69,9 +47,25 @@ export default function ChannelsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
-  const [form, setForm] = useState<ChannelFormData>(emptyForm)
-  const [formError, setFormError] = useState('')
   const [channelStats, setChannelStats] = useState<Record<string, ChannelStats>>({})
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+
+  const form = useForm<ChannelFormValues>({
+    resolver: zodResolver(channelSchema),
+    defaultValues: {
+      platform: 'article',
+      name: '',
+      description: '',
+      avatar_url: '',
+      wechat_app_id: '',
+      wechat_secret: '',
+      keywords: '',
+      positioning: '',
+      style: '',
+      theme: '',
+      author: '',
+    },
+  })
 
   const { data: channels, isLoading } = useQuery({
     queryKey: ['channels', statusFilter],
@@ -105,11 +99,12 @@ export default function ChannelsPage() {
   const createMutation = useMutation({
     mutationFn: (data: CreateChannelRequest) => api.channels.create(data),
     onSuccess: () => {
+      toast.success('频道创建成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       closeModal()
     },
     onError: () => {
-      setFormError('创建频道失败，请重试。')
+      toast.error('创建频道失败，请重试')
     },
   })
 
@@ -117,17 +112,19 @@ export default function ChannelsPage() {
     mutationFn: ({ id, data }: { id: string; data: Partial<CreateChannelRequest> }) =>
       api.channels.update(id, data),
     onSuccess: () => {
+      toast.success('频道更新成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       closeModal()
     },
     onError: () => {
-      setFormError('更新频道失败，请重试。')
+      toast.error('更新频道失败，请重试')
     },
   })
 
   const archiveMutation = useMutation({
     mutationFn: (id: string) => api.channels.archive(id),
     onSuccess: () => {
+      toast.success('频道已归档')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
     },
   })
@@ -135,6 +132,7 @@ export default function ChannelsPage() {
   const restoreMutation = useMutation({
     mutationFn: (id: string) => api.channels.restore(id),
     onSuccess: () => {
+      toast.success('频道已恢复')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
     },
   })
@@ -142,54 +140,55 @@ export default function ChannelsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.channels.delete(id),
     onSuccess: () => {
+      toast.success('频道已删除')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
+      setDeleteTarget(null)
     },
   })
 
   function openCreate() {
     setEditingChannel(null)
-    setForm(emptyForm)
-    setFormError('')
+    form.reset({
+      platform: 'article',
+      name: '',
+      description: '',
+      avatar_url: '',
+      wechat_app_id: '',
+      wechat_secret: '',
+      keywords: '',
+      positioning: '',
+      style: '',
+      theme: '',
+      author: '',
+    })
     setModalOpen(true)
   }
 
   function openEdit(channel: Channel) {
     setEditingChannel(channel)
-    setForm(channelToForm(channel))
-    setFormError('')
+    form.reset(channelToForm(channel))
     setModalOpen(true)
   }
 
   function closeModal() {
     setModalOpen(false)
     setEditingChannel(null)
-    setForm(emptyForm)
-    setFormError('')
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setFormError('')
-
-    if (!form.name.trim()) {
-      setFormError('频道名称不能为空。')
-      return
-    }
-
+  async function onSubmit(values: ChannelFormValues) {
     const payload: CreateChannelRequest = {
-      platform: form.platform,
-      name: form.name.trim(),
-      description: form.description.trim() || undefined,
-      avatar_url: form.avatar_url.trim() || undefined,
-      wechat_app_id: form.wechat_app_id.trim() || undefined,
-      wechat_secret: form.wechat_secret.trim() || undefined,
-      keywords: form.keywords.trim() || undefined,
-      positioning: form.positioning.trim() || undefined,
-      style: form.style.trim() || undefined,
-      theme: form.theme.trim() || undefined,
-      author: form.author.trim() || undefined,
+      platform: values.platform,
+      name: values.name.trim(),
+      description: values.description?.trim() || undefined,
+      avatar_url: values.avatar_url?.trim() || undefined,
+      wechat_app_id: values.wechat_app_id?.trim() || undefined,
+      wechat_secret: values.wechat_secret?.trim() || undefined,
+      keywords: values.keywords?.trim() || undefined,
+      positioning: values.positioning?.trim() || undefined,
+      style: values.style?.trim() || undefined,
+      theme: values.theme?.trim() || undefined,
+      author: values.author?.trim() || undefined,
     }
-
     if (editingChannel) {
       updateMutation.mutate({ id: editingChannel.id, data: payload })
     } else {
@@ -198,9 +197,7 @@ export default function ChannelsPage() {
   }
 
   function handleDelete(id: string) {
-    if (window.confirm('确定要删除此频道吗？此操作不可撤销。')) {
-      deleteMutation.mutate(id)
-    }
+    setDeleteTarget(id)
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
@@ -276,108 +273,153 @@ export default function ChannelsPage() {
           <DialogHeader>
             <DialogTitle>{editingChannel ? '编辑频道' : '新建频道'}</DialogTitle>
           </DialogHeader>
-          <div className="max-h-[60vh] overflow-y-auto">
-            <form onSubmit={handleSubmit} className="space-y-4 pr-1">
-              <Select
-                label="平台"
-                options={platformOptions}
-                value={form.platform}
-                onChange={(e) => setForm({ ...form, platform: e.target.value })}
-                disabled={!!editingChannel}
-              />
+          <Form {...form}>
+            <form id="channel-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+              <FormField control={form.control} name="platform" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>平台</FormLabel>
+                  <FormControl>
+                    <SimpleSelect
+                      options={platformOptions}
+                      value={field.value}
+                      onChange={(e) => field.onChange(e.target.value)}
+                      disabled={!!editingChannel}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Input
-                label="频道名称"
-                placeholder="e.g. 我的科技博客"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
+              <FormField control={form.control} name="name" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>频道名称</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. 我的科技博客" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Textarea
-                label="简介"
-                placeholder="可选的频道描述"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
+              <FormField control={form.control} name="description" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>简介</FormLabel>
+                  <FormControl>
+                    <Textarea placeholder="可选的频道描述" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Input
-                label="头像 URL"
-                placeholder="https://example.com/avatar.jpg"
-                value={form.avatar_url}
-                onChange={(e) => setForm({ ...form, avatar_url: e.target.value })}
-              />
+              <FormField control={form.control} name="avatar_url" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>头像 URL</FormLabel>
+                  <FormControl>
+                    <Input placeholder="https://example.com/avatar.jpg" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Input
-                label="WeChat App ID"
-                placeholder="wx..."
-                value={form.wechat_app_id}
-                onChange={(e) => setForm({ ...form, wechat_app_id: e.target.value })}
-              />
+              <FormField control={form.control} name="wechat_app_id" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>WeChat App ID</FormLabel>
+                  <FormControl>
+                    <Input placeholder="wx..." {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
               {!editingChannel && (
-                <Input
-                  label="WeChat App Secret"
-                  type="password"
-                  placeholder="创建后不可查看"
-                  value={form.wechat_secret}
-                  onChange={(e) => setForm({ ...form, wechat_secret: e.target.value })}
-                />
+                <FormField control={form.control} name="wechat_secret" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>WeChat App Secret</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="创建后不可查看" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
               )}
 
-              <Textarea
-                label="关键词"
-                placeholder="e.g. 科技, AI, 软件工程"
-                hint="逗号分隔的关键词，用于内容生成"
-                value={form.keywords}
-                onChange={(e) => setForm({ ...form, keywords: e.target.value })}
-              />
+              <FormField control={form.control} name="keywords" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>关键词</FormLabel>
+                  <FormControl>
+                    <Textarea placeholder="e.g. 科技, AI, 软件工程" {...field} />
+                  </FormControl>
+                  <FormDescription>逗号分隔的关键词，用于内容生成</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Textarea
-                label="定位"
-                placeholder="e.g. 面向开发者的实用 AI 教程科技博客"
-                value={form.positioning}
-                onChange={(e) => setForm({ ...form, positioning: e.target.value })}
-              />
+              <FormField control={form.control} name="positioning" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>定位</FormLabel>
+                  <FormControl>
+                    <Textarea placeholder="e.g. 面向开发者的实用 AI 教程科技博客" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Input
-                label="写作风格"
-                placeholder="e.g. casual-science, dan-koe"
-                hint="内置风格: casual-science, dan-koe, cultural-depth"
-                value={form.style}
-                onChange={(e) => setForm({ ...form, style: e.target.value })}
-              />
+              <FormField control={form.control} name="style" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>写作风格</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. casual-science, dan-koe" {...field} />
+                  </FormControl>
+                  <FormDescription>内置风格: casual-science, dan-koe, cultural-depth</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Input
-                label="主题"
-                placeholder="e.g. autumn-warm, spring-fresh"
-                hint="内置主题: autumn-warm, spring-fresh, ocean-calm"
-                value={form.theme}
-                onChange={(e) => setForm({ ...form, theme: e.target.value })}
-              />
+              <FormField control={form.control} name="theme" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>主题</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. autumn-warm, spring-fresh" {...field} />
+                  </FormControl>
+                  <FormDescription>内置主题: autumn-warm, spring-fresh, ocean-calm</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Input
-                label="作者名"
-                placeholder="e.g. 张三"
-                value={form.author}
-                onChange={(e) => setForm({ ...form, author: e.target.value })}
-              />
-
-              {formError && (
-                <div className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
-                  {formError}
-                </div>
-              )}
+              <FormField control={form.control} name="author" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>作者名</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. 张三" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
             </form>
-          </div>
+          </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button onClick={handleSubmit} loading={isSubmitting}>
+            <Button type="submit" form="channel-form" loading={isSubmitting}>
               {editingChannel ? '更新' : '创建'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定要删除此频道吗？</AlertDialogTitle>
+            <AlertDialogDescription>此操作不可撤销。删除后频道及其所有配置将永久移除。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction variant="danger" onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

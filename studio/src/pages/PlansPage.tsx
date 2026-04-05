@@ -1,5 +1,8 @@
 import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api, type Plan, type PlanType, type CreatePlanRequest } from '@/lib/api'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
@@ -7,10 +10,13 @@ import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
-import { Textarea } from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
+import { Textarea } from '@/components/ui/textarea'
+import SimpleSelect from '@/components/ui/Select'
 import SchedulePicker from '@/components/SchedulePicker'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN } from '@/lib/labels'
+import { planSchema, type PlanFormValues } from '@/lib/schemas'
 
 function planStatusBadge(status: string) {
   return status === 'active' ? 'success' : 'neutral'
@@ -27,25 +33,15 @@ function cronToHuman(cron: string): string {
   return `每${dayList} ${time}`
 }
 
-
-interface PlanFormData {
-  type: PlanType
-  title: string
-  description: string
-  cron_expr: string
-  topic_hint: string
-  channel_id: string
-  channel_platform: string
-}
-
-const emptyForm: PlanFormData = {
-  type: 'rednote',
-  title: '',
-  description: '',
-  cron_expr: '0 9 * * 1,3,5',
-  topic_hint: '',
-  channel_id: '',
-  channel_platform: '',
+function planToFormValues(plan: Plan): PlanFormValues {
+  return {
+    channel_id: plan.channel_id || '',
+    type: plan.type,
+    title: plan.title,
+    description: plan.description || '',
+    cron_expr: plan.cron_expr,
+    topic_hint: plan.topic_hint || '',
+  }
 }
 
 export default function PlansPage() {
@@ -53,8 +49,19 @@ export default function PlansPage() {
   const [channelFilter, setChannelFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
-  const [form, setForm] = useState<PlanFormData>(emptyForm)
-  const [formError, setFormError] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+
+  const form = useForm<PlanFormValues>({
+    resolver: zodResolver(planSchema),
+    defaultValues: {
+      channel_id: '',
+      type: 'rednote',
+      title: '',
+      description: '',
+      cron_expr: '0 9 * * 1,3,5',
+      topic_hint: '',
+    },
+  })
 
   const { data, isLoading } = useQuery({
     queryKey: ['plans', channelFilter],
@@ -69,35 +76,40 @@ export default function PlansPage() {
   const createMutation = useMutation({
     mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
     onSuccess: () => {
+      toast.success('计划创建成功')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
       closeModal()
     },
     onError: () => {
-      setFormError('创建计划失败，请检查输入。')
+      toast.error('创建计划失败')
     },
   })
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: CreatePlanRequest }) => api.plans.update(id, data),
     onSuccess: () => {
+      toast.success('计划更新成功')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
       closeModal()
     },
     onError: () => {
-      setFormError('更新计划失败，请检查输入。')
+      toast.error('更新计划失败')
     },
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.plans.delete(id),
     onSuccess: () => {
+      toast.success('计划已删除')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
+      setDeleteTarget(null)
     },
   })
 
   const pauseMutation = useMutation({
     mutationFn: (id: string) => api.plans.pause(id),
     onSuccess: () => {
+      toast.success('计划已暂停')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
     },
   })
@@ -105,59 +117,43 @@ export default function PlansPage() {
   const resumeMutation = useMutation({
     mutationFn: (id: string) => api.plans.resume(id),
     onSuccess: () => {
+      toast.success('计划已恢复')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
     },
   })
 
   function openCreate() {
     setEditingPlan(null)
-    setForm(emptyForm)
-    setFormError('')
+    form.reset({
+      channel_id: '',
+      type: 'rednote',
+      title: '',
+      description: '',
+      cron_expr: '0 9 * * 1,3,5',
+      topic_hint: '',
+    })
     setModalOpen(true)
   }
 
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
-    setForm({
-      type: plan.type,
-      title: plan.title,
-      description: plan.description,
-      cron_expr: plan.cron_expr,
-      topic_hint: plan.topic_hint,
-      channel_id: plan.channel_id || '',
-      channel_platform: '',
-    })
-    setFormError('')
+    form.reset(planToFormValues(plan))
     setModalOpen(true)
   }
 
   function closeModal() {
     setModalOpen(false)
     setEditingPlan(null)
-    setForm(emptyForm)
-    setFormError('')
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setFormError('')
-
-    if (!form.title.trim()) {
-      setFormError('标题不能为空。')
-      return
-    }
-    if (!form.cron_expr.trim()) {
-      setFormError('请设置排期。')
-      return
-    }
-
+  async function onSubmit(values: PlanFormValues) {
     const payload: CreatePlanRequest = {
-      type: form.type,
-      title: form.title.trim(),
-      description: form.description.trim() || undefined,
-      cron_expr: form.cron_expr.trim(),
-      topic_hint: form.topic_hint.trim() || undefined,
-      channel_id: form.channel_id || undefined,
+      type: values.type,
+      title: values.title.trim(),
+      description: values.description?.trim() || undefined,
+      cron_expr: values.cron_expr.trim(),
+      topic_hint: values.topic_hint?.trim() || undefined,
+      channel_id: values.channel_id || undefined,
     }
 
     if (editingPlan) {
@@ -251,11 +247,7 @@ export default function PlansPage() {
                     variant="ghost"
                     size="sm"
                     className="text-red-400 hover:text-red-300"
-                    onClick={() => {
-                      if (window.confirm('确定删除此计划？此操作不可撤销。')) {
-                        deleteMutation.mutate(plan.id)
-                      }
-                    }}
+                    onClick={() => setDeleteTarget(plan.id)}
                   >
                     删除
                   </Button>
@@ -272,76 +264,103 @@ export default function PlansPage() {
           <DialogHeader>
             <DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle>
           </DialogHeader>
-          <div className="max-h-[60vh] overflow-y-auto">
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-300">频道</label>
-                <ChannelSelector
-                  value={form.channel_id}
-                  onChange={(id, platform) => {
-                    setForm({
-                      ...form,
-                      channel_id: id,
-                      channel_platform: id ? platform : '',
-                      type: id ? (platform as PlanType) || form.type : form.type,
-                    })
-                  }}
-                />
-                <p className="mt-1 text-xs text-gray-500">选择频道以自动填充内容类型和配置。</p>
-              </div>
+          <Form {...form}>
+            <form id="plan-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
+              <FormField control={form.control} name="channel_id" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>频道</FormLabel>
+                  <FormControl>
+                    <ChannelSelector
+                      value={field.value || ''}
+                      onChange={(id, platform) => {
+                        field.onChange(id)
+                        if (id) form.setValue('type', platform as PlanType)
+                      }}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Select
-                label="内容类型"
-                options={contentTypeOptions}
-                value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value as PlanType })}
-              />
+              <FormField control={form.control} name="type" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>内容类型</FormLabel>
+                  <FormControl>
+                    <SimpleSelect
+                      options={contentTypeOptions}
+                      value={field.value}
+                      onChange={(e) => field.onChange(e.target.value as PlanType)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Input
-                label="标题"
-                placeholder="例如：每周小红书发布"
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-                required
-              />
+              <FormField control={form.control} name="title" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>标题</FormLabel>
+                  <FormControl>
+                    <Input placeholder="例如：每周小红书发布" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Textarea
-                label="描述"
-                placeholder="可选的计划描述"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
+              <FormField control={form.control} name="description" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>描述</FormLabel>
+                  <FormControl>
+                    <Textarea placeholder="可选的计划描述" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-300">排期设置</label>
-                <SchedulePicker
-                  value={form.cron_expr}
-                  onChange={(cron) => setForm({ ...form, cron_expr: cron })}
-                />
-              </div>
+              <FormField control={form.control} name="cron_expr" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>排期设置</FormLabel>
+                  <FormControl>
+                    <SchedulePicker value={field.value} onChange={field.onChange} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-              <Input
-                label="主题方向（可选）"
-                placeholder="例如：美妆技巧、科技评测"
-                value={form.topic_hint}
-                onChange={(e) => setForm({ ...form, topic_hint: e.target.value })}
-              />
-
-              {formError && (
-                <div className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
-                  {formError}
-                </div>
-              )}
+              <FormField control={form.control} name="topic_hint" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>主题方向（可选）</FormLabel>
+                  <FormControl>
+                    <Input placeholder="例如：美妆技巧、科技评测" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
             </form>
-          </div>
+          </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button onClick={handleSubmit} loading={isSubmitting}>
+            <Button type="submit" form="plan-form" loading={isSubmitting}>
               {editingPlan ? '更新' : '创建'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定删除此计划？</AlertDialogTitle>
+            <AlertDialogDescription>此操作不可撤销。删除后计划将无法恢复。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction variant="danger" onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
