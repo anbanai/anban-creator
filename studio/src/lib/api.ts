@@ -43,7 +43,6 @@ export interface Channel {
   style: string
   theme: string
   author: string
-  image_api_config: string
   status: ChannelStatus
   created_at: string
   updated_at: string
@@ -74,7 +73,6 @@ export interface CreateChannelRequest {
   style?: string
   theme?: string
   author?: string
-  image_api_config?: string
   description?: string
   avatar_url?: string
 }

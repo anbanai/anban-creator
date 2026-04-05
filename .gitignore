@@ -59,4 +59,4 @@ data/
 
 # Node.js
 node_modules/
-web/dist/
+studio/dist/

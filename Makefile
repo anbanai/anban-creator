@@ -40,7 +40,7 @@ build:
 
 # Clean all build artifacts
 clean:
-	@rm -rf bin/ web/dist/ web/node_modules/
+	@rm -rf bin/ studio/dist/ studio/node_modules/
 	@rm -rf dist/ release/
 	@rm -f *.log
 
@@ -112,15 +112,15 @@ server-test:
 
 # Install frontend dependencies
 web-install:
-	@cd web && npm install
+	@cd studio && npm install
 
 # Run frontend dev server
 web-dev:
-	@cd web && npm run dev
+	@cd studio && npm run dev
 
 # Build frontend for production
 web-build:
-	@cd web && npm run build
+	@cd studio && npm run build
 
 # ---------------------------------------------------------------------------
 # Docker targets

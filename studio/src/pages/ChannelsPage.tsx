@@ -32,7 +32,6 @@ interface ChannelFormData {
   style: string
   theme: string
   author: string
-  image_api_config: string
 }
 
 const emptyForm: ChannelFormData = {
@@ -47,7 +46,6 @@ const emptyForm: ChannelFormData = {
   style: '',
   theme: '',
   author: '',
-  image_api_config: '',
 }
 
 function channelToForm(ch: Channel): ChannelFormData {
@@ -63,7 +61,6 @@ function channelToForm(ch: Channel): ChannelFormData {
     style: ch.style || '',
     theme: ch.theme || '',
     author: ch.author || '',
-    image_api_config: ch.image_api_config || '',
   }
 }
 
@@ -179,16 +176,6 @@ export default function ChannelsPage() {
       return
     }
 
-    // Validate image_api_config JSON if provided
-    if (form.image_api_config.trim()) {
-      try {
-        JSON.parse(form.image_api_config)
-      } catch {
-        setFormError('Image API Config 不是有效的 JSON。')
-        return
-      }
-    }
-
     const payload: CreateChannelRequest = {
       platform: form.platform,
       name: form.name.trim(),
@@ -201,7 +188,6 @@ export default function ChannelsPage() {
       style: form.style.trim() || undefined,
       theme: form.theme.trim() || undefined,
       author: form.author.trim() || undefined,
-      image_api_config: form.image_api_config.trim() || undefined,
     }
 
     if (editingChannel) {
@@ -383,22 +369,6 @@ export default function ChannelsPage() {
             value={form.author}
             onChange={(e) => setForm({ ...form, author: e.target.value })}
           />
-
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-300">
-              Image API Config (JSON)
-            </label>
-            <textarea
-              className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 font-mono text-xs text-gray-100 placeholder-gray-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              rows={4}
-              placeholder='{"provider": "gemini", "model": "gemini-3-pro-image-preview"}'
-              value={form.image_api_config}
-              onChange={(e) => setForm({ ...form, image_api_config: e.target.value })}
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Provider 选项: openai, gemini, openrouter, volcengine
-            </p>
-          </div>
 
           {formError && (
             <div className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
