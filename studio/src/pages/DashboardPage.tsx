@@ -60,14 +60,14 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-100">
+          <h1 className="text-2xl font-bold text-foreground">
             欢迎{user?.nickname ? `，${user.nickname}` : ''}
           </h1>
-          <p className="mt-1 text-sm text-gray-400">以下是你的内容工作区概览。</p>
+          <p className="mt-1 text-sm text-muted-foreground">以下是你的内容工作区概览。</p>
         </div>
         <Link
           to="/tasks?create=true"
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -81,9 +81,9 @@ export default function DashboardPage() {
         {stats.map((stat) => (
           <Card key={stat.label}>
             <CardBody>
-              <p className="text-sm text-gray-400">{stat.label}</p>
-              <p className="mt-1 text-3xl font-bold text-gray-100">{stat.value}</p>
-              <p className="mt-1 text-xs text-gray-500">{stat.description}</p>
+              <p className="text-sm text-muted-foreground">{stat.label}</p>
+              <p className="mt-1 text-3xl font-bold text-foreground">{stat.value}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{stat.description}</p>
             </CardBody>
           </Card>
         ))}
@@ -91,15 +91,15 @@ export default function DashboardPage() {
 
       {/* Recent tasks */}
       <Card>
-        <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
-          <h2 className="font-semibold text-gray-100">最近任务</h2>
-          <Link to="/tasks" className="text-sm text-blue-400 hover:text-blue-300">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="font-semibold text-foreground">最近任务</h2>
+          <Link to="/tasks" className="text-sm text-primary hover:text-primary/80">
             查看全部
           </Link>
         </div>
-        <div className="divide-y divide-gray-700">
+        <div className="divide-y divide-border">
           {recentTasks.length === 0 ? (
-            <div className="py-8 text-center text-sm text-gray-500">
+            <div className="py-8 text-center text-sm text-muted-foreground">
               还没有任务。创建你的第一个任务开始创作。
             </div>
           ) : (
@@ -107,16 +107,16 @@ export default function DashboardPage() {
               <Link
                 key={task.id}
                 to={`/tasks/${task.id}`}
-                className="flex items-center justify-between px-4 py-3 transition-colors hover:bg-gray-750"
+                className="flex items-center justify-between px-4 py-3 transition-colors hover:bg-accent"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-gray-100">{task.topic}</p>
+                  <p className="truncate text-sm font-medium text-foreground">{task.topic}</p>
                   <div className="mt-1 flex items-center gap-2">
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-muted-foreground">
                       {formatDateTimeCN(task.created_at)}
                     </span>
-                    <span className="text-xs text-gray-600">|</span>
-                    <span className="text-xs text-gray-500">{contentTypeLabel[task.type]}</span>
+                    <span className="text-xs text-muted-foreground">|</span>
+                    <span className="text-xs text-muted-foreground">{contentTypeLabel[task.type]}</span>
                   </div>
                 </div>
                 <Badge variant={statusBadgeVariant(task.status)}>
@@ -130,28 +130,28 @@ export default function DashboardPage() {
 
       {/* Quick actions */}
       <div>
-        <h2 className="mb-3 text-lg font-semibold text-gray-100">快捷操作</h2>
+        <h2 className="mb-3 text-lg font-semibold text-foreground">快捷操作</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Link
             to="/tasks?create=true"
-            className="rounded-xl border border-gray-700 bg-gray-800 p-4 transition-colors hover:border-gray-600 hover:bg-gray-750"
+            className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent"
           >
-            <p className="font-medium text-gray-100">新建任务</p>
-            <p className="mt-1 text-sm text-gray-400">创建内容任务</p>
+            <p className="font-medium text-foreground">新建任务</p>
+            <p className="mt-1 text-sm text-muted-foreground">创建内容任务</p>
           </Link>
           <Link
             to="/plans"
-            className="rounded-xl border border-gray-700 bg-gray-800 p-4 transition-colors hover:border-gray-600 hover:bg-gray-750"
+            className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent"
           >
-            <p className="font-medium text-gray-100">新建计划</p>
-            <p className="mt-1 text-sm text-gray-400">规划新的内容排期</p>
+            <p className="font-medium text-foreground">新建计划</p>
+            <p className="mt-1 text-sm text-muted-foreground">规划新的内容排期</p>
           </Link>
           <Link
             to="/timeline"
-            className="rounded-xl border border-gray-700 bg-gray-800 p-4 transition-colors hover:border-gray-600 hover:bg-gray-750"
+            className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent"
           >
-            <p className="font-medium text-gray-100">查看时间线</p>
-            <p className="mt-1 text-sm text-gray-400">查看已排期内容</p>
+            <p className="font-medium text-foreground">查看时间线</p>
+            <p className="mt-1 text-sm text-muted-foreground">查看已排期内容</p>
           </Link>
         </div>
       </div>

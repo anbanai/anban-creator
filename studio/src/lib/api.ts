@@ -30,19 +30,24 @@ export interface ApiResponse<T = unknown> {
 export type ChannelPlatform = 'article' | 'xls' | 'rednote'
 export type ChannelStatus = 'active' | 'archived'
 
+export interface ChannelConfig {
+  wechat_app_id?: string
+  wechat_secret?: string
+}
+
 export interface Channel {
   id: string
   user_id: string
   platform: ChannelPlatform
   name: string
   avatar_url: string
-  description: string
-  wechat_app_id: string
-  keywords: string
+  profile_url: string
   positioning: string
+  keywords: string
   style: string
   theme: string
   author: string
+  config: ChannelConfig
   status: ChannelStatus
   created_at: string
   updated_at: string
@@ -65,16 +70,45 @@ export interface ChannelDetail {
 
 export interface CreateChannelRequest {
   platform: string
-  name: string
-  wechat_app_id?: string
-  wechat_secret?: string
-  keywords?: string
+  name?: string
+  profile_url?: string
+  avatar_url?: string
   positioning?: string
+  keywords?: string
   style?: string
   theme?: string
   author?: string
-  description?: string
-  avatar_url?: string
+  wechat_app_id?: string
+  wechat_secret?: string
+}
+
+// --- Platform Config Types ---
+
+export interface PlatformFieldConfig {
+  key: string
+  label: string
+  placeholder: string
+  required: boolean
+  type: 'text' | 'password' | 'url' | 'textarea'
+  group: 'basic' | 'credentials' | 'content' | 'advanced'
+  auto_fetched: boolean
+}
+
+export interface PlatformConfig {
+  id: string
+  label: string
+  badge_variant: string
+  supports_publishing: boolean
+  supports_auto_fetch: boolean
+  profile_url_pattern: string
+  fields: PlatformFieldConfig[]
+}
+
+export interface PlatformProfile {
+  name: string
+  avatar_url: string
+  positioning: string
+  raw_data: Record<string, unknown>
 }
 
 // --- Plan Types ---
@@ -140,13 +174,13 @@ export interface TaskResult {
 export interface TaskFile {
   id: string
   task_id: string
-  role: string            // "image", "cover", "html", "markdown", "other"
+  role: string
   file_name: string
   mime_type: string
   file_size: number
   oss_url: string
   oss_key: string
-  storage_provider: string // "oss" or "local"
+  storage_provider: string
   media_id?: string
   wechat_url?: string
   created_at: string
@@ -155,7 +189,7 @@ export interface TaskFile {
 export interface CreateTaskRequest {
   type: TaskType
   topic: string
-  channel_id?: string
+  channel_id: string
 }
 
 // --- Timeline Types ---
@@ -344,8 +378,18 @@ export const api = {
 
     delete: (id: string) =>
       unwrap<void>(http.delete(`/channels/${id}`)),
-  },
 
+    platformConfigs: () =>
+      unwrap<PlatformConfig[]>(http.get('/channels/platform-configs')),
+
+    fetchProfile: (platform: string, profileUrl: string, wechatAppId?: string, wechatSecret?: string) =>
+      unwrap<PlatformProfile>(http.post('/channels/fetch-profile', {
+        platform,
+        profile_url: profileUrl,
+        wechat_app_id: wechatAppId,
+        wechat_secret: wechatSecret,
+      })),
+  },
 }
 
 export default http

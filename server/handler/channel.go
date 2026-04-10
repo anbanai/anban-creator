@@ -2,11 +2,14 @@ package handler
 
 import (
 	"errors"
+	"net/url"
+	"regexp"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/platform"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
 )
@@ -22,34 +25,39 @@ func NewChannelHandler(svc *service.ChannelService, logger *zerolog.Logger) *Cha
 	return &ChannelHandler{service: svc, logger: logger}
 }
 
-// createChannelRequest is the request body for creating a channel.
-type createChannelRequest struct {
-	Platform      string `json:"platform"`
-	Name          string `json:"name"`
-	WechatAppID   string `json:"wechat_app_id"`
-	WechatSecret  string `json:"wechat_secret"`
-	Keywords      string `json:"keywords"`
-	Positioning   string `json:"positioning"`
-	Style         string `json:"style"`
-	Theme         string `json:"theme"`
-	Author        string `json:"author"`
-	Description   string `json:"description"`
-	AvatarURL     string `json:"avatar_url"`
+// channelRequest is the shared request body for creating and updating a channel.
+type channelRequest struct {
+	Platform    string `json:"platform"`
+	Name        string `json:"name"`
+	ProfileURL  string `json:"profile_url"`
+	AvatarURL   string `json:"avatar_url"`
+	Positioning string `json:"positioning"`
+	Keywords    string `json:"keywords"`
+	Style       string `json:"style"`
+	Theme       string `json:"theme"`
+	Author      string `json:"author"`
+	// Config fields for platform-specific credentials.
+	WechatAppID  string `json:"wechat_app_id"`
+	WechatSecret string `json:"wechat_secret"`
 }
 
-// updateChannelRequest is the request body for updating a channel.
-type updateChannelRequest struct {
-	Platform      string `json:"platform"`
-	Name          string `json:"name"`
-	WechatAppID   string `json:"wechat_app_id"`
-	WechatSecret  string `json:"wechat_secret"`
-	Keywords      string `json:"keywords"`
-	Positioning   string `json:"positioning"`
-	Style         string `json:"style"`
-	Theme         string `json:"theme"`
-	Author        string `json:"author"`
-	Description   string `json:"description"`
-	AvatarURL     string `json:"avatar_url"`
+// toChannel converts a request to a Channel model.
+func (req *channelRequest) toChannel() *model.Channel {
+	return &model.Channel{
+		Platform:    req.Platform,
+		Name:        req.Name,
+		ProfileURL:  req.ProfileURL,
+		AvatarURL:   req.AvatarURL,
+		Positioning: req.Positioning,
+		Keywords:    req.Keywords,
+		Style:       req.Style,
+		Theme:       req.Theme,
+		Author:      req.Author,
+		Config: model.ChannelConfig{
+			WechatAppID:  req.WechatAppID,
+			WechatSecret: req.WechatSecret,
+		},
+	}
 }
 
 // List handles GET /channels.
@@ -71,6 +79,11 @@ func (h *ChannelHandler) List(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to list channels")
 	}
 
+	// Sanitize all channels before returning.
+	for _, ch := range channels {
+		service.SanitizeChannel(ch)
+	}
+
 	return Success(c, channels)
 }
 
@@ -81,7 +94,7 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	var req createChannelRequest
+	var req channelRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
@@ -89,30 +102,29 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 	if req.Platform == "" {
 		return Error(c, fiber.StatusBadRequest, "platform is required")
 	}
-	if req.Name == "" {
-		return Error(c, fiber.StatusBadRequest, "name is required")
+
+	// Validate required fields per platform.
+	pc := model.GetPlatformConfig(req.Platform)
+	if pc != nil {
+		for _, field := range pc.Fields {
+			if !field.Required {
+				continue
+			}
+			val := req.getFieldValue(field.Key)
+			if val == "" {
+				return Error(c, fiber.StatusBadRequest, field.Label+" is required")
+			}
+		}
 	}
 
-	ch := &model.Channel{
-		Platform:     req.Platform,
-		Name:         req.Name,
-		WechatAppID:  req.WechatAppID,
-		WechatSecret: req.WechatSecret,
-		Keywords:     req.Keywords,
-		Positioning:  req.Positioning,
-		Style:        req.Style,
-		Theme:        req.Theme,
-		Author:       req.Author,
-		Description:  req.Description,
-		AvatarURL:    req.AvatarURL,
-	}
-
+	ch := req.toChannel()
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create channel failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to create channel")
+		return Error(c, fiber.StatusInternalServerError, "failed to create channel: "+err.Error())
 	}
 
+	service.SanitizeChannel(created)
 	return Success(c, created)
 }
 
@@ -140,6 +152,7 @@ func (h *ChannelHandler) Get(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to get channel")
 	}
 
+	service.SanitizeChannel(ch)
 	return Success(c, fiber.Map{
 		"channel": ch,
 		"stats":   stats,
@@ -158,25 +171,12 @@ func (h *ChannelHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "channel id is required")
 	}
 
-	var req updateChannelRequest
+	var req channelRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
-	ch := &model.Channel{
-		Platform:     req.Platform,
-		Name:         req.Name,
-		WechatAppID:  req.WechatAppID,
-		WechatSecret: req.WechatSecret,
-		Keywords:     req.Keywords,
-		Positioning:  req.Positioning,
-		Style:        req.Style,
-		Theme:        req.Theme,
-		Author:       req.Author,
-		Description:  req.Description,
-		AvatarURL:    req.AvatarURL,
-	}
-
+	ch := req.toChannel()
 	updated, err := h.service.Update(c.Context(), userID, channelID, ch)
 	if err != nil {
 		if errors.Is(err, service.ErrChannelNotFound) {
@@ -189,6 +189,7 @@ func (h *ChannelHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to update channel")
 	}
 
+	service.SanitizeChannel(updated)
 	return Success(c, updated)
 }
 
@@ -268,4 +269,107 @@ func (h *ChannelHandler) Delete(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{"message": "channel deleted"})
+}
+
+// GetPlatformConfigs handles GET /channels/platform-configs.
+func (h *ChannelHandler) GetPlatformConfigs(c fiber.Ctx) error {
+	return Success(c, model.GetAllPlatformConfigs())
+}
+
+// fetchProfileRequest is the request body for fetching a platform profile.
+type fetchProfileRequest struct {
+	Platform   string `json:"platform"`
+	ProfileURL string `json:"profile_url"`
+	// Optional WeChat credentials for article/xls platforms.
+	WechatAppID  string `json:"wechat_app_id"`
+	WechatSecret string `json:"wechat_secret"`
+}
+
+// FetchProfile handles POST /channels/fetch-profile.
+// It fetches profile data from the specified platform using the profile URL.
+func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	var req fetchProfileRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	if req.Platform == "" {
+		return Error(c, fiber.StatusBadRequest, "platform is required")
+	}
+	if req.ProfileURL == "" {
+		return Error(c, fiber.StatusBadRequest, "profile_url is required")
+	}
+
+	// SSRF protection: validate URL scheme and host.
+	parsedURL, err := url.ParseRequestURI(req.ProfileURL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		return Error(c, fiber.StatusBadRequest, "invalid profile URL")
+	}
+
+	// Validate URL matches the platform's expected pattern.
+	pc := model.GetPlatformConfig(req.Platform)
+	if pc != nil && pc.ProfileURLPattern != "" {
+		matched, _ := regexp.MatchString(pc.ProfileURLPattern, req.ProfileURL)
+		if !matched {
+			return Error(c, fiber.StatusBadRequest, "profile URL does not match expected pattern for "+pc.Label)
+		}
+	}
+
+	// Only pass credentials for publishing platforms.
+	var appID, secret string
+	if pc != nil && pc.SupportsPublishing {
+		appID = req.WechatAppID
+		secret = req.WechatSecret
+	}
+
+	provider := platform.NewProvider(req.Platform, appID, secret)
+	if provider == nil {
+		return Error(c, fiber.StatusBadRequest, "unsupported platform: "+req.Platform)
+	}
+
+	profile, err := provider.FetchProfile(c.Context(), req.ProfileURL)
+	if err != nil {
+		h.logger.Error().Err(err).
+			Str("platform", req.Platform).
+			Str("profile_url", req.ProfileURL).
+			Msg("fetch profile failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to fetch profile: "+err.Error())
+	}
+
+	return Success(c, profile)
+}
+
+// getFieldValue returns the value of a field by key from the request.
+func (req *channelRequest) getFieldValue(key string) string {
+	switch key {
+	case "platform":
+		return req.Platform
+	case "name":
+		return req.Name
+	case "profile_url":
+		return req.ProfileURL
+	case "avatar_url":
+		return req.AvatarURL
+	case "positioning":
+		return req.Positioning
+	case "keywords":
+		return req.Keywords
+	case "style":
+		return req.Style
+	case "theme":
+		return req.Theme
+	case "author":
+		return req.Author
+	case "wechat_app_id":
+		return req.WechatAppID
+	case "wechat_secret":
+		return req.WechatSecret
+	default:
+		return ""
+	}
 }

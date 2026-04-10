@@ -28,7 +28,7 @@ export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDe
   const platformBadge = platformBadgeVariant[channel.platform] || ('neutral' as const)
 
   return (
-    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 transition-shadow hover:border-gray-600 hover:shadow-md">
+    <div className="rounded-lg border border bg-card p-4 transition-shadow hover:border-foreground/20 hover:shadow-md">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           {channel.avatar_url ? (
@@ -38,12 +38,12 @@ export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDe
               className="h-12 w-12 rounded-full object-cover"
             />
           ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-700 text-lg font-medium text-gray-300">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-lg font-medium text-foreground">
               {channel.name.charAt(0)}
             </div>
           )}
           <div>
-            <h3 className="font-medium text-gray-100">{channel.name}</h3>
+            <h3 className="font-medium text-foreground">{channel.name}</h3>
             <Badge variant={platformBadge} className="text-[10px]">
               {platformLabel}
             </Badge>
@@ -53,11 +53,11 @@ export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDe
           <Badge variant="warning" className="text-[10px]">已归档</Badge>
         )}
       </div>
-      {channel.description && (
-        <p className="mt-2 line-clamp-2 text-sm text-gray-400">{channel.description}</p>
+      {channel.positioning && (
+        <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{channel.positioning}</p>
       )}
       {stats && (
-        <div className="mt-3 flex gap-4 border-t border-gray-700 pt-3 text-xs text-gray-400">
+        <div className="mt-3 flex gap-4 border-t border pt-3 text-xs text-muted-foreground">
           <span>任务 {stats.total_tasks}</span>
           <span>完成 {stats.completed_tasks}</span>
           {stats.total_tasks > 0 && <span>成功率 {(stats.success_rate * 100).toFixed(0)}%</span>}

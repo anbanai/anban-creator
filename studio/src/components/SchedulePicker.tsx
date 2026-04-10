@@ -71,7 +71,7 @@ export default function SchedulePicker({ value, onChange }: SchedulePickerProps)
         <button
           type="button"
           className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
-            frequency === 'daily' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            frequency === 'daily' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground hover:bg-accent'
           }`}
           onClick={() => { setFrequency('daily'); setDays([]) }}
         >
@@ -80,7 +80,7 @@ export default function SchedulePicker({ value, onChange }: SchedulePickerProps)
         <button
           type="button"
           className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
-            frequency === 'weekly' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            frequency === 'weekly' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground hover:bg-accent'
           }`}
           onClick={() => setFrequency('weekly')}
         >
@@ -97,8 +97,8 @@ export default function SchedulePicker({ value, onChange }: SchedulePickerProps)
               type="button"
               className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
                 days.includes(day.value)
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-secondary text-muted-foreground hover:bg-accent'
               }`}
               onClick={() => toggleDay(day.value)}
             >
@@ -110,17 +110,17 @@ export default function SchedulePicker({ value, onChange }: SchedulePickerProps)
 
       {/* 时间选择 */}
       <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-400">时间</label>
+        <label className="text-sm text-muted-foreground">时间</label>
         <input
           type="time"
           value={time}
           onChange={e => setTime(e.target.value)}
-          className="rounded-lg border border-gray-600 bg-gray-700 px-3 py-1.5 text-sm text-gray-100 focus:border-blue-500 focus:outline-none"
+          className="rounded-lg border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:border-ring focus:outline-none"
         />
       </div>
 
       {/* 预览 */}
-      <p className="text-xs text-gray-500">
+      <p className="text-xs text-muted-foreground">
         {frequency === 'daily'
           ? `每天 ${time} 自动执行`
           : dayLabels.length > 0

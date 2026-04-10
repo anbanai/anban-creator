@@ -134,8 +134,8 @@ export default function TimelinePage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-100">时间线</h1>
-          <p className="mt-1 text-sm text-gray-400">你的内容排期日历。</p>
+          <h1 className="text-2xl font-bold text-foreground">时间线</h1>
+          <p className="mt-1 text-sm text-muted-foreground">你的内容排期日历。</p>
         </div>
         <div className="flex items-center gap-2">
           {(['day', 'week', 'month'] as ViewMode[]).map((mode) => {
@@ -195,18 +195,18 @@ export default function TimelinePage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <svg className="h-8 w-8 animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
+          <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
         </div>
       ) : grouped.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-gray-700 bg-gray-800 py-16">
-          <svg className="mb-4 h-12 w-12 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="flex flex-col items-center justify-center rounded-xl border border bg-card py-16">
+          <svg className="mb-4 h-12 w-12 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          <p className="text-sm text-gray-400">没有排期内容</p>
-          <p className="mt-1 text-xs text-gray-500">创建计划或任务开始创作。</p>
+          <p className="text-sm text-muted-foreground">没有排期内容</p>
+          <p className="mt-1 text-xs text-muted-foreground">创建计划或任务开始创作。</p>
         </div>
       ) : (
         <div className="space-y-8">
@@ -214,19 +214,19 @@ export default function TimelinePage() {
             <div key={monthGroup.month}>
               {/* Month header */}
               <div className="mb-4 flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-gray-200">{monthGroup.month}</h2>
-                <div className="h-px flex-1 bg-gray-700" />
+                <h2 className="text-lg font-semibold text-foreground">{monthGroup.month}</h2>
+                <div className="h-px flex-1 bg-border" />
               </div>
 
               {/* Date groups */}
-              <div className="relative ml-4 border-l-2 border-gray-700 pl-6">
+              <div className="relative ml-4 border-l-2 border-border pl-6">
                 {monthGroup.dates.map((dateGroup) => (
                   <div key={dateGroup.dateKey} className="mb-6 last:mb-0">
                     {/* Date header */}
                     <div className="mb-3 flex items-center gap-2">
-                      <div className="absolute -left-[1.05rem] h-3 w-3 rounded-full border-2 border-gray-600 bg-gray-800" />
-                      <span className="text-sm font-medium text-gray-300">{dateGroup.label}</span>
-                      <span className="text-xs text-gray-500">
+                      <div className="absolute -left-[1.05rem] h-3 w-3 rounded-full border-2 border-input bg-card" />
+                      <span className="text-sm font-medium text-foreground">{dateGroup.label}</span>
+                      <span className="text-xs text-muted-foreground">
                         ({dateGroup.dateKey})
                       </span>
                     </div>
@@ -242,7 +242,7 @@ export default function TimelinePage() {
                         return (
                           <div
                             key={`${item.type}-${item.id}`}
-                            className={`group relative rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 transition-colors hover:border-gray-600 ${
+                            className={`group relative rounded-lg border border bg-card px-4 py-3 transition-colors hover:border-foreground/20 ${
                               isLast ? '' : ''
                             }`}
                           >
@@ -250,7 +250,7 @@ export default function TimelinePage() {
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
-                                    <span className="text-xs text-gray-500">
+                                    <span className="text-xs text-muted-foreground">
                                       {formatTimeCN(getItemDate(item))}
                                     </span>
                                     <Badge variant="outline" className="text-[10px]">
@@ -265,7 +265,7 @@ export default function TimelinePage() {
                                       </Badge>
                                     )}
                                   </div>
-                                  <p className="mt-1 truncate text-sm font-medium text-gray-100">
+                                  <p className="mt-1 truncate text-sm font-medium text-foreground">
                                     {item.title}
                                   </p>
                                   {item.error && (
@@ -319,7 +319,7 @@ export default function TimelinePage() {
 
       {/* Auto-refresh indicator */}
       {hasRunningItems && (
-        <div className="fixed bottom-4 right-4 flex items-center gap-2 rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-xs text-gray-400 shadow-lg">
+        <div className="fixed bottom-4 right-4 flex items-center gap-2 rounded-lg bg-card border border px-3 py-2 text-xs text-muted-foreground shadow-lg">
           <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
           自动刷新中（运行中的任务）
         </div>

@@ -42,6 +42,16 @@ func (s *ChannelService) Create(ctx context.Context, userID string, ch *model.Ch
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
 	}
 
+	// Platform-specific validation.
+	pc := model.GetPlatformConfig(ch.Platform)
+	if pc != nil {
+		if pc.SupportsPublishing {
+			if ch.Config.WechatAppID == "" {
+				return nil, fmt.Errorf("wechat_app_id is required for %s platform", pc.Label)
+			}
+		}
+	}
+
 	ch.ID = uuid.New().String()
 	ch.UserID = userID
 	ch.Status = model.ChannelStatusActive
@@ -103,14 +113,19 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 		existing.Platform = ch.Platform
 	}
 	existing.AvatarURL = ch.AvatarURL
-	existing.Description = ch.Description
-	existing.WechatAppID = ch.WechatAppID
-	existing.WechatSecret = ch.WechatSecret
-	existing.Keywords = ch.Keywords
+	existing.ProfileURL = ch.ProfileURL
 	existing.Positioning = ch.Positioning
+	existing.Keywords = ch.Keywords
 	existing.Style = ch.Style
 	existing.Theme = ch.Theme
 	existing.Author = ch.Author
+	// Merge Config: only update non-empty fields.
+	if ch.Config.WechatAppID != "" {
+		existing.Config.WechatAppID = ch.Config.WechatAppID
+	}
+	if ch.Config.WechatSecret != "" {
+		existing.Config.WechatSecret = ch.Config.WechatSecret
+	}
 
 	if err := s.repo.Channels().Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("update channel: %w", err)
@@ -174,4 +189,9 @@ func (s *ChannelService) Delete(ctx context.Context, userID, channelID string) e
 		return fmt.Errorf("delete channel: %w", err)
 	}
 	return nil
+}
+
+// SanitizeChannel clears sensitive fields from a channel before returning it in API responses.
+func SanitizeChannel(ch *model.Channel) {
+	ch.Config.WechatSecret = ""
 }

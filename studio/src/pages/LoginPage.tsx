@@ -30,11 +30,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-900 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-blue-400">AnbanWriter</h1>
-          <p className="mt-2 text-sm text-gray-400">登录你的账号</p>
+          <h1 className="text-2xl font-bold text-primary">AnbanWriter</h1>
+          <p className="mt-2 text-sm text-muted-foreground">登录你的账号</p>
         </div>
         <Card>
           <CardContent className="pt-6">
@@ -57,8 +57,8 @@ export default function LoginPage() {
                 <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>登录</Button>
               </form>
             </Form>
-            <p className="mt-4 text-center text-sm text-gray-400">
-              还没有账号？ <Link to="/register" className="text-blue-400 hover:text-blue-300">注册</Link>
+            <p className="mt-4 text-center text-sm text-muted-foreground">
+              还没有账号？ <Link to="/register" className="text-primary hover:text-primary/80">注册</Link>
             </p>
           </CardContent>
         </Card>

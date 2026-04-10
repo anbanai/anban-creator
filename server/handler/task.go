@@ -50,11 +50,19 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "channel_id is required")
 	}
 
+	topic := strings.TrimSpace(req.Topic)
+	if topic == "" {
+		return Error(c, fiber.StatusBadRequest, "topic is required")
+	}
+	if len(topic) > 500 {
+		return Error(c, fiber.StatusBadRequest, "topic must not exceed 500 characters")
+	}
+
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
-	task, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, req.Topic)
+	task, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, topic)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create task")

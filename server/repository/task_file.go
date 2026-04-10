@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/royalrick/anbanwriter/server/model"
 
 	"gorm.io/gorm"
@@ -17,6 +18,9 @@ func newTaskFileRepository(db *gorm.DB) TaskFileRepository {
 }
 
 func (r *taskFileRepository) Create(ctx context.Context, file *model.TaskFile) error {
+	if file.ID == "" {
+		file.ID = uuid.New().String()
+	}
 	return r.db.WithContext(ctx).Create(file).Error
 }
 
@@ -31,6 +35,11 @@ func (r *taskFileRepository) FindByTaskID(ctx context.Context, taskID string) ([
 func (r *taskFileRepository) BatchCreate(ctx context.Context, files []*model.TaskFile) error {
 	if len(files) == 0 {
 		return nil
+	}
+	for _, f := range files {
+		if f.ID == "" {
+			f.ID = uuid.New().String()
+		}
 	}
 	return r.db.WithContext(ctx).Create(files).Error
 }

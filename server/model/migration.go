@@ -43,18 +43,20 @@ func MigrateUserConfigsToChannels(db *gorm.DB) error {
 		}
 
 		ch := Channel{
-			ID:             strings.ReplaceAll(uuid.New().String(), "-", ""),
-			UserID:         cfg.UserID,
-			Platform:       cfg.Scope,
-			Name:           name,
-			WechatAppID:    cfg.WechatAppID,
-			WechatSecret:   cfg.WechatSecret,
-			Keywords:       cfg.Keywords,
-			Positioning:    cfg.Positioning,
-			Style:          cfg.Style,
-			Theme:          cfg.Theme,
-			Author:         cfg.Author,
-			Status:         ChannelStatusActive,
+			ID:          strings.ReplaceAll(uuid.New().String(), "-", ""),
+			UserID:      cfg.UserID,
+			Platform:    cfg.Scope,
+			Name:        name,
+			Keywords:    cfg.Keywords,
+			Positioning: cfg.Positioning,
+			Style:       cfg.Style,
+			Theme:       cfg.Theme,
+			Author:      cfg.Author,
+			Config: ChannelConfig{
+				WechatAppID:  cfg.WechatAppID,
+				WechatSecret: cfg.WechatSecret,
+			},
+			Status: ChannelStatusActive,
 		}
 		if err := db.Create(&ch).Error; err != nil {
 			// If a unique constraint race occurred (two processes running

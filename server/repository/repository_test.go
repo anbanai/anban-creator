@@ -290,8 +290,8 @@ func TestTaskRepository_CRUD(t *testing.T) {
 		t.Fatalf("UpdateResult: %v", err)
 	}
 	found, _ = repo.Tasks().FindByID(ctx, "task-abc123def456")
-	if found.Result != `{"url":"https://example.com"}` {
-		t.Errorf("expected result json, got %s", found.Result)
+	if found.Result == nil || *found.Result != `{"url":"https://example.com"}` {
+		t.Errorf("expected result json, got %v", found.Result)
 	}
 
 	// SetStartedAt

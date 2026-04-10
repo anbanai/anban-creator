@@ -4,7 +4,7 @@ import "time"
 
 // TaskFile stores files produced or consumed by a task.
 type TaskFile struct {
-	ID              string    `gorm:"primaryKey;autoIncrement" json:"id"`
+	ID              string    `gorm:"type:char(36);primaryKey" json:"id"`
 	TaskID          string    `gorm:"type:char(36);index;not null" json:"task_id"`
 	Role            string    `gorm:"type:varchar(20);not null" json:"role"`
 	FilePath        string    `gorm:"type:varchar(500)" json:"-"`

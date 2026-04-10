@@ -12,7 +12,7 @@ type Task struct {
 	Status       string     `gorm:"type:varchar(20);default:pending" json:"status"`
 	Topic        string     `gorm:"type:varchar(500)" json:"topic"`
 	ProgressLog  string     `gorm:"type:longtext" json:"progress_log,omitempty"`
-	Result       string     `gorm:"type:json" json:"result,omitempty"`
+	Result       *string    `gorm:"type:json" json:"result,omitempty"`
 	ErrorMessage string     `gorm:"type:text" json:"error_message,omitempty"`
 	StartedAt    *time.Time `gorm:"index" json:"started_at"`
 	CompletedAt  *time.Time `gorm:"index" json:"completed_at"`

@@ -30,11 +30,11 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-900 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-blue-400">AnbanWriter</h1>
-          <p className="mt-2 text-sm text-gray-400">创建你的账号</p>
+          <h1 className="text-2xl font-bold text-primary">AnbanWriter</h1>
+          <p className="mt-2 text-sm text-muted-foreground">创建你的账号</p>
         </div>
         <Card>
           <CardContent className="pt-6">
@@ -64,8 +64,8 @@ export default function RegisterPage() {
                 <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>创建账号</Button>
               </form>
             </Form>
-            <p className="mt-4 text-center text-sm text-gray-400">
-              已有账号？ <Link to="/login" className="text-blue-400 hover:text-blue-300">登录</Link>
+            <p className="mt-4 text-center text-sm text-muted-foreground">
+              已有账号？ <Link to="/login" className="text-primary hover:text-primary/80">登录</Link>
             </p>
           </CardContent>
         </Card>

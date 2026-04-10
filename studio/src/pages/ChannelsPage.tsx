@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { api, type Channel, type ChannelStats, type CreateChannelRequest } from '@/lib/api'
+import { api, type Channel, type ChannelStats, type CreateChannelRequest, type PlatformConfig, type PlatformProfile } from '@/lib/api'
 import { ChannelCard } from '@/components/ChannelCard'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -29,10 +29,10 @@ const statusTabs: { label: string; value: string }[] = [
 function channelToForm(ch: Channel): ChannelFormValues {
   return {
     platform: ch.platform,
-    name: ch.name,
-    description: ch.description || '',
+    name: ch.name || '',
+    profile_url: ch.profile_url || '',
     avatar_url: ch.avatar_url || '',
-    wechat_app_id: ch.wechat_app_id || '',
+    wechat_app_id: ch.config?.wechat_app_id || '',
     wechat_secret: '',
     keywords: ch.keywords || '',
     positioning: ch.positioning || '',
@@ -49,13 +49,15 @@ export default function ChannelsPage() {
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
   const [channelStats, setChannelStats] = useState<Record<string, ChannelStats>>({})
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [fetchingProfile, setFetchingProfile] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelSchema),
     defaultValues: {
       platform: 'article',
       name: '',
-      description: '',
+      profile_url: '',
       avatar_url: '',
       wechat_app_id: '',
       wechat_secret: '',
@@ -66,6 +68,58 @@ export default function ChannelsPage() {
       author: '',
     },
   })
+
+  const selectedPlatform = form.watch('platform')
+  const profileUrl = form.watch('profile_url')
+
+  // Load platform configs
+  const { data: platformConfigs } = useQuery({
+    queryKey: ['platform-configs'],
+    queryFn: () => api.channels.platformConfigs(),
+    staleTime: Infinity,
+  })
+
+  const platformConfigMap = useCallback(() => {
+    const map: Record<string, PlatformConfig> = {}
+    if (platformConfigs) {
+      for (const pc of platformConfigs) {
+        map[pc.id] = pc
+      }
+    }
+    return map
+  }, [platformConfigs])
+
+  const currentPlatformConfig = platformConfigMap()[selectedPlatform]
+
+  // Auto-fetch profile when profile URL changes (debounced)
+  useEffect(() => {
+    if (!profileUrl || !selectedPlatform) return
+    const pc = platformConfigMap()[selectedPlatform]
+    if (!pc?.supports_auto_fetch) return
+
+    const timer = setTimeout(() => {
+      handleFetchProfile(profileUrl)
+    }, 800)
+    return () => clearTimeout(timer)
+  }, [profileUrl, selectedPlatform])
+
+  async function handleFetchProfile(url: string) {
+    if (!url || !selectedPlatform) return
+    setFetchingProfile(true)
+    try {
+      const appId = form.getValues('wechat_app_id')
+      const secret = form.getValues('wechat_secret')
+      const profile = await api.channels.fetchProfile(selectedPlatform, url, appId, secret)
+      if (profile.name) form.setValue('name', profile.name)
+      if (profile.avatar_url) form.setValue('avatar_url', profile.avatar_url)
+      if (profile.positioning) form.setValue('positioning', profile.positioning)
+      toast.success('已自动获取账号信息')
+    } catch {
+      toast.error('获取账号信息失败，请手动填写')
+    } finally {
+      setFetchingProfile(false)
+    }
+  }
 
   const { data: channels, isLoading } = useQuery({
     queryKey: ['channels', statusFilter],
@@ -103,8 +157,8 @@ export default function ChannelsPage() {
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       closeModal()
     },
-    onError: () => {
-      toast.error('创建频道失败，请重试')
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.msg || '创建频道失败，请重试')
     },
   })
 
@@ -148,10 +202,11 @@ export default function ChannelsPage() {
 
   function openCreate() {
     setEditingChannel(null)
+    setAdvancedOpen(false)
     form.reset({
       platform: 'article',
       name: '',
-      description: '',
+      profile_url: '',
       avatar_url: '',
       wechat_app_id: '',
       wechat_secret: '',
@@ -166,6 +221,7 @@ export default function ChannelsPage() {
 
   function openEdit(channel: Channel) {
     setEditingChannel(channel)
+    setAdvancedOpen(false)
     form.reset(channelToForm(channel))
     setModalOpen(true)
   }
@@ -178,16 +234,16 @@ export default function ChannelsPage() {
   async function onSubmit(values: ChannelFormValues) {
     const payload: CreateChannelRequest = {
       platform: values.platform,
-      name: values.name.trim(),
-      description: values.description?.trim() || undefined,
+      name: values.name?.trim() || undefined,
+      profile_url: values.profile_url?.trim() || undefined,
       avatar_url: values.avatar_url?.trim() || undefined,
-      wechat_app_id: values.wechat_app_id?.trim() || undefined,
-      wechat_secret: values.wechat_secret?.trim() || undefined,
-      keywords: values.keywords?.trim() || undefined,
       positioning: values.positioning?.trim() || undefined,
+      keywords: values.keywords?.trim() || undefined,
       style: values.style?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
+      wechat_app_id: values.wechat_app_id?.trim() || undefined,
+      wechat_secret: values.wechat_secret?.trim() || undefined,
     }
     if (editingChannel) {
       updateMutation.mutate({ id: editingChannel.id, data: payload })
@@ -202,12 +258,15 @@ export default function ChannelsPage() {
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
 
+  // Determine which fields to show based on platform
+  const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-100">频道</h1>
-          <p className="mt-1 text-sm text-gray-400">管理你的内容频道和账号配置。</p>
+          <h1 className="text-2xl font-bold text-foreground">频道</h1>
+          <p className="mt-1 text-sm text-muted-foreground">管理你的内容频道和账号配置。</p>
         </div>
         <Button onClick={openCreate}>
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -218,15 +277,15 @@ export default function ChannelsPage() {
       </div>
 
       {/* Status filter tabs */}
-      <div className="flex gap-1 overflow-x-auto rounded-lg border border-gray-700 bg-gray-800 p-1">
+      <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted p-1">
         {statusTabs.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setStatusFilter(tab.value)}
             className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
               statusFilter === tab.value
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-400 hover:bg-gray-700/50 hover:text-gray-200'
+                ? 'bg-accent text-accent-foreground'
+                : 'text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground'
             }`}
           >
             {tab.label}
@@ -236,20 +295,20 @@ export default function ChannelsPage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <svg className="h-8 w-8 animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
+          <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
         </div>
       ) : !channels || channels.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-gray-700 bg-gray-800 py-16">
-          <svg className="mb-4 h-12 w-12 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-card py-16">
+          <svg className="mb-4 h-12 w-12 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
           </svg>
-          <p className="text-sm text-gray-400">
+          <p className="text-sm text-muted-foreground">
             {statusFilter === 'all' ? '还没有频道' : statusFilter === 'active' ? '没有活跃的频道' : '没有已归档的频道'}
           </p>
-          <p className="mt-1 text-xs text-gray-500">创建你的第一个内容频道开始创作。</p>
+          <p className="mt-1 text-xs text-muted-foreground">创建你的第一个内容频道开始创作。</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -275,6 +334,8 @@ export default function ChannelsPage() {
           </DialogHeader>
           <Form {...form}>
             <form id="channel-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+
+              {/* Platform Selection */}
               <FormField control={form.control} name="platform" render={({ field }) => (
                 <FormItem>
                   <FormLabel>平台</FormLabel>
@@ -282,7 +343,12 @@ export default function ChannelsPage() {
                     <SimpleSelect
                       options={platformOptions}
                       value={field.value}
-                      onChange={(e) => field.onChange(e.target.value)}
+                      onChange={(e) => {
+                        field.onChange(e.target.value)
+                        // Clear platform-specific fields when switching
+                        form.setValue('wechat_app_id', '')
+                        form.setValue('wechat_secret', '')
+                      }}
                       disabled={!!editingChannel}
                     />
                   </FormControl>
@@ -290,6 +356,38 @@ export default function ChannelsPage() {
                 </FormItem>
               )} />
 
+              {/* Profile URL (main entry for rednote, optional for wechat) */}
+              <FormField control={form.control} name="profile_url" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{isWechat ? '平台主页' : '主页链接'}</FormLabel>
+                  <div className="flex gap-2">
+                    <FormControl>
+                      <Input
+                        placeholder={isWechat ? 'https://mp.weixin.qq.com/...' : '粘贴小红书主页链接...'}
+                        {...field}
+                      />
+                    </FormControl>
+                    {currentPlatformConfig?.supports_auto_fetch && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        loading={fetchingProfile}
+                        disabled={!field.value}
+                        onClick={() => handleFetchProfile(field.value)}
+                      >
+                        获取
+                      </Button>
+                    )}
+                  </div>
+                  {currentPlatformConfig?.supports_auto_fetch && field.value && (
+                    <FormDescription>粘贴链接后自动获取账号信息</FormDescription>
+                  )}
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              {/* Basic info */}
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                   <FormLabel>频道名称</FormLabel>
@@ -300,100 +398,120 @@ export default function ChannelsPage() {
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="description" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>简介</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="可选的频道描述" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
               <FormField control={form.control} name="avatar_url" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>头像 URL</FormLabel>
+                  <FormLabel>头像</FormLabel>
                   <FormControl>
-                    <Input placeholder="https://example.com/avatar.jpg" {...field} />
+                    <Input placeholder="自动获取或手动填写 URL" {...field} />
                   </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              <FormField control={form.control} name="wechat_app_id" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>WeChat App ID</FormLabel>
-                  <FormControl>
-                    <Input placeholder="wx..." {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              {!editingChannel && (
-                <FormField control={form.control} name="wechat_secret" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>WeChat App Secret</FormLabel>
-                    <FormControl>
-                      <Input type="password" placeholder="创建后不可查看" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              )}
-
-              <FormField control={form.control} name="keywords" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>关键词</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="e.g. 科技, AI, 软件工程" {...field} />
-                  </FormControl>
-                  <FormDescription>逗号分隔的关键词，用于内容生成</FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />
 
               <FormField control={form.control} name="positioning" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>定位</FormLabel>
+                  <FormLabel>账号定位</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="e.g. 面向开发者的实用 AI 教程科技博客" {...field} />
+                    <Textarea placeholder="e.g. 面向开发者的实用 AI 教程" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="style" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>写作风格</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. casual-science, dan-koe" {...field} />
-                  </FormControl>
-                  <FormDescription>内置风格: casual-science, dan-koe, cultural-depth</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />
+              {/* Credentials — only for WeChat platforms */}
+              {isWechat && (
+                <>
+                  <div className="border-t border-border pt-4">
+                    <h4 className="mb-3 text-sm font-medium text-muted-foreground">平台凭证</h4>
+                  </div>
 
-              <FormField control={form.control} name="theme" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>主题</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. autumn-warm, spring-fresh" {...field} />
-                  </FormControl>
-                  <FormDescription>内置主题: autumn-warm, spring-fresh, ocean-calm</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />
+                  <FormField control={form.control} name="wechat_app_id" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>WeChat App ID</FormLabel>
+                      <FormControl>
+                        <Input placeholder="wx..." {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
 
-              <FormField control={form.control} name="author" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>作者名</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. 张三" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
+                  {!editingChannel && (
+                    <FormField control={form.control} name="wechat_secret" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>WeChat App Secret</FormLabel>
+                        <FormControl>
+                          <Input type="password" placeholder="创建后不可查看" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  )}
+                </>
+              )}
+
+              {/* Advanced settings — collapsible */}
+              <div className="border-t border-border pt-2">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+                  onClick={() => setAdvancedOpen(!advancedOpen)}
+                >
+                  高级设置
+                  <svg
+                    className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+
+              {advancedOpen && (
+                <>
+                  <FormField control={form.control} name="keywords" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>关键词</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="e.g. 科技, AI, 软件工程" {...field} />
+                      </FormControl>
+                      <FormDescription>逗号分隔的关键词，用于内容生成</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="style" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>写作风格</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. casual-science, dan-koe" {...field} />
+                      </FormControl>
+                      <FormDescription>内置风格: casual-science, dan-koe, cultural-depth</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="theme" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>主题</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. autumn-warm, spring-fresh" {...field} />
+                      </FormControl>
+                      <FormDescription>内置主题: autumn-warm, spring-fresh, ocean-calm</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="author" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>作者名</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. 张三" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </>
+              )}
             </form>
           </Form>
           <DialogFooter>
