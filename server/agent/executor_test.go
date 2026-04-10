@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	appconfig "github.com/royalrick/anbanwriter/app/config"
+	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
 )
 
@@ -97,6 +99,113 @@ func TestBuildAppConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildAppConfig_PlatformSizes(t *testing.T) {
+	tests := []struct {
+		name            string
+		platform        string
+		imageAPICfg     *srvconfig.ImageAPIConfig
+		wantCoverSize   string
+		wantContentSize string
+	}{
+		{
+			name:     "article defaults",
+			platform: model.ScopeArticle,
+			imageAPICfg: &srvconfig.ImageAPIConfig{
+				Sizes: srvconfig.SizesConfig{
+					ArticleCover:   "16:9",
+					ArticleContent: "16:9",
+				},
+			},
+			wantCoverSize:   "16:9",
+			wantContentSize: "16:9",
+		},
+		{
+			name:     "xls defaults",
+			platform: model.ScopeXls,
+			imageAPICfg: &srvconfig.ImageAPIConfig{
+				Sizes: srvconfig.SizesConfig{
+					XlsCover:   "3:4",
+					XlsContent: "3:4",
+				},
+			},
+			wantCoverSize:   "3:4",
+			wantContentSize: "3:4",
+		},
+		{
+			name:     "rednote defaults",
+			platform: model.ScopeRednote,
+			imageAPICfg: &srvconfig.ImageAPIConfig{
+				Sizes: srvconfig.SizesConfig{
+					RednoteCover:   "3:4",
+					RednoteContent: "3:4",
+				},
+			},
+			wantCoverSize:   "3:4",
+			wantContentSize: "3:4",
+		},
+		{
+			name:     "explicit cover size overrides platform default",
+			platform: model.ScopeArticle,
+			imageAPICfg: &srvconfig.ImageAPIConfig{
+				Cover: &appconfig.ImageAPI{
+					Provider: "openrouter",
+					Key:      "test-key",
+					Size:     "9:16",
+				},
+				Sizes: srvconfig.SizesConfig{
+					ArticleCover:   "16:9",
+					ArticleContent: "16:9",
+				},
+			},
+			wantCoverSize:   "9:16",
+			wantContentSize: "16:9",
+		},
+		{
+			name:     "nil imageAPICfg does not panic",
+			platform: model.ScopeArticle,
+			imageAPICfg:     nil,
+			wantCoverSize:   "",
+			wantContentSize: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ch := &model.Channel{
+				Platform: tt.platform,
+				Name:     "Test",
+			}
+			cfg, err := BuildAppConfig(ch, tt.imageAPICfg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			coverSize, contentSize := getPlatformSizes(cfg, tt.platform)
+			if coverSize != tt.wantCoverSize {
+				t.Errorf("cover size = %q, want %q", coverSize, tt.wantCoverSize)
+			}
+			if contentSize != tt.wantContentSize {
+				t.Errorf("content size = %q, want %q", contentSize, tt.wantContentSize)
+			}
+		})
+	}
+}
+
+// getPlatformSizes extracts cover and content sizes for a given platform.
+func getPlatformSizes(cfg *appconfig.Config, platform string) (cover, content string) {
+	switch platform {
+	case model.ScopeArticle:
+		return cfg.Wechat.Article.Cover.Image.Size, cfg.Wechat.Article.Content.Image.Size
+	case model.ScopeXls:
+		return cfg.Wechat.Xls.Cover.Image.Size, cfg.Wechat.Xls.Content.Image.Size
+	case model.ScopeRednote:
+		if cfg.Rednote != nil {
+			return cfg.Rednote.Cover.Image.Size, cfg.Rednote.Content.Image.Size
+		}
+	}
+	return "", ""
 }
 
 func TestTaskTypeToAgent(t *testing.T) {

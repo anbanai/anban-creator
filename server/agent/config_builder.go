@@ -42,9 +42,7 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*
 	case model.ScopeXls:
 		cfg.Wechat.Xls.Style = ch.Style
 	case model.ScopeRednote:
-		if cfg.Rednote == nil {
-			cfg.Rednote = &appconfig.RednoteConfig{}
-		}
+		cfg.Rednote = &appconfig.RednoteConfig{}
 		cfg.Rednote.Style = ch.Style
 	}
 
@@ -57,9 +55,6 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*
 			case model.ScopeXls:
 				cfg.Wechat.Xls.Cover.Image = *imageAPICfg.Cover
 			case model.ScopeRednote:
-				if cfg.Rednote == nil {
-					cfg.Rednote = &appconfig.RednoteConfig{}
-				}
 				cfg.Rednote.Cover.Image = *imageAPICfg.Cover
 			}
 		}
@@ -70,15 +65,14 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*
 			case model.ScopeXls:
 				cfg.Wechat.Xls.Content.Image = *imageAPICfg.Content
 			case model.ScopeRednote:
-				if cfg.Rednote == nil {
-					cfg.Rednote = &appconfig.RednoteConfig{}
-				}
 				cfg.Rednote.Content.Image = *imageAPICfg.Content
 			}
 		}
 
 		// Set platform-specific default sizes on the ImageAPI configs.
 		// These are used by generate_batch_images (which reads apiCfg.Size).
+		// Note: Size is set even when Cover/Content config is nil, so the default
+		// is available if the user configures provider/key later.
 		switch ch.Platform {
 		case model.ScopeArticle:
 			if cfg.Wechat.Article.Cover.Image.Size == "" {
@@ -95,13 +89,11 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*
 				cfg.Wechat.Xls.Content.Image.Size = imageAPICfg.Sizes.XlsContent
 			}
 		case model.ScopeRednote:
-			if cfg.Rednote != nil {
-				if cfg.Rednote.Cover.Image.Size == "" {
-					cfg.Rednote.Cover.Image.Size = imageAPICfg.Sizes.RednoteCover
-				}
-				if cfg.Rednote.Content.Image.Size == "" {
-					cfg.Rednote.Content.Image.Size = imageAPICfg.Sizes.RednoteContent
-				}
+			if cfg.Rednote.Cover.Image.Size == "" {
+				cfg.Rednote.Cover.Image.Size = imageAPICfg.Sizes.RednoteCover
+			}
+			if cfg.Rednote.Content.Image.Size == "" {
+				cfg.Rednote.Content.Image.Size = imageAPICfg.Sizes.RednoteContent
 			}
 		}
 	}
