@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/rs/zerolog"
 )
@@ -44,9 +45,33 @@ func (p *LocalProvider) Name() string {
 	return "local"
 }
 
+// safePath validates that the resolved path is within dataDir and returns the absolute path.
+func (p *LocalProvider) safePath(key string) (string, error) {
+	cleanKey := filepath.Clean(key)
+	if strings.Contains(cleanKey, "..") {
+		return "", fmt.Errorf("invalid key: path traversal detected")
+	}
+	destPath := filepath.Join(p.dataDir, cleanKey)
+	absPath, err := filepath.Abs(destPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	absDataDir, err := filepath.Abs(p.dataDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid data dir: %w", err)
+	}
+	if !strings.HasPrefix(absPath, absDataDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes data directory")
+	}
+	return absPath, nil
+}
+
 // Upload writes data from reader to {dataDir}/{key}, creating parent directories as needed.
 func (p *LocalProvider) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*UploadResult, error) {
-	destPath := filepath.Join(p.dataDir, key)
+	destPath, err := p.safePath(key)
+	if err != nil {
+		return nil, fmt.Errorf("invalid key: %w", err)
+	}
 	destDir := filepath.Dir(destPath)
 
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
@@ -97,7 +122,10 @@ func (p *LocalProvider) GetURL(key string) string {
 // Delete removes the file from local storage.
 // If the file does not exist, a warning is logged but no error is returned.
 func (p *LocalProvider) Delete(_ context.Context, key string) error {
-	destPath := filepath.Join(p.dataDir, key)
+	destPath, err := p.safePath(key)
+	if err != nil {
+		return fmt.Errorf("invalid key: %w", err)
+	}
 
 	if err := os.Remove(destPath); err != nil {
 		if os.IsNotExist(err) {

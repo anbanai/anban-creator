@@ -91,13 +91,14 @@ func (h *WebSocketHub) run() {
 
 		case msg := <-h.broadcast:
 			h.mu.Lock()
-			defer h.mu.Unlock()
 			conns := h.clients[msg.Scene]
 			if conns == nil {
+				h.mu.Unlock()
 				continue
 			}
 			data, err := json.Marshal(msg)
 			if err != nil {
+				h.mu.Unlock()
 				continue
 			}
 			var toClose []*websocket.Conn
@@ -110,6 +111,7 @@ func (h *WebSocketHub) run() {
 				delete(conns, conn)
 				conn.Close()
 			}
+			h.mu.Unlock()
 		}
 	}
 }

@@ -490,6 +490,8 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 		c.Set("Content-Type", "image/webp")
 	case ".svg":
 		c.Set("Content-Type", "image/svg+xml")
+		c.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+		c.Set("X-Content-Type-Options", "nosniff")
 	case ".mp4":
 		c.Set("Content-Type", "video/mp4")
 	case ".pdf":

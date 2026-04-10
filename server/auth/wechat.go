@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/rs/zerolog"
 )
@@ -48,12 +49,12 @@ func (s *WeChatService) SetBaseURL(url string) {
 // Code2Session exchanges a WeChat mini-program login code for an openID and
 // session key by calling the WeChat jscode2session API.
 func (s *WeChatService) Code2Session(code string) (*WxSession, error) {
-	url := fmt.Sprintf(
+	apiURL := fmt.Sprintf(
 		"%s/sns/jscode2session?appid=%s&secret=%s&js_code=%s&grant_type=authorization_code",
-		s.baseURL, s.appID, s.appSecret, code,
+		s.baseURL, url.QueryEscape(s.appID), url.QueryEscape(s.appSecret), url.QueryEscape(code),
 	)
 
-	resp, err := s.client.Get(url)
+	resp, err := s.client.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("wechat api request failed: %w", err)
 	}

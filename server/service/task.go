@@ -127,8 +127,15 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
-			// Refund this task's credits.
-			s.refundTasks(ctx, deductedTaskIDs)
+			// Refund only the tasks that were NOT successfully created.
+			// deductedTaskIDs[0..i) were created successfully; [i..) were not.
+			if s.creditSvc != nil {
+				for j := i; j < len(deductedTaskIDs); j++ {
+					if refundErr := s.creditSvc.RefundForTask(ctx, deductedTaskIDs[j]); refundErr != nil {
+						s.logger.Error().Err(refundErr).Str("task_id", deductedTaskIDs[j]).Msg("failed to refund credits during rollback")
+					}
+				}
+			}
 			return nil, fmt.Errorf("create task: %w", err)
 		}
 
