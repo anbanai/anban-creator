@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gofiber/fiber/v3"
@@ -14,9 +15,18 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// In production, check against allowed origins
-		// For now, allow all during development
-		return true
+		origin := r.Header.Get("Origin")
+		// Allow connections with no Origin header (non-browser clients).
+		if origin == "" {
+			return true
+		}
+		// Allow localhost origins for development.
+		if strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") {
+			return true
+		}
+		// In production, reject cross-origin WebSocket connections.
+		// TODO: add configurable allowed origins list.
+		return false
 	},
 }
 

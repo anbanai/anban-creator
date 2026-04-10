@@ -66,17 +66,14 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	ctx := c.Context()
 	var items []TimelineItem
 
-	// 1. Past tasks within the date range.
-	tasks, err := h.repo.Tasks().FindByCreatedAtRange(ctx, from, to, 0, 0)
+	// 1. Past tasks within the date range (scoped to user at query level).
+	tasks, err := h.repo.Tasks().FindByUserIDAndCreatedAtRange(ctx, userID, from, to, 0, 0)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to fetch tasks for timeline")
 		return Error(c, fiber.StatusInternalServerError, "failed to fetch timeline data")
 	}
 
 	for _, t := range tasks {
-		if t.UserID != userID {
-			continue
-		}
 		if channelID != "" && t.ChannelID != channelID {
 			continue
 		}

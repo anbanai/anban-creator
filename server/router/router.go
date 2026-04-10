@@ -219,7 +219,8 @@ func NewRouter(svc *Services) *fiber.App {
 
 	// Admin credits endpoint (outside JWT auth group, uses API key auth).
 	if svc.CreditHandler != nil {
-		app.Post("/api/v1/admin/credits/grant", svc.CreditHandler.AdminGrant)
+		adminLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
+		app.Post("/api/v1/admin/credits/grant", adminLimiter, svc.CreditHandler.AdminGrant)
 	}
 
 	return app

@@ -21,6 +21,16 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	s.logger.Info().Str("task_id", taskID).Msg("starting task execution")
 
+	// Re-read task to check if it was cancelled while waiting in queue.
+	currentTask, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("re-read task: %w", err)
+	}
+	if currentTask.Status == model.TaskStatusCancelled {
+		s.logger.Info().Str("task_id", taskID).Msg("task was cancelled, skipping execution")
+		return nil
+	}
+
 	// Set status to running.
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusRunning); err != nil {
 		return fmt.Errorf("set running status: %w", err)
@@ -81,6 +91,13 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		}
 		s.logger.Error().Str("task_id", taskID).Str("error", errMsg).Msg("task execution returned failure")
 		return s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+	}
+
+	// Check if task was cancelled during execution before marking as completed.
+	finalTask, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err == nil && finalTask.Status == model.TaskStatusCancelled {
+		s.logger.Info().Str("task_id", taskID).Msg("task was cancelled during execution, skipping completion")
+		return nil
 	}
 
 	// Success.

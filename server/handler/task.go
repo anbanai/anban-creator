@@ -229,11 +229,21 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	// Max SSE timeout: 30 minutes to prevent indefinitely stuck connections.
+	timeout := time.NewTimer(30 * time.Minute)
+	defer timeout.Stop()
+
 	lastLogLen := 0
 
 	for {
 		select {
 		case <-ctx.Done():
+			return nil
+		case <-timeout.C:
+			// Send timeout event and close.
+			if _, err := fmt.Fprintf(c, "event: timeout\ndata: {}\n\n"); err != nil {
+				return nil
+			}
 			return nil
 		case <-ticker.C:
 			task, err := h.service.GetByID(ctx, taskID)
@@ -308,6 +318,11 @@ func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
 
 	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
 		return nil // error response already written
+	}
+
+	// Verify the file belongs to the task.
+	if err := h.service.VerifyFileBelongsToTask(c.Context(), taskID, fileID); err != nil {
+		return Error(c, fiber.StatusNotFound, "file not found")
 	}
 
 	stream, file, err := h.service.GetFileStream(c.Context(), fileID)
@@ -411,10 +426,16 @@ func (h *TaskHandler) DownloadZip(c fiber.Ctx) error {
 }
 
 // ServeLocalFile handles GET /api/v1/files/* for the local storage provider.
-// It serves files from the local data directory with path traversal protection.
+// It serves files from the local data directory with path traversal protection
+// and verifies the requesting user owns the file (key prefix = userID).
 func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 	if h.dataDir == "" {
 		return Error(c, fiber.StatusNotFound, "local file serving is not configured")
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
 	key := c.Params("*")
@@ -426,6 +447,11 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 	cleanKey := filepath.Clean(key)
 	if strings.Contains(cleanKey, "..") {
 		return Error(c, fiber.StatusBadRequest, "invalid file path")
+	}
+
+	// Verify ownership: key format is {userID}/{taskID}/...
+	if !strings.HasPrefix(cleanKey, userID+"/") {
+		return Forbidden(c, "you do not have access to this file")
 	}
 
 	filePath := filepath.Join(h.dataDir, cleanKey)

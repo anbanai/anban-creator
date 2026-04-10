@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Loader2, ClipboardList } from 'lucide-react'
 import { api, type TaskType, type CreateTaskRequest, type TaskStatus } from '@/lib/api'
@@ -45,6 +45,7 @@ const taskCostMap: Record<string, number> = {
 
 export default function TasksPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const initialStatus = searchParams.get('status') || 'all'
@@ -90,8 +91,7 @@ export default function TasksPage() {
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       closeModal()
-      // Navigate to task detail
-      window.location.href = `/tasks/${task.id}`
+      navigate(`/tasks/${task.id}`)
     },
     onError: () => {
       toast.error('创建任务失败，请重试')

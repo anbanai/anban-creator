@@ -134,19 +134,26 @@ export default function ChannelsPage() {
       setChannelStats({})
       return
     }
+    const abortController = new AbortController()
     const statsMap: Record<string, ChannelStats> = {}
     const promises = channels.map(async (ch) => {
+      if (abortController.signal.aborted) return ch.id
       try {
         const detail = await api.channels.get(ch.id)
-        statsMap[ch.id] = detail.stats
+        if (!abortController.signal.aborted) {
+          statsMap[ch.id] = detail.stats
+        }
       } catch {
         // Ignore stats load failures
       }
       return ch.id
     })
     Promise.all(promises).then(() => {
-      setChannelStats(prev => ({ ...prev, ...statsMap }))
+      if (!abortController.signal.aborted) {
+        setChannelStats(prev => ({ ...prev, ...statsMap }))
+      }
     })
+    return () => abortController.abort()
   }, [channels])
 
   const createMutation = useMutation({

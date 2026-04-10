@@ -102,7 +102,7 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 		return nil, ErrChannelOwnedByUser
 	}
 
-	// Apply updatable fields from ch to existing.
+	// Apply updatable fields from ch to existing (only non-empty values).
 	if ch.Name != "" {
 		existing.Name = ch.Name
 	}
@@ -112,13 +112,27 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 		}
 		existing.Platform = ch.Platform
 	}
-	existing.AvatarURL = ch.AvatarURL
-	existing.ProfileURL = ch.ProfileURL
-	existing.Positioning = ch.Positioning
-	existing.Keywords = ch.Keywords
-	existing.Style = ch.Style
-	existing.Theme = ch.Theme
-	existing.Author = ch.Author
+	if ch.AvatarURL != "" {
+		existing.AvatarURL = ch.AvatarURL
+	}
+	if ch.ProfileURL != "" {
+		existing.ProfileURL = ch.ProfileURL
+	}
+	if ch.Positioning != "" {
+		existing.Positioning = ch.Positioning
+	}
+	if ch.Keywords != "" {
+		existing.Keywords = ch.Keywords
+	}
+	if ch.Style != "" {
+		existing.Style = ch.Style
+	}
+	if ch.Theme != "" {
+		existing.Theme = ch.Theme
+	}
+	if ch.Author != "" {
+		existing.Author = ch.Author
+	}
 	// Merge Config: only update non-empty fields.
 	if ch.Config.WechatAppID != "" {
 		existing.Config.WechatAppID = ch.Config.WechatAppID

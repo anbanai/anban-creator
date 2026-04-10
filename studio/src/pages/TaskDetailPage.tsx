@@ -75,8 +75,7 @@ export default function TaskDetailPage() {
     abortRef.current = controller
 
     try {
-      for await (const event of streamTaskProgress(id, token)) {
-        if (controller.signal.aborted) break
+      for await (const event of streamTaskProgress(id, token, controller.signal)) {
         handleSSEEvent(event)
       }
     } catch (err) {

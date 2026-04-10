@@ -164,6 +164,19 @@ func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workD
 	return nil
 }
 
+// VerifyFileBelongsToTask checks that a file belongs to the specified task.
+// Returns an error if the file does not exist or does not belong to the task.
+func (s *TaskService) VerifyFileBelongsToTask(ctx context.Context, taskID, fileID string) error {
+	exists, err := s.repo.TaskFiles().ExistsByTaskIDAndID(ctx, taskID, fileID)
+	if err != nil {
+		return fmt.Errorf("check file ownership: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("file %s does not belong to task %s", fileID, taskID)
+	}
+	return nil
+}
+
 // GetFileStream returns a ReadCloser for a task file's content and the TaskFile metadata.
 func (s *TaskService) GetFileStream(ctx context.Context, fileID string) (io.ReadCloser, *model.TaskFile, error) {
 	file, err := s.repo.TaskFiles().FindByID(ctx, fileID)

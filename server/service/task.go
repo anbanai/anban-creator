@@ -82,26 +82,39 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic
 
 	taskType := channel.Platform
 
-	// Deduct credits for each task. All-or-nothing: if any fails, refund previous deductions.
+	// Pre-calculate total credit cost and deduct upfront to avoid race conditions.
 	var deductedTaskIDs []string
 	tasks := make([]*model.Task, 0, quantity)
 
-	for i := 0; i < quantity; i++ {
-		taskID := generateTaskID()
+	if s.creditSvc != nil {
+		cost, ok := s.creditSvc.TaskCost(taskType)
+		if !ok {
+			return nil, fmt.Errorf("unknown task type: %s", taskType)
+		}
+		totalCost := cost * quantity
 
-		// Deduct credits if credit service is available.
-		if s.creditSvc != nil {
-			_, err := s.creditSvc.DeductForTask(ctx, userID, taskType, taskID)
-			if err != nil {
-				// Refund already-deducted tasks.
-				s.refundTasks(ctx, deductedTaskIDs)
+		// Generate all task IDs upfront so we can create individual transactions.
+		taskIDs := make([]string, quantity)
+		for i := range taskIDs {
+			taskIDs[i] = generateTaskID()
+		}
 
-				if errors.Is(err, ErrInsufficientCredits) {
-					return nil, fmt.Errorf("积分不足: %w", err)
-				}
-				return nil, fmt.Errorf("deduct credits: %w", err)
+		// Deduct total cost in a single atomic transaction.
+		if err := s.creditSvc.DeductBatch(ctx, userID, taskType, totalCost, taskIDs); err != nil {
+			if errors.Is(err, ErrInsufficientCredits) {
+				return nil, fmt.Errorf("积分不足: %w", err)
 			}
-			deductedTaskIDs = append(deductedTaskIDs, taskID)
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+		deductedTaskIDs = taskIDs
+	}
+
+	for i := 0; i < quantity; i++ {
+		var taskID string
+		if s.creditSvc != nil && len(deductedTaskIDs) > i {
+			taskID = deductedTaskIDs[i]
+		} else {
+			taskID = generateTaskID()
 		}
 
 		task := &model.Task{

@@ -73,6 +73,7 @@ type TaskRepository interface {
 	FindByUserID(ctx context.Context, userID string, channelID string, offset, limit int) ([]*model.Task, error)
 	FindByUserIDAndStatus(ctx context.Context, userID, status string, channelID string, offset, limit int) ([]*model.Task, error)
 	FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error)
+	FindByUserIDAndCreatedAtRange(ctx context.Context, userID string, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindRunning(ctx context.Context) ([]*model.Task, error)
 	FindRunningByUser(ctx context.Context, userID string, channelID string) ([]*model.Task, error)
 	FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.Task, error)
@@ -95,6 +96,7 @@ type TaskFileRepository interface {
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)
 	BatchCreate(ctx context.Context, files []*model.TaskFile) error
+	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
 }
 
 // -----------------------------------------------------------------------------

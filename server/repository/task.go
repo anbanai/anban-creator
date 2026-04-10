@@ -71,6 +71,18 @@ func (r *taskRepository) FindByCreatedAtRange(ctx context.Context, from, to time
 	return tasks, nil
 }
 
+func (r *taskRepository) FindByUserIDAndCreatedAtRange(ctx context.Context, userID string, from, to time.Time, offset, limit int) ([]*model.Task, error) {
+	var tasks []*model.Task
+	q := r.db.WithContext(ctx).Where("user_id = ? AND created_at >= ? AND created_at <= ?", userID, from, to).Order("created_at DESC")
+	if limit > 0 {
+		q = q.Offset(offset).Limit(limit)
+	}
+	if err := q.Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
 func (r *taskRepository) FindRunning(ctx context.Context) ([]*model.Task, error) {
 	var tasks []*model.Task
 	if err := r.db.WithContext(ctx).Where("status = ?", model.TaskStatusRunning).Find(&tasks).Error; err != nil {

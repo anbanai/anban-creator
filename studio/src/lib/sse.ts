@@ -44,9 +44,11 @@ export function parseSSE(text: string): SSEEvent[] {
 export async function* streamTaskProgress(
   taskId: string,
   token: string,
+  signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
   const response = await fetch(`/api/v1/tasks/${taskId}/stream`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal,
   })
 
   if (!response.ok) {
@@ -90,22 +92,5 @@ export async function* streamTaskProgress(
     }
   } finally {
     reader.releaseLock()
-  }
-}
-
-/**
- * Create an SSE connection helper for generic SSE endpoints.
- * Returns an abort controller to close the connection.
- */
-export function createSSEConnection(
-  _url: string,
-  _token: string,
-  _onMessage: (data: SSEEvent) => void,
-): { close: () => void } {
-  // Note: Standard EventSource does not support custom headers.
-  // Use streamTaskProgress() or similar fetch-based approach for authenticated SSE.
-  const controller = new AbortController()
-  return {
-    close: () => controller.abort(),
   }
 }
