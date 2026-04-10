@@ -3,7 +3,8 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { api, type Channel, type ChannelStats, type CreateChannelRequest, type PlatformConfig, type PlatformProfile } from '@/lib/api'
+import { Plus, Loader2, Inbox, ChevronDown } from 'lucide-react'
+import { api, type Channel, type ChannelStats, type CreateChannelRequest, type PlatformConfig } from '@/lib/api'
 import { ChannelCard } from '@/components/ChannelCard'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -13,6 +14,8 @@ import SimpleSelect from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { channelSchema, type ChannelFormValues } from '@/lib/schemas'
+import PageHeader from '@/components/layout/PageHeader'
+import EmptyState from '@/components/EmptyState'
 
 const platformOptions = [
   { value: 'article', label: '公众号 (Article)' },
@@ -72,7 +75,6 @@ export default function ChannelsPage() {
   const selectedPlatform = form.watch('platform')
   const profileUrl = form.watch('profile_url')
 
-  // Load platform configs
   const { data: platformConfigs } = useQuery({
     queryKey: ['platform-configs'],
     queryFn: () => api.channels.platformConfigs(),
@@ -91,12 +93,10 @@ export default function ChannelsPage() {
 
   const currentPlatformConfig = platformConfigMap()[selectedPlatform]
 
-  // Auto-fetch profile when profile URL changes (debounced)
   useEffect(() => {
     if (!profileUrl || !selectedPlatform) return
     const pc = platformConfigMap()[selectedPlatform]
     if (!pc?.supports_auto_fetch) return
-
     const timer = setTimeout(() => {
       handleFetchProfile(profileUrl)
     }, 800)
@@ -129,7 +129,6 @@ export default function ChannelsPage() {
       }),
   })
 
-  // Load stats for each channel
   useEffect(() => {
     if (!channels || channels.length === 0) {
       setChannelStats({})
@@ -257,24 +256,16 @@ export default function ChannelsPage() {
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
-
-  // Determine which fields to show based on platform
   const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">频道</h1>
-          <p className="mt-1 text-sm text-muted-foreground">管理你的内容频道和账号配置。</p>
-        </div>
+      <PageHeader title="频道" description="管理你的内容频道和账号配置。">
         <Button onClick={openCreate}>
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
+          <Plus className="h-4 w-4" />
           新建频道
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Status filter tabs */}
       <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted p-1">
@@ -282,9 +273,9 @@ export default function ChannelsPage() {
           <button
             key={tab.value}
             onClick={() => setStatusFilter(tab.value)}
-            className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-150 ${
               statusFilter === tab.value
-                ? 'bg-accent text-accent-foreground'
+                ? 'bg-primary text-primary-foreground'
                 : 'text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground'
             }`}
           >
@@ -295,21 +286,15 @@ export default function ChannelsPage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : !channels || channels.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-card py-16">
-          <svg className="mb-4 h-12 w-12 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-          </svg>
-          <p className="text-sm text-muted-foreground">
-            {statusFilter === 'all' ? '还没有频道' : statusFilter === 'active' ? '没有活跃的频道' : '没有已归档的频道'}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">创建你的第一个内容频道开始创作。</p>
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title={statusFilter === 'all' ? '还没有频道' : statusFilter === 'active' ? '没有活跃的频道' : '没有已归档的频道'}
+          description="创建你的第一个内容频道开始创作。"
+          action={{ label: '新建频道', onClick: openCreate }}
+        />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {channels.map((channel) => (
@@ -334,8 +319,6 @@ export default function ChannelsPage() {
           </DialogHeader>
           <Form {...form}>
             <form id="channel-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
-
-              {/* Platform Selection */}
               <FormField control={form.control} name="platform" render={({ field }) => (
                 <FormItem>
                   <FormLabel>平台</FormLabel>
@@ -345,7 +328,6 @@ export default function ChannelsPage() {
                       value={field.value}
                       onChange={(e) => {
                         field.onChange(e.target.value)
-                        // Clear platform-specific fields when switching
                         form.setValue('wechat_app_id', '')
                         form.setValue('wechat_secret', '')
                       }}
@@ -356,7 +338,6 @@ export default function ChannelsPage() {
                 </FormItem>
               )} />
 
-              {/* Profile URL (main entry for rednote, optional for wechat) */}
               <FormField control={form.control} name="profile_url" render={({ field }) => (
                 <FormItem>
                   <FormLabel>{isWechat ? '平台主页' : '主页链接'}</FormLabel>
@@ -374,7 +355,7 @@ export default function ChannelsPage() {
                         size="sm"
                         loading={fetchingProfile}
                         disabled={!field.value}
-                        onClick={() => handleFetchProfile(field.value)}
+                        onClick={() => handleFetchProfile(field.value || '')}
                       >
                         获取
                       </Button>
@@ -387,7 +368,6 @@ export default function ChannelsPage() {
                 </FormItem>
               )} />
 
-              {/* Basic info */}
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                   <FormLabel>频道名称</FormLabel>
@@ -418,7 +398,6 @@ export default function ChannelsPage() {
                 </FormItem>
               )} />
 
-              {/* Credentials — only for WeChat platforms */}
               {isWechat && (
                 <>
                   <div className="border-t border-border pt-4">
@@ -449,20 +428,14 @@ export default function ChannelsPage() {
                 </>
               )}
 
-              {/* Advanced settings — collapsible */}
               <div className="border-t border-border pt-2">
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+                  className="flex w-full items-center justify-between py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
                   onClick={() => setAdvancedOpen(!advancedOpen)}
                 >
                   高级设置
-                  <svg
-                    className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <ChevronDown className={`h-4 w-4 transition-transform duration-150 ${advancedOpen ? 'rotate-180' : ''}`} />
                 </button>
               </div>
 

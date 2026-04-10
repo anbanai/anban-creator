@@ -3,7 +3,8 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
+import { Plus, Loader2, ClipboardList } from 'lucide-react'
 import { api, type TaskType, type CreateTaskRequest, type TaskStatus } from '@/lib/api'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
@@ -12,6 +13,8 @@ import { Card } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import PageHeader from '@/components/layout/PageHeader'
+import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN } from '@/lib/labels'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 
@@ -58,8 +61,8 @@ export default function TasksPage() {
   })
 
   const form = useForm<CreateTaskFormValues>({
-    resolver: zodResolver(createTaskSchema),
-    defaultValues: { type: 'rednote', topic: '', channel_id: '' },
+    resolver: zodResolver(createTaskSchema) as any,
+    defaultValues: { type: 'rednote', topic: '', channel_id: '', quantity: 1 },
   })
 
   // Clear create param on mount
@@ -111,7 +114,7 @@ export default function TasksPage() {
     createMutation.mutate({
       type: values.type,
       topic: values.topic.trim(),
-      channel_id: values.channel_id || undefined,
+      channel_id: values.channel_id,
       quantity: quantity > 1 ? quantity : undefined,
     })
   }
@@ -120,28 +123,24 @@ export default function TasksPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">任务</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            跟踪和管理你的内容任务。
-            {runningCount > 0 && (
-              <span className="ml-1 text-amber-400">({runningCount} 运行中)</span>
-            )}
-          </p>
-        </div>
+      <PageHeader
+        title="任务"
+        description={
+          runningCount > 0
+            ? <>跟踪和管理你的内容任务。<span className="ml-1 text-primary">({runningCount} 运行中)</span></>
+            : '跟踪和管理你的内容任务。'
+        }
+      >
         <Button onClick={openCreate}>
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
+          <Plus className="h-4 w-4" />
           新建任务
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Filters row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         {/* Status filter tabs */}
-        <div className="flex gap-1 overflow-x-auto rounded-lg border border bg-muted p-1">
+        <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted p-1">
           {statusTabs.map((tab) => (
             <button
               key={tab.value}
@@ -155,7 +154,7 @@ export default function TasksPage() {
               }}
               className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 statusFilter === tab.value
-                  ? 'bg-accent text-accent-foreground'
+                  ? 'bg-primary text-primary-foreground'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
               }`}
             >
@@ -175,25 +174,23 @@ export default function TasksPage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : tasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border bg-card py-16">
-          <svg className="mb-4 h-12 w-12 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-          </svg>
-          <p className="text-sm text-muted-foreground">
-            {statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter]}的任务`}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {statusFilter === 'all'
+        <EmptyState
+          icon={ClipboardList}
+          title={statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter]}的任务`}
+          description={
+            statusFilter === 'all'
               ? '创建任务开始生成内容。'
-              : '尝试其他筛选条件或创建新任务。'}
-          </p>
-        </div>
+              : '尝试其他筛选条件或创建新任务。'
+          }
+          action={
+            statusFilter === 'all'
+              ? { label: '新建任务', onClick: openCreate }
+              : undefined
+          }
+        />
       ) : (
         <div className="space-y-2">
           {tasks.map((task) => (
@@ -221,7 +218,7 @@ export default function TasksPage() {
                     {task.status === 'running' && (
                       <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
                         <div
-                          className="h-1.5 rounded-full bg-amber-500 transition-all"
+                          className="h-1.5 rounded-full bg-primary transition-all"
                           style={{ width: `${task.progress}%` }}
                         />
                       </div>

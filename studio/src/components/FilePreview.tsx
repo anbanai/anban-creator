@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { FileText, Download, Eye, EyeOff } from 'lucide-react'
 import type { TaskFile } from '../lib/api'
 import { api } from '../lib/api'
 
@@ -57,12 +58,12 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
         <img
           src={imgSrc}
           alt={file.file_name}
-          className="max-w-full rounded-lg border border max-h-80 object-contain cursor-pointer hover:opacity-90"
+          className="max-h-80 max-w-full cursor-pointer rounded-lg object-contain ring-1 ring-border transition-opacity hover:opacity-90"
           onClick={handleDownload}
         />
         <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>{file.file_name}</span>
-          <span>{formatSize(file.file_size)}</span>
+          <span className="truncate">{file.file_name}</span>
+          <span className="shrink-0">{formatSize(file.file_size)}</span>
         </div>
       </div>
     )
@@ -75,14 +76,16 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
           <button
             onClick={handlePreview}
             disabled={loading}
-            className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
+            {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             {showPreview ? '关闭预览' : '预览'}
           </button>
           <button
             onClick={handleDownload}
-            className="px-3 py-1.5 text-sm bg-secondary text-foreground rounded hover:bg-accent"
+            className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
           >
+            <Download className="h-3.5 w-3.5" />
             下载
           </button>
           <span className="text-sm text-muted-foreground">{file.file_name} ({formatSize(file.file_size)})</span>
@@ -91,7 +94,7 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
           <iframe
             srcDoc={htmlContent}
             sandbox="allow-scripts"
-            className="w-full border border rounded-lg bg-white"
+            className="w-full rounded-lg border border-border bg-white"
             style={{ height: '600px' }}
             title="文章预览"
           />
@@ -101,13 +104,10 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
     )
   }
 
-  // Generic file
   return (
-    <div className="flex items-center justify-between p-2 border border rounded-lg">
-      <div className="flex items-center gap-2">
-        <svg className="w-5 h-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
+    <div className="flex items-center justify-between rounded-lg border border-border p-3">
+      <div className="flex items-center gap-3">
+        <FileText className="h-5 w-5 text-muted-foreground" />
         <div>
           <p className="text-sm font-medium text-foreground">{file.file_name}</p>
           <p className="text-xs text-muted-foreground">{file.mime_type} &middot; {formatSize(file.file_size)}</p>
@@ -115,8 +115,9 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
       </div>
       <button
         onClick={handleDownload}
-        className="px-3 py-1.5 text-sm bg-secondary text-foreground rounded hover:bg-accent"
+        className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
       >
+        <Download className="h-3.5 w-3.5" />
         下载
       </button>
     </div>

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from 'next-themes'
+import { useState } from 'react'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { Toaster } from '@/components/ui/sonner'
 import AppLayout from '@/components/layout/AppLayout'
@@ -14,6 +15,8 @@ import TasksPage from '@/pages/TasksPage'
 import TaskDetailPage from '@/pages/TaskDetailPage'
 import CreditsPage from '@/pages/CreditsPage'
 import SettingsPage from '@/pages/SettingsPage'
+import ShortcutHelp from '@/components/ShortcutHelp'
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -34,6 +37,13 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>
+}
+
+function KeyboardShortcuts() {
+  const [showHelp, setShowHelp] = useState(false)
+  useKeyboardShortcuts(() => setShowHelp(true))
+
+  return <ShortcutHelp open={showHelp} onOpenChange={setShowHelp} />
 }
 
 function AppRoutes() {
@@ -58,6 +68,7 @@ function AppRoutes() {
       <Route
         element={
           <ProtectedRoute>
+            <KeyboardShortcuts />
             <AppLayout />
           </ProtectedRoute>
         }

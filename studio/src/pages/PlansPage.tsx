@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { Plus, Loader2, FileText } from 'lucide-react'
 import { api, type Plan, type PlanType, type CreatePlanRequest } from '@/lib/api'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
@@ -17,6 +18,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN } from '@/lib/labels'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
+import PageHeader from '@/components/layout/PageHeader'
+import EmptyState from '@/components/EmptyState'
 
 function planStatusBadge(status: string) {
   return status === 'active' ? 'success' : 'neutral'
@@ -167,18 +170,12 @@ export default function PlansPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">计划</h1>
-          <p className="mt-1 text-sm text-muted-foreground">管理你的内容计划，定时自动创作发布。</p>
-        </div>
+      <PageHeader title="计划" description="管理你的内容计划，定时自动创作发布。">
         <Button onClick={openCreate}>
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
+          <Plus className="h-4 w-4" />
           新建计划
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Channel filter */}
       <div className="w-full sm:w-48">
@@ -190,19 +187,15 @@ export default function PlansPage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : plans.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border bg-card py-16">
-          <svg className="mb-4 h-12 w-12 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          <p className="text-sm text-muted-foreground">还没有计划</p>
-          <p className="mt-1 text-xs text-muted-foreground">创建你的第一个内容计划，让 AI 定时帮你创作。</p>
-        </div>
+        <EmptyState
+          icon={FileText}
+          title="还没有计划"
+          description="创建你的第一个内容计划，让 AI 定时帮你创作。"
+          action={{ label: '新建计划', onClick: openCreate }}
+        />
       ) : (
         <div className="space-y-3">
           {plans.map((plan) => (

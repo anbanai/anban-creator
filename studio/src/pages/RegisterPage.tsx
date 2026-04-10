@@ -33,8 +33,11 @@ export default function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-primary">AnbanWriter</h1>
-          <p className="mt-2 text-sm text-muted-foreground">创建你的账号</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            AnbanWriter
+          </h1>
+          <div className="mx-auto mt-2 h-0.5 w-8 rounded-full bg-primary" />
+          <p className="mt-4 text-sm text-muted-foreground">创建你的账号</p>
         </div>
         <Card>
           <CardContent className="pt-6">
@@ -61,7 +64,9 @@ export default function RegisterPage() {
                     <FormMessage />
                   </FormItem>
                 )} />
-                <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>创建账号</Button>
+                <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>
+                  创建账号
+                </Button>
               </form>
             </Form>
             <p className="mt-4 text-center text-sm text-muted-foreground">

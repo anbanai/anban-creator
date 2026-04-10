@@ -31,6 +31,8 @@ const badgeVariants = cva(
           "bg-blue-500/15 text-blue-600 dark:text-blue-400 [a]:hover:bg-blue-500/25",
         primary:
           "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        purple:
+          "bg-primary/15 text-primary [a]:hover:bg-primary/25",
       },
     },
     defaultVariants: {

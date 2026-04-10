@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
+import { Loader2 } from 'lucide-react'
 import { api, type CreditTransaction } from '@/lib/api'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { formatFullDateTimeCN } from '@/lib/labels'
+import PageHeader from '@/components/layout/PageHeader'
 
 const transactionTypeLabel: Record<string, string> = {
   sign_in: '每日签到',
@@ -64,10 +66,7 @@ export default function CreditsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">积分</h1>
-        <p className="mt-1 text-sm text-muted-foreground">管理你的积分余额和交易记录。</p>
-      </div>
+      <PageHeader title="积分" description="管理你的积分余额和交易记录。" />
 
       {/* Balance card */}
       <Card>
@@ -75,7 +74,7 @@ export default function CreditsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">积分余额</p>
-              <p className="mt-1 text-4xl font-bold text-foreground">
+              <p className="mt-1 text-4xl font-bold tracking-tight">
                 {balanceLoading ? (
                   <span className="inline-block h-10 w-24 animate-pulse rounded bg-muted" />
                 ) : (
@@ -97,7 +96,7 @@ export default function CreditsPage() {
       {/* Recharge info */}
       <Card>
         <CardBody>
-          <h3 className="font-medium text-foreground">充值积分</h3>
+          <h3 className="text-sm font-semibold text-foreground">充值积分</h3>
           <p className="mt-2 text-sm text-muted-foreground">
             如需充值积分，请联系企业微信客服获取更多积分包。客服将在确认后为您充值。
           </p>
@@ -107,14 +106,11 @@ export default function CreditsPage() {
       {/* Transaction history */}
       <Card>
         <div className="border-b border-border px-4 py-3">
-          <h2 className="font-semibold text-foreground">交易记录</h2>
+          <h2 className="text-sm font-semibold text-foreground">交易记录</h2>
         </div>
         {transactionsLoading ? (
           <div className="flex items-center justify-center py-16">
-            <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
         ) : transactions.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">
@@ -135,13 +131,13 @@ export default function CreditsPage() {
                 </thead>
                 <tbody>
                   {transactions.map((tx: CreditTransaction) => (
-                    <tr key={tx.id} className="border-b border-border transition-colors hover:bg-accent">
+                    <tr key={tx.id} className="border-b border-border transition-colors duration-150 hover:bg-accent">
                       <td className="px-4 py-3">
                         <Badge variant={transactionBadgeVariant(tx.type)}>
                           {transactionTypeLabel[tx.type] || tx.type}
                         </Badge>
                       </td>
-                      <td className={`px-4 py-3 font-medium ${tx.amount > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      <td className={`px-4 py-3 font-medium ${tx.amount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
@@ -159,7 +155,6 @@ export default function CreditsPage() {
               </table>
             </div>
 
-            {/* Pagination */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between border-t border-border px-4 py-3">
                 <p className="text-xs text-muted-foreground">

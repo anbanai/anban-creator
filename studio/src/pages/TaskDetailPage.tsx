@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { ArrowLeft, Check, X, Circle, Loader2, Download } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { TaskFile } from '@/lib/api'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
@@ -140,10 +141,7 @@ export default function TaskDetailPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     )
   }
@@ -170,9 +168,7 @@ export default function TaskDetailPage() {
             onClick={() => navigate('/tasks')}
             className="mb-2 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+            <ArrowLeft className="h-4 w-4" />
             返回任务列表
           </button>
           <div className="flex items-center gap-3">
@@ -215,48 +211,40 @@ export default function TaskDetailPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium text-foreground">进度</span>
-                <span className="text-sm text-amber-400">{task.progress}%</span>
+                <span className="text-sm text-primary">{task.progress}%</span>
               </div>
               <div className="h-2 w-full rounded-full bg-muted">
                 <div
-                  className="h-2 rounded-full bg-amber-500 transition-all duration-500"
+                  className="h-2 rounded-full bg-primary transition-all duration-500"
                   style={{ width: `${task.progress}%` }}
                 />
               </div>
             </div>
           ) : task.status === 'completed' ? (
             <div className="flex items-center gap-2">
-              <svg className="h-5 w-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              <span className="text-sm text-green-400">任务执行成功</span>
+              <Check className="h-5 w-5 text-emerald-400" />
+              <span className="text-sm text-emerald-400">任务执行成功</span>
             </div>
           ) : task.status === 'failed' ? (
             <div>
               <div className="flex items-center gap-2">
-                <svg className="h-5 w-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <X className="h-5 w-5 text-red-400" />
                 <span className="text-sm text-red-400">任务失败</span>
               </div>
               {task.error && (
-                <p className="mt-2 rounded-lg bg-red-900/30 px-3 py-2 text-sm text-red-300">
+                <p className="mt-2 bg-red-900/20 border border-red-900/30 rounded-lg px-3 py-2 text-sm text-red-300">
                   {task.error}
                 </p>
               )}
             </div>
           ) : task.status === 'cancelled' ? (
             <div className="flex items-center gap-2">
-              <svg className="h-5 w-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <X className="h-5 w-5 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">任务已取消</span>
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <svg className="h-5 w-5 text-muted-foreground animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="10" strokeWidth={2} />
-              </svg>
+              <Circle className="h-5 w-5 text-muted-foreground animate-pulse" />
               <span className="text-sm text-muted-foreground">任务等待执行中...</span>
             </div>
           )}
@@ -294,10 +282,10 @@ export default function TaskDetailPage() {
       {/* Live Output / SSE Logs */}
       {task.status === 'running' && (
         <Card>
-          <div className="border-b border px-4 py-3">
+          <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold text-foreground">执行日志</h2>
           </div>
-          <div className="max-h-96 overflow-y-auto bg-background px-4 py-3">
+          <div className="max-h-96 overflow-y-auto bg-background/50 rounded-lg border border-border font-mono px-4 py-3">
             {sseError && (
               <p className="mb-2 text-xs text-amber-400">{sseError}</p>
             )}
@@ -305,7 +293,7 @@ export default function TaskDetailPage() {
               <p className="text-xs text-muted-foreground">等待输出中...</p>
             ) : (
               sseLogs.map((log, idx) => (
-                <pre key={idx} className="mb-1 whitespace-pre-wrap font-mono text-xs text-foreground">
+                <pre key={idx} className="mb-1 whitespace-pre-wrap text-xs text-foreground">
                   {log}
                 </pre>
               ))
@@ -317,11 +305,11 @@ export default function TaskDetailPage() {
       {/* Result output for completed tasks */}
       {task.status === 'completed' && task.result?.output && (
         <Card>
-          <div className="border-b border px-4 py-3">
+          <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold text-foreground">执行结果</h2>
           </div>
-          <div className="max-h-64 overflow-y-auto bg-background px-4 py-3">
-            <pre className="whitespace-pre-wrap font-mono text-xs text-foreground">
+          <div className="max-h-64 overflow-y-auto bg-background/50 rounded-lg border border-border font-mono px-4 py-3">
+            <pre className="whitespace-pre-wrap text-xs text-foreground">
               {task.result.output}
             </pre>
           </div>
@@ -331,9 +319,10 @@ export default function TaskDetailPage() {
       {/* Files */}
       {files && files.length > 0 && (
         <Card>
-          <div className="border-b border px-4 py-3 flex items-center justify-between">
+          <div className="border-b border-border px-4 py-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">生成文件 ({files.length})</h2>
-            <button
+            <Button
+              size="sm"
               onClick={async () => {
                 try {
                   const blob = await api.tasks.downloadZipBlob(task.id)
@@ -347,10 +336,10 @@ export default function TaskDetailPage() {
                   console.error('Failed to download ZIP:', err)
                 }
               }}
-              className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90"
             >
+              <Download className="h-4 w-4" />
               下载全部 (ZIP)
-            </button>
+            </Button>
           </div>
           <div className="p-4 space-y-4">
             {/* Image files in grid */}

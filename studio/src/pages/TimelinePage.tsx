@@ -1,43 +1,36 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
+import { Calendar, Loader2, RefreshCw } from 'lucide-react'
+import PageHeader from '@/components/layout/PageHeader'
 import { api, type TimelineItem } from '@/lib/api'
 import { taskStatusLabel, planStatusLabel, contentTypeLabel, timelineItemTypeLabel, formatDateLabelCN, formatMonthCN, formatTimeCN } from '@/lib/labels'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
+import EmptyState from '@/components/EmptyState'
 
 type ViewMode = 'day' | 'week' | 'month'
 
 function getDateRange(mode: ViewMode): { from: string; to: string } {
   const now = new Date()
   const from = new Date(now)
-  from.setDate(now.getDate() - 1) // start from yesterday
+  from.setDate(now.getDate() - 1)
 
   if (mode === 'day') {
     const to = new Date(from)
     to.setDate(from.getDate() + 2)
-    return {
-      from: formatDate(from),
-      to: formatDate(to),
-    }
+    return { from: formatDate(from), to: formatDate(to) }
   }
   if (mode === 'week') {
     const to = new Date(from)
     to.setDate(from.getDate() + 7)
-    return {
-      from: formatDate(from),
-      to: formatDate(to),
-    }
+    return { from: formatDate(from), to: formatDate(to) }
   }
-  // month
   const to = new Date(from)
   to.setDate(from.getDate() + 30)
-  return {
-    from: formatDate(from),
-    to: formatDate(to),
-  }
+  return { from: formatDate(from), to: formatDate(to) }
 }
 
 function formatDate(d: Date): string {
@@ -58,7 +51,6 @@ function statusBadge(status: string, type: string) {
 }
 
 const getItemDate = (item: TimelineItem) => {
-  // Tasks use created_at, plans use scheduled_at (next_run_at)
   return item.scheduled_at || new Date().toISOString()
 }
 
@@ -89,7 +81,7 @@ export default function TimelinePage() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['timeline', dateRange.from, dateRange.to],
     queryFn: () => api.timeline.get(dateRange.from, dateRange.to),
-    refetchInterval: 10000, // auto-refresh every 10s for running tasks
+    refetchInterval: 10000,
   })
 
   const items = data?.items ?? []
@@ -102,14 +94,12 @@ export default function TimelinePage() {
       byDate[dateKey].push(item)
     }
 
-    // Sort items within each date by time
     for (const key of Object.keys(byDate)) {
       byDate[key].sort((a, b) =>
         new Date(getItemDate(a)).getTime() - new Date(getItemDate(b)).getTime()
       )
     }
 
-    // Group by month
     const monthMap: Record<string, { dateKey: string; label: string; items: TimelineItem[] }[]> = {}
     const sortedDates = Object.keys(byDate).sort()
 
@@ -130,20 +120,16 @@ export default function TimelinePage() {
     (i) => i.type === 'task' && i.status === 'running'
   )
 
+  const viewModeLabels: Record<string, string> = { day: '日', week: '周', month: '月' }
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">时间线</h1>
-          <p className="mt-1 text-sm text-muted-foreground">你的内容排期日历。</p>
-        </div>
+      <PageHeader title="时间线" description="你的内容排期日历。">
         <div className="flex items-center gap-2">
-          {(['day', 'week', 'month'] as ViewMode[]).map((mode) => {
-            const viewModeLabels: Record<string, string> = { day: '日', week: '周', month: '月' }
-            return (
+          {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
             <Button
               key={mode}
-              variant={viewMode === mode && !customFrom ? 'primary' : 'secondary'}
+              variant={viewMode === mode && !customFrom ? 'default' : 'secondary'}
               size="sm"
               onClick={() => {
                 setViewMode(mode)
@@ -153,10 +139,9 @@ export default function TimelinePage() {
             >
               {viewModeLabels[mode]}
             </Button>
-            )
-          })}
+          ))}
         </div>
-      </div>
+      </PageHeader>
 
       {/* Custom date range */}
       <Card>
@@ -176,18 +161,12 @@ export default function TimelinePage() {
             className="sm:max-w-[180px]"
           />
           {(customFrom || customTo) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setCustomFrom('')
-                setCustomTo('')
-              }}
-            >
+            <Button variant="ghost" size="sm" onClick={() => { setCustomFrom(''); setCustomTo('') }}>
               清除
             </Button>
           )}
           <Button variant="secondary" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-3.5 w-3.5" />
             刷新
           </Button>
         </div>
@@ -195,56 +174,44 @@ export default function TimelinePage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : grouped.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border bg-card py-16">
-          <svg className="mb-4 h-12 w-12 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <p className="text-sm text-muted-foreground">没有排期内容</p>
-          <p className="mt-1 text-xs text-muted-foreground">创建计划或任务开始创作。</p>
-        </div>
+        <EmptyState
+          icon={Calendar}
+          title="没有排期内容"
+          description="创建计划或任务开始创作。"
+        />
       ) : (
         <div className="space-y-8">
           {grouped.map((monthGroup) => (
             <div key={monthGroup.month}>
-              {/* Month header */}
               <div className="mb-4 flex items-center gap-3">
                 <h2 className="text-lg font-semibold text-foreground">{monthGroup.month}</h2>
                 <div className="h-px flex-1 bg-border" />
               </div>
 
-              {/* Date groups */}
-              <div className="relative ml-4 border-l-2 border-border pl-6">
+              <div className="relative ml-4 border-l border-border pl-6">
                 {monthGroup.dates.map((dateGroup) => (
                   <div key={dateGroup.dateKey} className="mb-6 last:mb-0">
-                    {/* Date header */}
                     <div className="mb-3 flex items-center gap-2">
-                      <div className="absolute -left-[1.05rem] h-3 w-3 rounded-full border-2 border-input bg-card" />
+                      <div className="absolute -left-[5px] h-2.5 w-2.5 rounded-full border-2 border-primary bg-card" />
                       <span className="text-sm font-medium text-foreground">{dateGroup.label}</span>
                       <span className="text-xs text-muted-foreground">
                         ({dateGroup.dateKey})
                       </span>
                     </div>
 
-                    {/* Items */}
                     <div className="space-y-2">
-                      {dateGroup.items.map((item, idx) => {
-                        const isLast = idx === dateGroup.items.length - 1
+                      {dateGroup.items.map((item) => {
                         const linkTo = item.type === 'plan'
-                          ? `/plans` // plan list for now
+                          ? `/plans`
                           : `/tasks/${item.id}`
 
                         return (
                           <div
                             key={`${item.type}-${item.id}`}
-                            className={`group relative rounded-lg border border bg-card px-4 py-3 transition-colors hover:border-foreground/20 ${
-                              isLast ? '' : ''
-                            }`}
+                            className="group rounded-lg border border-border bg-card px-4 py-3 transition-colors duration-150 hover:border-primary/30"
                           >
                             <Link to={linkTo} className="block">
                               <div className="flex items-start justify-between gap-3">
@@ -278,12 +245,11 @@ export default function TimelinePage() {
                               </div>
                             </Link>
 
-                            {/* Actions for plan items */}
                             {item.type === 'plan' && (
                               <div className="mt-2 flex items-center gap-2">
                                 {item.status === 'active' && (
                                   <button
-                                    className="text-xs text-amber-400 hover:text-amber-300"
+                                    className="text-xs text-primary hover:text-primary/80"
                                     onClick={(e) => {
                                       e.preventDefault()
                                       api.plans.pause(item.id).then(() => refetch())
@@ -294,7 +260,7 @@ export default function TimelinePage() {
                                 )}
                                 {item.status === 'paused' && (
                                   <button
-                                    className="text-xs text-green-400 hover:text-green-300"
+                                    className="text-xs text-emerald-400 hover:text-emerald-300"
                                     onClick={(e) => {
                                       e.preventDefault()
                                       api.plans.resume(item.id).then(() => refetch())
@@ -319,8 +285,8 @@ export default function TimelinePage() {
 
       {/* Auto-refresh indicator */}
       {hasRunningItems && (
-        <div className="fixed bottom-4 right-4 flex items-center gap-2 rounded-lg bg-card border border px-3 py-2 text-xs text-muted-foreground shadow-lg">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+        <div className="fixed bottom-4 right-4 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground shadow-lg">
+          <span className="h-2 w-2 animate-pulse-dot rounded-full bg-primary" />
           自动刷新中（运行中的任务）
         </div>
       )}
