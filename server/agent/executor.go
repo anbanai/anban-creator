@@ -35,38 +35,49 @@ func DefaultModel() string {
 }
 
 // Executor orchestrates Claude Code agent execution for content generation tasks.
+// It loads the anbanwriter plugin (agents + skills) and invokes the appropriate
+// agent based on task type.
 type Executor struct {
 	logger      *zerolog.Logger
 	imageAPICfg *srvconfig.ImageAPIConfig
+	claudeEnv   map[string]string
+	pluginDir   string // path to the anbanwriter plugin directory
+	sandbox     bool   // enable sandbox isolation (recommended in k8s)
 }
 
 // NewExecutor creates a new Executor.
-func NewExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig) *Executor {
-	return &Executor{logger: logger, imageAPICfg: imageAPICfg}
+func NewExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool) *Executor {
+	return &Executor{
+		logger:      logger,
+		imageAPICfg: imageAPICfg,
+		claudeEnv:   claudeEnv,
+		pluginDir:   pluginDir,
+		sandbox:     sandbox,
+	}
 }
 
 // ExecutionOptions configures a single agent execution.
 type ExecutionOptions struct {
-	Task    *model.Task
-	Channel *model.Channel
-	Model   string
-	MaxTurns int
+	Task       *model.Task
+	Channel    *model.Channel
+	Model      string
+	MaxTurns   int
 	OnProgress func(taskID string, message string) // callback for SSE
 }
 
 // ExecutionResult captures the outcome of an agent execution.
 type ExecutionResult struct {
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
-	WorkDir   string `json:"work_dir,omitempty"`
-	LogText   string `json:"log_text,omitempty"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+	WorkDir string `json:"work_dir,omitempty"`
+	LogText string `json:"log_text,omitempty"`
 }
 
 // Execute runs the Claude Code agent for the given task.
 //
-// It creates a per-task workspace directory, builds MCP tools from the user's
-// configuration, constructs the system prompt, and launches the agent via the
-// claude-agent-sdk-go SDK.
+// It creates a per-task workspace directory, writes the channel config as
+// .anbanwriter/settings.json, loads the anbanwriter plugin with the matching
+// agent definition, and launches execution via the claude-agent-sdk-go SDK.
 func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	// 1. Resolve defaults.
 	model := opts.Model
@@ -91,47 +102,63 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 		Str("model", model).
 		Int("max_turns", maxTurns).
 		Str("work_dir", workDir).
+		Str("plugin_dir", e.pluginDir).
+		Bool("sandbox", e.sandbox).
 		Msg("starting agent execution")
 
-	// 3. Build MCP server with channel config.
-	mcpServer, err := CreateMCPTools(workDir, opts.Channel, e.imageAPICfg, e.logger)
-	if err != nil {
-		return nil, fmt.Errorf("create MCP tools: %w", err)
+	// 3. Write channel config to workspace settings.json.
+	if opts.Channel != nil {
+		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg)
+		if err != nil {
+			return nil, fmt.Errorf("build app config: %w", err)
+		}
+		if err := writeSettingsJSON(workDir, cfg); err != nil {
+			return nil, fmt.Errorf("write settings: %w", err)
+		}
 	}
 
-	// 4. Get system prompt.
-	systemPrompt := GetSystemPrompt(opts.Task.Type, opts.Channel)
-
-	// 5. Build user prompt from task topic.
+	// 4. Build user prompt from task topic.
 	userPrompt := opts.Task.Topic
 	if userPrompt == "" {
 		userPrompt = fmt.Sprintf("Generate a %s content.", opts.Task.Type)
 	}
 
-	// 6. Build allowed MCP tool names.
-	allowedTools := []string{
-		"Read", "Write", "Glob", "Grep", "Bash", "Edit",
-		// Our MCP tools.
-		"mcp__anbanwriter__generate_image",
-		"mcp__anbanwriter__generate_cover_image",
-		"mcp__anbanwriter__generate_batch_images",
-		"mcp__anbanwriter__upload_image",
-		"mcp__anbanwriter__compress_image",
-		"mcp__anbanwriter__save_file",
-		"mcp__anbanwriter__read_file",
-		"mcp__anbanwriter__list_files",
-		"mcp__anbanwriter__create_article_draft",
-		"mcp__anbanwriter__create_xls_draft",
-		"mcp__anbanwriter__get_account_info",
-		"mcp__anbanwriter__validate_cover_image",
-		"mcp__anbanwriter__check_draft_history",
+	// 5. Map task type to agent name and build --agent flag.
+	agentName := taskTypeToAgent(opts.Task.Type)
+	agentFlag := "anbanwriter:" + agentName
+
+	// 6. Build SDK options.
+	sdkOpts := []claudecode.Option{
+		claudecode.WithMaxTurns(maxTurns),
+		claudecode.WithModel(model),
+		claudecode.WithCwd(workDir),
+		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
+		claudecode.WithExtraArgs(map[string]*string{
+			"agent": &agentFlag,
+		}),
 	}
 
-	// 7. Execute via SDK.
+	// Load the anbanwriter plugin (agents + skills).
+	if e.pluginDir != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithLocalPlugin(e.pluginDir))
+	}
+
+	// Sandbox isolation (recommended in k8s).
+	if e.sandbox {
+		sdkOpts = append(sdkOpts, claudecode.WithSandboxEnabled(true))
+		sdkOpts = append(sdkOpts, claudecode.WithAutoAllowBashIfSandboxed(true))
+	}
+
+	// Environment variables (auth tokens, API keys, etc.).
+	for k, v := range e.claudeEnv {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(k, v))
+	}
+
+	// 7. Execute via SDK with streaming.
 	var resultText string
 	var execErr error
 
-	err = claudecode.WithClient(ctx, func(client claudecode.Client) error {
+	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
 		if err := client.Query(ctx, userPrompt); err != nil {
 			return fmt.Errorf("send query: %w", err)
 		}
@@ -145,7 +172,6 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 						if opts.OnProgress != nil {
 							opts.OnProgress(opts.Task.ID, b.Text)
 						}
-						// Collect final text for the result.
 						if len(resultText) > 0 {
 							resultText += "\n"
 						}
@@ -162,7 +188,19 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 				}
 			case *claudecode.ResultMessage:
 				if m.IsError {
-					execErr = fmt.Errorf("agent execution failed (is_error)")
+					errMsg := "unknown error"
+					if m.Result != nil {
+						errMsg = *m.Result
+					}
+					e.logger.Error().
+						Str("task_id", opts.Task.ID).
+						Str("subtype", m.Subtype).
+						Int("duration_ms", m.DurationMs).
+						Int("num_turns", m.NumTurns).
+						Str("session_id", m.SessionID).
+						Str("result", errMsg).
+						Msg("agent returned error result")
+					execErr = fmt.Errorf("agent execution failed: %s", errMsg)
 					return execErr
 				}
 				return nil
@@ -170,13 +208,7 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 		}
 		return nil
 	},
-		claudecode.WithSystemPrompt(systemPrompt),
-		claudecode.WithSdkMcpServer("anbanwriter", mcpServer),
-		claudecode.WithAllowedTools(allowedTools...),
-		claudecode.WithMaxTurns(maxTurns),
-		claudecode.WithModel(model),
-		claudecode.WithCwd(workDir),
-		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
+		sdkOpts...,
 	)
 
 	if err != nil {
@@ -213,7 +245,7 @@ func ListWorkDirFiles(workDir string) ([]map[string]any, error) {
 	for _, e := range entries {
 		info, _ := e.Info()
 		f := map[string]any{
-			"name":  e.Name(),
+			"name":   e.Name(),
 			"is_dir": e.IsDir(),
 		}
 		if info != nil {

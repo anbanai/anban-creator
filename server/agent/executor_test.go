@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/royalrick/anbanwriter/server/model"
@@ -18,15 +17,17 @@ func TestBuildAppConfig(t *testing.T) {
 		{
 			name: "basic article config",
 			ch: &model.Channel{
-				Platform:     model.ScopeArticle,
-				Name:         "Test Account",
-				Keywords:     "写作,效率",
-				Positioning:  "个人成长",
-				WechatAppID:  "test_appid",
-				WechatSecret: "test_secret",
-				Author:       "TestAuthor",
-				Style:        "dan-koe",
-				Theme:        "default",
+				Platform:    model.ScopeArticle,
+				Name:        "Test Account",
+				Keywords:    "写作,效率",
+				Positioning: "个人成长",
+				Config: model.ChannelConfig{
+					WechatAppID:  "test_appid",
+					WechatSecret: "test_secret",
+				},
+				Author: "TestAuthor",
+				Style:  "dan-koe",
+				Theme:  "default",
 			},
 			wantErr: false,
 			check: func(t *testing.T, cfg map[string]any) {
@@ -98,63 +99,22 @@ func TestBuildAppConfig(t *testing.T) {
 	}
 }
 
-func TestGetSystemPrompt(t *testing.T) {
-	ch := &model.Channel{
-		Platform:    model.ScopeRednote,
-		Name:        "Test Name",
-		Keywords:    "写作,效率",
-		Positioning: "个人成长",
-	}
-
+func TestTaskTypeToAgent(t *testing.T) {
 	tests := []struct {
-		name string
-		ch   *model.Channel
-		want string
+		taskType string
+		want     string
 	}{
-		{
-			name: "rednote prompt",
-			ch:   ch,
-			want: "小红书图文全自动创作引擎",
-		},
-		{
-			name: "article prompt",
-			ch: &model.Channel{
-				Platform:    model.ScopeArticle,
-				Name:        "Article Name",
-				Author:      "Test Author",
-			},
-			want: "微信公众号图文文章创作引擎",
-		},
-		{
-			name: "xls prompt",
-			ch: &model.Channel{
-				Platform: model.ScopeXls,
-				Name:     "XLS Name",
-			},
-			want: "微信公众号小绿书创作引擎",
-		},
-		{
-			name: "unknown type",
-			ch: &model.Channel{
-				Platform: "unknown",
-			},
-			want: "",
-		},
+		{model.ScopeArticle, "wechatarticle"},
+		{model.ScopeXls, "wechatxls"},
+		{model.ScopeRednote, "rednote"},
+		{"unknown", "rednote"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := GetSystemPrompt(tt.ch.Platform, tt.ch)
-			if tt.want == "" && got != "" {
-				t.Errorf("expected empty prompt, got non-empty")
-			}
-			if tt.want != "" {
-				if got == "" {
-					t.Fatalf("expected prompt containing %q, got empty", tt.want)
-				}
-				if !strings.Contains(got, tt.want) {
-					t.Errorf("prompt does not contain %q", tt.want)
-				}
+		t.Run(tt.taskType, func(t *testing.T) {
+			got := taskTypeToAgent(tt.taskType)
+			if got != tt.want {
+				t.Errorf("taskTypeToAgent(%q) = %q, want %q", tt.taskType, got, tt.want)
 			}
 		})
 	}

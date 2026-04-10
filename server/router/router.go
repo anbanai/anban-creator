@@ -17,7 +17,6 @@ import (
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/handler"
 	appmiddleware "github.com/royalrick/anbanwriter/server/middleware"
-	"github.com/royalrick/anbanwriter/server/mcp"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
@@ -151,7 +150,9 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.ChannelHandler != nil {
 		apiV1.Get("/channels", svc.ChannelHandler.List)
+		apiV1.Get("/channels/platform-configs", svc.ChannelHandler.GetPlatformConfigs)
 		apiV1.Post("/channels", svc.ChannelHandler.Create)
+		apiV1.Post("/channels/fetch-profile", svc.ChannelHandler.FetchProfile)
 		apiV1.Get("/channels/:id", svc.ChannelHandler.Get)
 		apiV1.Put("/channels/:id", svc.ChannelHandler.Update)
 		apiV1.Patch("/channels/:id/archive", svc.ChannelHandler.Archive)
@@ -200,15 +201,6 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.TimelineHandler != nil {
 		apiV1.Get("/timeline", svc.TimelineHandler.GetTimeline)
-	}
-
-	// MCP tools endpoint with API key or JWT authentication.
-	if svc.Repo != nil && svc.Logger != nil {
-		mcpAuth := appmiddleware.MCPAuthMiddleware(
-			svc.JWTService, svc.Repo, svc.Config.MCP.APIKey, svc.Logger,
-		)
-		mcpGroup := app.Group("/api/v1/mcp", mcpAuth)
-		mcpGroup.Get("/tools", mcp.NewMCPHttpHandler(svc.Repo, svc.Logger))
 	}
 
 	return app

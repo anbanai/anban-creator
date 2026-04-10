@@ -22,6 +22,7 @@ type Config struct {
 	Storage  StorageConfig  `yaml:"storage"`
 	MCP      MCPConfig      `yaml:"mcp"`
 	ImageAPI ImageAPIConfig `yaml:"image_api"`
+	Claude   ClaudeConfig   `yaml:"claude"`
 }
 
 type ServerConfig struct {
@@ -74,11 +75,31 @@ type MCPConfig struct {
 	APIKey string `yaml:"api_key"`
 }
 
+// SizesConfig holds per-platform image size defaults (ratio:tier format, e.g. "16:9", "3:4:4K").
+type SizesConfig struct {
+	ArticleCover   string `yaml:"article_cover"`   // default "16:9"
+	ArticleContent string `yaml:"article_content"` // default "16:9"
+	XlsCover       string `yaml:"xls_cover"`       // default "3:4"
+	XlsContent     string `yaml:"xls_content"`     // default "3:4"
+	RednoteCover   string `yaml:"rednote_cover"`   // default "3:4"
+	RednoteContent string `yaml:"rednote_content"` // default "3:4"
+}
+
 // ImageAPIConfig holds global image generation API configuration.
 // All channels share this server-level config.
 type ImageAPIConfig struct {
 	Cover   *appconfig.ImageAPI `yaml:"cover"`
 	Content *appconfig.ImageAPI `yaml:"content"`
+	Sizes   SizesConfig         `yaml:"sizes"`
+}
+
+// ClaudeConfig holds configuration for the Claude CLI subprocess.
+// The Env map is passed as environment variables to the CLI process,
+// supporting auth tokens, base URLs, model overrides, etc.
+type ClaudeConfig struct {
+	Env       map[string]string `yaml:"env"`
+	PluginDir string            `yaml:"plugin_dir"` // Path to the anbanwriter plugin directory (contains claudecode/agents, skills, etc.)
+	Sandbox   bool              `yaml:"sandbox"`    // Enable sandbox isolation for agent execution (recommended in k8s)
 }
 
 // NewConfig loads configuration from a YAML file, applies defaults, then
@@ -135,6 +156,26 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Storage.LocalDataDir == "" {
 		c.Storage.LocalDataDir = "./data/files"
+	}
+
+	// Per-platform image size defaults (ratio:tier format).
+	if c.ImageAPI.Sizes.ArticleCover == "" {
+		c.ImageAPI.Sizes.ArticleCover = "16:9"
+	}
+	if c.ImageAPI.Sizes.ArticleContent == "" {
+		c.ImageAPI.Sizes.ArticleContent = "16:9"
+	}
+	if c.ImageAPI.Sizes.XlsCover == "" {
+		c.ImageAPI.Sizes.XlsCover = "3:4"
+	}
+	if c.ImageAPI.Sizes.XlsContent == "" {
+		c.ImageAPI.Sizes.XlsContent = "3:4"
+	}
+	if c.ImageAPI.Sizes.RednoteCover == "" {
+		c.ImageAPI.Sizes.RednoteCover = "3:4"
+	}
+	if c.ImageAPI.Sizes.RednoteContent == "" {
+		c.ImageAPI.Sizes.RednoteContent = "3:4"
 	}
 }
 
@@ -233,6 +274,13 @@ func (c *Config) applyEnvOverrides() {
 
 	if v := os.Getenv(prefix + "MCP_API_KEY"); v != "" {
 		c.MCP.APIKey = v
+	}
+
+	if v := os.Getenv(prefix + "CLAUDE_PLUGIN_DIR"); v != "" {
+		c.Claude.PluginDir = v
+	}
+	if v := os.Getenv(prefix + "CLAUDE_SANDBOX"); v != "" {
+		c.Claude.Sandbox = v == "true" || v == "1"
 	}
 }
 

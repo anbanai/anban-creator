@@ -73,47 +73,60 @@ func determineFileRole(filename, mimeType string) string {
 }
 
 // UploadTaskFiles uploads all files from a task's work directory to storage.
-// Individual upload failures are logged but do not abort the remaining uploads.
-// Returns an error only if the work directory cannot be read at all.
+// It recursively walks the directory tree to find files in nested subdirectories
+// (e.g. output/articles/staging/). Individual upload failures are logged but do
+// not abort the remaining uploads. Returns an error only if the work directory
+// cannot be read at all.
 func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workDir string) error {
 	if s.store == nil {
 		s.logger.Warn().Msg("no storage provider configured, skipping file upload")
 		return nil
 	}
 
-	entries, err := os.ReadDir(workDir)
-	if err != nil {
-		return fmt.Errorf("read work directory %s: %w", workDir, err)
-	}
-
 	var batch []*model.TaskFile
 	providerName := s.store.Name()
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	err := filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
 		}
 
-		filename := entry.Name()
-		filePath := filepath.Join(workDir, filename)
+		// Skip the .anbanwriter config directory (settings.json, etc.).
+		if strings.Contains(path, filepath.Join(workDir, ".anbanwriter")) {
+			return nil
+		}
+		// Skip the .claude config directory.
+		if strings.Contains(path, filepath.Join(workDir, ".claude")) {
+			return nil
+		}
 
-		info, err := entry.Info()
+		filename := filepath.Base(path)
+		mimeType := detectMimeType(path)
+		role := determineFileRole(filename, mimeType)
+
+		// Preserve subdirectory structure in the OSS key.
+		relPath, err := filepath.Rel(workDir, path)
+		if err != nil {
+			relPath = filename
+		}
+		ossKey := fmt.Sprintf("%s/%s/%s", userID, taskID, relPath)
+
+		info, err := d.Info()
 		if err != nil {
 			s.logger.Warn().Err(err).Str("file", filename).Msg("failed to get file info, skipping")
-			continue
+			return nil
 		}
 
-		mimeType := detectMimeType(filePath)
-		role := determineFileRole(filename, mimeType)
-		ossKey := fmt.Sprintf("%s/%s/%s", userID, taskID, filename)
-
-		uploadResult, err := s.store.UploadFile(ctx, ossKey, filePath, mimeType)
+		uploadResult, err := s.store.UploadFile(ctx, ossKey, path, mimeType)
 		if err != nil {
 			s.logger.Error().Err(err).
 				Str("file", filename).
 				Str("key", ossKey).
 				Msg("failed to upload file, skipping")
-			continue
+			return nil
 		}
 
 		fileSize := info.Size()
@@ -130,8 +143,12 @@ func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workD
 			OSSKey:          ossKey,
 			OSSURL:          uploadResult.URL,
 			StorageProvider: providerName,
-			FilePath:        filePath,
+			FilePath:        path,
 		})
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walk work directory %s: %w", workDir, err)
 	}
 
 	if len(batch) > 0 {

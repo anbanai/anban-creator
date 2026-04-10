@@ -130,7 +130,7 @@ func main() {
 	}
 
 	// 12. Create agent executor.
-	agentExecutor := agent.NewExecutor(log, &cfg.ImageAPI)
+	agentExecutor := agent.NewExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox)
 
 	// 13. Create services.
 	var planSvc *service.PlanService

@@ -62,7 +62,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		}
 
 		planSvc := service.NewPlanService(repo, &logger)
-		agentExecutor := agent.NewExecutor(&logger, nil)
+		agentExecutor := agent.NewExecutor(&logger, nil, nil, "", false)
 		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub()
@@ -177,22 +177,5 @@ func TestPublicAuthEndpoints(t *testing.T) {
 
 	if resp.StatusCode == fiber.StatusUnauthorized {
 		t.Errorf("public endpoint should not require auth, got 401")
-	}
-}
-
-// TestMCPRequiresAuth tests that the MCP endpoint requires either an API key
-// or a JWT token.
-func TestMCPRequiresAuth(t *testing.T) {
-	app, closeFunc := setupTestApp(t, true)
-	defer closeFunc()
-
-	req := httptest.NewRequest("GET", "/api/v1/mcp/tools", nil)
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-
-	if resp.StatusCode != fiber.StatusUnauthorized {
-		t.Errorf("expected 401 for MCP endpoint without auth, got %d", resp.StatusCode)
 	}
 }
