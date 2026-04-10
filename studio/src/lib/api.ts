@@ -190,6 +190,7 @@ export interface CreateTaskRequest {
   type: TaskType
   topic: string
   channel_id: string
+  quantity?: number
 }
 
 // --- Timeline Types ---
@@ -212,6 +213,33 @@ export interface TimelineItem {
 
 export interface TimelineResponse {
   items: TimelineItem[]
+}
+
+// --- Credits Types ---
+
+export interface CreditBalance {
+  balance: number
+}
+
+export interface SignInStatus {
+  signed_in_today: boolean
+}
+
+export interface CreditTransaction {
+  id: number
+  user_id: string
+  type: string  // sign_in, task_deduct, task_refund, admin_grant
+  amount: number
+  balance_after: number
+  task_id?: string
+  description: string
+  created_at: string
+}
+
+export interface AdminGrantRequest {
+  user_id: string
+  amount: number
+  description: string
 }
 
 // --- Paginated Response ---
@@ -389,6 +417,21 @@ export const api = {
         wechat_app_id: wechatAppId,
         wechat_secret: wechatSecret,
       })),
+  },
+
+  // Credits
+  credits: {
+    balance: () =>
+      unwrap<CreditBalance>(http.get('/credits/balance')),
+
+    signInStatus: () =>
+      unwrap<SignInStatus>(http.get('/credits/sign-in/status')),
+
+    signIn: () =>
+      unwrap<CreditBalance>(http.post('/credits/sign-in')),
+
+    transactions: (params?: { page?: number; page_size?: number }) =>
+      unwrap<PaginatedResponse<CreditTransaction>>(http.get('/credits/transactions', { params })),
   },
 }
 

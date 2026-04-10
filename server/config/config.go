@@ -22,6 +22,7 @@ type Config struct {
 	Storage  StorageConfig  `yaml:"storage"`
 	ImageAPI ImageAPIConfig `yaml:"image_api"`
 	Claude   ClaudeConfig   `yaml:"claude"`
+	Credits  CreditsConfig  `yaml:"credits"`
 }
 
 type ServerConfig struct {
@@ -91,6 +92,13 @@ type ClaudeConfig struct {
 	Env       map[string]string `yaml:"env"`
 	PluginDir string            `yaml:"plugin_dir"` // Path to the anbanwriter plugin directory (contains claudecode/agents, skills, etc.)
 	Sandbox   bool              `yaml:"sandbox"`    // Enable sandbox isolation for agent execution (recommended in k8s)
+}
+
+// CreditsConfig holds credits/points system configuration.
+type CreditsConfig struct {
+	DailySignIn int            `yaml:"daily_sign_in"` // credits awarded per daily sign-in (default 1024)
+	TaskCosts   map[string]int `yaml:"task_costs"`    // per-task-type costs, e.g. {"article": 500, "xls": 400, "rednote": 400}
+	AdminAPIKey string         `yaml:"admin_api_key"` // API key for admin credit grant endpoint
 }
 
 // NewConfig loads configuration from a YAML file, applies defaults, then
@@ -167,6 +175,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.ImageAPI.Sizes.RednoteContent == "" {
 		c.ImageAPI.Sizes.RednoteContent = "3:4"
+	}
+
+	// Credits defaults.
+	if c.Credits.DailySignIn == 0 {
+		c.Credits.DailySignIn = 1024
+	}
+	if c.Credits.TaskCosts == nil {
+		c.Credits.TaskCosts = map[string]int{
+			"article": 500,
+			"xls":     400,
+			"rednote": 400,
+		}
 	}
 }
 
@@ -268,6 +288,10 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "CLAUDE_SANDBOX"); v != "" {
 		c.Claude.Sandbox = v == "true" || v == "1"
+	}
+
+	if v := os.Getenv(prefix + "CREDITS_ADMIN_API_KEY"); v != "" {
+		c.Credits.AdminAPIKey = v
 	}
 }
 

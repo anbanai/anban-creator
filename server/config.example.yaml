@@ -97,6 +97,17 @@ image_api:
     rednote_content: "3:4"      # 小红书正文配图
 
 # ---------------------------------------------------------------------------
+# Credits: Credits system configuration
+# ---------------------------------------------------------------------------
+credits:
+  daily_sign_in: 1024    # credits awarded per daily sign-in
+  task_costs:
+    article: 500         # cost per article task
+    xls: 400             # cost per xls task
+    rednote: 400         # cost per rednote task
+  admin_api_key: ""      # API key for admin credit grant endpoint (also via ANBAN_SERVER_CREDITS_ADMIN_API_KEY)
+
+# ---------------------------------------------------------------------------
 # Claude: Configuration for Claude Code CLI agent execution
 # Required for agent execution. The env vars are passed to the CLI process.
 # ---------------------------------------------------------------------------

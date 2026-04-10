@@ -12,6 +12,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&Plan{},
 		&Task{},
 		&TaskFile{},
+		&CreditTransaction{},
 	)
 	if err != nil {
 		return err

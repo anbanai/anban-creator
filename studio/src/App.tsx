@@ -12,6 +12,7 @@ import ChannelsPage from '@/pages/ChannelsPage'
 import PlansPage from '@/pages/PlansPage'
 import TasksPage from '@/pages/TasksPage'
 import TaskDetailPage from '@/pages/TaskDetailPage'
+import CreditsPage from '@/pages/CreditsPage'
 import SettingsPage from '@/pages/SettingsPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -67,6 +68,7 @@ function AppRoutes() {
         <Route path="plans" element={<PlansPage />} />
         <Route path="tasks" element={<TasksPage />} />
         <Route path="tasks/:id" element={<TaskDetailPage />} />
+        <Route path="credits" element={<CreditsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -17,6 +17,7 @@ export const createTaskSchema = z.object({
   channel_id: z.string().min(1, "请选择频道"),
   type: z.enum(["rednote", "article", "xls"]),
   topic: z.string().min(1, "主题不能为空").max(200, "主题不能超过 200 个字符"),
+  quantity: z.number().int().min(1).max(5).default(1),
 })
 export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 

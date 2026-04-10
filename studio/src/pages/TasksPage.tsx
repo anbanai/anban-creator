@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
-import { toast } from 'sonner'
+import { toast } from 'react-hot-toast'
 import { api, type TaskType, type CreateTaskRequest, type TaskStatus } from '@/lib/api'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
@@ -34,6 +34,12 @@ function statusBadgeVariant(status: TaskStatus) {
   }
 }
 
+const taskCostMap: Record<string, number> = {
+  article: 500,
+  xls: 400,
+  rednote: 400,
+}
+
 export default function TasksPage() {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -44,6 +50,12 @@ export default function TasksPage() {
   const [statusFilter, setStatusFilter] = useState(initialStatus)
   const [channelFilter, setChannelFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(shouldCreate)
+  const [quantity, setQuantity] = useState(1)
+
+  const { data: creditsBalance } = useQuery({
+    queryKey: ['credits', 'balance'],
+    queryFn: () => api.credits.balance(),
+  })
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema),
@@ -85,12 +97,14 @@ export default function TasksPage() {
 
   function openCreate() {
     form.reset({ type: 'rednote', topic: '', channel_id: '' })
+    setQuantity(1)
     setModalOpen(true)
   }
 
   function closeModal() {
     setModalOpen(false)
     form.reset({ type: 'rednote', topic: '', channel_id: '' })
+    setQuantity(1)
   }
 
   async function onSubmit(values: CreateTaskFormValues) {
@@ -98,6 +112,7 @@ export default function TasksPage() {
       type: values.type,
       topic: values.topic.trim(),
       channel_id: values.channel_id || undefined,
+      quantity: quantity > 1 ? quantity : undefined,
     })
   }
 
@@ -255,11 +270,65 @@ export default function TasksPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {/* Quantity selector */}
+              <div className="space-y-2">
+                <FormLabel>数量</FormLabel>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Button
+                      key={n}
+                      type="button"
+                      variant={quantity === n ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setQuantity(n)}
+                    >
+                      {n}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Cost display */}
+              {(() => {
+                const taskType = form.watch('type')
+                const cost = taskCostMap[taskType] ?? 400
+                const totalCost = cost * quantity
+                const balance = creditsBalance?.balance ?? 0
+                const remaining = balance - totalCost
+                return (
+                  <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
+                    <p className="text-muted-foreground">
+                      预估消耗：{cost} x {quantity} = <span className="font-medium text-foreground">{totalCost}</span> 积分
+                    </p>
+                    <p className="text-muted-foreground">
+                      余额：{balance.toLocaleString()} →{' '}
+                      <span className={`font-medium ${remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
+                        {remaining.toLocaleString()}
+                      </span>
+                    </p>
+                    {remaining < 0 && (
+                      <p className="text-sm font-medium text-red-500">积分不足</p>
+                    )}
+                  </div>
+                )
+              })()}
             </form>
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="task-create-form" loading={createMutation.isPending}>
+            <Button
+              type="submit"
+              form="task-create-form"
+              loading={createMutation.isPending}
+              disabled={(() => {
+                const taskType = form.watch('type')
+                const cost = taskCostMap[taskType] ?? 400
+                const totalCost = cost * quantity
+                const balance = creditsBalance?.balance ?? 0
+                return balance - totalCost < 0
+              })()}
+            >
               创建
             </Button>
           </DialogFooter>

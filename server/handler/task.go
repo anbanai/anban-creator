@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -37,6 +38,7 @@ func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dataDir ..
 type createTaskRequest struct {
 	ChannelID string `json:"channel_id"`
 	Topic     string `json:"topic"`
+	Quantity  int    `json:"quantity"`
 }
 
 // Create handles POST /api/v1/tasks.
@@ -62,13 +64,28 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
-	task, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, topic)
+
+	quantity := req.Quantity
+	if quantity <= 0 {
+		quantity = 1
+	}
+	if quantity > 5 {
+		return Error(c, fiber.StatusBadRequest, "quantity must be between 1 and 5")
+	}
+
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, topic, quantity)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
+		if errors.Is(err, service.ErrInsufficientCredits) {
+			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
+				"code": 40200,
+				"msg":  "insufficient_credits",
+			})
+		}
 		return Error(c, fiber.StatusInternalServerError, "failed to create task")
 	}
 
-	return Success(c, task)
+	return Success(c, tasks)
 }
 
 // List handles GET /api/v1/tasks.

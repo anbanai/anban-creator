@@ -63,7 +63,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 
 		planSvc := service.NewPlanService(repo, &logger)
 		agentExecutor := agent.NewExecutor(&logger, nil, nil, "", false)
-		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, &logger)
+		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub()
 		authHandler := handler.NewAuthHandler(jwtSvc, nil, repo, &logger, wsHub)
@@ -144,6 +144,10 @@ func TestProtectedEndpointsRequireAuth(t *testing.T) {
 		{"POST", "/api/v1/tasks"},
 		{"GET", "/api/v1/configs"},
 		{"GET", "/api/v1/timeline?from=2025-01-01&to=2025-12-31"},
+		{"GET", "/api/v1/credits/balance"},
+		{"GET", "/api/v1/credits/sign-in/status"},
+		{"POST", "/api/v1/credits/sign-in"},
+		{"GET", "/api/v1/credits/transactions"},
 	}
 
 	for _, tc := range protectedPaths {

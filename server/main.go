@@ -136,11 +136,13 @@ func main() {
 	var planSvc *service.PlanService
 	var taskSvc *service.TaskService
 	var channelSvc *service.ChannelService
+	var creditSvc *service.CreditService
 	var asynqClient *scheduler.AsynqClient
 
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
 		channelSvc = service.NewChannelService(repo, log)
+		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
 
 		// Create Asynq client if Redis is available.
 		if rdb != nil {
@@ -152,7 +154,7 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, log)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log)
 	}
 
 	// 14. Create handlers.
@@ -160,6 +162,7 @@ func main() {
 	var taskHandler *handler.TaskHandler
 	var channelHandler *handler.ChannelHandler
 	var timelineHandler *handler.TimelineHandler
+	var creditHandler *handler.CreditHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -167,6 +170,9 @@ func main() {
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
 		channelHandler = handler.NewChannelHandler(channelSvc, log)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
+		if creditSvc != nil {
+			creditHandler = handler.NewCreditHandler(creditSvc, cfg.Credits.AdminAPIKey, log)
+		}
 	}
 
 	// 15. Start Asynq worker if Redis is available.
@@ -203,9 +209,11 @@ func main() {
 		Executor:        agentExecutor,
 		PlanService:     planSvc,
 		TaskService:     taskSvc,
+		CreditService:   creditSvc,
 		ChannelHandler:  channelHandler,
 		PlanHandler:     planHandler,
 		TaskHandler:     taskHandler,
+		CreditHandler:   creditHandler,
 		TimelineHandler: timelineHandler,
 		StorageProvider: store,
 	}

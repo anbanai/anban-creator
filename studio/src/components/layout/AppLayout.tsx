@@ -9,6 +9,7 @@ const navItems = [
   { to: '/timeline', label: '时间线' },
   { to: '/plans', label: '计划' },
   { to: '/tasks', label: '任务' },
+  { to: '/credits', label: '积分' },
   { to: '/settings', label: '设置' },
 ]
 

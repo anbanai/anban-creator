@@ -24,6 +24,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.UserConfig{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Channel{},
+		&model.CreditTransaction{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
@@ -41,7 +42,7 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 	})
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, &logger)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger)
 	return svc, repo
 }
 
@@ -65,10 +66,14 @@ func TestTaskService_CreateManual(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	task, err := svc.CreateManual(context.Background(), userID, channelID, "Test topic")
+	tasks, err := svc.CreateManual(context.Background(), userID, channelID, "Test topic", 1)
 	if err != nil {
 		t.Fatalf("CreateManual: %v", err)
 	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	task := tasks[0]
 	if task.ID == "" {
 		t.Error("task.ID should not be empty")
 	}
@@ -88,7 +93,7 @@ func TestTaskService_CreateManual(t *testing.T) {
 
 func TestTaskService_CreateManual_NoChannel(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
-	_, err := svc.CreateManual(context.Background(), "user1", "", "topic")
+	_, err := svc.CreateManual(context.Background(), "user1", "", "topic", 1)
 	if err == nil {
 		t.Error("expected error for empty channel_id")
 	}
@@ -99,7 +104,7 @@ func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	_, err := svc.CreateManual(context.Background(), "wrong-user", channelID, "topic")
+	_, err := svc.CreateManual(context.Background(), "wrong-user", channelID, "topic", 1)
 	if err == nil {
 		t.Error("expected error for wrong user")
 	}
@@ -110,7 +115,8 @@ func TestTaskService_GetByID(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	task, _ := svc.CreateManual(context.Background(), userID, channelID, "Find me")
+	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Find me", 1)
+	task := taskSlice[0]
 
 	found, err := svc.GetByID(context.Background(), task.ID)
 	if err != nil {
@@ -134,7 +140,8 @@ func TestTaskService_Cancel(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	task, _ := svc.CreateManual(context.Background(), userID, channelID, "Cancel me")
+	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Cancel me", 1)
+	task := taskSlice[0]
 
 	err := svc.Cancel(context.Background(), task.ID)
 	if err != nil {
@@ -152,8 +159,8 @@ func TestTaskService_List(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	svc.CreateManual(context.Background(), userID, channelID, "Task 1")
-	svc.CreateManual(context.Background(), userID, channelID, "Task 2")
+	svc.CreateManual(context.Background(), userID, channelID, "Task 1", 1)
+	svc.CreateManual(context.Background(), userID, channelID, "Task 2", 1)
 
 	tasks, total, err := svc.List(context.Background(), userID, 0, 10, "", "")
 	if err != nil {
@@ -172,7 +179,8 @@ func TestTaskService_List_ByStatus(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	task, _ := svc.CreateManual(context.Background(), userID, channelID, "Pending task")
+	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Pending task", 1)
+	task := taskSlice[0]
 	svc.Cancel(context.Background(), task.ID)
 
 	// Filter by pending — should find none

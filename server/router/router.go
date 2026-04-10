@@ -36,8 +36,10 @@ type Services struct {
 	Executor        *agent.Executor
 	PlanService     *service.PlanService
 	TaskService     *service.TaskService
+	CreditService   *service.CreditService
 	PlanHandler     *handler.PlanHandler
 	TaskHandler     *handler.TaskHandler
+	CreditHandler   *handler.CreditHandler
 	ChannelHandler  *handler.ChannelHandler
 	TimelineHandler *handler.TimelineHandler
 	StorageProvider storage.Provider
@@ -201,6 +203,23 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.TimelineHandler != nil {
 		apiV1.Get("/timeline", svc.TimelineHandler.GetTimeline)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Credits endpoints
+	// ---------------------------------------------------------------------------
+
+	if svc.CreditHandler != nil {
+		credits := apiV1.Group("/credits")
+		credits.Get("/balance", svc.CreditHandler.Balance)
+		credits.Get("/sign-in/status", svc.CreditHandler.SignInStatus)
+		credits.Post("/sign-in", svc.CreditHandler.SignIn)
+		credits.Get("/transactions", svc.CreditHandler.Transactions)
+	}
+
+	// Admin credits endpoint (outside JWT auth group, uses API key auth).
+	if svc.CreditHandler != nil {
+		app.Post("/api/v1/admin/credits/grant", svc.CreditHandler.AdminGrant)
 	}
 
 	return app

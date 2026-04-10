@@ -152,6 +152,14 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			Msg("task permanently failed after max retries")
 		_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error())
 		_ = s.repo.Tasks().SetCompletedAt(ctx, taskID)
+
+		// Refund credits for failed task.
+		if s.creditSvc != nil {
+			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
+				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits")
+			}
+		}
+
 		return execErr
 	}
 

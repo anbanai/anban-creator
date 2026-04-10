@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -30,6 +31,7 @@ type TaskService struct {
 	logger   *zerolog.Logger
 	enqueuer TaskEnqueuer
 	store    storage.Provider
+	creditSvc *CreditService
 }
 
 // NewTaskService creates a new TaskService.
@@ -38,21 +40,32 @@ func NewTaskService(
 	executor *agent.Executor,
 	enqueuer TaskEnqueuer,
 	store storage.Provider,
+	creditSvc *CreditService,
 	logger *zerolog.Logger,
 ) *TaskService {
 	return &TaskService{
-		repo:     repo,
-		executor: executor,
-		logger:   logger,
-		enqueuer: enqueuer,
-		store:    store,
+		repo:      repo,
+		executor:  executor,
+		logger:    logger,
+		enqueuer:  enqueuer,
+		store:     store,
+		creditSvc: creditSvc,
 	}
 }
 
-// CreateManual creates a task without a plan and enqueues it for execution.
-func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic string) (*model.Task, error) {
+// CreateManual creates tasks without a plan and enqueues them for execution.
+// The quantity parameter (1-5) determines how many tasks to create, each independently billed.
+func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic string, quantity int) ([]*model.Task, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
+	}
+
+	// Clamp quantity to 1-5.
+	if quantity <= 0 {
+		quantity = 1
+	}
+	if quantity > 5 {
+		quantity = 5
 	}
 
 	// Load and validate channel.
@@ -67,30 +80,67 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic
 		return nil, fmt.Errorf("channel is not active")
 	}
 
-	taskID := generateTaskID()
 	taskType := channel.Platform
 
-	task := &model.Task{
-		ID:        taskID,
-		UserID:    userID,
-		ChannelID: channelID,
-		Type:      taskType,
-		Status:    model.TaskStatusPending,
-		Topic:     topic,
+	// Deduct credits for each task. All-or-nothing: if any fails, refund previous deductions.
+	var deductedTaskIDs []string
+	tasks := make([]*model.Task, 0, quantity)
+
+	for i := 0; i < quantity; i++ {
+		taskID := generateTaskID()
+
+		// Deduct credits if credit service is available.
+		if s.creditSvc != nil {
+			_, err := s.creditSvc.DeductForTask(ctx, userID, taskType, taskID)
+			if err != nil {
+				// Refund already-deducted tasks.
+				s.refundTasks(ctx, deductedTaskIDs)
+
+				if errors.Is(err, ErrInsufficientCredits) {
+					return nil, fmt.Errorf("积分不足: %w", err)
+				}
+				return nil, fmt.Errorf("deduct credits: %w", err)
+			}
+			deductedTaskIDs = append(deductedTaskIDs, taskID)
+		}
+
+		task := &model.Task{
+			ID:        taskID,
+			UserID:    userID,
+			ChannelID: channelID,
+			Type:      taskType,
+			Status:    model.TaskStatusPending,
+			Topic:     topic,
+		}
+
+		if err := s.repo.Tasks().Create(ctx, task); err != nil {
+			// Refund this task's credits.
+			s.refundTasks(ctx, deductedTaskIDs)
+			return nil, fmt.Errorf("create task: %w", err)
+		}
+
+		// Enqueue for async execution.
+		if err := s.EnqueueExecution(ctx, task, nil); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue task, marking as failed")
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to enqueue: "+err.Error())
+		}
+
+		tasks = append(tasks, task)
 	}
 
-	if err := s.repo.Tasks().Create(ctx, task); err != nil {
-		return nil, fmt.Errorf("create task: %w", err)
-	}
+	return tasks, nil
+}
 
-	// Enqueue for async execution.
-	if err := s.EnqueueExecution(ctx, task, nil); err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue task, marking as failed")
-		_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to enqueue: "+err.Error())
-		return task, nil
+// refundTasks refunds credits for a list of task IDs.
+func (s *TaskService) refundTasks(ctx context.Context, taskIDs []string) {
+	if s.creditSvc == nil {
+		return
 	}
-
-	return task, nil
+	for _, tid := range taskIDs {
+		if err := s.creditSvc.RefundForTask(ctx, tid); err != nil {
+			s.logger.Error().Err(err).Str("task_id", tid).Msg("failed to refund credits during rollback")
+		}
+	}
 }
 
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.

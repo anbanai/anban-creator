@@ -50,3 +50,11 @@ const (
 	PlatformXLS     = "xls"
 	PlatformRednote = "rednote"
 )
+
+// Credit transaction type constants.
+const (
+	CreditTypeSignIn     = "sign_in"
+	CreditTypeTaskDeduct = "task_deduct"
+	CreditTypeTaskRefund = "task_refund"
+	CreditTypeAdminGrant = "admin_grant"
+)

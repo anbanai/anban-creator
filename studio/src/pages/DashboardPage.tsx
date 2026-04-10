@@ -1,10 +1,12 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { toast } from 'react-hot-toast'
 import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/lib/api'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN } from '@/lib/labels'
 import { Card, CardBody } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 
 function statusBadgeVariant(status: string) {
   switch (status) {
@@ -18,6 +20,28 @@ function statusBadgeVariant(status: string) {
 
 export default function DashboardPage() {
   const { user } = useAuth()
+  const queryClient = useQueryClient()
+
+  const { data: creditsBalance } = useQuery({
+    queryKey: ['credits', 'balance'],
+    queryFn: () => api.credits.balance(),
+  })
+
+  const { data: signInStatus } = useQuery({
+    queryKey: ['credits', 'signInStatus'],
+    queryFn: () => api.credits.signInStatus(),
+  })
+
+  const signInMutation = useMutation({
+    mutationFn: () => api.credits.signIn(),
+    onSuccess: () => {
+      toast.success('签到成功，积分 +1024')
+      queryClient.invalidateQueries({ queryKey: ['credits'] })
+    },
+    onError: () => {
+      toast.error('签到失败，请重试')
+    },
+  })
 
   const { data: plansData } = useQuery({
     queryKey: ['plans', 'dashboard'],
@@ -88,6 +112,27 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {/* Credits card */}
+      <Card>
+        <CardBody>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">积分余额</p>
+              <p className="mt-1 text-3xl font-bold text-foreground">
+                {(creditsBalance?.balance ?? 0).toLocaleString()}
+              </p>
+            </div>
+            <Button
+              onClick={() => signInMutation.mutate()}
+              disabled={signInStatus?.signed_in_today ?? false || signInMutation.isPending}
+              loading={signInMutation.isPending}
+            >
+              {signInStatus?.signed_in_today ? '已签到' : '签到 +1024'}
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
 
       {/* Recent tasks */}
       <Card>

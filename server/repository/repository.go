@@ -18,6 +18,7 @@ type Repository interface {
 	Tasks() TaskRepository
 	TaskFiles() TaskFileRepository
 	Channels() ChannelRepository
+	Credits() CreditRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -30,6 +31,8 @@ type UserRepository interface {
 	FindByOpenID(ctx context.Context, openID string) (*model.User, error)
 	Create(ctx context.Context, user *model.User) error
 	Update(ctx context.Context, user *model.User) error
+	AdjustBalance(ctx context.Context, userID string, delta int) (int, error)
+	DeductCredits(ctx context.Context, userID string, amount int) (int, bool, error)
 }
 
 // SessionRepository provides access to the login_sessions table.
@@ -107,6 +110,7 @@ type repository struct {
 	tasks    TaskRepository
 	files    TaskFileRepository
 	channels ChannelRepository
+	credits  CreditRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -118,6 +122,7 @@ func New(db *gorm.DB) Repository {
 	tasks := newTaskRepository(db)
 	files := newTaskFileRepository(db)
 	channels := newChannelRepository(db)
+	credits := newCreditRepository(db)
 
 	return &repository{
 		db:       db,
@@ -128,16 +133,18 @@ func New(db *gorm.DB) Repository {
 		tasks:    tasks,
 		files:    files,
 		channels: channels,
+		credits:  credits,
 	}
 }
 
-func (r *repository) Users() UserRepository        { return r.users }
-func (r *repository) Sessions() SessionRepository   { return r.sessions }
+func (r *repository) Users() UserRepository            { return r.users }
+func (r *repository) Sessions() SessionRepository       { return r.sessions }
 func (r *repository) UserConfigs() UserConfigRepository { return r.configs }
-func (r *repository) Plans() PlanRepository         { return r.plans }
-func (r *repository) Tasks() TaskRepository         { return r.tasks }
-func (r *repository) TaskFiles() TaskFileRepository { return r.files }
-func (r *repository) Channels() ChannelRepository    { return r.channels }
+func (r *repository) Plans() PlanRepository             { return r.plans }
+func (r *repository) Tasks() TaskRepository             { return r.tasks }
+func (r *repository) TaskFiles() TaskFileRepository     { return r.files }
+func (r *repository) Channels() ChannelRepository       { return r.channels }
+func (r *repository) Credits() CreditRepository         { return r.credits }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -171,6 +178,7 @@ type txRepository struct {
 	tasks    TaskRepository
 	files    TaskFileRepository
 	channels ChannelRepository
+	credits  CreditRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -183,16 +191,18 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		tasks:    newTaskRepository(tx),
 		files:    newTaskFileRepository(tx),
 		channels: newChannelRepository(tx),
+		credits:  newCreditRepository(tx),
 	}
 }
 
-func (r *txRepository) Users() UserRepository        { return r.users }
-func (r *txRepository) Sessions() SessionRepository   { return r.sessions }
+func (r *txRepository) Users() UserRepository            { return r.users }
+func (r *txRepository) Sessions() SessionRepository       { return r.sessions }
 func (r *txRepository) UserConfigs() UserConfigRepository { return r.configs }
-func (r *txRepository) Plans() PlanRepository         { return r.plans }
-func (r *txRepository) Tasks() TaskRepository         { return r.tasks }
-func (r *txRepository) TaskFiles() TaskFileRepository { return r.files }
-func (r *txRepository) Channels() ChannelRepository    { return r.channels }
+func (r *txRepository) Plans() PlanRepository             { return r.plans }
+func (r *txRepository) Tasks() TaskRepository             { return r.tasks }
+func (r *txRepository) TaskFiles() TaskFileRepository     { return r.files }
+func (r *txRepository) Channels() ChannelRepository       { return r.channels }
+func (r *txRepository) Credits() CreditRepository         { return r.credits }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.
