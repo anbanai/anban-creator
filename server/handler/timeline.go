@@ -7,19 +7,23 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
+	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 )
 
 // TimelineItem represents a unified item in the timeline view.
 type TimelineItem struct {
-	ID           string     `json:"id"`
-	Type         string     `json:"type"`          // "task" or "plan"
-	ContentType  string     `json:"content_type"`  // "rednote", "article", "xls"
-	Title        string     `json:"title"`
-	Status       string     `json:"status"`
-	ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
-	CompletedAt  *time.Time `json:"completed_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID          string     `json:"id"`
+	Type        string     `json:"type"`          // "task" or "plan"
+	ContentType string     `json:"content_type"`  // "rednote", "article", "xls"
+	Title       string     `json:"title"`
+	Status      string     `json:"status"`
+	ChannelID   string     `json:"channel_id,omitempty"`
+	ChannelName string     `json:"channel_name,omitempty"`
+	Platform    string     `json:"platform,omitempty"`
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 // TimelineHandler handles the timeline API endpoint.
@@ -62,8 +66,23 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	to = to.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
 
 	channelID := c.Query("channel_id", "")
+	itemType := c.Query("item_type", "")       // "task" or "plan"
+	contentType := c.Query("content_type", "") // "article", "xls", "rednote"
+	statusFilter := c.Query("status", "")      // any valid task or plan status
 
 	ctx := c.Context()
+
+	// Fetch all user's channels once for lookup.
+	channels, err := h.repo.Channels().ListByUserID(ctx, userID, repository.ChannelListOptions{})
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to fetch channels for timeline")
+		// Non-fatal: proceed without channel info.
+	}
+	channelMap := make(map[string]*model.Channel)
+	for _, ch := range channels {
+		channelMap[ch.ID] = ch
+	}
+
 	var items []TimelineItem
 
 	// 1. Past tasks within the date range (scoped to user at query level).
@@ -81,12 +100,20 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 		if title == "" {
 			title = t.Type + " task"
 		}
+		var channelName, platform string
+		if ch, ok := channelMap[t.ChannelID]; ok {
+			channelName = ch.Name
+			platform = ch.Platform
+		}
 		items = append(items, TimelineItem{
 			ID:          t.ID,
 			Type:        "task",
 			ContentType: t.Type,
 			Title:       title,
 			Status:      t.Status,
+			ChannelID:   t.ChannelID,
+			ChannelName: channelName,
+			Platform:    platform,
 			CompletedAt: t.CompletedAt,
 			CreatedAt:   t.CreatedAt,
 		})
@@ -107,12 +134,20 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 				if title == "" {
 					title = p.Type + " plan"
 				}
+				var channelName, platform string
+				if ch, ok := channelMap[p.ChannelID]; ok {
+					channelName = ch.Name
+					platform = ch.Platform
+				}
 				items = append(items, TimelineItem{
 					ID:          p.ID,
 					Type:        "plan",
 					ContentType: p.Type,
 					Title:       title,
 					Status:      p.Status,
+					ChannelID:   p.ChannelID,
+					ChannelName: channelName,
+					Platform:    platform,
 					ScheduledAt: p.NextRunAt,
 					CreatedAt:   p.CreatedAt,
 				})
@@ -141,15 +176,41 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 			if title == "" {
 				title = t.Type + " task"
 			}
+			var channelName, platform string
+			if ch, ok := channelMap[t.ChannelID]; ok {
+				channelName = ch.Name
+				platform = ch.Platform
+			}
 			items = append(items, TimelineItem{
 				ID:          t.ID,
 				Type:        "task",
 				ContentType: t.Type,
 				Title:       title,
 				Status:      t.Status,
+				ChannelID:   t.ChannelID,
+				ChannelName: channelName,
+				Platform:    platform,
 				CreatedAt:   t.CreatedAt,
 			})
 		}
+	}
+
+	// Apply server-side filters.
+	if itemType != "" || contentType != "" || statusFilter != "" {
+		filtered := make([]TimelineItem, 0, len(items))
+		for _, item := range items {
+			if itemType != "" && item.Type != itemType {
+				continue
+			}
+			if contentType != "" && item.ContentType != contentType {
+				continue
+			}
+			if statusFilter != "" && item.Status != statusFilter {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		items = filtered
 	}
 
 	if items == nil {

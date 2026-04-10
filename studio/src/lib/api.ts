@@ -203,8 +203,12 @@ export interface TimelineItem {
   content_type: TaskType | PlanType
   title: string
   status: TaskStatus | PlanStatus
+  channel_id?: string
+  channel_name?: string
+  platform?: string
   scheduled_at: string
   completed_at: string
+  created_at: string
   plan_id?: number
   task_id?: string
   progress?: number
@@ -380,8 +384,13 @@ export const api = {
 
   // Timeline
   timeline: {
-    get: (from: string, to: string) =>
-      unwrap<TimelineResponse>(http.get('/timeline', { params: { from, to } })),
+    get: (from: string, to: string, filters?: {
+      item_type?: string
+      content_type?: string
+      status?: string
+      channel_id?: string
+    }) =>
+      unwrap<TimelineResponse>(http.get('/timeline', { params: { from, to, ...filters } })),
   },
 
   // Channels

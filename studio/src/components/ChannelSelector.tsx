@@ -40,10 +40,12 @@ export function ChannelSelector({ value, onChange, platform }: ChannelSelectorPr
     <select
       value={value}
       onChange={e => {
-        const ch = channels.find(c => c.id === e.target.value)
+        const val = e.target.value
+        if (!val) { onChange('', ''); return }
+        const ch = channels.find(c => c.id === val)
         if (ch) onChange(ch.id, ch.platform)
       }}
-      className="w-full rounded-lg border border-input bg-secondary px-3 py-2 text-sm text-foreground transition-colors focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+      className="w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
     >
       <option value="">选择频道...</option>
       {Object.entries(groups).map(([label, items]) => (

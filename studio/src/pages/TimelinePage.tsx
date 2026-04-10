@@ -1,40 +1,36 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Calendar, Loader2, RefreshCw } from 'lucide-react'
 import PageHeader from '@/components/layout/PageHeader'
 import { api, type TimelineItem } from '@/lib/api'
-import { taskStatusLabel, planStatusLabel, contentTypeLabel, timelineItemTypeLabel, formatDateLabelCN, formatMonthCN, formatTimeCN } from '@/lib/labels'
+import {
+  taskStatusLabel,
+  planStatusLabel,
+  contentTypeLabel,
+  timelineItemTypeLabel,
+  contentTypeFilterOptions,
+  timelineItemTypeOptions,
+  timelineStatusOptions,
+  timelineSortOptions,
+  formatDateLabelCN,
+  formatMonthCN,
+  formatTimeCN,
+  formatDateYMD,
+  getWeekRange,
+} from '@/lib/labels'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Input } from '@/components/ui/Input'
 import EmptyState from '@/components/EmptyState'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { CalendarRangePicker } from '@/components/ui/Calendar'
+import { ChannelSelector } from '@/components/ChannelSelector'
 
-type ViewMode = 'day' | 'week' | 'month'
+// --- Helpers ---
 
-function getDateRange(mode: ViewMode): { from: string; to: string } {
-  const now = new Date()
-  const from = new Date(now)
-  from.setDate(now.getDate() - 1)
-
-  if (mode === 'day') {
-    const to = new Date(from)
-    to.setDate(from.getDate() + 2)
-    return { from: formatDate(from), to: formatDate(to) }
-  }
-  if (mode === 'week') {
-    const to = new Date(from)
-    to.setDate(from.getDate() + 7)
-    return { from: formatDate(from), to: formatDate(to) }
-  }
-  const to = new Date(from)
-  to.setDate(from.getDate() + 30)
-  return { from: formatDate(from), to: formatDate(to) }
-}
-
-function formatDate(d: Date): string {
-  return d.toISOString().split('T')[0]
+function getDefaultRange(): { from: string; to: string } {
+  return getWeekRange(new Date())
 }
 
 function statusBadge(status: string, type: string) {
@@ -51,53 +47,96 @@ function statusBadge(status: string, type: string) {
 }
 
 const getItemDate = (item: TimelineItem) => {
-  return item.scheduled_at || new Date().toISOString()
+  return item.scheduled_at || item.completed_at || item.created_at || new Date().toISOString()
 }
 
-interface GroupedItems {
-  [dateKey: string]: TimelineItem[]
-}
+// --- Interfaces ---
 
 interface MonthGroup {
   month: string
   dates: { dateKey: string; label: string; items: TimelineItem[] }[]
 }
 
+// --- Component ---
+
 export default function TimelinePage() {
-  const [searchParams] = useSearchParams()
-  const initialMode: ViewMode = (searchParams.get('mode') as ViewMode) || 'week'
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const [viewMode, setViewMode] = useState<ViewMode>(initialMode)
-  const [customFrom, setCustomFrom] = useState('')
-  const [customTo, setCustomTo] = useState('')
+  // Read filter state from URL params
+  const [calendarOpen, setCalendarOpen] = useState(false)
 
+  const dateFrom = searchParams.get('from') || ''
+  const dateTo = searchParams.get('to') || ''
+  const itemType = searchParams.get('item_type') || ''
+  const contentType = searchParams.get('content_type') || ''
+  const status = searchParams.get('status') || ''
+  const channelId = searchParams.get('channel_id') || ''
+  const sort = searchParams.get('sort') || 'date_asc'
+
+  // Derived date range
   const dateRange = useMemo(() => {
-    if (customFrom && customTo) {
-      return { from: customFrom, to: customTo }
+    if (dateFrom && dateTo) {
+      return { from: dateFrom, to: dateTo }
     }
-    return getDateRange(viewMode)
-  }, [viewMode, customFrom, customTo])
+    return getDefaultRange()
+  }, [dateFrom, dateTo])
 
+  const hasCustomDates = !!(dateFrom && dateTo)
+
+  // Update URL params
+  const updateFilter = useCallback((key: string, value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (value) {
+        next.set(key, value)
+      } else {
+        next.delete(key)
+      }
+      return next
+    })
+  }, [setSearchParams])
+
+  // Data fetching with filters
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['timeline', dateRange.from, dateRange.to],
-    queryFn: () => api.timeline.get(dateRange.from, dateRange.to),
+    queryKey: ['timeline', dateRange.from, dateRange.to, itemType, contentType, status, channelId],
+    queryFn: () =>
+      api.timeline.get(dateRange.from, dateRange.to, {
+        item_type: itemType || undefined,
+        content_type: contentType || undefined,
+        status: status || undefined,
+        channel_id: channelId || undefined,
+      }),
     refetchInterval: 10000,
   })
 
   const items = data?.items ?? []
 
+  // Sort items
+  const sortedItems = useMemo(() => {
+    const sorted = [...items]
+    switch (sort) {
+      case 'date_desc':
+        sorted.sort((a, b) => new Date(getItemDate(b)).getTime() - new Date(getItemDate(a)).getTime())
+        break
+      case 'status':
+        sorted.sort((a, b) => a.status.localeCompare(b.status))
+        break
+      case 'title':
+        sorted.sort((a, b) => a.title.localeCompare(b.title))
+        break
+      default: // date_asc
+        sorted.sort((a, b) => new Date(getItemDate(a)).getTime() - new Date(getItemDate(b)).getTime())
+    }
+    return sorted
+  }, [items, sort])
+
+  // Group by month/date
   const grouped = useMemo((): MonthGroup[] => {
-    const byDate: GroupedItems = {}
-    for (const item of items) {
+    const byDate: Record<string, TimelineItem[]> = {}
+    for (const item of sortedItems) {
       const dateKey = getItemDate(item).split('T')[0]
       if (!byDate[dateKey]) byDate[dateKey] = []
       byDate[dateKey].push(item)
-    }
-
-    for (const key of Object.keys(byDate)) {
-      byDate[key].sort((a, b) =>
-        new Date(getItemDate(a)).getTime() - new Date(getItemDate(b)).getTime()
-      )
     }
 
     const monthMap: Record<string, { dateKey: string; label: string; items: TimelineItem[] }[]> = {}
@@ -114,64 +153,130 @@ export default function TimelinePage() {
     }
 
     return Object.entries(monthMap).map(([month, dates]) => ({ month, dates }))
-  }, [items])
+  }, [sortedItems])
 
   const hasRunningItems = items.some(
     (i) => i.type === 'task' && i.status === 'running'
   )
 
-  const viewModeLabels: Record<string, string> = { day: '日', week: '周', month: '月' }
+  // Format the date range display
+  const dateRangeLabel = useMemo(() => {
+    if (!hasCustomDates) return '本周'
+    const from = new Date(dateRange.from + 'T00:00:00')
+    const to = new Date(dateRange.to + 'T00:00:00')
+    const fmt = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`
+    return from.getTime() === to.getTime()
+      ? fmt(from)
+      : `${fmt(from)} - ${fmt(to)}`
+  }, [dateRange, hasCustomDates])
 
   return (
     <div className="space-y-6">
       <PageHeader title="时间线" description="你的内容排期日历。">
-        <div className="flex items-center gap-2">
-          {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
-            <Button
-              key={mode}
-              variant={viewMode === mode && !customFrom ? 'default' : 'secondary'}
-              size="sm"
-              onClick={() => {
-                setViewMode(mode)
-                setCustomFrom('')
-                setCustomTo('')
-              }}
-            >
-              {viewModeLabels[mode]}
-            </Button>
-          ))}
-        </div>
+        <Button variant="secondary" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="h-3.5 w-3.5" />
+          刷新
+        </Button>
       </PageHeader>
 
-      {/* Custom date range */}
+      {/* Filter Bar */}
       <Card>
-        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-end">
-          <Input
-            label="开始"
-            type="date"
-            value={customFrom}
-            onChange={(e) => setCustomFrom(e.target.value)}
-            className="sm:max-w-[180px]"
-          />
-          <Input
-            label="结束"
-            type="date"
-            value={customTo}
-            onChange={(e) => setCustomTo(e.target.value)}
-            className="sm:max-w-[180px]"
-          />
-          {(customFrom || customTo) && (
-            <Button variant="ghost" size="sm" onClick={() => { setCustomFrom(''); setCustomTo('') }}>
-              清除
+        <div className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:flex-wrap">
+          {/* Date Range Picker */}
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger
+              render={
+                <Button variant="outline" size="sm" className="gap-1.5 min-w-[140px]">
+                  <Calendar className="size-3.5" />
+                  {dateRangeLabel}
+                </Button>
+              }
+            />
+            <PopoverContent align="start" side="bottom" className="p-0 border-0 bg-transparent shadow-none">
+              <CalendarRangePicker
+                value={hasCustomDates ? { from: dateRange.from, to: dateRange.to } : null}
+                onChange={(range) => {
+                  if (range) {
+                    updateFilter('from', range.from)
+                    updateFilter('to', range.to)
+                  } else {
+                    updateFilter('from', '')
+                    updateFilter('to', '')
+                  }
+                }}
+                onClose={() => setCalendarOpen(false)}
+              />
+            </PopoverContent>
+          </Popover>
+
+          {/* Item Type Filter */}
+          <select
+            value={itemType}
+            onChange={(e) => updateFilter('item_type', e.target.value)}
+            className="h-7 rounded-md border border-input bg-transparent px-2 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
+          >
+            {timelineItemTypeOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+
+          {/* Content Type Filter */}
+          <select
+            value={contentType}
+            onChange={(e) => updateFilter('content_type', e.target.value)}
+            className="h-7 rounded-md border border-input bg-transparent px-2 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
+          >
+            {contentTypeFilterOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+
+          {/* Status Filter */}
+          <select
+            value={status}
+            onChange={(e) => updateFilter('status', e.target.value)}
+            className="h-7 rounded-md border border-input bg-transparent px-2 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
+          >
+            {timelineStatusOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+
+          {/* Channel Filter */}
+          <div className="w-36">
+            <ChannelSelector
+              value={channelId}
+              onChange={(id) => updateFilter('channel_id', id)}
+            />
+          </div>
+
+          {/* Sort */}
+          <select
+            value={sort}
+            onChange={(e) => updateFilter('sort', e.target.value)}
+            className="h-7 rounded-md border border-input bg-transparent px-2 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
+          >
+            {timelineSortOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+
+          {/* Clear all filters */}
+          {(itemType || contentType || status || channelId || hasCustomDates) && (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                setSearchParams({})
+              }}
+            >
+              清除筛选
             </Button>
           )}
-          <Button variant="secondary" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            刷新
-          </Button>
         </div>
       </Card>
 
+      {/* Content */}
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -205,7 +310,7 @@ export default function TimelinePage() {
                     <div className="space-y-2">
                       {dateGroup.items.map((item) => {
                         const linkTo = item.type === 'plan'
-                          ? `/plans`
+                          ? `/plans?highlight=${item.id}`
                           : `/tasks/${item.id}`
 
                         return (
@@ -216,7 +321,7 @@ export default function TimelinePage() {
                             <Link to={linkTo} className="block">
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex flex-wrap items-center gap-1.5">
                                     <span className="text-xs text-muted-foreground">
                                       {formatTimeCN(getItemDate(item))}
                                     </span>
@@ -226,6 +331,11 @@ export default function TimelinePage() {
                                     <Badge variant="outline" className="text-[10px]">
                                       {timelineItemTypeLabel[item.type] || item.type}
                                     </Badge>
+                                    {item.channel_name && (
+                                      <Badge variant="secondary" className="text-[10px]">
+                                        {item.channel_name}
+                                      </Badge>
+                                    )}
                                     {item.type === 'task' && item.status === 'running' && (
                                       <Badge variant="warning" className="text-[10px]">
                                         {item.progress ?? 0}%
