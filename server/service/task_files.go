@@ -90,16 +90,12 @@ func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workD
 		if err != nil {
 			return err
 		}
+		// Skip config directories entirely to avoid uploading settings.json etc.
 		if d.IsDir() {
-			return nil
-		}
-
-		// Skip the .anbanwriter config directory (settings.json, etc.).
-		if strings.Contains(path, filepath.Join(workDir, ".anbanwriter")) {
-			return nil
-		}
-		// Skip the .claude config directory.
-		if strings.Contains(path, filepath.Join(workDir, ".claude")) {
+			name := d.Name()
+			if name == ".anbanwriter" || name == ".claude" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 

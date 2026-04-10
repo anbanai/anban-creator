@@ -141,6 +141,8 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 	// Load the anbanwriter plugin (agents + skills).
 	if e.pluginDir != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithLocalPlugin(e.pluginDir))
+	} else {
+		e.logger.Warn().Msg("plugin_dir is empty; agent execution will likely fail without plugin definitions")
 	}
 
 	// Sandbox isolation (recommended in k8s).

@@ -67,20 +67,6 @@ storage:
   local_data_dir: "./data/files"  # Local provider: where to store files
 
 # ---------------------------------------------------------------------------
-# MCP: Model Context Protocol endpoint configuration
-# Optional. The MCP endpoint (/api/v1/mcp/tools) supports two auth methods:
-#   1. JWT Bearer token (standard user authentication)
-#   2. X-API-Key header (set api_key here to enable)
-#
-# When api_key is empty, only JWT authentication is available.
-# When api_key is set, Claude Code can connect using the X-API-Key header.
-# ---------------------------------------------------------------------------
-mcp:
-  api_key: ""               # Server-level API key for Claude Code integration.
-                             # Set via ANBAN_SERVER_MCP_API_KEY env var.
-                             # Generate with: openssl rand -hex 32
-
-# ---------------------------------------------------------------------------
 # Image API: Global image generation API configuration
 # Shared across all channels. Supports cover and content image generation.
 # Provider: openai, gemini, openrouter, volcengine

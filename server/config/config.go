@@ -20,7 +20,6 @@ type Config struct {
 	JWT      JWTConfig      `yaml:"jwt"`
 	WeChat   WeChatConfig   `yaml:"wechat"`
 	Storage  StorageConfig  `yaml:"storage"`
-	MCP      MCPConfig      `yaml:"mcp"`
 	ImageAPI ImageAPIConfig `yaml:"image_api"`
 	Claude   ClaudeConfig   `yaml:"claude"`
 }
@@ -65,14 +64,6 @@ type StorageConfig struct {
 	Region          string `yaml:"region"`
 	CustomDomain    string `yaml:"custom_domain"`     // Optional CDN domain for public file URLs
 	LocalDataDir    string `yaml:"local_data_dir"`    // Default "./data/files"
-}
-
-// MCPConfig holds configuration for the MCP (Model Context Protocol) endpoint.
-type MCPConfig struct {
-	// APIKey is a server-level API key for Claude Code integration.
-	// When set, the MCP endpoint accepts X-API-Key header authentication
-	// alongside the standard JWT Bearer token.
-	APIKey string `yaml:"api_key"`
 }
 
 // SizesConfig holds per-platform image size defaults (ratio:tier format, e.g. "16:9", "3:4:4K").
@@ -270,10 +261,6 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "STORAGE_LOCAL_DATA_DIR"); v != "" {
 		c.Storage.LocalDataDir = v
-	}
-
-	if v := os.Getenv(prefix + "MCP_API_KEY"); v != "" {
-		c.MCP.APIKey = v
 	}
 
 	if v := os.Getenv(prefix + "CLAUDE_PLUGIN_DIR"); v != "" {

@@ -24,8 +24,9 @@ COPY --from=builder /anbanwriter-server /app/anbanwriter-server
 # Install the anbanwriter CLI binary (used by agents via Bash tool).
 COPY --from=builder /anbanwriter /app/anbanwriter
 
-# Install the anbanwriter plugin (agents, skills, hooks).
+# Install the anbanwriter plugin (agents, skills, hooks, manifest).
 COPY claudecode/ /app/claudecode/
+COPY .claude-plugin/ /app/.claude-plugin/
 COPY themes/ /app/themes/
 COPY writers/ /app/writers/
 
