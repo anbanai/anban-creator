@@ -104,6 +104,33 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	// Success.
 	s.logger.Info().Str("task_id", taskID).Str("work_dir", result.WorkDir).Msg("task completed successfully")
+
+	// Verify workspace has meaningful output files.
+	if result.WorkDir != "" {
+		if entries, readErr := os.ReadDir(result.WorkDir); readErr == nil {
+			meaningfulFiles := 0
+			for _, e := range entries {
+				if e.IsDir() && (e.Name() == ".anbanwriter" || e.Name() == ".claude") {
+					continue
+				}
+				if !e.IsDir() {
+					meaningfulFiles++
+				}
+			}
+			if meaningfulFiles == 0 {
+				s.logger.Warn().
+					Str("task_id", taskID).
+					Str("work_dir", result.WorkDir).
+					Msg("workspace contains no output files after execution; agent may not have produced content")
+			} else {
+				s.logger.Info().
+					Str("task_id", taskID).
+					Int("file_count", meaningfulFiles).
+					Msg("workspace contains output files")
+			}
+		}
+	}
+
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to completed")
 	}
@@ -116,6 +143,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		if err := s.UploadTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("file upload failed")
 		}
+	} else {
+		s.logger.Warn().Str("task_id", taskID).Msg("no work directory in result, skipping file upload")
 	}
 
 	return nil

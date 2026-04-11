@@ -79,7 +79,10 @@ func determineFileRole(filename, mimeType string) string {
 // cannot be read at all.
 func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workDir string) error {
 	if s.store == nil {
-		s.logger.Warn().Msg("no storage provider configured, skipping file upload")
+		s.logger.Warn().
+			Str("task_id", taskID).
+			Str("work_dir", workDir).
+			Msg("no storage provider configured, skipping file upload")
 		return nil
 	}
 

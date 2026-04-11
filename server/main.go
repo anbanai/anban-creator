@@ -132,6 +132,10 @@ func main() {
 
 	// 12. Create agent executor.
 	agentExecutor := agent.NewExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox)
+	log.Info().
+		Str("plugin_dir", cfg.Claude.PluginDir).
+		Bool("sandbox", cfg.Claude.Sandbox).
+		Msg("agent executor created")
 
 	// 13. Create services.
 	var planSvc *service.PlanService

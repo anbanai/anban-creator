@@ -67,10 +67,13 @@ type ExecutionOptions struct {
 
 // ExecutionResult captures the outcome of an agent execution.
 type ExecutionResult struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
-	WorkDir string `json:"work_dir,omitempty"`
-	LogText string `json:"log_text,omitempty"`
+	Success    bool   `json:"success"`
+	Error      string `json:"error,omitempty"`
+	WorkDir    string `json:"work_dir,omitempty"`
+	LogText    string `json:"log_text,omitempty"`
+	NumTurns   int    `json:"num_turns,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+	DurationMs int    `json:"duration_ms,omitempty"`
 }
 
 // Execute runs the Claude Code agent for the given task.
@@ -159,6 +162,8 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 	// 7. Execute via SDK with streaming.
 	var resultText string
 	var execErr error
+	var toolUseCount int
+	var resultMsg *claudecode.ResultMessage
 
 	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
 		if err := client.Query(ctx, userPrompt); err != nil {
@@ -179,6 +184,7 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 						}
 						resultText += b.Text
 					case *claudecode.ToolUseBlock:
+						toolUseCount++
 						if opts.OnProgress != nil {
 							e.logger.Debug().
 								Str("task_id", opts.Task.ID).
@@ -189,6 +195,7 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 					}
 				}
 			case *claudecode.ResultMessage:
+				resultMsg = m
 				if m.IsError {
 					errMsg := "unknown error"
 					if m.Result != nil {
@@ -205,6 +212,15 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 					execErr = fmt.Errorf("agent execution failed: %s", errMsg)
 					return execErr
 				}
+				// Log successful execution summary.
+				e.logger.Info().
+					Str("task_id", opts.Task.ID).
+					Str("subtype", m.Subtype).
+					Int("duration_ms", m.DurationMs).
+					Int("num_turns", m.NumTurns).
+					Int("tool_use_count", toolUseCount).
+					Str("session_id", m.SessionID).
+					Msg("agent execution completed")
 				return nil
 			}
 		}
@@ -222,19 +238,40 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 	}
 
 	if execErr != nil {
-		return &ExecutionResult{
+		result := &ExecutionResult{
 			Success: false,
 			Error:   execErr.Error(),
 			WorkDir: workDir,
 			LogText: resultText,
-		}, nil
+		}
+		if resultMsg != nil {
+			result.NumTurns = resultMsg.NumTurns
+			result.SessionID = resultMsg.SessionID
+			result.DurationMs = resultMsg.DurationMs
+		}
+		return result, nil
 	}
 
-	return &ExecutionResult{
+	// Log workspace contents for diagnostics.
+	if files, listErr := ListWorkDirFiles(workDir); listErr == nil {
+		e.logger.Info().
+			Str("task_id", opts.Task.ID).
+			Int("file_count", len(files)).
+			Interface("files", files).
+			Msg("workspace contents after execution")
+	}
+
+	result := &ExecutionResult{
 		Success: true,
 		WorkDir: workDir,
 		LogText: resultText,
-	}, nil
+	}
+	if resultMsg != nil {
+		result.NumTurns = resultMsg.NumTurns
+		result.SessionID = resultMsg.SessionID
+		result.DurationMs = resultMsg.DurationMs
+	}
+	return result, nil
 }
 
 // ListWorkDirFiles returns a summary of files in a task's work directory.

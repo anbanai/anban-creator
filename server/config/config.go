@@ -130,6 +130,7 @@ func NewConfig(path string) (*Config, error) {
 
 	cfg.applyDefaults()
 	cfg.applyEnvOverrides()
+	cfg.resolvePaths()
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -211,6 +212,19 @@ func (c *Config) applyDefaults() {
 	// Auto-detect plugin_dir by searching for claudecode/agents/.
 	if c.Claude.PluginDir == "" {
 		c.Claude.PluginDir = detectPluginDir()
+	}
+}
+
+// resolvePaths resolves relative paths to absolute. Must be called after both
+// applyDefaults and applyEnvOverrides so that env-var overrides are also resolved.
+func (c *Config) resolvePaths() {
+	// Resolve plugin_dir to absolute path if relative.
+	// The Claude Code CLI subprocess runs with CWD set to a temp directory,
+	// so relative paths like ".." would resolve incorrectly at execution time.
+	if c.Claude.PluginDir != "" && !filepath.IsAbs(c.Claude.PluginDir) {
+		if abs, err := filepath.Abs(c.Claude.PluginDir); err == nil {
+			c.Claude.PluginDir = abs
+		}
 	}
 }
 
@@ -385,6 +399,11 @@ func (c *Config) Validate() error {
 
 	if strings.TrimSpace(c.Claude.PluginDir) == "" {
 		errs = append(errs, "claude.plugin_dir is required for agent execution (set via config, ANBAN_SERVER_CLAUDE_PLUGIN_DIR env, or ensure claudecode/agents/ exists in a parent directory)")
+	} else {
+		agentsDir := filepath.Join(c.Claude.PluginDir, "claudecode", "agents")
+		if info, err := os.Stat(agentsDir); err != nil || !info.IsDir() {
+			errs = append(errs, fmt.Sprintf("claude.plugin_dir %q does not contain claudecode/agents/ directory (checked %q)", c.Claude.PluginDir, agentsDir))
+		}
 	}
 
 	if len(errs) > 0 {
