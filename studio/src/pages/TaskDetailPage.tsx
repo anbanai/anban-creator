@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -12,21 +12,19 @@ import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
 import { FilePreview } from '@/components/FilePreview'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN } from '@/lib/labels'
-
-function statusBadgeVariant(status: string) {
-  switch (status) {
-    case 'completed': return 'success'
-    case 'failed': return 'danger'
-    case 'running': return 'warning'
-    case 'cancelled': return 'neutral'
-    default: return 'neutral'
-  }
-}
+import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+
+  // Guard against /tasks/undefined from stale or malformed navigation.
+  useEffect(() => {
+    if (!id || id === 'undefined') {
+      navigate('/tasks', { replace: true })
+    }
+  }, [id, navigate])
+
   const queryClient = useQueryClient()
   const { token } = useAuth()
 
@@ -34,6 +32,8 @@ export default function TaskDetailPage() {
   const [sseError, setSseError] = useState<string | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const tokenRef = useRef(token)
+  tokenRef.current = token
 
   const { data: task, isLoading } = useQuery({
     queryKey: ['task', id],
@@ -69,13 +69,20 @@ export default function TaskDetailPage() {
     },
   })
 
-  const connectSSE = useCallback(async () => {
-    if (!id || !token) return
+  const connectSSE = async () => {
+    if (!id) return
+    const currentToken = tokenRef.current
+    if (!currentToken) return
+
+    // Abort any existing connection
+    if (abortRef.current) {
+      abortRef.current.abort()
+    }
     const controller = new AbortController()
     abortRef.current = controller
 
     try {
-      for await (const event of streamTaskProgress(id, token, controller.signal)) {
+      for await (const event of streamTaskProgress(id, currentToken, controller.signal)) {
         handleSSEEvent(event)
       }
     } catch (err) {
@@ -83,7 +90,7 @@ export default function TaskDetailPage() {
         setSseError('连接断开，正在刷新任务状态...')
       }
     }
-  }, [id, token])
+  }
 
   function handleSSEEvent(event: SSEEvent) {
     const parsed = typeof event.data === 'string'
@@ -123,9 +130,9 @@ export default function TaskDetailPage() {
     }
   }
 
-  // Connect SSE when task is running
+  // Connect SSE only when task status transitions to "running"
   useEffect(() => {
-    if (task?.status === 'running' && token) {
+    if (task?.status === 'running') {
       setSseLogs([])
       setSseError(null)
       connectSSE()
@@ -135,7 +142,8 @@ export default function TaskDetailPage() {
         abortRef.current.abort()
       }
     }
-  }, [task?.status, connectSSE, token])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.status])
 
   if (isLoading) {
     return (

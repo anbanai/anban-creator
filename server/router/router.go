@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -58,8 +59,22 @@ func NewRouter(svc *Services) *fiber.App {
 	// Request ID: inject X-Request-ID header into context.
 	app.Use(requestid.New())
 
-	// CORS: defaults allow all origins with standard methods.
-	app.Use(cors.New())
+	// CORS: configurable allowed origins. Defaults to localhost-only when empty.
+	var corsConfig cors.Config
+	if len(svc.Config.CORS.AllowedOrigins) > 0 {
+		corsConfig = cors.Config{
+			AllowOrigins: svc.Config.CORS.AllowedOrigins,
+		}
+	} else {
+		// Development default: dynamically allow any localhost origin.
+		corsConfig = cors.Config{
+			AllowOriginsFunc: func(origin string) bool {
+				return strings.HasPrefix(origin, "http://localhost") ||
+					strings.HasPrefix(origin, "http://127.0.0.1")
+			},
+		}
+	}
+	app.Use(cors.New(corsConfig))
 
 	// Security headers.
 	app.Use(helmet.New())
@@ -124,7 +139,9 @@ func NewRouter(svc *Services) *fiber.App {
 	// Public API group — /api/v1/auth
 	// ---------------------------------------------------------------------------
 
-	authPublic := app.Group("/api/v1/auth")
+	// Stricter rate limiter for auth endpoints (10 requests per minute per IP).
+	authRateLimit := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
+	authPublic := app.Group("/api/v1/auth", authRateLimit)
 	if svc.AuthHandler != nil {
 		authPublic.Post("/register", svc.AuthHandler.Register)
 		authPublic.Post("/login", svc.AuthHandler.Login)

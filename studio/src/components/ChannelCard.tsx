@@ -1,4 +1,5 @@
 import { type Channel, type ChannelStats } from '@/lib/api'
+import { platformLabels } from '@/lib/labels'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 
@@ -9,12 +10,6 @@ interface ChannelCardProps {
   onArchive?: (id: string) => void
   onRestore?: (id: string) => void
   onDelete?: (id: string) => void
-}
-
-const platformLabels: Record<string, string> = {
-  article: '公众号',
-  xls: '小绿书',
-  rednote: '小红书',
 }
 
 const platformBadgeVariant: Record<string, 'success' | 'info' | 'danger' | 'neutral'> = {

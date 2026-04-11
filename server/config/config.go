@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,8 @@ type Config struct {
 	ImageAPI ImageAPIConfig `yaml:"image_api"`
 	Claude   ClaudeConfig   `yaml:"claude"`
 	Credits  CreditsConfig  `yaml:"credits"`
+	CORS     CORSConfig     `yaml:"cors"`
+	Asynq    AsynqConfig    `yaml:"asynq"`
 }
 
 type ServerConfig struct {
@@ -99,6 +102,17 @@ type CreditsConfig struct {
 	DailySignIn int            `yaml:"daily_sign_in"` // credits awarded per daily sign-in (default 1024)
 	TaskCosts   map[string]int `yaml:"task_costs"`    // per-task-type costs, e.g. {"article": 500, "xls": 400, "rednote": 400}
 	AdminAPIKey string         `yaml:"admin_api_key"` // API key for admin credit grant endpoint
+}
+
+// CORSConfig holds Cross-Origin Resource Sharing configuration.
+// When AllowedOrigins is empty, only localhost origins are permitted (development default).
+type CORSConfig struct {
+	AllowedOrigins []string `yaml:"allowed_origins"`
+}
+
+// AsynqConfig holds Asynq task queue configuration.
+type AsynqConfig struct {
+	Concurrency int `yaml:"concurrency"` // default 3
 }
 
 // NewConfig loads configuration from a YAML file, applies defaults, then
@@ -187,6 +201,16 @@ func (c *Config) applyDefaults() {
 			"xls":     400,
 			"rednote": 400,
 		}
+	}
+
+	// Asynq defaults.
+	if c.Asynq.Concurrency == 0 {
+		c.Asynq.Concurrency = 3
+	}
+
+	// Auto-detect plugin_dir by searching for claudecode/agents/.
+	if c.Claude.PluginDir == "" {
+		c.Claude.PluginDir = detectPluginDir()
 	}
 }
 
@@ -293,6 +317,38 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv(prefix + "CREDITS_ADMIN_API_KEY"); v != "" {
 		c.Credits.AdminAPIKey = v
 	}
+
+	if v := os.Getenv(prefix + "ASYNQ_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Asynq.Concurrency = n
+		}
+	}
+}
+
+// detectPluginDir attempts to locate the anbanwriter project root directory
+// that contains claudecode/agents/. It searches upward from the current
+// working directory and the executable's directory.
+func detectPluginDir() string {
+	var candidates []string
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, wd)
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Dir(exe))
+	}
+	for _, dir := range candidates {
+		for i := 0; i < 5; i++ {
+			if info, err := os.Stat(filepath.Join(dir, "claudecode", "agents")); err == nil && info.IsDir() {
+				return dir
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return ""
 }
 
 // Validate checks that required configuration fields are set.
@@ -325,6 +381,10 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Storage.BucketName) == "" {
 			errs = append(errs, "storage.bucket_name is required when provider is \"oss\"")
 		}
+	}
+
+	if strings.TrimSpace(c.Claude.PluginDir) == "" {
+		errs = append(errs, "claude.plugin_dir is required for agent execution (set via config, ANBAN_SERVER_CLAUDE_PLUGIN_DIR env, or ensure claudecode/agents/ exists in a parent directory)")
 	}
 
 	if len(errs) > 0 {

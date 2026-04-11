@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -151,7 +152,7 @@ func TestBuildCustomAIPrompt(t *testing.T) {
 	if prompt == "" {
 		t.Error("expected non-empty prompt")
 	}
-	if !contains(prompt, "My custom style") {
+	if !strings.Contains(prompt, "My custom style") {
 		t.Error("expected custom prompt to be included")
 	}
 }

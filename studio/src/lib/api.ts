@@ -272,16 +272,71 @@ http.interceptors.request.use((config) => {
   return config
 })
 
-// Response interceptor: handle 401
+// Response interceptor: handle 401 with automatic token refresh
+let isRefreshing = false
+let refreshSubscribers: Array<(token: string) => void> = []
+
+function onTokenRefreshed(token: string) {
+  refreshSubscribers.forEach((cb) => cb(token))
+  refreshSubscribers = []
+}
+
+function addRefreshSubscriber(cb: (token: string) => void) {
+  refreshSubscribers.push(cb)
+}
+
 http.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('anbanwriter_token')
-      localStorage.removeItem('anbanwriter_refresh_token')
-      localStorage.removeItem('anbanwriter_user')
-      window.dispatchEvent(new CustomEvent('auth:token-expired'))
+  async (error) => {
+    const originalRequest = error.config
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      const refreshToken = localStorage.getItem('anbanwriter_refresh_token')
+
+      if (!refreshToken) {
+        localStorage.removeItem('anbanwriter_token')
+        localStorage.removeItem('anbanwriter_refresh_token')
+        localStorage.removeItem('anbanwriter_user')
+        window.dispatchEvent(new CustomEvent('auth:token-expired'))
+        return Promise.reject(error)
+      }
+
+      if (isRefreshing) {
+        // Queue this request to retry after the in-flight refresh completes
+        return new Promise((resolve) => {
+          addRefreshSubscriber((token: string) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`
+            resolve(http(originalRequest))
+          })
+        })
+      }
+
+      originalRequest._retry = true
+      isRefreshing = true
+
+      try {
+        const response = await api.auth.refresh(refreshToken)
+        const newToken = response.token
+
+        localStorage.setItem('anbanwriter_token', newToken)
+        localStorage.setItem('anbanwriter_refresh_token', response.refresh_token)
+        localStorage.setItem('anbanwriter_user', JSON.stringify(response.user))
+
+        onTokenRefreshed(newToken)
+
+        originalRequest.headers.Authorization = `Bearer ${newToken}`
+        return http(originalRequest)
+      } catch {
+        localStorage.removeItem('anbanwriter_token')
+        localStorage.removeItem('anbanwriter_refresh_token')
+        localStorage.removeItem('anbanwriter_user')
+        window.dispatchEvent(new CustomEvent('auth:token-expired'))
+        return Promise.reject(error)
+      } finally {
+        isRefreshing = false
+      }
     }
+
     return Promise.reject(error)
   },
 )
@@ -343,8 +398,10 @@ export const api = {
 
   // Tasks
   tasks: {
-    create: (data: CreateTaskRequest) =>
-      unwrap<Task>(http.post('/tasks', data)),
+    create: async (data: CreateTaskRequest): Promise<Task> => {
+      const result = await unwrap<Task | Task[]>(http.post('/tasks', data))
+      return Array.isArray(result) ? result[0] : result
+    },
 
     list: (params?: { offset?: number; limit?: number; status?: string; channel_id?: string }) =>
       unwrap<PaginatedResponse<Task>>(http.get('/tasks', { params })),

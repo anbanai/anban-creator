@@ -77,7 +77,9 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	// Store result.
 	resultJSON, _ := json.Marshal(result)
-	_ = s.repo.Tasks().UpdateResult(ctx, taskID, string(resultJSON))
+	if err := s.repo.Tasks().UpdateResult(ctx, taskID, string(resultJSON)); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to persist task result")
+	}
 
 	if execErr != nil {
 		s.logger.Error().Err(execErr).Str("task_id", taskID).Msg("task execution failed")
@@ -102,8 +104,12 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	// Success.
 	s.logger.Info().Str("task_id", taskID).Str("work_dir", result.WorkDir).Msg("task completed successfully")
-	_ = s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted)
-	_ = s.repo.Tasks().SetCompletedAt(ctx, taskID)
+	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to completed")
+	}
+	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
+	}
 
 	// Upload generated files to storage.
 	if result.WorkDir != "" {
@@ -167,8 +173,12 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			Int("retry_count", task.RetryCount).
 			Int("max_retries", task.MaxRetries).
 			Msg("task permanently failed after max retries")
-		_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error())
-		_ = s.repo.Tasks().SetCompletedAt(ctx, taskID)
+		if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
+		}
+		if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
+		}
 
 		// Refund credits for failed task.
 		if s.creditSvc != nil {
@@ -182,7 +192,9 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 
 	// Increment retry count.
 	task.RetryCount++
-	_ = s.repo.Tasks().Update(ctx, task)
+	if err := s.repo.Tasks().Update(ctx, task); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task retry count")
+	}
 
 	// Calculate backoff delay.
 	idx := task.RetryCount - 1
@@ -204,7 +216,13 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			"task_id": task.ID,
 			"user_id": task.UserID,
 		})
-		_ = s.enqueuer.EnqueueIn(TypeContentGenerate, payload, delay)
+		if err := s.enqueuer.EnqueueIn(TypeContentGenerate, payload, delay); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue retry, marking task as failed")
+			if updateErr := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "retry enqueue failed: "+err.Error()); updateErr != nil {
+				s.logger.Error().Err(updateErr).Str("task_id", taskID).Msg("failed to mark task as failed after enqueue failure")
+			}
+			return err
+		}
 	}
 
 	// Update status back to pending so it will be picked up.

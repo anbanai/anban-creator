@@ -26,27 +26,30 @@ import (
 type Service struct {
 	cfg *config.Config
 	log *zap.Logger
-	wc  *wechat.Wechat
+	oa  *officialaccount.OfficialAccount
 }
 
 // NewService 创建微信服务
 func NewService(cfg *config.Config, log *zap.Logger) *Service {
+	wc := wechat.NewWechat()
+	memory := wechatcache.NewMemory()
+	wechatCfg := &wechatconfig.Config{
+		AppID:     cfg.Wechat.AppID,
+		AppSecret: cfg.Wechat.Secret,
+		Cache:     memory,
+	}
+	oa := wc.GetOfficialAccount(wechatCfg)
+
 	return &Service{
 		cfg: cfg,
 		log: log,
-		wc:  wechat.NewWechat(),
+		oa:  oa,
 	}
 }
 
-// getOfficialAccount 获取公众号实例
+// getOfficialAccount 获取公众号实例（缓存在 Service 中，避免每次调用重新创建）
 func (s *Service) getOfficialAccount() *officialaccount.OfficialAccount {
-	memory := wechatcache.NewMemory()
-	wechatCfg := &wechatconfig.Config{
-		AppID:     s.cfg.Wechat.AppID,
-		AppSecret: s.cfg.Wechat.Secret,
-		Cache:     memory,
-	}
-	return s.wc.GetOfficialAccount(wechatCfg)
+	return s.oa
 }
 
 // UploadMaterialResult 上传素材结果
@@ -78,7 +81,7 @@ func (s *Service) UploadMaterial(filePath string) (*UploadMaterialResult, error)
 	duration := time.Since(startTime)
 	s.log.Debug("material uploaded",
 		zap.String("path", filePath),
-		zap.String("media_id", maskMediaID(mediaID)),
+		zap.String("media_id", MaskMediaID(mediaID)),
 		zap.Duration("duration", duration))
 
 	return &UploadMaterialResult{
@@ -108,7 +111,7 @@ func (s *Service) CreateDraft(articles []*draft.Article) (*CreateDraftResult, er
 
 	duration := time.Since(startTime)
 	s.log.Info("article draft created",
-		zap.String("media_id", maskMediaID(mediaID)),
+		zap.String("media_id", MaskMediaID(mediaID)),
 		zap.Duration("duration", duration))
 
 	// 构造草稿 URL
@@ -219,7 +222,7 @@ func (s *Service) CreateNewspicDraft(articles []NewspicArticle) (*CreateDraftRes
 
 	duration := time.Since(startTime)
 	s.log.Info("xls draft created",
-		zap.String("media_id", maskMediaID(resp.MediaID)),
+		zap.String("media_id", MaskMediaID(resp.MediaID)),
 		zap.Duration("duration", duration))
 
 	return &CreateDraftResult{
@@ -354,8 +357,8 @@ func (s *Service) GetAccessToken() (*AccessTokenResult, error) {
 	}, nil
 }
 
-// maskMediaID 遮蔽 media_id 用于日志
-func maskMediaID(id string) string {
+// MaskMediaID 遮蔽 media_id 用于日志
+func MaskMediaID(id string) string {
 	if id == "" || len(id) < 8 {
 		return "***"
 	}

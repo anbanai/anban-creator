@@ -3,6 +3,7 @@ package converter
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -30,7 +31,7 @@ func (p *imageProcessor) ExtractPlaceholders(html string) []ImagePlaceholder {
 
 	for _, match := range matches {
 		if len(match) >= 2 {
-			index := parseInt(match[1])
+			index, _ := strconv.Atoi(match[1])
 			placeholders = append(placeholders, ImagePlaceholder{
 				Index: index,
 				HTML:  match[0],
@@ -180,17 +181,4 @@ func (p *imageProcessor) ParseImageSyntax(markdown string) []ImageRef {
 	}
 
 	return images
-}
-
-// 辅助函数
-func parseInt(s string) int {
-	result := 0
-	for _, ch := range s {
-		if ch >= '0' && ch <= '9' {
-			result = result*10 + int(ch-'0')
-		} else {
-			break
-		}
-	}
-	return result
 }

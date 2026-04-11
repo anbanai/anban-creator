@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 
@@ -13,20 +14,25 @@ import (
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
+const planCheckerLockKey = "plan_checker:lock"
+const planCheckerLockTTL = 55 * time.Second
+
 // checkInterval is how often the plan checker runs.
 const checkInterval = 1 * time.Minute
 
 // StartPlanChecker runs a background goroutine that checks for plans whose
 // next_run_at has passed and triggers content generation tasks for them.
 // It runs on a 1-minute ticker and stops when the provided context is cancelled.
-func StartPlanChecker(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger) {
+// When Redis is available, it uses a distributed lock to prevent duplicate
+// task creation when multiple server instances are running.
+func StartPlanChecker(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger, rdb *redis.Client) {
 	logger.Info().Dur("interval", checkInterval).Msg("starting plan checker")
 
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
 	// Run once immediately on start.
-	checkAndTriggerPlans(ctx, repo, taskSvc, logger)
+	tryAcquireAndCheck(ctx, repo, taskSvc, logger, rdb)
 
 	for {
 		select {
@@ -34,9 +40,31 @@ func StartPlanChecker(ctx context.Context, repo repository.Repository, taskSvc *
 			logger.Info().Msg("plan checker stopped")
 			return
 		case <-ticker.C:
-			checkAndTriggerPlans(ctx, repo, taskSvc, logger)
+			tryAcquireAndCheck(ctx, repo, taskSvc, logger, rdb)
 		}
 	}
+}
+
+// tryAcquireAndCheck attempts to acquire a distributed lock via Redis SETNX
+// before running the plan checker. If Redis is unavailable or lock cannot be
+// acquired (another instance is processing), it skips this cycle.
+func tryAcquireAndCheck(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger, rdb *redis.Client) {
+	if rdb != nil {
+		// Try to acquire distributed lock.
+		acquired, err := rdb.SetNX(ctx, planCheckerLockKey, "locked", planCheckerLockTTL).Result()
+		if err != nil {
+			logger.Warn().Err(err).Msg("failed to acquire plan checker lock, skipping")
+			return
+		}
+		if !acquired {
+			logger.Debug().Msg("plan checker lock held by another instance, skipping")
+			return
+		}
+		// Ensure lock is released when done.
+		defer rdb.Del(ctx, planCheckerLockKey)
+	}
+
+	checkAndTriggerPlans(ctx, repo, taskSvc, logger)
 }
 
 // checkAndTriggerPlans queries all active plans that are due and creates

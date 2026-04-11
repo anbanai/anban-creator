@@ -10,6 +10,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Pre-compiled regexps for rednote content processing
+var (
+	reTag          = regexp.MustCompile(`#([^#\s][^\s#]*)`)
+	reImage        = regexp.MustCompile(`!\[([^\]]*)\]\([^\)]+\)`)
+	reLink         = regexp.MustCompile(`\[([^\]]+)\]\([^\)]+\)`)
+	reBold         = regexp.MustCompile(`\*\*([^\*]+)\*\*|__([^_]+)__`)
+	reItalic       = regexp.MustCompile(`\*([^\*]+)\*|_([^_]+)_`)
+	reCode         = regexp.MustCompile("`([^`]+)`")
+	reStrike       = regexp.MustCompile(`~~([^~]+)~~`)
+	reList         = regexp.MustCompile(`^[\s]*[-\*\d]+[\.\)]?\s*`)
+	reMultiSpace   = regexp.MustCompile(`\s+`)
+	reMultiNewline = regexp.MustCompile(`\n{3,}`)
+)
+
 // rednoteCmd 小红书发布相关命令组
 func rednoteCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -256,8 +270,7 @@ func parseXiaohongshuContent(content string) *XiaohongshuContent {
 func extractTags(text string) []string {
 	var tags []string
 	// 匹配 #中文 或 #english-tag 格式，但不匹配 ## Markdown 标题
-	re := regexp.MustCompile(`#([^#\s][^\s#]*)`)
-	matches := re.FindAllStringSubmatch(text, -1)
+	matches := reTag.FindAllStringSubmatch(text, -1)
 	for _, match := range matches {
 		if len(match) > 1 {
 			tag := strings.TrimSpace(match[1])
@@ -273,42 +286,34 @@ func extractTags(text string) []string {
 // removeTags 从文本中移除 # 标签
 func removeTags(text string) string {
 	// 移除 #标签 但保留其他内容
-	re := regexp.MustCompile(`#([^#\s][^\s#]*)`)
-	return strings.TrimSpace(re.ReplaceAllString(text, ""))
+	return strings.TrimSpace(reTag.ReplaceAllString(text, ""))
 }
 
 // markdownToPlain 将 Markdown 转换为纯文本
 func markdownToPlain(text string) string {
 	// 移除图片 ![alt](url)
-	imgRe := regexp.MustCompile(`!\[([^\]]*)\]\([^\)]+\)`)
-	text = imgRe.ReplaceAllString(text, "")
+	text = reImage.ReplaceAllString(text, "")
 
 	// 转换链接 [text](url) → text
-	linkRe := regexp.MustCompile(`\[([^\]]+)\]\([^\)]+\)`)
-	text = linkRe.ReplaceAllString(text, "$1")
+	text = reLink.ReplaceAllString(text, "$1")
 
 	// 转换加粗 **text** 或 __text__ → text
-	boldRe := regexp.MustCompile(`\*\*([^\*]+)\*\*|__([^_]+)__`)
-	text = boldRe.ReplaceAllString(text, "$1$2")
+	text = reBold.ReplaceAllString(text, "$1$2")
 
 	// 转换斜体 *text* 或 _text_ → text
-	italicRe := regexp.MustCompile(`\*([^\*]+)\*|_([^_]+)_`)
-	text = italicRe.ReplaceAllString(text, "$1$2")
+	text = reItalic.ReplaceAllString(text, "$1$2")
 
 	// 转换行内代码 `code` → code
-	codeRe := regexp.MustCompile("`([^`]+)`")
-	text = codeRe.ReplaceAllString(text, "$1")
+	text = reCode.ReplaceAllString(text, "$1")
 
 	// 转换删除线 ~~text~~ → text
-	strikeRe := regexp.MustCompile(`~~([^~]+)~~`)
-	text = strikeRe.ReplaceAllString(text, "$1")
+	text = reStrike.ReplaceAllString(text, "$1")
 
 	// 转换列表标记 - 或 * 或 1.
-	listRe := regexp.MustCompile(`^[\s]*[-\*\d]+[\.\)]?\s*`)
-	text = listRe.ReplaceAllString(text, "")
+	text = reList.ReplaceAllString(text, "")
 
 	// 清理多余的空格
-	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
+	text = reMultiSpace.ReplaceAllString(text, " ")
 
 	return strings.TrimSpace(text)
 }
@@ -316,7 +321,7 @@ func markdownToPlain(text string) string {
 // cleanContent 清理内容格式
 func cleanContent(content string) string {
 	// 移除多余的空行
-	content = regexp.MustCompile(`\n{3,}`).ReplaceAllString(content, "\n\n")
+	content = reMultiNewline.ReplaceAllString(content, "\n\n")
 
 	// 移除行首行尾空白
 	lines := strings.Split(content, "\n")

@@ -108,6 +108,18 @@ credits:
   admin_api_key: ""      # API key for admin credit grant endpoint (also via ANBAN_SERVER_CREDITS_ADMIN_API_KEY)
 
 # ---------------------------------------------------------------------------
+# CORS: Cross-Origin Resource Sharing configuration
+# When allowed_origins is empty, only localhost origins are permitted.
+# Set to your production domain(s) for deployed environments.
+# ---------------------------------------------------------------------------
+cors:
+  allowed_origins: []
+  # Examples:
+  # allowed_origins:
+  #   - "https://your-domain.com"
+  #   - "https://admin.your-domain.com"
+
+# ---------------------------------------------------------------------------
 # Claude: Configuration for Claude Code CLI agent execution
 # Required for agent execution. The env vars are passed to the CLI process.
 # ---------------------------------------------------------------------------

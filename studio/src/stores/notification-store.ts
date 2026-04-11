@@ -1,5 +1,9 @@
 import { create } from 'zustand'
 
+// NOTE: This store is a placeholder for client-side notification management.
+// Notifications are currently only populated locally via addNotification().
+// Server-sourced notifications are not yet wired in.
+
 export type NotificationType = 'task_completed' | 'task_failed' | 'plan_executed' | 'plan_paused'
 
 export interface Notification {

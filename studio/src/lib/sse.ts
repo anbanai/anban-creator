@@ -52,7 +52,13 @@ export async function* streamTaskProgress(
   })
 
   if (!response.ok) {
-    throw new Error(`SSE connection failed: ${response.status}`)
+    const body = await response.text().catch(() => '')
+    let detail = body
+    try {
+      const parsed = JSON.parse(body)
+      detail = parsed.msg || parsed.error || parsed.message || body
+    } catch {}
+    throw new Error(`SSE connection failed: ${response.status}${detail ? ` — ${detail}` : ''}`)
   }
 
   if (!response.body) {

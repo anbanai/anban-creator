@@ -426,7 +426,10 @@ func GenerateDigestFromContent(content string, maxLen int) string {
 
 	// 截取
 	if len(content) > maxLen {
-		content = content[:maxLen] + "..."
+		runes := []rune(content)
+		if len(runes) > maxLen {
+			content = string(runes[:maxLen]) + "..."
+		}
 	}
 
 	return content

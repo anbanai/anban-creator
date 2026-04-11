@@ -21,6 +21,24 @@ export const contentTypeLabel: Record<string, string> = {
   xls: '小绿书',
 }
 
+// 平台标签
+export const platformLabels: Record<string, string> = {
+  article: '公众号',
+  xls: '小绿书',
+  rednote: '小红书',
+}
+
+// 状态 Badge 变体
+export function statusBadgeVariant(status: string): 'success' | 'danger' | 'warning' | 'neutral' {
+  switch (status) {
+    case 'completed': return 'success'
+    case 'failed': return 'danger'
+    case 'running': return 'warning'
+    case 'cancelled': return 'neutral'
+    default: return 'neutral'
+  }
+}
+
 // 内容类型选项（用于 Select 组件）
 export const contentTypeOptions = [
   { value: 'rednote', label: '小红书' },

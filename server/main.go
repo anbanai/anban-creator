@@ -64,6 +64,7 @@ func main() {
 	log.Info().
 		Int("port", cfg.Server.Port).
 		Str("host", cfg.Server.Host).
+		Int("asynq_concurrency", cfg.Asynq.Concurrency).
 		Msg("config loaded")
 
 	// 4. Connect MySQL.
@@ -121,7 +122,7 @@ func main() {
 	}
 
 	// 10. Create WebSocket hub.
-	wsHub := handler.NewWebSocketHub()
+	wsHub := handler.NewWebSocketHub(jwtSvc)
 
 	// 11. Create auth handler.
 	var authHandler *handler.AuthHandler
@@ -185,7 +186,7 @@ func main() {
 	if repo != nil && taskSvc != nil {
 		schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 		defer schedulerCancel()
-		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log)
+		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log, rdb)
 	}
 
 	// 15.2 Start periodic workspace cleanup (every hour).
@@ -342,12 +343,12 @@ func startAsynqServer(taskSvc *service.TaskService, cfg *config.Config, log *zer
 		cfg.Redis.Addr,
 		cfg.Redis.Password,
 		cfg.Redis.DB,
-		1,
+		cfg.Asynq.Concurrency,
 		log,
 	)
 
 	go func() {
-		log.Info().Msg("starting Asynq task processor")
+		log.Info().Int("concurrency", cfg.Asynq.Concurrency).Msg("starting Asynq task processor")
 		if err := srv.Start(); err != nil {
 			log.Error().Err(err).Msg("Asynq server start error")
 		}

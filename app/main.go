@@ -59,37 +59,27 @@ func initStorage() {
 
 // initConfig 初始化配置（延迟加载，允许 help 命令无需配置）
 func initConfig() error {
-	if cfg != nil && log != nil {
-		return nil
-	}
-
-	var err error
-	cfg, err = config.Load()
-	if err != nil {
-		return err
-	}
-
-	log, err = initLogger()
-	if err != nil {
-		// 日志初始化失败不阻断命令，仅输出到 stderr（仅一次）
-		fmt.Fprintf(os.Stderr, "⚠️  日志初始化失败: %v\n", err)
-		// 创建 no-op logger
-		log = zap.NewNop()
-	}
-
-	initStorage()
-	return nil
+	return initConfigWithMode(false)
 }
 
 // initConfigMinimal 初始化配置（不验证微信账号）
 // 用于不需要微信 API 的命令（如 AI 提示词生成）
 func initConfigMinimal() error {
+	return initConfigWithMode(true)
+}
+
+// initConfigWithMode 统一的配置初始化（minimal 模式跳过微信账号验证）
+func initConfigWithMode(minimal bool) error {
 	if cfg != nil && log != nil {
 		return nil
 	}
 
 	var err error
-	cfg, err = config.LoadMinimal()
+	if minimal {
+		cfg, err = config.LoadMinimal()
+	} else {
+		cfg, err = config.Load()
+	}
 	if err != nil {
 		return err
 	}
@@ -141,10 +131,18 @@ Configuration:
 
 	if err := rootCmd.Execute(); err != nil {
 		responseError(err)
+		cleanup()
 		os.Exit(1)
 	}
 
-	// 确保日志写入文件
+	cleanup()
+}
+
+// cleanup 关闭数据库连接并刷新日志，确保资源正确释放
+func cleanup() {
+	if store != nil {
+		store.Close()
+	}
 	if log != nil {
 		_ = log.Sync()
 	}
@@ -168,7 +166,6 @@ func responseError(err error) {
 		response["hint"] = hint
 	}
 	printJSON(response)
-	os.Exit(1)
 }
 
 func printJSON(v any) {
@@ -177,14 +174,5 @@ func printJSON(v any) {
 	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(v); err != nil {
 		fmt.Fprintf(os.Stderr, "JSON encode error: %v\n", err)
-		os.Exit(1)
 	}
-}
-
-// maskMediaID 遮蔽 media_id 用于日志
-func maskMediaID(id string) string {
-	if len(id) < 8 {
-		return "***"
-	}
-	return id[:4] + "***" + id[len(id)-4:]
 }

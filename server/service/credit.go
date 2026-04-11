@@ -232,14 +232,16 @@ func (s *CreditService) RefundForTask(ctx context.Context, taskID string) error 
 
 // DeductBatch deducts the total cost for multiple tasks in a single atomic transaction.
 // It creates individual transaction records for each taskID.
-func (s *CreditService) DeductBatch(ctx context.Context, userID, taskType string, totalCost int, taskIDs []string) error {
+// If repo is nil, it uses the service's default repository (creating its own transaction).
+// If repo is provided, it operates within that repository's transaction context.
+func (s *CreditService) DeductBatch(ctx context.Context, userID, taskType string, totalCost int, taskIDs []string, repo ...repository.Repository) error {
 	if totalCost <= 0 || len(taskIDs) == 0 {
 		return ErrInvalidAmount
 	}
 
 	costPerTask := totalCost / len(taskIDs)
 
-	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+	deduct := func(txRepo repository.Repository) error {
 		newBalance, ok, err := txRepo.Users().DeductCredits(ctx, userID, totalCost)
 		if err != nil {
 			return fmt.Errorf("deduct credits: %w", err)
@@ -263,7 +265,14 @@ func (s *CreditService) DeductBatch(ctx context.Context, userID, taskType string
 			}
 		}
 		return nil
-	})
+	}
+
+	// If a repo is provided, use it directly (caller manages the transaction).
+	if len(repo) > 0 && repo[0] != nil {
+		return deduct(repo[0])
+	}
+	// Otherwise, create our own transaction.
+	return s.repo.WithTx(ctx, deduct)
 }
 
 // TaskCost returns the credit cost for a given task type.

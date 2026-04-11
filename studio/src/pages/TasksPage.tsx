@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Loader2, ClipboardList } from 'lucide-react'
-import { api, type TaskType, type CreateTaskRequest, type TaskStatus } from '@/lib/api'
+import { api, type TaskType, type CreateTaskRequest } from '@/lib/api'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/Input'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
-import { taskStatusLabel, contentTypeLabel, formatDateTimeCN } from '@/lib/labels'
+import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 
 const statusTabs: { label: string; value: string }[] = [
@@ -26,16 +26,6 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '失败', value: 'failed' },
   { label: '已取消', value: 'cancelled' },
 ]
-
-function statusBadgeVariant(status: TaskStatus) {
-  switch (status) {
-    case 'completed': return 'success'
-    case 'failed': return 'danger'
-    case 'running': return 'warning'
-    case 'cancelled': return 'neutral'
-    default: return 'neutral'
-  }
-}
 
 const taskCostMap: Record<string, number> = {
   article: 500,

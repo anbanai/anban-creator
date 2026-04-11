@@ -42,7 +42,11 @@ func NewAsynqClient(redisAddr, redisPassword string, redisDB int) *AsynqClient {
 
 // Enqueue creates an Asynq task and enqueues it.
 func (c *AsynqClient) Enqueue(taskType string, payload []byte) error {
-	_, err := c.client.Enqueue(asynq.NewTask(taskType, payload))
+	_, err := c.client.Enqueue(
+		asynq.NewTask(taskType, payload),
+		asynq.MaxRetry(3),
+		asynq.Timeout(30*time.Minute),
+	)
 	return err
 }
 
@@ -51,6 +55,8 @@ func (c *AsynqClient) EnqueueIn(taskType string, payload []byte, delay time.Dura
 	_, err := c.client.Enqueue(
 		asynq.NewTask(taskType, payload),
 		asynq.ProcessIn(delay),
+		asynq.MaxRetry(3),
+		asynq.Timeout(30*time.Minute),
 	)
 	return err
 }
@@ -131,6 +137,14 @@ func NewTaskProcessor(
 			Queues: map[string]int{
 				"default":  6,
 				"critical": 10,
+			},
+			RetryDelayFunc: func(n int, err error, task *asynq.Task) time.Duration {
+				// Exponential backoff: 10s, 20s, 40s, ... capped at 5 minutes.
+				delay := 10 * time.Second * time.Duration(1<<uint(n))
+				if delay > 5*time.Minute {
+					delay = 5 * time.Minute
+				}
+				return delay
 			},
 			LogLevel: asynq.InfoLevel,
 			ErrorHandler: asynq.ErrorHandlerFunc(func(ctx context.Context, t *asynq.Task, err error) {

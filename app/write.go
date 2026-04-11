@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -296,21 +297,19 @@ func generateCover(asst *writer.Assistant, req *writer.WriteRequest) (string, er
 
 // readLine 读取一行输入
 func readLine() string {
-	var line string
-	fmt.Scanln(&line)
-	return strings.TrimSpace(line)
+	scanner := bufio.NewScanner(os.Stdin)
+	if scanner.Scan() {
+		return strings.TrimSpace(scanner.Text())
+	}
+	return ""
 }
 
-// readMultiline 读取多行输入
+// readMultiline 读取多行输入（空行保留，Ctrl+D 结束）
 func readMultiline() string {
+	scanner := bufio.NewScanner(os.Stdin)
 	var lines []string
-	for {
-		var line string
-		_, err := fmt.Scanln(&line)
-		if err != nil {
-			break
-		}
-		lines = append(lines, line)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
 	}
 	return strings.Join(lines, "\n")
 }

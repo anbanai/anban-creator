@@ -3,6 +3,7 @@ package converter
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -145,7 +146,7 @@ func TestBuildCustomAIPrompt_AppendsRules(t *testing.T) {
 	if result == "" {
 		t.Error("expected non-empty result")
 	}
-	if !contains(result, "Use dark theme colors") {
+	if !strings.Contains(result, "Use dark theme colors") {
 		t.Error("expected custom prompt to be included")
 	}
 }

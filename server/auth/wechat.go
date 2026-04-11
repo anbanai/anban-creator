@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -37,7 +38,7 @@ func NewWeChatService(appID, appSecret string, logger *zerolog.Logger) *WeChatSe
 		appSecret: appSecret,
 		baseURL:   defaultWeChatAPIBase,
 		logger:    logger,
-		client:    &http.Client{},
+		client:    &http.Client{Timeout: 10 * time.Second},
 	}
 }
 

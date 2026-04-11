@@ -289,7 +289,7 @@ func processImages(result *converter.ConvertResult) error {
 
 		log.Info("image uploaded",
 			zap.Int("index", i),
-			zap.String("media_id", maskMediaID(uploadResult.MediaID)),
+			zap.String("media_id", wechat.MaskMediaID(uploadResult.MediaID)),
 			zap.String("wechat_url", uploadResult.WechatURL))
 	}
 
@@ -344,7 +344,7 @@ func createWeChatDraft(result *converter.ConvertResult, coverImagePath, markdown
 	if err != nil {
 		return fmt.Errorf("上传封面图片失败: %w", err)
 	}
-	log.Info("cover image uploaded", zap.String("media_id", maskMediaID(coverMediaID)))
+	log.Info("cover image uploaded", zap.String("media_id", wechat.MaskMediaID(coverMediaID)))
 
 	// 提取标题
 	title := extractTitle(markdown)
@@ -364,7 +364,7 @@ func createWeChatDraft(result *converter.ConvertResult, coverImagePath, markdown
 	}
 
 	log.Info("article draft created",
-		zap.String("media_id", maskMediaID(draftResult.MediaID)),
+		zap.String("media_id", wechat.MaskMediaID(draftResult.MediaID)),
 		zap.String("draft_url", draftResult.DraftURL))
 
 	return nil

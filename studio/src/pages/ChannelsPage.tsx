@@ -235,6 +235,19 @@ export default function ChannelsPage() {
   function closeModal() {
     setModalOpen(false)
     setEditingChannel(null)
+    form.reset({
+      platform: 'article',
+      name: '',
+      profile_url: '',
+      avatar_url: '',
+      wechat_app_id: '',
+      wechat_secret: '',
+      keywords: '',
+      positioning: '',
+      style: '',
+      theme: '',
+      author: '',
+    })
   }
 
   async function onSubmit(values: ChannelFormValues) {

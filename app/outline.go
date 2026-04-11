@@ -114,8 +114,6 @@ func outlineCmd() *cobra.Command {
 
 	cmd.MarkFlagRequired("topic")
 
-	_ = domain // domain is kept as a flag for future use
-
 	return cmd
 }
 

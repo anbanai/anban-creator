@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"github.com/royalrick/anbanwriter/server/model"
@@ -85,6 +86,10 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to create task")
 	}
 
+	// Return single task for quantity=1 (frontend expects Task, not Task[]).
+	if quantity == 1 && len(tasks) > 0 {
+		return Success(c, tasks[0])
+	}
 	return Success(c, tasks)
 }
 
@@ -118,9 +123,9 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 
 // GetByID handles GET /api/v1/tasks/:id.
 func (h *TaskHandler) GetByID(c fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
-		return Error(c, fiber.StatusBadRequest, "task id is required")
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	userID := GetUserID(c)
@@ -142,9 +147,9 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 
 // Cancel handles POST /api/v1/tasks/:id/cancel.
 func (h *TaskHandler) Cancel(c fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
-		return Error(c, fiber.StatusBadRequest, "task id is required")
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	userID := GetUserID(c)
@@ -171,9 +176,9 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 
 // GetFiles handles GET /api/v1/tasks/:id/files.
 func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
-		return Error(c, fiber.StatusBadRequest, "task id is required")
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	userID := GetUserID(c)
@@ -206,9 +211,9 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 	c.Set("Connection", "keep-alive")
 	c.Set("X-Accel-Buffering", "no")
 
-	taskID := c.Params("id")
-	if taskID == "" {
-		return Error(c, fiber.StatusBadRequest, "task id is required")
+	taskID, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	userID := GetUserID(c)
@@ -310,10 +315,13 @@ func (h *TaskHandler) verifyTaskOwnership(c fiber.Ctx, taskID string) (*model.Ta
 // DownloadFile handles GET /api/v1/tasks/:id/files/:fileId/download.
 // It streams the file content as an attachment download.
 func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
-	taskID := c.Params("id")
-	fileID := c.Params("fileId")
-	if taskID == "" || fileID == "" {
-		return Error(c, fiber.StatusBadRequest, "task id and file id are required")
+	taskID, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+	fileID, err := validateUUIDParam(c, "fileId")
+	if err != nil {
+		return err
 	}
 
 	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
@@ -351,9 +359,9 @@ func (h *TaskHandler) DownloadFile(c fiber.Ctx) error {
 // PreviewHTML handles GET /api/v1/tasks/:id/preview.
 // It finds the HTML file for the task and returns it as the response body.
 func (h *TaskHandler) PreviewHTML(c fiber.Ctx) error {
-	taskID := c.Params("id")
-	if taskID == "" {
-		return Error(c, fiber.StatusBadRequest, "task id is required")
+	taskID, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
@@ -403,9 +411,9 @@ func (h *TaskHandler) PreviewHTML(c fiber.Ctx) error {
 // DownloadZip handles GET /api/v1/tasks/:id/files/zip.
 // It creates a ZIP archive of all task files and sends it as a download.
 func (h *TaskHandler) DownloadZip(c fiber.Ctx) error {
-	taskID := c.Params("id")
-	if taskID == "" {
-		return Error(c, fiber.StatusBadRequest, "task id is required")
+	taskID, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
@@ -499,4 +507,17 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 	}
 
 	return c.SendFile(absPath)
+}
+
+// validateUUIDParam extracts and validates that a path parameter is a valid UUID.
+// Returns the UUID string or writes an error response and returns empty string.
+func validateUUIDParam(c fiber.Ctx, paramName string) (string, error) {
+	val := c.Params(paramName)
+	if val == "" {
+		return "", Error(c, fiber.StatusBadRequest, paramName+" is required")
+	}
+	if _, err := uuid.Parse(val); err != nil {
+		return "", Error(c, fiber.StatusBadRequest, "invalid "+paramName+" format")
+	}
+	return val, nil
 }

@@ -1,22 +1,50 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from 'next-themes'
-import { useState } from 'react'
+import React, { useState, Suspense } from 'react'
+import { Loader2 } from 'lucide-react'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { Toaster } from '@/components/ui/sonner'
 import AppLayout from '@/components/layout/AppLayout'
-import LoginPage from '@/pages/LoginPage'
-import RegisterPage from '@/pages/RegisterPage'
-import DashboardPage from '@/pages/DashboardPage'
-import TimelinePage from '@/pages/TimelinePage'
-import ChannelsPage from '@/pages/ChannelsPage'
-import PlansPage from '@/pages/PlansPage'
-import TasksPage from '@/pages/TasksPage'
-import TaskDetailPage from '@/pages/TaskDetailPage'
-import CreditsPage from '@/pages/CreditsPage'
-import SettingsPage from '@/pages/SettingsPage'
 import ShortcutHelp from '@/components/ShortcutHelp'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+
+// Lazy-loaded pages
+const LoginPage = React.lazy(() => import('@/pages/LoginPage'))
+const RegisterPage = React.lazy(() => import('@/pages/RegisterPage'))
+const DashboardPage = React.lazy(() => import('@/pages/DashboardPage'))
+const TimelinePage = React.lazy(() => import('@/pages/TimelinePage'))
+const ChannelsPage = React.lazy(() => import('@/pages/ChannelsPage'))
+const PlansPage = React.lazy(() => import('@/pages/PlansPage'))
+const TasksPage = React.lazy(() => import('@/pages/TasksPage'))
+const TaskDetailPage = React.lazy(() => import('@/pages/TaskDetailPage'))
+const CreditsPage = React.lazy(() => import('@/pages/CreditsPage'))
+const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
+
+function LoadingSpinner() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  )
+}
+
+function NotFoundPage() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="text-center">
+        <h1 className="text-6xl font-bold text-foreground">404</h1>
+        <p className="mt-4 text-muted-foreground">页面未找到</p>
+        <Link
+          to="/"
+          className="mt-6 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          返回首页
+        </Link>
+      </div>
+    </div>
+  )
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -53,7 +81,9 @@ function AppRoutes() {
         path="/login"
         element={
           <PublicRoute>
-            <LoginPage />
+            <Suspense fallback={<LoadingSpinner />}>
+              <LoginPage />
+            </Suspense>
           </PublicRoute>
         }
       />
@@ -61,7 +91,9 @@ function AppRoutes() {
         path="/register"
         element={
           <PublicRoute>
-            <RegisterPage />
+            <Suspense fallback={<LoadingSpinner />}>
+              <RegisterPage />
+            </Suspense>
           </PublicRoute>
         }
       />
@@ -73,16 +105,16 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<DashboardPage />} />
-        <Route path="timeline" element={<TimelinePage />} />
-        <Route path="channels" element={<ChannelsPage />} />
-        <Route path="plans" element={<PlansPage />} />
-        <Route path="tasks" element={<TasksPage />} />
-        <Route path="tasks/:id" element={<TaskDetailPage />} />
-        <Route path="credits" element={<CreditsPage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route index element={<Suspense fallback={<LoadingSpinner />}><DashboardPage /></Suspense>} />
+        <Route path="timeline" element={<Suspense fallback={<LoadingSpinner />}><TimelinePage /></Suspense>} />
+        <Route path="channels" element={<Suspense fallback={<LoadingSpinner />}><ChannelsPage /></Suspense>} />
+        <Route path="plans" element={<Suspense fallback={<LoadingSpinner />}><PlansPage /></Suspense>} />
+        <Route path="tasks" element={<Suspense fallback={<LoadingSpinner />}><TasksPage /></Suspense>} />
+        <Route path="tasks/:id" element={<Suspense fallback={<LoadingSpinner />}><TaskDetailPage /></Suspense>} />
+        <Route path="credits" element={<Suspense fallback={<LoadingSpinner />}><CreditsPage /></Suspense>} />
+        <Route path="settings" element={<Suspense fallback={<LoadingSpinner />}><SettingsPage /></Suspense>} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   )
 }

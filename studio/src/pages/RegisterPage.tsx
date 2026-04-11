@@ -23,9 +23,9 @@ export default function RegisterPage() {
       const response = await api.auth.register(values.email, values.password, values.nickname || undefined)
       login(response.token, response.refresh_token, response.user)
       navigate('/', { replace: true })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '注册失败，请重试。'
-      toast.error(message)
+    } catch (err: any) {
+      const msg = err?.response?.data?.msg || err?.message || '注册失败，请重试。'
+      toast.error(msg)
     }
   }
 

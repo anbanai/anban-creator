@@ -5,11 +5,11 @@ import "time"
 // Task represents a content generation task.
 type Task struct {
 	ID           string     `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID       string     `gorm:"type:char(36);index;not null" json:"user_id"`
+	UserID       string     `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
 	ChannelID    string     `gorm:"type:char(36);index" json:"channel_id"`
 	PlanID       *uint      `gorm:"index" json:"plan_id"`
 	Type         string     `gorm:"type:varchar(20);not null" json:"type"`
-	Status       string     `gorm:"type:varchar(20);default:pending" json:"status"`
+	Status       string     `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
 	Topic        string     `gorm:"type:varchar(500)" json:"topic"`
 	ProgressLog  string     `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Result       *string    `gorm:"type:json" json:"result,omitempty"`
@@ -19,7 +19,7 @@ type Task struct {
 	CleanedUpAt  *time.Time `gorm:"index" json:"cleaned_up_at"`
 	RetryCount   int        `gorm:"default:0" json:"retry_count"`
 	MaxRetries   int        `gorm:"default:3" json:"max_retries"`
-	CreatedAt    time.Time  `json:"created_at"`
+	CreatedAt    time.Time  `gorm:"index:idx_user_created,priority:2" json:"created_at"`
 	Plan         *Plan      `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
 }
 

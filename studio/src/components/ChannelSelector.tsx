@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { api, type Channel } from '@/lib/api'
+import { platformLabels } from '@/lib/labels'
 
 interface ChannelSelectorProps {
   value: string
@@ -7,24 +8,13 @@ interface ChannelSelectorProps {
   platform?: string
 }
 
-const platformLabels: Record<string, string> = {
-  article: '公众号',
-  xls: '小绿书',
-  rednote: '小红书',
-}
-
 export function ChannelSelector({ value, onChange, platform }: ChannelSelectorProps) {
-  const [channels, setChannels] = useState<Channel[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: channels = [], isLoading } = useQuery({
+    queryKey: ['channels', 'active', platform],
+    queryFn: () => api.channels.list({ status: 'active', platform }),
+  })
 
-  useEffect(() => {
-    api.channels.list({ status: 'active', platform }).then(data => {
-      setChannels(data)
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [platform])
-
-  if (loading) {
+  if (isLoading) {
     return <div className="h-10 animate-pulse rounded-lg bg-muted" />
   }
 

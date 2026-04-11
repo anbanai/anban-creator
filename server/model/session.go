@@ -6,8 +6,8 @@ import "time"
 type LoginSession struct {
 	ID           string    `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID       string    `gorm:"type:char(36);index;not null" json:"user_id"`
-	Token        string    `gorm:"type:text;not null" json:"-"`
-	RefreshToken string    `gorm:"type:text;not null" json:"-"`
+	Token        string    `gorm:"type:text;not null;index" json:"-"`
+	RefreshToken string    `gorm:"type:text;not null;index" json:"-"`
 	ExpiresAt    time.Time `gorm:"index;not null" json:"expires_at"`
 	CreatedAt    time.Time `json:"created_at"`
 	User         User      `gorm:"foreignKey:UserID" json:"user,omitempty"`

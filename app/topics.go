@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -66,11 +67,11 @@ Claude 代理会根据你的账号画像（关键词、领域）生成定制化�
 			// 从配置获取账号关键词，命令行关键词优先追加
 			accountKeywords := cfg.Keywords
 			for _, kw := range keywords {
-				if !contains(accountKeywords, kw) {
+				if !slices.Contains(accountKeywords, kw) {
 					accountKeywords = append(accountKeywords, kw)
 				}
 			}
-			if domain != "" && !contains(accountKeywords, domain) {
+			if domain != "" && !slices.Contains(accountKeywords, domain) {
 				accountKeywords = append([]string{domain}, accountKeywords...)
 			}
 
@@ -176,14 +177,4 @@ func runTopicsStep2(aiResultFile string) error {
 		"count":  len(topics),
 	})
 	return nil
-}
-
-// contains 检查字符串切片是否包含某元素
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }

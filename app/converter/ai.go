@@ -187,7 +187,7 @@ func BuildAIRequestForExternal(markdown, theme, customPrompt string, themeMgr *T
 	// 简单的图片提取逻辑
 	lines := markdown
 	imgIndex := 0
-	for _, line := range splitLines(lines) {
+	for _, line := range strings.Split(lines, "\n") {
 		if containsImageSyntax(line) {
 			images = append(images, ImageRef{
 				Index:    imgIndex,
@@ -217,39 +217,9 @@ func BuildAIRequestForExternal(markdown, theme, customPrompt string, themeMgr *T
 }
 
 // 辅助函数
-func splitLines(s string) []string {
-	// 简单的按行分割
-	lines := []string{}
-	current := ""
-	for _, ch := range s {
-		if ch == '\n' {
-			lines = append(lines, current)
-			current = ""
-		} else {
-			current += string(ch)
-		}
-	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	return lines
-}
 
 func containsImageSyntax(line string) bool {
-	return len(line) > 4 && (line[0:2] == "![" || contains(line, "<!-- IMG:"))
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && findSubstring(s, substr) >= 0
-}
-
-func findSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
+	return len(line) > 4 && (line[0:2] == "![" || strings.Contains(line, "<!-- IMG:"))
 }
 
 func getGenericPromptForExternal() string {

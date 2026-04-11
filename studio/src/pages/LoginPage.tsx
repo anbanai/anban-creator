@@ -23,9 +23,9 @@ export default function LoginPage() {
       const response = await api.auth.login(values.email, values.password)
       login(response.token, response.refresh_token, response.user)
       navigate('/', { replace: true })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '登录失败，请重试。'
-      toast.error(message)
+    } catch (err: any) {
+      const msg = err?.response?.data?.msg || err?.message || '登录失败，请重试。'
+      toast.error(msg)
     }
   }
 

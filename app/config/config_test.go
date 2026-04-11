@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -337,10 +338,10 @@ func TestSaveConfig_JSON(t *testing.T) {
 	}
 
 	content := string(data)
-	if !contains(content, "wx123456") {
+	if !strings.Contains(content, "wx123456") {
 		t.Error("Saved config should contain appid")
 	}
-	if !contains(content, "test_key") {
+	if !strings.Contains(content, "test_key") {
 		t.Error("Saved config should contain image API key")
 	}
 }
@@ -913,17 +914,4 @@ func TestResolvedRednoteContentImage(t *testing.T) {
 			t.Errorf("Key = %q, want empty", result.Key)
 		}
 	})
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsMiddle(s, substr)))
-}
-
-func containsMiddle(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

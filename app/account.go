@@ -206,6 +206,7 @@ func showAccountInfo(scope string) error {
 			if provider == "" {
 				provider = config.DefaultImageProvider
 			}
+			fmt.Printf("- 图片生成: %s (已配置)\n", provider)
 		} else {
 			fmt.Printf("- 图片生成: 未配置（需设置 flower.content.image.key）\n")
 		}

@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -99,13 +100,13 @@ func TestReplaceImagePlaceholders(t *testing.T) {
 	if result == html {
 		t.Error("expected HTML to be modified")
 	}
-	if !contains(result, "https://cdn.example.com/a.jpg") {
+	if !strings.Contains(result, "https://cdn.example.com/a.jpg") {
 		t.Error("expected URL a.jpg in result")
 	}
-	if !contains(result, "https://cdn.example.com/b.jpg") {
+	if !strings.Contains(result, "https://cdn.example.com/b.jpg") {
 		t.Error("expected URL b.jpg in result")
 	}
-	if contains(result, "<!-- IMG:0 -->") {
+	if strings.Contains(result, "<!-- IMG:0 -->") {
 		t.Error("placeholder 0 should be replaced")
 	}
 }
@@ -118,10 +119,10 @@ func TestReplaceImagePlaceholders_PartialURLs(t *testing.T) {
 	}
 
 	result := ReplaceImagePlaceholders(html, images)
-	if contains(result, "<!-- IMG:0 -->") {
+	if strings.Contains(result, "<!-- IMG:0 -->") {
 		t.Error("placeholder 0 should be replaced")
 	}
-	if !contains(result, "<!-- IMG:1 -->") {
+	if !strings.Contains(result, "<!-- IMG:1 -->") {
 		t.Error("placeholder 1 should remain (no URL)")
 	}
 }

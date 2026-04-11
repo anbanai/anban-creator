@@ -26,11 +26,11 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo     repository.Repository
-	executor *agent.Executor
-	logger   *zerolog.Logger
-	enqueuer TaskEnqueuer
-	store    storage.Provider
+	repo      repository.Repository
+	executor  *agent.Executor
+	logger    *zerolog.Logger
+	enqueuer  TaskEnqueuer
+	store     storage.Provider
 	creditSvc *CreditService
 }
 
@@ -278,6 +278,18 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 
 	// Fallback: run in goroutine if no enqueuer.
 	s.logger.Warn().Str("task_id", task.ID).Msg("no enqueuer available, running task in goroutine")
-	go s.HandleExecution(context.Background(), task, channel)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error().
+					Str("task_id", task.ID).
+					Interface("panic", r).
+					Msg("panic recovered in fallback task execution")
+			}
+		}()
+		if err := s.HandleExecution(context.Background(), task, channel); err != nil {
+			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task execution failed")
+		}
+	}()
 	return nil
 }

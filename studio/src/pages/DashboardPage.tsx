@@ -17,7 +17,7 @@ import {
 } from 'recharts'
 import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/lib/api'
-import { taskStatusLabel, contentTypeLabel, formatDateTimeCN } from '@/lib/labels'
+import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -31,16 +31,6 @@ const CHART_COLORS = [
   'hsl(60, 60%, 55%)',
   'hsl(330, 50%, 55%)',
 ]
-
-function statusBadgeVariant(status: string) {
-  switch (status) {
-    case 'completed': return 'success'
-    case 'failed': return 'danger'
-    case 'running': return 'warning'
-    case 'cancelled': return 'neutral'
-    default: return 'neutral'
-  }
-}
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -207,25 +197,25 @@ export default function DashboardPage() {
             {trendData.length > 0 ? (
               <ResponsiveContainer width="100%" height={240}>
                 <LineChart data={trendData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis
                     dataKey="date"
                     tick={{ fontSize: 12 }}
-                    stroke="rgba(255,255,255,0.4)"
+                    stroke="var(--muted-foreground)"
                     interval="preserveStartEnd"
                   />
                   <YAxis
                     allowDecimals={false}
                     tick={{ fontSize: 12 }}
-                    stroke="rgba(255,255,255,0.4)"
+                    stroke="var(--muted-foreground)"
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: '#1a1a1a',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '8px',
+                      backgroundColor: 'var(--background)',
+                      color: 'var(--foreground)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius)',
                       fontSize: '12px',
-                      color: '#f0f0f0',
                     }}
                   />
                   <Line
@@ -273,11 +263,11 @@ export default function DashboardPage() {
                     </Pie>
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: '#1a1a1a',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '8px',
+                        backgroundColor: 'var(--background)',
+                        color: 'var(--foreground)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius)',
                         fontSize: '12px',
-                        color: '#f0f0f0',
                       }}
                     />
                   </PieChart>

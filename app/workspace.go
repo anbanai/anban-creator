@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,49 +116,6 @@ func workspaceArchiveCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&name, "name", "", "归档目录名（如笔记标题），不指定时使用日期格式")
 	return cmd
-}
-
-// copyDir 递归复制目录内容（跨文件系统兼容）
-func copyDir(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// 计算目标路径
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		dstPath := filepath.Join(dst, relPath)
-
-		if info.IsDir() {
-			return os.MkdirAll(dstPath, info.Mode())
-		}
-
-		return copyFile(path, dstPath, info.Mode())
-	})
-}
-
-// copyFile 复制单个文件
-func copyFile(src, dst string, mode os.FileMode) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
-
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		return err
-	}
-
-	return dstFile.Sync()
 }
 
 // sanitizeDirName 将标题清理为合法目录名：去除非法字符，截断至 50 字符

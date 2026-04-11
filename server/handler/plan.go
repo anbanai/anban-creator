@@ -49,6 +49,10 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	}
 
 	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
 	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.Title, req.Description, req.CronExpr, req.TopicHint)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
