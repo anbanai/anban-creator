@@ -31,14 +31,25 @@ type DockerExecutor struct {
 }
 
 // NewDockerExecutor creates a new DockerExecutor.
-// It initializes a Docker API client from environment variables.
+// It initializes a Docker API client, auto-detecting the Docker socket path.
 func NewDockerExecutor(
 	logger *zerolog.Logger,
 	imageAPICfg *srvconfig.ImageAPIConfig,
 	claudeEnv map[string]string,
 	dockerCfg srvconfig.DockerConfig,
 ) (*DockerExecutor, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
+
+	// Auto-detect Docker socket if DOCKER_HOST is not set.
+	// Docker Desktop on macOS uses ~/.docker/run/docker.sock instead of
+	// /var/run/docker.sock, and client.FromEnv alone won't find it.
+	if os.Getenv("DOCKER_HOST") == "" {
+		if host := detectDockerHost(); host != "" {
+			opts = append(opts, client.WithHost(host))
+		}
+	}
+
+	cli, err := client.NewClientWithOpts(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("docker client init: %w", err)
 	}
@@ -243,4 +254,25 @@ func (e *DockerExecutor) streamLogs(reader io.ReadCloser, opts *ExecutionOptions
 			opts.OnProgress(opts.Task.ID, string(buf))
 		}
 	}
+}
+
+// detectDockerHost searches for the Docker daemon socket on the filesystem.
+// Returns the host URL (e.g. "unix:///Users/.../.docker/run/docker.sock") or empty string.
+func detectDockerHost() string {
+	homeDir, _ := os.UserHomeDir()
+	candidates := []string{
+		"/var/run/docker.sock",
+		"/run/docker.sock",
+	}
+	if homeDir != "" {
+		candidates = append(candidates,
+			filepath.Join(homeDir, ".docker", "run", "docker.sock"),
+		)
+	}
+	for _, p := range candidates {
+		if info, err := os.Stat(p); err == nil && info.Mode()&os.ModeSocket != 0 {
+			return "unix://" + p
+		}
+	}
+	return ""
 }
