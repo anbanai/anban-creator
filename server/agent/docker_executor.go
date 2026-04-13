@@ -119,17 +119,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 
 	cmd := []string{
 		"claude",
+		"--plugin-dir", "/app",
 		"--agent", agentFlag,
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--model", model,
 		"--permission-mode", "bypassPermissions",
-		"--setting-sources", "user",
 		"--print", userPrompt,
 	}
 
 	// 5. Build environment variables.
 	env := []string{
-		"CLAUDE_PLUGIN_ROOT=/app",
 		"PATH=/app:/usr/local/bin:/usr/bin:/bin",
 	}
 	for k, v := range e.claudeEnv {
