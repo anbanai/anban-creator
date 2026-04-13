@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -278,4 +279,25 @@ func detectDockerHost() string {
 		}
 	}
 	return ""
+}
+
+// writeMCPConfig writes a .mcp.json file to the workspace directory so the
+// Claude CLI running inside the container can connect to the server's MCP endpoint.
+func writeMCPConfig(workDir, baseURL, apiKey string) error {
+	mcpConfig := map[string]any{
+		"mcpServers": map[string]any{
+			"rednote": map[string]any{
+				"type": "http",
+				"url":  baseURL + "/mcp",
+				"headers": map[string]string{
+					"X-API-Key": apiKey,
+				},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(mcpConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(workDir, ".mcp.json"), data, 0644)
 }

@@ -101,10 +101,12 @@ type ClaudeConfig struct {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Image      string `yaml:"image"`       // Docker image name (default: "anbanwriter:latest")
-	CPUCores   int64  `yaml:"cpu_cores"`   // CPU limit in cores (default: 2)
-	MemoryMB   int64  `yaml:"memory_mb"`   // Memory limit in MB (default: 4096)
-	TimeoutSec int    `yaml:"timeout_sec"` // Container execution timeout in seconds (default: 1800 = 30 min)
+	Image      string `yaml:"image"`        // Docker image name (default: "anbanwriter:latest")
+	CPUCores   int64  `yaml:"cpu_cores"`    // CPU limit in cores (default: 2)
+	MemoryMB   int64  `yaml:"memory_mb"`    // Memory limit in MB (default: 4096)
+	TimeoutSec int    `yaml:"timeout_sec"`  // Container execution timeout in seconds (default: 1800 = 30 min)
+	MCPBaseURL string `yaml:"mcp_base_url"` // Base URL for MCP server reachable from containers (default: "http://host.docker.internal:{port}")
+	MCPAPIKey  string `yaml:"mcp_api_key"`  // API key for MCP server authentication
 }
 
 // CreditsConfig holds credits/points system configuration.
@@ -234,6 +236,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Claude.Docker.TimeoutSec == 0 {
 		c.Claude.Docker.TimeoutSec = 1800
+	}
+	if c.Claude.Docker.MCPBaseURL == "" {
+		c.Claude.Docker.MCPBaseURL = fmt.Sprintf("http://host.docker.internal:%d", c.Server.Port)
 	}
 
 	// Auto-detect plugin_dir by searching for agents/.
@@ -374,6 +379,12 @@ func (c *Config) applyEnvOverrides() {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Claude.Docker.TimeoutSec = n
 		}
+	}
+	if v := os.Getenv(prefix + "CLAUDE_DOCKER_MCP_BASE_URL"); v != "" {
+		c.Claude.Docker.MCPBaseURL = v
+	}
+	if v := os.Getenv(prefix + "CLAUDE_DOCKER_MCP_API_KEY"); v != "" {
+		c.Claude.Docker.MCPAPIKey = v
 	}
 
 	if v := os.Getenv(prefix + "CREDITS_ADMIN_API_KEY"); v != "" {
