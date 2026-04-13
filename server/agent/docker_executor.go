@@ -83,8 +83,9 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	// 2. Create workspace directory on host.
+	// Use 0777 so the container's non-root user (node, uid 1000) can write to it.
 	workDir := filepath.Join(os.TempDir(), "anbanwriter", opts.Task.ID)
-	if err := os.MkdirAll(workDir, 0755); err != nil {
+	if err := os.MkdirAll(workDir, 0777); err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
 
@@ -136,11 +137,14 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	// 6. Create container.
+	// Run as "node" user (uid 1000) — Claude CLI refuses --permission-mode
+	// bypassPermissions when running as root. The node:22-slim image includes this user.
 	containerConfig := &container.Config{
 		Image:      e.dockerCfg.Image,
 		Cmd:        cmd,
 		Env:        env,
 		WorkingDir: "/workspace",
+		User:       "node",
 	}
 
 	hostConfig := &container.HostConfig{
