@@ -92,9 +92,19 @@ type ImageAPIConfig struct {
 // The Env map is passed as environment variables to the CLI process,
 // supporting auth tokens, base URLs, model overrides, etc.
 type ClaudeConfig struct {
+	Executor  string            `yaml:"executor"`   // "local" (default) or "docker"
 	Env       map[string]string `yaml:"env"`
-	PluginDir string            `yaml:"plugin_dir"` // Path to the anbanwriter plugin directory (contains claudecode/agents, skills, etc.)
+	PluginDir string            `yaml:"plugin_dir"` // Path to the anbanwriter plugin directory (contains agents/, skills/)
 	Sandbox   bool              `yaml:"sandbox"`    // Enable sandbox isolation for agent execution (recommended in k8s)
+	Docker    DockerConfig      `yaml:"docker"`     // Docker executor settings (used when executor=docker)
+}
+
+// DockerConfig holds Docker executor settings for container-based task execution.
+type DockerConfig struct {
+	Image      string `yaml:"image"`       // Docker image name (default: "anbanwriter:latest")
+	CPUCores   int64  `yaml:"cpu_cores"`   // CPU limit in cores (default: 2)
+	MemoryMB   int64  `yaml:"memory_mb"`   // Memory limit in MB (default: 4096)
+	TimeoutSec int    `yaml:"timeout_sec"` // Container execution timeout in seconds (default: 1800 = 30 min)
 }
 
 // CreditsConfig holds credits/points system configuration.
@@ -209,7 +219,24 @@ func (c *Config) applyDefaults() {
 		c.Asynq.Concurrency = 3
 	}
 
-	// Auto-detect plugin_dir by searching for claudecode/agents/.
+	// Claude executor defaults.
+	if c.Claude.Executor == "" {
+		c.Claude.Executor = "local"
+	}
+	if c.Claude.Docker.Image == "" {
+		c.Claude.Docker.Image = "anbanwriter:latest"
+	}
+	if c.Claude.Docker.CPUCores == 0 {
+		c.Claude.Docker.CPUCores = 2
+	}
+	if c.Claude.Docker.MemoryMB == 0 {
+		c.Claude.Docker.MemoryMB = 4096
+	}
+	if c.Claude.Docker.TimeoutSec == 0 {
+		c.Claude.Docker.TimeoutSec = 1800
+	}
+
+	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
 		c.Claude.PluginDir = detectPluginDir()
 	}
@@ -321,11 +348,32 @@ func (c *Config) applyEnvOverrides() {
 		c.Storage.LocalDataDir = v
 	}
 
+	if v := os.Getenv(prefix + "CLAUDE_EXECUTOR"); v != "" {
+		c.Claude.Executor = v
+	}
 	if v := os.Getenv(prefix + "CLAUDE_PLUGIN_DIR"); v != "" {
 		c.Claude.PluginDir = v
 	}
 	if v := os.Getenv(prefix + "CLAUDE_SANDBOX"); v != "" {
 		c.Claude.Sandbox = v == "true" || v == "1"
+	}
+	if v := os.Getenv(prefix + "CLAUDE_DOCKER_IMAGE"); v != "" {
+		c.Claude.Docker.Image = v
+	}
+	if v := os.Getenv(prefix + "CLAUDE_DOCKER_CPU_CORES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			c.Claude.Docker.CPUCores = n
+		}
+	}
+	if v := os.Getenv(prefix + "CLAUDE_DOCKER_MEMORY_MB"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			c.Claude.Docker.MemoryMB = n
+		}
+	}
+	if v := os.Getenv(prefix + "CLAUDE_DOCKER_TIMEOUT_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Claude.Docker.TimeoutSec = n
+		}
 	}
 
 	if v := os.Getenv(prefix + "CREDITS_ADMIN_API_KEY"); v != "" {
@@ -339,20 +387,27 @@ func (c *Config) applyEnvOverrides() {
 	}
 }
 
-// detectPluginDir attempts to locate the anbanwriter project root directory
-// that contains claudecode/agents/. It searches upward from the current
-// working directory and the executable's directory.
+// detectPluginDir attempts to locate the anbanwriter plugin directory
+// that contains agents/. It checks for a "plugin/" subdirectory first,
+// then searches upward from the current working directory.
 func detectPluginDir() string {
 	var candidates []string
 	if wd, err := os.Getwd(); err == nil {
+		// Check for plugin/ subdirectory first (standard project layout).
+		if info, err := os.Stat(filepath.Join(wd, "plugin", "agents")); err == nil && info.IsDir() {
+			return filepath.Join(wd, "plugin")
+		}
 		candidates = append(candidates, wd)
 	}
 	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Dir(exe))
+		exeDir := filepath.Dir(exe)
+		if info, err := os.Stat(filepath.Join(exeDir, "agents")); err == nil && info.IsDir() {
+			return exeDir
+		}
 	}
 	for _, dir := range candidates {
-		for i := 0; i < 5; i++ {
-			if info, err := os.Stat(filepath.Join(dir, "claudecode", "agents")); err == nil && info.IsDir() {
+		for range 5 {
+			if info, err := os.Stat(filepath.Join(dir, "agents")); err == nil && info.IsDir() {
 				return dir
 			}
 			parent := filepath.Dir(dir)
@@ -397,12 +452,17 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if strings.TrimSpace(c.Claude.PluginDir) == "" {
-		errs = append(errs, "claude.plugin_dir is required for agent execution (set via config, ANBAN_SERVER_CLAUDE_PLUGIN_DIR env, or ensure claudecode/agents/ exists in a parent directory)")
-	} else {
-		agentsDir := filepath.Join(c.Claude.PluginDir, "claudecode", "agents")
-		if info, err := os.Stat(agentsDir); err != nil || !info.IsDir() {
-			errs = append(errs, fmt.Sprintf("claude.plugin_dir %q does not contain claudecode/agents/ directory (checked %q)", c.Claude.PluginDir, agentsDir))
+	if c.Claude.Executor != "local" && c.Claude.Executor != "docker" {
+		errs = append(errs, fmt.Sprintf("claude.executor must be 'local' or 'docker', got %q", c.Claude.Executor))
+	}
+	if c.Claude.Executor == "local" {
+		if strings.TrimSpace(c.Claude.PluginDir) == "" {
+			errs = append(errs, "claude.plugin_dir is required for agent execution (set via config, ANBAN_SERVER_CLAUDE_PLUGIN_DIR env, or ensure agents/ exists in a parent directory)")
+		} else {
+			agentsDir := filepath.Join(c.Claude.PluginDir, "agents")
+			if info, err := os.Stat(agentsDir); err != nil || !info.IsDir() {
+				errs = append(errs, fmt.Sprintf("claude.plugin_dir %q does not contain agents/ directory (checked %q)", c.Claude.PluginDir, agentsDir))
+			}
 		}
 	}
 

@@ -131,11 +131,27 @@ func main() {
 	}
 
 	// 12. Create agent executor.
-	agentExecutor := agent.NewExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox)
-	log.Info().
-		Str("plugin_dir", cfg.Claude.PluginDir).
-		Bool("sandbox", cfg.Claude.Sandbox).
-		Msg("agent executor created")
+	var agentExecutor agent.TaskExecutor
+	switch cfg.Claude.Executor {
+	case "docker":
+		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create Docker executor")
+		}
+		agentExecutor = dockerExec
+		log.Info().
+			Str("image", cfg.Claude.Docker.Image).
+			Int64("cpu_cores", cfg.Claude.Docker.CPUCores).
+			Int64("memory_mb", cfg.Claude.Docker.MemoryMB).
+			Int("timeout_sec", cfg.Claude.Docker.TimeoutSec).
+			Msg("docker agent executor created")
+	default:
+		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox)
+		log.Info().
+			Str("plugin_dir", cfg.Claude.PluginDir).
+			Bool("sandbox", cfg.Claude.Sandbox).
+			Msg("local agent executor created")
+	}
 
 	// 13. Create services.
 	var planSvc *service.PlanService
@@ -248,6 +264,13 @@ func main() {
 		if asynqServer != nil {
 			asynqServer.Shutdown()
 			log.Info().Msg("Asynq server stopped")
+		}
+
+		// Close Docker executor client if applicable.
+		if closer, ok := agentExecutor.(interface{ Close() error }); ok {
+			if err := closer.Close(); err != nil {
+				log.Error().Err(err).Msg("failed to close agent executor")
+			}
 		}
 
 		// Close Asynq client.

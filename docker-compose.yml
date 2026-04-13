@@ -38,6 +38,30 @@ services:
       timeout: 5s
       retries: 5
 
+  server:
+    build: .
+    image: anbanwriter:latest
+    container_name: anbanwriter-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/workspace:/tmp/anbanwriter
+    networks:
+      - anbanwriter-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - ANBAN_SERVER_DATABASE_DSN=root:${MYSQL_ROOT_PASSWORD:-anbanwriter_dev}@tcp(mysql:3306)/anbanwriter?charset=utf8mb4&parseTime=true&loc=Local
+      - ANBAN_SERVER_REDIS_ADDR=redis:6379
+      - ANBAN_SERVER_JWT_SECRET_KEY=${JWT_SECRET_KEY:-anbanwriter_dev_secret}
+      - ANBAN_SERVER_CLAUDE_EXECUTOR=docker
+      - ANBAN_SERVER_CLAUDE_DOCKER_IMAGE=anbanwriter:latest
+
 networks:
   anbanwriter-network:
     driver: bridge

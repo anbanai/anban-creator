@@ -34,7 +34,7 @@ type Services struct {
 	WechatSvc       *auth.WeChatService
 	WSHub           *handler.WebSocketHub
 	AuthHandler     *handler.AuthHandler
-	Executor        *agent.Executor
+	Executor        agent.TaskExecutor
 	PlanService     *service.PlanService
 	TaskService     *service.TaskService
 	CreditService   *service.CreditService

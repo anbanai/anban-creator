@@ -23,8 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 make build                    # Build CLI binary to bin/anbanwriter
 make release                  # Build all platform binaries
-make test                     # Run all Go tests
-make test                     # or: go test -v ./...
+make test                     # Run all Go tests (go test -v ./...)
 go test -v ./app/config       # Run specific package tests
 go test -v -run TestConfig_Validate ./app/config  # Run specific test
 make coverage                 # Tests with coverage report
@@ -45,11 +44,11 @@ make server-run               # Build and run server with config
 make server-test              # Run server tests
 ```
 
-### Web Frontend
+### Studio Frontend
 
 ```bash
-make web-install              # Install frontend dependencies
-make web-dev                  # Run frontend dev server (proxies API to localhost:8080)
+cd studio && bun install      # Install frontend dependencies (uses Bun, not npm)
+make web-dev                  # Run frontend dev server (proxies /api → localhost:8080, /ws → ws://localhost:8080)
 make web-build                # Build frontend for production
 ```
 
@@ -149,7 +148,8 @@ server/
 │   ├── plan.go             # Plan CRUD + pause/resume
 │   ├── task.go             # Task CRUD + file management + streaming
 │   ├── timeline.go         # Unified timeline view
-│   └── websocket.go        # WebSocket hub for real-time updates
+│   ├── websocket.go        # WebSocket hub for real-time updates
+│   └── credit.go           # Credits/billing (balance, sign-in, transactions)
 │
 ├── middleware/              # HTTP middleware
 │   ├── auth.go             # JWT Bearer token validation
@@ -168,7 +168,8 @@ server/
 ├── service/                # Business logic
 │   ├── channel.go, plan.go, task.go
 │   ├── task_execution.go   # Task execution with agent SDK
-│   └── task_files.go       # Task file management
+│   ├── task_files.go       # Task file management
+│   └── credit.go           # Credits/points billing system
 │
 ├── router/                 # Fiber router setup
 │   └── router.go           # All routes + middleware wiring
@@ -189,11 +190,39 @@ server/
     └── e2e_test.go         # End-to-end tests
 ```
 
-### Web Frontend (`studio/`)
+### Server API Routes
 
-React 19 + TypeScript + Vite 6 + Tailwind CSS v4. State: Zustand v5. Data fetching: TanStack React Query v5. Routing: React Router DOM v7.
+- `GET /health` — Health check (MySQL + Redis status)
+- `GET /ws` — WebSocket for real-time updates
+- `POST /api/v1/auth/*` — Register, login, refresh, logout, wx-login (public)
+- `GET /api/v1/auth/me` — Current user (authenticated)
+- `/api/v1/channels` — Channel CRUD + fetch-profile, archive/restore
+- `/api/v1/plans` — Plan CRUD + pause/resume
+- `/api/v1/tasks` — Task CRUD + cancel, stream (SSE), preview, files/zip/download
+- `/api/v1/timeline` — Unified timeline view
+- `/api/v1/credits` — Balance, sign-in, transactions
+- `/api/v1/files/*` — Local file serving (local storage mode only)
+- `/mcp` — MCP endpoint (API key or JWT auth, configured in `.mcp.json`)
 
-Pages: Login, Register, Dashboard, Channels (WeChat account management), Plans, Tasks, TaskDetail, Timeline, Settings.
+### Studio Frontend (`studio/`)
+
+React 19 + TypeScript + Vite 8 + Tailwind CSS v4. State: Zustand v5. Data fetching: TanStack React Query v5. Routing: React Router DOM v7. UI: shadcn/ui + Base UI. Package manager: **Bun**.
+
+```
+studio/src/
+├── pages/          # Route pages: Login, Register, Dashboard, Channels, Plans, Tasks, TaskDetail, Timeline, Credits, Settings
+├── components/
+│   ├── ui/         # shadcn/ui primitives (Button, Card, Input, Dialog, etc.)
+│   ├── auth/       # LoginDialog, UserAccountPopover
+│   └── layout/     # AppLayout, Sidebar, PageHeader
+├── lib/
+│   ├── api.ts      # Axios API client (base URL via Vite proxy)
+│   ├── sse.ts      # Server-Sent Events client for task streaming
+│   ├── schemas.ts  # Zod validation schemas
+│   └── labels.ts   # Label constants
+├── hooks/          # useWebSocket, useKeyboardShortcuts
+└── stores/         # Zustand stores (notification-store)
+```
 
 Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhost:8080`.
 
@@ -206,6 +235,12 @@ Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhos
 **Two Loading Modes**:
 - `Load()` / `LoadWithDefaults()`: Full validation including WeChat AppID/Secret
 - `LoadMinimal()`: Skips WeChat validation, used by commands that don't need WeChat API (write, doctor)
+
+### Server Configuration
+
+YAML config at `server/config.yaml`. All fields overridable via `ANBAN_SERVER_*` env vars (e.g. `ANBAN_SERVER_DATABASE_DSN`, `ANBAN_SERVER_JWT_SECRET_KEY`).
+
+Graceful degradation: MySQL unreachable → server runs in degraded mode (no persistence). Redis unreachable → falls back to in-process goroutine task execution, rate limiting skipped.
 
 ### Conversion Flow
 
@@ -231,7 +266,7 @@ All providers implement the `Provider` interface (`app/image/provider.go`).
 
 ### Writing Styles
 
-Located in `writers/*.yaml`. Each defines core_traits, structure_patterns, language_usage, domain_knowledge.
+Located in `plugin/writers/*.yaml`. Each defines core_traits, structure_patterns, language_usage, domain_knowledge.
 
 Built-in: `dan-koe`, `cultural-depth`, `casual-science`
 
@@ -260,7 +295,7 @@ Quality scoring (5 dimensions, 10 points each): Directness, Rhythm, Trust, Authe
 
 ### Adding New Themes
 
-1. Create YAML file in `themes/{name}.yaml`
+1. Create YAML file in `plugin/themes/{name}.yaml`
 2. Theme system auto-loads with hot-reload support
 
 ### Writing Tests
@@ -316,7 +351,7 @@ Quality scoring (5 dimensions, 10 points each): Directness, Rhythm, Trust, Authe
 
 ## Skills Integration
 
-Skills in `claudecode/skills/`:
+Skills in `plugin/skills/`:
 
 - `content-writing` - Article writing workflow
 - `topic-research` - Research and scoring
@@ -335,17 +370,20 @@ Skills in `claudecode/skills/`:
 ## Plugin & Agent Ecosystem
 
 ```
-.claude-plugin/
-├── plugin.json          # Plugin manifest v2.3.3
-└── marketplace.json     # Marketplace listing
-
-hooks/hooks.json         # SessionStart (env setup), SubagentStop, TaskCompleted
-
-agents/
-├── wechatarticle.md    # Full article pipeline agent (maxTurns: 50)
-├── wechatxls.md        # Image post pipeline agent (maxTurns: 25)
-├── rednote.md          # Xiaohongshu creation engine (maxTurns: 20)
-└── flower.md           # Flower image generation agent
+plugin/
+├── .claude-plugin/
+│   ├── plugin.json      # Plugin manifest v2.3.3
+│   └── marketplace.json # Marketplace listing
+├── agents/
+│   ├── wechatarticle.md # Full article pipeline agent (maxTurns: 50)
+│   ├── wechatxls.md     # Image post pipeline agent (maxTurns: 25)
+│   ├── rednote.md       # Xiaohongshu creation engine (maxTurns: 20)
+│   └── flower.md        # Flower image generation agent
+├── skills/              # Claude Code skills
+├── hooks/
+│   └── hooks.json       # SessionStart, SubagentStop, TaskCompleted
+├── themes/              # Conversion themes (YAML)
+└── writers/             # Writing styles (YAML)
 ```
 
 `.mcp.json` configures an MCP server pointing to the server's `/mcp` endpoint.
@@ -358,3 +396,4 @@ agents/
 - Two Cobra patterns coexist: package-level var with `init()` (older) and factory functions returning `*cobra.Command` (preferred)
 - Server config overrides via `ANBAN_SERVER_*` env vars
 - Docker Compose provides MySQL 8.0 + Redis 7 for local development
+- Studio uses **Bun** as package manager (not npm) — use `bun install`, `bun run dev`

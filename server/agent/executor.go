@@ -34,20 +34,21 @@ func DefaultModel() string {
 	return "claude-sonnet-4-6"
 }
 
-// Executor orchestrates Claude Code agent execution for content generation tasks.
-// It loads the anbanwriter plugin (agents + skills) and invokes the appropriate
-// agent based on task type.
-type Executor struct {
+// LocalExecutor runs agent tasks as local Claude CLI subprocesses via the SDK.
+type LocalExecutor struct {
 	logger      *zerolog.Logger
 	imageAPICfg *srvconfig.ImageAPIConfig
 	claudeEnv   map[string]string
-	pluginDir   string // path to the anbanwriter plugin directory
-	sandbox     bool   // enable sandbox isolation (recommended in k8s)
+	pluginDir   string
+	sandbox     bool
 }
 
-// NewExecutor creates a new Executor.
-func NewExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool) *Executor {
-	return &Executor{
+// Compile-time interface check.
+var _ TaskExecutor = (*LocalExecutor)(nil)
+
+// NewLocalExecutor creates a new LocalExecutor.
+func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool) *LocalExecutor {
+	return &LocalExecutor{
 		logger:      logger,
 		imageAPICfg: imageAPICfg,
 		claudeEnv:   claudeEnv,
@@ -81,7 +82,7 @@ type ExecutionResult struct {
 // It creates a per-task workspace directory, writes the channel config as
 // .anbanwriter/settings.json, loads the anbanwriter plugin with the matching
 // agent definition, and launches execution via the claude-agent-sdk-go SDK.
-func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
+func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	// 1. Resolve defaults.
 	model := opts.Model
 	if model == "" {
@@ -136,16 +137,10 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 		claudecode.WithModel(model),
 		claudecode.WithCwd(workDir),
 		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
+		claudecode.WithSettingSources(claudecode.SettingSourceUser),
 		claudecode.WithExtraArgs(map[string]*string{
 			"agent": &agentFlag,
 		}),
-	}
-
-	// Load the anbanwriter plugin (agents + skills).
-	if e.pluginDir != "" {
-		sdkOpts = append(sdkOpts, claudecode.WithLocalPlugin(e.pluginDir))
-	} else {
-		e.logger.Warn().Msg("plugin_dir is empty; agent execution will likely fail without plugin definitions")
 	}
 
 	// Sandbox isolation (recommended in k8s).
@@ -164,6 +159,14 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 	var execErr error
 	var toolUseCount int
 	var resultMsg *claudecode.ResultMessage
+
+	// Capture CLI stderr for diagnostics.
+	sdkOpts = append(sdkOpts, claudecode.WithStderrCallback(func(line string) {
+		e.logger.Debug().
+			Str("task_id", opts.Task.ID).
+			Str("cli_stderr", line).
+			Msg("cli stderr")
+	}))
 
 	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
 		if err := client.Query(ctx, userPrompt); err != nil {
@@ -221,6 +224,17 @@ func (e *Executor) Execute(ctx context.Context, opts *ExecutionOptions) (*Execut
 					Int("tool_use_count", toolUseCount).
 					Str("session_id", m.SessionID).
 					Msg("agent execution completed")
+				// Warn if agent produced no tool calls - likely agent definition not loaded.
+				if toolUseCount == 0 {
+					truncated := resultText
+					if len(truncated) > 500 {
+						truncated = truncated[:500] + "..."
+					}
+					e.logger.Warn().
+						Str("task_id", opts.Task.ID).
+						Str("result_text", truncated).
+						Msg("agent completed with zero tool uses; agent definition may not have loaded")
+				}
 				return nil
 			}
 		}

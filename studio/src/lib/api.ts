@@ -263,6 +263,16 @@ const http = axios.create({
   },
 })
 
+// Separate instance for token refresh — bypasses the 401 response interceptor
+// to prevent deadlock when the refresh token itself is expired.
+const refreshHttp = axios.create({
+  baseURL: '/api/v1',
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+})
+
 // Request interceptor: attach auth token
 http.interceptors.request.use((config) => {
   const token = localStorage.getItem('anbanwriter_token')
@@ -360,7 +370,7 @@ export const api = {
       unwrap<AuthResponse>(http.post('/auth/login', { email, password })),
 
     refresh: (refreshToken: string) =>
-      unwrap<AuthResponse>(http.post('/auth/refresh', { refresh_token: refreshToken })),
+      unwrap<AuthResponse>(refreshHttp.post('/auth/refresh', { refresh_token: refreshToken })),
 
     logout: () =>
       unwrap<void>(http.post('/auth/logout')),

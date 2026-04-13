@@ -190,7 +190,7 @@ The converter module orchestrates a multi-step process:
 
 ### Writing Styles
 
-Located in `writers/*.yaml`, each style defines:
+Located in `plugin/writers/*.yaml`, each style defines:
 
 - **Core Traits**: Distinctive voice characteristics
 - **Structure Patterns**: Preferred content organization
@@ -248,7 +248,7 @@ Quality scoring (5 dimensions, 10 points each):
 
 ### Adding New Themes
 
-1. Create YAML file in `themes/{name}.yaml`
+1. Create YAML file in `plugin/themes/{name}.yaml`
 2. Theme system auto-loads from YAML with hot-reload support
 3. Theme structure includes: core_traits, structure_patterns, language_usage, domain_knowledge
 
@@ -352,7 +352,7 @@ func TestFeature(t *testing.T) {
 
 ## Skills Integration
 
-The project includes Claude Code skills in `skills/` directory:
+The project includes Claude Code skills in `plugin/skills/` directory:
 
 - `content-writing` - Article writing workflow
 - `visual-design` - Image and theme management
@@ -378,17 +378,17 @@ Skills are auto-loaded when working in this repository or via plugin marketplace
 ## Plugin & Agent Ecosystem
 
 ```
-.claude-plugin/
-├── plugin.json          # Plugin manifest v2.3.0
-└── marketplace.json     # Marketplace listing
-
-hooks/hooks.json         # SessionStart (env setup), SubagentStop, TaskCompleted
-
-agents/
-├── wechatarticle.md    # Full article pipeline agent (maxTurns: 50)
-├── wechatxls.md       # Image post pipeline agent (maxTurns: 25)
-└── rednote.md          # 小红书创作引擎，支持原创+复刻双模式 (maxTurns: 20)
-
-output-styles/
-└── wechat-creator.md    # WeChat creator output style
+plugin/
+├── .claude-plugin/
+│   ├── plugin.json      # Plugin manifest
+│   └── marketplace.json # Marketplace listing
+├── agents/
+│   ├── wechatarticle.md # Full article pipeline agent (maxTurns: 50)
+│   ├── wechatxls.md     # Image post pipeline agent (maxTurns: 25)
+│   └── rednote.md       # Xiaohongshu creation engine (maxTurns: 20)
+├── skills/              # Claude Code skills
+├── hooks/
+│   └── hooks.json       # SessionStart, SubagentStop, TaskCompleted
+├── themes/              # Conversion themes (YAML)
+└── writers/             # Writing styles (YAML)
 ```

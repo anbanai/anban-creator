@@ -24,15 +24,12 @@ COPY --from=builder /anbanwriter-server /app/anbanwriter-server
 # Install the anbanwriter CLI binary (used by agents via Bash tool).
 COPY --from=builder /anbanwriter /app/anbanwriter
 
-# Install the anbanwriter plugin (agents, skills, hooks, manifest).
-COPY claudecode/ /app/claudecode/
-COPY .claude-plugin/ /app/.claude-plugin/
-COPY themes/ /app/themes/
-COPY writers/ /app/writers/
+# Install the anbanwriter plugin (agents, skills, hooks, manifest, themes, writers).
+COPY plugin/ /app/
 
 # Set environment so Claude Code discovers the plugin and binary.
 ENV CLAUDE_PLUGIN_ROOT=/app
 ENV PATH="/app:${PATH}"
 
 WORKDIR /app
-ENTRYPOINT ["/app/anbanwriter-server"]
+CMD ["/app/anbanwriter-server"]
