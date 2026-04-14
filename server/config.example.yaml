@@ -1,4 +1,4 @@
-# AnbanWriter Online Service Configuration
+# 案板创作助手 Online Service Configuration
 # Copy this file to config.yaml and adjust values as needed.
 # All fields can also be set via ANBAN_SERVER_ prefixed environment variables
 # (e.g. ANBAN_SERVER_DATABASE_DSN, ANBAN_SERVER_JWT_SECRET_KEY).

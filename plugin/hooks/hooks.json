@@ -1,5 +1,5 @@
 {
-  "description": "AnbanWriter plugin lifecycle hooks for workspace management, agent delivery summaries, and quality verification",
+  "description": "案板创作助手 plugin lifecycle hooks for workspace management, agent delivery summaries, and quality verification",
   "hooks": {
     "SessionStart": [
       {
@@ -9,7 +9,7 @@
             "type": "command",
             "command": "[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && [ -n \"$CLAUDE_ENV_FILE\" ] && { echo \"export CLAUDE_PLUGIN_ROOT=$CLAUDE_PLUGIN_ROOT\" >> \"$CLAUDE_ENV_FILE\"; echo \"export PATH=$CLAUDE_PLUGIN_ROOT/bin:\\$PATH\" >> \"$CLAUDE_ENV_FILE\"; bash \"$CLAUDE_PLUGIN_ROOT/scripts/bootstrap.sh\" & } || true",
             "timeout": 5,
-            "statusMessage": "初始化 anbanwriter 环境..."
+            "statusMessage": "初始化案板创作助手环境..."
           },
           {
             "type": "command",

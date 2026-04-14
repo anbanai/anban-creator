@@ -24,11 +24,12 @@ var _ TaskExecutor = (*DockerExecutor)(nil)
 // DockerExecutor runs agent tasks inside Docker containers.
 // Each task gets an isolated container with resource limits and a bind-mounted workspace.
 type DockerExecutor struct {
-	logger      *zerolog.Logger
-	imageAPICfg *srvconfig.ImageAPIConfig
-	claudeEnv   map[string]string
-	dockerCfg   srvconfig.DockerConfig
-	dockerCLI   *client.Client
+	logger       *zerolog.Logger
+	imageAPICfg  *srvconfig.ImageAPIConfig
+	claudeEnv    map[string]string
+	dockerCfg    srvconfig.DockerConfig
+	dockerCLI    *client.Client
+	defaultModel string // configured model; empty means use env vars
 }
 
 // NewDockerExecutor creates a new DockerExecutor.
@@ -38,6 +39,7 @@ func NewDockerExecutor(
 	imageAPICfg *srvconfig.ImageAPIConfig,
 	claudeEnv map[string]string,
 	dockerCfg srvconfig.DockerConfig,
+	defaultModel string,
 ) (*DockerExecutor, error) {
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
 
@@ -59,7 +61,8 @@ func NewDockerExecutor(
 		imageAPICfg: imageAPICfg,
 		claudeEnv:   claudeEnv,
 		dockerCfg:   dockerCfg,
-		dockerCLI:   cli,
+		dockerCLI:    cli,
+		defaultModel: defaultModel,
 	}, nil
 }
 
@@ -76,7 +79,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	// 1. Resolve defaults.
 	model := opts.Model
 	if model == "" {
-		model = DefaultModel()
+		model = e.defaultModel
 	}
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
@@ -90,15 +93,17 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
 
-	e.logger.Info().
+	logEvt := e.logger.Info().
 		Str("task_id", opts.Task.ID).
 		Str("type", opts.Task.Type).
 		Str("topic", opts.Task.Topic).
-		Str("model", model).
 		Int("max_turns", maxTurns).
 		Str("work_dir", workDir).
-		Str("image", e.dockerCfg.Image).
-		Msg("starting docker agent execution")
+		Str("image", e.dockerCfg.Image)
+	if model != "" {
+		logEvt = logEvt.Str("model", model)
+	}
+	logEvt.Msg("starting docker agent execution")
 
 	// 3. Write channel config to workspace settings.json.
 	if opts.Channel != nil {
@@ -108,6 +113,13 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		}
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
+		}
+	}
+
+	// 3.5. Write MCP config so the agent can connect to the server's MCP endpoint.
+	if e.dockerCfg.MCPBaseURL != "" && e.dockerCfg.MCPAPIKey != "" {
+		if err := writeMCPConfig(workDir, e.dockerCfg.MCPBaseURL, e.dockerCfg.MCPAPIKey); err != nil {
+			return nil, fmt.Errorf("write mcp config: %w", err)
 		}
 	}
 
@@ -124,9 +136,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		"--plugin-dir", "/app",
 		"--agent", agentFlag,
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
-		"--model", model,
 		"--permission-mode", "bypassPermissions",
 		"--print", userPrompt,
+	}
+	// Only set model if explicitly configured; otherwise let Claude CLI use env vars.
+	if model != "" {
+		cmd = append(cmd, "--model", model)
 	}
 
 	// 5. Build environment variables.
@@ -160,6 +175,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 			NanoCPUs: e.dockerCfg.CPUCores * 1e9,
 			Memory:   e.dockerCfg.MemoryMB * 1024 * 1024,
 		},
+		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 
 	containerName := "anbanwriter-" + opts.Task.ID
@@ -217,9 +233,19 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		// errCh sent nil — container exited normally, read status below.
 	case result := <-statusCh:
 		if result.StatusCode != 0 {
+			// Capture container logs for diagnostics.
+			containerLogs := e.readContainerLogs(resp.ID)
+			errMsg := fmt.Sprintf("container exited with code %d", result.StatusCode)
+			if containerLogs != "" {
+				truncated := containerLogs
+				if len(truncated) > 2000 {
+					truncated = truncated[len(truncated)-2000:]
+				}
+				errMsg += "\n" + truncated
+			}
 			return &ExecutionResult{
 				Success: false,
-				Error:   fmt.Sprintf("container exited with code %d", result.StatusCode),
+				Error:   errMsg,
 				WorkDir: workDir,
 			}, nil
 		}
@@ -260,6 +286,43 @@ func (e *DockerExecutor) streamLogs(reader io.ReadCloser, opts *ExecutionOptions
 	}
 }
 
+// readContainerLogs reads the full log output of a container (stdout + stderr)
+// and returns it as a plain string. Used for diagnostics when the container
+// exits with a non-zero status code.
+func (e *DockerExecutor) readContainerLogs(containerID string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reader, err := e.dockerCLI.ContainerLogs(ctx, containerID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Timestamps: false,
+	})
+	if err != nil {
+		return ""
+	}
+	defer reader.Close()
+
+	// Docker multiplexed stream: 8-byte header + payload per frame.
+	var buf []byte
+	hdr := make([]byte, 8)
+	for {
+		if _, err := io.ReadFull(reader, hdr); err != nil {
+			break
+		}
+		size := binary.BigEndian.Uint32(hdr[4:])
+		if size == 0 {
+			continue
+		}
+		frame := make([]byte, size)
+		if _, err := io.ReadFull(reader, frame); err != nil {
+			break
+		}
+		buf = append(buf, frame...)
+	}
+	return string(buf)
+}
+
 // detectDockerHost searches for the Docker daemon socket on the filesystem.
 // Returns the host URL (e.g. "unix:///Users/.../.docker/run/docker.sock") or empty string.
 func detectDockerHost() string {
@@ -281,9 +344,16 @@ func detectDockerHost() string {
 	return ""
 }
 
-// writeMCPConfig writes a .mcp.json file to the workspace directory so the
+// writeMCPConfig writes a .mcp.json file inside the .claude/ subdirectory so the
 // Claude CLI running inside the container can connect to the server's MCP endpoint.
+// Placing it inside .claude/ prevents it from being uploaded as a task file (the
+// .claude directory is already skipped during file upload).
 func writeMCPConfig(workDir, baseURL, apiKey string) error {
+	claudeDir := filepath.Join(workDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		return fmt.Errorf("create .claude dir: %w", err)
+	}
+
 	mcpConfig := map[string]any{
 		"mcpServers": map[string]any{
 			"rednote": map[string]any{
@@ -299,5 +369,5 @@ func writeMCPConfig(workDir, baseURL, apiKey string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(workDir, ".mcp.json"), data, 0644)
+	return os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), data, 0644)
 }

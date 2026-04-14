@@ -250,13 +250,6 @@ func TestDefaultMaxTurns(t *testing.T) {
 	}
 }
 
-func TestDefaultModel(t *testing.T) {
-	got := DefaultModel()
-	if got != "claude-sonnet-4-6" {
-		t.Errorf("DefaultModel() = %q, want claude-sonnet-4-6", got)
-	}
-}
-
 func TestMarshalResultJSON(t *testing.T) {
 	r := &ExecutionResult{
 		Success: true,

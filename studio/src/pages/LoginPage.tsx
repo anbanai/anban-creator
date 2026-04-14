@@ -34,7 +34,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            AnbanWriter
+            案板创作助手
           </h1>
           <div className="mx-auto mt-2 h-0.5 w-8 rounded-full bg-primary" />
           <p className="mt-4 text-sm text-muted-foreground">登录你的账号</p>

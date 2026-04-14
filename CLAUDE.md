@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Writer for WeChat** (anbanwriter) is a multi-component content creation platform: a Go CLI tool for transforming Markdown into WeChat-formatted HTML with AI-powered writing and publishing, plus a web application (Go server + React frontend) for managing content plans and task execution.
+**案板创作助手** (anbanwriter) is a multi-component content creation platform: a Go CLI tool for transforming Markdown into WeChat-formatted HTML with AI-powered writing and publishing, plus a web application (Go server + React frontend) for managing content plans and task execution.
 
 **Components**:
 - **CLI** (`app/`): Go CLI for conversion, writing, humanization, image generation, and direct WeChat publishing

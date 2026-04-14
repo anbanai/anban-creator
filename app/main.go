@@ -100,7 +100,7 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "anbanwriter",
 		Short: "微信公众号写作工具",
-		Long: `Anban Writer - 公众号、小红书、小绿书写作助手
+		Long: `案板创作助手 - 公众号、小红书、小绿书内容创作
 
 提供图片处理、格式转换、草稿管理、风格化写作、AI去痕、热点评分等全流程功能。
 支持多领域配置和多种写作风格。

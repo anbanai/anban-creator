@@ -21,6 +21,7 @@ type Config struct {
 	JWT      JWTConfig      `yaml:"jwt"`
 	WeChat   WeChatConfig   `yaml:"wechat"`
 	Storage  StorageConfig  `yaml:"storage"`
+	MCP      MCPConfig      `yaml:"mcp"`
 	ImageAPI ImageAPIConfig `yaml:"image_api"`
 	Claude   ClaudeConfig   `yaml:"claude"`
 	Credits  CreditsConfig  `yaml:"credits"`
@@ -55,6 +56,11 @@ type JWTConfig struct {
 type WeChatConfig struct {
 	AppID     string `yaml:"app_id"`
 	AppSecret string `yaml:"app_secret"`
+}
+
+// MCPConfig holds Model Context Protocol endpoint configuration.
+type MCPConfig struct {
+	APIKey string `yaml:"api_key"` // API key for MCP endpoint authentication
 }
 
 // StorageConfig holds file storage configuration.
@@ -92,6 +98,7 @@ type ImageAPIConfig struct {
 // The Env map is passed as environment variables to the CLI process,
 // supporting auth tokens, base URLs, model overrides, etc.
 type ClaudeConfig struct {
+	Model     string            `yaml:"model"`      // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
 	Executor  string            `yaml:"executor"`   // "local" (default) or "docker"
 	Env       map[string]string `yaml:"env"`
 	PluginDir string            `yaml:"plugin_dir"` // Path to the anbanwriter plugin directory (contains agents/, skills/)
@@ -328,6 +335,10 @@ func (c *Config) applyEnvOverrides() {
 		c.WeChat.AppSecret = v
 	}
 
+	if v := os.Getenv(prefix + "MCP_API_KEY"); v != "" {
+		c.MCP.APIKey = v
+	}
+
 	if v := os.Getenv(prefix + "STORAGE_PROVIDER"); v != "" {
 		c.Storage.Provider = v
 	}
@@ -353,6 +364,9 @@ func (c *Config) applyEnvOverrides() {
 		c.Storage.LocalDataDir = v
 	}
 
+	if v := os.Getenv(prefix + "CLAUDE_MODEL"); v != "" {
+		c.Claude.Model = v
+	}
 	if v := os.Getenv(prefix + "CLAUDE_EXECUTOR"); v != "" {
 		c.Claude.Executor = v
 	}

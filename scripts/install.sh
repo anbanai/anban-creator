@@ -1,12 +1,12 @@
 #!/bin/bash
-# Writer for WeChat 自动安装脚本
+# 案板创作助手 自动安装脚本
 # 适用于：macOS / Linux
 # 使用方法：curl -fsSL https://raw.githubusercontent.com/royalrick/anbanwriter/main/scripts/install.sh | bash
 
 set -e
 
 echo "========================================"
-echo "   Writer for WeChat 安装向导"
+echo "   案板创作助手 安装向导"
 echo "========================================"
 echo ""
 

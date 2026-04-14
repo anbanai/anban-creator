@@ -20,6 +20,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/handler"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/mcp"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/router"
 	"github.com/royalrick/anbanwriter/server/scheduler"
@@ -134,7 +135,7 @@ func main() {
 	var agentExecutor agent.TaskExecutor
 	switch cfg.Claude.Executor {
 	case "docker":
-		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker)
+		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.Claude.Model)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker executor")
 		}
@@ -146,7 +147,7 @@ func main() {
 			Int("timeout_sec", cfg.Claude.Docker.TimeoutSec).
 			Msg("docker agent executor created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox)
+		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model)
 		log.Info().
 			Str("plugin_dir", cfg.Claude.PluginDir).
 			Bool("sandbox", cfg.Claude.Sandbox).
@@ -196,6 +197,13 @@ func main() {
 		}
 	}
 
+	// 14.1. Create MCP handler.
+	var mcpHandler *mcp.Handler
+	if cfg.MCP.APIKey != "" {
+		mcpHandler = mcp.NewHandler(cfg.MCP.APIKey, log)
+		log.Info().Msg("MCP handler initialized")
+	}
+
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
@@ -236,6 +244,7 @@ func main() {
 		TaskHandler:     taskHandler,
 		CreditHandler:   creditHandler,
 		TimelineHandler: timelineHandler,
+		MCPHandler:      mcpHandler,
 		StorageProvider: store,
 	}
 

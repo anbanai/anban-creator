@@ -29,31 +29,28 @@ func DefaultMaxTurns(taskType string) int {
 	}
 }
 
-// DefaultModel returns the default Claude model for agent execution.
-func DefaultModel() string {
-	return "claude-sonnet-4-6"
-}
-
 // LocalExecutor runs agent tasks as local Claude CLI subprocesses via the SDK.
 type LocalExecutor struct {
-	logger      *zerolog.Logger
-	imageAPICfg *srvconfig.ImageAPIConfig
-	claudeEnv   map[string]string
-	pluginDir   string
-	sandbox     bool
+	logger       *zerolog.Logger
+	imageAPICfg  *srvconfig.ImageAPIConfig
+	claudeEnv    map[string]string
+	pluginDir    string
+	sandbox      bool
+	defaultModel string // configured model; empty means use env vars
 }
 
 // Compile-time interface check.
 var _ TaskExecutor = (*LocalExecutor)(nil)
 
 // NewLocalExecutor creates a new LocalExecutor.
-func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool) *LocalExecutor {
+func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string) *LocalExecutor {
 	return &LocalExecutor{
-		logger:      logger,
-		imageAPICfg: imageAPICfg,
-		claudeEnv:   claudeEnv,
-		pluginDir:   pluginDir,
-		sandbox:     sandbox,
+		logger:       logger,
+		imageAPICfg:  imageAPICfg,
+		claudeEnv:    claudeEnv,
+		pluginDir:    pluginDir,
+		sandbox:      sandbox,
+		defaultModel: defaultModel,
 	}
 }
 
@@ -86,7 +83,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// 1. Resolve defaults.
 	model := opts.Model
 	if model == "" {
-		model = DefaultModel()
+		model = e.defaultModel
 	}
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
@@ -99,16 +96,18 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
 
-	e.logger.Info().
+	logEvt := e.logger.Info().
 		Str("task_id", opts.Task.ID).
 		Str("type", opts.Task.Type).
 		Str("topic", opts.Task.Topic).
-		Str("model", model).
 		Int("max_turns", maxTurns).
 		Str("work_dir", workDir).
 		Str("plugin_dir", e.pluginDir).
-		Bool("sandbox", e.sandbox).
-		Msg("starting agent execution")
+		Bool("sandbox", e.sandbox)
+	if model != "" {
+		logEvt = logEvt.Str("model", model)
+	}
+	logEvt.Msg("starting agent execution")
 
 	// 3. Write channel config to workspace settings.json.
 	if opts.Channel != nil {
@@ -134,13 +133,17 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// 6. Build SDK options.
 	sdkOpts := []claudecode.Option{
 		claudecode.WithMaxTurns(maxTurns),
-		claudecode.WithModel(model),
 		claudecode.WithCwd(workDir),
 		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
 		claudecode.WithSettingSources(claudecode.SettingSourceUser),
 		claudecode.WithExtraArgs(map[string]*string{
 			"agent": &agentFlag,
 		}),
+	}
+
+	// Only set model if explicitly configured; otherwise let Claude CLI use env vars.
+	if model != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithModel(model))
 	}
 
 	// Sandbox isolation (recommended in k8s).

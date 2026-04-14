@@ -871,7 +871,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-900 px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-blue-400">AnbanWriter</h1>
+          <h1 className="text-2xl font-bold text-blue-400">案板创作助手</h1>
           <p className="mt-2 text-sm text-gray-400">登录你的账号</p>
         </div>
 
