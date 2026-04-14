@@ -4,7 +4,7 @@
 .PHONY: all build clean test install help lint fmt vet release sync ci coverage \
         server-build server-run server-dev server-test \
         web-install web-dev web-build \
-        docker-up docker-down docker-logs
+        docker-up docker-down docker-logs docker-image
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -s -w -X main.version=$(VERSION)
@@ -138,6 +138,12 @@ docker-down:
 docker-logs:
 	@docker-compose logs -f
 
+# Build the abwriter Docker image (required for executor: docker)
+docker-image:
+	@echo "Building abwriter:latest..."
+	@docker build -t abwriter:latest .
+	@echo "Image build complete: abwriter:latest"
+
 # ---------------------------------------------------------------------------
 # Help
 # ---------------------------------------------------------------------------
@@ -172,6 +178,7 @@ help:
 	@echo "  make docker-up     - Start MySQL and Redis containers"
 	@echo "  make docker-down   - Stop containers"
 	@echo "  make docker-logs   - Follow container logs"
+	@echo "  make docker-image  - Build abwriter Docker image"
 	@echo ""
 	@echo "Quick install:"
 	@echo "  go install github.com/royalrick/anbanwriter/app/cmd/writer@latest"

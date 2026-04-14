@@ -59,6 +59,12 @@ func NewDockerExecutor(
 	if err != nil {
 		return nil, fmt.Errorf("docker client init: %w", err)
 	}
+
+	// Verify the Docker image exists locally before accepting any task execution.
+	if _, err := cli.ImageInspect(context.Background(), dockerCfg.Image); err != nil {
+		return nil, fmt.Errorf("docker image %q not found locally (run 'make docker-image' to build it): %w", dockerCfg.Image, err)
+	}
+
 	return &DockerExecutor{
 		logger:      logger,
 		imageAPICfg: imageAPICfg,
@@ -176,6 +182,15 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 	for k, v := range e.claudeEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Inject MCP server env vars so plugin/.mcp.json can resolve
+	// ${ANBANWRITER_API_KEY} and ${ANBANWRITER_API_URL} inside the container.
+	if e.dockerCfg.MCPAPIKey != "" {
+		env = append(env, fmt.Sprintf("ANBANWRITER_API_KEY=%s", e.dockerCfg.MCPAPIKey))
+	}
+	if e.dockerCfg.MCPBaseURL != "" {
+		env = append(env, fmt.Sprintf("ANBANWRITER_API_URL=%s", e.dockerCfg.MCPBaseURL))
 	}
 
 	// 6. Create container.
