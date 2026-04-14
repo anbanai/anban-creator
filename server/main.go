@@ -215,7 +215,7 @@ func main() {
 			PlanSvc:    planSvc,
 		})
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
-		log.Info().Msg("MCP handler initialized with tools (official SDK)")
+		log.Info().Bool("mcp_static_key_set", cfg.MCP.APIKey != "").Msg("MCP handler initialized with tools (official SDK)")
 	} else {
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")

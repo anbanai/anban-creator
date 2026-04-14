@@ -115,10 +115,16 @@ export default function TaskDetailPage() {
         setSseLogs((prev) => [...prev, `错误：${data}`])
         break
       }
-      case 'done': {
+      case 'done':
+      case 'completed':
+      case 'failed':
+      case 'cancelled': {
         queryClient.invalidateQueries({ queryKey: ['task', id] })
         queryClient.invalidateQueries({ queryKey: ['task-files', id] })
-        setSseLogs((prev) => [...prev, '--- 任务完成 ---'])
+        const statusText = event.event === 'completed' ? '任务完成'
+          : event.event === 'failed' ? '任务失败'
+            : event.event === 'cancelled' ? '任务取消' : '任务完成'
+        setSseLogs((prev) => [...prev, `--- ${statusText} ---`])
         break
       }
       default: {

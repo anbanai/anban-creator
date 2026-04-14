@@ -105,7 +105,11 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *
 		}
 
 		if zlog != nil {
-			zlog.Warn().Str("remote_addr", r.RemoteAddr).Msg("mcp auth failed: invalid token")
+			zlog.Warn().
+				Str("remote_addr", r.RemoteAddr).
+				Int("token_len", len(token)).
+				Bool("static_key_set", staticKey != "").
+				Msg("mcp auth failed: invalid token")
 		}
 		return nil, auth.ErrInvalidToken
 	}
