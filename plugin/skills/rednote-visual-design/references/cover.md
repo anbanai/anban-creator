@@ -79,5 +79,5 @@
 **CLI 命令**：
 
 ```bash
-anbanwriter image generate "{prompt}" --mode xhs --cover -o ./cover.png
+abwriter image generate "{prompt}" --mode xhs --cover -o ./cover.png
 ```

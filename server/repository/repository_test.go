@@ -39,9 +39,6 @@ func TestNew(t *testing.T) {
 	if repo.Sessions() == nil {
 		t.Error("Sessions() should not be nil")
 	}
-	if repo.UserConfigs() == nil {
-		t.Error("UserConfigs() should not be nil")
-	}
 	if repo.Plans() == nil {
 		t.Error("Plans() should not be nil")
 	}
@@ -435,4 +432,3 @@ func TestTaskFileRepository_CRUD(t *testing.T) {
 	}
 }
 
-// UserConfigRepository tests removed — UserConfig is now a legacy migration model.

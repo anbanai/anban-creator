@@ -20,23 +20,23 @@ all: build
 release:
 	@mkdir -p bin
 	@echo "Building for Linux amd64..."
-	@GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-linux-amd64 ./app
+	@GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-linux-amd64 ./app
 	@echo "Building for Linux arm64..."
-	@GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-linux-arm64 ./app
+	@GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-linux-arm64 ./app
 	@echo "Building for macOS amd64 (Intel)..."
-	@GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-darwin-amd64 ./app
+	@GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-darwin-amd64 ./app
 	@echo "Building for macOS arm64 (Apple Silicon)..."
-	@GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-darwin-arm64 ./app
+	@GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-darwin-arm64 ./app
 	@echo "Building for Windows amd64..."
-	@GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter-windows-amd64.exe ./app
+	@GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-windows-amd64.exe ./app
 	@chmod +x bin/*-linux* bin/*-darwin* 2>/dev/null || true
 	@echo "Release builds complete in bin/"
 
 # Build for current platform
 build:
 	@mkdir -p bin
-	@go build -ldflags="$(LDFLAGS)" -o bin/anbanwriter ./app
-	@echo "Build complete: bin/anbanwriter"
+	@go build -ldflags="$(LDFLAGS)" -o bin/abwriter ./app
+	@echo "Build complete: bin/abwriter"
 
 # Clean all build artifacts
 clean:
@@ -91,12 +91,12 @@ coverage:
 # Build the server binary
 server-build:
 	@mkdir -p bin
-	@go build -o bin/anbanwriter-server ./server
-	@echo "Server build complete: bin/anbanwriter-server"
+	@go build -o bin/abwriter-server ./server
+	@echo "Server build complete: bin/abwriter-server"
 
 # Build and run the server
 server-run: server-build
-	@./bin/anbanwriter-server -config server/config.yaml
+	@./bin/abwriter-server -config server/config.yaml
 
 # Run the server via go run (development)
 server-dev:
@@ -158,7 +158,7 @@ help:
 	@echo "  make clean         - Remove all build artifacts"
 	@echo ""
 	@echo "Server targets:"
-	@echo "  make server-build  - Build server binary to bin/anbanwriter-server"
+	@echo "  make server-build  - Build server binary to bin/abwriter-server"
 	@echo "  make server-run    - Build and run server with config"
 	@echo "  make server-dev    - go run server (development)"
 	@echo "  make server-test   - Run server tests"

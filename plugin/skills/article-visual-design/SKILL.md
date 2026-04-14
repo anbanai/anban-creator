@@ -17,20 +17,20 @@ description: Manages images for WeChat article (公众号图文) content includi
 
 ```bash
 # 文章内图片批量提取+生成（推荐）
-anbanwriter image batch article.md --mode article
+abwriter image batch article.md --mode article
 
 # 单张生成
-anbanwriter image generate "{prompt}" --mode article -o ./image.png
+abwriter image generate "{prompt}" --mode article -o ./image.png
 
 # 生成并上传
-anbanwriter image generate "{prompt}" --mode article --upload -o ./image.png
+abwriter image generate "{prompt}" --mode article --upload -o ./image.png
 
 # 上传已有图片
-anbanwriter image upload ./image.png
+abwriter image upload ./image.png
 
 # 下载在线图片（+上传）
-anbanwriter image download https://example.com/image.jpg
-anbanwriter image download https://example.com/image.jpg --upload
+abwriter image download https://example.com/image.jpg
+abwriter image download https://example.com/image.jpg --upload
 ```
 
 ---

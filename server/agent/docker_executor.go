@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,7 +91,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 
 	// 2. Create workspace directory on host.
 	// Use 0777 so the container's non-root user (node, uid 1000) can write to it.
-	workDir := filepath.Join(os.TempDir(), "anbanwriter", opts.Task.ID)
+	workDir := filepath.Join(os.TempDir(), "abwriter", opts.Task.ID)
 	if err := os.MkdirAll(workDir, 0777); err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
@@ -167,6 +168,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	if model != "" {
 		cmd = append(cmd, "--model", model)
 	}
+	e.logger.Debug().Strs("cmd", cmd).Str("task_id", opts.Task.ID).Msg("container command")
 
 	// 5. Build environment variables.
 	env := []string{
@@ -202,7 +204,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 
-	containerName := "anbanwriter-" + opts.Task.ID
+	containerName := "abwriter-" + opts.Task.ID
 	resp, err := e.dockerCLI.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
 	if err != nil {
 		return nil, fmt.Errorf("docker create: %w", err)
@@ -300,7 +302,46 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		parseDockerJSONResult(stdoutBuf.String(), result, e.logger, opts.Task.ID)
 	}
 
-	return result, nil
+	// Check for output files in workspace.
+		if result.WorkDir != "" {
+			fileCount := CountMeaningfulFiles(result.WorkDir)
+			result.NoOutputFiles = fileCount == 0
+			if result.NoOutputFiles && result.NumTurns <= 1 {
+				result.AgentLikelyFailed = true
+			}
+		}
+
+		// Warn if agent completed with too few turns — likely MCP or agent loading failure.
+		if result.NumTurns <= 1 {
+			stdoutSnippet := ""
+			if stdoutBuf.Len() > 0 {
+				stdoutSnippet = stdoutBuf.String()
+				if len(stdoutSnippet) > 2000 {
+					stdoutSnippet = stdoutSnippet[len(stdoutSnippet)-2000:]
+				}
+			}
+			logLevel := e.logger.Warn()
+			if result.AgentLikelyFailed {
+				logLevel = e.logger.Error()
+			}
+			logLevel.
+				Str("task_id", opts.Task.ID).
+				Int("num_turns", result.NumTurns).
+				Bool("no_output_files", result.NoOutputFiles).
+				Bool("agent_likely_failed", result.AgentLikelyFailed).
+				Str("stdout", stdoutSnippet).
+				Msg("agent completed with <=1 turns; agent definition may not have loaded or MCP connection failed")
+		}
+
+		// Warn if model is not a known Claude model — agent tool use may not work.
+		if model != "" && !isKnownClaudeModel(model) {
+			e.logger.Warn().
+				Str("task_id", opts.Task.ID).
+				Str("model", model).
+				Msg("configured model is not a Claude model; agent tool use may not work correctly")
+		}
+
+		return result, nil
 }
 
 // streamAndCaptureLogs reads multiplexed Docker log frames, forwards them to
@@ -322,13 +363,23 @@ func (e *DockerExecutor) streamAndCaptureLogs(reader io.ReadCloser, opts *Execut
 		if _, err := io.ReadFull(reader, buf); err != nil {
 			return
 		}
-		// Capture stdout frames for JSON result parsing.
-		// Only forward stderr (stream type 2) to OnProgress for human-readable
-		// progress, since --output-format json makes stdout contain JSON lines.
+		frame := string(buf)
 		if streamType == 1 {
+			// Capture stdout frames for JSON result parsing.
 			stdoutBuf.Write(buf)
-		} else if opts.OnProgress != nil {
-			opts.OnProgress(opts.Task.ID, string(buf))
+			// Also forward stdout to progress log for visibility.
+			if opts.OnProgress != nil {
+				opts.OnProgress(opts.Task.ID, frame)
+			}
+		} else {
+			// stderr — forward to progress log AND server log for diagnostics.
+			if opts.OnProgress != nil {
+				opts.OnProgress(opts.Task.ID, frame)
+			}
+			e.logger.Debug().
+				Str("task_id", opts.Task.ID).
+				Str("container_stderr", frame).
+				Msg("claude code stderr")
 		}
 	}
 }
@@ -476,7 +527,7 @@ func writeMCPConfig(workDir, baseURL, apiKey string) error {
 
 	mcpConfig := map[string]any{
 		"mcpServers": map[string]any{
-			"rednote": map[string]any{
+			"anbanwriter": map[string]any{
 				"type": "http",
 				"url":  baseURL + "/mcp",
 				"headers": map[string]string{
@@ -490,4 +541,10 @@ func writeMCPConfig(workDir, baseURL, apiKey string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), data, 0644)
+}
+
+// isKnownClaudeModel returns true for Claude model identifiers.
+func isKnownClaudeModel(model string) bool {
+	return strings.HasPrefix(model, "claude-") ||
+		strings.HasPrefix(model, "anthropic:")
 }

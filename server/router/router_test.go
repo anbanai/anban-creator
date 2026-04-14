@@ -142,7 +142,6 @@ func TestProtectedEndpointsRequireAuth(t *testing.T) {
 		{"GET", "/api/v1/auth/me"},
 		{"GET", "/api/v1/plans"},
 		{"POST", "/api/v1/tasks"},
-		{"GET", "/api/v1/configs"},
 		{"GET", "/api/v1/timeline?from=2025-01-01&to=2025-12-31"},
 		{"GET", "/api/v1/credits/balance"},
 		{"GET", "/api/v1/credits/sign-in/status"},

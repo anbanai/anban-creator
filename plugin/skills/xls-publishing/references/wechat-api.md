@@ -11,8 +11,8 @@
 ### CLI 命令
 
 ```bash
-anbanwriter image upload <file_path>
-anbanwriter image download <url>
+abwriter image upload <file_path>
+abwriter image download <url>
 ```
 
 ### 错误码
@@ -32,9 +32,9 @@ anbanwriter image download <url>
 ### CLI 命令
 
 ```bash
-anbanwriter draft xls -t "标题" --images photo1.jpg,photo2.jpg
-anbanwriter draft xls -t "标题" -m article.md
-anbanwriter draft xls -t "标题" --images photo.jpg --dry-run
+abwriter draft xls -t "标题" --images photo1.jpg,photo2.jpg
+abwriter draft xls -t "标题" -m article.md
+abwriter draft xls -t "标题" --images photo.jpg --dry-run
 ```
 
 ### 与图文草稿的区别

@@ -136,10 +136,10 @@
 在 `outline` 命令中通过 `--template` 指定模板类型：
 
 ```bash
-anbanwriter outline -t "话题" --template authoritative
-anbanwriter outline -t "话题" --template comparison
-anbanwriter outline -t "话题" --template cultural
-anbanwriter outline -t "话题" --template practical
+abwriter outline -t "话题" --template authoritative
+abwriter outline -t "话题" --template comparison
+abwriter outline -t "话题" --template cultural
+abwriter outline -t "话题" --template practical
 ```
 
 Claude 代理在生成大纲时，应参考对应模板的结构、标题公式和互动设计要点，

@@ -85,7 +85,7 @@ func checkConfig(cfg *config.Config, cfgErr error) []CheckResult {
 	if _, err := os.Stat(configPath); err == nil {
 		checks = append(checks, CheckResult{Name: "config_file", Status: "pass", Message: fmt.Sprintf("配置文件存在: %s", configPath)})
 	} else {
-		checks = append(checks, CheckResult{Name: "config_file", Status: "warn", Message: "配置文件不存在", Hint: "运行 'anbanwriter account init' 创建配置文件"})
+		checks = append(checks, CheckResult{Name: "config_file", Status: "warn", Message: "配置文件不存在", Hint: "运行 'abwriter account init' 创建配置文件"})
 	}
 
 	if cfgErr != nil || cfg == nil {

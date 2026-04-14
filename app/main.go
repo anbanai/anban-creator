@@ -98,7 +98,7 @@ func initConfigWithMode(minimal bool) error {
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "anbanwriter",
+		Use:   "abwriter",
 		Short: "微信公众号写作工具",
 		Long: `案板创作助手 - 公众号、小红书、小绿书内容创作
 
@@ -106,7 +106,7 @@ func main() {
 支持多领域配置和多种写作风格。
 
 Configuration:
-  Config file: .anbanwriter/settings.json (use 'anbanwriter account init' to create)`,
+  Config file: .anbanwriter/settings.json (use 'abwriter account init' to create)`,
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,

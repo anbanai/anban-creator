@@ -13,7 +13,6 @@ import (
 type Repository interface {
 	Users() UserRepository
 	Sessions() SessionRepository
-	UserConfigs() UserConfigRepository
 	Plans() PlanRepository
 	Tasks() TaskRepository
 	TaskFiles() TaskFileRepository
@@ -44,14 +43,6 @@ type SessionRepository interface {
 	Update(ctx context.Context, session *model.LoginSession) error
 	Delete(ctx context.Context, token string) error
 	DeleteExpired(ctx context.Context) error
-}
-
-// UserConfigRepository provides access to the user_configs table.
-type UserConfigRepository interface {
-	FindByUserAndScope(ctx context.Context, userID, scope string) (*model.UserConfig, error)
-	Upsert(ctx context.Context, config *model.UserConfig) error
-	ListByUserID(ctx context.Context, userID string) ([]*model.UserConfig, error)
-	Delete(ctx context.Context, id string) error
 }
 
 // PlanRepository provides access to the plans table.
@@ -108,7 +99,6 @@ type repository struct {
 	db       *gorm.DB
 	users    UserRepository
 	sessions SessionRepository
-	configs  UserConfigRepository
 	plans    PlanRepository
 	tasks    TaskRepository
 	files    TaskFileRepository
@@ -121,7 +111,6 @@ type repository struct {
 func New(db *gorm.DB) Repository {
 	users := newUserRepository(db)
 	sessions := newSessionRepository(db)
-	configs := newUserConfigRepository(db)
 	plans := newPlanRepository(db)
 	tasks := newTaskRepository(db)
 	files := newTaskFileRepository(db)
@@ -133,7 +122,6 @@ func New(db *gorm.DB) Repository {
 		db:       db,
 		users:    users,
 		sessions: sessions,
-		configs:  configs,
 		plans:    plans,
 		tasks:    tasks,
 		files:    files,
@@ -145,7 +133,6 @@ func New(db *gorm.DB) Repository {
 
 func (r *repository) Users() UserRepository            { return r.users }
 func (r *repository) Sessions() SessionRepository       { return r.sessions }
-func (r *repository) UserConfigs() UserConfigRepository { return r.configs }
 func (r *repository) Plans() PlanRepository             { return r.plans }
 func (r *repository) Tasks() TaskRepository             { return r.tasks }
 func (r *repository) TaskFiles() TaskFileRepository     { return r.files }
@@ -180,7 +167,6 @@ type txRepository struct {
 	db       *gorm.DB
 	users    UserRepository
 	sessions SessionRepository
-	configs  UserConfigRepository
 	plans    PlanRepository
 	tasks    TaskRepository
 	files    TaskFileRepository
@@ -194,7 +180,6 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		db:       tx,
 		users:    newUserRepository(tx),
 		sessions: newSessionRepository(tx),
-		configs:  newUserConfigRepository(tx),
 		plans:    newPlanRepository(tx),
 		tasks:    newTaskRepository(tx),
 		files:    newTaskFileRepository(tx),
@@ -206,7 +191,6 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 
 func (r *txRepository) Users() UserRepository            { return r.users }
 func (r *txRepository) Sessions() SessionRepository       { return r.sessions }
-func (r *txRepository) UserConfigs() UserConfigRepository { return r.configs }
 func (r *txRepository) Plans() PlanRepository             { return r.plans }
 func (r *txRepository) Tasks() TaskRepository             { return r.tasks }
 func (r *txRepository) TaskFiles() TaskFileRepository     { return r.files }

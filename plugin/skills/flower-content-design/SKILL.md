@@ -202,7 +202,7 @@ shallow to medium depth of field, rich color gradients, 9:16 portrait format
 第1张（首图）: 不使用 --ref，使用完整 $STYLE 描述确立基准风格
     ↓ 生成结果: flower_01_[name].png
 第2张起: 使用第1张作为 --ref，传递风格基准
-    ↓ anbanwriter image --scope flower generate "PROMPT" --size 9:16 --style "$STYLE" --ref flower_01_[name].png
+    ↓ abwriter image --scope flower generate "PROMPT" --size 9:16 --style "$STYLE" --ref flower_01_[name].png
 后续图片: 继续使用第1张（基准图）作为 --ref
 ```
 
@@ -214,13 +214,13 @@ shallow to medium depth of field, rich color gradients, 9:16 portrait format
 
 ```bash
 # 第1张（首图，无参考图）
-anbanwriter image --scope flower generate "PROMPT" --size 9:16 --style "STYLE_DESC"
+abwriter image --scope flower generate "PROMPT" --size 9:16 --style "STYLE_DESC"
 
 # 第2张起（以首图为参考）
-anbanwriter image --scope flower generate "PROMPT" --size 9:16 --style "STYLE_DESC" --ref path/to/flower_01.png
+abwriter image --scope flower generate "PROMPT" --size 9:16 --style "STYLE_DESC" --ref path/to/flower_01.png
 
 # 使用用户提供的参考图（所有图片）
-anbanwriter image --scope flower generate "PROMPT" --size 9:16 --style "STYLE_DESC" --ref path/to/user_ref.png
+abwriter image --scope flower generate "PROMPT" --size 9:16 --style "STYLE_DESC" --ref path/to/user_ref.png
 ```
 
 **参数说明**：

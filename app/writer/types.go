@@ -264,7 +264,7 @@ func NewStyleNotFoundError(name string) *WriterError {
 	return &WriterError{
 		Code:    ErrCodeStyleNotFound,
 		Message: "风格未找到: " + name,
-		HintMsg: "使用 `anbanwriter write --list` 查看可用风格，或在 writers/ 目录添加自定义风格",
+		HintMsg: "使用 `abwriter write --list` 查看可用风格，或在 writers/ 目录添加自定义风格",
 	}
 }
 

@@ -13,10 +13,10 @@ description: Researches topics, scores engagement potential, and generates conte
 
 ```bash
 # 查看草稿箱和已发布文章（统一视图）
-anbanwriter account history
+abwriter account history
 
 # 可指定获取更多条目
-anbanwriter account history --count 10
+abwriter account history --count 10
 ```
 
 列出所有已有标题后，选题应避开这些已有主题。
@@ -26,7 +26,7 @@ anbanwriter account history --count 10
 评估话题的爆款潜力：
 
 ```bash
-anbanwriter score -i metrics.json -t "主题" -d [领域]
+abwriter score -i metrics.json -t "主题" -d [领域]
 ```
 
 **标志**: `-i/--input`（数据文件）, `-t/--topic`（话题）, `-d/--domain`（领域）
@@ -36,7 +36,7 @@ anbanwriter score -i metrics.json -t "主题" -d [领域]
 基于话题生成内容框架：
 
 ```bash
-anbanwriter outline -t "主题" --template [模板] -d [领域] -s [风格] -k [关键词]
+abwriter outline -t "主题" --template [模板] -d [领域] -s [风格] -k [关键词]
 ```
 
 **标志**: `-t/--topic`, `--template`, `-d/--domain`, `-s/--style`, `-k/--keywords`
@@ -50,10 +50,10 @@ anbanwriter outline -t "主题" --template [模板] -d [领域] -s [风格] -k [
 
 ```bash
 # 话题评分
-anbanwriter score --help
+abwriter score --help
 
 # 内容框架生成
-anbanwriter outline --help
+abwriter outline --help
 ```
 
 ## 注意事项

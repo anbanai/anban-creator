@@ -34,13 +34,13 @@ func seoCmd() *cobra.Command {
 
 示例:
   # Step 1: 生成 SEO 分析提示词
-  anbanwriter seo article.md -k "茶文化" -k "养生"
+  abwriter seo article.md -k "茶文化" -k "养生"
 
   # 指定文章标题
-  anbanwriter seo article.md --title "一杯茶的养生秘密" -k "茶"
+  abwriter seo article.md --title "一杯茶的养生秘密" -k "茶"
 
   # Step 2: 解析代理返回的分析结果
-  anbanwriter seo article.md --ai-result seo-result.md`,
+  abwriter seo article.md --ai-result seo-result.md`,
 		Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			filePath := args[0]

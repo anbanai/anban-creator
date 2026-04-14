@@ -43,5 +43,5 @@
 ## 使用方式
 
 ```bash
-anbanwriter score --help
+abwriter score --help
 ```

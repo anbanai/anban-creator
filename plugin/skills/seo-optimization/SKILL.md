@@ -84,8 +84,8 @@ SEO 优化结果应输出以下结构：
 
 ```bash
 # 生成含关键词布局的大纲
-anbanwriter outline --help
+abwriter outline --help
 
 # 风格写作（融入 SEO）
-anbanwriter write --help
+abwriter write --help
 ```

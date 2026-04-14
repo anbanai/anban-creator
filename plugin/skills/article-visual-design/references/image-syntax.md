@@ -35,13 +35,13 @@
 
 ```bash
 # 提取 + 生成 + 不上传（预览用）
-anbanwriter image batch article.md --mode article --no-upload
+abwriter image batch article.md --mode article --no-upload
 
 # 提取 + 生成 + 上传
-anbanwriter image batch article.md --mode article
+abwriter image batch article.md --mode article
 
 # 指定输出目录
-anbanwriter image batch article.md --mode article -o ./images/
+abwriter image batch article.md --mode article -o ./images/
 ```
 
 ---

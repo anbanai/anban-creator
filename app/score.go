@@ -69,8 +69,8 @@ func scoreCmd() *cobra.Command {
 func runScore(inputFile, topic, domain string) error {
 	if inputFile == "" && isTerminal() {
 		return fmt.Errorf("需要提供评分数据。用法:\n" +
-			"  anbanwriter score -i metrics.json\n" +
-			"  echo '{\"read_count\":8500,\"like_count\":350}' | anbanwriter score -t \"话题\"\n\n" +
+			"  abwriter score -i metrics.json\n" +
+			"  echo '{\"read_count\":8500,\"like_count\":350}' | abwriter score -t \"话题\"\n\n" +
 			"JSON 格式示例:\n" +
 			"  {\"read_count\":8500,\"like_count\":350,\"share_count\":120,\"comment_count\":80}")
 	}

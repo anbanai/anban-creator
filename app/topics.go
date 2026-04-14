@@ -44,16 +44,16 @@ Claude 代理会根据你的账号画像（关键词、领域）生成定制化�
 
 示例:
   # 基于账号关键词生成话题（Step 1）
-  anbanwriter topics
+  abwriter topics
 
   # 指定领域和数量
-  anbanwriter topics --domain "传统文化" --count 5
+  abwriter topics --domain "传统文化" --count 5
 
   # 指定额外关键词
-  anbanwriter topics -k "茶文化" -k "养生"
+  abwriter topics -k "茶文化" -k "养生"
 
   # Step 2: 验证代理返回的话题列表
-  anbanwriter topics --ai-result topics.json`,
+  abwriter topics --ai-result topics.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := initConfigMinimal(); err != nil {
 				return fmt.Errorf("初始化配置失败: %w", err)

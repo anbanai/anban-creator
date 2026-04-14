@@ -22,7 +22,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("failed to open test db: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&model.Plan{}, &model.Task{}, &model.UserConfig{}, &model.User{},
+		&model.Plan{}, &model.Task{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Channel{},
 		&model.CreditTransaction{},
 	); err != nil {

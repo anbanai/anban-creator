@@ -2,10 +2,12 @@ package router
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/helmet"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
@@ -18,7 +20,6 @@ import (
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/handler"
 	appmiddleware "github.com/royalrick/anbanwriter/server/middleware"
-	"github.com/royalrick/anbanwriter/server/mcp"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
@@ -45,7 +46,7 @@ type Services struct {
 	ChannelHandler  *handler.ChannelHandler
 	TimelineHandler *handler.TimelineHandler
 	APIKeyHandler   *handler.APIKeyHandler
-	MCPHandler      *mcp.Handler
+	MCPHandler      http.Handler
 	StorageProvider storage.Provider
 }
 
@@ -256,8 +257,8 @@ func NewRouter(svc *Services) *fiber.App {
 
 	// MCP endpoint (API key auth, no JWT required).
 	if svc.MCPHandler != nil {
-		app.Post("/mcp", svc.MCPHandler.Handle)
-		app.Get("/mcp", svc.MCPHandler.Handle)
+		mcpHandler := adaptor.HTTPHandler(svc.MCPHandler)
+		app.All("/mcp", mcpHandler)
 	}
 
 	return app

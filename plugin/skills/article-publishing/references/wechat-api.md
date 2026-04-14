@@ -11,8 +11,8 @@
 ### CLI 命令
 
 ```bash
-anbanwriter image upload <file_path>
-anbanwriter image download <url>
+abwriter image upload <file_path>
+abwriter image download <url>
 ```
 
 ### 响应格式
@@ -42,7 +42,7 @@ anbanwriter image download <url>
 ### CLI 命令
 
 ```bash
-anbanwriter draft article <json_file>
+abwriter draft article <json_file>
 ```
 
 ### 响应格式

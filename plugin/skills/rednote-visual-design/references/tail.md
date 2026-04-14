@@ -129,7 +129,7 @@ Agent 在 image-plan 阶段根据内容主题自动判断，无需用户指定�
 
 ```bash
 # 单独生成尾图（与封面风格一致）
-anbanwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
+abwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
 ```
 
 > **关键规则**：尾图单独生成，不使用 `--count`。输出固定命名为 `tail.png`。

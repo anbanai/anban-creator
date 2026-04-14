@@ -1,9 +1,9 @@
 ---
 name: config
-description: Initializes, views, and modifies anbanwriter configuration settings. Use when user wants to initialize, view, or modify anbanwriter configuration.
+description: Initializes, views, and modifies abwriter configuration settings. Use when user wants to initialize, view, or modify abwriter configuration.
 ---
 
-# anbanwriter 配置管理
+# abwriter 配置管理
 
 ## 分步初始化配置（Agent 引导流程）
 
@@ -14,13 +14,13 @@ description: Initializes, views, and modifies anbanwriter configuration settings
 向用户获取微信公众号 AppID 和 Secret：
 
 ```bash
-anbanwriter account init --appid <wx_appid> --secret <wx_secret>
+abwriter account init --appid <wx_appid> --secret <wx_secret>
 ```
 
 ### 第二步：公众号基本信息（可选）
 
 ```bash
-anbanwriter account init --name <公众号名称> --author <作者名称>
+abwriter account init --name <公众号名称> --author <作者名称>
 ```
 
 ### 第三步：写作风格
@@ -28,7 +28,7 @@ anbanwriter account init --name <公众号名称> --author <作者名称>
 可选值：`dan-koe`（简洁有力）、`cultural-depth`（文化深度）、`casual-science`（轻松科普）
 
 ```bash
-anbanwriter account init --style dan-koe
+abwriter account init --style dan-koe
 ```
 
 ### 第四步：文章主题
@@ -36,13 +36,13 @@ anbanwriter account init --style dan-koe
 可选值：`default`、`apple`、`autumn-warm`、`spring-fresh`、`ocean-calm`
 
 ```bash
-anbanwriter account init --theme default
+abwriter account init --theme default
 ```
 
 ### 第五步：AI API 配置（可选）
 
 ```bash
-anbanwriter account init --ai-key <api_key> --ai-base-url https://api.anthropic.com/v1
+abwriter account init --ai-key <api_key> --ai-base-url https://api.anthropic.com/v1
 ```
 
 ### 第六步：图片生成服务（可选）
@@ -50,17 +50,17 @@ anbanwriter account init --ai-key <api_key> --ai-base-url https://api.anthropic.
 可选值：`gemini`、`openai`、`openrouter`、`volcengine`
 
 ```bash
-anbanwriter account init --provider gemini
+abwriter account init --provider gemini
 ```
 
-> 多个 flags 可合并：`anbanwriter account init --appid wx123 --secret abc --style dan-koe`
+> 多个 flags 可合并：`abwriter account init --appid wx123 --secret abc --style dan-koe`
 
 ---
 
 ## 无 flags：创建完整模板文件
 
 ```bash
-anbanwriter account init
+abwriter account init
 ```
 
 创建 `.anbanwriter/settings.json` 模板，手动编辑填入凭证。
@@ -68,5 +68,5 @@ anbanwriter account init
 ## 查看账号信息
 
 ```bash
-anbanwriter account info
+abwriter account info
 ```

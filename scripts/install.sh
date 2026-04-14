@@ -1,7 +1,7 @@
 #!/bin/bash
 # 案板创作助手 自动安装脚本
 # 适用于：macOS / Linux
-# 使用方法：curl -fsSL https://raw.githubusercontent.com/royalrick/anbanwriter/main/scripts/install.sh | bash
+# 使用方法：DOWNLOAD_URL/main/scripts/install.sh | bash
 
 set -e
 
@@ -19,15 +19,15 @@ echo "检测到系统: $OS $ARCH"
 # 确定下载链接
 if [ "$OS" = "Darwin" ]; then
     if [ "$ARCH" = "arm64" ]; then
-        BINARY="anbanwriter-darwin-arm64"
+        BINARY="abwriter-darwin-arm64"
     else
-        BINARY="anbanwriter-darwin-amd64"
+        BINARY="abwriter-darwin-amd64"
     fi
 elif [ "$OS" = "Linux" ]; then
     if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-        BINARY="anbanwriter-linux-arm64"
+        BINARY="abwriter-linux-arm64"
     else
-        BINARY="anbanwriter-linux-amd64"
+        BINARY="abwriter-linux-amd64"
     fi
 else
     echo "❌ 不支持的系统: $OS"
@@ -47,16 +47,16 @@ DOWNLOAD_URL="https://github.com/royalrick/anbanwriter/releases/latest/download/
 echo "下载地址: $DOWNLOAD_URL"
 
 if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/anbanwriter"
+    curl -fsSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/abwriter"
 elif command -v wget >/dev/null 2>&1; then
-    wget -q "$DOWNLOAD_URL" -O "$INSTALL_DIR/anbanwriter"
+    wget -q "$DOWNLOAD_URL" -O "$INSTALL_DIR/abwriter"
 else
     echo "❌ 需要 curl 或 wget 来下载文件"
     exit 1
 fi
 
 # 添加执行权限
-chmod +x "$INSTALL_DIR/anbanwriter"
+chmod +x "$INSTALL_DIR/abwriter"
 
 echo ""
 echo "✅ 下载完成！"
@@ -88,9 +88,9 @@ echo "   安装完成！"
 echo "========================================"
 echo ""
 echo "下一步："
-echo "  1. 运行: anbanwriter account init"
+echo "  1. 运行: abwriter account init"
 echo "  2. 编辑生成的配置文件"
-echo "  3. 运行: anbanwriter convert 文章.md --preview"
+echo "  3. 运行: abwriter convert 文章.md --preview"
 echo ""
-echo "查看帮助: anbanwriter --help"
+echo "查看帮助: abwriter --help"
 echo ""

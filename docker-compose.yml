@@ -1,21 +1,21 @@
-version: '3.8'
+version: "3.8"
 
 services:
   mysql:
     image: mysql:8.0
-    container_name: anbanwriter-mysql
+    container_name: abwriter-mysql
     restart: unless-stopped
     ports:
       - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-anbanwriter_dev}
-      MYSQL_DATABASE: anbanwriter
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-abwriter_dev}
+      MYSQL_DATABASE: abwriter
       MYSQL_CHARSET: utf8mb4
       MYSQL_COLLATION: utf8mb4_bin
     volumes:
       - ./data/mysql:/var/lib/mysql
     networks:
-      - anbanwriter-network
+      - abwriter-network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -24,44 +24,44 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: anbanwriter-redis
+    container_name: abwriter-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
       - ./data/redis:/data
     networks:
-      - anbanwriter-network
+      - abwriter-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  server:
-    build: .
-    image: anbanwriter:latest
-    container_name: anbanwriter-server
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./data/workspace:/tmp/anbanwriter
-    networks:
-      - anbanwriter-network
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      - ANBAN_SERVER_DATABASE_DSN=root:${MYSQL_ROOT_PASSWORD:-anbanwriter_dev}@tcp(mysql:3306)/anbanwriter?charset=utf8mb4&parseTime=true&loc=Local
-      - ANBAN_SERVER_REDIS_ADDR=redis:6379
-      - ANBAN_SERVER_JWT_SECRET_KEY=${JWT_SECRET_KEY:-anbanwriter_dev_secret}
-      - ANBAN_SERVER_CLAUDE_EXECUTOR=docker
-      - ANBAN_SERVER_CLAUDE_DOCKER_IMAGE=anbanwriter:latest
+  # server:
+  #   build: .
+  #   image: abwriter:latest
+  #   container_name: abwriter-server
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - ./data/workspace:/tmp/abwriter
+  #   networks:
+  #     - abwriter-network
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   environment:
+  #     - ANBAN_SERVER_DATABASE_DSN=root:${MYSQL_ROOT_PASSWORD:-abwriter_dev}@tcp(mysql:3306)/abwriter?charset=utf8mb4&parseTime=true&loc=Local
+  #     - ANBAN_SERVER_REDIS_ADDR=redis:6379
+  #     - ANBAN_SERVER_JWT_SECRET_KEY=${JWT_SECRET_KEY:-abwriter_dev_secret}
+  #     - ANBAN_SERVER_CLAUDE_EXECUTOR=docker
+  #     - ANBAN_SERVER_CLAUDE_DOCKER_IMAGE=abwriter:latest
 
 networks:
-  anbanwriter-network:
+  abwriter-network:
     driver: bridge

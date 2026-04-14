@@ -63,7 +63,6 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.LoginSession{},
-		&model.UserConfig{},
 		&model.Channel{},
 		&model.Plan{},
 		&model.Task{},
@@ -73,10 +72,6 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 		t.Fatalf("failed to auto-migrate: %v", err)
 	}
 
-	// Create the unique index for user_configs(user_id, scope) with SQLite syntax.
-	// The model.AutoMigrate function uses MySQL-specific DDL which fails on SQLite,
-	// so we create it here manually.
-	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_configs_user_id_scope ON user_configs(user_id, scope)")
 
 	// Drop the unique index on users.phone and users.open_id because the auth
 	// handler sets empty string instead of NULL for users without a phone

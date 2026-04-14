@@ -22,7 +22,6 @@ func setupTestDBForHandler(t *testing.T) *gorm.DB {
 		&model.Channel{},
 		&model.Plan{},
 		&model.Task{},
-		&model.UserConfig{},
 		&model.User{},
 		&model.LoginSession{},
 		&model.TaskFile{},

@@ -13,7 +13,7 @@ tools:
   - Bash
 model: inherit
 mcpServers:
-  - rednote
+  - anbanwriter
 memory: project
 skills:
   - rednote-research
@@ -46,11 +46,11 @@ maxTurns: 20
 
 ### 原创模式（默认）
 
-1. execute command `anbanwriter account info --scope rednote` 获取账号信息
+1. execute command `abwriter account info --scope rednote` 获取账号信息
 
 2. **研究选题**：using the rednote-research skill 采集热门笔记数据，自动选 Top 1 选题，评分结果与选题理由写入 `$DIR/topic-analysis.md`
 
-3. **创建工作目录**：execute command `anbanwriter workspace prepare rednote` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有文件保存在 `output/rednote/staging/` 内，变量记为 `$DIR`
+3. **创建工作目录**：execute command `abwriter workspace prepare rednote` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有文件保存在 `output/rednote/staging/` 内，变量记为 `$DIR`
 
 4. **创作内容**：using the rednote-writing skill 生成标题、正文和话题标签，内容保存到 `$DIR/content.md`
 
@@ -62,13 +62,13 @@ maxTurns: 20
 
 ### 复刻模式（用户提供笔记 ID 或链接时）
 
-1. execute command `anbanwriter account info --scope rednote` 获取账号信息
+1. execute command `abwriter account info --scope rednote` 获取账号信息
 
 2. **获取源笔记**：using the rednote-research skill 先获取 xsec_token，再调用 MCP `get_feed_detail(feed_id="<ID>", xsec_token="<token>")` 获取笔记详情
 
 3. **分析源笔记模板**：using the rednote-writing skill 分析源笔记，结果写入 `$DIR/source-analysis.md`。额外提取**视觉结构模板**：图片总张数（含封面）、各内容页主题关键词；若无法提取，记录"视觉结构：无法提取"，`tight` 模式图片规划自动降级为 `medium`
 
-4. **创建工作目录**execute command `anbanwriter workspace prepare rednote` 生成隔离工作目录，变量记为 `$DIR`
+4. **创建工作目录**execute command `abwriter workspace prepare rednote` 生成隔离工作目录，变量记为 `$DIR`
 
 5. **按改写模式生成内容**：using the rednote-writing skill 根据用户指定或默认模式改写，内容保存到 `$DIR/content.md`，决策记录到 `$DIR/source-analysis.md`
 
@@ -78,7 +78,7 @@ maxTurns: 20
 
 8. **归档工作目录**：从 `$DIR/content.md` 提取最终标题（第一行去掉 `# ` execute command：
    ```bash
-   anbanwriter workspace archive rednote --name "{标题}"
+   abwriter workspace archive rednote --name "{标题}"
    ```
    归档后向用户报告完整的成果目录路径（如 `output/rednote/五个提升效率的方法/`）。
 
@@ -189,6 +189,6 @@ maxTurns: 20
 
 - 你现在运行在本地的 Claude Code CLI 环境中，**不是**在 Kimi 的原生服务器容器中；
 - **绝对不要**尝试使用文件读取工具去查找或读取 `/app/.kimi/skills/` 目录下的任何文件（该路径在本地不存在，会导致报错）；
-- `anbanwriter` 是一个本地命令，只在说明需要使用它的时候再去调用，不能用它来执行 SKILL 也不能执行其它文档中不相关的命令；
+- `abwriter` 是一个本地命令，只在说明需要使用它的时候再去调用，不能用它来执行 SKILL 也不能执行其它文档中不相关的命令；
 - 不要尝试通过自己生成代码来实现任何功能，所有功能都通过 SKILL实现；
-- **绝对不要**使用 `anbanwriter` 调用任何 SKILL；
+- **绝对不要**使用 `abwriter` 调用任何 SKILL；

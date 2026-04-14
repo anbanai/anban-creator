@@ -38,11 +38,11 @@ jobs:
         run: |
           mkdir -p bin
 
-          GOOS=linux   GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-linux-amd64 ./app
-          GOOS=linux   GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-linux-arm64 ./app
-          GOOS=darwin  GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-darwin-amd64 ./app
-          GOOS=darwin  GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-darwin-arm64 ./app
-          GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/anbanwriter-windows-amd64.exe ./app
+          GOOS=linux   GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/abwriter-linux-amd64 ./app
+          GOOS=linux   GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/abwriter-linux-arm64 ./app
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/abwriter-darwin-amd64 ./app
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/abwriter-darwin-arm64 ./app
+          GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/abwriter-windows-amd64.exe ./app
 
           chmod +x bin/*-linux* bin/*-darwin* 2>/dev/null || true
           echo "${{ github.ref_name }}" > bin/version.txt
@@ -59,11 +59,11 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            bin/anbanwriter-linux-amd64
-            bin/anbanwriter-linux-arm64
-            bin/anbanwriter-darwin-amd64
-            bin/anbanwriter-darwin-arm64
-            bin/anbanwriter-windows-amd64.exe
+            bin/abwriter-linux-amd64
+            bin/abwriter-linux-arm64
+            bin/abwriter-darwin-amd64
+            bin/abwriter-darwin-arm64
+            bin/abwriter-windows-amd64.exe
             bin/version.txt
             bin/checksums.txt
           draft: false

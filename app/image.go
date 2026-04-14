@@ -52,8 +52,8 @@ func imageUploadCmd() *cobra.Command {
   wechat.secret  - 微信公众号 Secret
 
 示例:
-  anbanwriter image upload cover.jpg
-  anbanwriter image upload ./images/photo.png`,
+  abwriter image upload cover.jpg
+  abwriter image upload ./images/photo.png`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfig()
@@ -97,11 +97,11 @@ func imageDownloadCmd() *cobra.Command {
 
 示例:
   # 下载并上传到微信
-  anbanwriter image download https://example.com/photo.jpg
+  abwriter image download https://example.com/photo.jpg
 
   # 仅下载到本地
-  anbanwriter image download https://example.com/photo.jpg --no-upload
-  anbanwriter image download https://example.com/photo.jpg --no-upload -o local.jpg`,
+  abwriter image download https://example.com/photo.jpg --no-upload
+  abwriter image download https://example.com/photo.jpg --no-upload -o local.jpg`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if noUpload {
@@ -198,25 +198,25 @@ Prompt 构建优先级（从高到低）：
 
 示例:
   # 生成图片（自动以时间戳命名，如 generated_image_20060102_150405.png）
-  anbanwriter image generate "春天的茶园，阳光明媚"
+  abwriter image generate "春天的茶园，阳光明媚"
 
   # 指定输出文件
-  anbanwriter image generate "春天的茶园" -o tea.png
+  abwriter image generate "春天的茶园" -o tea.png
 
   # 指定尺寸（比例格式，默认 2K 档位）
-  anbanwriter image generate "清晨茶园" --size 16:9 -o cover.jpg
+  abwriter image generate "清晨茶园" --size 16:9 -o cover.jpg
 
   # 使用封面图配置（而非内容图配置）
-  anbanwriter image generate "封面图" --cover -o cover.jpg
+  abwriter image generate "封面图" --cover -o cover.jpg
 
   # 指定比例+档位
-  anbanwriter image generate "封面图" --size 3:4:2K -o cover.jpg
+  abwriter image generate "封面图" --size 3:4:2K -o cover.jpg
 
   # 组图模式：一次生成 4 张风格一致的图片到目录
-  anbanwriter image generate "小红书内容图" --count 4 -o ./output/images/
+  abwriter image generate "小红书内容图" --count 4 -o ./output/images/
 
   # 生成后自动上传到微信
-  anbanwriter image generate "封面图" --upload`,
+  abwriter image generate "封面图" --upload`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if upload {
@@ -444,10 +444,10 @@ func imageBatchCmd() *cobra.Command {
 
 示例:
   # 批量生成并上传，使用统一风格
-  anbanwriter image batch article.md --style "水彩插画，柔和暖色调" -o images.json
+  abwriter image batch article.md --style "水彩插画，柔和暖色调" -o images.json
 
   # 仅生成不上传（输出本地路径）
-  anbanwriter image batch article.md --style "水彩插画" --no-upload -o images.json`,
+  abwriter image batch article.md --style "水彩插画" --no-upload -o images.json`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if noUpload {

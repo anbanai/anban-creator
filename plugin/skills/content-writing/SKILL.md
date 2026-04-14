@@ -73,11 +73,11 @@ description: Writes articles with style guidance, removes AI traces, converts Ma
 
 ```bash
 # 风格写作
-anbanwriter write --help
+abwriter write --help
 
 # Markdown 转微信 HTML
-anbanwriter convert --help
+abwriter convert --help
 
 # AI 去痕
-anbanwriter humanize --help
+abwriter humanize --help
 ```

@@ -1,256 +1,154 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"net/http"
-	"strings"
+	"time"
 
-	"github.com/gofiber/fiber/v3"
+	"github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
-// Handler implements a minimal MCP JSON-RPC endpoint.
-// It supports initialize, tools/list, and tools/call methods.
-// Tools are registered via RegisterTool.
-type Handler struct {
-	logger    *zerolog.Logger
-	apiKeySvc *service.APIKeyService
-	staticKey string // fallback when no service available
-	tools     []Tool
+// statusWriter wraps http.ResponseWriter to capture the status code.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
 }
 
-// Tool describes an MCP tool.
-type Tool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
-	CallFunc    func(userID string, args map[string]any) (any, error) `json:"-"`
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
 }
 
-// jsonRPCRequest is a JSON-RPC 2.0 request.
-type jsonRPCRequest struct {
-	JSONRPC string         `json:"jsonrpc"`
-	Method  string         `json:"method"`
-	Params  map[string]any `json:"params,omitempty"`
-	ID      any            `json:"id"`
-}
-
-// jsonRPCResponse is a JSON-RPC 2.0 response.
-type jsonRPCResponse struct {
-	JSONRPC string `json:"jsonrpc"`
-	Result  any    `json:"result,omitempty"`
-	Error   any    `json:"error,omitempty"`
-	ID      any    `json:"id"`
-}
-
-// jsonRPCError is a JSON-RPC 2.0 error object.
-type jsonRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
-}
-
-// NewHandler creates a new MCP handler with per-user API key support.
-func NewHandler(apiKeySvc *service.APIKeyService, staticKey string, logger *zerolog.Logger) *Handler {
-	return &Handler{
-		apiKeySvc: apiKeySvc,
-		staticKey: staticKey,
-		logger:    logger,
-		tools:     []Tool{},
-	}
-}
-
-// RegisterTool adds an MCP tool to the handler.
-func (h *Handler) RegisterTool(tool Tool) {
-	h.tools = append(h.tools, tool)
-}
-
-// Handle handles POST /mcp requests.
-func (h *Handler) Handle(c fiber.Ctx) error {
-	// Authenticate and extract userID.
-	userID, err := h.authenticate(c)
-	if err != nil {
-		return c.Status(http.StatusUnauthorized).JSON(jsonRPCResponse{
-			JSONRPC: "2.0",
-			Error: jsonRPCError{
-				Code:    -32001,
-				Message: "unauthorized: " + err.Error(),
-			},
-			ID: nil,
-		})
-	}
-
-	// Parse JSON-RPC request.
-	var req jsonRPCRequest
-	if err := json.Unmarshal(c.Body(), &req); err != nil {
-		return c.JSON(jsonRPCResponse{
-			JSONRPC: "2.0",
-			Error: jsonRPCError{
-				Code:    -32700,
-				Message: "parse error: invalid JSON",
-			},
-			ID: nil,
-		})
-	}
-
-	if req.JSONRPC != "2.0" {
-		return c.JSON(jsonRPCResponse{
-			JSONRPC: "2.0",
-			Error: jsonRPCError{
-				Code:    -32600,
-				Message: "invalid request: jsonrpc must be 2.0",
-			},
-			ID: req.ID,
-		})
-	}
-
-	// Route to method handler.
-	var result any
-	var rpcErr *jsonRPCError
-
-	switch req.Method {
-	case "initialize":
-		result = h.handleInitialize()
-	case "tools/list":
-		result = h.handleToolsList()
-	case "tools/call":
-		result, rpcErr = h.handleToolsCall(userID, req.Params)
-	case "ping":
-		result = map[string]any{}
-	default:
-		rpcErr = &jsonRPCError{
-			Code:    -32601,
-			Message: fmt.Sprintf("method not found: %s", req.Method),
+// mcpLoggingMiddleware wraps an http.Handler to log all MCP requests.
+func mcpLoggingMiddleware(next http.Handler, zlog *zerolog.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, status: 200}
+		next.ServeHTTP(sw, r)
+		if zlog != nil {
+			zlog.Info().
+				Str("method", r.Method).
+				Str("path", r.URL.Path).
+				Int("status", sw.status).
+				Dur("duration", time.Since(start)).
+				Str("remote_addr", r.RemoteAddr).
+				Msg("mcp request")
 		}
-	}
-
-	resp := jsonRPCResponse{
-		JSONRPC: "2.0",
-		ID:      req.ID,
-	}
-	if rpcErr != nil {
-		resp.Error = *rpcErr
-	} else {
-		resp.Result = result
-	}
-
-	if h.logger != nil {
-		h.logger.Debug().
-			Str("method", req.Method).
-			Str("user_id", userID).
-			Interface("id", req.ID).
-			Bool("error", rpcErr != nil).
-			Msg("mcp request handled")
-	}
-
-	return c.JSON(resp)
+	})
 }
 
-// authenticate validates the API key and returns the userID.
-// Tries per-user API keys first, falls back to static key.
-func (h *Handler) authenticate(c fiber.Ctx) (string, error) {
-	// Extract key from X-API-Key header or Authorization: Bearer <token>.
-	rawKey := ""
-	if apiKey := c.Get("X-API-Key"); apiKey != "" {
-		rawKey = apiKey
-	} else {
-		auth := c.Get("Authorization")
-		if token, ok := strings.CutPrefix(auth, "Bearer "); ok {
-			rawKey = token
-		}
-	}
+// NewMCPHandler creates an http.Handler for the MCP endpoint using the official
+// MCP Go SDK. It supports per-user API keys (via APIKeyService) with optional
+// fallback to a static API key.
+//
+// The returned handler handles:
+//   - POST /mcp — client-to-server JSON-RPC messages
+//   - GET /mcp  — server-to-client SSE stream
+//   - DELETE /mcp — terminate session
+func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zerolog.Logger) http.Handler {
+	// Create MCP server.
+	mcServer := mcp.NewServer(&mcp.Implementation{
+		Name:    "anbanwriter-mcp",
+		Version: "1.2.0",
+	}, &mcp.ServerOptions{
+		Instructions: "Content creation assistant for WeChat, Xiaolvshu, and Xiaohongshu publishing.",
+	})
 
-	if rawKey == "" {
-		return "", fmt.Errorf("missing api key")
-	}
+	// Register all tools.
+	RegisterTools(mcServer)
 
-	// Try per-user API key first.
-	if h.apiKeySvc != nil {
-		apiKey, err := h.apiKeySvc.Validate(c.Context(), rawKey)
-		if err == nil && apiKey != nil {
-			return apiKey.UserID, nil
-		}
-	}
-
-	// Fallback to static key.
-	if h.staticKey != "" && rawKey == h.staticKey {
-		return "", nil // No userID for static key (admin mode)
-	}
-
-	return "", fmt.Errorf("invalid api key")
-}
-
-// handleInitialize returns server capabilities.
-func (h *Handler) handleInitialize() map[string]any {
-	return map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities": map[string]any{
-			"tools": map[string]any{
-				"listChanged": false,
-			},
+	// Create streamable HTTP handler (supports POST/GET/DELETE).
+	mcpHTTP := mcp.NewStreamableHTTPHandler(
+		func(r *http.Request) *mcp.Server {
+			return mcServer
 		},
-		"serverInfo": map[string]any{
-			"name":    "anbanwriter-mcp",
-			"version": "1.1.0",
+		&mcp.StreamableHTTPOptions{
+			SessionTimeout: 10 * time.Minute,
 		},
-	}
+	)
+
+	// Auth middleware: validate bearer token via per-user API keys or static key.
+	verifier := newTokenVerifier(apiKeySvc, staticKey, zlog)
+	protected := auth.RequireBearerToken(verifier, nil)(mcpHTTP)
+
+	return mcpLoggingMiddleware(protected, zlog)
 }
 
-// handleToolsList returns the list of available tools.
-func (h *Handler) handleToolsList() map[string]any {
-	tools := make([]map[string]any, len(h.tools))
-	for i, t := range h.tools {
-		tools[i] = map[string]any{
-			"name":        t.Name,
-			"description": t.Description,
-			"inputSchema": t.InputSchema,
-		}
-	}
-	return map[string]any{
-		"tools": tools,
-	}
-}
-
-// handleToolsCall executes a tool call with the authenticated userID.
-func (h *Handler) handleToolsCall(userID string, params map[string]any) (any, *jsonRPCError) {
-	name, _ := params["name"].(string)
-	if name == "" {
-		return nil, &jsonRPCError{
-			Code:    -32602,
-			Message: "missing tool name",
-		}
-	}
-
-	// Find the tool.
-	for _, t := range h.tools {
-		if t.Name == name {
-			args, _ := params["arguments"].(map[string]any)
-			if args == nil {
-				args = map[string]any{}
+// tokenVerifier validates per-user API keys via APIKeyService, with static key fallback.
+func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *zerolog.Logger) auth.TokenVerifier {
+	return func(ctx context.Context, token string, r *http.Request) (*auth.TokenInfo, error) {
+		// 1. Try per-user API key.
+		if apiKeySvc != nil {
+			apiKey, err := apiKeySvc.Validate(ctx, token)
+			if err == nil && apiKey != nil {
+				return &auth.TokenInfo{
+					UserID:     apiKey.UserID,
+					Scopes:     []string{"mcp"},
+					Expiration: time.Now().Add(10 * 365 * 24 * time.Hour), // API keys don't expire
+				}, nil
 			}
-			result, err := t.CallFunc(userID, args)
-			if err != nil {
-				return nil, &jsonRPCError{
-					Code:    -32000,
-					Message: err.Error(),
-				}
-			}
-			return map[string]any{
-				"content": []map[string]any{
-					{
-						"type": "text",
-						"text": fmt.Sprintf("%v", result),
-					},
-				},
+		}
+
+		// 2. Fallback to static key (admin mode, no userID).
+		if staticKey != "" && token == staticKey {
+			return &auth.TokenInfo{
+				UserID:     "",
+				Scopes:     []string{"mcp", "admin"},
+				Expiration: time.Now().Add(10 * 365 * 24 * time.Hour),
 			}, nil
 		}
-	}
 
-	return nil, &jsonRPCError{
-		Code:    -32602,
-		Message: fmt.Sprintf("unknown tool: %s", name),
+		if zlog != nil {
+			zlog.Warn().Str("remote_addr", r.RemoteAddr).Msg("mcp auth failed: invalid token")
+		}
+		return nil, auth.ErrInvalidToken
 	}
 }
+
+// getUserID extracts the authenticated user ID from the MCP request context.
+// Returns empty string for static key / admin mode.
+func getUserID(ctx context.Context) string {
+	info := auth.TokenInfoFromContext(ctx)
+	if info == nil {
+		return ""
+	}
+	return info.UserID
+}
+
+// textResult creates a CallToolResult with JSON text content.
+func textResult(data any) (*mcp.CallToolResult, error) {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: string(b)},
+		},
+	}, nil
+}
+
+// errorResult creates a CallToolResult indicating a tool error.
+func errorResult(msg string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: msg},
+		},
+		IsError: true,
+	}
+}
+
+// noopLogger returns a discard slog.Logger if zlog is nil.
+func noopLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(ioDiscard{}, nil))
+}
+
+type ioDiscard struct{}
+
+func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }

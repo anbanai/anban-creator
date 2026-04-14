@@ -49,10 +49,10 @@ Article 状态流转: created → outlined → drafted → polished → converte
 Xls 状态流转:    created → planned → images_ready → published
 
 示例：
-  anbanwriter content track --dir $DIR --type article --status created --topic "茶文化"
-  anbanwriter content track --dir $DIR --status outlined --title "标题"
-  anbanwriter content track --dir $DIR --status drafted
-  anbanwriter content track --dir $DIR --status published --media-id "xxx"`,
+  abwriter content track --dir $DIR --type article --status created --topic "茶文化"
+  abwriter content track --dir $DIR --status outlined --title "标题"
+  abwriter content track --dir $DIR --status drafted
+  abwriter content track --dir $DIR --status published --media-id "xxx"`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfigMinimal()
 		},
@@ -130,9 +130,9 @@ func contentListCmd() *cobra.Command {
 		Long: `列出本地追踪的内容，默认仅显示未发布内容
 
 示例：
-  anbanwriter content list
-  anbanwriter content list --all
-  anbanwriter content list --json`,
+  abwriter content list
+  abwriter content list --all
+  abwriter content list --json`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfigMinimal()
 		},

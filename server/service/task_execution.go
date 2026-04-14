@@ -96,6 +96,26 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		return s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
 	}
 
+	var meaningfulFileCount int
+	// Check if agent produced no output — treat as failure when num_turns <= 1
+	// and workspace has zero meaningful files (agent definition likely didn't load).
+	if result.AgentLikelyFailed || (result.NumTurns <= 1 && result.WorkDir != "") {
+		meaningfulFileCount = agent.CountMeaningfulFiles(result.WorkDir)
+		if meaningfulFileCount == 0 {
+			errMsg := fmt.Sprintf(
+				"agent execution produced no output files (num_turns=%d, output_files=0); agent definition may not have loaded or model does not support tool use",
+				result.NumTurns,
+			)
+			s.logger.Error().
+				Str("task_id", taskID).
+				Int("num_turns", result.NumTurns).
+				Int("meaningful_files", meaningfulFileCount).
+				Bool("agent_likely_failed", result.AgentLikelyFailed).
+				Msg(errMsg)
+			return s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+		}
+	}
+
 	// Check if task was cancelled during execution before marking as completed.
 	finalTask, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err == nil && finalTask.Status == model.TaskStatusCancelled {
@@ -106,30 +126,25 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	// Success.
 	s.logger.Info().Str("task_id", taskID).Str("work_dir", result.WorkDir).Msg("task completed successfully")
 
-	// Verify workspace has meaningful output files.
+	// Log workspace file count for diagnostics (reuse count from above if already computed).
 	if result.WorkDir != "" {
-		if entries, readErr := os.ReadDir(result.WorkDir); readErr == nil {
-			meaningfulFiles := 0
-			for _, e := range entries {
-				if e.IsDir() && (e.Name() == ".anbanwriter" || e.Name() == ".claude") {
-					continue
-				}
-				if !e.IsDir() {
-					meaningfulFiles++
-				}
-			}
-			if meaningfulFiles == 0 {
-				s.logger.Warn().
-					Str("task_id", taskID).
-					Str("work_dir", result.WorkDir).
-					Msg("workspace contains no output files after execution; agent may not have produced content")
-			} else {
-				s.logger.Info().
-					Str("task_id", taskID).
-					Int("file_count", meaningfulFiles).
-					Msg("workspace contains output files")
-			}
+		if meaningfulFileCount == 0 {
+			meaningfulFileCount = agent.CountMeaningfulFiles(result.WorkDir)
 		}
+		s.logger.Info().
+			Str("task_id", taskID).
+			Int("file_count", meaningfulFileCount).
+			Msg("workspace contains output files")
+	}
+
+	// Upload generated files to storage (BEFORE marking completed — prevents
+	// "completed with no files" if the process crashes between the two steps).
+	if result.WorkDir != "" {
+		if err := s.UploadTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("file upload failed")
+		}
+	} else {
+		s.logger.Warn().Str("task_id", taskID).Msg("no work directory in result, skipping file upload")
 	}
 
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {
@@ -137,15 +152,6 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	}
 	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
-	}
-
-	// Upload generated files to storage.
-	if result.WorkDir != "" {
-		if err := s.UploadTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("file upload failed")
-		}
-	} else {
-		s.logger.Warn().Str("task_id", taskID).Msg("no work directory in result, skipping file upload")
 	}
 
 	return nil
@@ -361,7 +367,7 @@ func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
 	s.logger.Info().Int("count", len(tasks)).Msg("found tasks eligible for cleanup")
 
 	for _, task := range tasks {
-		workDir := fmt.Sprintf("/tmp/anbanwriter/%s", task.ID)
+		workDir := fmt.Sprintf("/tmp/abwriter/%s", task.ID)
 		if err := os.RemoveAll(workDir); err != nil {
 			s.logger.Warn().Err(err).Str("task_id", task.ID).Str("path", workDir).Msg("failed to remove workspace directory")
 			continue

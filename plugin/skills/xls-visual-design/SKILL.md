@@ -15,16 +15,16 @@ description: Generates cover and content images for WeChat Xiaolvshu (小绿书/
 
 ```bash
 # 生成封面（单张）
-anbanwriter image generate "{prompt}" --mode xls --cover -o ./cover.png
+abwriter image generate "{prompt}" --mode xls --cover -o ./cover.png
 
 # 批量生成内容图
-anbanwriter image generate "{paged_prompt}" --mode xls --count N -o ./
+abwriter image generate "{paged_prompt}" --mode xls --count N -o ./
 
 # 带参考图保持一致
-anbanwriter image generate "{paged_prompt}" --mode xls --count N --ref ./cover.png -o ./
+abwriter image generate "{paged_prompt}" --mode xls --count N --ref ./cover.png -o ./
 
 # 带风格描述
-anbanwriter image generate "{prompt}" --mode xls --cover --style "简约质感，米白色调" -o ./cover.png
+abwriter image generate "{prompt}" --mode xls --cover --style "简约质感，米白色调" -o ./cover.png
 ```
 
 **关键规则**：内容图使用 `--count` 批量生成，不逐张调用。

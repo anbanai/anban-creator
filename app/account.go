@@ -23,8 +23,8 @@ func accountCmd() *cobra.Command {
 		Short: "账号管理",
 		Long: `管理微信公众号账号信息和配置
 
-使用 'anbanwriter account info' 查看账号画像信息。
-使用 'anbanwriter account init' 创建配置文件。`,
+使用 'abwriter account info' 查看账号画像信息。
+使用 'abwriter account init' 创建配置文件。`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := showAccountInfo(""); err != nil {
 				responseError(err)
@@ -426,10 +426,10 @@ func accountHistoryCmd() *cobra.Command {
 使用 --sync 手动触发 API 同步。
 
 示例:
-  anbanwriter account history
-  anbanwriter account history --count 10
-  anbanwriter account history --json
-  anbanwriter account history --sync`,
+  abwriter account history
+  abwriter account history --count 10
+  abwriter account history --json
+  abwriter account history --sync`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if sync {
 				// --sync 需要微信 API，加载完整配置
@@ -461,7 +461,7 @@ func accountHistoryCmd() *cobra.Command {
 				// 自动同步但缺少微信凭证时，输出提示而非报错
 				if !sync && (cfg.Wechat.AppID == "" || cfg.Wechat.Secret == "") {
 					fmt.Fprintf(os.Stderr, "⚠️  本地历史记录为空，自动同步需要配置微信凭证（wechat.appid / wechat.secret）\n")
-					fmt.Fprintf(os.Stderr, "   运行 'anbanwriter account init' 设置，或使用 --sync 手动触发同步。\n")
+					fmt.Fprintf(os.Stderr, "   运行 'abwriter account init' 设置，或使用 --sync 手动触发同步。\n")
 				} else {
 					items, warnings = fetchHistoryFromAPI(count)
 					// 同步结果持久化到 DB

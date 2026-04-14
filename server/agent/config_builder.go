@@ -12,7 +12,7 @@ import (
 
 // BuildAppConfig constructs an app/config.Config from a Channel DB record.
 // This bridges the multi-user server config to the single-account app config
-// used by the anbanwriter CLI binary.
+// used by the abwriter CLI binary.
 func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
 		Name:        ch.Name,
@@ -102,7 +102,7 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*
 }
 
 // writeSettingsJSON writes the app config to the workspace's .anbanwriter/settings.json.
-// The anbanwriter CLI binary reads config from CWD/.anbanwriter/settings.json as its
+// The abwriter CLI binary reads config from CWD/.anbanwriter/settings.json as its
 // highest-priority search path.
 func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	path := filepath.Join(workDir, appconfig.ConfigDir, appconfig.ConfigFileName)

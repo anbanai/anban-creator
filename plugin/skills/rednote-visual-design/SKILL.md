@@ -155,20 +155,20 @@ description: Generates cover and content images for Xiaohongshu (小红书) post
 
 ```bash
 # 生成封面（单张）
-anbanwriter image generate "{prompt}" --mode xhs --cover -o ./cover.png
+abwriter image generate "{prompt}" --mode xhs --cover -o ./cover.png
 
 # 批量生成内容图（N-2 张，不含尾图）
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 -o ./
+abwriter image generate "{paged_prompt}" --mode xhs --count N-2 -o ./
 
 # 单独生成尾图
-anbanwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
+abwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
 
 # 带参考图（保持风格一致）
-anbanwriter image generate "{prompt}" --mode xhs --cover --ref ./cover.png -o ./cover.png
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
+abwriter image generate "{prompt}" --mode xhs --cover --ref ./cover.png -o ./cover.png
+abwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
 
 # 带风格描述
-anbanwriter image generate "{prompt}" --mode xhs --cover --style "手绘感，暖色调，小清新" -o ./cover.png
+abwriter image generate "{prompt}" --mode xhs --cover --style "手绘感，暖色调，小清新" -o ./cover.png
 ```
 
 **关键规则**：内容图必须用 `--count` 批量生成，尾图单独生成（`tail.png`），封面单独生成（`cover.png`）。`--mode xhs` 自动使用 3:4:1K 规格。

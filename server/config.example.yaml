@@ -126,7 +126,7 @@ cors:
 claude:
   executor: local             # "local" (subprocess) or "docker" (container).
                               # Override with ANBAN_SERVER_CLAUDE_EXECUTOR.
-  plugin_dir: ""              # Path to the anbanwriter plugin directory (local executor only).
+  plugin_dir: ""              # Path to the abwriter plugin directory (local executor only).
                               # Must contain agents/ and skills/.
                               # Override with ANBAN_SERVER_CLAUDE_PLUGIN_DIR.
                               # In k8s/Docker: typically "/app".
@@ -135,7 +135,7 @@ claude:
 
   # Docker executor settings (used when executor=docker).
   docker:
-    image: "anbanwriter:latest"   # Docker image with Claude CLI + anbanwriter plugin.
+    image: "abwriter:latest"   # Docker image with Claude CLI + abwriter plugin.
     cpu_cores: 2                  # CPU limit per task container.
     memory_mb: 4096               # Memory limit per task container (MB).
     timeout_sec: 1800             # Container execution timeout (seconds, default 30 min).

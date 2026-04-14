@@ -236,10 +236,10 @@ func TestDefaultMaxTurns(t *testing.T) {
 		taskType string
 		want     int
 	}{
-		{model.ScopeArticle, 50},
-		{model.ScopeXls, 25},
-		{model.ScopeRednote, 20},
-		{"unknown", 20},
+		{model.ScopeArticle, 100},
+		{model.ScopeXls, 50},
+		{model.ScopeRednote, 40},
+		{"unknown", 40},
 	}
 
 	for _, tt := range tests {
@@ -299,9 +299,9 @@ func TestWriteMCPConfig(t *testing.T) {
 		t.Fatal("mcpServers not found or wrong type")
 	}
 
-	server, ok := servers["rednote"].(map[string]any)
+	server, ok := servers["anbanwriter"].(map[string]any)
 	if !ok {
-		t.Fatal("rednote server not found")
+		t.Fatal("abwriter server not found")
 	}
 
 	// Verify URL.
@@ -326,5 +326,74 @@ func TestWriteMCPConfig(t *testing.T) {
 	// Verify X-API-Key is NOT present.
 	if _, hasXAPIKey := headers["X-API-Key"]; hasXAPIKey {
 		t.Error("X-API-Key header should not be present; use Authorization: Bearer instead")
+	}
+}
+
+func TestCountMeaningfulFiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, dir string)
+		want    int
+	}{
+		{
+			name:  "empty directory",
+			setup: func(t *testing.T, dir string) {},
+			want:  0,
+		},
+		{
+			name: "only dotfiles",
+			setup: func(t *testing.T, dir string) {
+				os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("bin"), 0644)
+				os.WriteFile(filepath.Join(dir, ".hidden"), []byte("hidden"), 0644)
+			},
+			want: 0,
+		},
+		{
+			name: "only excluded dirs",
+			setup: func(t *testing.T, dir string) {
+				os.MkdirAll(filepath.Join(dir, ".anbanwriter"), 0755)
+				os.MkdirAll(filepath.Join(dir, ".claude"), 0755)
+				os.WriteFile(filepath.Join(dir, ".anbanwriter", "settings.json"), []byte("{}"), 0644)
+				os.WriteFile(filepath.Join(dir, ".claude", ".mcp.json"), []byte("{}"), 0644)
+			},
+			want: 0,
+		},
+		{
+			name: "single file",
+			setup: func(t *testing.T, dir string) {
+				os.WriteFile(filepath.Join(dir, "article.html"), []byte("<p>hi</p>"), 0644)
+			},
+			want: 1,
+		},
+		{
+			name: "nested files",
+			setup: func(t *testing.T, dir string) {
+				os.MkdirAll(filepath.Join(dir, "output", "images"), 0755)
+				os.WriteFile(filepath.Join(dir, "output", "article.md"), []byte("# Hi"), 0644)
+				os.WriteFile(filepath.Join(dir, "output", "images", "cover.png"), []byte("pngdata"), 0644)
+			},
+			want: 2,
+		},
+		{
+			name: "mixed with excluded",
+			setup: func(t *testing.T, dir string) {
+				os.MkdirAll(filepath.Join(dir, ".anbanwriter"), 0755)
+				os.WriteFile(filepath.Join(dir, ".anbanwriter", "settings.json"), []byte("{}"), 0644)
+				os.WriteFile(filepath.Join(dir, "index.html"), []byte("<p>hi</p>"), 0644)
+				os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("bin"), 0644)
+			},
+			want: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.setup(t, dir)
+			got := CountMeaningfulFiles(dir)
+			if got != tt.want {
+				t.Errorf("CountMeaningfulFiles = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }

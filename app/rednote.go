@@ -63,10 +63,10 @@ func rednoteExportCmd() *cobra.Command {
 两种使用模式：
 
 模式1：从 Markdown 文件解析（传统方式）
-  anbanwriter rednote export ./content.md
+  abwriter rednote export ./content.md
 
 模式2：直接传参（新增）
-  anbanwriter rednote export --title "标题" --content "正文内容" --images "a.png,b.png" --tags "tag1,tag2"
+  abwriter rednote export --title "标题" --content "正文内容" --images "a.png,b.png" --tags "tag1,tag2"
 
 导出格式：
   clipboard    - 复制到剪贴板（默认），可直接粘贴到小红书 App
@@ -87,13 +87,13 @@ func rednoteExportCmd() *cobra.Command {
 
 示例:
   # 从文件导出到剪贴板（默认）
-  anbanwriter rednote export ./content.md
+  abwriter rednote export ./content.md
 
   # 从文件导出为 JSON
-  anbanwriter rednote export ./content.md --format json -o output.json
+  abwriter rednote export ./content.md --format json -o output.json
 
   # 直接传参导出
-  anbanwriter rednote export --title "春季茶园攻略" \
+  abwriter rednote export --title "春季茶园攻略" \
     --content "春天是采茶的好季节..." \
     --images "cover.png,img2.png,img3.png" \
     --tags "茶园,春季,采茶" \

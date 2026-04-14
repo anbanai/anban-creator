@@ -4,7 +4,7 @@
 
 ## 概述
 
-写作功能是 anbanwriter 的辅助写作工具，特点：
+写作功能是 abwriter 的辅助写作工具，特点：
 
 - **零基础友好**：只需一个观点或想法，AI 自动扩展成完整文章
 - **创作者风格**：内置 Dan Koe 等风格，支持自定义
@@ -19,25 +19,25 @@
 
 ```bash
 # 交互式写作（最简单）
-anbanwriter write
+abwriter write
 
 # 查看所有可用风格
-anbanwriter write --list
+abwriter write --list
 
 # 指定风格写作
-anbanwriter write --style dan-koe
+abwriter write --style dan-koe
 
 # 指定标题写作
 
-anbanwriter write --style dan-koe --title "文章标题" <<EOF
+abwriter write --style dan-koe --title "文章标题" <<EOF
 你的内容
 EOF
 
 # 只生成封面提示词
-anbanwriter write --style dan-koe --cover-only
+abwriter write --style dan-koe --cover-only
 
 # 同时生成文章和封面
-anbanwriter write --style dan-koe --cover
+abwriter write --style dan-koe --cover
 ```
 
 ### 输入类型
@@ -71,7 +71,7 @@ anbanwriter write --style dan-koe --cover
 **输入**：一个想法或观点
 
 ```bash
-anbanwriter write
+abwriter write
 ```
 
 然后输入：
@@ -93,13 +93,13 @@ anbanwriter write
 
 ```bash
 echo "我觉得自律是个伪命题，大多数人坚持不下来是因为内心深处并不真正想要那个结果" | \
-anbanwriter write --style dan-koe
+abwriter write --style dan-koe
 ```
 
 或使用 heredoc：
 
 ```bash
-anbanwriter write --style dan-koe --title "自律是个谎言" <<EOF
+abwriter write --style dan-koe --title "自律是个谎言" <<EOF
 我觉得自律是个伪命题。
 大多数人坚持不下来是因为内心深处并不真正想要那个结果。
 EOF
@@ -108,13 +108,13 @@ EOF
 ### 场景 3：润色现有文章
 
 ```bash
-anbanwriter write --style dan-koe --input-type fragment article.md
+abwriter write --style dan-koe --input-type fragment article.md
 ```
 
 ### 场景 4：只生成封面
 
 ```bash
-anbanwriter write --style dan-koe --cover-only
+abwriter write --style dan-koe --cover-only
 ```
 
 输入文章内容后，获得：
@@ -252,7 +252,7 @@ Claude 会自动调用 `write` 命令并处理结果。
 
 ```bash
 # 生成 16:9 封面图（推荐，默认 2K 档位）
-anbanwriter image generate --size 16:9 "封面提示词"
+abwriter image generate --size 16:9 "封面提示词"
 ```
 
 ---
@@ -268,7 +268,7 @@ A: 不需要。写作功能专为小白设计，只需提供一个想法即可�
 A: 生成的是 Markdown 格式，需要用 `convert` 命令转换为微信格式：
 
 ```bash
-anbanwriter convert article.md --preview
+abwriter convert article.md --preview
 ```
 
 **Q: 可以修改生成的内容吗？**

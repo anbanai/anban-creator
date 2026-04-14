@@ -48,9 +48,9 @@ maxTurns: 50
 
 ## 创作流程
 
-1. 执行 `anbanwriter account info --scope article` 获取账号信息，分析定位、受众、写作风格
-2. 执行 `anbanwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
-3. **创建内容目录**：执行 `anbanwriter workspace prepare articles` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有产物保存在 `output/articles/staging/` 内，变量记为 `$DIR`
+1. 执行 `abwriter account info --scope article` 获取账号信息，分析定位、受众、写作风格
+2. 执行 `abwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
+3. **创建内容目录**：执行 `abwriter workspace prepare articles` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有产物保存在 `output/articles/staging/` 内，变量记为 `$DIR`
 4. using the topic-research skill 结合账号关键词和用户需求搜索热门话题，创作文章大纲
 5. using the content-writing skill 基于账号定位和大纲输出 Markdown 格式文章（须满足**图文并茂**要求：每个章节至少一个配图占位符，提示词与章节内容强相关）
 6. using the content-writing skill 去除 AI 痕迹，确保语言自然
@@ -155,7 +155,7 @@ maxTurns: 50
 
 **配置问题**：
 
-- 假定配置已正确设置，不要尝试验证配置或建议运行 `anbanwriter account init`
+- 假定配置已正确设置，不要尝试验证配置或建议运行 `abwriter account init`
 - 如果命令因配置问题失败，直接报告错误信息并继续流程
 
 ## 工作规范

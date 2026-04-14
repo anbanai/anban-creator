@@ -18,7 +18,7 @@ description: Generates flower arrangement image series with sequential reference
     → 生成 flower_01_[name].png
 
 第2张起：使用第1张作为 --ref
-    → anbanwriter image generate "PROMPT" --size 9:16 --style "$STYLE" --ref ./flower_01_[name].png
+    → abwriter image generate "PROMPT" --size 9:16 --style "$STYLE" --ref ./flower_01_[name].png
 
 第3张及以后：继续使用第1张（基准图）作为 --ref
     → 不要用上一张，始终用第1张保持风格基准稳定
@@ -32,13 +32,13 @@ description: Generates flower arrangement image series with sequential reference
 
 ```bash
 # 第1张（首图，无参考图）
-anbanwriter image generate "PROMPT_1" --size 9:16 --style "STYLE_DESC" -o ./flower_01_peony.png
+abwriter image generate "PROMPT_1" --size 9:16 --style "STYLE_DESC" -o ./flower_01_peony.png
 
 # 第2张起（以首图为参考）
-anbanwriter image generate "PROMPT_2" --size 9:16 --style "STYLE_DESC" --ref ./flower_01_peony.png -o ./flower_02_rose.png
+abwriter image generate "PROMPT_2" --size 9:16 --style "STYLE_DESC" --ref ./flower_01_peony.png -o ./flower_02_rose.png
 
 # 用户提供参考图时（所有图片统一使用）
-anbanwriter image generate "PROMPT_1" --size 9:16 --style "STYLE_DESC" --ref ./user_ref.png -o ./flower_01_peony.png
+abwriter image generate "PROMPT_1" --size 9:16 --style "STYLE_DESC" --ref ./user_ref.png -o ./flower_01_peony.png
 ```
 
 **参数**：

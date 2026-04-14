@@ -117,7 +117,7 @@
 
 **CLI 命令（批量，必须使用 --count）**：
 ```bash
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
+abwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
 # 输出自动命名为 image_01.png, image_02.png ... image_0{N-2}.png
 # 尾图单独生成见 tail.md
 ```

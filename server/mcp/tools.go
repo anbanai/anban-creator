@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
 )
@@ -17,16 +19,25 @@ type Services struct {
 	PlanSvc    *service.PlanService
 }
 
-// RegisterTools registers all MCP tools on the handler.
-func RegisterTools(h *Handler, svcs *Services) {
-	registerChannelTools(h, svcs)
-	registerTaskTools(h, svcs)
-	registerCreditTools(h, svcs)
-	registerPlanTools(h, svcs)
+// RegisterTools registers all MCP tools on the server.
+func RegisterTools(server *mcp.Server) {
+	registerChannelTools(server)
+	registerTaskTools(server)
+	registerCreditTools(server)
+	registerPlanTools(server)
 }
 
-func registerChannelTools(h *Handler, svcs *Services) {
-	h.RegisterTool(Tool{
+// parseArgs unmarshals raw JSON arguments into a map.
+func parseArgs(raw json.RawMessage) map[string]any {
+	args := map[string]any{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &args)
+	}
+	return args
+}
+
+func registerChannelTools(server *mcp.Server) {
+	server.AddTool(&mcp.Tool{
 		Name:        "list_channels",
 		Description: "List the authenticated user's channels (WeChat accounts). Each channel represents a WeChat Official Account or Xiaohongshu account.",
 		InputSchema: map[string]any{
@@ -36,26 +47,9 @@ func registerChannelTools(h *Handler, svcs *Services) {
 				"platform": map[string]any{"type": "string", "enum": []any{"article", "xls", "rednote"}, "description": "Filter by platform type"},
 			},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			opts := repository.ChannelListOptions{}
-			if v, ok := args["status"].(string); ok {
-				opts.Status = v
-			}
-			if v, ok := args["platform"].(string); ok {
-				opts.Platform = v
-			}
-			channels, err := svcs.ChannelSvc.List(newCtx(), userID, opts)
-			if err != nil {
-				return nil, fmt.Errorf("list channels: %w", err)
-			}
-			for _, ch := range channels {
-				service.SanitizeChannel(ch)
-			}
-			return channels, nil
-		},
-	})
+	}, channelListHandler)
 
-	h.RegisterTool(Tool{
+	server.AddTool(&mcp.Tool{
 		Name:        "get_channel",
 		Description: "Get details of a specific channel by ID, including its configuration (WeChat AppID, positioning, style, theme, etc.).",
 		InputSchema: map[string]any{
@@ -65,23 +59,11 @@ func registerChannelTools(h *Handler, svcs *Services) {
 			},
 			"required": []any{"channel_id"},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			channelID, _ := args["channel_id"].(string)
-			if channelID == "" {
-				return nil, fmt.Errorf("channel_id is required")
-			}
-			ch, stats, err := svcs.ChannelSvc.Get(newCtx(), userID, channelID)
-			if err != nil {
-				return nil, fmt.Errorf("get channel: %w", err)
-			}
-			service.SanitizeChannel(ch)
-			return map[string]any{"channel": ch, "stats": stats}, nil
-		},
-	})
+	}, channelGetHandler)
 }
 
-func registerTaskTools(h *Handler, svcs *Services) {
-	h.RegisterTool(Tool{
+func registerTaskTools(server *mcp.Server) {
+	server.AddTool(&mcp.Tool{
 		Name:        "create_task",
 		Description: "Create one or more content creation tasks for a channel. The task type is derived from the channel's platform (article/xls/rednote). Credits are deducted automatically.",
 		InputSchema: map[string]any{
@@ -93,39 +75,9 @@ func registerTaskTools(h *Handler, svcs *Services) {
 			},
 			"required": []any{"channel_id", "topic"},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			channelID, _ := args["channel_id"].(string)
-			topic, _ := args["topic"].(string)
-			if channelID == "" {
-				return nil, fmt.Errorf("channel_id is required")
-			}
-			if topic == "" {
-				return nil, fmt.Errorf("topic is required")
-			}
-			quantity := 1
-			if v, ok := args["quantity"].(float64); ok && int(v) > 0 {
-				quantity = int(v)
-			}
+	}, taskCreateHandler)
 
-			tasks, err := svcs.TaskSvc.CreateManual(newCtx(), userID, channelID, topic, quantity)
-			if err != nil {
-				return nil, fmt.Errorf("create task: %w", err)
-			}
-
-			ids := make([]string, len(tasks))
-			for i, t := range tasks {
-				ids[i] = t.ID
-			}
-			return map[string]any{
-				"task_ids": ids,
-				"count":    len(tasks),
-				"status":   "pending",
-				"message":  fmt.Sprintf("Created %d task(s). Tasks will execute asynchronously.", len(tasks)),
-			}, nil
-		},
-	})
-
-	h.RegisterTool(Tool{
+	server.AddTool(&mcp.Tool{
 		Name:        "list_tasks",
 		Description: "List tasks for the authenticated user with optional filters.",
 		InputSchema: map[string]any{
@@ -136,26 +88,9 @@ func registerTaskTools(h *Handler, svcs *Services) {
 				"limit":      map[string]any{"type": "integer", "description": "Max results (default 20, max 100)", "default": 20},
 			},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			limit := 20
-			if v, ok := args["limit"].(float64); ok && int(v) > 0 && int(v) <= 100 {
-				limit = int(v)
-			}
-			status, _ := args["status"].(string)
-			channelID, _ := args["channel_id"].(string)
+	}, taskListHandler)
 
-			tasks, total, err := svcs.TaskSvc.List(newCtx(), userID, 0, limit, status, channelID)
-			if err != nil {
-				return nil, fmt.Errorf("list tasks: %w", err)
-			}
-			return map[string]any{
-				"items": tasks,
-				"total": total,
-			}, nil
-		},
-	})
-
-	h.RegisterTool(Tool{
+	server.AddTool(&mcp.Tool{
 		Name:        "get_task",
 		Description: "Get detailed information about a specific task including status, progress log, and result.",
 		InputSchema: map[string]any{
@@ -165,37 +100,9 @@ func registerTaskTools(h *Handler, svcs *Services) {
 			},
 			"required": []any{"task_id"},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			taskID, _ := args["task_id"].(string)
-			if taskID == "" {
-				return nil, fmt.Errorf("task_id is required")
-			}
-			task, err := svcs.TaskSvc.GetByID(newCtx(), taskID)
-			if err != nil {
-				return nil, fmt.Errorf("get task: %w", err)
-			}
-			// Parse result JSON if present.
-			var result any
-			if task.Result != nil && *task.Result != "" {
-				_ = json.Unmarshal([]byte(*task.Result), &result)
-			}
-			return map[string]any{
-				"id":            task.ID,
-				"type":          task.Type,
-				"status":        task.Status,
-				"topic":         task.Topic,
-				"progress_log":  task.ProgressLog,
-				"result":        result,
-				"error_message": task.ErrorMessage,
-				"retry_count":   task.RetryCount,
-				"created_at":    task.CreatedAt,
-				"started_at":    task.StartedAt,
-				"completed_at":  task.CompletedAt,
-			}, nil
-		},
-	})
+	}, taskGetHandler)
 
-	h.RegisterTool(Tool{
+	server.AddTool(&mcp.Tool{
 		Name:        "cancel_task",
 		Description: "Cancel a pending or running task.",
 		InputSchema: map[string]any{
@@ -205,19 +112,9 @@ func registerTaskTools(h *Handler, svcs *Services) {
 			},
 			"required": []any{"task_id"},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			taskID, _ := args["task_id"].(string)
-			if taskID == "" {
-				return nil, fmt.Errorf("task_id is required")
-			}
-			if err := svcs.TaskSvc.Cancel(newCtx(), taskID); err != nil {
-				return nil, fmt.Errorf("cancel task: %w", err)
-			}
-			return map[string]any{"cancelled": true, "task_id": taskID}, nil
-		},
-	})
+	}, taskCancelHandler)
 
-	h.RegisterTool(Tool{
+	server.AddTool(&mcp.Tool{
 		Name:        "get_task_files",
 		Description: "List output files for a completed task. Returns file names, roles (cover, html, markdown, image), and sizes.",
 		InputSchema: map[string]any{
@@ -227,40 +124,22 @@ func registerTaskTools(h *Handler, svcs *Services) {
 			},
 			"required": []any{"task_id"},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			taskID, _ := args["task_id"].(string)
-			if taskID == "" {
-				return nil, fmt.Errorf("task_id is required")
-			}
-			files, err := svcs.TaskSvc.GetFiles(newCtx(), taskID)
-			if err != nil {
-				return nil, fmt.Errorf("get task files: %w", err)
-			}
-			return map[string]any{"files": files, "count": len(files)}, nil
-		},
-	})
+	}, taskFilesHandler)
 }
 
-func registerCreditTools(h *Handler, svcs *Services) {
-	h.RegisterTool(Tool{
+func registerCreditTools(server *mcp.Server) {
+	server.AddTool(&mcp.Tool{
 		Name:        "get_credits",
 		Description: "Get the authenticated user's current credit balance.",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			balance, err := svcs.CreditSvc.GetBalance(newCtx(), userID)
-			if err != nil {
-				return nil, fmt.Errorf("get credits: %w", err)
-			}
-			return map[string]any{"balance": balance}, nil
-		},
-	})
+	}, creditsGetHandler)
 }
 
-func registerPlanTools(h *Handler, svcs *Services) {
-	h.RegisterTool(Tool{
+func registerPlanTools(server *mcp.Server) {
+	server.AddTool(&mcp.Tool{
 		Name:        "list_plans",
 		Description: "List scheduled content plans for the authenticated user.",
 		InputSchema: map[string]any{
@@ -269,17 +148,9 @@ func registerPlanTools(h *Handler, svcs *Services) {
 				"channel_id": map[string]any{"type": "string", "description": "Filter by channel ID"},
 			},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			channelID, _ := args["channel_id"].(string)
-			plans, total, err := svcs.PlanSvc.List(newCtx(), userID, 0, 50, channelID)
-			if err != nil {
-				return nil, fmt.Errorf("list plans: %w", err)
-			}
-			return map[string]any{"items": plans, "total": total}, nil
-		},
-	})
+	}, planListHandler)
 
-	h.RegisterTool(Tool{
+	server.AddTool(&mcp.Tool{
 		Name:        "create_plan",
 		Description: "Create a scheduled content plan that automatically generates tasks on a cron schedule.",
 		InputSchema: map[string]any{
@@ -292,26 +163,200 @@ func registerPlanTools(h *Handler, svcs *Services) {
 			},
 			"required": []any{"channel_id", "title", "cron_expr"},
 		},
-		CallFunc: func(userID string, args map[string]any) (any, error) {
-			channelID, _ := args["channel_id"].(string)
-			title, _ := args["title"].(string)
-			cronExpr, _ := args["cron_expr"].(string)
-			topicHint, _ := args["topic_hint"].(string)
+	}, planCreateHandler)
+}
 
-			if channelID == "" || title == "" || cronExpr == "" {
-				return nil, fmt.Errorf("channel_id, title, and cron_expr are required")
-			}
+// ---------------------------------------------------------------------------
+// Tool handler implementations (closures over Services, set via SetServices)
+// ---------------------------------------------------------------------------
 
-			plan, err := svcs.PlanSvc.Create(newCtx(), userID, channelID, title, "", cronExpr, topicHint)
-			if err != nil {
-				return nil, fmt.Errorf("create plan: %w", err)
-			}
-			return plan, nil
-		},
+var svcs *Services
+
+// SetServices stores the service instances for use by tool handlers.
+func SetServices(s *Services) {
+	svcs = s
+}
+
+func channelListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+
+	opts := repository.ChannelListOptions{}
+	if v, ok := args["status"].(string); ok {
+		opts.Status = v
+	}
+	if v, ok := args["platform"].(string); ok {
+		opts.Platform = v
+	}
+	channels, err := svcs.ChannelSvc.List(context.Background(), userID, opts)
+	if err != nil {
+		return errorResult(fmt.Sprintf("list channels: %v", err)), nil
+	}
+	for _, ch := range channels {
+		service.SanitizeChannel(ch)
+	}
+	return textResult(channels)
+}
+
+func channelGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+	channelID, _ := args["channel_id"].(string)
+	if channelID == "" {
+		return errorResult("channel_id is required"), nil
+	}
+
+	ch, stats, err := svcs.ChannelSvc.Get(context.Background(), userID, channelID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("get channel: %v", err)), nil
+	}
+	service.SanitizeChannel(ch)
+	return textResult(map[string]any{"channel": ch, "stats": stats})
+}
+
+func taskCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+	channelID, _ := args["channel_id"].(string)
+	topic, _ := args["topic"].(string)
+	if channelID == "" {
+		return errorResult("channel_id is required"), nil
+	}
+	if topic == "" {
+		return errorResult("topic is required"), nil
+	}
+	quantity := 1
+	if v, ok := args["quantity"].(float64); ok && int(v) > 0 {
+		quantity = int(v)
+	}
+
+	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, topic, quantity)
+	if err != nil {
+		return errorResult(fmt.Sprintf("create task: %v", err)), nil
+	}
+
+	ids := make([]string, len(tasks))
+	for i, t := range tasks {
+		ids[i] = t.ID
+	}
+	return textResult(map[string]any{
+		"task_ids": ids,
+		"count":    len(tasks),
+		"status":   "pending",
+		"message":  fmt.Sprintf("Created %d task(s). Tasks will execute asynchronously.", len(tasks)),
 	})
 }
 
-// newCtx returns a background context for service calls.
-func newCtx() context.Context {
-	return context.Background()
+func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+	limit := 20
+	if v, ok := args["limit"].(float64); ok && int(v) > 0 && int(v) <= 100 {
+		limit = int(v)
+	}
+	status, _ := args["status"].(string)
+	channelID, _ := args["channel_id"].(string)
+
+	tasks, total, err := svcs.TaskSvc.List(context.Background(), userID, 0, limit, status, channelID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("list tasks: %v", err)), nil
+	}
+	return textResult(map[string]any{"items": tasks, "total": total})
+}
+
+func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := parseArgs(req.Params.Arguments)
+	taskID, _ := args["task_id"].(string)
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
+	}
+
+	task, err := svcs.TaskSvc.GetByID(context.Background(), taskID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("get task: %v", err)), nil
+	}
+	var result any
+	if task.Result != nil && *task.Result != "" {
+		_ = json.Unmarshal([]byte(*task.Result), &result)
+	}
+	return textResult(map[string]any{
+		"id":            task.ID,
+		"type":          task.Type,
+		"status":        task.Status,
+		"topic":         task.Topic,
+		"progress_log":  task.ProgressLog,
+		"result":        result,
+		"error_message": task.ErrorMessage,
+		"retry_count":   task.RetryCount,
+		"created_at":    task.CreatedAt,
+		"started_at":    task.StartedAt,
+		"completed_at":  task.CompletedAt,
+	})
+}
+
+func taskCancelHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := parseArgs(req.Params.Arguments)
+	taskID, _ := args["task_id"].(string)
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
+	}
+
+	if err := svcs.TaskSvc.Cancel(context.Background(), taskID); err != nil {
+		return errorResult(fmt.Sprintf("cancel task: %v", err)), nil
+	}
+	return textResult(map[string]any{"cancelled": true, "task_id": taskID})
+}
+
+func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := parseArgs(req.Params.Arguments)
+	taskID, _ := args["task_id"].(string)
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
+	}
+
+	files, err := svcs.TaskSvc.GetFiles(context.Background(), taskID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("get task files: %v", err)), nil
+	}
+	return textResult(map[string]any{"files": files, "count": len(files)})
+}
+
+func creditsGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	balance, err := svcs.CreditSvc.GetBalance(context.Background(), userID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("get credits: %v", err)), nil
+	}
+	return textResult(map[string]any{"balance": balance})
+}
+
+func planListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+	channelID, _ := args["channel_id"].(string)
+
+	plans, total, err := svcs.PlanSvc.List(context.Background(), userID, 0, 50, channelID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("list plans: %v", err)), nil
+	}
+	return textResult(map[string]any{"items": plans, "total": total})
+}
+
+func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+	channelID, _ := args["channel_id"].(string)
+	title, _ := args["title"].(string)
+	cronExpr, _ := args["cron_expr"].(string)
+	topicHint, _ := args["topic_hint"].(string)
+
+	if channelID == "" || title == "" || cronExpr == "" {
+		return errorResult("channel_id, title, and cron_expr are required"), nil
+	}
+
+	plan, err := svcs.PlanSvc.Create(context.Background(), userID, channelID, title, "", cronExpr, topicHint)
+	if err != nil {
+		return errorResult(fmt.Sprintf("create plan: %v", err)), nil
+	}
+	return textResult(plan)
 }

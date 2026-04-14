@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -19,13 +21,13 @@ import (
 func DefaultMaxTurns(taskType string) int {
 	switch taskType {
 	case model.ScopeArticle:
-		return 50
+		return 100
 	case model.ScopeXls:
-		return 25
+		return 50
 	case model.ScopeRednote:
-		return 20
+		return 40
 	default:
-		return 20
+		return 40
 	}
 }
 
@@ -85,12 +87,16 @@ type ExecutionResult struct {
 	DurationAPIMs int         `json:"duration_api_ms,omitempty"`
 	TotalCostUSD  *float64    `json:"total_cost_usd,omitempty"`
 	TokenUsage    *TokenUsage `json:"token_usage,omitempty"`
+
+	// Post-execution diagnostics.
+	NoOutputFiles     bool `json:"no_output_files,omitempty"`
+	AgentLikelyFailed bool `json:"agent_likely_failed,omitempty"`
 }
 
 // Execute runs the Claude Code agent for the given task.
 //
 // It creates a per-task workspace directory, writes the channel config as
-// .anbanwriter/settings.json, loads the anbanwriter plugin with the matching
+// .anbanwriter/settings.json, loads the abwriter plugin with the matching
 // agent definition, and launches execution via the claude-agent-sdk-go SDK.
 func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	// 1. Resolve defaults.
@@ -104,7 +110,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 2. Create workspace directory.
-	workDir := filepath.Join(os.TempDir(), "anbanwriter", opts.Task.ID)
+	workDir := filepath.Join(os.TempDir(), "abwriter", opts.Task.ID)
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
@@ -336,6 +342,31 @@ func ListWorkDirFiles(workDir string) ([]map[string]any, error) {
 		files = append(files, f)
 	}
 	return files, nil
+}
+
+// CountMeaningfulFiles recursively counts files in workDir, excluding
+// .anbanwriter/, .claude/, and dotfiles. Returns the count of actual files
+// (not directories) at any nesting depth.
+func CountMeaningfulFiles(workDir string) int {
+	count := 0
+	filepath.WalkDir(workDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".anbanwriter", ".claude":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		count++
+		return nil
+	})
+	return count
 }
 
 // MarshalResultJSON serializes an ExecutionResult to JSON.

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Auto-download/update anbanwriter binary from GitHub releases.
+# Auto-download/update abwriter binary from GitHub releases.
 # Designed to run in background from SessionStart hook.
 # All output goes to bin/.bootstrap.log; failures are silent.
 
 set -euo pipefail
 
-REPO="royalrick/anbanwriter"
+REPO="royalrick/abwriter"
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 BIN_DIR="$ROOT/bin"
 LOG="$BIN_DIR/.bootstrap.log"
@@ -22,7 +22,7 @@ case "$ARCH" in
   aarch64) ARCH="arm64" ;;
 esac
 
-BINARY_NAME="anbanwriter-${OS}-${ARCH}"
+BINARY_NAME="abwriter-${OS}-${ARCH}"
 [ "$OS" = "windows" ] && BINARY_NAME="${BINARY_NAME}.exe"
 
 # Get latest version from GitHub API
@@ -35,7 +35,7 @@ fi
 echo "Latest version: $LATEST"
 
 # Compare with local version
-if [ -f "$VERSION_FILE" ] && [ "$(cat "$VERSION_FILE")" = "$LATEST" ] && [ -x "$BIN_DIR/anbanwriter" ]; then
+if [ -f "$VERSION_FILE" ] && [ "$(cat "$VERSION_FILE")" = "$LATEST" ] && [ -x "$BIN_DIR/abwriter" ]; then
   echo "Already up to date"
   exit 0
 fi
@@ -43,10 +43,10 @@ fi
 # Download
 URL="https://github.com/${REPO}/releases/download/${LATEST}/${BINARY_NAME}"
 echo "Downloading $URL ..."
-curl -fsSL "$URL" -o "$BIN_DIR/anbanwriter.new"
-chmod +x "$BIN_DIR/anbanwriter.new"
+curl -fsSL "$URL" -o "$BIN_DIR/abwriter.new"
+chmod +x "$BIN_DIR/abwriter.new"
 
 # Atomic replace
-mv -f "$BIN_DIR/anbanwriter.new" "$BIN_DIR/anbanwriter"
+mv -f "$BIN_DIR/abwriter.new" "$BIN_DIR/abwriter"
 echo "$LATEST" > "$VERSION_FILE"
 echo "Updated to $LATEST"

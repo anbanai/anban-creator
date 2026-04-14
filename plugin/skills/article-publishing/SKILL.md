@@ -9,20 +9,20 @@ description: Creates and manages WeChat news article drafts with HTML formatting
 
 ## 草稿管理
 
-查看发布历史：`anbanwriter account history`
+查看发布历史：`abwriter account history`
 
 ## 命令
 
 ```bash
 # 查看草稿箱和已发布文章
-anbanwriter account history
-anbanwriter account history --count 10
+abwriter account history
+abwriter account history --count 10
 
 # 从 JSON 文件创建草稿
-anbanwriter draft article /path/to/article.json
+abwriter draft article /path/to/article.json
 
 # 测试 HTML 草稿（验证内容）
-anbanwriter draft test article.html cover.jpg -t "标题"
+abwriter draft test article.html cover.jpg -t "标题"
 ```
 
 ## draft.json 格式
@@ -59,15 +59,15 @@ anbanwriter draft test article.html cover.jpg -t "标题"
 
 ```bash
 # 1. 转换 Markdown → WeChat HTML（同时保存 draft.json）
-anbanwriter convert article.md --theme autumn-warm --draft
+abwriter convert article.md --theme autumn-warm --draft
 
 # 2. 生成封面图到本地
-anbanwriter image generate -s 2k "封面图提示词" -o output/cover.jpg
+abwriter image generate -s 2k "封面图提示词" -o output/cover.jpg
 # 3. 上传封面图到微信素材库，记录返回的 media_id
-anbanwriter image upload output/cover.jpg
+abwriter image upload output/cover.jpg
 
 # 4. 创建草稿
-anbanwriter draft article ./draft.json
+abwriter draft article ./draft.json
 ```
 
 ## 注意事项

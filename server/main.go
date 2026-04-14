@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -82,12 +83,6 @@ func main() {
 			log.Info().Msg("database migration completed")
 		}
 
-		// 6.1. Migrate legacy user_configs to channels (idempotent).
-		if err := model.MigrateUserConfigsToChannels(mysqlDB); err != nil {
-			log.Error().Err(err).Msg("failed to migrate user_configs to channels")
-		} else {
-			log.Info().Msg("user_configs -> channels migration completed")
-		}
 	}
 
 	// 7. Create repository.
@@ -210,20 +205,20 @@ func main() {
 		}
 	}
 
-	// 14.1. Create MCP handler.
-	var mcpHandler *mcp.Handler
-	mcpHandler = mcp.NewHandler(apiKeySvc, cfg.MCP.APIKey, log)
-	if apiKeySvc != nil {
-		// Register MCP tools wrapping the service layer.
-		mcp.RegisterTools(mcpHandler, &mcp.Services{
+	// 14.1. Create MCP handler (using official MCP Go SDK).
+	var mcpHandler http.Handler
+	if channelSvc != nil && taskSvc != nil && creditSvc != nil && planSvc != nil {
+		mcp.SetServices(&mcp.Services{
 			ChannelSvc: channelSvc,
 			TaskSvc:    taskSvc,
 			CreditSvc:  creditSvc,
 			PlanSvc:    planSvc,
 		})
-		log.Info().Msg("MCP handler initialized with tools")
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
+		log.Info().Msg("MCP handler initialized with tools (official SDK)")
 	} else {
-		log.Info().Msg("MCP handler initialized (no tools, service unavailable)")
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
+		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")
 	}
 
 	// 15. Start Asynq worker if Redis is available.

@@ -101,14 +101,14 @@ type ClaudeConfig struct {
 	Model     string            `yaml:"model"`      // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
 	Executor  string            `yaml:"executor"`   // "local" (default) or "docker"
 	Env       map[string]string `yaml:"env"`
-	PluginDir string            `yaml:"plugin_dir"` // Path to the anbanwriter plugin directory (contains agents/, skills/)
+	PluginDir string            `yaml:"plugin_dir"` // Path to the abwriter plugin directory (contains agents/, skills/)
 	Sandbox   bool              `yaml:"sandbox"`    // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker    DockerConfig      `yaml:"docker"`     // Docker executor settings (used when executor=docker)
 }
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Image      string `yaml:"image"`        // Docker image name (default: "anbanwriter:latest")
+	Image      string `yaml:"image"`        // Docker image name (default: "abwriter:latest")
 	CPUCores   int64  `yaml:"cpu_cores"`    // CPU limit in cores (default: 2)
 	MemoryMB   int64  `yaml:"memory_mb"`    // Memory limit in MB (default: 4096)
 	TimeoutSec int    `yaml:"timeout_sec"`  // Container execution timeout in seconds (default: 1800 = 30 min)
@@ -233,7 +233,7 @@ func (c *Config) applyDefaults() {
 		c.Claude.Executor = "local"
 	}
 	if c.Claude.Docker.Image == "" {
-		c.Claude.Docker.Image = "anbanwriter:latest"
+		c.Claude.Docker.Image = "abwriter:latest"
 	}
 	if c.Claude.Docker.CPUCores == 0 {
 		c.Claude.Docker.CPUCores = 2
@@ -412,7 +412,7 @@ func (c *Config) applyEnvOverrides() {
 	}
 }
 
-// detectPluginDir attempts to locate the anbanwriter plugin directory
+// detectPluginDir attempts to locate the abwriter plugin directory
 // that contains agents/. It checks for a "plugin/" subdirectory first,
 // then searches upward from the current working directory.
 func detectPluginDir() string {

@@ -59,19 +59,19 @@ func videoAssembleCmd() *cobra.Command {
 
 示例：
   # 用三张图片组装视频（随机转场）
-  anbanwriter video assemble img1.png img2.png img3.png
+  abwriter video assemble img1.png img2.png img3.png
 
   # 用目录中的图片组装视频
-  anbanwriter video assemble output/xls/xls-20240101-001/
+  abwriter video assemble output/xls/xls-20240101-001/
 
   # 指定输出文件和转场效果
-  anbanwriter video assemble img1.png img2.png -o result.mp4 --effects "fade,wipeleft"
+  abwriter video assemble img1.png img2.png -o result.mp4 --effects "fade,wipeleft"
 
   # 指定每张图片时长和转场时长
-  anbanwriter video assemble dir/ --duration 5 --transition 2
+  abwriter video assemble dir/ --duration 5 --transition 2
 
   # 指定分辨率
-  anbanwriter video assemble dir/ --resolution 1080x1440`,
+  abwriter video assemble dir/ --resolution 1080x1440`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 1. 解析输入图片列表

@@ -246,6 +246,25 @@ export interface AdminGrantRequest {
   description: string
 }
 
+// --- API Key Types ---
+
+export interface APIKey {
+  id: string
+  user_id: string
+  name: string
+  key_prefix: string
+  last_used_at: string | null
+  created_at: string
+}
+
+export interface CreateAPIKeyResponse {
+  id: string
+  name: string
+  key_prefix: string
+  key: string
+  created_at: string
+}
+
 // --- Paginated Response ---
 
 export interface PaginatedResponse<T> {
@@ -508,6 +527,18 @@ export const api = {
 
     transactions: (params?: { page?: number; page_size?: number }) =>
       unwrap<PaginatedResponse<CreditTransaction>>(http.get('/credits/transactions', { params })),
+  },
+
+  // API Keys
+  apiKeys: {
+    list: () =>
+      unwrap<{ items: APIKey[] }>(http.get('/api-keys')),
+
+    create: (name: string) =>
+      unwrap<CreateAPIKeyResponse>(http.post('/api-keys', { name })),
+
+    revoke: (id: string) =>
+      unwrap<{ revoked: boolean }>(http.delete(`/api-keys/${id}`)),
   },
 }
 

@@ -40,30 +40,30 @@ func draftXlsCmd() *cobra.Command {
 ║  小红书发布请使用 MCP 工具：                                   ║
 ║    publish_content(title="...", content="...", images=[...])   ║
 ║                                                                ║
-║  或先使用 anbanwriter rednote export 导出内容             ║
+║  或先使用 abwriter rednote export 导出内容             ║
 ╚════════════════════════════════════════════════════════════════╝
 
 示例：
   # 从逗号分隔的本地图片文件路径创建（自动上传到微信素材库）
-  anbanwriter draft xls -t "周末出游" --images photo1.jpg,photo2.jpg,photo3.jpg
+  abwriter draft xls -t "周末出游" --images photo1.jpg,photo2.jpg,photo3.jpg
 
   # 从 Markdown 文件提取图片
-  anbanwriter draft xls -t "旅行日记" -m article.md
+  abwriter draft xls -t "旅行日记" -m article.md
 
   # 带描述文字和评论设置
-  anbanwriter draft xls -t "美食分享" -c "今天的午餐" --images food.jpg --open-comment
+  abwriter draft xls -t "美食分享" -c "今天的午餐" --images food.jpg --open-comment
 
   # 使用微信素材 ID 创建（先用 image upload 获取 media_id，再跳过重复上传）
-  anbanwriter draft xls -t "AI 图集" --media-ids "MEDIA_ID_1,MEDIA_ID_2"
+  abwriter draft xls -t "AI 图集" --media-ids "MEDIA_ID_1,MEDIA_ID_2"
 
   # 混合使用：微信素材 ID + 本地文件路径
-  anbanwriter draft xls -t "混合图集" --media-ids "MEDIA_ID_1" --images "local.jpg"
+  abwriter draft xls -t "混合图集" --media-ids "MEDIA_ID_1" --images "local.jpg"
 
   # 从 stdin 读取描述
-  echo "每日打卡" | anbanwriter draft xls -t "每日" --images pic.jpg
+  echo "每日打卡" | abwriter draft xls -t "每日" --images pic.jpg
 
   # 预览模式（不实际创建）
-  anbanwriter draft xls -t "测试" --images a.jpg,b.jpg --dry-run`,
+  abwriter draft xls -t "测试" --images a.jpg,b.jpg --dry-run`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return initConfig()
 		},
