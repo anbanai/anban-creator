@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	appconfig "github.com/royalrick/anbanwriter/app/config"
@@ -269,5 +271,60 @@ func TestMarshalResultJSON(t *testing.T) {
 	}
 	if parsed["work_dir"] != "/tmp/test" {
 		t.Errorf("work_dir = %v, want /tmp/test", parsed["work_dir"])
+	}
+}
+
+func TestWriteMCPConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	wantURL := "http://host.docker.internal:18060"
+	wantKey := "test-api-key-12345"
+
+	if err := writeMCPConfig(tmpDir, wantURL, wantKey); err != nil {
+		t.Fatalf("writeMCPConfig error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".claude", ".mcp.json"))
+	if err != nil {
+		t.Fatalf("failed to read .mcp.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .mcp.json: %v", err)
+	}
+
+	servers, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatal("mcpServers not found or wrong type")
+	}
+
+	server, ok := servers["rednote"].(map[string]any)
+	if !ok {
+		t.Fatal("rednote server not found")
+	}
+
+	// Verify URL.
+	if got := server["url"]; got != wantURL+"/mcp" {
+		t.Errorf("url = %v, want %v", got, wantURL+"/mcp")
+	}
+
+	// Verify Authorization: Bearer header (NOT X-API-Key).
+	headers, ok := server["headers"].(map[string]any)
+	if !ok {
+		t.Fatal("headers not found or wrong type")
+	}
+
+	authVal, ok := headers["Authorization"]
+	if !ok {
+		t.Error("Authorization header not found")
+	}
+	if authVal != "Bearer "+wantKey {
+		t.Errorf("Authorization = %v, want %v", authVal, "Bearer "+wantKey)
+	}
+
+	// Verify X-API-Key is NOT present.
+	if _, hasXAPIKey := headers["X-API-Key"]; hasXAPIKey {
+		t.Error("X-API-Key header should not be present; use Authorization: Bearer instead")
 	}
 }

@@ -140,6 +140,10 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		if err := writeMCPConfig(workDir, e.dockerCfg.MCPBaseURL, e.dockerCfg.MCPAPIKey); err != nil {
 			return nil, fmt.Errorf("write mcp config: %w", err)
 		}
+		e.logger.Info().
+			Str("task_id", opts.Task.ID).
+			Str("mcp_url", e.dockerCfg.MCPBaseURL+"/mcp").
+			Msg("MCP config written to container workspace")
 	}
 
 	// 4. Build container command.
@@ -476,7 +480,7 @@ func writeMCPConfig(workDir, baseURL, apiKey string) error {
 				"type": "http",
 				"url":  baseURL + "/mcp",
 				"headers": map[string]string{
-					"X-API-Key": apiKey,
+					"Authorization": "Bearer " + apiKey,
 				},
 			},
 		},
