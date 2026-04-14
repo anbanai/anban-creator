@@ -182,12 +182,19 @@ func main() {
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log)
 	}
 
+	// 13.1 Create API key service.
+	var apiKeySvc *service.APIKeyService
+	if repo != nil {
+		apiKeySvc = service.NewAPIKeyService(repo, log)
+	}
+
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
 	var taskHandler *handler.TaskHandler
 	var channelHandler *handler.ChannelHandler
 	var timelineHandler *handler.TimelineHandler
 	var creditHandler *handler.CreditHandler
+	var apiKeyHandler *handler.APIKeyHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -198,13 +205,25 @@ func main() {
 		if creditSvc != nil {
 			creditHandler = handler.NewCreditHandler(creditSvc, cfg.Credits.AdminAPIKey, log)
 		}
+		if apiKeySvc != nil {
+			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
+		}
 	}
 
 	// 14.1. Create MCP handler.
 	var mcpHandler *mcp.Handler
-	if cfg.MCP.APIKey != "" {
-		mcpHandler = mcp.NewHandler(cfg.MCP.APIKey, log)
-		log.Info().Msg("MCP handler initialized")
+	mcpHandler = mcp.NewHandler(apiKeySvc, cfg.MCP.APIKey, log)
+	if apiKeySvc != nil {
+		// Register MCP tools wrapping the service layer.
+		mcp.RegisterTools(mcpHandler, &mcp.Services{
+			ChannelSvc: channelSvc,
+			TaskSvc:    taskSvc,
+			CreditSvc:  creditSvc,
+			PlanSvc:    planSvc,
+		})
+		log.Info().Msg("MCP handler initialized with tools")
+	} else {
+		log.Info().Msg("MCP handler initialized (no tools, service unavailable)")
 	}
 
 	// 15. Start Asynq worker if Redis is available.
@@ -247,6 +266,7 @@ func main() {
 		TaskHandler:     taskHandler,
 		CreditHandler:   creditHandler,
 		TimelineHandler: timelineHandler,
+		APIKeyHandler:   apiKeyHandler,
 		MCPHandler:      mcpHandler,
 		StorageProvider: store,
 	}

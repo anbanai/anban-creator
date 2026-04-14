@@ -19,6 +19,7 @@ type Repository interface {
 	TaskFiles() TaskFileRepository
 	Channels() ChannelRepository
 	Credits() CreditRepository
+	APIKeys() APIKeyRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -113,6 +114,7 @@ type repository struct {
 	files    TaskFileRepository
 	channels ChannelRepository
 	credits  CreditRepository
+	apiKeys  APIKeyRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -125,6 +127,7 @@ func New(db *gorm.DB) Repository {
 	files := newTaskFileRepository(db)
 	channels := newChannelRepository(db)
 	credits := newCreditRepository(db)
+	apiKeys := newAPIKeyRepository(db)
 
 	return &repository{
 		db:       db,
@@ -136,6 +139,7 @@ func New(db *gorm.DB) Repository {
 		files:    files,
 		channels: channels,
 		credits:  credits,
+		apiKeys:  apiKeys,
 	}
 }
 
@@ -147,6 +151,7 @@ func (r *repository) Tasks() TaskRepository             { return r.tasks }
 func (r *repository) TaskFiles() TaskFileRepository     { return r.files }
 func (r *repository) Channels() ChannelRepository       { return r.channels }
 func (r *repository) Credits() CreditRepository         { return r.credits }
+func (r *repository) APIKeys() APIKeyRepository         { return r.apiKeys }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -181,6 +186,7 @@ type txRepository struct {
 	files    TaskFileRepository
 	channels ChannelRepository
 	credits  CreditRepository
+	apiKeys  APIKeyRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -194,6 +200,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		files:    newTaskFileRepository(tx),
 		channels: newChannelRepository(tx),
 		credits:  newCreditRepository(tx),
+		apiKeys:  newAPIKeyRepository(tx),
 	}
 }
 
@@ -205,6 +212,7 @@ func (r *txRepository) Tasks() TaskRepository             { return r.tasks }
 func (r *txRepository) TaskFiles() TaskFileRepository     { return r.files }
 func (r *txRepository) Channels() ChannelRepository       { return r.channels }
 func (r *txRepository) Credits() CreditRepository         { return r.credits }
+func (r *txRepository) APIKeys() APIKeyRepository         { return r.apiKeys }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

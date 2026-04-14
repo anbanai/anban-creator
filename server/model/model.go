@@ -13,6 +13,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&Task{},
 		&TaskFile{},
 		&CreditTransaction{},
+		&APIKey{},
 	)
 	if err != nil {
 		return err

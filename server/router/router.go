@@ -18,6 +18,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/handler"
 	appmiddleware "github.com/royalrick/anbanwriter/server/middleware"
+	"github.com/royalrick/anbanwriter/server/mcp"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
@@ -43,6 +44,8 @@ type Services struct {
 	CreditHandler   *handler.CreditHandler
 	ChannelHandler  *handler.ChannelHandler
 	TimelineHandler *handler.TimelineHandler
+	APIKeyHandler   *handler.APIKeyHandler
+	MCPHandler      *mcp.Handler
 	StorageProvider storage.Provider
 }
 
@@ -239,6 +242,22 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.CreditHandler != nil {
 		adminLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
 		app.Post("/api/v1/admin/credits/grant", adminLimiter, svc.CreditHandler.AdminGrant)
+	}
+
+	// ---------------------------------------------------------------------------
+	// API Key endpoints
+	// ---------------------------------------------------------------------------
+
+	if svc.APIKeyHandler != nil {
+		apiV1.Post("/api-keys", svc.APIKeyHandler.Create)
+		apiV1.Get("/api-keys", svc.APIKeyHandler.List)
+		apiV1.Delete("/api-keys/:id", svc.APIKeyHandler.Revoke)
+	}
+
+	// MCP endpoint (API key auth, no JWT required).
+	if svc.MCPHandler != nil {
+		app.Post("/mcp", svc.MCPHandler.Handle)
+		app.Get("/mcp", svc.MCPHandler.Handle)
 	}
 
 	return app
