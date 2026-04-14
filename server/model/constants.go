@@ -18,8 +18,9 @@ const (
 
 // Retry constants.
 const (
-	MaxRetries     = 3
-	DefaultRetries = 3
+	MaxRetries         = 3
+	DefaultRetries     = 3
+	MaxRateLimitRetries = 5
 )
 
 // Config scope constants.

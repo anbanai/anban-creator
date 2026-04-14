@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -183,8 +184,31 @@ var retryBackoffs = []time.Duration{
 	15 * time.Minute,
 }
 
+// rateLimitBackoffs defines longer backoff delays for rate limit (429) retries.
+var rateLimitBackoffs = []time.Duration{
+	15 * time.Minute,
+	30 * time.Minute,
+	45 * time.Minute,
+	60 * time.Minute,
+	60 * time.Minute,
+}
+
+// isRateLimitError checks if the error is caused by an upstream rate limit (429).
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "API Error: 429") ||
+		strings.Contains(s, "rate limit") ||
+		strings.Contains(s, "rate_limit") ||
+		strings.Contains(s, "Too Many Requests") ||
+		strings.Contains(s, "\"1302\"")
+}
+
 // HandleExecutionFailure handles task execution failures with retry logic.
 // If the task has not exceeded max retries, it schedules a delayed retry.
+// Rate limit (429) errors use a separate counter with longer backoff.
 // Otherwise, it marks the task as permanently failed.
 func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Task, execErr error) error {
 	taskID := task.ID
@@ -194,6 +218,72 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 		task.MaxRetries = model.DefaultRetries
 	}
 
+	rateLimited := isRateLimitError(execErr)
+
+	if rateLimited {
+		// Rate limit errors use a separate retry counter with longer backoff.
+		if task.RateLimitRetryCount >= model.MaxRateLimitRetries {
+			s.logger.Error().
+				Err(execErr).
+				Str("task_id", taskID).
+				Int("rate_limit_retry_count", task.RateLimitRetryCount).
+				Int("max_rate_limit_retries", model.MaxRateLimitRetries).
+				Msg("task permanently failed after max rate limit retries")
+			if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
+				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
+			}
+			if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
+			}
+
+			if s.creditSvc != nil {
+				if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
+					s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits")
+				}
+			}
+
+			return execErr
+		}
+
+		task.RateLimitRetryCount++
+
+		idx := task.RateLimitRetryCount - 1
+		if idx >= len(rateLimitBackoffs) {
+			idx = len(rateLimitBackoffs) - 1
+		}
+		delay := rateLimitBackoffs[idx]
+
+		if err := s.repo.Tasks().Update(ctx, task); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task rate limit retry count")
+		}
+
+		s.logger.Info().
+			Err(execErr).
+			Str("task_id", taskID).
+			Int("rate_limit_retry_count", task.RateLimitRetryCount).
+			Dur("backoff", delay).
+			Msg("rate limit detected, scheduling task retry with extended backoff")
+
+		if s.enqueuer != nil {
+			payload, _ := json.Marshal(map[string]string{
+				"task_id": task.ID,
+				"user_id": task.UserID,
+			})
+			if err := s.enqueuer.EnqueueIn(TypeContentGenerate, payload, delay); err != nil {
+				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue rate limit retry, marking task as failed")
+				if updateErr := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "retry enqueue failed: "+err.Error()); updateErr != nil {
+					s.logger.Error().Err(updateErr).Str("task_id", taskID).Msg("failed to mark task as failed after enqueue failure")
+				}
+				return err
+			}
+		} else {
+			s.logger.Warn().Str("task_id", taskID).Msg("no enqueuer available, task set to pending but will not be retried automatically")
+		}
+
+		return s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusPending)
+	}
+
+	// Non-rate-limit errors use the standard retry logic.
 	// Check if retry is possible.
 	if task.RetryCount >= task.MaxRetries {
 		s.logger.Error().
@@ -252,8 +342,9 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			}
 			return err
 		}
+	} else {
+		s.logger.Warn().Str("task_id", taskID).Msg("no enqueuer available, task set to pending but will not be retried automatically")
 	}
-
 	// Update status back to pending so it will be picked up.
 	return s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusPending)
 }
