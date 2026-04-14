@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/royalrick/anbanwriter/server/model"
@@ -75,15 +76,11 @@ func determineFileRole(filename, mimeType string) string {
 // UploadTaskFiles uploads all files from a task's work directory to storage.
 // It recursively walks the directory tree to find files in nested subdirectories
 // (e.g. output/articles/staging/). Individual upload failures are logged but do
-// not abort the remaining uploads. Returns an error only if the work directory
-// cannot be read at all.
+// not abort the remaining uploads. Returns an error if no storage provider is
+// configured or if the work directory cannot be read at all.
 func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workDir string) error {
 	if s.store == nil {
-		s.logger.Warn().
-			Str("task_id", taskID).
-			Str("work_dir", workDir).
-			Msg("no storage provider configured, skipping file upload")
-		return nil
+		return fmt.Errorf("no storage provider configured: cannot upload files for task %s", taskID)
 	}
 
 	var batch []*model.TaskFile
@@ -103,6 +100,12 @@ func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workD
 		}
 
 		filename := filepath.Base(path)
+
+		// Skip dotfiles (sensitive config files like .mcp.json, .gitignore, etc.).
+		if strings.HasPrefix(filename, ".") {
+			return nil
+		}
+
 		mimeType := detectMimeType(path)
 		role := determineFileRole(filename, mimeType)
 
@@ -270,4 +273,28 @@ func (s *TaskService) getFileContent(ctx context.Context, file *model.TaskFile) 
 	}
 
 	return io.ReadAll(resp.Body)
+}
+
+// RewriteHTMLImageURLs replaces relative image src references in HTML content
+// with their actual storage URLs. The fileMap maps lowercase filenames to URLs.
+// It handles both direct references (src="cover.png") and subdirectory references
+// (src="images/cover.png").
+func RewriteHTMLImageURLs(htmlContent []byte, fileMap map[string]string) []byte {
+	if len(fileMap) == 0 {
+		return htmlContent
+	}
+
+	content := string(htmlContent)
+	for filename, url := range fileMap {
+		// Replace direct references: src="filename" and src='filename'.
+		content = strings.ReplaceAll(content, `src="`+filename+`"`, `src="`+url+`"`)
+		content = strings.ReplaceAll(content, `src='`+filename+`'`, `src="`+url+`"`)
+
+		// Replace subdirectory references: src="path/filename" → src="url".
+		// Match the full src value containing the filename and replace entirely.
+		pattern := `src=["'][^"']*` + regexp.QuoteMeta(filename) + `["']`
+		re := regexp.MustCompile(pattern)
+		content = re.ReplaceAllString(content, `src="`+url+`"`)
+	}
+	return []byte(content)
 }

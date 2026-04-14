@@ -114,6 +114,23 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
+
+		// Validate image API config — warn if keys are missing.
+		if e.imageAPICfg != nil {
+			hasCover := e.imageAPICfg.Cover != nil && e.imageAPICfg.Cover.Key != ""
+			hasContent := e.imageAPICfg.Content != nil && e.imageAPICfg.Content.Key != ""
+			if !hasCover || !hasContent {
+				e.logger.Warn().
+					Bool("cover_key_set", hasCover).
+					Bool("content_key_set", hasContent).
+					Msg("image API key not configured; image generation may fail")
+			} else {
+				e.logger.Info().
+					Bool("cover_key_set", hasCover).
+					Bool("content_key_set", hasContent).
+					Msg("image API config validated")
+			}
+		}
 	}
 
 	// 3.5. Write MCP config so the agent can connect to the server's MCP endpoint.

@@ -53,6 +53,15 @@ func NewTaskService(
 	}
 }
 
+// StorageProviderName returns the name of the configured storage provider,
+// or empty string if no provider is configured.
+func (s *TaskService) StorageProviderName() string {
+	if s.store == nil {
+		return ""
+	}
+	return s.store.Name()
+}
+
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The quantity parameter (1-5) determines how many tasks to create, each independently billed.
 func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic string, quantity int) ([]*model.Task, error) {

@@ -99,7 +99,10 @@ func main() {
 	// 7.1 Create storage provider.
 	store, err := storage.NewProvider(cfg.Storage, log)
 	if err != nil {
-		log.Warn().Err(err).Msg("failed to create storage provider, using nil")
+		if cfg.Storage.Provider == "oss" {
+			log.Fatal().Err(err).Msg("failed to create OSS storage provider (check credentials and configuration)")
+		}
+		log.Warn().Err(err).Msg("failed to create storage provider, file uploads will be unavailable")
 		store = nil
 	} else {
 		log.Info().Str("provider", store.Name()).Msg("storage provider initialized")

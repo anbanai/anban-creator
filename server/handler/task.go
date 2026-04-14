@@ -400,9 +400,25 @@ func (h *TaskHandler) PreviewHTML(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to read HTML file")
 	}
 
+	// Rewrite relative image URLs to absolute storage URLs so images render in preview.
+	fileMap := make(map[string]string)
+	for _, f := range files {
+		if (f.Role == model.FileRoleImage || f.Role == model.FileRoleCover) && f.OSSURL != "" {
+			fileMap[strings.ToLower(f.FileName)] = f.OSSURL
+		}
+	}
+	if len(fileMap) > 0 {
+		htmlContent = service.RewriteHTMLImageURLs(htmlContent, fileMap)
+	}
+
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	c.Set("X-Content-Type-Options", "nosniff")
-	c.Set("Content-Security-Policy", "sandbox allow-scripts")
+	// Allow loading images from external storage (OSS) in the sandboxed preview.
+	cspValue := "sandbox allow-scripts"
+	if h.service.StorageProviderName() == "oss" {
+		cspValue += "; img-src https: data:"
+	}
+	c.Set("Content-Security-Policy", cspValue)
 	c.Set("Content-Length", strconv.Itoa(len(htmlContent)))
 
 	return c.Send(htmlContent)
