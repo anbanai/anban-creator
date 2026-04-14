@@ -302,3 +302,70 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 	}()
 	return nil
 }
+
+// UsageStats holds aggregated LLM usage statistics.
+type UsageStats struct {
+	TotalTasks           int                       `json:"total_tasks"`
+	TotalInputTokens     int64                     `json:"total_input_tokens"`
+	TotalOutputTokens    int64                     `json:"total_output_tokens"`
+	TotalCacheReadTokens int64                     `json:"total_cache_read_tokens"`
+	TotalCostUSD         float64                   `json:"total_cost_usd"`
+	ByType               map[string]*TypeStatEntry `json:"by_type,omitempty"`
+}
+
+// TypeStatEntry holds per-type aggregated stats.
+type TypeStatEntry struct {
+	Count           int     `json:"count"`
+	InputTokens     int64   `json:"input_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	CacheReadTokens int64   `json:"cache_read_tokens"`
+	CostUSD         float64 `json:"cost_usd"`
+}
+
+// GetUsageStats returns aggregated token usage and cost stats for a user.
+func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to time.Time, channelID string) (*UsageStats, error) {
+	tasks, err := s.repo.Tasks().FindByUserIDAndCreatedAtRange(ctx, userID, from, to, 0, 0)
+	if err != nil {
+		return nil, fmt.Errorf("query tasks: %w", err)
+	}
+
+	stats := &UsageStats{ByType: make(map[string]*TypeStatEntry)}
+	for _, t := range tasks {
+		if channelID != "" && t.ChannelID != channelID {
+			continue
+		}
+		if t.Result == nil {
+			continue
+		}
+
+		var result agent.ExecutionResult
+		if err := json.Unmarshal([]byte(*t.Result), &result); err != nil {
+			continue
+		}
+
+		stats.TotalTasks++
+
+		// Per-type aggregation.
+		te, ok := stats.ByType[t.Type]
+		if !ok {
+			te = &TypeStatEntry{}
+			stats.ByType[t.Type] = te
+		}
+		te.Count++
+
+		if result.TotalCostUSD != nil {
+			stats.TotalCostUSD += *result.TotalCostUSD
+			te.CostUSD += *result.TotalCostUSD
+		}
+		if result.TokenUsage != nil {
+			stats.TotalInputTokens += int64(result.TokenUsage.InputTokens)
+			stats.TotalOutputTokens += int64(result.TokenUsage.OutputTokens)
+			stats.TotalCacheReadTokens += int64(result.TokenUsage.CacheReadTokens)
+			te.InputTokens += int64(result.TokenUsage.InputTokens)
+			te.OutputTokens += int64(result.TokenUsage.OutputTokens)
+			te.CacheReadTokens += int64(result.TokenUsage.CacheReadTokens)
+		}
+	}
+
+	return stats, nil
+}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -154,6 +156,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		"--agent", agentFlag,
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--permission-mode", "bypassPermissions",
+		"--output-format", "json",
 		"--print", userPrompt,
 	}
 	// Only set model if explicitly configured; otherwise let Claude CLI use env vars.
@@ -215,6 +218,9 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	// 8. Follow logs for progress streaming.
+	// Capture stdout separately for JSON result parsing (--output-format json).
+	var stdoutBuf bytes.Buffer
+	var logWg sync.WaitGroup
 	logsReader, err := e.dockerCLI.ContainerLogs(ctx, resp.ID, container.LogsOptions{
 		Follow:     true,
 		ShowStdout: true,
@@ -224,7 +230,11 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	if err != nil {
 		e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to follow container logs")
 	} else {
-		go e.streamLogs(logsReader, opts)
+		logWg.Add(1)
+		go func() {
+			defer logWg.Done()
+			e.streamAndCaptureLogs(logsReader, opts, &stdoutBuf)
+		}()
 	}
 
 	// 9. Wait for container with timeout.
@@ -277,18 +287,29 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 			Msg("workspace contents after execution")
 	}
 
-	return &ExecutionResult{Success: true, WorkDir: workDir}, nil
+	// Ensure all stdout frames have been captured before parsing.
+	logWg.Wait()
+
+	// Parse JSON output from stdout to extract usage/cost data.
+	result := &ExecutionResult{Success: true, WorkDir: workDir}
+	if stdoutBuf.Len() > 0 {
+		parseDockerJSONResult(stdoutBuf.String(), result, e.logger, opts.Task.ID)
+	}
+
+	return result, nil
 }
 
-// streamLogs reads multiplexed Docker log frames and forwards to OnProgress.
-// Docker uses 8-byte headers: [1 byte stream type][3 bytes padding][4 bytes size].
-func (e *DockerExecutor) streamLogs(reader io.ReadCloser, opts *ExecutionOptions) {
+// streamAndCaptureLogs reads multiplexed Docker log frames, forwards them to
+// OnProgress, and captures stdout frames into buf for post-execution JSON parsing.
+// Docker multiplexed stream: [1 byte stream type (1=stdout, 2=stderr)][3 bytes padding][4 bytes size].
+func (e *DockerExecutor) streamAndCaptureLogs(reader io.ReadCloser, opts *ExecutionOptions, stdoutBuf *bytes.Buffer) {
 	defer reader.Close()
 	hdr := make([]byte, 8)
 	for {
 		if _, err := io.ReadFull(reader, hdr); err != nil {
 			return
 		}
+		streamType := hdr[0]
 		size := binary.BigEndian.Uint32(hdr[4:])
 		if size == 0 {
 			continue
@@ -297,10 +318,88 @@ func (e *DockerExecutor) streamLogs(reader io.ReadCloser, opts *ExecutionOptions
 		if _, err := io.ReadFull(reader, buf); err != nil {
 			return
 		}
-		if opts.OnProgress != nil {
+		// Capture stdout frames for JSON result parsing.
+		// Only forward stderr (stream type 2) to OnProgress for human-readable
+		// progress, since --output-format json makes stdout contain JSON lines.
+		if streamType == 1 {
+			stdoutBuf.Write(buf)
+		} else if opts.OnProgress != nil {
 			opts.OnProgress(opts.Task.ID, string(buf))
 		}
 	}
+}
+
+// parseDockerJSONResult attempts to extract execution metrics from the JSON
+// output produced by `claude --print --output-format json`.
+// The output is a series of JSON objects (one per line); the last "result" type
+// message contains cost and usage data.
+func parseDockerJSONResult(stdout string, result *ExecutionResult, logger *zerolog.Logger, taskID string) {
+	type jsonMsg struct {
+		Type         string          `json:"type"`
+		Subtype      string          `json:"subtype"`
+		DurationMs   int             `json:"duration_ms"`
+		DurationAPMs int             `json:"duration_api_ms"`
+		NumTurns     int             `json:"num_turns"`
+		SessionID    string          `json:"session_id"`
+		TotalCostUSD *float64        `json:"total_cost_usd"`
+		Usage        json.RawMessage `json:"usage"`
+		Result       *string         `json:"result"`
+		IsError      bool            `json:"is_error"`
+	}
+
+	// Find the last "result" message by scanning backwards through lines.
+	lines := bytes.Split([]byte(stdout), []byte("\n"))
+	var lastResult []byte
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if len(line) == 0 {
+			continue
+		}
+		// Quick check: result messages contain "result" type.
+		if bytes.Contains(line, []byte(`"type":"result"`)) || bytes.Contains(line, []byte(`"type": "result"`)) {
+			lastResult = line
+			break
+		}
+	}
+
+	if lastResult == nil {
+		logger.Debug().Str("task_id", taskID).Msg("no result message found in docker stdout")
+		return
+	}
+
+	var msg jsonMsg
+	if err := json.Unmarshal(lastResult, &msg); err != nil {
+		logger.Debug().Err(err).Str("task_id", taskID).Msg("failed to parse docker result JSON")
+		return
+	}
+
+	result.DurationMs = msg.DurationMs
+	result.DurationAPIMs = msg.DurationAPMs
+	result.NumTurns = msg.NumTurns
+	result.SessionID = msg.SessionID
+	result.TotalCostUSD = msg.TotalCostUSD
+
+	if len(msg.Usage) > 0 {
+		var usageMap map[string]any
+		if err := json.Unmarshal(msg.Usage, &usageMap); err == nil {
+			result.TokenUsage = ParseTokenUsage(usageMap)
+		}
+	}
+
+	logEvt := logger.Info().
+		Str("task_id", taskID).
+		Int("duration_ms", msg.DurationMs).
+		Int("num_turns", msg.NumTurns).
+		Int("duration_api_ms", msg.DurationAPMs)
+	if msg.TotalCostUSD != nil {
+		logEvt = logEvt.Float64("cost_usd", *msg.TotalCostUSD)
+	}
+	if result.TokenUsage != nil {
+		logEvt = logEvt.
+			Int("input_tokens", result.TokenUsage.InputTokens).
+			Int("output_tokens", result.TokenUsage.OutputTokens)
+	}
+	logEvt.Msg("docker execution metrics")
 }
 
 // readContainerLogs reads the full log output of a container (stdout + stderr)

@@ -63,6 +63,14 @@ type ExecutionOptions struct {
 	OnProgress func(taskID string, message string) // callback for SSE
 }
 
+// TokenUsage captures LLM token consumption for a task execution.
+type TokenUsage struct {
+	InputTokens         int `json:"input_tokens,omitempty"`
+	OutputTokens        int `json:"output_tokens,omitempty"`
+	CacheReadTokens     int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_input_tokens,omitempty"`
+}
+
 // ExecutionResult captures the outcome of an agent execution.
 type ExecutionResult struct {
 	Success    bool   `json:"success"`
@@ -72,6 +80,11 @@ type ExecutionResult struct {
 	NumTurns   int    `json:"num_turns,omitempty"`
 	SessionID  string `json:"session_id,omitempty"`
 	DurationMs int    `json:"duration_ms,omitempty"`
+
+	// LLM usage metrics (populated from SDK ResultMessage).
+	DurationAPIMs int         `json:"duration_api_ms,omitempty"`
+	TotalCostUSD  *float64    `json:"total_cost_usd,omitempty"`
+	TokenUsage    *TokenUsage `json:"token_usage,omitempty"`
 }
 
 // Execute runs the Claude Code agent for the given task.
@@ -219,14 +232,25 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 					return execErr
 				}
 				// Log successful execution summary.
-				e.logger.Info().
+				completeEvt := e.logger.Info().
 					Str("task_id", opts.Task.ID).
 					Str("subtype", m.Subtype).
 					Int("duration_ms", m.DurationMs).
 					Int("num_turns", m.NumTurns).
 					Int("tool_use_count", toolUseCount).
-					Str("session_id", m.SessionID).
-					Msg("agent execution completed")
+					Str("session_id", m.SessionID)
+				if m.TotalCostUSD != nil {
+					completeEvt = completeEvt.Float64("cost_usd", *m.TotalCostUSD)
+				}
+				if m.Usage != nil {
+					tu := ParseTokenUsage(*m.Usage)
+					if tu != nil {
+						completeEvt = completeEvt.
+							Int("input_tokens", tu.InputTokens).
+							Int("output_tokens", tu.OutputTokens)
+					}
+				}
+				completeEvt.Msg("agent execution completed")
 				// Warn if agent produced no tool calls - likely agent definition not loaded.
 				if toolUseCount == 0 {
 					truncated := resultText
@@ -265,6 +289,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			result.NumTurns = resultMsg.NumTurns
 			result.SessionID = resultMsg.SessionID
 			result.DurationMs = resultMsg.DurationMs
+			populateUsageFields(result, resultMsg)
 		}
 		return result, nil
 	}
@@ -287,6 +312,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		result.NumTurns = resultMsg.NumTurns
 		result.SessionID = resultMsg.SessionID
 		result.DurationMs = resultMsg.DurationMs
+		populateUsageFields(result, resultMsg)
 	}
 	return result, nil
 }
@@ -319,4 +345,48 @@ func MarshalResultJSON(r *ExecutionResult) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// ParseTokenUsage extracts token counts from the SDK's raw usage map.
+// Returns nil if no meaningful data is found.
+func ParseTokenUsage(m map[string]any) *TokenUsage {
+	tu := &TokenUsage{
+		InputTokens:         jsonInt(m, "input_tokens"),
+		OutputTokens:        jsonInt(m, "output_tokens"),
+		CacheReadTokens:     jsonInt(m, "cache_read_input_tokens"),
+		CacheCreationTokens: jsonInt(m, "cache_creation_input_tokens"),
+	}
+	if tu.InputTokens == 0 && tu.OutputTokens == 0 {
+		return nil
+	}
+	return tu
+}
+
+// jsonInt safely extracts an int from a map[string]any,
+// handling both float64 (JSON numbers) and int types.
+func jsonInt(m map[string]any, key string) int {
+	v, ok := m[key]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
+}
+
+// populateUsageFields fills the cost/token fields of an ExecutionResult
+// from a SDK ResultMessage.
+func populateUsageFields(result *ExecutionResult, resultMsg *claudecode.ResultMessage) {
+	if resultMsg == nil {
+		return
+	}
+	result.DurationAPIMs = resultMsg.DurationAPIMs
+	result.TotalCostUSD = resultMsg.TotalCostUSD
+	if resultMsg.Usage != nil {
+		result.TokenUsage = ParseTokenUsage(*resultMsg.Usage)
+	}
 }

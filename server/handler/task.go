@@ -537,3 +537,42 @@ func validateUUIDParam(c fiber.Ctx, paramName string) (string, error) {
 	}
 	return val, nil
 }
+
+// UsageStats handles GET /api/v1/usage/stats.
+// Returns aggregated LLM token usage and cost statistics for the authenticated user.
+func (h *TaskHandler) UsageStats(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Parse optional date range. Defaults to last 30 days.
+	from := time.Now().AddDate(0, 0, -30)
+	to := time.Now()
+
+	if v := c.Query("from"); v != "" {
+		parsed, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			return Error(c, fiber.StatusBadRequest, "invalid 'from' date format, use YYYY-MM-DD")
+		}
+		from = parsed
+	}
+	if v := c.Query("to"); v != "" {
+		parsed, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			return Error(c, fiber.StatusBadRequest, "invalid 'to' date format, use YYYY-MM-DD")
+		}
+		// Include the entire end day.
+		to = parsed.AddDate(0, 0, 1)
+	}
+
+	channelID := c.Query("channel_id")
+
+	stats, err := h.service.GetUsageStats(c.Context(), userID, from, to, channelID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("get usage stats failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to get usage stats")
+	}
+
+	return Success(c, stats)
+}

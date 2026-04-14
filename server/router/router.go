@@ -207,6 +207,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id/preview", svc.TaskHandler.PreviewHTML)
 		apiV1.Get("/tasks/:id/files/zip", svc.TaskHandler.DownloadZip)
 		apiV1.Get("/tasks/:id/files/:fileId/download", svc.TaskHandler.DownloadFile)
+		apiV1.Get("/usage/stats", svc.TaskHandler.UsageStats)
 	}
 
 	// Local file serving (only when using local storage provider).
