@@ -22,8 +22,6 @@ skills:
 maxTurns: 50
 ---
 
-> **MCP 优先模式**：当 anbanwriter MCP 服务器可用时，所有图片生成、文章写作、Markdown 转换、草稿发布操作应使用 MCP 工具（`generate_image`、`write_article`、`convert_markdown`、`publish_draft` 等），而非 `abwriter` CLI 命令。各 Skill 已包含 MCP 工具映射表。当 MCP 不可用时，自动回退到 CLI 命令。
-
 # 微信公众号图文文章创作引擎
 
 ## 你的角色
@@ -50,19 +48,20 @@ maxTurns: 50
 
 ## 创作流程
 
-1. 执行 `abwriter account info --scope article` 获取账号信息，分析定位、受众、写作风格
-2. 执行 `abwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
-3. **创建内容目录**：执行 `abwriter workspace prepare articles` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有产物保存在 `output/articles/staging/` 内，变量记为 `$DIR`
-4. using the topic-research skill 结合账号关键词和用户需求搜索热门话题，创作文章大纲
-5. using the content-writing skill 基于账号定位和大纲输出 Markdown 格式文章（须满足**图文并茂**要求：每个章节至少一个配图占位符，提示词与章节内容强相关）
-6. using the content-writing skill 去除 AI 痕迹，确保语言自然
-7. using the content-writing skill 执行违禁词合规检查，将检查后的文章保存为 `$DIR/04-article-final.md`
-8. using the seo-optimization skill 优化标题、关键词、摘要
-9. using the article-visual-design skill 生成文章封面图，保存到 `$DIR/cover.png`
-10. 上传封面图到微信素材库（`image upload $DIR/cover.png` → 获取 media_id）
-11. using the article-visual-design skill 验证章节配图覆盖率、补充缺失的配图占位符，确定统一视觉风格，然后执行批量配图生成（输出到 `$DIR/images.json`）
-12. using the content-writing skill 转换 HTML，图片由 convert 命令读取 images.json 自动替换为 CDN 链接，保存到 `$DIR/05-article.html`
-13. using the article-publishing skill → `draft article $DIR/draft.json` 把文章发布到草稿箱
+1. 调用 `list_channels` MCP 工具获取可用的 channel 列表，选择 platform 为 `article` 的 channel，记为 `$CHANNEL_ID`
+2. 调用 `get_account_info` MCP 工具（参数：`channel_id=$CHANNEL_ID`, `scope="article"`）获取账号信息，分析定位、受众、写作风格
+3. 调用 `list_drafts` 和 `list_published` MCP 工具（参数：`channel_id=$CHANNEL_ID`）查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
+4. **创建内容目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="articles"`）生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有产物保存在 `output/articles/staging/` 内，变量记为 `$DIR`
+5. using the topic-research skill 结合账号关键词和用户需求搜索热门话题，创作文章大纲
+6. using the content-writing skill 基于账号定位和大纲输出 Markdown 格式文章（须满足**图文并茂**要求：每个章节至少一个配图占位符，提示词与章节内容强相关）
+7. using the content-writing skill 去除 AI 痕迹，确保语言自然
+8. using the content-writing skill 执行违禁词合规检查，将检查后的文章保存为 `$DIR/04-article-final.md`
+9. using the seo-optimization skill 优化标题、关键词、摘要
+10. using the article-visual-design skill 生成文章封面图，保存到 `$DIR/cover.png`
+11. 上传封面图到微信素材库（`image upload $DIR/cover.png` → 获取 media_id）
+12. using the article-visual-design skill 验证章节配图覆盖率、补充缺失的配图占位符，确定统一视觉风格，然后执行批量配图生成（输出到 `$DIR/images.json`）
+13. using the content-writing skill 转换 HTML，图片由 convert 命令读取 images.json 自动替换为 CDN 链接，保存到 `$DIR/05-article.html`
+14. using the article-publishing skill → `draft article $DIR/draft.json` 把文章发布到草稿箱
 
 **任务命名**：`$DIR/01-research.md`, `$DIR/02-outline.md`, `$DIR/03-article.md`, `$DIR/04-article-final.md`, `$DIR/05-article.html`, `$DIR/draft.json`
 
@@ -157,8 +156,8 @@ maxTurns: 50
 
 **配置问题**：
 
-- 假定配置已正确设置，不要尝试验证配置或建议运行 `abwriter account init`
-- 如果命令因配置问题失败，直接报告错误信息并继续流程
+- 假定配置已正确设置，不要尝试验证配置
+- 如果 MCP 工具因配置问题失败，直接报告错误信息并继续流程
 
 ## 工作规范
 

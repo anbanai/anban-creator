@@ -31,7 +31,7 @@ maxTurns: 20
 
 | 决策点 | 自动策略 |
 |--------|----------|
-| **花卉种数** | 从配置读取（`abwriter account info --scope flower`），默认 5 种 |
+| **花卉种数** | 从配置读取（`get_account_info` MCP 工具，scope="flower"），默认 5 种 |
 | **花卉选择** | 根据用户描述的主题/场景，从调研数据库自动选出配置指定数量的视觉多样的花 |
 | **环境氛围** | 根据主题自动设计统一批次氛围（雨后/晨雾/黄金时刻等），增加画面故事性 |
 | **构图类型** | 按批次数量自动分配不同构图类型，following the flower-content-design skill 的构图分配策略 |
@@ -56,21 +56,13 @@ maxTurns: 20
 
 ### 步骤 1.5：读取花卉配置
 
-执行命令获取账户花卉配置，确定本次生成的花卉种数：
+调用 `list_channels` MCP 工具获取可用的 channel 列表，选择 platform 为 `flower` 的 channel，记为 `$CHANNEL_ID`。然后调用 `get_account_info` MCP 工具（参数：`channel_id=$CHANNEL_ID`, `scope="flower"`）获取账户花卉配置，确定本次生成的花卉种数。
 
-```bash
-abwriter account info --scope flower
-```
-
-从输出中提取 `flower.content.count` 字段作为本次生成的花卉种数 `$COUNT`。若命令失败或字段不存在，使用默认值 5。
+从输出中提取 `flower.content.count` 字段作为本次生成的花卉种数 `$COUNT`。若 MCP 工具调用失败或字段不存在，使用默认值 5。
 
 ### 步骤 2：创建工作目录
 
-执行命令创建隔离工作目录：
-
-```bash
-abwriter workspace prepare flower
-```
+调用 `prepare_workspace` MCP 工具（参数：`content_type="flower"`）创建隔离工作目录。
 
 > 此命令自动归档残留 staging 目录，确保工作目录为空。输出路径为 `output/flower/staging/`，后续所有文件保存在此，变量记为 `$DIR`。
 
@@ -223,7 +215,7 @@ using the flower-content-design skill 生成图片。命令参考和参考图策
 
 流程中出现以下情况时需要特别关注：
 
-- [ ] 花卉种数与配置不符 → 需检查 `abwriter account info --scope flower` 输出
+- [ ] 花卉种数与配置不符 → 需检查 `get_account_info` MCP 工具输出
 - [ ] Prompt 字数 < 150 字 → 需补充摄影细节描述
 - [ ] 缺少 `[ATMOSPHERE_DESCRIPTION]` → 需添加环境氛围描述
 - [ ] 构图类型重复 → 需重新分配（当 `$COUNT` ≤ 可用类型数时）

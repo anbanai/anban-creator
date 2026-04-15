@@ -5,16 +5,12 @@ description: Creates and manages WeChat Xiaolvshu (newspic) image post drafts wi
 
 # 微信公众号小绿书发布
 
-## 运行模式
+## MCP 工具
 
-当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
-
-| CLI 命令 | MCP 工具 |
-|----------|----------|
-| `abwriter image upload {file}` | `upload_image` (channel_id, file_path) |
-| `abwriter draft xls ...` | `publish_xls` (channel_id, title, content, images) |
-
-当 MCP 不可用时，回退到 CLI 命令。
+| MCP 工具 | 说明 |
+|----------|------|
+| `upload_image` (channel_id, file_path) | 上传图片到微信素材库 |
+| `publish_xls` (channel_id, title, content, images) | 创建小绿书草稿 |
 
 ---
 
@@ -22,67 +18,17 @@ description: Creates and manages WeChat Xiaolvshu (newspic) image post drafts wi
 
 ## 草稿管理
 
-查看发布历史：`abwriter account history`
+查看发布历史：调用 `list_drafts` 和 `list_published` MCP 工具。
 
-## 命令
-
-```bash
-# 从图片路径列表创建
-abwriter draft xls \
-  -t "帖子标题" \
-  --images "photo1.jpg,photo2.jpg,photo3.jpg"
-
-# 从 Markdown 文件提取本地图片
-abwriter draft xls \
-  -t "旅行日记" \
-  -m article.md
-
-# 使用已上传的 media_id（跳过重复上传，适合 image generate 后直接发布）
-abwriter draft xls \
-  -t "AI 生成图集" \
-  --media-ids "media_id_1,media_id_2,media_id_3"
-
-# 混合使用：已有 media_id + 本地图片
-abwriter draft xls \
-  -t "混合图集" \
-  --media-ids "media_id_1" \
-  --images "local_photo.jpg"
-
-# 带描述文字和评论设置
-abwriter draft xls \
-  -t "美食分享" \
-  -c "今天的午餐，简单又美味" \
-  --images food.jpg \
-  --open-comment
-
-# 仅粉丝可评论
-abwriter draft xls \
-  -t "会员专享" \
-  --images a.jpg,b.jpg \
-  --open-comment --fans-only
-
-# 预览模式（不实际创建）
-abwriter draft xls \
-  -t "测试" --images a.jpg,b.jpg --dry-run
-
-# 保存结果到文件
-abwriter draft xls \
-  -t "标题" --images a.jpg -o output/02-result.json
-```
-
-## 参数说明
+## publish_xls 参数说明
 
 | 参数 | 说明 | 必填 |
 |------|------|------|
-| `-t` / `--title` | 帖子标题 | 是 |
-| `-c` / `--content` | 纯文本描述 | 否 |
-| `--images` | 本地图片文件路径，逗号分隔（将自动上传到微信素材库） | 三选一 |
-| `--media-ids` | 微信素材 ID（media_id），逗号分隔（已上传到素材库的图片，跳过重复上传） | 三选一 |
-| `-m` / `--from-markdown` | 从 Markdown 提取本地图片 | 三选一 |
-| `--open-comment` | 开启评论 | 否 |
-| `--fans-only` | 仅粉丝可评论（需同时 --open-comment） | 否 |
-| `--dry-run` | 预览模式，不实际创建 | 否 |
-| `-o` / `--output` | 保存结果到 JSON 文件 | 否 |
+| `title` | 帖子标题 | 是 |
+| `content` | 纯文本描述 | 否 |
+| `images` | 图片列表（文件路径或 media_id，自动上传本地图片） | 是 |
+| `open_comment` | 开启评论 | 否 |
+| `fans_only` | 仅粉丝可评论（需同时 open_comment） | 否 |
 
 ## 响应格式
 
@@ -102,40 +48,14 @@ abwriter draft xls \
 
 ### 直接使用本地图片
 
-```bash
-# 1. 预览（验证图片路径和数量）
-abwriter draft xls \
-  -t "周末出游" --images p1.jpg,p2.jpg,p3.jpg --dry-run
-
-# 2. 确认无误后正式发布
-abwriter draft xls \
-  -t "周末出游" --images p1.jpg,p2.jpg,p3.jpg \
-  -c "难得的好天气" --open-comment \
-  -o output/02-result.json
-```
+1. 调用 `publish_xls`，传入图片文件路径列表，工具会自动上传到微信素材库
+2. 可同时传入 `content` 文字描述和评论设置
 
 ### AI 生成图片完整工作流
 
-```bash
-# 1. 生成图片到本地
-abwriter image generate "封面" --mode xls --style "$STYLE" -o output/cover.jpg
-abwriter image generate "内容" --mode xls --style "$STYLE" -o output/page1.jpg
-
-# 2. 上传到微信素材库，获取 media_id
-abwriter image upload output/cover.jpg
-# → data.media_id = "COVER_MID"
-abwriter image upload output/page1.jpg
-# → data.media_id = "PAGE1_MID"
-
-# 3. 用 media_id 创建小绿书（跳过重复上传）
-abwriter draft xls -t "标题" --media-ids "COVER_MID,PAGE1_MID"
-```
-
-也可以直接用本地文件路径（自动上传，但无法复用 media_id）：
-
-```bash
-abwriter draft xls -t "标题" --images "output/cover.jpg,output/page1.jpg"
-```
+1. 调用 `generate_image` 生成封面图片
+2. 调用 `generate_batch_images` 批量生成内容图片
+3. 调用 `publish_xls`，传入生成的图片路径，工具会自动上传并创建草稿
 
 ## 注意事项
 

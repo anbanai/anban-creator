@@ -22,8 +22,6 @@ skills:
 maxTurns: 20
 ---
 
-> **MCP 优先模式**：当 anbanwriter MCP 服务器可用时，优先使用 MCP 工具（`generate_image`、`generate_batch_images`、`upload_image`）代替 `abwriter` CLI 命令。各 Skill 已包含 MCP/CLI 映射。当 MCP 不可用时，自动回退。
-
 # 小红书图文全自动创作引擎
 
 ## 角色
@@ -48,15 +46,16 @@ maxTurns: 20
 
 ### 原创模式（默认）
 
-1. execute command `abwriter account info --scope rednote` 获取账号信息
+1. 调用 `list_channels` MCP 工具获取可用的 channel 列表，选择 platform 为 `rednote` 的 channel，记为 `$CHANNEL_ID`
+2. 调用 `get_account_info` MCP 工具（参数：`channel_id=$CHANNEL_ID`, `scope="rednote"`）获取账号信息
 
-2. **研究选题**：using the rednote-research skill 采集热门笔记数据，自动选 Top 1 选题，评分结果与选题理由写入 `$DIR/topic-analysis.md`
+3. **研究选题**：using the rednote-research skill 采集热门笔记数据，自动选 Top 1 选题，评分结果与选题理由写入 `$DIR/topic-analysis.md`
 
-3. **创建工作目录**：execute command `abwriter workspace prepare rednote` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有文件保存在 `output/rednote/staging/` 内，变量记为 `$DIR`
+4. **创建工作目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="rednote"`）生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有文件保存在 `output/rednote/staging/` 内，变量记为 `$DIR`
 
-4. **创作内容**：using the rednote-writing skill 生成标题、正文和话题标签，内容保存到 `$DIR/content.md`
+5. **创作内容**：using the rednote-writing skill 生成标题、正文和话题标签，内容保存到 `$DIR/content.md`
 
-5. **图片生成**：using the rednote-visual-design skill，传入 `$DIR/content.md`，技能内部完成图片内容规划（`$DIR/image-plan.md`）和全部图片生成。保存到 `$DIR/`
+6. **图片生成**：using the rednote-visual-design skill，传入 `$DIR/content.md`，技能内部完成图片内容规划（`$DIR/image-plan.md`）和全部图片生成。保存到 `$DIR/`
 
    生成后检查每张图片：`$DIR/cover.png`（封面）、`$DIR/image_01.png` ... `$DIR/image_0{N-2}.png`（内容图）、`$DIR/tail.png`（尾图）
 
@@ -64,25 +63,22 @@ maxTurns: 20
 
 ### 复刻模式（用户提供笔记 ID 或链接时）
 
-1. execute command `abwriter account info --scope rednote` 获取账号信息
+1. 调用 `list_channels` MCP 工具获取可用的 channel 列表，选择 platform 为 `rednote` 的 channel，记为 `$CHANNEL_ID`
+2. 调用 `get_account_info` MCP 工具（参数：`channel_id=$CHANNEL_ID`, `scope="rednote"`）获取账号信息
 
-2. **获取源笔记**：using the rednote-research skill 先获取 xsec_token，再调用 MCP `get_feed_detail(feed_id="<ID>", xsec_token="<token>")` 获取笔记详情
+3. **获取源笔记**：using the rednote-research skill 先获取 xsec_token，再调用 MCP `get_feed_detail(feed_id="<ID>", xsec_token="<token>")` 获取笔记详情
 
-3. **分析源笔记模板**：using the rednote-writing skill 分析源笔记，结果写入 `$DIR/source-analysis.md`。额外提取**视觉结构模板**：图片总张数（含封面）、各内容页主题关键词；若无法提取，记录"视觉结构：无法提取"，`tight` 模式图片规划自动降级为 `medium`
+4. **分析源笔记模板**：using the rednote-writing skill 分析源笔记，结果写入 `$DIR/source-analysis.md`。额外提取**视觉结构模板**：图片总张数（含封面）、各内容页主题关键词；若无法提取，记录"视觉结构：无法提取"，`tight` 模式图片规划自动降级为 `medium`
 
-4. **创建工作目录**execute command `abwriter workspace prepare rednote` 生成隔离工作目录，变量记为 `$DIR`
+5. **创建工作目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="rednote"`）生成隔离工作目录，变量记为 `$DIR`
 
-5. **按改写模式生成内容**：using the rednote-writing skill 根据用户指定或默认模式改写，内容保存到 `$DIR/content.md`，决策记录到 `$DIR/source-analysis.md`
+6. **按改写模式生成内容**：using the rednote-writing skill 根据用户指定或默认模式改写，内容保存到 `$DIR/content.md`，决策记录到 `$DIR/source-analysis.md`
 
-6. **图片生成**：using the rednote-visual-design skill，传入 `$DIR/content.md`、改写模式和源笔记视觉结构，技能内部自动适配并完成规划与生成。保存到 `$DIR/`
+7. **图片生成**：using the rednote-visual-design skill，传入 `$DIR/content.md`、改写模式和源笔记视觉结构，技能内部自动适配并完成规划与生成。保存到 `$DIR/`
 
-7. **违禁词合规检查**：using the rednote-writing skill 扫描标题与正文，生成 `$DIR/compliance-report.md`
+8. **违禁词合规检查**：using the rednote-writing skill 扫描标题与正文，生成 `$DIR/compliance-report.md`
 
-8. **归档工作目录**：从 `$DIR/content.md` 提取最终标题（第一行去掉 `# ` execute command：
-   ```bash
-   abwriter workspace archive rednote --name "{标题}"
-   ```
-   归档后向用户报告完整的成果目录路径（如 `output/rednote/五个提升效率的方法/`）。
+9. **归档工作目录**：从 `$DIR/content.md` 提取最终标题（第一行去掉 `# `），调用 `archive_workspace` MCP 工具（参数：`content_type="rednote"`, `name="{标题}"`）归档。归档后向用户报告完整的成果目录路径（如 `output/rednote/五个提升效率的方法/`）。
 
 ---
 
@@ -187,10 +183,3 @@ maxTurns: 20
 
 每个阶段完成后可独立验证，不依赖后续阶段。
 
-# 运行环境强制指令 (CRITICAL ENVIRONMENT RULES)
-
-- 你现在运行在本地的 Claude Code CLI 环境中，**不是**在 Kimi 的原生服务器容器中；
-- **绝对不要**尝试使用文件读取工具去查找或读取 `/app/.kimi/skills/` 目录下的任何文件（该路径在本地不存在，会导致报错）；
-- `abwriter` 是一个本地命令，只在说明需要使用它的时候再去调用，不能用它来执行 SKILL 也不能执行其它文档中不相关的命令；
-- 不要尝试通过自己生成代码来实现任何功能，所有功能都通过 SKILL实现；
-- **绝对不要**使用 `abwriter` 调用任何 SKILL；

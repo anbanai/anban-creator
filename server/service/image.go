@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 	"github.com/rs/zerolog"
 
 	appconfig "github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/converter"
 	"github.com/royalrick/anbanwriter/app/image"
 	"github.com/royalrick/anbanwriter/server/agent"
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
@@ -44,6 +46,28 @@ type UploadImageResult struct {
 	URL       string `json:"url"`
 	MediaID   string `json:"media_id,omitempty"`
 	WechatURL string `json:"wechat_url,omitempty"`
+}
+
+// DownloadImageResult is the response for image download (optionally with upload).
+type DownloadImageResult struct {
+	FilePath  string `json:"file_path,omitempty"`
+	URL       string `json:"url,omitempty"`
+	MediaID   string `json:"media_id,omitempty"`
+	WechatURL string `json:"wechat_url,omitempty"`
+}
+
+// BatchMarkdownImageItem is a single item in batch markdown image generation results.
+type BatchMarkdownImageItem struct {
+	Index    int    `json:"index"`
+	Prompt   string `json:"prompt"`
+	FilePath string `json:"file_path,omitempty"`
+	URL      string `json:"url,omitempty"`
+}
+
+// BatchMarkdownResult is the response for batch image generation from markdown.
+type BatchMarkdownResult struct {
+	Count   int                      `json:"count"`
+	Results []BatchMarkdownImageItem `json:"results"`
 }
 
 // ImageService handles image generation, upload, and compression
@@ -304,4 +328,169 @@ func (s *ImageService) CompressImage(filePath string, maxWidth int) (string, boo
 	compressor := image.NewCompressor(zapLog, maxWidth, maxSize)
 
 	return compressor.CompressImage(filePath)
+}
+
+// DownloadImage downloads an image from a URL and optionally uploads it to WeChat CDN.
+// If upload is "true" or "wechat", the image is uploaded after download.
+// Otherwise the image is saved to a temp directory.
+func (s *ImageService) DownloadImage(
+	ctx context.Context,
+	userID, channelID, url, upload string,
+) (*DownloadImageResult, error) {
+	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("find channel: %w", err)
+	}
+
+	processor, err := s.buildProcessor(ch, "content")
+	if err != nil {
+		return nil, err
+	}
+
+	if strings.EqualFold(upload, "true") || strings.EqualFold(upload, "wechat") {
+		result, err := processor.DownloadAndUpload(url)
+		if err != nil {
+			return nil, fmt.Errorf("download and upload: %w", err)
+		}
+
+		// Deduct credits for the upload.
+		if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageUpload, 1); creditErr != nil {
+			s.logger.Warn().Err(creditErr).
+				Str("user_id", userID).
+				Str("channel_id", channelID).
+				Msg("failed to deduct image download+upload credits")
+		}
+
+		return &DownloadImageResult{
+			URL:       url,
+			MediaID:   result.MediaID,
+			WechatURL: result.WechatURL,
+		}, nil
+	}
+
+	// Download only.
+	tmpDir, err := os.MkdirTemp("", "abw-dl-")
+	if err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	outputPath := filepath.Join(tmpDir, "downloaded.png")
+
+	result, err := processor.DownloadOnly(url, outputPath)
+	if err != nil {
+		return nil, fmt.Errorf("download image: %w", err)
+	}
+
+	return &DownloadImageResult{
+		FilePath: result.FilePath,
+		URL:      url,
+	}, nil
+}
+
+// BatchGenerateFromMarkdown extracts AI image placeholders from Markdown content,
+// generates all images, and optionally uploads them.
+func (s *ImageService) BatchGenerateFromMarkdown(
+	ctx context.Context,
+	userID, channelID, markdown, imageType, stylePrompt string,
+	upload bool,
+) (*BatchMarkdownResult, error) {
+	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("find channel: %w", err)
+	}
+
+	processor, err := s.buildProcessor(ch, imageType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract AI image references from markdown.
+	conv := converter.NewConverter(zap.NewNop())
+	refs := conv.ExtractImages(markdown)
+
+	// Filter to AI-only images.
+	var aiRefs []converter.ImageRef
+	for _, ref := range refs {
+		if ref.Type == converter.ImageTypeAI {
+			aiRefs = append(aiRefs, ref)
+		}
+	}
+
+	if len(aiRefs) == 0 {
+		return &BatchMarkdownResult{
+			Count:   0,
+			Results: []BatchMarkdownImageItem{},
+		}, nil
+	}
+
+	// Create temp directory for generated images.
+	tmpDir, err := os.MkdirTemp("", "abw-md-img-")
+	if err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+
+	results := make([]BatchMarkdownImageItem, 0, len(aiRefs))
+	for _, ref := range aiRefs {
+		prompt := ref.AIPrompt
+		if stylePrompt != "" {
+			prompt = stylePrompt + "\n\n" + prompt
+		}
+
+		outputPath := filepath.Join(tmpDir, fmt.Sprintf("img-%d.png", ref.Index))
+
+		genResult, err := processor.GenerateOnly(prompt, outputPath)
+		if err != nil {
+			s.logger.Warn().Err(err).
+				Int("index", ref.Index).
+				Str("prompt", prompt).
+				Msg("failed to generate image from markdown, skipping")
+			results = append(results, BatchMarkdownImageItem{
+				Index:  ref.Index,
+				Prompt: prompt,
+			})
+			continue
+		}
+
+		item := BatchMarkdownImageItem{
+			Index:    ref.Index,
+			Prompt:   prompt,
+			FilePath: genResult.FilePath,
+		}
+
+		// Optionally upload the generated image.
+		if upload {
+			uploadResult, uploadErr := processor.UploadLocalImage(genResult.FilePath)
+			if uploadErr != nil {
+				s.logger.Warn().Err(uploadErr).
+					Int("index", ref.Index).
+					Str("file_path", genResult.FilePath).
+					Msg("failed to upload generated image")
+			} else {
+				item.URL = uploadResult.WechatURL
+			}
+		}
+
+		results = append(results, item)
+	}
+
+	// Deduct credits for all successfully generated images.
+	successCount := 0
+	for _, r := range results {
+		if r.FilePath != "" {
+			successCount++
+		}
+	}
+	if successCount > 0 {
+		if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, successCount); creditErr != nil {
+			s.logger.Warn().Err(creditErr).
+				Str("user_id", userID).
+				Str("channel_id", channelID).
+				Int("count", successCount).
+				Msg("failed to deduct batch markdown image generation credits")
+		}
+	}
+
+	return &BatchMarkdownResult{
+		Count:   len(results),
+		Results: results,
+	}, nil
 }

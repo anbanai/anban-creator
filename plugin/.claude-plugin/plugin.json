@@ -1,7 +1,7 @@
 {
   "name": "anbanwriter",
-  "description": "Professional WeChat and Xiaohongshu (小红书) content creation toolkit with AI-powered writing, visual design, and multi-platform publishing optimization",
-  "version": "2.3.3",
+  "description": "Professional WeChat and Xiaohongshu (小红书) content creation toolkit — MCP server with AI-powered writing, visual design, and multi-platform publishing",
+  "version": "2.4.0",
   "author": {
     "name": "Rick",
     "email": "medivhzhan@gmail.com",
@@ -18,8 +18,8 @@
     "visual-design",
     "seo-optimization",
     "publishing",
-    "markdown",
-    "html-converter",
+    "mcp-server",
+    "claude-code",
     "chinese-content",
     "social-media",
     "official-account",

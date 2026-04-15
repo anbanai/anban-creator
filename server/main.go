@@ -213,6 +213,7 @@ func main() {
 		var imageSvc *service.ImageService
 		var writingSvc *service.WritingService
 		var publishingSvc *service.PublishingService
+		var workspaceSvc *service.WorkspaceService
 
 		if store != nil {
 			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, log)
@@ -232,6 +233,7 @@ func main() {
 				log.Warn().Msg("LLM client not configured (missing ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
 			}
 			publishingSvc = service.NewPublishingService(repo, creditSvc, log)
+			workspaceSvc = service.NewWorkspaceService("", log)
 		}
 
 		mcp.SetServices(&mcp.Services{
@@ -242,6 +244,7 @@ func main() {
 			ImageSvc:      imageSvc,
 			WritingSvc:    writingSvc,
 			PublishingSvc: publishingSvc,
+			WorkspaceSvc:  workspaceSvc,
 		})
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
 		log.Info().

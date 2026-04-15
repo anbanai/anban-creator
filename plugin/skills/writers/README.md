@@ -1,6 +1,6 @@
 # 自定义写作风格
 
-想模仿哪位作家或创作者的风格？可以轻松添加到 md2wechat。
+想模仿哪位作家或创作者的风格？可以轻松添加到 anbanwriter。
 
 ## 快速开始
 
@@ -43,15 +43,10 @@ cover_mood: "封面情绪"
 
 ### 3. 使用新风格
 
-配置文件创建后，立即可用：
+配置文件创建后，通过 MCP 工具立即可用：
 
-```bash
-# CLI 命令
-anbanwriter write --style my-style
-
-# 自然语言
-"用 my-style 风格写一篇文章"
-```
+- 调用 `write_article`，style 参数设为 `"my-style"`
+- 自然语言："用 my-style 风格写一篇文章"
 
 ---
 
@@ -175,11 +170,11 @@ cover_prompt: |
 
 ## 风格文件位置
 
-`md2wechat` 会按以下顺序查找风格文件：
+anbanwriter 会按以下顺序查找风格文件：
 
 1. `./writers/` - 当前项目目录
-2. `~/.config/md2wechat/writers/` - 用户配置目录
-3. `~/.md2wechat-writers/` - 用户主目录
+2. `~/.config/anbanwriter/writers/` - 用户配置目录
+3. `~/.anbanwriter/writers/` - 用户主目录
 
 ---
 
@@ -201,18 +196,7 @@ A: 检查以下几点：
 
 ### Q: 如何测试新风格？
 
-A:
-
-```bash
-# 列出所有风格
-anbanwriter styles
-
-# 查看风格详情
-anbanwriter styles --detail my-style
-
-# 测试写作
-anbanwriter write --style my-style --input-type idea
-```
+A: 调用 `write_article` MCP 工具，style 参数设为新风格名称即可测试。
 
 ### Q: 可以分享我的风格吗？
 

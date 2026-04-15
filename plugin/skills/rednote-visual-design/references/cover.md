@@ -76,8 +76,6 @@
 内容主题：{topic}
 ```
 
-**CLI 命令**：
+**生成方式**：
 
-```bash
-abwriter image generate "{prompt}" --mode xhs --cover -o ./cover.png
-```
+通过 MCP 工具调用 `generate_image`，image_type 设为 `"cover"`。

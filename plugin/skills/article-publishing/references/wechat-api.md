@@ -8,12 +8,9 @@
 
 上传图片到微信素材库，返回 media_id 和 CDN URL。
 
-### CLI 命令
+### MCP 工具
 
-```bash
-abwriter image upload <file_path>
-abwriter image download <url>
-```
+调用 `upload_image` 上传本地图片，调用 `download_image` 下载在线图片。
 
 ### 响应格式
 
@@ -39,11 +36,9 @@ abwriter image download <url>
 
 创建图文草稿到公众号草稿箱。
 
-### CLI 命令
+### MCP 工具
 
-```bash
-abwriter draft article <json_file>
-```
+调用 `publish_draft`，传入 channel_id 和 articles 数组。
 
 ### 响应格式
 

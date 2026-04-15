@@ -5,17 +5,13 @@ description: Generates cover and content images for Xiaohongshu (小红书) post
 
 # 小红书图片生成
 
-## 运行模式
+## MCP 工具
 
-当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
-
-| CLI 命令 | MCP 工具 |
-|----------|----------|
-| `abwriter image generate "{prompt}" --mode xhs --cover -o {path}` | `generate_image` (channel_id, prompt, image_type="cover", output_path) |
-| `abwriter image generate "{prompt}" --mode xhs --count N -o {dir}` | `generate_batch_images` (channel_id, prompt, count, output_dir) |
-| `abwriter image upload {file}` | `upload_image` (channel_id, file_path) |
-
-当 MCP 不可用时，回退到 CLI 命令。
+| MCP 工具 | 说明 |
+|----------|------|
+| `generate_image` (channel_id, prompt, image_type="cover", output_path) | 生成封面（单张） |
+| `generate_batch_images` (channel_id, prompt, count, output_dir) | 批量生成内容图 |
+| `upload_image` (channel_id, file_path) | 上传图片到微信素材库 |
 
 ---
 
@@ -35,7 +31,7 @@ description: Generates cover and content images for Xiaohongshu (小红书) post
 3. **目标受众** — 年龄层、消费力影响配色（年轻用户偏饱和鲜艳；成熟用户偏质感低饱和）
 
 **封面与内容图的一致性**：
-- 无配置参考图时：先生成封面确立基准风格 → 以封面 `--ref` 批量生成内容图
+- 无配置参考图时：先生成封面确立基准风格 → 以封面作为参考图批量生成内容图
 - 有配置参考图时：所有图片统一使用配置参考图
 
 ---
@@ -145,7 +141,7 @@ description: Generates cover and content images for Xiaohongshu (小红书) post
 按 image-plan.md 逐一生成：
 
 1. **封面**：使用 [references/cover.md](references/cover.md) 的 Prompt 模板生成
-2. **内容图**：使用 [references/content.md](references/content.md) 的 Prompt 模板批量生成（`--count N-2`）
+2. **内容图**：使用 [references/content.md](references/content.md) 的 Prompt 模板批量生成（count = N-2）
 3. **尾图**：使用 [references/tail.md](references/tail.md) 的 Prompt 模板单独生成
 
 ### 步骤 6：质量验证
@@ -165,24 +161,14 @@ description: Generates cover and content images for Xiaohongshu (小红书) post
 
 ---
 
-## CLI 命令
+## 图片生成方式
 
-```bash
-# 生成封面（单张）
-abwriter image generate "{prompt}" --mode xhs --cover -o ./cover.png
+通过 MCP 工具调用：
 
-# 批量生成内容图（N-2 张，不含尾图）
-abwriter image generate "{paged_prompt}" --mode xhs --count N-2 -o ./
+1. **生成封面（单张）**：调用 `generate_image`，image_type 设为 `"cover"`
+2. **批量生成内容图（N-2 张，不含尾图）**：调用 `generate_batch_images`，指定 count
+3. **单独生成尾图**：调用 `generate_image`，传入封面作为参考图
+4. **带参考图（保持风格一致）**：提供参考图路径
+5. **带风格描述**：在 prompt 中加入风格描述（如"手绘感，暖色调，小清新"）
 
-# 单独生成尾图
-abwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
-
-# 带参考图（保持风格一致）
-abwriter image generate "{prompt}" --mode xhs --cover --ref ./cover.png -o ./cover.png
-abwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
-
-# 带风格描述
-abwriter image generate "{prompt}" --mode xhs --cover --style "手绘感，暖色调，小清新" -o ./cover.png
-```
-
-**关键规则**：内容图必须用 `--count` 批量生成，尾图单独生成（`tail.png`），封面单独生成（`cover.png`）。`--mode xhs` 自动使用 3:4:1K 规格。
+**关键规则**：内容图必须用 `generate_batch_images` 批量生成，尾图单独生成（`tail.png`），封面单独生成（`cover.png`）。

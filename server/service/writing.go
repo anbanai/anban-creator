@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/royalrick/anbanwriter/app/converter"
+	"github.com/royalrick/anbanwriter/app/humanizer"
 	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
@@ -134,9 +135,21 @@ type ImageRefDTO struct {
 	Placeholder string `json:"placeholder,omitempty"`
 }
 
-// HumanizeArticleResult contains the humanized content.
+// HumanizeArticleResult contains the humanized content and optional quality score.
 type HumanizeArticleResult struct {
-	Content string `json:"content"`
+	Content string               `json:"content"`
+	Score    *HumanizeScoreResult `json:"score,omitempty"`
+}
+
+// HumanizeScoreResult contains the 5-dimension quality score.
+type HumanizeScoreResult struct {
+	Total        int    `json:"total"`
+	Directness   int    `json:"directness"`
+	Rhythm       int    `json:"rhythm"`
+	Trust        int    `json:"trust"`
+	Authenticity int    `json:"authenticity"`
+	Conciseness  int    `json:"conciseness"`
+	Rating       string `json:"rating"`
 }
 
 // ResearchTopicsResult contains generated topic suggestions.
@@ -159,6 +172,26 @@ type OptimizeSEOResult struct {
 	OptimizedTitle string `json:"optimized_title"`
 	Keywords       string `json:"keywords"`
 	Summary        string `json:"summary"`
+}
+
+// OutlineSection represents a single section in a generated outline.
+type OutlineSection struct {
+	Title      string   `json:"title"`
+	Content    string   `json:"content"`
+	KeyPoints  []string `json:"key_points"`
+	Engagement string   `json:"engagement"`
+}
+
+// OutlineResult contains a generated article outline.
+type OutlineResult struct {
+	Title         string           `json:"title"`
+	Subtitle      string           `json:"subtitle,omitempty"`
+	Hook          string           `json:"hook"`
+	Sections      []OutlineSection `json:"sections"`
+	KeyPoints     []string         `json:"key_points"`
+	CallToAction  string           `json:"call_to_action,omitempty"`
+	ViralElements []string         `json:"viral_elements,omitempty"`
+	SEOKeywords   []string         `json:"seo_keywords,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +349,7 @@ func (s *WritingService) ConvertMarkdown(
 }
 
 // HumanizeArticle removes AI-generated writing traces from content.
+// Uses the full 24-pattern humanizer prompt system for comprehensive AI trace removal.
 func (s *WritingService) HumanizeArticle(
 	ctx context.Context,
 	userID, channelID, content, intensity string,
@@ -324,16 +358,24 @@ func (s *WritingService) HumanizeArticle(
 		return nil, fmt.Errorf("content is required")
 	}
 
-	if intensity == "" {
-		intensity = "medium"
+	humanizeIntensity := humanizer.ParseIntensity(intensity)
+
+	req := &humanizer.HumanizeRequest{
+		Content:  content,
+		Intensity: humanizeIntensity,
+		IncludeScore: true,
 	}
 
-	prompt := s.buildHumanizePrompt(intensity, content)
+	prompt := humanizer.BuildPrompt(req)
 
-	humanized, err := s.llmClient.Complete(ctx, "", prompt)
+	raw, err := s.llmClient.Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm humanize: %w", err)
 	}
+
+	// Parse the structured response using the humanizer package.
+	h := humanizer.NewHumanizer()
+	parsed := h.ParseAIResponse(raw, req)
 
 	// Deduct credits.
 	if s.creditSvc != nil {
@@ -345,11 +387,27 @@ func (s *WritingService) HumanizeArticle(
 	s.logger.Info().
 		Str("user_id", userID).
 		Str("intensity", intensity).
+		Bool("scored", parsed.Score != nil).
 		Msg("article humanized")
 
-	return &HumanizeArticleResult{
-		Content: humanized,
-	}, nil
+	result := &HumanizeArticleResult{
+		Content: parsed.Content,
+	}
+
+	// Include quality score if available.
+	if parsed.Score != nil {
+		result.Score = &HumanizeScoreResult{
+			Total:        parsed.Score.Total,
+			Directness:   parsed.Score.Directness,
+			Rhythm:       parsed.Score.Rhythm,
+			Trust:        parsed.Score.Trust,
+			Authenticity: parsed.Score.Authenticity,
+			Conciseness:  parsed.Score.Conciseness,
+			Rating:       parsed.Score.Rating(),
+		}
+	}
+
+	return result, nil
 }
 
 // ResearchTopics generates topic suggestions based on a channel's positioning.
@@ -458,24 +516,75 @@ func (s *WritingService) OptimizeSEO(
 	return result, nil
 }
 
+// GenerateOutline generates a structured article outline using an LLM.
+func (s *WritingService) GenerateOutline(
+	ctx context.Context,
+	userID, channelID, topic, template, style string,
+) (*OutlineResult, error) {
+	if topic == "" {
+		return nil, fmt.Errorf("topic is required")
+	}
+	if template == "" {
+		template = "authoritative"
+	}
+
+	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("find channel: %w", err)
+	}
+	if ch.UserID != userID {
+		return nil, fmt.Errorf("channel not owned by user")
+	}
+
+	// Use channel style if not overridden.
+	if style == "" {
+		style = ch.Style
+	}
+	if style == "" {
+		style = "dan-koe"
+	}
+
+	// Extract keywords from the channel.
+	var keywords []string
+	for _, kw := range strings.Split(ch.Keywords, ",") {
+		kw = strings.TrimSpace(kw)
+		if kw != "" {
+			keywords = append(keywords, kw)
+		}
+	}
+
+	prompt := buildOutlinePrompt(topic, template, style, keywords)
+
+	raw, err := s.llmClient.Complete(ctx, "", prompt)
+	if err != nil {
+		return nil, fmt.Errorf("llm generate outline: %w", err)
+	}
+
+	result, err := parseOutlineResponse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse outline response: %w", err)
+	}
+
+	// Deduct credits.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeOutline, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
+	s.logger.Info().
+		Str("user_id", userID).
+		Str("channel_id", channelID).
+		Str("topic", topic).
+		Int("section_count", len(result.Sections)).
+		Msg("outline generated")
+
+	return result, nil
+}
+
 // ---------------------------------------------------------------------------
 // Private prompt builders
 // ---------------------------------------------------------------------------
-
-// buildHumanizePrompt constructs a humanization prompt for the given intensity.
-func (s *WritingService) buildHumanizePrompt(intensity, content string) string {
-	intensityLabel := "中等"
-	switch intensity {
-	case "gentle":
-		intensityLabel = "轻度"
-	case "aggressive":
-		intensityLabel = "强力"
-	default:
-		intensityLabel = "中等"
-	}
-
-	return fmt.Sprintf("你是一个专业的内容编辑，请去除以下内容中的 AI 生成痕迹。\n\n强度级别: %s\n\n请保留原意，但让文字更加自然、有人味。\n\n## 原文\n%s", intensityLabel, content)
-}
 
 // buildTopicsPrompt constructs a topic research prompt.
 func (s *WritingService) buildTopicsPrompt(positioning string, keywords []string, count int) string {
@@ -565,4 +674,65 @@ func (s *WritingService) parseSEOResponse(raw string) *OptimizeSEOResult {
 	}
 
 	return &result
+}
+
+// ---------------------------------------------------------------------------
+// Outline helpers (package-level, not methods)
+// ---------------------------------------------------------------------------
+
+// buildOutlinePrompt constructs the outline generation prompt.
+func buildOutlinePrompt(topic, templateType, style string, keywords []string) string {
+	kwStr := strings.Join(keywords, "、")
+	if kwStr == "" {
+		kwStr = "（无）"
+	}
+
+	return fmt.Sprintf(`请为以下微信公众号文章生成一个详细的内容框架，以 JSON 格式输出。
+
+话题: %s
+模板类型: %s
+写作风格: %s
+关键词: %s
+
+请输出严格的 JSON 格式，结构如下（不要包含任何额外文字）:
+{
+  "title": "吸引眼球的文章标题",
+  "subtitle": "副标题或引导语",
+  "hook": "开头钩子句（吸引读者继续阅读）",
+  "sections": [
+    {
+      "title": "1. 节标题",
+      "content": "该节的核心内容描述（2-3句话）",
+      "key_points": ["要点一", "要点二", "要点三"],
+      "engagement": "该节的互动引导语"
+    }
+  ],
+  "key_points": ["全文核心要点一", "全文核心要点二", "全文核心要点三"],
+  "call_to_action": "结尾行动号召",
+  "viral_elements": ["传播元素一", "传播元素二"],
+  "seo_keywords": ["SEO关键词一", "SEO关键词二", "SEO关键词三"]
+}
+
+要求：
+- 标题要有冲击力和好奇心驱动
+- 钩子要能在3秒内抓住读者注意力
+- 各节内容要具体，紧扣关键词
+- 结构要符合%s模板类型的逻辑`, topic, templateType, style, kwStr, templateType)
+}
+
+// parseOutlineResponse parses the LLM response as an outline JSON object.
+func parseOutlineResponse(raw string) (*OutlineResult, error) {
+	// Strip markdown code fences if present.
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
+
+	var result OutlineResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil, fmt.Errorf("unmarshal outline: %w", err)
+	}
+
+	return &result, nil
 }

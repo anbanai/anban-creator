@@ -42,6 +42,4 @@
 
 ## 使用方式
 
-```bash
-abwriter score --help
-```
+调用 `score_article` MCP 工具，传入话题内容和领域参数。

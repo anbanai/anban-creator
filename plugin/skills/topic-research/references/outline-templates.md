@@ -133,14 +133,12 @@
 
 ## 使用说明
 
-在 `outline` 命令中通过 `--template` 指定模板类型：
+调用 `generate_outline` MCP 工具时，通过 template 参数指定模板类型：
 
-```bash
-abwriter outline -t "话题" --template authoritative
-abwriter outline -t "话题" --template comparison
-abwriter outline -t "话题" --template cultural
-abwriter outline -t "话题" --template practical
-```
+- authoritative（权威揭秘型）
+- comparison（对比评测型）
+- cultural（文化故事型）
+- practical（实用干货型）
 
 Claude 代理在生成大纲时，应参考对应模板的结构、标题公式和互动设计要点，
 生成符合该模板逻辑的完整内容框架 JSON。

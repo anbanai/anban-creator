@@ -8,7 +8,7 @@
     {
       "name": "anbanwriter",
       "source": "./",
-      "description": "Next-generation WeChat and Xiaohongshu (小红书) content creation suite with AI-powered writing, intelligent formatting, multi-platform publishing, and visual design. Features smart conversion, natural language image generation, writing style enhancement, and comprehensive content optimization for WeChat articles, Xiaolvshu image posts, and Rednote notes.",
+      "description": "Next-generation WeChat and Xiaohongshu (小红书) content creation suite powered by MCP server. Features AI-powered writing, intelligent formatting, multi-platform publishing, and visual design through Claude Code agents and skills.",
       "author": {
         "name": "Rick"
       },
@@ -17,14 +17,8 @@
       "license": "MIT",
       "keywords": [
         "wechat",
-        "markdown",
-        "blog",
-        "publishing",
-        "html",
-        "converter",
-        "official account",
-        "公众号",
-        "排版",
+        "mcp-server",
+        "claude-code",
         "ai-writing",
         "content-generation",
         "image-generation",

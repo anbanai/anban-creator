@@ -20,6 +20,7 @@ type Services struct {
 	ImageSvc      *service.ImageService
 	WritingSvc    *service.WritingService
 	PublishingSvc *service.PublishingService
+	WorkspaceSvc  *service.WorkspaceService
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -31,6 +32,8 @@ func RegisterTools(server *mcp.Server) {
 	registerImageTools(server)
 	registerWritingTools(server)
 	registerPublishingTools(server)
+	registerWorkspaceTools(server)
+	registerRednoteTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.
@@ -66,6 +69,19 @@ func registerChannelTools(server *mcp.Server) {
 			"required": []any{"channel_id"},
 		},
 	}, channelGetHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "get_account_info",
+		Description: "Get formatted account information for AI content creation context. Returns account positioning, keywords, style, theme, and platform-specific configuration. Does NOT expose sensitive credentials.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "xls", "rednote", "flower"}, "description": "Filter output by content type"},
+			},
+			"required": []any{"channel_id"},
+		},
+	}, accountInfoHandler)
 }
 
 func registerTaskTools(server *mcp.Server) {
@@ -218,6 +234,53 @@ func channelGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	}
 	service.SanitizeChannel(ch)
 	return textResult(map[string]any{"channel": ch, "stats": stats})
+}
+
+func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+	channelID, _ := args["channel_id"].(string)
+	if channelID == "" {
+		return errorResult("channel_id is required"), nil
+	}
+	scope, _ := args["scope"].(string)
+
+	ch, _, err := svcs.ChannelSvc.Get(context.Background(), userID, channelID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("get channel: %v", err)), nil
+	}
+	service.SanitizeChannel(ch)
+
+	// Base account info (always included).
+	info := map[string]any{
+		"name":        ch.Name,
+		"author":      ch.Author,
+		"positioning": ch.Positioning,
+		"keywords":    ch.Keywords,
+		"style":       ch.Style,
+		"theme":       ch.Theme,
+		"platform":    ch.Platform,
+	}
+
+	switch scope {
+	case "article":
+		info["style"] = ch.Style
+	case "xls":
+		// XLS config is derived from channel fields.
+		info["image_config"] = map[string]any{
+			"reference_image_url": ch.ReferenceImageURL,
+		}
+	case "rednote":
+		info["image_config"] = map[string]any{
+			"reference_image_url": ch.ReferenceImageURL,
+		}
+	case "flower":
+		info["image_config"] = map[string]any{
+			"reference_image_url": ch.ReferenceImageURL,
+		}
+	}
+
+	return textResult(info)
 }
 
 func taskCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

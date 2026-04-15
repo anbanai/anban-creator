@@ -8,12 +8,9 @@
 
 上传图片到微信素材库，返回 media_id 和 URL。
 
-### CLI 命令
+### MCP 工具
 
-```bash
-abwriter image upload <file_path>
-abwriter image download <url>
-```
+调用 `upload_image` 上传本地图片，调用 `download_image` 下载在线图片。
 
 ### 错误码
 
@@ -29,13 +26,9 @@ abwriter image download <url>
 
 创建微信公众号小绿书（图文笔记）草稿，支持最多 20 张图片。
 
-### CLI 命令
+### MCP 工具
 
-```bash
-abwriter draft xls -t "标题" --images photo1.jpg,photo2.jpg
-abwriter draft xls -t "标题" -m article.md
-abwriter draft xls -t "标题" --images photo.jpg --dry-run
-```
+调用 `publish_xls`，传入 title、content、images 参数。
 
 ### 与图文草稿的区别
 
@@ -75,7 +68,7 @@ abwriter draft xls -t "标题" --images photo.jpg --dry-run
 
 ### 重要约束
 
-- 每张图片必须先上传为永久素材（`image upload`），获取 `media_id`
+- 每张图片必须先上传为永久素材（调用 `upload_image`），获取 `media_id`
 - 最多 20 张图片
 - 内容为纯文本（不支持 HTML）
 - SDK（silenceper）不支持 newspic，需直接调用微信 API

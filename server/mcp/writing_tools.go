@@ -3,11 +3,12 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerWritingTools registers article writing, conversion, humanization, topic research, and SEO tools.
+// registerWritingTools registers article writing, conversion, humanization, topic research, SEO, outline generation, and scoring tools.
 func registerWritingTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "write_article",
@@ -82,6 +83,38 @@ func registerWritingTools(server *mcp.Server) {
 			"required": []any{"channel_id", "content", "title"},
 		},
 	}, optimizeSEOHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "generate_outline",
+		Description: "Generate a structured article outline/framework based on a topic and template. Returns title, hook, sections, key points, CTA, and viral elements.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"channel_id": map[string]any{"type": "string", "description": "Channel ID (determines style and keywords)"},
+				"topic":      map[string]any{"type": "string", "description": "Article topic or idea"},
+				"template":   map[string]any{"type": "string", "enum": []any{"authoritative", "comparison", "cultural", "practical"}, "description": "Outline template type (default: authoritative)"},
+				"style":      map[string]any{"type": "string", "description": "Writing style override (optional, uses channel style by default)"},
+			},
+			"required": []any{"channel_id", "topic"},
+		},
+	}, generateOutlineHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "score_article",
+		Description: "Calculate viral potential score based on article engagement metrics (reads, likes, shares, comments, collects). Returns score, level, rates, and optimization recommendations.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"read_count":    map[string]any{"type": "integer", "description": "Number of reads"},
+				"like_count":    map[string]any{"type": "integer", "description": "Number of likes"},
+				"share_count":   map[string]any{"type": "integer", "description": "Number of shares (default: 0)"},
+				"comment_count": map[string]any{"type": "integer", "description": "Number of comments (default: 0)"},
+				"collect_count": map[string]any{"type": "integer", "description": "Number of collects/bookmarks (default: 0)"},
+				"topic":         map[string]any{"type": "string", "description": "Article topic (optional, for context in recommendations)"},
+			},
+			"required": []any{"read_count", "like_count"},
+		},
+	}, scoreArticleHandler)
 }
 
 func writeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -234,4 +267,157 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	}
 
 	return textResult(result)
+}
+
+func generateOutlineHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.WritingSvc == nil {
+		return errorResult("writing service not available"), nil
+	}
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+
+	channelID, _ := args["channel_id"].(string)
+	topic, _ := args["topic"].(string)
+	if channelID == "" {
+		return errorResult("channel_id is required"), nil
+	}
+	if topic == "" {
+		return errorResult("topic is required"), nil
+	}
+
+	template, _ := args["template"].(string)
+	style, _ := args["style"].(string)
+
+	result, err := svcs.WritingSvc.GenerateOutline(ctx, userID, channelID, topic, template, style)
+	if err != nil {
+		return errorResult(fmt.Sprintf("generate outline: %v", err)), nil
+	}
+
+	return textResult(result)
+}
+
+func scoreArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := parseArgs(req.Params.Arguments)
+
+	readCount := int64(0)
+	likeCount := int64(0)
+	shareCount := int64(0)
+	commentCount := int64(0)
+	collectCount := int64(0)
+
+	if v, ok := args["read_count"].(float64); ok {
+		readCount = int64(v)
+	}
+	if v, ok := args["like_count"].(float64); ok {
+		likeCount = int64(v)
+	}
+	if v, ok := args["share_count"].(float64); ok {
+		shareCount = int64(v)
+	}
+	if v, ok := args["comment_count"].(float64); ok {
+		commentCount = int64(v)
+	}
+	if v, ok := args["collect_count"].(float64); ok {
+		collectCount = int64(v)
+	}
+
+	if readCount <= 0 {
+		return errorResult("read_count must be positive"), nil
+	}
+	if likeCount < 0 {
+		return errorResult("like_count must be non-negative"), nil
+	}
+
+	topic, _ := args["topic"].(string)
+
+	// Compute engagement rates.
+	engagementRate := float64(likeCount+shareCount+commentCount) / float64(readCount)
+	shareRate := float64(shareCount) / float64(readCount)
+	likeRate := float64(likeCount) / float64(readCount)
+	commentRate := float64(commentCount) / float64(readCount)
+
+	// Calculate viral score.
+	score := calculateViralScore(readCount, engagementRate, shareRate, likeRate, commentRate)
+	level := getViralLevel(score)
+	recommendations := generateScoreRecommendations(engagementRate, shareRate, likeRate, commentRate)
+
+	result := map[string]any{
+		"score":            score,
+		"level":            level,
+		"topic":            topic,
+		"read_count":       readCount,
+		"like_count":       likeCount,
+		"share_count":      shareCount,
+		"comment_count":    commentCount,
+		"collect_count":    collectCount,
+		"engagement_rate":  engagementRate,
+		"share_rate":       shareRate,
+		"like_rate":        likeRate,
+		"comment_rate":     commentRate,
+		"recommendations":  recommendations,
+	}
+
+	return textResult(result)
+}
+
+// ---------------------------------------------------------------------------
+// Scoring helpers (pure computation, no external dependencies)
+// ---------------------------------------------------------------------------
+
+func calculateViralScore(readCount int64, engagementRate, shareRate, likeRate, commentRate float64) float64 {
+	score := 0.0
+
+	// Read count score (30%).
+	readScore := math.Min(math.Log10(float64(readCount))*10, 100)
+	score += readScore * 0.3
+
+	// Engagement rate score (30%).
+	score += math.Min(engagementRate*1000, 30)
+
+	// Share rate score (25%).
+	score += math.Min(shareRate*2500, 25)
+
+	// Comment rate score (15%).
+	score += math.Min(commentRate*3750, 15)
+
+	return math.Min(score, 100)
+}
+
+func getViralLevel(score float64) string {
+	switch {
+	case score >= 90:
+		return "超级爆款"
+	case score >= 80:
+		return "热门爆款"
+	case score >= 70:
+		return "优质内容"
+	case score >= 60:
+		return "潜力内容"
+	case score >= 50:
+		return "普通内容"
+	default:
+		return "待优化"
+	}
+}
+
+func generateScoreRecommendations(engagementRate, shareRate, likeRate, commentRate float64) []string {
+	var recs []string
+
+	if engagementRate < 0.02 {
+		recs = append(recs, "互动率偏低，建议增加互动引导或话题讨论点")
+	}
+
+	if shareRate < 0.01 {
+		recs = append(recs, "分享率偏低，建议增加实用价值或情感共鸣点")
+	}
+
+	if commentRate < likeRate*0.05 {
+		recs = append(recs, "评论率偏低，建议增加争议性或思考性内容")
+	}
+
+	if len(recs) == 0 {
+		recs = append(recs, "各项指标表现良好，继续保持！")
+	}
+
+	return recs
 }

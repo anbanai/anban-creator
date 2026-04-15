@@ -1,42 +1,17 @@
-# Writer CLI Makefile
-# WeChat writing tool unified build
+# AnbanWriter Makefile
+# Content creation platform: MCP Server + Web Studio
 
-.PHONY: all build clean test install help lint fmt vet release sync ci coverage \
+.PHONY: all clean test help lint fmt vet \
         server-build server-run server-dev server-test \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -s -w -X main.version=$(VERSION)
-
 # Default target
-all: build
+all: server-build
 
 # ---------------------------------------------------------------------------
-# CLI targets
+# Shared targets
 # ---------------------------------------------------------------------------
-
-# Build for all platforms (release)
-release:
-	@mkdir -p bin
-	@echo "Building for Linux amd64..."
-	@GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-linux-amd64 ./app
-	@echo "Building for Linux arm64..."
-	@GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-linux-arm64 ./app
-	@echo "Building for macOS amd64 (Intel)..."
-	@GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-darwin-amd64 ./app
-	@echo "Building for macOS arm64 (Apple Silicon)..."
-	@GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-darwin-arm64 ./app
-	@echo "Building for Windows amd64..."
-	@GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o bin/abwriter-windows-amd64.exe ./app
-	@chmod +x bin/*-linux* bin/*-darwin* 2>/dev/null || true
-	@echo "Release builds complete in bin/"
-
-# Build for current platform
-build:
-	@mkdir -p bin
-	@go build -ldflags="$(LDFLAGS)" -o bin/abwriter ./app
-	@echo "Build complete: bin/abwriter"
 
 # Clean all build artifacts
 clean:
@@ -61,18 +36,10 @@ fmt:
 vet:
 	@go vet ./...
 
-# Install to GOPATH/bin
-install:
-	@go install ./app
-
 # Download and tidy dependencies
 deps:
 	@go mod download
 	@go mod tidy
-
-# Sync Skill directories
-sync:
-	@bash scripts/sync.sh
 
 # Run all CI checks (format, vet, test, lint)
 ci: fmt vet test lint
@@ -96,7 +63,7 @@ server-build:
 
 # Build and run the server
 server-run: server-build
-	@./bin/abwriter-server -config server/config.yaml
+	./bin/abwriter-server -config server/config.yaml
 
 # Run the server via go run (development)
 server-dev:
@@ -112,15 +79,15 @@ server-test:
 
 # Install frontend dependencies
 web-install:
-	@cd studio && npm install
+	@cd studio && bun install
 
 # Run frontend dev server
 web-dev:
-	@cd studio && npm run dev
+	@cd studio && bun run dev
 
 # Build frontend for production
 web-build:
-	@cd studio && npm run build
+	@cd studio && bun run build
 
 # ---------------------------------------------------------------------------
 # Docker targets
@@ -149,11 +116,9 @@ docker-image:
 # ---------------------------------------------------------------------------
 
 help:
-	@echo "Writer CLI + Online Service Makefile"
+	@echo "AnbanWriter - Content Creation Platform"
 	@echo ""
-	@echo "CLI targets:"
-	@echo "  make build         - Build current platform CLI binary"
-	@echo "  make release       - Build all platform binaries to bin/"
+	@echo "Shared targets:"
 	@echo "  make test          - Run all tests"
 	@echo "  make coverage      - Run tests with coverage report"
 	@echo "  make ci            - Run all CI checks (fmt + vet + test + lint)"
@@ -170,15 +135,12 @@ help:
 	@echo "  make server-test   - Run server tests"
 	@echo ""
 	@echo "Frontend targets:"
-	@echo "  make web-install   - Install frontend dependencies"
-	@echo "  make web-dev       - Run frontend dev server"
-	@echo "  make web-build     - Build frontend for production"
+	@echo "  make web-install   - Install frontend dependencies (bun)"
+	@echo "  make web-dev       - Run frontend dev server (bun)"
+	@echo "  make web-build     - Build frontend for production (bun)"
 	@echo ""
 	@echo "Docker targets:"
 	@echo "  make docker-up     - Start MySQL and Redis containers"
 	@echo "  make docker-down   - Stop containers"
 	@echo "  make docker-logs   - Follow container logs"
 	@echo "  make docker-image  - Build abwriter Docker image"
-	@echo ""
-	@echo "Quick install:"
-	@echo "  go install github.com/royalrick/anbanwriter/app/cmd/writer@latest"

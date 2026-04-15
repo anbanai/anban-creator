@@ -5,17 +5,13 @@ description: Writes articles with style guidance, removes AI traces, converts Ma
 
 # 微信公众号内容写作知识库
 
-## 运行模式
+## MCP 工具
 
-当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
-
-| 功能 | MCP 工具 | 说明 |
-|------|----------|------|
-| AI 写作 | `write_article` | server 端调用 LLM，按写作风格生成文章 |
-| Markdown 转 HTML | `convert_markdown` | server 端调用 LLM 转换 |
-| 去AI痕迹 | `humanize_article` | server 端调用 LLM 去痕 |
-
-当 MCP 不可用时，由 Agent 直接使用 LLM 能力写作，再用 `abwriter convert` 转换。
+| MCP 工具 | 说明 |
+|----------|------|
+| `write_article` | server 端调用 LLM，按写作风格生成文章 |
+| `convert_markdown` | server 端调用 LLM 转换 Markdown 为 WeChat HTML |
+| `humanize_article` | server 端调用 LLM 去除 AI 痕迹 |
 
 ---
 
@@ -44,7 +40,7 @@ description: Writes articles with style guidance, removes AI traces, converts Ma
 3. **图片位置**：放在关键段落之后，不要紧接 ## 标题，不要放在章节末尾
 4. **提示词差异化**：不同章节的配图提示词必须有明显区别，反映各章节的不同主题
 5. **提示词格式**：`[章节核心主题] + [具体场景/物体] + [视觉风格] + [构图指导]`，长度 30-80 字
-6. **风格一致性**：所有章节的配图提示词应保持相似的视觉风格描述（后续通过 `--style` 参数统一执行）
+6. **风格一致性**：所有章节的配图提示词应保持相似的视觉风格描述
 
 ## AI 去痕参考
 
@@ -83,15 +79,8 @@ description: Writes articles with style guidance, removes AI traces, converts Ma
 - 禁止外部资源
 - 安全标签：section, p, span, strong, em, h1-h6, ul, ol, li, blockquote, pre, code, table, img, br, hr
 
-## 命令帮助
+## 相关工具
 
-```bash
-# 风格写作
-abwriter write --help
-
-# Markdown 转微信 HTML
-abwriter convert --help
-
-# AI 去痕
-abwriter humanize --help
-```
+- 风格写作：调用 `write_article` MCP 工具
+- Markdown 转微信 HTML：调用 `convert_markdown` MCP 工具
+- AI 去痕：调用 `humanize_article` MCP 工具

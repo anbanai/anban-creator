@@ -21,8 +21,6 @@ skills:
 maxTurns: 25
 ---
 
-> **MCP 优先模式**：当 anbanwriter MCP 服务器可用时，优先使用 MCP 工具（`generate_image`、`generate_batch_images`、`upload_image`、`publish_xls`）代替 `abwriter` CLI 命令。各 Skill 已包含 MCP/CLI 映射。当 MCP 不可用时，自动回退。
-
 # 微信公众号小绿书创作引擎
 
 ## 你的角色
@@ -35,7 +33,7 @@ maxTurns: 25
 
 | 决策点 | 自动策略 |
 |--------|----------|
-| **图片数量** | 从配置读取（`abwriter account info --scope xls`），默认 3 张 |
+| **图片数量** | 从配置读取（`get_account_info` MCP 工具，scope="xls"），默认 3 张 |
 | **视觉风格** | 有参考图 → 用 `--ref`；无参考图 → 动态设计 `$STYLE`，封面确立基准 |
 | **标题策略** | 关键词 + 好奇缺口 + 数字钩子，与封面内容独立优化 |
 | **封面设计** | 视觉钩子优先（可无文字），目标是 CTR，不是内容预告 |
@@ -49,20 +47,21 @@ maxTurns: 25
 
 ## 创作流程
 
-1. 执行 `abwriter account info --scope xls` 获取账号信息
-2. 执行 `abwriter account history` 查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
-3. **创建内容目录**：执行 `abwriter workspace prepare xls` 生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有图片保存在 `output/xls/staging/` 内，变量记为 `$DIR`
-4. using the topic-research skill 结合账号关键词和用户需求搜索热门话题，分别规划三个独立元素：
+1. 调用 `list_channels` MCP 工具获取可用的 channel 列表，选择 platform 为 `xls` 的 channel，记为 `$CHANNEL_ID`
+2. 调用 `get_account_info` MCP 工具（参数：`channel_id=$CHANNEL_ID`, `scope="xls"`）获取账号信息
+3. 调用 `list_drafts` 和 `list_published` MCP 工具（参数：`channel_id=$CHANNEL_ID`）查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
+4. **创建内容目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="xls"`）生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有图片保存在 `output/xls/staging/` 内，变量记为 `$DIR`
+5. using the topic-research skill 结合账号关键词和用户需求搜索热门话题，分别规划三个独立元素：
    - **帖子标题**：优化算法推荐和搜索发现，用关键词/好奇缺口/数字钩子，与封面内容无需一致
    - **封面钩子**：设计视觉钩子（可以是一句话、情绪词、或纯视觉无文字），目标是让人想点进来，不必复述标题或预告内容
    - **内容页规划**：规划每页的核心信息点，这才是实际传递价值的地方
 5. **定义统一视觉风格**：using the xls-visual-design skill 确定视觉方案（参考图优先，风格描述兜底），确保封面与所有内容图视觉一致
 
 6. using the xls-visual-design skill 生成小绿书图片，以封面确立基准风格，后续图片以封面为参考批量生成，输出模式 `--mode xls`，保存到 `$DIR/`
-6.5. using the content-writing skill 对标题和描述文案执行违禁词合规检查
-6.6. **（可选）视频组装**：如用户要求生成视频版本，using the xls-visual-design skill 将图片组装为视频，保存到 `$DIR/video.mp4`
-7. 逐一上传图片到微信素材库（`image upload $DIR/cover.png`），记录每张图的 media_id
-8. using the xls-publishing skill → `draft xls --media-ids` 用素材 ID 发布到微信公众号草稿箱
+7. using the content-writing skill 对标题和描述文案执行违禁词合规检查
+8. **（可选）视频组装**：如用户要求生成视频版本，using the xls-visual-design skill 将图片组装为视频，保存到 `$DIR/video.mp4`
+9. 逐一上传图片到微信素材库（`image upload $DIR/cover.png`），记录每张图的 media_id
+10. using the xls-publishing skill → `draft xls --media-ids` 用素材 ID 发布到微信公众号草稿箱
 
 ## 三段式思维框架
 
@@ -75,7 +74,7 @@ maxTurns: 25
 
 ## 质量标准
 
-- 图片数量以 `abwriter account info` 输出的「图片数量」为准（配置项 `xls.count`，默认 4）
+- 图片数量以 `get_account_info` MCP 工具输出的「图片数量」为准（配置项 `xls.count`，默认 4）
 - 所有图片保持视觉一致性：封面确立基准风格，后续图片以封面为参考批量生成
 - 所有图片文件存在且可访问
 - 标题不为空，不超过 32 字符
@@ -122,7 +121,7 @@ maxTurns: 25
 - [ ] 封面信息密度过高（>1 个钩子）→ 需简化，聚焦视觉冲击
 - [ ] 内容图单页信息点 >1 个 → 需拆分或精简
 - [ ] 尾部图引入新内容 → 需移除，仅保留记忆点提炼
-- [ ] 图片数量与配置不符 → 需检查 `abwriter account info --scope xls` 输出
+- [ ] 图片数量与配置不符 → 需检查 `get_account_info` MCP 工具输出
 - [ ] 封面与内容图风格明显不一致 → 需检查参考图链是否正确
 - [ ] 违禁词报告显示高风险词汇 → 需人工复核
 
@@ -143,8 +142,8 @@ maxTurns: 25
 
 **配置问题**：
 
-- 假定配置已正确设置，不要尝试验证配置或建议运行 `abwriter account init`
-- 如果命令因配置问题失败，直接报告错误信息并继续流程
+- 假定配置已正确设置，不要尝试验证配置
+- 如果 MCP 工具因配置问题失败，直接报告错误信息并继续流程
 
 ## 工作规范
 

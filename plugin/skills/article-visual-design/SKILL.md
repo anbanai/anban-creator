@@ -5,18 +5,14 @@ description: Manages images for WeChat article (公众号图文) content includi
 
 # 公众号图文图片管理
 
-## 运行模式
+## MCP 工具
 
-当 anbanwriter MCP 服务器可用时（检查 MCP 工具列表），使用 MCP 工具代替 CLI 命令：
-
-| CLI 命令 | MCP 工具 |
-|----------|----------|
-| `abwriter image generate "{prompt}" --mode article -o {path}` | `generate_image` (channel_id, prompt, image_type="cover"或"content", output_path) |
-| `abwriter image batch {file} --mode article` | `generate_batch_images` (channel_id, prompt, count, output_dir) |
-| `abwriter image upload {file}` | `upload_image` (channel_id, file_path) |
-| `abwriter image compress {file}` | `compress_image` (file_path) |
-
-当 MCP 不可用时，回退到 CLI 命令。
+| MCP 工具 | 说明 |
+|----------|------|
+| `generate_image` (channel_id, prompt, image_type="cover"或"content", output_path) | 生成单张图片 |
+| `batch_generate_from_markdown` (channel_id, file_path, mode) | 从 Markdown 批量提取+生成图片 |
+| `upload_image` (channel_id, file_path) | 上传图片到微信素材库 |
+| `compress_image` (file_path) | 压缩图片 |
 
 ---
 
@@ -28,25 +24,14 @@ description: Manages images for WeChat article (公众号图文) content includi
 
 ---
 
-## CLI 命令
+## 使用方式
 
-```bash
-# 文章内图片批量提取+生成（推荐）
-abwriter image batch article.md --mode article
+通过 MCP 工具调用：
 
-# 单张生成
-abwriter image generate "{prompt}" --mode article -o ./image.png
-
-# 生成并上传
-abwriter image generate "{prompt}" --mode article --upload -o ./image.png
-
-# 上传已有图片
-abwriter image upload ./image.png
-
-# 下载在线图片（+上传）
-abwriter image download https://example.com/image.jpg
-abwriter image download https://example.com/image.jpg --upload
-```
+1. **文章内图片批量提取+生成（推荐）**：调用 `batch_generate_from_markdown`，传入 Markdown 文件路径
+2. **单张生成**：调用 `generate_image`，指定 image_type
+3. **上传已有图片**：调用 `upload_image`，传入文件路径
+4. **下载在线图片**：调用 `download_image`，传入 URL
 
 ---
 
@@ -64,7 +49,7 @@ abwriter image download https://example.com/image.jpg --upload
 继续正文...
 ```
 
-`image batch` 命令提取所有 `__generate:...` 占位符，批量生成图片并替换。
+`batch_generate_from_markdown` 工具提取所有 `__generate:...` 占位符，批量生成图片并替换。
 
 ---
 

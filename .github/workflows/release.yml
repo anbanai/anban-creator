@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26"
           cache: true
 
       - name: Download dependencies
@@ -32,17 +32,15 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Build all platforms
-        env:
-          LDFLAGS: "-s -w -X main.version=${{ steps.version.outputs.VERSION }}"
+      - name: Build server for all platforms
         run: |
           mkdir -p bin
 
-          GOOS=linux   GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/abwriter-linux-amd64 ./app
-          GOOS=linux   GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/abwriter-linux-arm64 ./app
-          GOOS=darwin  GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/abwriter-darwin-amd64 ./app
-          GOOS=darwin  GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin/abwriter-darwin-arm64 ./app
-          GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin/abwriter-windows-amd64.exe ./app
+          GOOS=linux   GOARCH=amd64 go build -ldflags="-s -w" -o bin/abwriter-server-linux-amd64 ./server
+          GOOS=linux   GOARCH=arm64 go build -ldflags="-s -w" -o bin/abwriter-server-linux-arm64 ./server
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o bin/abwriter-server-darwin-amd64 ./server
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o bin/abwriter-server-darwin-arm64 ./server
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/abwriter-server-windows-amd64.exe ./server
 
           chmod +x bin/*-linux* bin/*-darwin* 2>/dev/null || true
           echo "${{ github.ref_name }}" > bin/version.txt
@@ -59,11 +57,11 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            bin/abwriter-linux-amd64
-            bin/abwriter-linux-arm64
-            bin/abwriter-darwin-amd64
-            bin/abwriter-darwin-arm64
-            bin/abwriter-windows-amd64.exe
+            bin/abwriter-server-linux-amd64
+            bin/abwriter-server-linux-arm64
+            bin/abwriter-server-darwin-amd64
+            bin/abwriter-server-darwin-arm64
+            bin/abwriter-server-windows-amd64.exe
             bin/version.txt
             bin/checksums.txt
           draft: false

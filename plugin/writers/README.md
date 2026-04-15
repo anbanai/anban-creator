@@ -20,7 +20,7 @@ writers/
 ```yaml
 # writers/my-style.yaml
 name: "风格名称"
-english_name: "my-style"  # 英文标识，用于命令行
+english_name: "my-style"  # 英文标识，用于 channel 配置
 category: "分类"
 description: "一句话描述这个风格"
 version: "1.0"
@@ -43,15 +43,11 @@ cover_mood: "封面情绪"
 
 ### 3. 使用新风格
 
-配置文件创建后，立即可用：
+配置文件创建后，在 channel 配置中引用该风格的 `english_name` 即可使用：
 
-```bash
-# CLI 命令
-anbanwriter write --style my-style
-
-# 自然语言
-"用 my-style 风格写一篇文章"
-```
+- **Studio**: 在 channel 编辑页面设置 `style` 字段为 `my-style`
+- **MCP 工具**: 调用 `write_article` 工具，写作风格由 channel 配置决定
+- **自然语言**: "用 my-style 风格写一篇文章"
 
 ---
 
@@ -62,7 +58,7 @@ anbanwriter write --style my-style
 | 字段 | 说明 | 示例 |
 |------|------|------|
 | `name` | 风格中文名称 | `"鲁迅"` |
-| `english_name` | 英文标识，用于命令行 | `"luxun"` |
+| `english_name` | 英文标识，用于 channel 配置 | `"luxun"` |
 | `writing_prompt` | AI 写作提示词 | 见下方详细说明 |
 
 ### 可选字段
@@ -175,11 +171,12 @@ cover_prompt: |
 
 ## 风格文件位置
 
-`bin/anbanwriter` 会按以下顺序查找风格文件：
+anbanwriter 会按以下顺序查找风格文件：
 
-1. `./writers/` - 当前项目目录
-2. `~/.config/anbanwriter/writers/` - 用户配置目录
-3. `~/.anbanwriter/` - 用户主目录
+1. `plugin/writers/` - 项目内置风格
+2. `./writers/` - 当前项目目录
+3. `~/.config/anbanwriter/writers/` - 用户配置目录
+4. `~/.anbanwriter/` - 用户主目录
 
 ---
 
@@ -203,16 +200,10 @@ A: 检查以下几点：
 
 A:
 
-```bash
-# 列出所有风格
-anbanwriter styles
-
-# 查看风格详情
-anbanwriter styles --detail my-style
-
-# 测试写作
-anbanwriter write --style my-style --input-type idea
-```
+1. 将风格文件放在 `plugin/writers/` 目录下（内置风格）或 `./writers/` 目录下（项目级）
+2. 在 channel 配置中将 `style` 字段设为对应的 `english_name`（如 `my-style`）
+3. 通过 MCP 工具 `write_article` 发起写作请求，写作风格由 channel 自动应用
+4. 或通过 Studio 界面在 channel 编辑页面配置风格后创建内容任务
 
 ### Q: 可以分享我的风格吗？
 

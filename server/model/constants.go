@@ -70,4 +70,5 @@ const (
 	CreditTypeTopicResearch = "topic_research"
 	CreditTypeSEO           = "seo"
 	CreditTypeDraftPublish  = "draft_publish"
+	CreditTypeOutline       = "outline"
 )

@@ -49,34 +49,18 @@ Humanizer 基于维基百科的"AI 写作特征"指南，检测并处理 **24 �
 - 知识截止日期免责声明
 - 谄媚/卑躬屈膝的语气
 
-## CLI 使用
+## MCP 工具使用
 
-### 独立命令
+### 独立调用
 
-```bash
-# 基本用法
-abwriter humanize article.md
+调用 `humanize_article` MCP 工具，传入内容和处理强度参数：
 
-# 指定处理强度
-abwriter humanize article.md --intensity gentle
-abwriter humanize article.md --intensity aggressive
-
-# 显示修改对比和质量评分
-abwriter humanize article.md --show-changes
-
-# 输出到文件
-abwriter humanize article.md -o output.md
-```
+- 基本用法：传入文章内容
+- 指定处理强度：传入 intensity 参数（gentle / medium / aggressive）
 
 ### 与写作风格组合
 
-```bash
-# 写作 + 去痕
-abwriter write --style dan-koe --humanize
-
-# 指定去痕强度
-abwriter write --style dan-koe --humanize --humanize-intensity aggressive
-```
+先调用 `write_article` 生成文章，再调用 `humanize_article` 进行去痕处理。
 
 ## 处理强度
 
@@ -90,15 +74,11 @@ abwriter write --style dan-koe --humanize --humanize-intensity aggressive
 
 当 Humanizer 与写作风格组合使用时，遵循**风格优先原则**：
 
-```
-用户: abwriter write --style dan-koe --humanize
-
-处理流程:
-1. 用 Dan Koe 风格生成文章
-2. 应用 Humanizer 去痕
+处理流程：
+1. 调用 `write_article` 用 Dan Koe 风格生成文章
+2. 调用 `humanize_article` 应用去痕
 3. 保留 Dan Koe 风格的核心特征（如破折号）
 4. 只去除无意的 AI 痕迹
-```
 
 ## 输出格式
 
@@ -167,7 +147,7 @@ A: 风格优先。Humanizer 会识别并保留风格刻意为之的特征（如 
 
 ### Q: 可以只处理特定类型的痕迹吗？
 
-A: 可以。使用 `--focus` 参数指定聚焦模式（当前仅限 API 调用）。
+A: 可以。在调用时传入 focus 参数指定聚焦模式。
 
 ### Q: 处理失败怎么办？
 

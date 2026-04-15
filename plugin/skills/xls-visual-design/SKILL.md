@@ -5,17 +5,13 @@ description: Generates cover and content images for WeChat Xiaolvshu (小绿书/
 
 # 小绿书图片生成
 
-## 运行模式
+## MCP 工具
 
-当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
-
-| CLI 命令 | MCP 工具 |
-|----------|----------|
-| `abwriter image generate "{prompt}" --mode xls --cover -o {path}` | `generate_image` (channel_id, prompt, image_type="cover", output_path) |
-| `abwriter image generate "{prompt}" --mode xls --count N -o {dir}` | `generate_batch_images` (channel_id, prompt, count, output_dir) |
-| `abwriter image upload {file}` | `upload_image` (channel_id, file_path) |
-
-当 MCP 不可用时，回退到 CLI 命令。
+| MCP 工具 | 说明 |
+|----------|------|
+| `generate_image` (channel_id, prompt, image_type="cover", output_path) | 生成封面（单张） |
+| `generate_batch_images` (channel_id, prompt, count, output_dir) | 批量生成内容图 |
+| `upload_image` (channel_id, file_path) | 上传图片到微信素材库 |
 
 ---
 
@@ -25,23 +21,16 @@ description: Generates cover and content images for WeChat Xiaolvshu (小绿书/
 
 ---
 
-## CLI 命令
+## 使用方式
 
-```bash
-# 生成封面（单张）
-abwriter image generate "{prompt}" --mode xls --cover -o ./cover.png
+通过 MCP 工具调用：
 
-# 批量生成内容图
-abwriter image generate "{paged_prompt}" --mode xls --count N -o ./
+1. **生成封面（单张）**：调用 `generate_image`，image_type 设为 `"cover"`，prompt 中描述封面内容和风格
+2. **批量生成内容图**：调用 `generate_batch_images`，指定 count 和 prompt
+3. **带参考图保持一致**：提供参考图路径，保持视觉风格统一
+4. **带风格描述**：在 prompt 中加入风格描述（如"简约质感，米白色调"）
 
-# 带参考图保持一致
-abwriter image generate "{paged_prompt}" --mode xls --count N --ref ./cover.png -o ./
-
-# 带风格描述
-abwriter image generate "{prompt}" --mode xls --cover --style "简约质感，米白色调" -o ./cover.png
-```
-
-**关键规则**：内容图使用 `--count` 批量生成，不逐张调用。
+**关键规则**：内容图使用 `generate_batch_images` 批量生成，不逐张调用。
 
 ---
 
@@ -56,7 +45,7 @@ abwriter image generate "{prompt}" --mode xls --cover --style "简约质感，�
 - 日常打卡：生活感，暖色调，随拍质感
 
 **封面与内容图一致性**：
-- 无参考图：先生成封面 → 以封面 `--ref` 批量生成内容图
+- 无参考图：先生成封面 → 以封面作为参考图批量生成内容图
 - 有配置参考图：统一使用配置参考图
 
 ---

@@ -125,14 +125,11 @@ Agent 在 image-plan 阶段根据内容主题自动判断，无需用户指定�
 
 ---
 
-## CLI 命令
+## 生成方式
 
-```bash
-# 单独生成尾图（与封面风格一致）
-abwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
-```
+通过 MCP 工具调用 `generate_image`，传入封面图片作为参考图（ref），输出固定命名为 `tail.png`。
 
-> **关键规则**：尾图单独生成，不使用 `--count`。输出固定命名为 `tail.png`。
+> **关键规则**：尾图单独生成，不使用批量模式。
 
 ---
 

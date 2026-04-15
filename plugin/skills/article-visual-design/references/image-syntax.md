@@ -31,18 +31,7 @@
 
 ## AI 图片批量提取
 
-`image batch` 命令从 Markdown 文件提取所有 AI 生成占位符：
-
-```bash
-# 提取 + 生成 + 不上传（预览用）
-abwriter image batch article.md --mode article --no-upload
-
-# 提取 + 生成 + 上传
-abwriter image batch article.md --mode article
-
-# 指定输出目录
-abwriter image batch article.md --mode article -o ./images/
-```
+调用 `batch_generate_from_markdown` MCP 工具从 Markdown 文件提取所有 AI 生成占位符，批量生成并可选上传。
 
 ---
 

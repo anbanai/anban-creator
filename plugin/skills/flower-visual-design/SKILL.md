@@ -5,35 +5,31 @@ description: Generates flower arrangement image series with sequential reference
 
 # 花卉图片视觉一致性生成
 
-## 运行模式
+## MCP 工具
 
-当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
-
-| CLI 命令 | MCP 工具 |
-|----------|----------|
-| `abwriter image generate "{prompt}" --mode flower -o {path}` | `generate_image` (channel_id, prompt, image_type="content", output_path) |
-| `abwriter image generate "{prompt}" --mode flower --count N -o {dir}` | `generate_batch_images` (channel_id, prompt, count, output_dir) |
-
-当 MCP 不可用时，回退到 CLI 命令。
+| MCP 工具 | 说明 |
+|----------|------|
+| `generate_image` (channel_id, prompt, image_type="content", output_path) | 生成花卉图片（单张） |
+| `generate_batch_images` (channel_id, prompt, count, output_dir) | 批量生成图片（不适用于花卉，因为每张 prompt 不同） |
 
 ---
 
 ## 核心 Gotcha
 
-花卉图片系列中每张花的 prompt 不同（不同花种），因此**不能用 `--count` 批量模式**（该模式适用于同一 prompt 的多张变体）。必须逐张生成，但通过 `--ref` 参考链保持风格一致。
+花卉图片系列中每张花的 prompt 不同（不同花种），因此**不能用 `generate_batch_images` 批量模式**（该模式适用于同一 prompt 的多张变体）。必须逐张生成，但通过参考图（ref）保持风格一致。
 
 ---
 
 ## 参考链流程
 
 ```
-第1张（首图）：不使用 --ref，用完整 $STYLE 描述确立基准
-    → 生成 flower_01_[name].png
+第1张（首图）：不使用参考图，用完整 $STYLE 描述确立基准
+    → 调用 generate_image 生成 flower_01_[name].png
 
-第2张起：使用第1张作为 --ref
-    → abwriter image generate "PROMPT" --size 9:16 --style "$STYLE" --ref ./flower_01_[name].png
+第2张起：使用第1张作为参考图（ref）
+    → 调用 generate_image，传入第1张图片路径作为 ref
 
-第3张及以后：继续使用第1张（基准图）作为 --ref
+第3张及以后：继续使用第1张（基准图）作为参考图
     → 不要用上一张，始终用第1张保持风格基准稳定
 ```
 
@@ -41,23 +37,18 @@ description: Generates flower arrangement image series with sequential reference
 
 ---
 
-## CLI 命令
+## 使用方式
 
-```bash
-# 第1张（首图，无参考图）
-abwriter image generate "PROMPT_1" --size 9:16 --style "STYLE_DESC" -o ./flower_01_peony.png
+通过 MCP 工具逐张调用 `generate_image`：
 
-# 第2张起（以首图为参考）
-abwriter image generate "PROMPT_2" --size 9:16 --style "STYLE_DESC" --ref ./flower_01_peony.png -o ./flower_02_rose.png
+1. **第1张（首图，无参考图）**：在 prompt 中使用完整 $STYLE 描述确立基准风格
+2. **第2张起（以首图为参考）**：在 prompt 中包含风格描述，传入第1张图片路径作为 ref
+3. **用户提供参考图时（所有图片统一使用）**：传入用户提供的参考图路径作为 ref
 
-# 用户提供参考图时（所有图片统一使用）
-abwriter image generate "PROMPT_1" --size 9:16 --style "STYLE_DESC" --ref ./user_ref.png -o ./flower_01_peony.png
-```
-
-**参数**：
-- `--size 9:16`：竖版，适合花卉摄影
-- `--style "STYLE_DESC"`：全局风格（色调、光线、氛围），每张保持一致
-- `--ref`：参考图（始终用第1张）
+**参数说明**：
+- 在 prompt 中指定 `9:16 portrait format` 竖版比例
+- 在 prompt 中包含全局风格描述（色调、光线、氛围），每张保持一致
+- ref 参数始终传入第1张图片路径
 - 命名规范：`flower_序号_花名.png`（如 `flower_01_peony.png`）
 
 ---

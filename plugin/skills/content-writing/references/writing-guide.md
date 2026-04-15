@@ -1,10 +1,10 @@
 # 写作功能指南 (Writing Guide)
 
-> **风格写作 (`write`)** 命令让你只需提供一个想法，AI 就能自动生成符合特定创作者风格的文章。
+> 通过 `write_article` MCP 工具，只需提供一个想法，AI 就能自动生成符合特定创作者风格的文章。
 
 ## 概述
 
-写作功能是 abwriter 的辅助写作工具，特点：
+写作功能是 anbanwriter 的辅助写作工具，特点：
 
 - **零基础友好**：只需一个观点或想法，AI 自动扩展成完整文章
 - **创作者风格**：内置 Dan Koe 等风格，支持自定义
@@ -13,72 +13,36 @@
 
 ---
 
-## 命令格式
-
-### 基本命令
-
-```bash
-# 交互式写作（最简单）
-abwriter write
-
-# 查看所有可用风格
-abwriter write --list
-
-# 指定风格写作
-abwriter write --style dan-koe
-
-# 指定标题写作
-
-abwriter write --style dan-koe --title "文章标题" <<EOF
-你的内容
-EOF
-
-# 只生成封面提示词
-abwriter write --style dan-koe --cover-only
-
-# 同时生成文章和封面
-abwriter write --style dan-koe --cover
-```
+## 工具参数
 
 ### 输入类型
 
 | 类型 | 参数 | 说明 | 示例 |
 |------|------|------|------|
-| **观点** | `--input-type idea` | 一个观点或想法 | "我觉得自律是个伪命题" |
-| **片段** | `--input-type fragment` | 内容片段，需要润色扩展 | 现有的草稿或未完成的文章 |
-| **大纲** | `--input-type outline` | 文章大纲，需要填充内容 | 有结构，需要填充内容 |
-| **标题** | `--input-type title` | 仅标题，围绕标题写作 | "自律是个谎言" |
+| **观点** | input_type="idea" | 一个观点或想法 | "我觉得自律是个伪命题" |
+| **片段** | input_type="fragment" | 内容片段，需要润色扩展 | 现有的草稿或未完成的文章 |
+| **大纲** | input_type="outline" | 文章大纲，需要填充内容 | 有结构，需要填充内容 |
+| **标题** | input_type="title" | 仅标题，围绕标题写作 | "自律是个谎言" |
 
 ### 其他参数
 
 | 参数 | 说明 |
 |------|------|
-| `--style` | 写作风格（默认: dan-koe） |
-| `--length` | 文章长度：short/medium/long |
-| `--title` | 文章标题 |
-| `-o, --output` | 输出文件路径 |
-| `--cover` | 同时生成封面提示词 |
-| `--cover-only` | 仅生成封面提示词 |
-| `--list` | 列出所有可用风格 |
-| `--detail` | 显示详细风格信息 |
+| style | 写作风格（默认: dan-koe） |
+| length | 文章长度：short/medium/long |
+| title | 文章标题 |
+| generate_cover | 同时生成封面提示词 |
+| cover_only | 仅生成封面提示词 |
 
 ---
 
 ## 使用场景
 
-### 场景 1：从零开始写文章（交互式）
+### 场景 1：从零开始写文章
 
 **输入**：一个想法或观点
 
-```bash
-abwriter write
-```
-
-然后输入：
-
-```
-我觉得自律是个伪命题
-```
+调用 `write_article`，传入内容和风格参数。
 
 **输出**：
 
@@ -87,35 +51,13 @@ abwriter write
 - 精彩的金句
 - 可选的封面提示词
 
-### 场景 2：从零开始写文章（非交互式）
+### 场景 2：润色现有文章
 
-**输入**：通过管道传递内容
+调用 `write_article`，传入 input_type="fragment" 和文章内容。
 
-```bash
-echo "我觉得自律是个伪命题，大多数人坚持不下来是因为内心深处并不真正想要那个结果" | \
-abwriter write --style dan-koe
-```
+### 场景 3：只生成封面
 
-或使用 heredoc：
-
-```bash
-abwriter write --style dan-koe --title "自律是个谎言" <<EOF
-我觉得自律是个伪命题。
-大多数人坚持不下来是因为内心深处并不真正想要那个结果。
-EOF
-```
-
-### 场景 3：润色现有文章
-
-```bash
-abwriter write --style dan-koe --input-type fragment article.md
-```
-
-### 场景 4：只生成封面
-
-```bash
-abwriter write --style dan-koe --cover-only
-```
+调用 `write_article`，传入 cover_only=true。
 
 输入文章内容后，获得：
 
@@ -126,36 +68,13 @@ abwriter write --style dan-koe --cover-only
 
 ## AI 模式说明
 
-`write` 命令默认使用 **AI 模式**：
+`write_article` 工具使用 **AI 模式**：
 
-1. 命令返回结构化的提示词（JSON 格式）
+1. 工具返回结构化的提示词（JSON 格式）
 2. 由 Claude 等大模型处理提示词
 3. 生成最终文章内容
 
 **在 Claude Code 中使用时，这个流程是自动的。**
-
-### AI 模式输出
-
-```json
-{
-  "success": true,
-  "mode": "ai",
-  "action": "ai_write_request",
-  "style": "Dan Koe",
-  "prompt": "结构化的写作提示词..."
-}
-```
-
-### 带封面的输出
-
-```json
-{
-  "success": true,
-  "prompt": "文章提示词...",
-  "cover_prompt": "封面提示词...",
-  "cover_explanation": "封面设计思路..."
-}
-```
 
 ---
 
@@ -235,7 +154,7 @@ flowchart LR
 "生成一个匹配的封面"
 ```
 
-Claude 会自动调用 `write` 命令并处理结果。
+Claude 会自动调用 `write_article` 工具并处理结果。
 
 ---
 
@@ -250,10 +169,7 @@ Claude 会自动调用 `write` 命令并处理结果。
 
 ### 生成封面图
 
-```bash
-# 生成 16:9 封面图（推荐，默认 2K 档位）
-abwriter image generate --size 16:9 "封面提示词"
-```
+调用 `generate_image` MCP 工具，在 prompt 中指定 16:9 比例。
 
 ---
 
@@ -265,11 +181,7 @@ A: 不需要。写作功能专为小白设计，只需提供一个想法即可�
 
 **Q: 生成的文章可以直接发公众号吗？**
 
-A: 生成的是 Markdown 格式，需要用 `convert` 命令转换为微信格式：
-
-```bash
-abwriter convert article.md --preview
-```
+A: 生成的是 Markdown 格式，需要调用 `convert_markdown` 工具转换为微信格式。
 
 **Q: 可以修改生成的内容吗？**
 

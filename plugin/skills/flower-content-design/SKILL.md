@@ -199,32 +199,27 @@ shallow to medium depth of field, rich color gradients, 9:16 portrait format
 ### 参考图一致性流程
 
 ```
-第1张（首图）: 不使用 --ref，使用完整 $STYLE 描述确立基准风格
-    ↓ 生成结果: flower_01_[name].png
-第2张起: 使用第1张作为 --ref，传递风格基准
-    ↓ abwriter image --scope flower generate "PROMPT" --size 9:16 --style "$STYLE" --ref flower_01_[name].png
-后续图片: 继续使用第1张（基准图）作为 --ref
+第1张（首图）: 不使用参考图，使用完整 $STYLE 描述确立基准风格
+    ↓ 调用 generate_image 生成结果: flower_01_[name].png
+第2张起: 使用第1张作为参考图（ref），传递风格基准
+    ↓ 调用 generate_image，传入 ref 参数
+后续图片: 继续使用第1张（基准图）作为参考图
 ```
 
-**注意**：每张花卉图的 prompt 不同（不同花卉种类），因此不能使用 `--count` 批量模式（该模式适用于同一 prompt 的多张变体）。每张独立调用，通过 `--ref` 保持风格一致。
+**注意**：每张花卉图的 prompt 不同（不同花卉种类），因此不能使用 `generate_batch_images` 批量模式（该模式适用于同一 prompt 的多张变体）。每张独立调用 `generate_image`，通过 ref 参数保持风格一致。
 
 ---
 
-## D. 命令参考
+## D. 工具参考
 
-```bash
-# 第1张（首图，无参考图）
-abwriter image --scope flower generate "PROMPT" --size 9:16 --style "STYLE_DESC"
+通过 MCP 工具逐张调用 `generate_image`：
 
-# 第2张起（以首图为参考）
-abwriter image --scope flower generate "PROMPT" --size 9:16 --style "STYLE_DESC" --ref path/to/flower_01.png
-
-# 使用用户提供的参考图（所有图片）
-abwriter image --scope flower generate "PROMPT" --size 9:16 --style "STYLE_DESC" --ref path/to/user_ref.png
-```
+1. **第1张（首图，无参考图）**：在 prompt 中使用完整 $STYLE 描述确立基准风格
+2. **第2张起（以首图为参考）**：在 prompt 中包含风格描述，传入第1张图片路径作为 ref
+3. **使用用户提供的参考图（所有图片）**：传入用户提供的参考图路径作为 ref
 
 **参数说明**：
-- `--size 9:16`：竖版 9:16 比例，适合花卉摄影的竖构图
-- `--style "STYLE_DESC"`：全局风格描述，影响色调、光线、氛围
-- `--ref path/to/ref.png`：参考图，用于保持多张图片的视觉风格一致性
+- 在 prompt 中指定 `9:16 portrait format` 竖版 9:16 比例
+- 在 prompt 中包含全局风格描述（色调、光线、氛围）
+- ref 参数传入参考图路径，用于保持多张图片的视觉风格一致性
 - 输出文件命名规范：`flower_01_peony.png`、`flower_02_rose.png`（序号_花名）

@@ -5,15 +5,11 @@ description: Optimizes titles, keywords, and article digests for WeChat search r
 
 # 微信公众号 SEO 优化
 
-## 运行模式
+## MCP 工具
 
-当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
-
-| CLI 命令 | MCP 工具 |
-|----------|----------|
-| `abwriter seo ...` | `optimize_seo` (channel_id, content, title, keywords?) |
-
-当 MCP 不可用时，回退到 CLI 命令。
+| MCP 工具 | 说明 |
+|----------|------|
+| `optimize_seo` (channel_id, content, title, keywords?) | SEO 优化分析 |
 
 ---
 
@@ -92,12 +88,7 @@ SEO 优化结果应输出以下结构：
 
 - 平台标题规范：[title-guidelines.md](references/title-guidelines.md)
 
-## 相关命令
+## 相关工具
 
-```bash
-# 生成含关键词布局的大纲
-abwriter outline --help
-
-# 风格写作（融入 SEO）
-abwriter write --help
-```
+- 生成含关键词布局的大纲：调用 `generate_outline` MCP 工具
+- 风格写作（融入 SEO）：调用 `write_article` MCP 工具
