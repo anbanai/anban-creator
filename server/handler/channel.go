@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"regexp"
 
@@ -27,15 +28,17 @@ func NewChannelHandler(svc *service.ChannelService, logger *zerolog.Logger) *Cha
 
 // channelRequest is the shared request body for creating and updating a channel.
 type channelRequest struct {
-	Platform    string `json:"platform"`
-	Name        string `json:"name"`
-	ProfileURL  string `json:"profile_url"`
-	AvatarURL   string `json:"avatar_url"`
-	Positioning string `json:"positioning"`
-	Keywords    string `json:"keywords"`
-	Style       string `json:"style"`
-	Theme       string `json:"theme"`
-	Author      string `json:"author"`
+	Platform           string `json:"platform"`
+	Name               string `json:"name"`
+	ProfileURL         string `json:"profile_url"`
+	AvatarURL          string `json:"avatar_url"`
+	Positioning        string `json:"positioning"`
+	Keywords           string `json:"keywords"`
+	Style              string `json:"style"`
+	Theme              string `json:"theme"`
+	Author             string `json:"author"`
+	ReferenceImageURL  string `json:"reference_image_url"`
+	MaxConcurrentTasks int    `json:"max_concurrent_tasks"`
 	// Config fields for platform-specific credentials.
 	WechatAppID  string `json:"wechat_app_id"`
 	WechatSecret string `json:"wechat_secret"`
@@ -44,15 +47,17 @@ type channelRequest struct {
 // toChannel converts a request to a Channel model.
 func (req *channelRequest) toChannel() *model.Channel {
 	return &model.Channel{
-		Platform:    req.Platform,
-		Name:        req.Name,
-		ProfileURL:  req.ProfileURL,
-		AvatarURL:   req.AvatarURL,
-		Positioning: req.Positioning,
-		Keywords:    req.Keywords,
-		Style:       req.Style,
-		Theme:       req.Theme,
-		Author:      req.Author,
+		Platform:           req.Platform,
+		Name:               req.Name,
+		ProfileURL:         req.ProfileURL,
+		AvatarURL:          req.AvatarURL,
+		Positioning:        req.Positioning,
+		Keywords:           req.Keywords,
+		Style:              req.Style,
+		Theme:              req.Theme,
+		Author:             req.Author,
+		ReferenceImageURL:  req.ReferenceImageURL,
+		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		Config: model.ChannelConfig{
 			WechatAppID:  req.WechatAppID,
 			WechatSecret: req.WechatSecret,
@@ -365,6 +370,10 @@ func (req *channelRequest) getFieldValue(key string) string {
 		return req.Theme
 	case "author":
 		return req.Author
+	case "reference_image_url":
+		return req.ReferenceImageURL
+	case "max_concurrent_tasks":
+		return fmt.Sprintf("%d", req.MaxConcurrentTasks)
 	case "wechat_app_id":
 		return req.WechatAppID
 	case "wechat_secret":

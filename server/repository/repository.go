@@ -79,6 +79,8 @@ type TaskRepository interface {
 	SetCompletedAt(ctx context.Context, id string) error
 	CountByUserID(ctx context.Context, userID string, channelID string) (int64, error)
 	CountByUserIDAndStatus(ctx context.Context, userID, status string, channelID string) (int64, error)
+	CountRunningByChannel(ctx context.Context, channelID string) (int64, error)
+	FindPendingByChannel(ctx context.Context, channelID string, limit int) ([]*model.Task, error)
 }
 
 // TaskFileRepository provides access to the task_files table.

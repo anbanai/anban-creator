@@ -42,6 +42,8 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "style", Label: "写作风格", Placeholder: "e.g. casual-science, dan-koe", Type: "text", Group: "advanced"},
 			{Key: "theme", Label: "主题", Placeholder: "e.g. autumn-warm, spring-fresh", Type: "text", Group: "advanced"},
 			{Key: "author", Label: "作者名", Placeholder: "e.g. 张三", Type: "text", Group: "advanced"},
+			{Key: "reference_image_url", Label: "品牌视觉参考图", Placeholder: "粘贴图片 URL（支持 JPG, PNG）", Type: "url", Group: "advanced"},
+			{Key: "max_concurrent_tasks", Label: "最大并发任务数", Placeholder: "默认 10", Type: "number", Group: "advanced"},
 		},
 	},
 	PlatformXLS: {
@@ -62,6 +64,8 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "style", Label: "写作风格", Placeholder: "e.g. casual-science, dan-koe", Type: "text", Group: "advanced"},
 			{Key: "theme", Label: "主题", Placeholder: "e.g. autumn-warm, spring-fresh", Type: "text", Group: "advanced"},
 			{Key: "author", Label: "作者名", Placeholder: "e.g. 张三", Type: "text", Group: "advanced"},
+			{Key: "reference_image_url", Label: "品牌视觉参考图", Placeholder: "粘贴图片 URL（支持 JPG, PNG）", Type: "url", Group: "advanced"},
+			{Key: "max_concurrent_tasks", Label: "最大并发任务数", Placeholder: "默认 10", Type: "number", Group: "advanced"},
 		},
 	},
 	PlatformRednote: {
@@ -80,6 +84,8 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "style", Label: "写作风格", Placeholder: "e.g. casual-science, dan-koe", Type: "text", Group: "advanced"},
 			{Key: "theme", Label: "主题", Placeholder: "e.g. autumn-warm, spring-fresh", Type: "text", Group: "advanced"},
 			{Key: "author", Label: "作者名", Placeholder: "e.g. 张三", Type: "text", Group: "advanced"},
+			{Key: "reference_image_url", Label: "品牌视觉参考图", Placeholder: "粘贴图片 URL（支持 JPG, PNG）", Type: "url", Group: "advanced"},
+			{Key: "max_concurrent_tasks", Label: "最大并发任务数", Placeholder: "默认 10", Type: "number", Group: "advanced"},
 		},
 	},
 }

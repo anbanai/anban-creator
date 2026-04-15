@@ -43,6 +43,8 @@ export const channelSchema = z.object({
   style: z.string().max(100, "写作风格不能超过 100 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
   author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
+  reference_image_url: z.string().url("请输入有效的图片 URL").or(z.literal("")).optional(),
+  max_concurrent_tasks: z.number().int().min(1, "最小并发数为 1").max(100, "最大并发数为 100").optional(),
 }).refine((data) => {
   // For article/xls platforms, wechat_app_id is required
   if (data.platform === 'article' || data.platform === 'xls') {

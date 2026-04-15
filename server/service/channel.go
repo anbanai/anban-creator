@@ -133,6 +133,11 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	if ch.Author != "" {
 		existing.Author = ch.Author
 	}
+	// ReferenceImageURL: unconditional assign to support clearing.
+	existing.ReferenceImageURL = ch.ReferenceImageURL
+	if ch.MaxConcurrentTasks > 0 {
+		existing.MaxConcurrentTasks = ch.MaxConcurrentTasks
+	}
 	// Merge Config: only update non-empty fields.
 	if ch.Config.WechatAppID != "" {
 		existing.Config.WechatAppID = ch.Config.WechatAppID

@@ -135,6 +135,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
 
+		// Download brand reference image if configured.
+		if opts.Channel.ReferenceImageURL != "" {
+			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
+				e.logger.Warn().Err(err).
+					Str("task_id", opts.Task.ID).
+					Str("url", opts.Channel.ReferenceImageURL).
+					Msg("failed to download reference image, continuing without it")
+			}
+		}
+
 		// Validate image API config — warn if keys are missing.
 		if e.imageAPICfg != nil {
 			hasCover := e.imageAPICfg.Cover != nil && e.imageAPICfg.Cover.Key != ""

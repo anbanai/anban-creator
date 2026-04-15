@@ -4,13 +4,14 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Plus, Loader2, Inbox, ChevronDown } from 'lucide-react'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api, type Channel, type ChannelStats, type CreateChannelRequest, type PlatformConfig } from '@/lib/api'
 import { ChannelCard } from '@/components/ChannelCard'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/textarea'
-import SimpleSelect from '@/components/ui/Select'
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { channelSchema, type ChannelFormValues } from '@/lib/schemas'
@@ -42,6 +43,8 @@ function channelToForm(ch: Channel): ChannelFormValues {
     style: ch.style || '',
     theme: ch.theme || '',
     author: ch.author || '',
+    reference_image_url: ch.reference_image_url || '',
+    max_concurrent_tasks: ch.max_concurrent_tasks || 10,
   }
 }
 
@@ -69,6 +72,8 @@ export default function ChannelsPage() {
       style: '',
       theme: '',
       author: '',
+      reference_image_url: '',
+      max_concurrent_tasks: 10,
     },
   })
 
@@ -221,6 +226,8 @@ export default function ChannelsPage() {
       style: '',
       theme: '',
       author: '',
+      reference_image_url: '',
+      max_concurrent_tasks: 10,
     })
     setModalOpen(true)
   }
@@ -247,6 +254,8 @@ export default function ChannelsPage() {
       style: '',
       theme: '',
       author: '',
+      reference_image_url: '',
+      max_concurrent_tasks: 10,
     })
   }
 
@@ -261,6 +270,8 @@ export default function ChannelsPage() {
       style: values.style?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
+      reference_image_url: values.reference_image_url?.trim() || undefined,
+      max_concurrent_tasks: values.max_concurrent_tasks,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
     }
@@ -288,21 +299,19 @@ export default function ChannelsPage() {
       </PageHeader>
 
       {/* Status filter tabs */}
-      <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted p-1">
+      <ToggleGroup
+        value={[statusFilter]}
+        onValueChange={(val) => setStatusFilter(val[0] || 'all')}
+        variant="outline"
+        size="sm"
+        spacing={2}
+      >
         {statusTabs.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setStatusFilter(tab.value)}
-            className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-150 ${
-              statusFilter === tab.value
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground'
-            }`}
-          >
+          <ToggleGroupItem key={tab.value} value={tab.value}>
             {tab.label}
-          </button>
+          </ToggleGroupItem>
         ))}
-      </div>
+      </ToggleGroup>
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
@@ -343,16 +352,24 @@ export default function ChannelsPage() {
                 <FormItem>
                   <FormLabel>平台</FormLabel>
                   <FormControl>
-                    <SimpleSelect
-                      options={platformOptions}
+                    <Select
                       value={field.value}
-                      onChange={(e) => {
-                        field.onChange(e.target.value)
+                      onValueChange={(v) => {
+                        field.onChange(v)
                         form.setValue('wechat_app_id', '')
                         form.setValue('wechat_secret', '')
                       }}
                       disabled={!!editingChannel}
-                    />
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择平台" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {platformOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -503,6 +520,38 @@ export default function ChannelsPage() {
                       <FormMessage />
                     </FormItem>
                   )} />
+
+                  <FormField control={form.control} name="reference_image_url" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>品牌视觉参考图</FormLabel>
+                      <FormControl>
+                        <Input placeholder="粘贴图片 URL（支持 JPG, PNG）" {...field} />
+                      </FormControl>
+                      <FormDescription>用于 AI 图片生成的视觉风格参考，保持品牌一致性</FormDescription>
+                      {field.value && (
+                        <div className="mt-2">
+                          <img
+                            src={field.value}
+                            alt="参考图预览"
+                            className="h-24 w-24 rounded-md object-cover border"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                          />
+                        </div>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="max_concurrent_tasks" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>最大并发任务数</FormLabel>
+                      <FormControl>
+                        <Input type="number" min={1} max={100} placeholder="默认 10" {...field} onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} />
+                      </FormControl>
+                      <FormDescription>同一时间最多可执行的任务数量，超出部分自动排队</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
                 </>
               )}
             </form>
@@ -525,7 +574,7 @@ export default function ChannelsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="danger" onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
+            <AlertDialogAction variant="destructive" onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
               删除
             </AlertDialogAction>
           </AlertDialogFooter>

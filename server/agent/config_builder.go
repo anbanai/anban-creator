@@ -1,9 +1,14 @@
 package agent
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	appconfig "github.com/royalrick/anbanwriter/app/config"
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
@@ -98,6 +103,22 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*
 		}
 	}
 
+	// Set brand reference image path for image generation (downloaded by executor).
+	if ch.ReferenceImageURL != "" {
+		referPath := filepath.Join(appconfig.ConfigDir, "reference.png")
+		switch ch.Platform {
+		case model.ScopeArticle:
+			cfg.Wechat.Article.Cover.Image.Refer = referPath
+			cfg.Wechat.Article.Content.Image.Refer = referPath
+		case model.ScopeXls:
+			cfg.Wechat.Xls.Cover.Image.Refer = referPath
+			cfg.Wechat.Xls.Content.Image.Refer = referPath
+		case model.ScopeRednote:
+			cfg.Rednote.Cover.Image.Refer = referPath
+			cfg.Rednote.Content.Image.Refer = referPath
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -124,4 +145,46 @@ func taskTypeToAgent(taskType string) string {
 	default:
 		return "rednote"
 	}
+}
+
+// DownloadReferenceImage downloads a channel's brand reference image to the
+// workspace's .anbanwriter directory. The image is saved as reference.png for
+// use by both Claude Code (visual context) and abwriter CLI (--ref flag).
+func DownloadReferenceImage(ctx context.Context, workDir, imageURL string) error {
+	destDir := filepath.Join(workDir, appconfig.ConfigDir)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+
+	destPath := filepath.Join(destDir, "reference.png")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download: HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("create file: %w", err)
+	}
+	defer f.Close()
+
+	// Limit download size to 20MB.
+	if _, err := io.Copy(f, io.LimitReader(resp.Body, 20*1024*1024)); err != nil {
+		os.Remove(destPath)
+		return fmt.Errorf("write file: %w", err)
+	}
+
+	return nil
 }

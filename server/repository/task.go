@@ -183,3 +183,21 @@ func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, sta
 	}
 	return count, nil
 }
+
+func (r *taskRepository) CountRunningByChannel(ctx context.Context, channelID string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("channel_id = ? AND status = ?", channelID, model.TaskStatusRunning).
+		Count(&count).Error
+	return count, err
+}
+
+func (r *taskRepository) FindPendingByChannel(ctx context.Context, channelID string, limit int) ([]*model.Task, error) {
+	var tasks []*model.Task
+	err := r.db.WithContext(ctx).
+		Where("channel_id = ? AND status = ?", channelID, model.TaskStatusPending).
+		Order("created_at ASC").
+		Limit(limit).
+		Find(&tasks).Error
+	return tasks, err
+}

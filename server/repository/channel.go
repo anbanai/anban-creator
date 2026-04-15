@@ -30,6 +30,7 @@ type ChannelRepository interface {
 	Create(ctx context.Context, channel *model.Channel) error
 	FindByID(ctx context.Context, id string) (*model.Channel, error)
 	ListByUserID(ctx context.Context, userID string, opts ChannelListOptions) ([]*model.Channel, error)
+	ListActiveChannels(ctx context.Context) ([]*model.Channel, error)
 	FindByUserAndPlatform(ctx context.Context, userID, platform string) ([]*model.Channel, error)
 	Update(ctx context.Context, channel *model.Channel) error
 	UpdateStatus(ctx context.Context, id, status string) error
@@ -75,6 +76,14 @@ func (r *gormChannelRepository) ListByUserID(ctx context.Context, userID string,
 		return nil, err
 	}
 	return channels, nil
+}
+
+func (r *gormChannelRepository) ListActiveChannels(ctx context.Context) ([]*model.Channel, error) {
+	var channels []*model.Channel
+	err := r.db.WithContext(ctx).
+		Where("status = ?", model.ChannelStatusActive).
+		Find(&channels).Error
+	return channels, err
 }
 
 func (r *gormChannelRepository) FindByUserAndPlatform(ctx context.Context, userID, platform string) ([]*model.Channel, error) {

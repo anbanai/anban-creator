@@ -65,6 +65,7 @@ func tryAcquireAndCheck(ctx context.Context, repo repository.Repository, taskSvc
 	}
 
 	checkAndTriggerPlans(ctx, repo, taskSvc, logger)
+	checkAndDispatchPendingTasks(ctx, repo, taskSvc, logger)
 }
 
 // checkAndTriggerPlans queries all active plans that are due and creates
@@ -131,4 +132,23 @@ func advancePlanNextRun(ctx context.Context, repo repository.Repository, plan *m
 	}
 
 	return &next, nil
+}
+
+// checkAndDispatchPendingTasks finds all channels that have pending tasks
+// and available concurrency slots, then enqueues them.
+// This serves as a fallback for cases where the post-completion dispatch
+// was missed (e.g., server restart, crash).
+func checkAndDispatchPendingTasks(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger) {
+	// Find all active channels.
+	channels, err := repo.Channels().ListActiveChannels(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to list channels for pending task dispatch")
+		return
+	}
+
+	for _, ch := range channels {
+		if err := taskSvc.DispatchPendingTasks(ctx, ch.ID); err != nil {
+			logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to dispatch pending tasks")
+		}
+	}
 }

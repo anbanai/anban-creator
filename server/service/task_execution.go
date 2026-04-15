@@ -154,6 +154,13 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
 	}
 
+	// Dispatch pending tasks for the same channel now that a slot opened.
+	if task.ChannelID != "" {
+		if err := s.DispatchPendingTasks(ctx, task.ChannelID); err != nil {
+			s.logger.Warn().Err(err).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after completion")
+		}
+	}
+
 	return nil
 }
 
@@ -245,6 +252,13 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			if s.creditSvc != nil {
 				if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
 					s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits")
+				}
+			}
+
+			// A slot opened on this channel — dispatch pending tasks.
+			if task.ChannelID != "" {
+				if derr := s.DispatchPendingTasks(ctx, task.ChannelID); derr != nil {
+					s.logger.Warn().Err(derr).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after failure")
 				}
 			}
 

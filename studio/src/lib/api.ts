@@ -47,6 +47,8 @@ export interface Channel {
   style: string
   theme: string
   author: string
+  reference_image_url: string
+  max_concurrent_tasks: number
   config: ChannelConfig
   status: ChannelStatus
   created_at: string
@@ -78,6 +80,8 @@ export interface CreateChannelRequest {
   style?: string
   theme?: string
   author?: string
+  reference_image_url?: string
+  max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string
 }
@@ -89,7 +93,7 @@ export interface PlatformFieldConfig {
   label: string
   placeholder: string
   required: boolean
-  type: 'text' | 'password' | 'url' | 'textarea'
+  type: 'text' | 'password' | 'url' | 'textarea' | 'number'
   group: 'basic' | 'credentials' | 'content' | 'advanced'
   auto_fetched: boolean
 }

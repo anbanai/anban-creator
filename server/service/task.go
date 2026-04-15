@@ -267,7 +267,39 @@ func (s *TaskService) GetFiles(ctx context.Context, taskID string) ([]*model.Tas
 
 // EnqueueExecution enqueues a task for async execution.
 // If no enqueuer is available (nil), it runs synchronously in a goroutine.
+// If the channel's concurrent task limit is reached, the task stays in DB as "pending"
+// and will be dispatched later when a slot opens up.
 func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, channel *model.Channel) error {
+	// Load channel if not provided, for concurrency check.
+	if channel == nil && task.ChannelID != "" {
+		ch, err := s.repo.Channels().FindByID(ctx, task.ChannelID)
+		if err == nil {
+			channel = ch
+		}
+	}
+
+	// Check per-channel concurrency limit.
+	if channel != nil {
+		maxConcurrent := channel.MaxConcurrentTasks
+		if maxConcurrent <= 0 {
+			maxConcurrent = DefaultMaxConcurrentTasks
+		}
+		running, err := s.repo.Tasks().CountRunningByChannel(ctx, channel.ID)
+		if err != nil {
+			s.logger.Warn().Err(err).
+				Str("channel_id", channel.ID).
+				Msg("failed to count running tasks, proceeding without limit check")
+		} else if int(running) >= maxConcurrent {
+			s.logger.Info().
+				Str("task_id", task.ID).
+				Str("channel_id", channel.ID).
+				Int64("running", running).
+				Int("max", maxConcurrent).
+				Msg("channel concurrency limit reached, task will be dispatched later")
+			return nil
+		}
+	}
+
 	if s.enqueuer != nil {
 		payload, err := json.Marshal(map[string]string{
 			"task_id": task.ID,
@@ -300,6 +332,46 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task execution failed")
 		}
 	}()
+	return nil
+}
+
+// DefaultMaxConcurrentTasks is the default per-channel concurrent task limit.
+const DefaultMaxConcurrentTasks = 10
+
+// DispatchPendingTasks checks for pending tasks on a channel and enqueues them
+// if there are available concurrency slots. Called after a task completes or fails.
+func (s *TaskService) DispatchPendingTasks(ctx context.Context, channelID string) error {
+	channel, err := s.repo.Channels().FindByID(ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("find channel: %w", err)
+	}
+
+	maxConcurrent := channel.MaxConcurrentTasks
+	if maxConcurrent <= 0 {
+		maxConcurrent = DefaultMaxConcurrentTasks
+	}
+
+	running, err := s.repo.Tasks().CountRunningByChannel(ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("count running: %w", err)
+	}
+
+	available := maxConcurrent - int(running)
+	if available <= 0 {
+		return nil
+	}
+
+	pending, err := s.repo.Tasks().FindPendingByChannel(ctx, channelID, available)
+	if err != nil {
+		return fmt.Errorf("find pending: %w", err)
+	}
+
+	for _, t := range pending {
+		if err := s.EnqueueExecution(ctx, t, channel); err != nil {
+			s.logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to dispatch pending task")
+		}
+	}
+
 	return nil
 }
 
