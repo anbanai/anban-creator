@@ -7,8 +7,8 @@
 # Server: HTTP listen configuration
 # ---------------------------------------------------------------------------
 server:
-  port: 8080            # Listen port. Override with ANBAN_SERVER_PORT or -port flag.
-  host: "0.0.0.0"       # Listen host. Use "127.0.0.1" to restrict to localhost.
+  port: 8080 # Listen port. Override with ANBAN_SERVER_PORT or -port flag.
+  host: "0.0.0.0" # Listen host. Use "127.0.0.1" to restrict to localhost.
 
 # ---------------------------------------------------------------------------
 # Database: MySQL connection
@@ -18,9 +18,9 @@ server:
 # ---------------------------------------------------------------------------
 database:
   dsn: "root:anbanwriter_dev@tcp(localhost:3306)/anbanwriter?charset=utf8mb4&parseTime=True&loc=Local"
-  max_open_conns: 10        # Maximum open connections to the database.
-  max_idle_conns: 5         # Maximum idle connections kept in the pool.
-  conn_max_lifetime: 3600   # Connection maximum lifetime in seconds.
+  max_open_conns: 10 # Maximum open connections to the database.
+  max_idle_conns: 5 # Maximum idle connections kept in the pool.
+  conn_max_lifetime: 3600 # Connection maximum lifetime in seconds.
 
 # ---------------------------------------------------------------------------
 # Redis: Cache and async task queue (Asynq)
@@ -29,27 +29,27 @@ database:
 # is unavailable.
 # ---------------------------------------------------------------------------
 redis:
-  addr: "localhost:6379"    # Redis server address (host:port).
-  password: ""              # Redis password. Set via ANBAN_SERVER_REDIS_PASSWORD.
-  db: 0                     # Redis database number.
+  addr: "localhost:6379" # Redis server address (host:port).
+  password: "" # Redis password. Set via ANBAN_SERVER_REDIS_PASSWORD.
+  db: 0 # Redis database number.
 
 # ---------------------------------------------------------------------------
 # JWT: JSON Web Token authentication
 # Required. secret_key must be set (via config or ANBAN_SERVER_JWT_SECRET_KEY).
 # ---------------------------------------------------------------------------
 jwt:
-  secret_key: ""            # HMAC signing key. MUST be set in production.
-                             # Generate with: openssl rand -hex 32
-  access_expiry: "24h"      # Access token validity duration.
-  refresh_expiry: "168h"    # Refresh token validity duration (7 days).
+  secret_key: "" # HMAC signing key. MUST be set in production.
+                  # Generate with: openssl rand -hex 32
+  access_expiry: "24h" # Access token validity duration.
+  refresh_expiry: "168h" # Refresh token validity duration (7 days).
 
 # ---------------------------------------------------------------------------
 # WeChat: Optional WeChat mini-program login integration
 # Optional. If app_id and app_secret are empty, WeChat login is disabled.
 # ---------------------------------------------------------------------------
 wechat:
-  app_id: ""                # WeChat Mini Program AppID.
-  app_secret: ""            # WeChat Mini Program AppSecret.
+  app_id: "" # WeChat Mini Program AppID.
+  app_secret: "" # WeChat Mini Program AppSecret.
 
 # ---------------------------------------------------------------------------
 # Storage: File storage configuration
@@ -58,13 +58,13 @@ wechat:
 # ---------------------------------------------------------------------------
 storage:
   provider: "local"
-  endpoint: ""                # OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
-  access_key_id: ""           # Alibaba Cloud AccessKey ID
-  access_key_secret: ""       # Alibaba Cloud AccessKey Secret
-  bucket_name: ""             # OSS bucket name
-  region: ""                  # OSS region, e.g. "cn-hangzhou"
-  custom_domain: ""           # Optional CDN domain for public file URLs
-  local_data_dir: "./data/files"  # Local provider: where to store files
+  endpoint: "" # OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
+  access_key_id: "" # Alibaba Cloud AccessKey ID
+  access_key_secret: "" # Alibaba Cloud AccessKey Secret
+  bucket_name: "" # OSS bucket name
+  region: "" # OSS region, e.g. "cn-hangzhou"
+  custom_domain: "" # Optional CDN domain for public file URLs
+  local_data_dir: "./data/files" # Local provider: where to store files
 
 # ---------------------------------------------------------------------------
 # Image API: Global image generation API configuration
@@ -77,35 +77,35 @@ image_api:
     key: ""
     base_url: ""
     model: ""
-    size: ""             # Default size override for cover images (ratio:tier, e.g. "16:9:4K")
+    size: "" # Default size override for cover images (ratio:tier, e.g. "16:9:4K")
   content:
     provider: ""
     key: ""
     base_url: ""
     model: ""
-    size: ""             # Default size override for content images (ratio:tier, e.g. "3:4:4K")
+    size: "" # Default size override for content images (ratio:tier, e.g. "3:4:4K")
   sizes:
     # Per-platform default image sizes in ratio:tier format.
     # Ratio: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
     # Tier: 1K, 2K (default), 4K
     # Examples: "16:9", "3:4:4K", "9:16:2K"
-    article_cover: "16:9"       # 公众号封面（横版）
-    article_content: "16:9"     # 公众号正文配图
-    xls_cover: "3:4"            # 小绿书封面（竖版）
-    xls_content: "3:4"          # 小绿书正文配图
-    rednote_cover: "3:4"        # 小红书封面（竖版）
-    rednote_content: "3:4"      # 小红书正文配图
+    article_cover: "16:9" # 公众号封面（横版）
+    article_content: "16:9" # 公众号正文配图
+    xls_cover: "3:4" # 小绿书封面（竖版）
+    xls_content: "3:4" # 小绿书正文配图
+    rednote_cover: "3:4" # 小红书封面（竖版）
+    rednote_content: "3:4" # 小红书正文配图
 
 # ---------------------------------------------------------------------------
 # Credits: Credits system configuration
 # ---------------------------------------------------------------------------
 credits:
-  daily_sign_in: 1024    # credits awarded per daily sign-in
+  daily_sign_in: 1024 # credits awarded per daily sign-in
   task_costs:
-    article: 500         # cost per article task
-    xls: 400             # cost per xls task
-    rednote: 400         # cost per rednote task
-  admin_api_key: ""      # API key for admin credit grant endpoint (also via ANBAN_SERVER_CREDITS_ADMIN_API_KEY)
+    article: 500 # cost per article task
+    xls: 400 # cost per xls task
+    rednote: 400 # cost per rednote task
+  admin_api_key: "" # API key for admin credit grant endpoint (also via ANBAN_SERVER_CREDITS_ADMIN_API_KEY)
 
 # ---------------------------------------------------------------------------
 # CORS: Cross-Origin Resource Sharing configuration
@@ -124,14 +124,14 @@ cors:
 # Required for agent execution. The env vars are passed to the CLI process.
 # ---------------------------------------------------------------------------
 claude:
-  executor: local             # "local" (subprocess) or "docker" (container).
-                              # Override with ANBAN_SERVER_CLAUDE_EXECUTOR.
-  plugin_dir: ""              # Path to the abwriter plugin directory (local executor only).
-                              # Must contain agents/ and skills/.
-                              # Override with ANBAN_SERVER_CLAUDE_PLUGIN_DIR.
-                              # In k8s/Docker: typically "/app".
-  sandbox: false              # Enable SDK sandbox for agent tasks (local executor only).
-                              # Override with ANBAN_SERVER_CLAUDE_SANDBOX=true.
+  executor: local # "local" (subprocess) or "docker" (container).
+                     # Override with ANBAN_SERVER_CLAUDE_EXECUTOR.
+  plugin_dir: "" # Path to the abwriter plugin directory (local executor only).
+                  # Must contain agents/ and skills/.
+                  # Override with ANBAN_SERVER_CLAUDE_PLUGIN_DIR.
+                  # In k8s/Docker: typically "/app".
+  sandbox: false # Enable SDK sandbox for agent tasks (local executor only).
+                  # Override with ANBAN_SERVER_CLAUDE_SANDBOX=true.
 
   # Per-task-type max turns for agent execution.
   # Defaults: article=100, xls=50, rednote=60. Increase if agent hits max_turns errors.
@@ -142,16 +142,16 @@ claude:
 
   # Docker executor settings (used when executor=docker).
   docker:
-    image: "abwriter:latest"   # Docker image with Claude CLI + abwriter plugin.
-    cpu_cores: 2                  # CPU limit per task container.
-    memory_mb: 4096               # Memory limit per task container (MB).
-    timeout_sec: 1800             # Container execution timeout (seconds, default 30 min).
+    image: "abwriter:latest" # Docker image with Claude CLI + abwriter plugin.
+    cpu_cores: 2 # CPU limit per task container.
+    memory_mb: 4096 # Memory limit per task container (MB).
+    timeout_sec: 1800 # Container execution timeout (seconds, default 30 min).
 
   env:
-    ANTHROPIC_AUTH_TOKEN: ""                  # Auth token for API access
-    ANTHROPIC_BASE_URL: ""                    # Custom API endpoint (e.g. for compatible providers)
-    ANTHROPIC_MODEL: ""                       # Default model override
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: ""         # Model override for haiku tier
-    ANTHROPIC_DEFAULT_SONNET_MODEL: ""        # Model override for sonnet tier
-    ANTHROPIC_DEFAULT_OPUS_MODEL: ""          # Model override for opus tier
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"  # Disable telemetry
+    ANTHROPIC_AUTH_TOKEN: "" # Auth token for API access
+    ANTHROPIC_BASE_URL: "" # Custom API endpoint (e.g. for compatible providers)
+    ANTHROPIC_MODEL: "" # Default model override
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: "" # Model override for haiku tier
+    ANTHROPIC_DEFAULT_SONNET_MODEL: "" # Model override for sonnet tier
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "" # Model override for opus tier
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" # Disable telemetry

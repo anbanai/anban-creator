@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import Button from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button'
 import { formatDateYMD, getWeekRange, getMonthRange } from '@/lib/labels'
 
 // --- Helpers ---

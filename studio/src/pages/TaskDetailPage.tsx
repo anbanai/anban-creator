@@ -7,7 +7,7 @@ import { api } from '@/lib/api'
 import type { TaskFile } from '@/lib/api'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
-import Button from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
 import { FilePreview } from '@/components/FilePreview'
@@ -207,7 +207,7 @@ export default function TaskDetailPage() {
         </div>
         {canCancel && (
           <Button
-            variant="danger"
+            variant="destructive"
             size="sm"
             loading={cancelMutation.isPending}
             onClick={() => setShowCancelDialog(true)}
@@ -422,7 +422,7 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="danger" onClick={() => cancelMutation.mutate()}>
+            <AlertDialogAction variant="destructive" onClick={() => cancelMutation.mutate()}>
               确定取消
             </AlertDialogAction>
           </AlertDialogFooter>

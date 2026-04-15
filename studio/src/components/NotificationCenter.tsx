@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Bell, Check, CheckCheck, X, Play, Pause } from 'lucide-react'
 import { useNotificationStore, type Notification } from '@/stores/notification-store'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Button } from '@/components/ui/Button'
 
 function notificationIcon(type: Notification['type']) {
   switch (type) {
@@ -47,13 +48,15 @@ export default function NotificationCenter() {
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <span className="text-sm font-medium text-foreground">通知</span>
           {count > 0 && (
-            <button
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={markAllAsRead}
-              className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className="text-muted-foreground"
             >
               <CheckCheck className="h-3.5 w-3.5" />
               全部已读
-            </button>
+            </Button>
           )}
         </div>
         <div className="max-h-80 overflow-y-auto">

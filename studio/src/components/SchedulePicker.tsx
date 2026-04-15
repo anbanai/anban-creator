@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import TimePicker from '@/components/TimePicker'
 
 interface SchedulePickerProps {
   value: string          // cron expression, e.g. "0 9 * * 1,3,5"
@@ -48,15 +50,21 @@ export default function SchedulePicker({ value, onChange }: SchedulePickerProps)
   const [days, setDays] = useState<number[]>(parsed.days)
   const [time, setTime] = useState(`${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`)
 
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
   useEffect(() => {
     const [h, m] = time.split(':').map(Number)
-    onChange(toCron(frequency, days, h || 0, m || 0))
+    onChangeRef.current(toCron(frequency, days, h || 0, m || 0))
   }, [frequency, days, time])
 
-  function toggleDay(day: number) {
-    setDays(prev =>
-      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
-    )
+  function handleFrequencyChange(val: string[]) {
+    const freq = (val[0] || 'daily') as Frequency
+    setFrequency(freq)
+    if (freq === 'daily') setDays([])
+  }
+
+  function handleDaysChange(val: string[]) {
+    setDays(val.map(Number))
   }
 
   const dayLabels = days
@@ -66,60 +74,43 @@ export default function SchedulePicker({ value, onChange }: SchedulePickerProps)
 
   return (
     <div className="space-y-3">
-      {/* 频率选择 */}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
-            frequency === 'daily' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground hover:bg-accent'
-          }`}
-          onClick={() => { setFrequency('daily'); setDays([]) }}
-        >
-          每天
-        </button>
-        <button
-          type="button"
-          className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
-            frequency === 'weekly' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground hover:bg-accent'
-          }`}
-          onClick={() => setFrequency('weekly')}
-        >
-          每周
-        </button>
-      </div>
+      {/* Frequency selection */}
+      <ToggleGroup
+        value={[frequency]}
+        onValueChange={handleFrequencyChange}
+        variant="outline"
+        size="sm"
+        spacing={2}
+      >
+        <ToggleGroupItem value="daily">每天</ToggleGroupItem>
+        <ToggleGroupItem value="weekly">每周</ToggleGroupItem>
+      </ToggleGroup>
 
-      {/* 星期选择（仅每周模式） */}
+      {/* Day of week selection (weekly only) */}
       {frequency === 'weekly' && (
-        <div className="flex flex-wrap gap-1.5">
+        <ToggleGroup
+          value={days.map(String)}
+          onValueChange={handleDaysChange}
+          multiple
+          variant="outline"
+          size="sm"
+          spacing={1}
+        >
           {WEEK_DAYS.map(day => (
-            <button
-              key={day.value}
-              type="button"
-              className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
-                days.includes(day.value)
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-secondary text-muted-foreground hover:bg-accent'
-              }`}
-              onClick={() => toggleDay(day.value)}
-            >
+            <ToggleGroupItem key={day.value} value={String(day.value)}>
               {day.label}
-            </button>
+            </ToggleGroupItem>
           ))}
-        </div>
+        </ToggleGroup>
       )}
 
-      {/* 时间选择 */}
+      {/* Time selection */}
       <div className="flex items-center gap-2">
         <label className="text-sm text-muted-foreground">时间</label>
-        <input
-          type="time"
-          value={time}
-          onChange={e => setTime(e.target.value)}
-          className="rounded-lg border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:border-ring focus:outline-none"
-        />
+        <TimePicker value={time} onChange={setTime} />
       </div>
 
-      {/* 预览 */}
+      {/* Preview */}
       <p className="text-xs text-muted-foreground">
         {frequency === 'daily'
           ? `每天 ${time} 自动执行`

@@ -199,39 +199,3 @@ export {
   SelectTrigger,
   SelectValue,
 }
-
-// Simple select wrapper for backward compatibility with the old API
-interface SimpleSelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> {
-  label?: string
-  options: { value: string; label: string }[]
-  onChange?: (e: React.ChangeEvent<HTMLSelectElement>) => void
-}
-
-function SimpleSelect({ label, options, className, id, ...props }: SimpleSelectProps) {
-  const selectId = id || label?.replace(/\s+/g, '-').toLowerCase()
-  return (
-    <>
-      {label && (
-        <label htmlFor={selectId} className="mb-1 block text-sm font-medium text-foreground">
-          {label}
-        </label>
-      )}
-      <select
-        id={selectId}
-        className={cn(
-          "flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50",
-          className
-        )}
-        {...props}
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </>
-  )
-}
-
-export default SimpleSelect

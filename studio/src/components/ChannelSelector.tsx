@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { api, type Channel } from '@/lib/api'
+import { api } from '@/lib/api'
 import { platformLabels } from '@/lib/labels'
+import { Combobox, type ComboboxOption } from '@/components/Combobox'
 
 interface ChannelSelectorProps {
   value: string
@@ -14,37 +15,31 @@ export function ChannelSelector({ value, onChange, platform }: ChannelSelectorPr
     queryFn: () => api.channels.list({ status: 'active', platform }),
   })
 
+  const options: ComboboxOption[] = channels.map((ch) => ({
+    value: ch.id,
+    label: ch.name,
+    group: platformLabels[ch.platform] || ch.platform,
+  }))
+
   if (isLoading) {
-    return <div className="h-10 animate-pulse rounded-lg bg-muted" />
+    return <div className="h-8 animate-pulse rounded-lg bg-muted" />
   }
 
-  // Group by platform
-  const groups = channels.reduce((acc, ch) => {
-    const label = platformLabels[ch.platform] || ch.platform
-    if (!acc[label]) acc[label] = []
-    acc[label].push(ch)
-    return acc
-  }, {} as Record<string, Channel[]>)
-
   return (
-    <select
+    <Combobox
+      options={options}
       value={value}
-      onChange={e => {
-        const val = e.target.value
-        if (!val) { onChange('', ''); return }
-        const ch = channels.find(c => c.id === val)
+      onChange={(id) => {
+        if (!id) {
+          onChange('', '')
+          return
+        }
+        const ch = channels.find((c) => c.id === id)
         if (ch) onChange(ch.id, ch.platform)
       }}
-      className="w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
-    >
-      <option value="">选择频道...</option>
-      {Object.entries(groups).map(([label, items]) => (
-        <optgroup key={label} label={label}>
-          {items.map(ch => (
-            <option key={ch.id} value={ch.id}>{ch.name}</option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
+      placeholder="选择频道..."
+      searchPlaceholder="搜索频道..."
+      emptyText="没有找到频道"
+    />
   )
 }

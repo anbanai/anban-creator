@@ -75,7 +75,7 @@ export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDe
           </Button>
         )}
         {onDelete && (
-          <Button variant="danger" size="xs" onClick={() => onDelete(channel.id)}>
+          <Button variant="destructive" size="xs" onClick={() => onDelete(channel.id)}>
             删除
           </Button>
         )}

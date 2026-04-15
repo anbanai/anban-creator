@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /abwriter-server ./server/
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /abwriter ./app/
 
 # Stage 2: Runtime image with Claude Code
-FROM node:22-slim
+FROM node:25-slim
 
 # Install Claude Code CLI.
 RUN npm install -g @anthropic-ai/claude-code

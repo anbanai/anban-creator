@@ -19,7 +19,8 @@ import {
   getWeekRange,
 } from '@/lib/labels'
 import Badge from '@/components/ui/Badge'
-import Button from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button'
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Card } from '@/components/ui/Card'
 import EmptyState from '@/components/EmptyState'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -209,37 +210,40 @@ export default function TimelinePage() {
           </Popover>
 
           {/* Item Type Filter */}
-          <select
-            value={itemType}
-            onChange={(e) => updateFilter('item_type', e.target.value)}
-            className="h-7 rounded-md border border-input bg-transparent px-2 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
-          >
-            {timelineItemTypeOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <Select value={itemType || undefined} onValueChange={(v) => updateFilter('item_type', v ?? '')}>
+            <SelectTrigger size="sm" className="min-w-[100px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {timelineItemTypeOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Content Type Filter */}
-          <select
-            value={contentType}
-            onChange={(e) => updateFilter('content_type', e.target.value)}
-            className="h-7 rounded-md border border-input bg-transparent px-2 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
-          >
-            {contentTypeFilterOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <Select value={contentType || undefined} onValueChange={(v) => updateFilter('content_type', v ?? '')}>
+            <SelectTrigger size="sm" className="min-w-[110px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {contentTypeFilterOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Status Filter */}
-          <select
-            value={status}
-            onChange={(e) => updateFilter('status', e.target.value)}
-            className="h-7 rounded-md border border-input bg-transparent px-2 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
-          >
-            {timelineStatusOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <Select value={status || undefined} onValueChange={(v) => updateFilter('status', v ?? '')}>
+            <SelectTrigger size="sm" className="min-w-[100px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {timelineStatusOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Channel Filter */}
           <div className="w-36">
@@ -250,15 +254,16 @@ export default function TimelinePage() {
           </div>
 
           {/* Sort */}
-          <select
-            value={sort}
-            onChange={(e) => updateFilter('sort', e.target.value)}
-            className="h-7 rounded-md border border-input bg-transparent px-2 text-sm text-foreground transition-colors focus:border-ring focus:outline-none dark:bg-input/30 dark:hover:bg-input/50"
-          >
-            {timelineSortOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <Select value={sort || undefined} onValueChange={(v) => updateFilter('sort', v ?? '')}>
+            <SelectTrigger size="sm" className="min-w-[100px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {timelineSortOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Clear all filters */}
           {(itemType || contentType || status || channelId || hasCustomDates) && (
