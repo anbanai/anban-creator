@@ -109,11 +109,12 @@ type ClaudeConfig struct {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Image      string `yaml:"image"`        // Docker image name (default: "abwriter:latest")
-	CPUCores   int64  `yaml:"cpu_cores"`    // CPU limit in cores (default: 2)
-	MemoryMB   int64  `yaml:"memory_mb"`    // Memory limit in MB (default: 4096)
-	TimeoutSec int    `yaml:"timeout_sec"`  // Container execution timeout in seconds (default: 1800 = 30 min)
-	MCPBaseURL string `yaml:"mcp_base_url"` // Base URL for MCP server reachable from containers (default: "http://host.docker.internal:{port}")
+	Image         string `yaml:"image"`          // Docker image name (default: "abwriter:latest")
+	CPUCores      int64  `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
+	MemoryMB      int64  `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
+	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
+	MCPBaseURL    string `yaml:"mcp_base_url"`   // Base URL for MCP server reachable from containers (default: "http://host.docker.internal:{port}")
+	ContainerName string `yaml:"container_name"` // Name of a persistent container to reuse via docker exec (empty = create+destroy per task)
 }
 
 // CreditsConfig holds credits/points system configuration.
@@ -416,6 +417,9 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "CLAUDE_DOCKER_MCP_BASE_URL"); v != "" {
 		c.Claude.Docker.MCPBaseURL = v
+	}
+	if v := os.Getenv(prefix + "CLAUDE_DOCKER_CONTAINER_NAME"); v != "" {
+		c.Claude.Docker.ContainerName = v
 	}
 
 	if v := os.Getenv(prefix + "CREDITS_ADMIN_API_KEY"); v != "" {

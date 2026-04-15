@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/rs/zerolog"
@@ -229,9 +230,175 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		env = append(env, fmt.Sprintf("ANBANWRITER_API_URL=%s", e.dockerCfg.MCPBaseURL))
 	}
 
-	// 6. Create container.
-	// Run as "node" user (uid 1000) — Claude CLI refuses --permission-mode
-	// bypassPermissions when running as root. The node:22-slim image includes this user.
+	// 6. Dispatch to persistent container (docker exec) or create new container.
+	var stdoutBuf bytes.Buffer
+	if e.dockerCfg.ContainerName != "" {
+		stdoutBuf = e.executeViaExec(ctx, opts, workDir, cmd, env)
+	} else {
+		stdoutBuf = e.executeInNewContainer(ctx, opts, workDir, cmd, env)
+	}
+
+	// Shared post-processing: log workspace, parse results, check files.
+	if files, listErr := ListWorkDirFiles(workDir); listErr == nil {
+		e.logger.Info().
+			Str("task_id", opts.Task.ID).
+			Int("file_count", len(files)).
+			Interface("files", files).
+			Msg("workspace contents after execution")
+	}
+
+	if stdoutBuf.Len() > 0 {
+		logDockerConversation(stdoutBuf.String(), e.logger, opts.Task.ID)
+	}
+
+	result := &ExecutionResult{Success: true, WorkDir: workDir}
+	if stdoutBuf.Len() > 0 {
+		parseDockerJSONResult(stdoutBuf.String(), result, e.logger, opts.Task.ID)
+	}
+
+	if result.WorkDir != "" {
+		fileCount := CountMeaningfulFiles(result.WorkDir)
+		result.NoOutputFiles = fileCount == 0
+		if result.NoOutputFiles && result.NumTurns <= 1 {
+			result.AgentLikelyFailed = true
+		}
+	}
+
+	if result.NumTurns <= 1 {
+		stdoutSnippet := ""
+		if stdoutBuf.Len() > 0 {
+			stdoutSnippet = stdoutBuf.String()
+			if len(stdoutSnippet) > 2000 {
+				stdoutSnippet = stdoutSnippet[len(stdoutSnippet)-2000:]
+			}
+		}
+		logLevel := e.logger.Warn()
+		if result.AgentLikelyFailed {
+			logLevel = e.logger.Error()
+		}
+		logLevel.
+			Str("task_id", opts.Task.ID).
+			Int("num_turns", result.NumTurns).
+			Bool("no_output_files", result.NoOutputFiles).
+			Bool("agent_likely_failed", result.AgentLikelyFailed).
+			Str("stdout", stdoutSnippet).
+			Msg("agent completed with <=1 turns; agent definition may not have loaded or MCP connection failed")
+	}
+
+	if model != "" && !isKnownClaudeModel(model) {
+		e.logger.Warn().
+			Str("task_id", opts.Task.ID).
+			Str("model", model).
+			Msg("configured model is not a Claude model; agent tool use may not work correctly")
+	}
+
+	return result, nil
+}
+
+// executeViaExec runs the claude command inside a persistent container using docker exec.
+// The container must already be running and have /tmp/abwriter bind-mounted as /workspace.
+func (e *DockerExecutor) executeViaExec(ctx context.Context, opts *ExecutionOptions, workDir string, cmd []string, env []string) bytes.Buffer {
+	taskID := opts.Task.ID
+	containerName := e.dockerCfg.ContainerName
+
+	// Verify the persistent container exists and is running.
+	nameFilter := filters.NewArgs()
+	nameFilter.Add("name", containerName)
+	containers, err := e.dockerCLI.ContainerList(ctx, container.ListOptions{
+		Filters: nameFilter,
+	})
+	if err != nil || len(containers) == 0 {
+		e.logger.Error().Err(err).
+			Str("task_id", taskID).
+			Str("container", containerName).
+			Msg("persistent container not found, falling back to create+destroy")
+		return e.executeInNewContainer(ctx, opts, workDir, cmd, env)
+	}
+
+	// Use task-specific subdirectory inside the container.
+	// The persistent container mounts /tmp/abwriter -> /workspace,
+	// so /workspace/{taskID} maps to /tmp/abwriter/{taskID} on the host.
+	workDirInContainer := "/workspace/" + taskID
+
+	e.logger.Info().
+		Str("task_id", taskID).
+		Str("container", containerName).
+		Str("cwd", workDirInContainer).
+		Msg("executing via persistent container")
+
+	// Create exec instance.
+	execCreate, err := e.dockerCLI.ContainerExecCreate(ctx, containerName, container.ExecOptions{
+		Cmd:          cmd,
+		Env:          env,
+		WorkingDir:   workDirInContainer,
+		User:         "node",
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		e.logger.Error().Err(err).
+			Str("task_id", taskID).
+			Msg("failed to create exec instance")
+		return bytes.Buffer{}
+	}
+
+	// Attach to exec to capture stdout/stderr.
+	hijacked, err := e.dockerCLI.ContainerExecAttach(ctx, execCreate.ID, container.ExecStartOptions{
+		Detach: false,
+		Tty:    false,
+	})
+	if err != nil {
+		e.logger.Error().Err(err).
+			Str("task_id", taskID).
+			Msg("failed to attach to exec")
+		return bytes.Buffer{}
+	}
+	defer hijacked.Close()
+
+	// Stream output from exec (multiplexed: same 8-byte header format as container logs).
+	var stdoutBuf bytes.Buffer
+	go func() {
+		// hijacked.Reader is a *bufio.Reader, not io.ReadCloser.
+		// Wrap it so streamAndCaptureLogs can call Close().
+		e.streamAndCaptureLogs(io.NopCloser(hijacked.Reader), opts, &stdoutBuf)
+	}()
+
+	// Poll for exec completion with timeout.
+	timeout := time.Duration(e.dockerCfg.TimeoutSec) * time.Second
+	deadline := time.Now().Add(timeout)
+	for {
+		inspect, err := e.dockerCLI.ContainerExecInspect(ctx, execCreate.ID)
+		if err != nil {
+			e.logger.Error().Err(err).Str("task_id", taskID).Msg("exec inspect failed")
+			break
+		}
+		if !inspect.Running {
+			if inspect.ExitCode != 0 {
+				e.logger.Error().
+					Str("task_id", taskID).
+					Int("exit_code", inspect.ExitCode).
+					Msg("exec exited with non-zero code")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			e.logger.Error().
+				Str("task_id", taskID).
+				Int("timeout_sec", e.dockerCfg.TimeoutSec).
+				Msg("exec timed out")
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return stdoutBuf
+}
+
+// executeInNewContainer creates, runs, and destroys a container for a single task (legacy mode).
+func (e *DockerExecutor) executeInNewContainer(ctx context.Context, opts *ExecutionOptions, workDir string, cmd []string, env []string) bytes.Buffer {
+	taskID := opts.Task.ID
+
+	// Create container with per-task bind mount.
 	containerConfig := &container.Config{
 		Image:      e.dockerCfg.Image,
 		Cmd:        cmd,
@@ -255,27 +422,28 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 
-	containerName := "abwriter-" + opts.Task.ID
+	containerName := "abwriter-" + taskID
 	resp, err := e.dockerCLI.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
 	if err != nil {
-		return nil, fmt.Errorf("docker create: %w", err)
+		e.logger.Error().Err(err).Str("task_id", taskID).Msg("docker create failed")
+		return bytes.Buffer{}
 	}
 
 	// Ensure container cleanup.
 	defer func() {
 		removeCtx := context.Background()
 		if err := e.dockerCLI.ContainerRemove(removeCtx, resp.ID, container.RemoveOptions{Force: true}); err != nil {
-			e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to remove container")
+			e.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to remove container")
 		}
 	}()
 
-	// 7. Start container.
+	// Start container.
 	if err := e.dockerCLI.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return nil, fmt.Errorf("docker start: %w", err)
+		e.logger.Error().Err(err).Str("task_id", taskID).Msg("docker start failed")
+		return bytes.Buffer{}
 	}
 
-	// 8. Follow logs for progress streaming.
-	// Capture stdout separately for JSON result parsing (--output-format json).
+	// Follow logs for progress streaming.
 	var stdoutBuf bytes.Buffer
 	var logWg sync.WaitGroup
 	logsReader, err := e.dockerCLI.ContainerLogs(ctx, resp.ID, container.LogsOptions{
@@ -285,7 +453,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		Timestamps: false,
 	})
 	if err != nil {
-		e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to follow container logs")
+		e.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to follow container logs")
 	} else {
 		logWg.Add(1)
 		go func() {
@@ -294,7 +462,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		}()
 	}
 
-	// 9. Wait for container with timeout.
+	// Wait for container with timeout.
 	timeout := time.Duration(e.dockerCfg.TimeoutSec) * time.Second
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -303,104 +471,20 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	select {
 	case err := <-errCh:
 		if waitCtx.Err() == context.DeadlineExceeded {
-			// Timeout — kill the container.
 			e.dockerCLI.ContainerStop(context.Background(), resp.ID, container.StopOptions{})
-			return &ExecutionResult{
-				Success: false,
-				Error:   fmt.Sprintf("task timed out after %d seconds", e.dockerCfg.TimeoutSec),
-				WorkDir: workDir,
-			}, nil
+			e.logger.Error().Str("task_id", taskID).Msg("container timed out")
+		} else if err != nil {
+			e.logger.Error().Err(err).Str("task_id", taskID).Msg("container wait error")
 		}
-		if err != nil {
-			return nil, fmt.Errorf("docker wait: %w", err)
-		}
-		// errCh sent nil — container exited normally, read status below.
-	case result := <-statusCh:
-		if result.StatusCode != 0 {
-			// Capture container logs for diagnostics.
-			containerLogs := e.readContainerLogs(resp.ID)
-			errMsg := fmt.Sprintf("container exited with code %d", result.StatusCode)
-			if containerLogs != "" {
-				truncated := containerLogs
-				if len(truncated) > 2000 {
-					truncated = truncated[len(truncated)-2000:]
-				}
-				errMsg += "\n" + truncated
-			}
-			return &ExecutionResult{
-				Success: false,
-				Error:   errMsg,
-				WorkDir: workDir,
-			}, nil
-		}
+	case <-statusCh:
+		// Container exited.
 	}
 
-	// 10. Log workspace contents.
-	if files, listErr := ListWorkDirFiles(workDir); listErr == nil {
-		e.logger.Info().
-			Str("task_id", opts.Task.ID).
-			Int("file_count", len(files)).
-			Interface("files", files).
-			Msg("workspace contents after execution")
-	}
-
-	// Ensure all stdout frames have been captured before parsing.
 	logWg.Wait()
-
-	// Log all conversation content from stdout at debug level.
-	if stdoutBuf.Len() > 0 {
-		logDockerConversation(stdoutBuf.String(), e.logger, opts.Task.ID)
-	}
-
-	// Parse JSON output from stdout to extract usage/cost data.
-	result := &ExecutionResult{Success: true, WorkDir: workDir}
-	if stdoutBuf.Len() > 0 {
-		parseDockerJSONResult(stdoutBuf.String(), result, e.logger, opts.Task.ID)
-	}
-
-	// Check for output files in workspace.
-		if result.WorkDir != "" {
-			fileCount := CountMeaningfulFiles(result.WorkDir)
-			result.NoOutputFiles = fileCount == 0
-			if result.NoOutputFiles && result.NumTurns <= 1 {
-				result.AgentLikelyFailed = true
-			}
-		}
-
-		// Warn if agent completed with too few turns — likely MCP or agent loading failure.
-		if result.NumTurns <= 1 {
-			stdoutSnippet := ""
-			if stdoutBuf.Len() > 0 {
-				stdoutSnippet = stdoutBuf.String()
-				if len(stdoutSnippet) > 2000 {
-					stdoutSnippet = stdoutSnippet[len(stdoutSnippet)-2000:]
-				}
-			}
-			logLevel := e.logger.Warn()
-			if result.AgentLikelyFailed {
-				logLevel = e.logger.Error()
-			}
-			logLevel.
-				Str("task_id", opts.Task.ID).
-				Int("num_turns", result.NumTurns).
-				Bool("no_output_files", result.NoOutputFiles).
-				Bool("agent_likely_failed", result.AgentLikelyFailed).
-				Str("stdout", stdoutSnippet).
-				Msg("agent completed with <=1 turns; agent definition may not have loaded or MCP connection failed")
-		}
-
-		// Warn if model is not a known Claude model — agent tool use may not work.
-		if model != "" && !isKnownClaudeModel(model) {
-			e.logger.Warn().
-				Str("task_id", opts.Task.ID).
-				Str("model", model).
-				Msg("configured model is not a Claude model; agent tool use may not work correctly")
-		}
-
-		return result, nil
+	return stdoutBuf
 }
 
-// streamAndCaptureLogs reads multiplexed Docker log frames, forwards them to
+// streamAndCaptureLogs reads multiplexed Docker log frames, forwards them to reads multiplexed Docker log frames, forwards them to
 // OnProgress, and captures stdout frames into buf for post-execution JSON parsing.
 // Docker multiplexed stream: [1 byte stream type (1=stdout, 2=stderr)][3 bytes padding][4 bytes size].
 func (e *DockerExecutor) streamAndCaptureLogs(reader io.ReadCloser, opts *ExecutionOptions, stdoutBuf *bytes.Buffer) {
