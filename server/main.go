@@ -129,11 +129,17 @@ func main() {
 		authHandler = handler.NewAuthHandler(jwtSvc, wechatSvc, repo, log, wsHub)
 	}
 
+	// 11.1 Create API key service (needed before executor for per-user MCP keys).
+	var apiKeySvc *service.APIKeyService
+	if repo != nil {
+		apiKeySvc = service.NewAPIKeyService(repo, log)
+	}
+
 	// 12. Create agent executor.
 	var agentExecutor agent.TaskExecutor
 	switch cfg.Claude.Executor {
 	case "docker":
-		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.Claude.Model)
+		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.Claude.Model, apiKeySvc)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker executor")
 		}
@@ -143,6 +149,7 @@ func main() {
 			Int64("cpu_cores", cfg.Claude.Docker.CPUCores).
 			Int64("memory_mb", cfg.Claude.Docker.MemoryMB).
 			Int("timeout_sec", cfg.Claude.Docker.TimeoutSec).
+			Bool("per_user_mcp", apiKeySvc != nil).
 			Msg("docker agent executor created")
 	default:
 		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model)
@@ -175,12 +182,6 @@ func main() {
 		}
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log)
-	}
-
-	// 13.1 Create API key service.
-	var apiKeySvc *service.APIKeyService
-	if repo != nil {
-		apiKeySvc = service.NewAPIKeyService(repo, log)
 	}
 
 	// 14. Create handlers.

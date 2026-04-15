@@ -113,7 +113,6 @@ type DockerConfig struct {
 	MemoryMB   int64  `yaml:"memory_mb"`    // Memory limit in MB (default: 4096)
 	TimeoutSec int    `yaml:"timeout_sec"`  // Container execution timeout in seconds (default: 1800 = 30 min)
 	MCPBaseURL string `yaml:"mcp_base_url"` // Base URL for MCP server reachable from containers (default: "http://host.docker.internal:{port}")
-	MCPAPIKey  string `yaml:"mcp_api_key"`  // API key for MCP server authentication
 }
 
 // CreditsConfig holds credits/points system configuration.
@@ -396,9 +395,6 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "CLAUDE_DOCKER_MCP_BASE_URL"); v != "" {
 		c.Claude.Docker.MCPBaseURL = v
-	}
-	if v := os.Getenv(prefix + "CLAUDE_DOCKER_MCP_API_KEY"); v != "" {
-		c.Claude.Docker.MCPAPIKey = v
 	}
 
 	if v := os.Getenv(prefix + "CREDITS_ADMIN_API_KEY"); v != "" {

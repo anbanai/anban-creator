@@ -24,6 +24,11 @@ import (
 // Compile-time interface check.
 var _ TaskExecutor = (*DockerExecutor)(nil)
 
+// UserKeyProvider resolves a per-user API key for MCP authentication.
+type UserKeyProvider interface {
+	EnsureUserKey(ctx context.Context, userID string) (string, error)
+}
+
 // DockerExecutor runs agent tasks inside Docker containers.
 // Each task gets an isolated container with resource limits and a bind-mounted workspace.
 type DockerExecutor struct {
@@ -33,6 +38,7 @@ type DockerExecutor struct {
 	dockerCfg    srvconfig.DockerConfig
 	dockerCLI    *client.Client
 	defaultModel string // configured model; empty means use env vars
+	keyProvider  UserKeyProvider
 }
 
 // NewDockerExecutor creates a new DockerExecutor.
@@ -43,6 +49,7 @@ func NewDockerExecutor(
 	claudeEnv map[string]string,
 	dockerCfg srvconfig.DockerConfig,
 	defaultModel string,
+	keyProvider UserKeyProvider,
 ) (*DockerExecutor, error) {
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
 
@@ -66,12 +73,13 @@ func NewDockerExecutor(
 	}
 
 	return &DockerExecutor{
-		logger:      logger,
-		imageAPICfg: imageAPICfg,
-		claudeEnv:   claudeEnv,
-		dockerCfg:   dockerCfg,
+		logger:       logger,
+		imageAPICfg:  imageAPICfg,
+		claudeEnv:    claudeEnv,
+		dockerCfg:    dockerCfg,
 		dockerCLI:    cli,
 		defaultModel: defaultModel,
+		keyProvider:  keyProvider,
 	}, nil
 }
 
@@ -142,9 +150,23 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		}
 	}
 
-	// 3.5. Write MCP config so the agent can connect to the server's MCP endpoint.
-	if e.dockerCfg.MCPBaseURL != "" && e.dockerCfg.MCPAPIKey != "" {
-		if err := writeMCPConfig(workDir, e.dockerCfg.MCPBaseURL, e.dockerCfg.MCPAPIKey); err != nil {
+	// 3.5. Resolve per-user API key for MCP authentication.
+	var mcpAPIKey string
+	if e.keyProvider != nil && opts.Task.UserID != "" {
+		rawKey, err := e.keyProvider.EnsureUserKey(ctx, opts.Task.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve user API key: %w", err)
+		}
+		mcpAPIKey = rawKey
+		e.logger.Info().
+			Str("task_id", opts.Task.ID).
+			Str("user_id", opts.Task.UserID).
+			Msg("using per-user API key for MCP")
+	}
+
+	// Write MCP config so the agent can connect to the server's MCP endpoint.
+	if e.dockerCfg.MCPBaseURL != "" && mcpAPIKey != "" {
+		if err := writeMCPConfig(workDir, e.dockerCfg.MCPBaseURL, mcpAPIKey); err != nil {
 			return nil, fmt.Errorf("write mcp config: %w", err)
 		}
 		e.logger.Info().
@@ -186,8 +208,8 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 
 	// Inject MCP server env vars so plugin/.mcp.json can resolve
 	// ${ANBANWRITER_API_KEY} and ${ANBANWRITER_API_URL} inside the container.
-	if e.dockerCfg.MCPAPIKey != "" {
-		env = append(env, fmt.Sprintf("ANBANWRITER_API_KEY=%s", e.dockerCfg.MCPAPIKey))
+	if mcpAPIKey != "" {
+		env = append(env, fmt.Sprintf("ANBANWRITER_API_KEY=%s", mcpAPIKey))
 	}
 	if e.dockerCfg.MCPBaseURL != "" {
 		env = append(env, fmt.Sprintf("ANBANWRITER_API_URL=%s", e.dockerCfg.MCPBaseURL))

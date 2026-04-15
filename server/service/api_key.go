@@ -54,9 +54,48 @@ func (s *APIKeyService) Create(ctx context.Context, userID, name string) (*model
 	return apiKey, rawKey, nil
 }
 
-// List returns all API keys for a user (without the hash).
+// List returns all user-created API keys for a user (without the hash).
+// Managed keys (auto-created for Docker MCP auth) are excluded.
 func (s *APIKeyService) List(ctx context.Context, userID string) ([]*model.APIKey, error) {
 	return s.repo.APIKeys().FindByUserID(ctx, userID)
+}
+
+// EnsureUserKey returns a raw API key for the given user.
+// If the user has a managed key, it returns the existing raw key.
+// Otherwise, it creates a new managed key and returns the raw key.
+func (s *APIKeyService) EnsureUserKey(ctx context.Context, userID string) (string, error) {
+	// Check for existing managed key.
+	existing, err := s.repo.APIKeys().FindManagedByUserID(ctx, userID)
+	if err == nil && existing != nil && existing.RawKey != "" {
+		return existing.RawKey, nil
+	}
+
+	// Create a new managed key.
+	rawKey, keyHash, keyPrefix, err := generateAPIKey()
+	if err != nil {
+		return "", fmt.Errorf("generate managed key: %w", err)
+	}
+
+	apiKey := &model.APIKey{
+		ID:        strings.ReplaceAll(uuid.New().String(), "-", ""),
+		UserID:    userID,
+		Name:      "system-managed",
+		KeyHash:   keyHash,
+		KeyPrefix: keyPrefix,
+		IsManaged: true,
+		RawKey:    rawKey,
+	}
+
+	if err := s.repo.APIKeys().Create(ctx, apiKey); err != nil {
+		return "", fmt.Errorf("create managed api key: %w", err)
+	}
+
+	s.logger.Info().
+		Str("user_id", userID).
+		Str("key_prefix", keyPrefix).
+		Msg("managed API key created")
+
+	return rawKey, nil
 }
 
 // Revoke deletes an API key. Verifies ownership before deleting.

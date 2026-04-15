@@ -9,6 +9,8 @@ type APIKey struct {
 	Name       string     `gorm:"type:varchar(100)" json:"name"`
 	KeyHash    string     `gorm:"type:char(64);uniqueIndex;not null" json:"-"`
 	KeyPrefix  string     `gorm:"type:varchar(12);not null" json:"key_prefix"`
+	IsManaged  bool       `gorm:"default:false" json:"is_managed"`
+	RawKey     string     `gorm:"type:text" json:"-"` // stored only for managed keys; empty for user-created keys
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 }
