@@ -133,6 +133,11 @@ func main() {
 	var apiKeySvc *service.APIKeyService
 	if repo != nil {
 		apiKeySvc = service.NewAPIKeyService(repo, log)
+
+		// Ensure a system default API key exists on startup.
+		if _, err := apiKeySvc.EnsureSystemKey(context.Background()); err != nil {
+			log.Warn().Err(err).Msg("failed to ensure system API key")
+		}
 	}
 
 	// 12. Create agent executor.
@@ -152,10 +157,11 @@ func main() {
 			Bool("per_user_mcp", apiKeySvc != nil).
 			Msg("docker agent executor created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, cfg.Claude.MaxTurns)
+		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns)
 		log.Info().
 			Str("plugin_dir", cfg.Claude.PluginDir).
 			Bool("sandbox", cfg.Claude.Sandbox).
+			Bool("per_user_mcp", apiKeySvc != nil).
 			Msg("local agent executor created")
 	}
 

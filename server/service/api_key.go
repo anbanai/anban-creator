@@ -120,6 +120,41 @@ func (s *APIKeyService) Revoke(ctx context.Context, userID, keyID string) error 
 	return nil
 }
 
+// EnsureSystemKey returns a raw API key for the system user.
+// If a managed system key already exists, it returns the existing raw key.
+// Otherwise, it creates a new managed key and returns the raw key.
+func (s *APIKeyService) EnsureSystemKey(ctx context.Context) (string, error) {
+	existing, err := s.repo.APIKeys().FindManagedByUserID(ctx, "system")
+	if err == nil && existing != nil && existing.RawKey != "" {
+		return existing.RawKey, nil
+	}
+
+	rawKey, keyHash, keyPrefix, err := generateAPIKey()
+	if err != nil {
+		return "", fmt.Errorf("generate system key: %w", err)
+	}
+
+	apiKey := &model.APIKey{
+		ID:        strings.ReplaceAll(uuid.New().String(), "-", ""),
+		UserID:    "system",
+		Name:      "system-default",
+		KeyHash:   keyHash,
+		KeyPrefix: keyPrefix,
+		IsManaged: true,
+		RawKey:    rawKey,
+	}
+
+	if err := s.repo.APIKeys().Create(ctx, apiKey); err != nil {
+		return "", fmt.Errorf("create system api key: %w", err)
+	}
+
+	s.logger.Info().
+		Str("key_prefix", keyPrefix).
+		Msg("system API key created")
+
+	return rawKey, nil
+}
+
 // Validate checks a raw API key and returns the associated APIKey record.
 // Updates LastUsedAt on success.
 func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*model.APIKey, error) {

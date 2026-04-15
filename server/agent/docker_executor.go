@@ -24,9 +24,10 @@ import (
 // Compile-time interface check.
 var _ TaskExecutor = (*DockerExecutor)(nil)
 
-// UserKeyProvider resolves a per-user API key for MCP authentication.
+// UserKeyProvider resolves API keys for MCP authentication.
 type UserKeyProvider interface {
 	EnsureUserKey(ctx context.Context, userID string) (string, error)
+	EnsureSystemKey(ctx context.Context) (string, error)
 }
 
 // DockerExecutor runs agent tasks inside Docker containers.

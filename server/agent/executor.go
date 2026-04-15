@@ -34,6 +34,7 @@ type LocalExecutor struct {
 	pluginDir         string
 	sandbox           bool
 	defaultModel      string // configured model; empty means use env vars
+	keyProvider       UserKeyProvider
 	maxTurnsOverrides map[string]int
 }
 
@@ -41,7 +42,7 @@ type LocalExecutor struct {
 var _ TaskExecutor = (*LocalExecutor)(nil)
 
 // NewLocalExecutor creates a new LocalExecutor.
-func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, maxTurnsOverrides map[string]int) *LocalExecutor {
+func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int) *LocalExecutor {
 	return &LocalExecutor{
 		logger:            logger,
 		imageAPICfg:       imageAPICfg,
@@ -49,6 +50,7 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 		pluginDir:         pluginDir,
 		sandbox:           sandbox,
 		defaultModel:      defaultModel,
+		keyProvider:       keyProvider,
 		maxTurnsOverrides: maxTurnsOverrides,
 	}
 }
@@ -146,6 +148,39 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		}
 	}
 
+	// 3.5. Resolve API key for MCP authentication.
+	// Tries per-user key first, falls back to system key.
+	// Unlike DockerExecutor, failures are non-fatal here: local execution
+	// can still produce output via direct tool calls even without MCP.
+	var mcpAPIKey string
+	if e.keyProvider != nil {
+		if opts.Task.UserID != "" {
+			if rawKey, err := e.keyProvider.EnsureUserKey(ctx, opts.Task.UserID); err == nil {
+				mcpAPIKey = rawKey
+				e.logger.Info().
+					Str("task_id", opts.Task.ID).
+					Str("user_id", opts.Task.UserID).
+					Msg("using per-user API key for MCP")
+			} else {
+				e.logger.Warn().Err(err).
+					Str("task_id", opts.Task.ID).
+					Msg("failed to resolve user API key, falling back to system key")
+			}
+		}
+		if mcpAPIKey == "" {
+			if rawKey, err := e.keyProvider.EnsureSystemKey(ctx); err == nil {
+				mcpAPIKey = rawKey
+				e.logger.Info().
+					Str("task_id", opts.Task.ID).
+					Msg("using system API key for MCP")
+			} else {
+				e.logger.Warn().Err(err).
+					Str("task_id", opts.Task.ID).
+					Msg("failed to resolve system API key, MCP will not be available")
+			}
+		}
+	}
+
 	// 4. Build user prompt from task topic.
 	userPrompt := opts.Task.Topic
 	if userPrompt == "" {
@@ -181,6 +216,12 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// Environment variables (auth tokens, API keys, etc.).
 	for k, v := range e.claudeEnv {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(k, v))
+	}
+
+	// Inject MCP server API key so plugin/.mcp.json can resolve
+	// ${ANBANWRITER_API_KEY} for the anbanwriter MCP server.
+	if mcpAPIKey != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_API_KEY", mcpAPIKey))
 	}
 
 	// 7. Execute via SDK with streaming.
