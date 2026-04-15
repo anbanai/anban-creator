@@ -120,6 +120,27 @@ func (p *OSSProvider) GetURL(key string) string {
 	return fmt.Sprintf("https://%s.%s/%s", p.bucketName, p.endpoint, key)
 }
 
+// Read downloads an object from OSS by key and returns its content.
+func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
+	signedURL, err := p.DownloadURL(ctx, key, 3600)
+	if err != nil {
+		return nil, fmt.Errorf("get signed URL for %s: %w", key, err)
+	}
+	resp, err := http.Get(signedURL)
+	if err != nil {
+		return nil, fmt.Errorf("download %s from OSS: %w", key, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download %s from OSS: unexpected status %d", key, resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read %s from OSS: %w", key, err)
+	}
+	return data, nil
+}
+
 // Delete removes an object from the OSS bucket.
 func (p *OSSProvider) Delete(_ context.Context, key string) error {
 	if err := p.bucket.DeleteObject(key); err != nil {

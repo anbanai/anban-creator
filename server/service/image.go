@@ -298,24 +298,23 @@ func (s *ImageService) UploadImage(
 // compression was actually performed.
 func (s *ImageService) CompressImage(filePath string, maxWidth int) (string, bool, error) {
 	// Determine max size from config; fall back to 5MB if not configured.
+	// Prefer Content config as standalone compression is more commonly used for content images.
 	var maxSize int64 = 5 * 1024 * 1024
 	if s.imageCfg != nil {
-		for _, apiCfg := range []*appconfig.ImageAPI{s.imageCfg.Cover, s.imageCfg.Content} {
-			if apiCfg != nil && apiCfg.MaxSizeMB > 0 {
-				maxSize = apiCfg.MaxSizeBytes()
-				break
-			}
+		if cfg := s.imageCfg.Content; cfg != nil && cfg.MaxSizeMB > 0 {
+			maxSize = cfg.MaxSizeBytes()
+		} else if cfg := s.imageCfg.Cover; cfg != nil && cfg.MaxSizeMB > 0 {
+			maxSize = cfg.MaxSizeBytes()
 		}
 	}
 
 	if maxWidth <= 0 {
 		// Try to get max width from config.
 		if s.imageCfg != nil {
-			for _, apiCfg := range []*appconfig.ImageAPI{s.imageCfg.Cover, s.imageCfg.Content} {
-				if apiCfg != nil && apiCfg.MaxWidth > 0 {
-					maxWidth = apiCfg.MaxWidth
-					break
-				}
+			if cfg := s.imageCfg.Content; cfg != nil && cfg.MaxWidth > 0 {
+				maxWidth = cfg.MaxWidth
+			} else if cfg := s.imageCfg.Cover; cfg != nil && cfg.MaxWidth > 0 {
+				maxWidth = cfg.MaxWidth
 			}
 		}
 		// Ultimate fallback.

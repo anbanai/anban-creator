@@ -252,27 +252,7 @@ func (s *TaskService) getFileContent(ctx context.Context, file *model.TaskFile) 
 		return nil, fmt.Errorf("no storage provider configured")
 	}
 
-	if s.store.Name() == "local" {
-		return os.ReadFile(file.FilePath)
-	}
-
-	// For OSS and other remote providers, use a signed URL.
-	signedURL, err := s.store.DownloadURL(ctx, file.OSSKey, 3600)
-	if err != nil {
-		return nil, fmt.Errorf("get download URL for %s: %w", file.OSSKey, err)
-	}
-
-	resp, err := http.Get(signedURL)
-	if err != nil {
-		return nil, fmt.Errorf("download file from %s: %w", signedURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download file from %s: unexpected status %d", signedURL, resp.StatusCode)
-	}
-
-	return io.ReadAll(resp.Body)
+	return s.store.Read(ctx, file.OSSKey)
 }
 
 // RewriteHTMLImageURLs replaces relative image src references in HTML content

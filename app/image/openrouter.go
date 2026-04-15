@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -114,7 +115,7 @@ func (p *OpenRouterProvider) buildRequest(prompt string, opts *GenerateOptions) 
 			dataURI := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 			messages = []openrouter.ChatCompletionMessage{openrouter.UserMessageWithImage(prompt, dataURI)}
 		} else {
-			// 读取参考图失败，降级为纯文本
+			log.Printf("[warn] openrouter: 读取参考图失败，降级为纯文本模式: %v", err)
 			messages = []openrouter.ChatCompletionMessage{openrouter.UserMessage(prompt)}
 		}
 	} else {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -233,7 +234,7 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 	errMsg := err.Error()
 
 	// 尝试识别常见错误类型
-	if contains(errMsg, "401") || contains(errMsg, "unauthorized") || contains(errMsg, "authentication") {
+	if strings.Contains(errMsg, "401") || strings.Contains(errMsg, "unauthorized") || strings.Contains(errMsg, "authentication") {
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "unauthorized",
@@ -243,7 +244,7 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 		}
 	}
 
-	if contains(errMsg, "429") || contains(errMsg, "rate limit") {
+	if strings.Contains(errMsg, "429") || strings.Contains(errMsg, "rate limit") {
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "rate_limit",
@@ -253,7 +254,7 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 		}
 	}
 
-	if contains(errMsg, "400") || contains(errMsg, "bad request") {
+	if strings.Contains(errMsg, "400") || strings.Contains(errMsg, "bad request") {
 		if isContentSafetyError(errMsg) {
 			return &GenerateError{
 				Provider: p.Name(),
@@ -272,7 +273,7 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 		}
 	}
 
-	if contains(errMsg, "402") || contains(errMsg, "403") || contains(errMsg, "insufficient") || contains(errMsg, "quota") {
+	if strings.Contains(errMsg, "402") || strings.Contains(errMsg, "403") || strings.Contains(errMsg, "insufficient") || strings.Contains(errMsg, "quota") {
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "payment_required",
@@ -290,20 +291,4 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 		HintMsg:  "请稍后重试，或检查 OpenAI 服务状态",
 		Original: err,
 	}
-}
-
-// contains 检查字符串是否包含子串
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && indexOf(s, substr) >= 0))
-}
-
-// indexOf 返回子串在字符串中的位置
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }

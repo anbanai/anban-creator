@@ -119,6 +119,19 @@ func (p *LocalProvider) GetURL(key string) string {
 	return "/api/v1/files/" + key
 }
 
+// Read reads a file from local storage by key and returns its content.
+func (p *LocalProvider) Read(_ context.Context, key string) ([]byte, error) {
+	destPath, err := p.safePath(key)
+	if err != nil {
+		return nil, fmt.Errorf("invalid key: %w", err)
+	}
+	data, err := os.ReadFile(destPath)
+	if err != nil {
+		return nil, fmt.Errorf("read file %s: %w", destPath, err)
+	}
+	return data, nil
+}
+
 // Delete removes the file from local storage.
 // If the file does not exist, a warning is logged but no error is returned.
 func (p *LocalProvider) Delete(_ context.Context, key string) error {

@@ -135,8 +135,8 @@ func validateOpenAIConfig(apiCfg *config.ImageAPI) error {
 	if apiCfg.BaseURL == "" {
 		return &config.ConfigError{
 			Field:   "ImageAPIBase",
-			Message: "需要配置 API Base URL",
-			HintMsg: "在配置文件中设置 article.image.base_url",
+			Message: "使用 OpenAI 图片服务需要配置 API Base URL",
+			HintMsg: "在配置文件中设置 article.image.base_url，或切换到其他提供者: gemini, openrouter, volcengine",
 		}
 	}
 	return nil

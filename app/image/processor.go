@@ -211,6 +211,12 @@ type BatchImageResult struct {
 // outputPath 非空时保存到目标路径；为空时返回临时文件路径（调用方负责清理）。
 func (p *Processor) processRawResult(result *GenerateResult, outputPath string) (*GenerateOnlyResult, error) {
 	var toClean []string
+	// Ensure temp files are cleaned up even on panic.
+	defer func() {
+		for _, f := range toClean {
+			os.Remove(f)
+		}
+	}()
 
 	// 远程 URL 需要下载，本地路径（Gemini/OpenRouter）直接使用
 	sourcePath := result.URL
@@ -243,28 +249,23 @@ func (p *Processor) processRawResult(result *GenerateResult, outputPath string) 
 	if outputPath != "" {
 		data, err := os.ReadFile(processedPath)
 		if err != nil {
-			for _, f := range toClean {
-				os.Remove(f)
-			}
 			return nil, fmt.Errorf("read processed image: %w", err)
 		}
 		if err := os.WriteFile(outputPath, data, 0644); err != nil {
-			for _, f := range toClean {
-				os.Remove(f)
-			}
 			return nil, fmt.Errorf("save to output %s: %w", outputPath, err)
 		}
-		for _, f := range toClean {
-			os.Remove(f)
-		}
+		// Mark all temps as cleaned since defer will handle it.
+		toClean = nil
 		finalPath = outputPath
 	} else {
-		// 清理中间临时文件，保留最终处理结果（由调用方负责清理）
+		// 保留最终处理结果（由调用方负责清理），清除中间文件。
 		for _, f := range toClean {
 			if f != processedPath {
 				os.Remove(f)
 			}
 		}
+		// Remove final file from toClean so defer won't delete it.
+		toClean = nil
 	}
 
 	return &GenerateOnlyResult{
