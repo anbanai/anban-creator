@@ -17,42 +17,39 @@ import (
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
-// DefaultMaxTurns returns the default max turns for a given task type.
-func DefaultMaxTurns(taskType string) int {
-	switch taskType {
-	case model.ScopeArticle:
-		return 100
-	case model.ScopeXls:
-		return 50
-	case model.ScopeRednote:
-		return 40
-	default:
-		return 40
+// DefaultMaxTurns returns the max turns for a given task type from the config map.
+// Falls back to 40 if the task type is not configured.
+func DefaultMaxTurns(taskType string, maxTurns map[string]int) int {
+	if v, ok := maxTurns[taskType]; ok && v > 0 {
+		return v
 	}
+	return 40
 }
 
 // LocalExecutor runs agent tasks as local Claude CLI subprocesses via the SDK.
 type LocalExecutor struct {
-	logger       *zerolog.Logger
-	imageAPICfg  *srvconfig.ImageAPIConfig
-	claudeEnv    map[string]string
-	pluginDir    string
-	sandbox      bool
-	defaultModel string // configured model; empty means use env vars
+	logger            *zerolog.Logger
+	imageAPICfg       *srvconfig.ImageAPIConfig
+	claudeEnv         map[string]string
+	pluginDir         string
+	sandbox           bool
+	defaultModel      string // configured model; empty means use env vars
+	maxTurnsOverrides map[string]int
 }
 
 // Compile-time interface check.
 var _ TaskExecutor = (*LocalExecutor)(nil)
 
 // NewLocalExecutor creates a new LocalExecutor.
-func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string) *LocalExecutor {
+func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, maxTurnsOverrides map[string]int) *LocalExecutor {
 	return &LocalExecutor{
-		logger:       logger,
-		imageAPICfg:  imageAPICfg,
-		claudeEnv:    claudeEnv,
-		pluginDir:    pluginDir,
-		sandbox:      sandbox,
-		defaultModel: defaultModel,
+		logger:            logger,
+		imageAPICfg:       imageAPICfg,
+		claudeEnv:         claudeEnv,
+		pluginDir:         pluginDir,
+		sandbox:           sandbox,
+		defaultModel:      defaultModel,
+		maxTurnsOverrides: maxTurnsOverrides,
 	}
 }
 
@@ -106,7 +103,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
-		maxTurns = DefaultMaxTurns(opts.Task.Type)
+		maxTurns = DefaultMaxTurns(opts.Task.Type, e.maxTurnsOverrides)
 	}
 
 	// 2. Create workspace directory.

@@ -32,13 +32,14 @@ type UserKeyProvider interface {
 // DockerExecutor runs agent tasks inside Docker containers.
 // Each task gets an isolated container with resource limits and a bind-mounted workspace.
 type DockerExecutor struct {
-	logger       *zerolog.Logger
-	imageAPICfg  *srvconfig.ImageAPIConfig
-	claudeEnv    map[string]string
-	dockerCfg    srvconfig.DockerConfig
-	dockerCLI    *client.Client
-	defaultModel string // configured model; empty means use env vars
-	keyProvider  UserKeyProvider
+	logger           *zerolog.Logger
+	imageAPICfg      *srvconfig.ImageAPIConfig
+	claudeEnv        map[string]string
+	dockerCfg        srvconfig.DockerConfig
+	dockerCLI        *client.Client
+	defaultModel     string // configured model; empty means use env vars
+	keyProvider      UserKeyProvider
+	maxTurnsOverrides map[string]int
 }
 
 // NewDockerExecutor creates a new DockerExecutor.
@@ -50,6 +51,7 @@ func NewDockerExecutor(
 	dockerCfg srvconfig.DockerConfig,
 	defaultModel string,
 	keyProvider UserKeyProvider,
+	maxTurnsOverrides map[string]int,
 ) (*DockerExecutor, error) {
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
 
@@ -79,7 +81,8 @@ func NewDockerExecutor(
 		dockerCfg:    dockerCfg,
 		dockerCLI:    cli,
 		defaultModel: defaultModel,
-		keyProvider:  keyProvider,
+		keyProvider:       keyProvider,
+		maxTurnsOverrides: maxTurnsOverrides,
 	}, nil
 }
 
@@ -100,7 +103,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
-		maxTurns = DefaultMaxTurns(opts.Task.Type)
+		maxTurns = DefaultMaxTurns(opts.Task.Type, e.maxTurnsOverrides)
 	}
 
 	// 2. Create workspace directory on host.

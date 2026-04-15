@@ -232,19 +232,24 @@ func TestTaskTypeToAgent(t *testing.T) {
 }
 
 func TestDefaultMaxTurns(t *testing.T) {
+	maxTurns := map[string]int{
+		"article": 100,
+		"xls":     50,
+		"rednote": 60,
+	}
 	tests := []struct {
 		taskType string
 		want     int
 	}{
 		{model.ScopeArticle, 100},
 		{model.ScopeXls, 50},
-		{model.ScopeRednote, 40},
+		{model.ScopeRednote, 60},
 		{"unknown", 40},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.taskType, func(t *testing.T) {
-			got := DefaultMaxTurns(tt.taskType)
+			got := DefaultMaxTurns(tt.taskType, maxTurns)
 			if got != tt.want {
 				t.Errorf("DefaultMaxTurns(%q) = %d, want %d", tt.taskType, got, tt.want)
 			}

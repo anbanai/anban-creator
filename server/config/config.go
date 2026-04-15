@@ -104,6 +104,7 @@ type ClaudeConfig struct {
 	PluginDir string            `yaml:"plugin_dir"` // Path to the abwriter plugin directory (contains agents/, skills/)
 	Sandbox   bool              `yaml:"sandbox"`    // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker    DockerConfig      `yaml:"docker"`     // Docker executor settings (used when executor=docker)
+	MaxTurns  map[string]int    `yaml:"max_turns"`  // Per-task-type max turns, e.g. {"article": 100, "xls": 50, "rednote": 60}
 }
 
 // DockerConfig holds Docker executor settings for container-based task execution.
@@ -230,6 +231,13 @@ func (c *Config) applyDefaults() {
 	// Claude executor defaults.
 	if c.Claude.Executor == "" {
 		c.Claude.Executor = "local"
+	}
+	if c.Claude.MaxTurns == nil {
+		c.Claude.MaxTurns = map[string]int{
+			"article": 100,
+			"xls":     50,
+			"rednote": 60,
+		}
 	}
 	if c.Claude.Docker.Image == "" {
 		c.Claude.Docker.Image = "abwriter:latest"

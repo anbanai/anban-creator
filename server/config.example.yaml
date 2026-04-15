@@ -133,6 +133,13 @@ claude:
   sandbox: false              # Enable SDK sandbox for agent tasks (local executor only).
                               # Override with ANBAN_SERVER_CLAUDE_SANDBOX=true.
 
+  # Per-task-type max turns for agent execution.
+  # Defaults: article=100, xls=50, rednote=60. Increase if agent hits max_turns errors.
+  max_turns:
+    article: 100
+    xls: 50
+    rednote: 60
+
   # Docker executor settings (used when executor=docker).
   docker:
     image: "abwriter:latest"   # Docker image with Claude CLI + abwriter plugin.
