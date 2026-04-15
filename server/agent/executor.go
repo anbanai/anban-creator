@@ -256,14 +256,41 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 							resultText += "\n"
 						}
 						resultText += b.Text
+						text := b.Text
+						if len(text) > 500 {
+							text = text[:500] + "...(truncated)"
+						}
+						e.logger.Debug().
+							Str("task_id", opts.Task.ID).
+							Str("text", text).
+							Msg("claude assistant text")
 					case *claudecode.ToolUseBlock:
 						toolUseCount++
 						if opts.OnProgress != nil {
+							opts.OnProgress(opts.Task.ID, fmt.Sprintf("Using tool: %s", b.Name))
+						}
+						inputJSON, _ := json.Marshal(b.Input)
+						inputStr := string(inputJSON)
+						if len(inputStr) > 1000 {
+							inputStr = inputStr[:1000] + "...(truncated)"
+						}
+						e.logger.Debug().
+							Str("task_id", opts.Task.ID).
+							Str("tool", b.Name).
+							Str("input", inputStr).
+							Msg("claude tool use")
+					case *claudecode.ToolResultBlock:
+						if b.Content != nil {
+							contentJSON, _ := json.Marshal(b.Content)
+							contentStr := string(contentJSON)
+							if len(contentStr) > 1000 {
+								contentStr = contentStr[:1000] + "...(truncated)"
+							}
 							e.logger.Debug().
 								Str("task_id", opts.Task.ID).
-								Str("tool", b.Name).
-								Msg("agent tool use")
-							opts.OnProgress(opts.Task.ID, fmt.Sprintf("Using tool: %s", b.Name))
+								Str("tool_use_id", b.ToolUseID).
+								Str("content", contentStr).
+								Msg("claude tool result")
 						}
 					}
 				}

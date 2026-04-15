@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -26,10 +28,38 @@ func (w *statusWriter) WriteHeader(code int) {
 }
 
 // mcpLoggingMiddleware wraps an http.Handler to log all MCP requests.
+// For POST requests, it reads and logs the JSON-RPC tool call details.
 func mcpLoggingMiddleware(next http.Handler, zlog *zerolog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: 200}
+
+		// Log tool call details from JSON-RPC request body.
+		if r.Method == http.MethodPost && r.Body != nil && zlog != nil {
+			body, err := io.ReadAll(io.LimitReader(r.Body, 100000))
+			if err == nil && len(body) > 0 {
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				var msg map[string]any
+				if json.Unmarshal(body, &msg) == nil {
+					if method, _ := msg["method"].(string); method == "tools/call" {
+						if params, ok := msg["params"].(map[string]any); ok {
+							toolName, _ := params["name"].(string)
+							argsJSON, _ := json.Marshal(params["arguments"])
+							argsStr := string(argsJSON)
+							if len(argsStr) > 1000 {
+								argsStr = argsStr[:1000] + "...(truncated)"
+							}
+							zlog.Debug().
+								Str("tool", toolName).
+								Str("args", argsStr).
+								Str("remote_addr", r.RemoteAddr).
+								Msg("mcp tool call")
+						}
+					}
+				}
+			}
+		}
+
 		next.ServeHTTP(sw, r)
 		if zlog != nil {
 			zlog.Info().

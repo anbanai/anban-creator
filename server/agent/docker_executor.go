@@ -347,6 +347,11 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	// Ensure all stdout frames have been captured before parsing.
 	logWg.Wait()
 
+	// Log all conversation content from stdout at debug level.
+	if stdoutBuf.Len() > 0 {
+		logDockerConversation(stdoutBuf.String(), e.logger, opts.Task.ID)
+	}
+
 	// Parse JSON output from stdout to extract usage/cost data.
 	result := &ExecutionResult{Success: true, WorkDir: workDir}
 	if stdoutBuf.Len() > 0 {
@@ -431,6 +436,109 @@ func (e *DockerExecutor) streamAndCaptureLogs(reader io.ReadCloser, opts *Execut
 				Str("task_id", opts.Task.ID).
 				Str("container_stderr", frame).
 				Msg("claude code stderr")
+		}
+	}
+}
+
+// logDockerConversation parses all JSON lines from Claude CLI stdout and logs
+// each assistant message, tool call, and tool result at debug level.
+func logDockerConversation(stdout string, logger *zerolog.Logger, taskID string) {
+	type assistantContent struct {
+		Type  string `json:"type"`
+		Text  string `json:"text"`
+		Name  string `json:"name"`
+		ID    string `json:"id"`
+		Input any    `json:"input"`
+	}
+	type assistantMsg struct {
+		Type    string             `json:"type"`
+		Message struct {
+			Content []assistantContent `json:"content"`
+		} `json:"message"`
+	}
+
+	lines := bytes.Split([]byte(stdout), []byte("\n"))
+	turnNum := 0
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(line, &raw); err != nil {
+			continue
+		}
+		msgType, _ := raw["type"].(string)
+		switch msgType {
+		case "assistant":
+			var msg assistantMsg
+			if err := json.Unmarshal(line, &msg); err != nil {
+				continue
+			}
+			turnNum++
+			for _, block := range msg.Message.Content {
+				switch block.Type {
+				case "text":
+					text := block.Text
+					if len(text) > 500 {
+						text = text[:500] + "...(truncated)"
+					}
+					logger.Debug().
+						Str("task_id", taskID).
+						Int("turn", turnNum).
+						Str("text", text).
+						Msg("claude assistant text")
+				case "tool_use":
+					inputJSON, _ := json.Marshal(block.Input)
+					inputStr := string(inputJSON)
+					if len(inputStr) > 1000 {
+						inputStr = inputStr[:1000] + "...(truncated)"
+					}
+					logger.Debug().
+						Str("task_id", taskID).
+						Int("turn", turnNum).
+						Str("tool", block.Name).
+						Str("input", inputStr).
+						Msg("claude tool use")
+				case "tool_result":
+					// Tool results come as part of user messages in some formats,
+					// but can also appear in assistant messages.
+					contentJSON, _ := json.Marshal(block)
+					contentStr := string(contentJSON)
+					if len(contentStr) > 1000 {
+						contentStr = contentStr[:1000] + "...(truncated)"
+					}
+					logger.Debug().
+						Str("task_id", taskID).
+						Int("turn", turnNum).
+						Str("content", contentStr).
+						Msg("claude tool result")
+				}
+			}
+		case "user":
+			// User messages may contain tool results embedded in content.
+			if rawContent, ok := raw["message"].(map[string]any); ok {
+				if arr, ok := rawContent["content"].([]any); ok {
+					for _, item := range arr {
+						b, err := json.Marshal(item)
+						if err != nil {
+							continue
+						}
+						var block assistantContent
+						if json.Unmarshal(b, &block) == nil && block.Type == "tool_result" {
+							contentJSON := string(b)
+							if len(contentJSON) > 1000 {
+								contentJSON = contentJSON[:1000] + "...(truncated)"
+							}
+							logger.Debug().
+								Str("task_id", taskID).
+								Str("tool_use_id", block.ID).
+								Str("content", contentJSON).
+								Msg("claude tool result")
+						}
+					}
+				}
+			}
 		}
 	}
 }
