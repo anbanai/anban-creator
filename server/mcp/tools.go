@@ -13,10 +13,13 @@ import (
 
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ChannelSvc *service.ChannelService
-	TaskSvc    *service.TaskService
-	CreditSvc  *service.CreditService
-	PlanSvc    *service.PlanService
+	ChannelSvc    *service.ChannelService
+	TaskSvc       *service.TaskService
+	CreditSvc     *service.CreditService
+	PlanSvc       *service.PlanService
+	ImageSvc      *service.ImageService
+	WritingSvc    *service.WritingService
+	PublishingSvc *service.PublishingService
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -25,6 +28,9 @@ func RegisterTools(server *mcp.Server) {
 	registerTaskTools(server)
 	registerCreditTools(server)
 	registerPlanTools(server)
+	registerImageTools(server)
+	registerWritingTools(server)
+	registerPublishingTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.

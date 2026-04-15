@@ -118,9 +118,10 @@ type DockerConfig struct {
 
 // CreditsConfig holds credits/points system configuration.
 type CreditsConfig struct {
-	DailySignIn int            `yaml:"daily_sign_in"` // credits awarded per daily sign-in (default 1024)
-	TaskCosts   map[string]int `yaml:"task_costs"`    // per-task-type costs, e.g. {"article": 500, "xls": 400, "rednote": 400}
-	AdminAPIKey string         `yaml:"admin_api_key"` // API key for admin credit grant endpoint
+	DailySignIn    int            `yaml:"daily_sign_in"`     // credits awarded per daily sign-in (default 1024)
+	TaskCosts      map[string]int `yaml:"task_costs"`        // per-task-type costs, e.g. {"article": 500, "xls": 400, "rednote": 400}
+	OperationCosts map[string]int `yaml:"operation_costs"`   // per-operation costs for MCP tools, e.g. {"image_gen": 10, "article_write": 50}
+	AdminAPIKey    string         `yaml:"admin_api_key"`     // API key for admin credit grant endpoint
 }
 
 // CORSConfig holds Cross-Origin Resource Sharing configuration.
@@ -220,6 +221,18 @@ func (c *Config) applyDefaults() {
 			"article": 500,
 			"xls":     400,
 			"rednote": 400,
+		}
+	}
+	if c.Credits.OperationCosts == nil {
+		c.Credits.OperationCosts = map[string]int{
+			"image_gen":      10,
+			"image_upload":   5,
+			"article_write":  50,
+			"convert":        20,
+			"humanize":       15,
+			"topic_research": 10,
+			"seo":            10,
+			"draft_publish":  5,
 		}
 	}
 

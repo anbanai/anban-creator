@@ -22,6 +22,8 @@ skills:
 maxTurns: 20
 ---
 
+> **MCP 优先模式**：当 anbanwriter MCP 服务器可用时，优先使用 MCP 工具（`generate_image`、`generate_batch_images`、`upload_image`）代替 `abwriter` CLI 命令。各 Skill 已包含 MCP/CLI 映射。当 MCP 不可用时，自动回退。
+
 # 小红书图文全自动创作引擎
 
 ## 角色

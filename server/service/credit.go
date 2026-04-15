@@ -280,3 +280,53 @@ func (s *CreditService) TaskCost(taskType string) (int, bool) {
 	cost, ok := s.cfg.TaskCosts[taskType]
 	return cost, ok
 }
+
+var (
+	ErrUnknownOperation = errors.New("unknown operation type for credit costing")
+)
+
+// OperationCost returns the credit cost for a per-operation MCP tool call.
+func (s *CreditService) OperationCost(opType string) (int, bool) {
+	cost, ok := s.cfg.OperationCosts[opType]
+	return cost, ok
+}
+
+// DeductForOperation deducts credits for a single MCP tool operation (e.g. image_gen, article_write).
+func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType string, count int) (int, error) {
+	cost, ok := s.cfg.OperationCosts[opType]
+	if !ok {
+		return 0, ErrUnknownOperation
+	}
+	totalCost := cost * count
+
+	var newBalance int
+	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		var ok bool
+		var err error
+		newBalance, ok, err = txRepo.Users().DeductCredits(ctx, userID, totalCost)
+		if err != nil {
+			return fmt.Errorf("deduct credits: %w", err)
+		}
+		if !ok {
+			return ErrInsufficientCredits
+		}
+
+		tx := &model.CreditTransaction{
+			UserID:      userID,
+			Type:        opType,
+			Amount:      -totalCost,
+			BalanceAfter: newBalance,
+			Description: fmt.Sprintf("操作扣费 (%s) x%d -%d", opType, count, totalCost),
+		}
+		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
+			return fmt.Errorf("create deduction transaction: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	s.logger.Info().Str("user_id", userID).Str("op_type", opType).Int("count", count).Int("cost", totalCost).Int("balance", newBalance).Msg("credits deducted for operation")
+	return newBalance, nil
+}

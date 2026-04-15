@@ -5,6 +5,21 @@ description: Manages images for WeChat article (公众号图文) content includi
 
 # 公众号图文图片管理
 
+## 运行模式
+
+当 anbanwriter MCP 服务器可用时（检查 MCP 工具列表），使用 MCP 工具代替 CLI 命令：
+
+| CLI 命令 | MCP 工具 |
+|----------|----------|
+| `abwriter image generate "{prompt}" --mode article -o {path}` | `generate_image` (channel_id, prompt, image_type="cover"或"content", output_path) |
+| `abwriter image batch {file} --mode article` | `generate_batch_images` (channel_id, prompt, count, output_dir) |
+| `abwriter image upload {file}` | `upload_image` (channel_id, file_path) |
+| `abwriter image compress {file}` | `compress_image` (file_path) |
+
+当 MCP 不可用时，回退到 CLI 命令。
+
+---
+
 ## 三种使用场景
 
 1. **文章内嵌图片**：Markdown 中用 `__generate:prompt__` 语法，批量提取并生成

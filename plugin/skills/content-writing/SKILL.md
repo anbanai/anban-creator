@@ -5,6 +5,20 @@ description: Writes articles with style guidance, removes AI traces, converts Ma
 
 # 微信公众号内容写作知识库
 
+## 运行模式
+
+当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
+
+| 功能 | MCP 工具 | 说明 |
+|------|----------|------|
+| AI 写作 | `write_article` | server 端调用 LLM，按写作风格生成文章 |
+| Markdown 转 HTML | `convert_markdown` | server 端调用 LLM 转换 |
+| 去AI痕迹 | `humanize_article` | server 端调用 LLM 去痕 |
+
+当 MCP 不可用时，由 Agent 直接使用 LLM 能力写作，再用 `abwriter convert` 转换。
+
+---
+
 ## 写作风格
 
 内置风格定义文件位于 `writers/` 目录：

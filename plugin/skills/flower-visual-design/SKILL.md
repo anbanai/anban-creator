@@ -5,6 +5,19 @@ description: Generates flower arrangement image series with sequential reference
 
 # 花卉图片视觉一致性生成
 
+## 运行模式
+
+当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
+
+| CLI 命令 | MCP 工具 |
+|----------|----------|
+| `abwriter image generate "{prompt}" --mode flower -o {path}` | `generate_image` (channel_id, prompt, image_type="content", output_path) |
+| `abwriter image generate "{prompt}" --mode flower --count N -o {dir}` | `generate_batch_images` (channel_id, prompt, count, output_dir) |
+
+当 MCP 不可用时，回退到 CLI 命令。
+
+---
+
 ## 核心 Gotcha
 
 花卉图片系列中每张花的 prompt 不同（不同花种），因此**不能用 `--count` 批量模式**（该模式适用于同一 prompt 的多张变体）。必须逐张生成，但通过 `--ref` 参考链保持风格一致。

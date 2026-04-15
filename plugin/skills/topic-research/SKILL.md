@@ -5,6 +5,18 @@ description: Researches topics, scores engagement potential, and generates conte
 
 # 微信公众号选题分析工具
 
+## 运行模式
+
+当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
+
+| CLI 命令 | MCP 工具 |
+|----------|----------|
+| `abwriter topics ...` | `research_topics` (channel_id, keywords?, domain?, count?) |
+
+当 MCP 不可用时，回退到 CLI 命令。
+
+---
+
 ## 核心功能
 
 ### 0. 查看已有内容（选题前必做）

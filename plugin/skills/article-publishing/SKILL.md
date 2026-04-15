@@ -5,6 +5,19 @@ description: Creates and manages WeChat news article drafts with HTML formatting
 
 # 微信公众号图文文章发布
 
+## 运行模式
+
+当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
+
+| CLI 命令 | MCP 工具 |
+|----------|----------|
+| `abwriter image upload {file}` | `upload_image` (channel_id, file_path) |
+| `abwriter draft article {json}` | `publish_draft` (channel_id, articles) |
+
+当 MCP 不可用时，回退到 CLI 命令。
+
+---
+
 适用于：带 HTML 排版的长文、深度文章。
 
 ## 草稿管理

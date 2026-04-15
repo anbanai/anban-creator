@@ -59,3 +59,15 @@ const (
 	CreditTypeTaskRefund = "task_refund"
 	CreditTypeAdminGrant = "admin_grant"
 )
+
+// Per-operation credit type constants (for MCP tool billing).
+const (
+	CreditTypeImageGen      = "image_gen"
+	CreditTypeImageUpload   = "image_upload"
+	CreditTypeArticleWrite  = "article_write"
+	CreditTypeConvert       = "convert"
+	CreditTypeHumanize      = "humanize"
+	CreditTypeTopicResearch = "topic_research"
+	CreditTypeSEO           = "seo"
+	CreditTypeDraftPublish  = "draft_publish"
+)

@@ -209,14 +209,47 @@ func main() {
 	// 14.1. Create MCP handler (using official MCP Go SDK).
 	var mcpHandler http.Handler
 	if channelSvc != nil && taskSvc != nil && creditSvc != nil && planSvc != nil {
+		// Create AI operation services for MCP tools.
+		var imageSvc *service.ImageService
+		var writingSvc *service.WritingService
+		var publishingSvc *service.PublishingService
+
+		if store != nil {
+			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, log)
+		}
+		if repo != nil && creditSvc != nil {
+			// Create LLM client from Claude env config for writing operations.
+			llmBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
+			llmAPIKey := os.Getenv("ANTHROPIC_AUTH_TOKEN")
+			llmModel := cfg.Claude.Model
+			if llmModel == "" {
+				llmModel = os.Getenv("ANTHROPIC_MODEL")
+			}
+			if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
+				llmClient := service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel)
+				writingSvc = service.NewWritingService(repo, creditSvc, llmClient, log)
+			} else {
+				log.Warn().Msg("LLM client not configured (missing ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
+			}
+			publishingSvc = service.NewPublishingService(repo, creditSvc, log)
+		}
+
 		mcp.SetServices(&mcp.Services{
-			ChannelSvc: channelSvc,
-			TaskSvc:    taskSvc,
-			CreditSvc:  creditSvc,
-			PlanSvc:    planSvc,
+			ChannelSvc:    channelSvc,
+			TaskSvc:       taskSvc,
+			CreditSvc:     creditSvc,
+			PlanSvc:       planSvc,
+			ImageSvc:      imageSvc,
+			WritingSvc:    writingSvc,
+			PublishingSvc: publishingSvc,
 		})
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
-		log.Info().Bool("mcp_static_key_set", cfg.MCP.APIKey != "").Msg("MCP handler initialized with tools (official SDK)")
+		log.Info().
+			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
+			Bool("image_tools", imageSvc != nil).
+			Bool("writing_tools", writingSvc != nil).
+			Bool("publishing_tools", publishingSvc != nil).
+			Msg("MCP handler initialized with tools (official SDK)")
 	} else {
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")

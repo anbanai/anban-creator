@@ -5,6 +5,19 @@ description: Creates and manages WeChat Xiaolvshu (newspic) image post drafts wi
 
 # 微信公众号小绿书发布
 
+## 运行模式
+
+当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
+
+| CLI 命令 | MCP 工具 |
+|----------|----------|
+| `abwriter image upload {file}` | `upload_image` (channel_id, file_path) |
+| `abwriter draft xls ...` | `publish_xls` (channel_id, title, content, images) |
+
+当 MCP 不可用时，回退到 CLI 命令。
+
+---
+
 适用于：纯图片帖子、旅行图集、产品展示，最多 20 张图片。内容为**纯文本**（不支持 HTML）。
 
 ## 草稿管理

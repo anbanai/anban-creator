@@ -5,6 +5,20 @@ description: Generates cover and content images for WeChat Xiaolvshu (小绿书/
 
 # 小绿书图片生成
 
+## 运行模式
+
+当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
+
+| CLI 命令 | MCP 工具 |
+|----------|----------|
+| `abwriter image generate "{prompt}" --mode xls --cover -o {path}` | `generate_image` (channel_id, prompt, image_type="cover", output_path) |
+| `abwriter image generate "{prompt}" --mode xls --count N -o {dir}` | `generate_batch_images` (channel_id, prompt, count, output_dir) |
+| `abwriter image upload {file}` | `upload_image` (channel_id, file_path) |
+
+当 MCP 不可用时，回退到 CLI 命令。
+
+---
+
 ## 平台 Gotcha
 
 小绿书（微信图片帖）最多 20 张图片，发布后图片顺序固定。封面是用户看到的第一张，内容图靠滑动浏览。与小红书相比：微信用户相对成熟，设计感可以更强，但仍需保持视觉一致性。

@@ -5,6 +5,18 @@ description: Optimizes titles, keywords, and article digests for WeChat search r
 
 # 微信公众号 SEO 优化
 
+## 运行模式
+
+当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
+
+| CLI 命令 | MCP 工具 |
+|----------|----------|
+| `abwriter seo ...` | `optimize_seo` (channel_id, content, title, keywords?) |
+
+当 MCP 不可用时，回退到 CLI 命令。
+
+---
+
 ## 优化流程
 
 1. **关键词研究** — 核心词 + 长尾词 + 语义词

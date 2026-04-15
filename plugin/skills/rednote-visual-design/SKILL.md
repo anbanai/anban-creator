@@ -5,6 +5,20 @@ description: Generates cover and content images for Xiaohongshu (小红书) post
 
 # 小红书图片生成
 
+## 运行模式
+
+当 anbanwriter MCP 服务器可用时，使用 MCP 工具：
+
+| CLI 命令 | MCP 工具 |
+|----------|----------|
+| `abwriter image generate "{prompt}" --mode xhs --cover -o {path}` | `generate_image` (channel_id, prompt, image_type="cover", output_path) |
+| `abwriter image generate "{prompt}" --mode xhs --count N -o {dir}` | `generate_batch_images` (channel_id, prompt, count, output_dir) |
+| `abwriter image upload {file}` | `upload_image` (channel_id, file_path) |
+
+当 MCP 不可用时，回退到 CLI 命令。
+
+---
+
 ## 平台 Gotcha
 
 小红书图片是 **3:4 竖版**，强视觉驱动。封面决定点击率，内容图决定完读率，尾图决定互动率。三类图片目标不同，prompt 构建方式也不同。
