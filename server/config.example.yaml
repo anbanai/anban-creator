@@ -39,7 +39,7 @@ redis:
 # ---------------------------------------------------------------------------
 jwt:
   secret_key: "" # HMAC signing key. MUST be set in production.
-                  # Generate with: openssl rand -hex 32
+  # Generate with: openssl rand -hex 32
   access_expiry: "24h" # Access token validity duration.
   refresh_expiry: "168h" # Refresh token validity duration (7 days).
 
@@ -125,13 +125,13 @@ cors:
 # ---------------------------------------------------------------------------
 claude:
   executor: local # "local" (subprocess) or "docker" (container).
-                     # Override with ANBAN_SERVER_CLAUDE_EXECUTOR.
+  # Override with ANBAN_SERVER_CLAUDE_EXECUTOR.
   plugin_dir: "" # Path to the abwriter plugin directory (local executor only).
-                  # Must contain agents/ and skills/.
-                  # Override with ANBAN_SERVER_CLAUDE_PLUGIN_DIR.
-                  # In k8s/Docker: typically "/app".
+  # Auto-detected by searching for agents/ in parent directories.
+  # Override with ANBAN_SERVER_CLAUDE_PLUGIN_DIR.
+  # In k8s/Docker: typically "/app" or "/anbanai".
   sandbox: false # Enable SDK sandbox for agent tasks (local executor only).
-                  # Override with ANBAN_SERVER_CLAUDE_SANDBOX=true.
+  # Override with ANBAN_SERVER_CLAUDE_SANDBOX=true.
 
   # Per-task-type max turns for agent execution.
   # Defaults: article=100, xls=50, rednote=60. Increase if agent hits max_turns errors.
@@ -143,6 +143,8 @@ claude:
   # Docker executor settings (used when executor=docker).
   docker:
     image: "abwriter:latest" # Docker image with Claude CLI + abwriter plugin.
+    container_name: "abwriter" # Persistent container to reuse via docker exec (empty = create+destroy per task).
+    workspace_dir: "./data/workspace" # Host-side workspace base dir (must match docker-compose volume mount source).
     cpu_cores: 2 # CPU limit per task container.
     memory_mb: 4096 # Memory limit per task container (MB).
     timeout_sec: 1800 # Container execution timeout (seconds, default 30 min).

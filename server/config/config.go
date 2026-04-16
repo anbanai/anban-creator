@@ -115,6 +115,7 @@ type DockerConfig struct {
 	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
 	MCPBaseURL    string `yaml:"mcp_base_url"`   // Base URL for MCP server reachable from containers (default: "http://host.docker.internal:{port}")
 	ContainerName string `yaml:"container_name"` // Name of a persistent container to reuse via docker exec (empty = create+destroy per task)
+	WorkspaceDir  string `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
 }
 
 // CreditsConfig holds credits/points system configuration.
@@ -286,6 +287,12 @@ func (c *Config) resolvePaths() {
 			c.Claude.PluginDir = abs
 		}
 	}
+	// Resolve docker workspace_dir to absolute path if relative.
+	if c.Claude.Docker.WorkspaceDir != "" && !filepath.IsAbs(c.Claude.Docker.WorkspaceDir) {
+		if abs, err := filepath.Abs(c.Claude.Docker.WorkspaceDir); err == nil {
+			c.Claude.Docker.WorkspaceDir = abs
+		}
+	}
 }
 
 // applyEnvOverrides reads ANBAN_SERVER_ prefixed environment variables and
@@ -420,6 +427,9 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "CLAUDE_DOCKER_CONTAINER_NAME"); v != "" {
 		c.Claude.Docker.ContainerName = v
+	}
+	if v := os.Getenv(prefix + "CLAUDE_DOCKER_WORKSPACE_DIR"); v != "" {
+		c.Claude.Docker.WorkspaceDir = v
 	}
 
 	if v := os.Getenv(prefix + "CREDITS_ADMIN_API_KEY"); v != "" {

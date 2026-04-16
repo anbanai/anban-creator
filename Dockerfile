@@ -21,17 +21,19 @@ RUN npm install -g @anthropic-ai/claude-code
 COPY --from=builder /abwriter-server /app/abwriter-server
 
 # Install the abwriter plugin (agents, skills, hooks, manifest, themes, writers).
-# NOTE: plugin/.mcp.json is intentionally excluded — Docker containers receive
-# their MCP config from the executor via .claude/.mcp.json in the workspace.
-COPY plugin/.claude-plugin/ /app/.claude-plugin/
-COPY plugin/agents/         /app/agents/
-COPY plugin/skills/         /app/skills/
-COPY plugin/hooks/          /app/hooks/
-COPY plugin/themes/         /app/themes/
-COPY plugin/writers/        /app/writers/
+COPY plugin/.claude-plugin/ /anbanai/.claude-plugin/
+COPY plugin/.mcp.json       /anbanai/.mcp.json
+COPY plugin/agents/         /anbanai/agents/
+COPY plugin/skills/         /anbanai/skills/
+COPY plugin/hooks/          /anbanai/hooks/
+COPY plugin/themes/         /anbanai/themes/
+COPY plugin/writers/        /anbanai/writers/
 
-# Set environment so Claude Code discovers the plugin.
-ENV CLAUDE_PLUGIN_ROOT=/app
+# Install plugin as node user so registration lands in /home/node/.claude/
+USER node
+RUN claude plugin marketplace add /anbanai && \
+    claude plugin install --scope user anbanwriter@anbanai
+USER root
 
 WORKDIR /app
 CMD ["/app/abwriter-server"]

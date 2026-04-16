@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -381,7 +382,7 @@ func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
 	s.logger.Info().Int("count", len(tasks)).Msg("found tasks eligible for cleanup")
 
 	for _, task := range tasks {
-		workDir := fmt.Sprintf("/tmp/abwriter/%s", task.ID)
+		workDir := filepath.Join(os.TempDir(), "abwriter", task.ID)
 		if err := os.RemoveAll(workDir); err != nil {
 			s.logger.Warn().Err(err).Str("task_id", task.ID).Str("path", workDir).Msg("failed to remove workspace directory")
 			continue

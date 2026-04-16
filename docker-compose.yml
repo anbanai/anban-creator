@@ -38,29 +38,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # server:
-  #   build: .
-  #   image: abwriter:latest
-  #   container_name: abwriter-server
-  #   restart: unless-stopped
-  #   ports:
-  #     - "8080:8080"
-  #   volumes:
-  #     - /var/run/docker.sock:/var/run/docker.sock
-  #     - ./data/workspace:/tmp/abwriter
-  #   networks:
-  #     - abwriter-network
-  #   depends_on:
-  #     mysql:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   environment:
-  #     - ANBAN_SERVER_DATABASE_DSN=root:${MYSQL_ROOT_PASSWORD:-abwriter_dev}@tcp(mysql:3306)/abwriter?charset=utf8mb4&parseTime=true&loc=Local
-  #     - ANBAN_SERVER_REDIS_ADDR=redis:6379
-  #     - ANBAN_SERVER_JWT_SECRET_KEY=${JWT_SECRET_KEY:-abwriter_dev_secret}
-  #     - ANBAN_SERVER_CLAUDE_EXECUTOR=docker
-  #     - ANBAN_SERVER_CLAUDE_DOCKER_IMAGE=abwriter:latest
+  abwriter:
+    build: .
+    image: abwriter:latest
+    container_name: abwriter
+    restart: unless-stopped
+    volumes:
+      - ./data/workspace:/workspace
+    networks:
+      - abwriter-network
+    entrypoint: ["tail", "-f", "/dev/null"]
 
 networks:
   abwriter-network:

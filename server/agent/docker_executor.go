@@ -34,13 +34,13 @@ type UserKeyProvider interface {
 // DockerExecutor runs agent tasks inside Docker containers.
 // Each task gets an isolated container with resource limits and a bind-mounted workspace.
 type DockerExecutor struct {
-	logger           *zerolog.Logger
-	imageAPICfg      *srvconfig.ImageAPIConfig
-	claudeEnv        map[string]string
-	dockerCfg        srvconfig.DockerConfig
-	dockerCLI        *client.Client
-	defaultModel     string // configured model; empty means use env vars
-	keyProvider      UserKeyProvider
+	logger            *zerolog.Logger
+	imageAPICfg       *srvconfig.ImageAPIConfig
+	claudeEnv         map[string]string
+	dockerCfg         srvconfig.DockerConfig
+	dockerCLI         *client.Client
+	defaultModel      string // configured model; empty means use env vars
+	keyProvider       UserKeyProvider
 	maxTurnsOverrides map[string]int
 }
 
@@ -77,12 +77,12 @@ func NewDockerExecutor(
 	}
 
 	return &DockerExecutor{
-		logger:       logger,
-		imageAPICfg:  imageAPICfg,
-		claudeEnv:    claudeEnv,
-		dockerCfg:    dockerCfg,
-		dockerCLI:    cli,
-		defaultModel: defaultModel,
+		logger:            logger,
+		imageAPICfg:       imageAPICfg,
+		claudeEnv:         claudeEnv,
+		dockerCfg:         dockerCfg,
+		dockerCLI:         cli,
+		defaultModel:      defaultModel,
 		keyProvider:       keyProvider,
 		maxTurnsOverrides: maxTurnsOverrides,
 	}, nil
@@ -110,7 +110,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 
 	// 2. Create workspace directory on host.
 	// Use 0777 so the container's non-root user (node, uid 1000) can write to it.
-	workDir := filepath.Join(os.TempDir(), "abwriter", opts.Task.ID)
+	var workDir string
+	if e.dockerCfg.ContainerName != "" && e.dockerCfg.WorkspaceDir != "" {
+		workDir = filepath.Join(e.dockerCfg.WorkspaceDir, opts.Task.ID)
+	} else {
+		workDir = filepath.Join(os.TempDir(), "abwriter", opts.Task.ID)
+	}
 	if err := os.MkdirAll(workDir, 0777); err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
@@ -179,17 +184,6 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 			Msg("using per-user API key for MCP")
 	}
 
-	// Write MCP config so the agent can connect to the server's MCP endpoint.
-	if e.dockerCfg.MCPBaseURL != "" && mcpAPIKey != "" {
-		if err := writeMCPConfig(workDir, e.dockerCfg.MCPBaseURL, mcpAPIKey); err != nil {
-			return nil, fmt.Errorf("write mcp config: %w", err)
-		}
-		e.logger.Info().
-			Str("task_id", opts.Task.ID).
-			Str("mcp_url", e.dockerCfg.MCPBaseURL+"/mcp").
-			Msg("MCP config written to container workspace")
-	}
-
 	// 4. Build container command.
 	userPrompt := opts.Task.Topic
 	if userPrompt == "" {
@@ -200,7 +194,6 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 
 	cmd := []string{
 		"claude",
-		"--plugin-dir", "/app",
 		"--agent", agentFlag,
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--permission-mode", "bypassPermissions",
@@ -305,7 +298,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 }
 
 // executeViaExec runs the claude command inside a persistent container using docker exec.
-// The container must already be running and have /tmp/abwriter bind-mounted as /workspace.
+// The container must already be running and have the workspace dir bind-mounted as /workspace.
 // execResult holds the output of a container execution.
 type execResult struct {
 	stdout bytes.Buffer
@@ -331,8 +324,8 @@ func (e *DockerExecutor) executeViaExec(ctx context.Context, opts *ExecutionOpti
 	}
 
 	// Use task-specific subdirectory inside the container.
-	// The persistent container mounts /tmp/abwriter -> /workspace,
-	// so /workspace/{taskID} maps to /tmp/abwriter/{taskID} on the host.
+	// The persistent container mounts {workspace_dir} -> /workspace,
+	// so /workspace/{taskID} maps to {workspace_dir}/{taskID} on the host.
 	workDirInContainer := "/workspace/" + taskID
 
 	e.logger.Info().
@@ -584,7 +577,7 @@ func logDockerConversation(stdout string, logger *zerolog.Logger, taskID string)
 		Input any    `json:"input"`
 	}
 	type assistantMsg struct {
-		Type    string             `json:"type"`
+		Type    string `json:"type"`
 		Message struct {
 			Content []assistantContent `json:"content"`
 		} `json:"message"`
@@ -805,34 +798,6 @@ func detectDockerHost() string {
 		}
 	}
 	return ""
-}
-
-// writeMCPConfig writes a .mcp.json file inside the .claude/ subdirectory so the
-// Claude CLI running inside the container can connect to the server's MCP endpoint.
-// Placing it inside .claude/ prevents it from being uploaded as a task file (the
-// .claude directory is already skipped during file upload).
-func writeMCPConfig(workDir, baseURL, apiKey string) error {
-	claudeDir := filepath.Join(workDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
-		return fmt.Errorf("create .claude dir: %w", err)
-	}
-
-	mcpConfig := map[string]any{
-		"mcpServers": map[string]any{
-			"anbanwriter": map[string]any{
-				"type": "http",
-				"url":  baseURL + "/mcp",
-				"headers": map[string]string{
-					"Authorization": "Bearer " + apiKey,
-				},
-			},
-		},
-	}
-	data, err := json.MarshalIndent(mcpConfig, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), data, 0644)
 }
 
 // isKnownClaudeModel returns true for Claude model identifiers.
