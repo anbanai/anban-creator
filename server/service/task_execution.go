@@ -23,6 +23,19 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	s.logger.Info().Str("task_id", taskID).Msg("starting task execution")
 
+	// Create per-task log writer if task_log_dir is configured.
+	var taskLogWriter *agent.TaskLogWriter
+	if s.taskLogDir != "" {
+		logPath := filepath.Join(s.taskLogDir, taskID+".log")
+		var err error
+		taskLogWriter, err = agent.NewTaskLogWriter(logPath, taskID)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to create task log writer, continuing without log file")
+		} else {
+			defer taskLogWriter.Close()
+		}
+	}
+
 	// Re-read task to check if it was cancelled while waiting in queue.
 	currentTask, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -62,8 +75,9 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	// Execute via agent.
 	result, execErr := s.executor.Execute(ctx, &agent.ExecutionOptions{
-		Task:    task,
-		Channel: channel,
+		Task:      task,
+		Channel:   channel,
+		LogWriter: taskLogWriter,
 		OnProgress: func(id string, message string) {
 			current, err := s.repo.Tasks().FindByID(ctx, id)
 			if err != nil {

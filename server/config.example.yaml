@@ -149,6 +149,10 @@ claude:
     memory_mb: 4096 # Memory limit per task container (MB).
     timeout_sec: 1800 # Container execution timeout (seconds, default 30 min).
 
+  # Per-task agent execution log directory. Each task gets a {task_id}.log file.
+  # Empty = disabled (no log files). Override with ANBAN_SERVER_CLAUDE_TASK_LOG_DIR.
+  task_log_dir: "./data/logs/tasks"
+
   env:
     ANTHROPIC_AUTH_TOKEN: "" # Auth token for API access
     ANTHROPIC_BASE_URL: "" # Custom API endpoint (e.g. for compatible providers)

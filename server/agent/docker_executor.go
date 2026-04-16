@@ -132,6 +132,11 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 	logEvt.Msg("starting docker agent execution")
 
+	// 2.5 Write task log header.
+	if opts.LogWriter != nil {
+		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Topic, model, maxTurns)
+	}
+
 	// 3. Write channel config to workspace settings.json.
 	if opts.Channel != nil {
 		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg)
@@ -233,6 +238,10 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 
 	// Handle execution failures.
 	if execRes.err != "" {
+		if opts.LogWriter != nil {
+			opts.LogWriter.WriteError(execRes.err)
+			opts.LogWriter.WriteResult(false, 0, 0, nil, nil)
+		}
 		return &ExecutionResult{
 			Success: false,
 			Error:   execRes.err,
@@ -250,12 +259,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if execRes.stdout.Len() > 0 {
-		logDockerConversation(execRes.stdout.String(), e.logger, opts.Task.ID)
+		logDockerConversation(execRes.stdout.String(), e.logger, opts.Task.ID, opts.LogWriter)
 	}
 
 	result := &ExecutionResult{Success: true, WorkDir: workDir}
 	if execRes.stdout.Len() > 0 {
 		parseDockerJSONResult(execRes.stdout.String(), result, e.logger, opts.Task.ID)
+	}
+
+	if opts.LogWriter != nil {
+		opts.LogWriter.WriteResult(true, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
 	}
 
 	if result.WorkDir != "" {
@@ -553,6 +566,10 @@ func (e *DockerExecutor) streamAndCaptureLogs(reader io.ReadCloser, opts *Execut
 			if opts.OnProgress != nil {
 				opts.OnProgress(opts.Task.ID, frame)
 			}
+			// Write raw stdout to task log for real-time visibility.
+			if opts.LogWriter != nil {
+				opts.LogWriter.WriteRawStdout(frame)
+			}
 		} else {
 			// stderr — forward to progress log AND server log for diagnostics.
 			if opts.OnProgress != nil {
@@ -562,13 +579,16 @@ func (e *DockerExecutor) streamAndCaptureLogs(reader io.ReadCloser, opts *Execut
 				Str("task_id", opts.Task.ID).
 				Str("container_stderr", frame).
 				Msg("claude code stderr")
+			if opts.LogWriter != nil {
+				opts.LogWriter.WriteStderr(frame)
+			}
 		}
 	}
 }
 
 // logDockerConversation parses all JSON lines from Claude CLI stdout and logs
 // each assistant message, tool call, and tool result at debug level.
-func logDockerConversation(stdout string, logger *zerolog.Logger, taskID string) {
+func logDockerConversation(stdout string, logger *zerolog.Logger, taskID string, lw *TaskLogWriter) {
 	type assistantContent struct {
 		Type  string `json:"type"`
 		Text  string `json:"text"`
@@ -614,6 +634,9 @@ func logDockerConversation(stdout string, logger *zerolog.Logger, taskID string)
 						Int("turn", turnNum).
 						Str("text", text).
 						Msg("claude assistant text")
+					if lw != nil {
+						lw.WriteAssistantText(turnNum, block.Text)
+					}
 				case "tool_use":
 					inputJSON, _ := json.Marshal(block.Input)
 					inputStr := string(inputJSON)
@@ -626,6 +649,9 @@ func logDockerConversation(stdout string, logger *zerolog.Logger, taskID string)
 						Str("tool", block.Name).
 						Str("input", inputStr).
 						Msg("claude tool use")
+					if lw != nil {
+						lw.WriteToolUse(turnNum, block.Name, string(inputJSON))
+					}
 				case "tool_result":
 					// Tool results come as part of user messages in some formats,
 					// but can also appear in assistant messages.
@@ -639,6 +665,9 @@ func logDockerConversation(stdout string, logger *zerolog.Logger, taskID string)
 						Int("turn", turnNum).
 						Str("content", contentStr).
 						Msg("claude tool result")
+					if lw != nil {
+						lw.WriteToolResult(block.ID, string(contentJSON))
+					}
 				}
 			}
 		case "user":
@@ -661,6 +690,9 @@ func logDockerConversation(stdout string, logger *zerolog.Logger, taskID string)
 								Str("tool_use_id", block.ID).
 								Str("content", contentJSON).
 								Msg("claude tool result")
+							if lw != nil {
+								lw.WriteToolResult(block.ID, string(contentJSON))
+							}
 						}
 					}
 				}

@@ -42,7 +42,7 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 	})
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger)
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "")
 	return svc, repo
 }
 

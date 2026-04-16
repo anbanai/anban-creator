@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,16 +21,20 @@ import (
 
 // TaskHandler handles task-related HTTP endpoints.
 type TaskHandler struct {
-	service *service.TaskService
-	logger  *zerolog.Logger
-	dataDir string // local storage data directory (for ServeLocalFile)
+	service    *service.TaskService
+	logger     *zerolog.Logger
+	dataDir    string // local storage data directory (for ServeLocalFile)
+	taskLogDir string // task log directory (for GetLog)
 }
 
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dataDir ...string) *TaskHandler {
+func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...string) *TaskHandler {
 	h := &TaskHandler{service: svc, logger: logger}
-	if len(dataDir) > 0 {
-		h.dataDir = dataDir[0]
+	if svc != nil {
+		h.taskLogDir = svc.TaskLogDir()
+	}
+	if len(dirs) > 0 {
+		h.dataDir = dirs[0]
 	}
 	return h
 }
@@ -447,6 +452,39 @@ func (h *TaskHandler) DownloadZip(c fiber.Ctx) error {
 	c.Set("Content-Length", strconv.Itoa(buf.Len()))
 
 	return c.Send(buf.Bytes())
+}
+
+// GetLog handles GET /api/v1/tasks/:id/log.
+// It returns the per-task agent execution log file content.
+func (h *TaskHandler) GetLog(c fiber.Ctx) error {
+	if h.taskLogDir == "" {
+		return Error(c, fiber.StatusNotFound, "task logging is not configured")
+	}
+
+	taskID, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
+		return nil // error response already written
+	}
+
+	logPath := filepath.Join(h.taskLogDir, taskID+".log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Error(c, fiber.StatusNotFound, "task log not found")
+		}
+		h.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to read task log")
+		return Error(c, fiber.StatusInternalServerError, "failed to read task log")
+	}
+
+	c.Set("Content-Type", "text/plain; charset=utf-8")
+	if c.Query("download") == "true" {
+		c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="task-%s.log"`, taskID))
+	}
+	return c.Send(data)
 }
 
 // ServeLocalFile handles GET /api/v1/files/* for the local storage provider.

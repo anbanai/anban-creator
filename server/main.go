@@ -20,8 +20,8 @@ import (
 	"github.com/royalrick/anbanwriter/server/auth"
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/handler"
-	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/mcp"
+	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/router"
 	"github.com/royalrick/anbanwriter/server/scheduler"
@@ -187,7 +187,7 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir)
 	}
 
 	// 14. Create handlers.
@@ -368,6 +368,16 @@ func main() {
 	}
 
 	log.Info().Msg("server exited")
+}
+
+// createTaskLogDir ensures the task log directory exists if configured.
+func createTaskLogDir(dir string, log *zerolog.Logger) {
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Warn().Err(err).Str("dir", dir).Msg("failed to create task log directory")
+	}
 }
 
 // resolveConfigPath returns the config file path. If explicit is non-empty, it is

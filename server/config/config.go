@@ -42,9 +42,9 @@ type DatabaseConfig struct {
 }
 
 type RedisConfig struct {
-	Addr     string `yaml:"addr"`      // default "localhost:6379"
+	Addr     string `yaml:"addr"` // default "localhost:6379"
 	Password string `yaml:"password"`
-	DB       int    `yaml:"db"`        // default 0
+	DB       int    `yaml:"db"` // default 0
 }
 
 type JWTConfig struct {
@@ -66,14 +66,14 @@ type MCPConfig struct {
 // StorageConfig holds file storage configuration.
 // Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
 type StorageConfig struct {
-	Provider        string `yaml:"provider"`          // "oss" or "local", default "local"
-	Endpoint        string `yaml:"endpoint"`          // OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
+	Provider        string `yaml:"provider"` // "oss" or "local", default "local"
+	Endpoint        string `yaml:"endpoint"` // OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
 	AccessKeyID     string `yaml:"access_key_id"`
 	AccessKeySecret string `yaml:"access_key_secret"`
 	BucketName      string `yaml:"bucket_name"`
 	Region          string `yaml:"region"`
-	CustomDomain    string `yaml:"custom_domain"`     // Optional CDN domain for public file URLs
-	LocalDataDir    string `yaml:"local_data_dir"`    // Default "./data/files"
+	CustomDomain    string `yaml:"custom_domain"`  // Optional CDN domain for public file URLs
+	LocalDataDir    string `yaml:"local_data_dir"` // Default "./data/files"
 }
 
 // SizesConfig holds per-platform image size defaults (ratio:tier format, e.g. "16:9", "3:4:4K").
@@ -98,13 +98,14 @@ type ImageAPIConfig struct {
 // The Env map is passed as environment variables to the CLI process,
 // supporting auth tokens, base URLs, model overrides, etc.
 type ClaudeConfig struct {
-	Model     string            `yaml:"model"`      // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
-	Executor  string            `yaml:"executor"`   // "local" (default) or "docker"
-	Env       map[string]string `yaml:"env"`
-	PluginDir string            `yaml:"plugin_dir"` // Path to the abwriter plugin directory (contains agents/, skills/)
-	Sandbox   bool              `yaml:"sandbox"`    // Enable sandbox isolation for agent execution (recommended in k8s)
-	Docker    DockerConfig      `yaml:"docker"`     // Docker executor settings (used when executor=docker)
-	MaxTurns  map[string]int    `yaml:"max_turns"`  // Per-task-type max turns, e.g. {"article": 100, "xls": 50, "rednote": 60}
+	Model      string            `yaml:"model"`    // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
+	Executor   string            `yaml:"executor"` // "local" (default) or "docker"
+	Env        map[string]string `yaml:"env"`
+	PluginDir  string            `yaml:"plugin_dir"`   // Path to the abwriter plugin directory (contains agents/, skills/)
+	Sandbox    bool              `yaml:"sandbox"`      // Enable sandbox isolation for agent execution (recommended in k8s)
+	Docker     DockerConfig      `yaml:"docker"`       // Docker executor settings (used when executor=docker)
+	MaxTurns   map[string]int    `yaml:"max_turns"`    // Per-task-type max turns, e.g. {"article": 100, "xls": 50, "rednote": 60}
+	TaskLogDir string            `yaml:"task_log_dir"` // Directory for per-task agent execution logs. Empty = disabled.
 }
 
 // DockerConfig holds Docker executor settings for container-based task execution.
@@ -120,10 +121,10 @@ type DockerConfig struct {
 
 // CreditsConfig holds credits/points system configuration.
 type CreditsConfig struct {
-	DailySignIn    int            `yaml:"daily_sign_in"`     // credits awarded per daily sign-in (default 1024)
-	TaskCosts      map[string]int `yaml:"task_costs"`        // per-task-type costs, e.g. {"article": 500, "xls": 400, "rednote": 400}
-	OperationCosts map[string]int `yaml:"operation_costs"`   // per-operation costs for MCP tools, e.g. {"image_gen": 10, "article_write": 50}
-	AdminAPIKey    string         `yaml:"admin_api_key"`     // API key for admin credit grant endpoint
+	DailySignIn    int            `yaml:"daily_sign_in"`   // credits awarded per daily sign-in (default 1024)
+	TaskCosts      map[string]int `yaml:"task_costs"`      // per-task-type costs, e.g. {"article": 500, "xls": 400, "rednote": 400}
+	OperationCosts map[string]int `yaml:"operation_costs"` // per-operation costs for MCP tools, e.g. {"image_gen": 10, "article_write": 50}
+	AdminAPIKey    string         `yaml:"admin_api_key"`   // API key for admin credit grant endpoint
 }
 
 // CORSConfig holds Cross-Origin Resource Sharing configuration.
@@ -293,6 +294,12 @@ func (c *Config) resolvePaths() {
 			c.Claude.Docker.WorkspaceDir = abs
 		}
 	}
+	// Resolve task_log_dir to absolute path if relative.
+	if c.Claude.TaskLogDir != "" && !filepath.IsAbs(c.Claude.TaskLogDir) {
+		if abs, err := filepath.Abs(c.Claude.TaskLogDir); err == nil {
+			c.Claude.TaskLogDir = abs
+		}
+	}
 }
 
 // applyEnvOverrides reads ANBAN_SERVER_ prefixed environment variables and
@@ -430,6 +437,9 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "CLAUDE_DOCKER_WORKSPACE_DIR"); v != "" {
 		c.Claude.Docker.WorkspaceDir = v
+	}
+	if v := os.Getenv(prefix + "CLAUDE_TASK_LOG_DIR"); v != "" {
+		c.Claude.TaskLogDir = v
 	}
 
 	if v := os.Getenv(prefix + "CREDITS_ADMIN_API_KEY"); v != "" {

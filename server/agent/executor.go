@@ -62,6 +62,7 @@ type ExecutionOptions struct {
 	Model      string
 	MaxTurns   int
 	OnProgress func(taskID string, message string) // callback for SSE
+	LogWriter  *TaskLogWriter                      // optional per-task log file writer; nil = no log file
 }
 
 // TokenUsage captures LLM token consumption for a task execution.
@@ -126,6 +127,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		logEvt = logEvt.Str("model", model)
 	}
 	logEvt.Msg("starting agent execution")
+
+	// 2.5 Write task log header.
+	if opts.LogWriter != nil {
+		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Topic, model, maxTurns)
+	}
 
 	// 3. Write channel config to workspace settings.json.
 	if opts.Channel != nil {
@@ -228,6 +234,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	var resultText string
 	var execErr error
 	var toolUseCount int
+	var turnNum int
 	var resultMsg *claudecode.ResultMessage
 
 	// Capture CLI stderr for diagnostics.
@@ -236,6 +243,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			Str("task_id", opts.Task.ID).
 			Str("cli_stderr", line).
 			Msg("cli stderr")
+		if opts.LogWriter != nil {
+			opts.LogWriter.WriteStderr(line)
+		}
 	}))
 
 	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
@@ -246,6 +256,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		for msg := range client.ReceiveMessages(ctx) {
 			switch m := msg.(type) {
 			case *claudecode.AssistantMessage:
+				turnNum++
 				for _, block := range m.Content {
 					switch b := block.(type) {
 					case *claudecode.TextBlock:
@@ -264,6 +275,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 							Str("task_id", opts.Task.ID).
 							Str("text", text).
 							Msg("claude assistant text")
+						if opts.LogWriter != nil {
+							opts.LogWriter.WriteAssistantText(turnNum, b.Text)
+						}
 					case *claudecode.ToolUseBlock:
 						toolUseCount++
 						if opts.OnProgress != nil {
@@ -279,6 +293,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 							Str("tool", b.Name).
 							Str("input", inputStr).
 							Msg("claude tool use")
+						if opts.LogWriter != nil {
+							opts.LogWriter.WriteToolUse(turnNum, b.Name, string(inputJSON))
+						}
 					case *claudecode.ToolResultBlock:
 						if b.Content != nil {
 							contentJSON, _ := json.Marshal(b.Content)
@@ -291,6 +308,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 								Str("tool_use_id", b.ToolUseID).
 								Str("content", contentStr).
 								Msg("claude tool result")
+							if opts.LogWriter != nil {
+								opts.LogWriter.WriteToolResult(b.ToolUseID, string(contentJSON))
+							}
 						}
 					}
 				}
@@ -332,6 +352,13 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 					}
 				}
 				completeEvt.Msg("agent execution completed")
+				if opts.LogWriter != nil {
+					var tokenUsage *TokenUsage
+					if m.Usage != nil {
+						tokenUsage = ParseTokenUsage(*m.Usage)
+					}
+					opts.LogWriter.WriteResult(true, m.DurationMs, m.NumTurns, m.TotalCostUSD, tokenUsage)
+				}
 				// Warn if agent produced no tool calls - likely agent definition not loaded.
 				if toolUseCount == 0 {
 					truncated := resultText
@@ -352,6 +379,10 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	)
 
 	if err != nil {
+		if opts.LogWriter != nil {
+			opts.LogWriter.WriteError(err.Error())
+			opts.LogWriter.WriteResult(false, 0, 0, nil, nil)
+		}
 		return &ExecutionResult{
 			Success: false,
 			Error:   err.Error(),
@@ -360,6 +391,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	if execErr != nil {
+		if opts.LogWriter != nil {
+			opts.LogWriter.WriteError(execErr.Error())
+		}
 		result := &ExecutionResult{
 			Success: false,
 			Error:   execErr.Error(),

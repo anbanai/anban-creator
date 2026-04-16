@@ -26,12 +26,13 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo      repository.Repository
-	executor  agent.TaskExecutor
-	logger    *zerolog.Logger
-	enqueuer  TaskEnqueuer
-	store     storage.Provider
-	creditSvc *CreditService
+	repo       repository.Repository
+	executor   agent.TaskExecutor
+	logger     *zerolog.Logger
+	enqueuer   TaskEnqueuer
+	store      storage.Provider
+	creditSvc  *CreditService
+	taskLogDir string
 }
 
 // NewTaskService creates a new TaskService.
@@ -42,15 +43,22 @@ func NewTaskService(
 	store storage.Provider,
 	creditSvc *CreditService,
 	logger *zerolog.Logger,
+	taskLogDir string,
 ) *TaskService {
 	return &TaskService{
-		repo:      repo,
-		executor:  executor,
-		logger:    logger,
-		enqueuer:  enqueuer,
-		store:     store,
-		creditSvc: creditSvc,
+		repo:       repo,
+		executor:   executor,
+		logger:     logger,
+		enqueuer:   enqueuer,
+		store:      store,
+		creditSvc:  creditSvc,
+		taskLogDir: taskLogDir,
 	}
+}
+
+// TaskLogDir returns the configured task log directory.
+func (s *TaskService) TaskLogDir() string {
+	return s.taskLogDir
 }
 
 // StorageProviderName returns the name of the configured storage provider,
