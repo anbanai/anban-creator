@@ -133,8 +133,8 @@ func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	return nil
 }
 
-// taskTypeToAgent maps server task types to Claude Code agent names.
-func taskTypeToAgent(taskType string) string {
+// TaskTypeToAgent maps server task types to Claude Code agent names.
+func TaskTypeToAgent(taskType string) string {
 	switch taskType {
 	case model.ScopeArticle:
 		return "wechatarticle"
@@ -145,11 +145,6 @@ func taskTypeToAgent(taskType string) string {
 	default:
 		return "rednote"
 	}
-}
-
-// TaskTypeToAgent maps a task type to the installed Claude Code agent name.
-func TaskTypeToAgent(taskType string) string {
-	return taskTypeToAgent(taskType)
 }
 
 // DownloadReferenceImage downloads a channel's brand reference image to the

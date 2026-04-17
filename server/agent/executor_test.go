@@ -223,9 +223,9 @@ func TestTaskTypeToAgent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.taskType, func(t *testing.T) {
-			got := taskTypeToAgent(tt.taskType)
+			got := TaskTypeToAgent(tt.taskType)
 			if got != tt.want {
-				t.Errorf("taskTypeToAgent(%q) = %q, want %q", tt.taskType, got, tt.want)
+				t.Errorf("TaskTypeToAgent(%q) = %q, want %q", tt.taskType, got, tt.want)
 			}
 		})
 	}

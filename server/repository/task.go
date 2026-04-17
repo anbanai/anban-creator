@@ -136,6 +136,14 @@ func (r *taskRepository) UpdateProgressLog(ctx context.Context, id, log string) 
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("progress_log", log).Error
 }
 
+// AppendProgressLog atomically appends a message to the progress_log column
+// using SQL CONCAT, avoiding read-modify-write races under concurrent callers.
+func (r *taskRepository) AppendProgressLog(ctx context.Context, id, message string) error {
+	return r.db.WithContext(ctx).
+		Exec("UPDATE tasks SET progress_log = CONCAT(COALESCE(progress_log, ''), ?) WHERE id = ?", message+"\n", id).
+		Error
+}
+
 func (r *taskRepository) UpdateResult(ctx context.Context, id, result string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("result", result).Error
 }

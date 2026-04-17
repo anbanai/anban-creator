@@ -207,7 +207,7 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string,
 		"--topic", opts.Task.Topic,
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--workspace", workspace,
-		"--agent-flag", "anbanwriter:" + taskTypeToAgent(opts.Task.Type),
+		"--agent-flag", "anbanwriter:" + TaskTypeToAgent(opts.Task.Type),
 	}
 	if model != "" {
 		cmd = append(cmd, "--model", model)

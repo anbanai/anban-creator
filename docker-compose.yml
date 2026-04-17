@@ -41,9 +41,9 @@ services:
   agent:
     build:
       context: .
-      dockerfile: Dockerfile.agent
+      dockerfile: agent/Dockerfile
     image: abwriter-agent:latest
-    container_name: abwriter
+    container_name: abwriter-agent
     restart: unless-stopped
     volumes:
       - ./data/workspace:/workspace

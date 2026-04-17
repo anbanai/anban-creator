@@ -24,25 +24,14 @@ func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authe
 	return task, nil
 }
 
-// AppendProgressLog appends one progress line to the task log.
+// AppendProgressLog appends one progress line to the task log atomically.
 func (s *TaskService) AppendProgressLog(ctx context.Context, taskID, message string) error {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		return nil
 	}
-
-	current, err := s.repo.Tasks().FindByID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("read task for progress update: %w", err)
-	}
-
-	newLog := current.ProgressLog
-	if newLog != "" && !strings.HasSuffix(newLog, "\n") {
-		newLog += "\n"
-	}
-	newLog += message + "\n"
-	if err := s.repo.Tasks().UpdateProgressLog(ctx, taskID, newLog); err != nil {
-		return fmt.Errorf("update progress log: %w", err)
+	if err := s.repo.Tasks().AppendProgressLog(ctx, taskID, message); err != nil {
+		return fmt.Errorf("append progress log: %w", err)
 	}
 	return nil
 }

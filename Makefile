@@ -109,13 +109,13 @@ docker-logs:
 # Build the abwriter-agent Docker image (required for executor: docker)
 docker-agent-image:
 	@echo "Building abwriter-agent:latest..."
-	@docker build -f Dockerfile.agent -t abwriter-agent:latest .
+	@docker build -f agent/Dockerfile -t abwriter-agent:latest .
 	@echo "Image build complete: abwriter-agent:latest"
 
 # Build the abwriter-server Docker image
 docker-server-image:
 	@echo "Building abwriter-server:latest..."
-	@docker build -t abwriter-server:latest .
+	@docker build -f server/Dockerfile -t abwriter-server:latest .
 	@echo "Image build complete: abwriter-server:latest"
 
 # Build both images

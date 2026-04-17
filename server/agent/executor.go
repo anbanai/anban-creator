@@ -194,7 +194,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 5. Map task type to agent name and build --agent flag.
-	agentName := taskTypeToAgent(opts.Task.Type)
+	agentName := TaskTypeToAgent(opts.Task.Type)
 	agentFlag := "anbanwriter:" + agentName
 
 	// 6. Build SDK options.

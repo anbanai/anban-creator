@@ -92,7 +92,7 @@ func (u *Uploader) uploadFile(ctx context.Context, filePath, relPath string) err
 			writeErrCh <- err
 			return
 		}
-		if _, err := ioCopy(part, f); err != nil {
+		if _, err := io.Copy(part, f); err != nil {
 			writeErrCh <- err
 			return
 		}
@@ -137,8 +137,4 @@ func multipartPipe(ctx context.Context) (*io.PipeReader, *multipart.Writer) {
 		_ = pw.CloseWithError(ctx.Err())
 	}()
 	return pr, writer
-}
-
-func ioCopy(dst io.Writer, src *os.File) (int64, error) {
-	return io.Copy(dst, src)
 }
