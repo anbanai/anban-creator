@@ -32,7 +32,7 @@ The persistent container must be started externally with:
 docker run -d --name abwriter-persistent \
   -v /tmp/abwriter:/workspace \
   --add-host=host.docker.internal:host-gateway \
-  abwriter:latest sleep infinity
+  abwriter-agent:latest sleep infinity
 ```
 
 Requirements:

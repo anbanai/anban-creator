@@ -79,21 +79,14 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		Channel:   channel,
 		LogWriter: taskLogWriter,
 		OnProgress: func(id string, message string) {
-			current, err := s.repo.Tasks().FindByID(ctx, id)
-			if err != nil {
-				s.logger.Error().Err(err).Str("task_id", id).Msg("failed to read task for progress update")
-				return
-			}
-			newLog := current.ProgressLog + message + "\n"
-			if err := s.repo.Tasks().UpdateProgressLog(ctx, id, newLog); err != nil {
+			if err := s.AppendProgressLog(ctx, id, message); err != nil {
 				s.logger.Error().Err(err).Str("task_id", id).Msg("failed to update progress log")
 			}
 		},
 	})
 
 	// Store result.
-	resultJSON, _ := json.Marshal(result)
-	if err := s.repo.Tasks().UpdateResult(ctx, taskID, string(resultJSON)); err != nil {
+	if err := s.UpdateExecutionResult(ctx, taskID, result); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to persist task result")
 	}
 
@@ -151,15 +144,17 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			Int("file_count", meaningfulFileCount).
 			Msg("workspace contains output files")
 	}
-
-	// Upload generated files to storage (BEFORE marking completed — prevents
-	// "completed with no files" if the process crashes between the two steps).
-	if result.WorkDir != "" {
+	// In the remote-agent architecture, the agent uploads files through
+	// /api/v1/agent/upload before completion. Keep a local-executor fallback so
+	// existing non-agent paths still persist outputs if nothing was uploaded.
+	if existingFiles, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID); err != nil {
+		s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to check uploaded task files")
+	} else if len(existingFiles) == 0 && result.WorkDir != "" {
 		if err := s.UploadTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("file upload failed")
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("fallback file upload failed")
 		}
-	} else {
-		s.logger.Warn().Str("task_id", taskID).Msg("no work directory in result, skipping file upload")
+	} else if len(existingFiles) == 0 {
+		s.logger.Warn().Str("task_id", taskID).Msg("task completed with no uploaded files and no work directory")
 	}
 
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {

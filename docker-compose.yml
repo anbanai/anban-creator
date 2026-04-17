@@ -38,16 +38,19 @@ services:
       timeout: 5s
       retries: 5
 
-  abwriter:
-    build: .
-    image: abwriter:latest
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: abwriter-agent:latest
     container_name: abwriter
     restart: unless-stopped
     volumes:
       - ./data/workspace:/workspace
     networks:
       - abwriter-network
-    entrypoint: ["tail", "-f", "/dev/null"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 networks:
   abwriter-network:

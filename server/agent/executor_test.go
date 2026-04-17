@@ -165,8 +165,8 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 			wantContentSize: "16:9",
 		},
 		{
-			name:     "nil imageAPICfg does not panic",
-			platform: model.ScopeArticle,
+			name:            "nil imageAPICfg does not panic",
+			platform:        model.ScopeArticle,
 			imageAPICfg:     nil,
 			wantCoverSize:   "",
 			wantContentSize: "",
@@ -281,9 +281,9 @@ func TestMarshalResultJSON(t *testing.T) {
 
 func TestCountMeaningfulFiles(t *testing.T) {
 	tests := []struct {
-		name    string
-		setup   func(t *testing.T, dir string)
-		want    int
+		name  string
+		setup func(t *testing.T, dir string)
+		want  int
 	}{
 		{
 			name:  "empty directory",

@@ -11,6 +11,12 @@ server:
   host: "0.0.0.0" # Listen host. Use "127.0.0.1" to restrict to localhost.
 
 # ---------------------------------------------------------------------------
+# Logging
+logging:
+  level: info # "debug", "info" (default), "warn", "error", "trace"
+              # Override with ANBAN_SERVER_LOGGING_LEVEL or LOG_LEVEL env.
+
+# ---------------------------------------------------------------------------
 # Database: MySQL connection
 # Required. The server will not start without a valid DSN.
 # Graceful degradation: if MySQL is unreachable at startup, the server logs an
@@ -142,7 +148,7 @@ claude:
 
   # Docker executor settings (used when executor=docker).
   docker:
-    image: "abwriter:latest" # Docker image with Claude CLI + abwriter plugin.
+    image: "abwriter-agent:latest" # Docker image with Claude CLI + abwriter plugin.
     container_name: "abwriter" # Persistent container to reuse via docker exec (empty = create+destroy per task).
     workspace_dir: "./data/workspace" # Host-side workspace base dir (must match docker-compose volume mount source).
     cpu_cores: 2 # CPU limit per task container.

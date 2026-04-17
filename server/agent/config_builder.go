@@ -147,6 +147,11 @@ func taskTypeToAgent(taskType string) string {
 	}
 }
 
+// TaskTypeToAgent maps a task type to the installed Claude Code agent name.
+func TaskTypeToAgent(taskType string) string {
+	return taskTypeToAgent(taskType)
+}
+
 // DownloadReferenceImage downloads a channel's brand reference image to the
 // workspace's .anbanwriter directory. The image is saved as reference.png for
 // use by both Claude Code (visual context) and abwriter CLI (--ref flag).

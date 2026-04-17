@@ -16,6 +16,7 @@ import (
 // Config holds all server configuration.
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
+	Logging  LoggingConfig  `yaml:"logging"`
 	Database DatabaseConfig `yaml:"database"`
 	Redis    RedisConfig    `yaml:"redis"`
 	JWT      JWTConfig      `yaml:"jwt"`
@@ -32,6 +33,10 @@ type Config struct {
 type ServerConfig struct {
 	Port int    `yaml:"port"` // default 8080
 	Host string `yaml:"host"` // default "0.0.0.0"
+}
+
+type LoggingConfig struct {
+	Level string `yaml:"level"` // "debug", "info" (default), "warn", "error", "trace"
 }
 
 type DatabaseConfig struct {
@@ -110,7 +115,7 @@ type ClaudeConfig struct {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Image         string `yaml:"image"`          // Docker image name (default: "abwriter:latest")
+	Image         string `yaml:"image"`          // Docker image name (default: "abwriter-agent:latest")
 	CPUCores      int64  `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
 	MemoryMB      int64  `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
 	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
@@ -256,7 +261,7 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	if c.Claude.Docker.Image == "" {
-		c.Claude.Docker.Image = "abwriter:latest"
+		c.Claude.Docker.Image = "abwriter-agent:latest"
 	}
 	if c.Claude.Docker.CPUCores == 0 {
 		c.Claude.Docker.CPUCores = 2
@@ -320,6 +325,10 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "SERVER_HOST"); v != "" {
 		c.Server.Host = v
+	}
+
+	if v := os.Getenv(prefix + "LOGGING_LEVEL"); v != "" {
+		c.Logging.Level = v
 	}
 
 	if v := os.Getenv(prefix + "DATABASE_DSN"); v != "" {

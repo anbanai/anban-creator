@@ -1,0 +1,6 @@
+studio/
+data/
+bin/
+release/
+.git/
+*.log

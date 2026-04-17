@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.uber.org/zap"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"go.uber.org/zap"
 
 	appconfig "github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/app/converter"
@@ -22,17 +23,19 @@ import (
 
 // ImageResult is the response for single image generation.
 type ImageResult struct {
-	FilePath string `json:"file_path"`
-	Size     string `json:"size"`
-	Width    int    `json:"width,omitempty"`
-	Height   int    `json:"height,omitempty"`
+	FilePath    string `json:"file_path"`
+	DownloadURL string `json:"download_url,omitempty"`
+	Size        string `json:"size"`
+	Width       int    `json:"width,omitempty"`
+	Height      int    `json:"height,omitempty"`
 }
 
 // BatchImageResultItem is a single item in batch image generation results.
 type BatchImageResultItem struct {
-	FilePath string `json:"file_path"`
-	Size     string `json:"size"`
-	Index    int    `json:"index"`
+	FilePath    string `json:"file_path"`
+	DownloadURL string `json:"download_url,omitempty"`
+	Size        string `json:"size"`
+	Index       int    `json:"index"`
 }
 
 // BatchImageResult is the response for batch image generation.
@@ -58,10 +61,11 @@ type DownloadImageResult struct {
 
 // BatchMarkdownImageItem is a single item in batch markdown image generation results.
 type BatchMarkdownImageItem struct {
-	Index    int    `json:"index"`
-	Prompt   string `json:"prompt"`
-	FilePath string `json:"file_path,omitempty"`
-	URL      string `json:"url,omitempty"`
+	Index       int    `json:"index"`
+	Prompt      string `json:"prompt"`
+	FilePath    string `json:"file_path,omitempty"`
+	DownloadURL string `json:"download_url,omitempty"`
+	URL         string `json:"url,omitempty"`
 }
 
 // BatchMarkdownResult is the response for batch image generation from markdown.
@@ -73,11 +77,12 @@ type BatchMarkdownResult struct {
 // ImageService handles image generation, upload, and compression
 // for server-side MCP tool use. It wraps the app/image package.
 type ImageService struct {
-	imageCfg  *srvconfig.ImageAPIConfig
-	storage   storage.Provider
-	repo      repository.Repository
-	creditSvc *CreditService
-	logger    *zerolog.Logger
+	imageCfg     *srvconfig.ImageAPIConfig
+	storage      storage.Provider
+	repo         repository.Repository
+	creditSvc    *CreditService
+	logger       *zerolog.Logger
+	agentBaseURL string
 }
 
 // NewImageService creates a new ImageService.
@@ -86,15 +91,51 @@ func NewImageService(
 	store storage.Provider,
 	repo repository.Repository,
 	creditSvc *CreditService,
+	agentBaseURL string,
 	logger *zerolog.Logger,
 ) *ImageService {
 	return &ImageService{
-		imageCfg:  imageCfg,
-		storage:   store,
-		repo:      repo,
-		creditSvc: creditSvc,
-		logger:    logger,
+		imageCfg:     imageCfg,
+		storage:      store,
+		repo:         repo,
+		creditSvc:    creditSvc,
+		logger:       logger,
+		agentBaseURL: agentBaseURL,
 	}
+}
+
+const agentTempStoragePrefix = "agent-temp"
+
+// AgentTempStorageKey returns the storage key used for a temporary agent-downloadable file.
+func AgentTempStorageKey(id, fileName string) string {
+	return filepath.ToSlash(filepath.Join(agentTempStoragePrefix, id, filepath.Base(fileName)))
+}
+
+// AgentTempDownloadPath returns the HTTP path for downloading a temporary agent file.
+func AgentTempDownloadPath(id, fileName string) string {
+	return "/api/v1/agent/temp/" + id + "/" + filepath.Base(fileName)
+}
+
+func buildAgentTempDownloadURL(baseURL, id, fileName string) string {
+	path := AgentTempDownloadPath(id, fileName)
+	if baseURL == "" {
+		return path
+	}
+	return strings.TrimRight(baseURL, "/") + path
+}
+
+func (s *ImageService) publishAgentTempFile(ctx context.Context, filePath string) (string, error) {
+	if s.storage == nil {
+		return "", fmt.Errorf("storage provider is required for agent temp downloads")
+	}
+
+	fileName := filepath.Base(filePath)
+	tempID := uuid.NewString()
+	key := AgentTempStorageKey(tempID, fileName)
+	if _, err := s.storage.UploadFile(ctx, key, filePath, DetectTaskFileMIME(filePath)); err != nil {
+		return "", fmt.Errorf("upload temp file: %w", err)
+	}
+	return buildAgentTempDownloadURL(s.agentBaseURL, tempID, fileName), nil
 }
 
 // resolveImageAPI returns the appropriate ImageAPI config based on image_type.
@@ -185,11 +226,17 @@ func (s *ImageService) GenerateImage(
 		width, height = info.Width, info.Height
 	}
 
+	downloadURL, err := s.publishAgentTempFile(ctx, result.FilePath)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ImageResult{
-		FilePath: result.FilePath,
-		Size:     result.Size,
-		Width:    width,
-		Height:   height,
+		FilePath:    result.FilePath,
+		DownloadURL: downloadURL,
+		Size:        result.Size,
+		Width:       width,
+		Height:      height,
 	}, nil
 }
 
@@ -244,10 +291,15 @@ func (s *ImageService) GenerateBatch(
 
 	items := make([]BatchImageResultItem, 0, len(results))
 	for _, r := range results {
+		downloadURL, err := s.publishAgentTempFile(ctx, r.FilePath)
+		if err != nil {
+			return nil, err
+		}
 		items = append(items, BatchImageResultItem{
-			FilePath: r.FilePath,
-			Size:     r.Size,
-			Index:    r.Index,
+			FilePath:    r.FilePath,
+			DownloadURL: downloadURL,
+			Size:        r.Size,
+			Index:       r.Index,
 		})
 	}
 
@@ -453,6 +505,15 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 			Index:    ref.Index,
 			Prompt:   prompt,
 			FilePath: genResult.FilePath,
+		}
+
+		if downloadURL, err := s.publishAgentTempFile(ctx, genResult.FilePath); err == nil {
+			item.DownloadURL = downloadURL
+		} else {
+			s.logger.Warn().Err(err).
+				Int("index", ref.Index).
+				Str("file_path", genResult.FilePath).
+				Msg("failed to publish generated markdown image for agent download")
 		}
 
 		// Optionally upload the generated image.

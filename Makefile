@@ -4,7 +4,8 @@
 .PHONY: all clean test help lint fmt vet \
         server-build server-run server-dev server-test \
         web-install web-dev web-build \
-        docker-up docker-down docker-logs docker-image
+        docker-up docker-down docker-logs docker-image \
+        docker-agent-image docker-server-image docker-images
 
 # Default target
 all: server-build
@@ -105,11 +106,23 @@ docker-down:
 docker-logs:
 	@docker-compose logs -f
 
-# Build the abwriter Docker image (required for executor: docker)
-docker-image:
-	@echo "Building abwriter:latest..."
-	@docker build -t abwriter:latest .
-	@echo "Image build complete: abwriter:latest"
+# Build the abwriter-agent Docker image (required for executor: docker)
+docker-agent-image:
+	@echo "Building abwriter-agent:latest..."
+	@docker build -f Dockerfile.agent -t abwriter-agent:latest .
+	@echo "Image build complete: abwriter-agent:latest"
+
+# Build the abwriter-server Docker image
+docker-server-image:
+	@echo "Building abwriter-server:latest..."
+	@docker build -t abwriter-server:latest .
+	@echo "Image build complete: abwriter-server:latest"
+
+# Build both images
+docker-images: docker-agent-image docker-server-image
+
+# Backward-compatible alias (builds agent image)
+docker-image: docker-agent-image
 
 # ---------------------------------------------------------------------------
 # Help
@@ -140,7 +153,10 @@ help:
 	@echo "  make web-build     - Build frontend for production (bun)"
 	@echo ""
 	@echo "Docker targets:"
-	@echo "  make docker-up     - Start MySQL and Redis containers"
-	@echo "  make docker-down   - Stop containers"
-	@echo "  make docker-logs   - Follow container logs"
-	@echo "  make docker-image  - Build abwriter Docker image"
+	@echo "  make docker-up          - Start MySQL, Redis and agent containers"
+	@echo "  make docker-down        - Stop containers"
+	@echo "  make docker-logs        - Follow container logs"
+	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
+	@echo "  make docker-server-image - Build server image (Go binary)"
+	@echo "  make docker-images      - Build both images"
+	@echo "  make docker-image       - Build agent image (alias)"

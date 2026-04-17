@@ -57,8 +57,12 @@ func main() {
 		}
 	}
 
-	// 3. Init logger (JSON to stderr, level from LOG_LEVEL or "info").
-	logLevel := parseLogLevel(os.Getenv("LOG_LEVEL"))
+	// 3. Init logger (JSON to stderr, level from config, LOG_LEVEL env, or "info").
+	logLevelStr := cfg.Logging.Level
+	if logLevelStr == "" {
+		logLevelStr = os.Getenv("LOG_LEVEL")
+	}
+	logLevel := parseLogLevel(logLevelStr)
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger().Level(logLevel)
 	log := &logger
@@ -171,6 +175,7 @@ func main() {
 	var channelSvc *service.ChannelService
 	var creditSvc *service.CreditService
 	var asynqClient *scheduler.AsynqClient
+	workspaceSvc := service.NewWorkspaceService("", log)
 
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
@@ -187,12 +192,13 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc)
 	}
 
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
 	var taskHandler *handler.TaskHandler
+	var agentHandler *handler.AgentHandler
 	var channelHandler *handler.ChannelHandler
 	var timelineHandler *handler.TimelineHandler
 	var creditHandler *handler.CreditHandler
@@ -210,6 +216,7 @@ func main() {
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
+		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
 	}
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
@@ -219,10 +226,9 @@ func main() {
 		var imageSvc *service.ImageService
 		var writingSvc *service.WritingService
 		var publishingSvc *service.PublishingService
-		var workspaceSvc *service.WorkspaceService
 
 		if store != nil {
-			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, log)
+			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, cfg.Claude.Docker.MCPBaseURL, log)
 		}
 		if repo != nil && creditSvc != nil {
 			// Create LLM client from Claude env config for writing operations.
@@ -239,7 +245,6 @@ func main() {
 				log.Warn().Msg("LLM client not configured (missing ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
 			}
 			publishingSvc = service.NewPublishingService(repo, creditSvc, log)
-			workspaceSvc = service.NewWorkspaceService("", log)
 		}
 
 		mcp.SetServices(&mcp.Services{
@@ -302,6 +307,7 @@ func main() {
 		ChannelHandler:  channelHandler,
 		PlanHandler:     planHandler,
 		TaskHandler:     taskHandler,
+		AgentHandler:    agentHandler,
 		CreditHandler:   creditHandler,
 		TimelineHandler: timelineHandler,
 		APIKeyHandler:   apiKeyHandler,

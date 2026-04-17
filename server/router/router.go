@@ -42,6 +42,7 @@ type Services struct {
 	CreditService   *service.CreditService
 	PlanHandler     *handler.PlanHandler
 	TaskHandler     *handler.TaskHandler
+	AgentHandler    *handler.AgentHandler
 	CreditHandler   *handler.CreditHandler
 	ChannelHandler  *handler.ChannelHandler
 	TimelineHandler *handler.TimelineHandler
@@ -243,6 +244,15 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.CreditHandler != nil {
 		adminLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
 		app.Post("/api/v1/admin/credits/grant", adminLimiter, svc.CreditHandler.AdminGrant)
+	}
+
+	// Agent communication endpoints (API key auth, no JWT required).
+	if svc.AgentHandler != nil {
+		agentLimiter := appmiddleware.RateLimit(svc.Redis, 300, 1*time.Minute)
+		agentAPI := app.Group("/api/v1/agent", agentLimiter, svc.AgentHandler.AuthMiddleware)
+		agentAPI.Post("/upload", svc.AgentHandler.Upload)
+		agentAPI.Get("/temp/:id/:file", svc.AgentHandler.Temp)
+		agentAPI.Post("/progress", svc.AgentHandler.Progress)
 	}
 
 	// ---------------------------------------------------------------------------

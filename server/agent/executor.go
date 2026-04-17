@@ -530,3 +530,8 @@ func populateUsageFields(result *ExecutionResult, resultMsg *claudecode.ResultMe
 		result.TokenUsage = ParseTokenUsage(*resultMsg.Usage)
 	}
 }
+
+// PopulateUsageFields fills the cost/token fields of an ExecutionResult from a SDK ResultMessage.
+func PopulateUsageFields(result *ExecutionResult, resultMsg *claudecode.ResultMessage) {
+	populateUsageFields(result, resultMsg)
+}

@@ -159,6 +159,36 @@ func (s *WorkspaceService) namedArchiveDir(contentType, name string) (string, er
 	return "", fmt.Errorf("no available archive slot for name %q under %s", name, base)
 }
 
+// CollectOutputFiles walks baseDir/<contentType>/ and returns absolute paths of
+// all regular files in archived (non-staging) subdirectories that were modified
+// after sinceTime. Used after task execution to merge MCP-generated files into
+// the Docker workspace. Passing a zero sinceTime collects all files.
+func (s *WorkspaceService) CollectOutputFiles(contentType string, sinceTime time.Time) []string {
+	dir := filepath.Join(s.baseDir, contentType)
+	var paths []string
+	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			// Skip the staging subdirectory (active workspace, not yet archived).
+			if filepath.Base(path) == "staging" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !sinceTime.IsZero() {
+			info, err := d.Info()
+			if err != nil || info.ModTime().Before(sinceTime) {
+				return nil
+			}
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	return paths
+}
+
 // sanitizeDirName cleans a title for use as a directory name:
 // replaces illegal characters with '_', trims whitespace, truncates to 50 runes.
 func sanitizeDirName(name string) string {

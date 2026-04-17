@@ -26,13 +26,14 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo       repository.Repository
-	executor   agent.TaskExecutor
-	logger     *zerolog.Logger
-	enqueuer   TaskEnqueuer
-	store      storage.Provider
-	creditSvc  *CreditService
-	taskLogDir string
+	repo         repository.Repository
+	executor     agent.TaskExecutor
+	logger       *zerolog.Logger
+	enqueuer     TaskEnqueuer
+	store        storage.Provider
+	creditSvc    *CreditService
+	taskLogDir   string
+	workspaceSvc *WorkspaceService
 }
 
 // NewTaskService creates a new TaskService.
@@ -44,15 +45,17 @@ func NewTaskService(
 	creditSvc *CreditService,
 	logger *zerolog.Logger,
 	taskLogDir string,
+	workspaceSvc *WorkspaceService,
 ) *TaskService {
 	return &TaskService{
-		repo:       repo,
-		executor:   executor,
-		logger:     logger,
-		enqueuer:   enqueuer,
-		store:      store,
-		creditSvc:  creditSvc,
-		taskLogDir: taskLogDir,
+		repo:         repo,
+		executor:     executor,
+		logger:       logger,
+		enqueuer:     enqueuer,
+		store:        store,
+		creditSvc:    creditSvc,
+		taskLogDir:   taskLogDir,
+		workspaceSvc: workspaceSvc,
 	}
 }
 

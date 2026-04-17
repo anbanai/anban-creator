@@ -35,9 +35,9 @@ var mimeTypes = map[string]string{
 	".zip":      "application/zip",
 }
 
-// detectMimeType returns the MIME type for a file based on its extension.
+// DetectTaskFileMIME returns the MIME type for a file based on its extension.
 // Falls back to net/http.DetectContentType by reading the first 512 bytes.
-func detectMimeType(filePath string) string {
+func DetectTaskFileMIME(filePath string) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if mime, ok := mimeTypes[ext]; ok {
 		return mime
@@ -54,8 +54,8 @@ func detectMimeType(filePath string) string {
 	return http.DetectContentType(buf[:n])
 }
 
-// determineFileRole returns the role for a file based on its name and MIME type.
-func determineFileRole(filename, mimeType string) string {
+// DetermineTaskFileRole returns the role for a file based on its name and MIME type.
+func DetermineTaskFileRole(filename, mimeType string) string {
 	base := strings.ToLower(filepath.Base(filename))
 	if strings.HasPrefix(base, "cover") {
 		return model.FileRoleCover
@@ -73,6 +73,116 @@ func determineFileRole(filename, mimeType string) string {
 	return model.FileRoleOther
 }
 
+// ShouldSkipTaskFileDir reports whether a directory should be excluded from task uploads.
+func ShouldSkipTaskFileDir(name string) bool {
+	switch name {
+	case ".anbanwriter", ".claude":
+		return true
+	default:
+		return false
+	}
+}
+
+// ShouldSkipTaskFile reports whether a file should be excluded from task uploads.
+func ShouldSkipTaskFile(name string) bool {
+	return strings.HasPrefix(filepath.Base(name), ".")
+}
+
+// CleanTaskFileRelativePath normalizes a user-provided relative task file path.
+func CleanTaskFileRelativePath(relPath string) (string, error) {
+	relPath = strings.TrimSpace(relPath)
+	relPath = strings.ReplaceAll(relPath, "\\", "/")
+	relPath = strings.TrimPrefix(relPath, "./")
+	relPath = strings.TrimPrefix(relPath, "/")
+	if relPath == "" {
+		return "", fmt.Errorf("relative path is required")
+	}
+
+	cleaned := filepath.Clean(relPath)
+	if cleaned == "." || cleaned == "" {
+		return "", fmt.Errorf("relative path is required")
+	}
+	if filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid relative path")
+	}
+	return cleaned, nil
+}
+
+func buildTaskStorageKey(userID, taskID, relPath string) string {
+	return fmt.Sprintf("%s/%s/%s", userID, taskID, filepath.ToSlash(relPath))
+}
+
+// UploadTaskFileFromReader uploads one task output file and persists its metadata.
+func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	if s.store == nil {
+		return nil, fmt.Errorf("no storage provider configured: cannot upload files for task %s", taskID)
+	}
+
+	cleanRelPath, err := CleanTaskFileRelativePath(relPath)
+	if err != nil {
+		return nil, err
+	}
+
+	filename := filepath.Base(cleanRelPath)
+	if ShouldSkipTaskFile(filename) {
+		return nil, fmt.Errorf("refusing to upload dotfile %q", filename)
+	}
+
+	if mimeType == "" {
+		mimeType = mimeTypes[strings.ToLower(filepath.Ext(filename))]
+	}
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	ossKey := buildTaskStorageKey(userID, taskID, cleanRelPath)
+	uploadResult, err := s.store.Upload(ctx, ossKey, reader, mimeType)
+	if err != nil {
+		return nil, fmt.Errorf("upload file %s: %w", cleanRelPath, err)
+	}
+
+	if uploadResult.Size > 0 {
+		fileSize = uploadResult.Size
+	}
+
+	taskFile := &model.TaskFile{
+		TaskID:          taskID,
+		Role:            DetermineTaskFileRole(filename, mimeType),
+		FileName:        filename,
+		MimeType:        mimeType,
+		FileSize:        fileSize,
+		OSSKey:          ossKey,
+		OSSURL:          uploadResult.URL,
+		StorageProvider: s.store.Name(),
+		FilePath:        cleanRelPath,
+	}
+	if err := s.repo.TaskFiles().Create(ctx, taskFile); err != nil {
+		return nil, fmt.Errorf("persist task file %s: %w", cleanRelPath, err)
+	}
+
+	return taskFile, nil
+}
+
+func (s *TaskService) uploadTaskFileFromPath(ctx context.Context, taskID, userID, workDir, path string, info os.FileInfo) (*model.TaskFile, error) {
+	relPath, err := filepath.Rel(workDir, path)
+	if err != nil {
+		relPath = filepath.Base(path)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open task file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	var fileSize int64
+	if info != nil {
+		fileSize = info.Size()
+	}
+
+	return s.UploadTaskFileFromReader(ctx, taskID, userID, relPath, f, DetectTaskFileMIME(path), fileSize)
+}
+
 // UploadTaskFiles uploads all files from a task's work directory to storage.
 // It recursively walks the directory tree to find files in nested subdirectories
 // (e.g. output/articles/staging/). Individual upload failures are logged but do
@@ -83,8 +193,7 @@ func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workD
 		return fmt.Errorf("no storage provider configured: cannot upload files for task %s", taskID)
 	}
 
-	var batch []*model.TaskFile
-	providerName := s.store.Name()
+	var uploadedCount int
 
 	err := filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -92,79 +201,41 @@ func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workD
 		}
 		// Skip config directories entirely to avoid uploading settings.json etc.
 		if d.IsDir() {
-			name := d.Name()
-			if name == ".anbanwriter" || name == ".claude" {
+			if ShouldSkipTaskFileDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		filename := filepath.Base(path)
-
 		// Skip dotfiles (sensitive config files like .mcp.json, .gitignore, etc.).
-		if strings.HasPrefix(filename, ".") {
+		if ShouldSkipTaskFile(d.Name()) {
 			return nil
 		}
-
-		mimeType := detectMimeType(path)
-		role := determineFileRole(filename, mimeType)
-
-		// Preserve subdirectory structure in the OSS key.
-		relPath, err := filepath.Rel(workDir, path)
-		if err != nil {
-			relPath = filename
-		}
-		ossKey := fmt.Sprintf("%s/%s/%s", userID, taskID, relPath)
 
 		info, err := d.Info()
 		if err != nil {
-			s.logger.Warn().Err(err).Str("file", filename).Msg("failed to get file info, skipping")
+			s.logger.Warn().Err(err).Str("file", d.Name()).Msg("failed to get file info, skipping")
 			return nil
 		}
 
-		uploadResult, err := s.store.UploadFile(ctx, ossKey, path, mimeType)
-		if err != nil {
+		if _, err := s.uploadTaskFileFromPath(ctx, taskID, userID, workDir, path, info); err != nil {
 			s.logger.Error().Err(err).
-				Str("file", filename).
-				Str("key", ossKey).
+				Str("file", path).
 				Msg("failed to upload file, skipping")
 			return nil
 		}
-
-		fileSize := info.Size()
-		if uploadResult.Size > 0 {
-			fileSize = uploadResult.Size
-		}
-
-		batch = append(batch, &model.TaskFile{
-			TaskID:          taskID,
-			Role:            role,
-			FileName:        filename,
-			MimeType:        mimeType,
-			FileSize:        fileSize,
-			OSSKey:          ossKey,
-			OSSURL:          uploadResult.URL,
-			StorageProvider: providerName,
-			FilePath:        path,
-		})
+		uploadedCount++
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("walk work directory %s: %w", workDir, err)
 	}
 
-	if len(batch) > 0 {
-		if err := s.repo.TaskFiles().BatchCreate(ctx, batch); err != nil {
-			s.logger.Error().Err(err).
-				Str("task_id", taskID).
-				Int("count", len(batch)).
-				Msg("failed to persist task file records")
-		} else {
-			s.logger.Info().
-				Str("task_id", taskID).
-				Int("count", len(batch)).
-				Msg("task files uploaded to storage")
-		}
+	if uploadedCount > 0 {
+		s.logger.Info().
+			Str("task_id", taskID).
+			Int("count", uploadedCount).
+			Msg("task files uploaded to storage")
 	}
 
 	return nil
