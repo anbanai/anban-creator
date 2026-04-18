@@ -80,7 +80,10 @@ func (u *Uploader) uploadFile(ctx context.Context, filePath, relPath string) err
 	}
 	defer f.Close()
 
-	bodyReader, bodyWriter := multipartPipe(ctx)
+	uploadCtx, cancel := context.WithTimeout(ctx, u.client.Timeout)
+	defer cancel()
+
+	bodyReader, bodyWriter := multipartPipe(uploadCtx)
 	writeErrCh := make(chan error, 1)
 
 	go func() {
@@ -107,7 +110,7 @@ func (u *Uploader) uploadFile(ctx context.Context, filePath, relPath string) err
 		writeErrCh <- nil
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.cfg.ServerURL+"/api/v1/agent/upload", bodyReader)
+	req, err := http.NewRequestWithContext(uploadCtx, http.MethodPost, u.cfg.ServerURL+"/api/v1/agent/upload", bodyReader)
 	if err != nil {
 		return fmt.Errorf("create upload request: %w", err)
 	}
@@ -132,9 +135,11 @@ func (u *Uploader) uploadFile(ctx context.Context, filePath, relPath string) err
 func multipartPipe(ctx context.Context) (*io.PipeReader, *multipart.Writer) {
 	pr, pw := io.Pipe()
 	writer := multipart.NewWriter(pw)
-	go func() {
-		<-ctx.Done()
-		_ = pw.CloseWithError(ctx.Err())
-	}()
+	if ctx.Done() != nil {
+		go func() {
+			<-ctx.Done()
+			_ = pw.CloseWithError(ctx.Err())
+		}()
+	}
 	return pr, writer
 }
