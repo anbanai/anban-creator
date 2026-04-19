@@ -66,6 +66,18 @@ func NewProcessor(cfg *config.Config, apiCfg *config.ImageAPI, log *zap.Logger) 
 	}
 }
 
+// wechatUpload uploads a file to WeChat CDN with retry. Returns an error if
+// WeChat credentials are not configured.
+func (p *Processor) wechatUpload(filePath string) (*wechat.UploadMaterialResult, error) {
+	if p.ws == nil {
+		return nil, &ProcessorError{
+			Message: "wechat credentials not configured, cannot upload image",
+			HintText: "请先在频道配置中填写 WeChat App ID 和 Secret",
+		}
+	}
+	return p.ws.UploadMaterialWithRetry(filePath, 3)
+}
+
 // SetStylePrompt 设置风格提示词（CLI --style 传入，优先级高于配置文件）
 func (p *Processor) SetStylePrompt(prompt string) {
 	p.stylePrompt = prompt
@@ -129,7 +141,7 @@ func (p *Processor) UploadLocalImage(filePath string) (*UploadResult, error) {
 	}
 
 	// 上传到微信
-	result, err := p.ws.UploadMaterialWithRetry(processedPath, 3)
+	result, err := p.wechatUpload(processedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +182,7 @@ func (p *Processor) DownloadAndUpload(url string) (*UploadResult, error) {
 	}
 
 	// 上传到微信
-	result, err := p.ws.UploadMaterialWithRetry(processedPath, 3)
+	result, err := p.wechatUpload(processedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +450,7 @@ func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, 
 	defer os.Remove(onlyResult.FilePath)
 
 	// 上传到微信
-	uploadResult, err := p.ws.UploadMaterialWithRetry(onlyResult.FilePath, 3)
+	uploadResult, err := p.wechatUpload(onlyResult.FilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +476,7 @@ func (p *Processor) GenerateAndUploadWithSize(prompt string, size string) (*Gene
 	defer os.Remove(onlyResult.FilePath)
 
 	// 上传到微信
-	uploadResult, err := p.ws.UploadMaterialWithRetry(onlyResult.FilePath, 3)
+	uploadResult, err := p.wechatUpload(onlyResult.FilePath)
 	if err != nil {
 		return nil, err
 	}
