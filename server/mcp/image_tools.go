@@ -44,7 +44,7 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "upload_image",
-		Description: "Upload a local image to the WeChat CDN (or configured storage). Returns the CDN URL and media ID.",
+		Description: "Upload a local image. For WeChat channels, uploads to WeChat CDN; for other platforms, uploads to configured storage. Returns the URL.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

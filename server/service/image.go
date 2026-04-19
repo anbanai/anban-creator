@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,7 +311,8 @@ func (s *ImageService) GenerateBatch(
 	}, nil
 }
 
-// UploadImage uploads a local image to the WeChat CDN via the channel's credentials.
+// UploadImage uploads a local image. For WeChat platforms (article/xls), uploads
+// to WeChat CDN. For other platforms (rednote), uploads to the configured storage provider.
 func (s *ImageService) UploadImage(
 	ctx context.Context,
 	userID, channelID, filePath string,
@@ -319,6 +322,12 @@ func (s *ImageService) UploadImage(
 		return nil, fmt.Errorf("find channel: %w", err)
 	}
 
+	// Non-WeChat platforms: upload to storage provider (local/OSS).
+	if ch.Platform != model.PlatformArticle && ch.Platform != model.PlatformXLS {
+		return s.uploadToStorage(ctx, filePath)
+	}
+
+	// WeChat platforms: upload to WeChat CDN.
 	processor, err := s.buildProcessor(ch, "content")
 	if err != nil {
 		return nil, err
@@ -341,6 +350,31 @@ func (s *ImageService) UploadImage(
 		URL:       result.WechatURL,
 		MediaID:   result.MediaID,
 		WechatURL: result.WechatURL,
+	}, nil
+}
+
+// uploadToStorage uploads a file to the configured storage provider (local or OSS).
+func (s *ImageService) uploadToStorage(ctx context.Context, filePath string) (*UploadImageResult, error) {
+	if s.storage == nil {
+		return nil, fmt.Errorf("storage provider not available")
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("open file: %w", err)
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(filePath))
+	key := fmt.Sprintf("uploads/images/%s%s", uuid.New().String(), ext)
+
+	result, err := s.storage.Upload(ctx, key, file, "image/jpeg")
+	if err != nil {
+		return nil, fmt.Errorf("upload to storage: %w", err)
+	}
+
+	return &UploadImageResult{
+		URL: result.URL,
 	}, nil
 }
 
@@ -393,33 +427,43 @@ func (s *ImageService) DownloadImage(
 		return nil, fmt.Errorf("find channel: %w", err)
 	}
 
+	if strings.EqualFold(upload, "true") || strings.EqualFold(upload, "wechat") {
+		// WeChat platforms: download and upload to WeChat CDN.
+		if ch.Platform == model.PlatformArticle || ch.Platform == model.PlatformXLS {
+			processor, err := s.buildProcessor(ch, "content")
+			if err != nil {
+				return nil, err
+			}
+
+			result, err := processor.DownloadAndUpload(url)
+			if err != nil {
+				return nil, fmt.Errorf("download and upload: %w", err)
+			}
+
+			if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageUpload, 1); creditErr != nil {
+				s.logger.Warn().Err(creditErr).
+					Str("user_id", userID).
+					Str("channel_id", channelID).
+					Msg("failed to deduct image download+upload credits")
+			}
+
+			return &DownloadImageResult{
+				URL:       url,
+				MediaID:   result.MediaID,
+				WechatURL: result.WechatURL,
+			}, nil
+		}
+
+		// Non-WeChat platforms: download and upload to storage provider.
+		return s.downloadAndUploadToStorage(ctx, url)
+	}
+
+	// Download only (all platforms).
 	processor, err := s.buildProcessor(ch, "content")
 	if err != nil {
 		return nil, err
 	}
 
-	if strings.EqualFold(upload, "true") || strings.EqualFold(upload, "wechat") {
-		result, err := processor.DownloadAndUpload(url)
-		if err != nil {
-			return nil, fmt.Errorf("download and upload: %w", err)
-		}
-
-		// Deduct credits for the upload.
-		if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageUpload, 1); creditErr != nil {
-			s.logger.Warn().Err(creditErr).
-				Str("user_id", userID).
-				Str("channel_id", channelID).
-				Msg("failed to deduct image download+upload credits")
-		}
-
-		return &DownloadImageResult{
-			URL:       url,
-			MediaID:   result.MediaID,
-			WechatURL: result.WechatURL,
-		}, nil
-	}
-
-	// Download only.
 	tmpDir, err := os.MkdirTemp("", "abw-dl-")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
@@ -434,6 +478,51 @@ func (s *ImageService) DownloadImage(
 	return &DownloadImageResult{
 		FilePath: result.FilePath,
 		URL:      url,
+	}, nil
+}
+
+// downloadAndUploadToStorage downloads an image from URL and uploads it to the storage provider.
+func (s *ImageService) downloadAndUploadToStorage(ctx context.Context, imageURL string) (*DownloadImageResult, error) {
+	if s.storage == nil {
+		return nil, fmt.Errorf("storage provider not available")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "abw-dl-")
+	if err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	outputPath := filepath.Join(tmpDir, "downloaded.png")
+
+	// Download using http.Get directly (no WeChat dependency needed).
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return nil, fmt.Errorf("download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download image: HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("write temp file: %w", err)
+	}
+	f.Close()
+
+	uploadResult, err := s.uploadToStorage(ctx, outputPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DownloadImageResult{
+		URL: uploadResult.URL,
 	}, nil
 }
 
