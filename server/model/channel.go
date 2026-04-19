@@ -18,7 +18,7 @@ type Channel struct {
 	ProfileURL  string        `gorm:"type:varchar(500)" json:"profile_url"`    // 平台主页链接
 	Positioning string        `gorm:"type:text" json:"positioning"`            // 账号定位
 	Keywords    string        `gorm:"type:text" json:"keywords"`               // 关键词
-	Style       string        `gorm:"type:varchar(50)" json:"style"`           // 写作风格
+	Style       string        `gorm:"type:text" json:"style"`                    // 写作风格 / 视觉风格（小红书用）
 	Theme       string        `gorm:"type:varchar(50)" json:"theme"`           // 主题
 	Author             string        `gorm:"type:varchar(50)" json:"author"`               // 作者名
 	ReferenceImageURL  string        `gorm:"type:varchar(500)" json:"reference_image_url"` // 品牌视觉参考图 URL

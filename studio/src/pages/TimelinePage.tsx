@@ -172,7 +172,7 @@ export default function TimelinePage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="时间线" description="你的内容排期日历。">
+      <PageHeader title="时间轴" description="你的内容排期日历。">
         <Button variant="secondary" size="sm" onClick={() => refetch()}>
           <RefreshCw className="h-3.5 w-3.5" />
           刷新
@@ -212,11 +212,11 @@ export default function TimelinePage() {
           {/* Item Type Filter */}
           <Select value={itemType || undefined} onValueChange={(v) => updateFilter('item_type', v ?? '')}>
             <SelectTrigger size="sm" className="min-w-[100px]">
-              <SelectValue />
+              <SelectValue placeholder="全部类型" />
             </SelectTrigger>
             <SelectContent>
               {timelineItemTypeOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -224,11 +224,11 @@ export default function TimelinePage() {
           {/* Content Type Filter */}
           <Select value={contentType || undefined} onValueChange={(v) => updateFilter('content_type', v ?? '')}>
             <SelectTrigger size="sm" className="min-w-[110px]">
-              <SelectValue />
+              <SelectValue placeholder="全部内容" />
             </SelectTrigger>
             <SelectContent>
               {contentTypeFilterOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -236,11 +236,11 @@ export default function TimelinePage() {
           {/* Status Filter */}
           <Select value={status || undefined} onValueChange={(v) => updateFilter('status', v ?? '')}>
             <SelectTrigger size="sm" className="min-w-[100px]">
-              <SelectValue />
+              <SelectValue placeholder="全部状态" />
             </SelectTrigger>
             <SelectContent>
               {timelineStatusOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -256,11 +256,11 @@ export default function TimelinePage() {
           {/* Sort */}
           <Select value={sort || undefined} onValueChange={(v) => updateFilter('sort', v ?? '')}>
             <SelectTrigger size="sm" className="min-w-[100px]">
-              <SelectValue />
+              <SelectValue placeholder="日期 ↑" />
             </SelectTrigger>
             <SelectContent>
               {timelineSortOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>

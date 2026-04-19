@@ -342,19 +342,19 @@ func scoreArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	recommendations := generateScoreRecommendations(engagementRate, shareRate, likeRate, commentRate)
 
 	result := map[string]any{
-		"score":            score,
-		"level":            level,
-		"topic":            topic,
-		"read_count":       readCount,
-		"like_count":       likeCount,
-		"share_count":      shareCount,
-		"comment_count":    commentCount,
-		"collect_count":    collectCount,
-		"engagement_rate":  engagementRate,
-		"share_rate":       shareRate,
-		"like_rate":        likeRate,
-		"comment_rate":     commentRate,
-		"recommendations":  recommendations,
+		"score":           score,
+		"level":           level,
+		"topic":           topic,
+		"read_count":      readCount,
+		"like_count":      likeCount,
+		"share_count":     shareCount,
+		"comment_count":   commentCount,
+		"collect_count":   collectCount,
+		"engagement_rate": engagementRate,
+		"share_rate":      shareRate,
+		"like_rate":       likeRate,
+		"comment_rate":    commentRate,
+		"recommendations": recommendations,
 	}
 
 	return textResult(result)

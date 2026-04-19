@@ -136,6 +136,7 @@ type WechatConfig struct {
 
 // RednoteConfig 小红书配置
 type RednoteConfig struct {
+	// Style 视觉风格描述，用于图片生成时的风格提示
 	Style   string            `json:"style,omitempty" yaml:"style,omitempty"`
 	Cover   ImageSection      `json:"cover,omitempty" yaml:"cover,omitempty"`
 	Content XlsContentSection `json:"content,omitempty" yaml:"content,omitempty"`

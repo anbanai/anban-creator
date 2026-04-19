@@ -130,6 +130,12 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 	logEvt.Msg("starting agent execution")
 
+	if e.pluginDir == "" {
+		e.logger.Warn().
+			Str("task_id", opts.Task.ID).
+			Msg("plugin directory not found; --agent flag may not resolve")
+	}
+
 	// 2.5 Write task log header.
 	if opts.LogWriter != nil {
 		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Topic, model, maxTurns)
@@ -208,6 +214,10 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		claudecode.WithExtraArgs(map[string]*string{
 			"agent": &agentFlag,
 		}),
+	}
+
+	if e.pluginDir != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithLocalPlugin(e.pluginDir))
 	}
 
 	// Only set model if explicitly configured; otherwise let Claude CLI use env vars.

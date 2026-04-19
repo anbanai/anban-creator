@@ -76,12 +76,12 @@ var PlatformConfigs = map[string]*PlatformConfig{
 		SupportsAutoFetch:  true,
 		ProfileURLPattern:  `^https?://(www\.)?xiaohongshu\.com/user/profile/`,
 		Fields: []PlatformFieldConfig{
-			{Key: "profile_url", Label: "小红书主页", Placeholder: "粘贴小红书主页链接...", Required: true, Type: "url", Group: "basic"},
+			{Key: "profile_url", Label: "小红书主页", Placeholder: "粘贴小红书主页链接...", Type: "url", Group: "basic"},
 			{Key: "name", Label: "频道名称", Placeholder: "自动获取", Type: "text", Group: "basic", AutoFetched: true},
 			{Key: "avatar_url", Label: "头像", Placeholder: "自动获取", Type: "url", Group: "basic", AutoFetched: true},
 			{Key: "positioning", Label: "账号定位", Placeholder: "自动获取", Type: "textarea", Group: "basic", AutoFetched: true},
 			{Key: "keywords", Label: "关键词", Placeholder: "e.g. 美妆, 时尚, 生活方式", Type: "textarea", Group: "advanced"},
-			{Key: "style", Label: "写作风格", Placeholder: "e.g. casual-science, dan-koe", Type: "text", Group: "advanced"},
+			{Key: "style", Label: "视觉风格", Placeholder: "e.g. 手绘感，暖色调，小清新，治愈系水彩插画风格", Type: "textarea", Group: "advanced"},
 			{Key: "theme", Label: "主题", Placeholder: "e.g. autumn-warm, spring-fresh", Type: "text", Group: "advanced"},
 			{Key: "author", Label: "作者名", Placeholder: "e.g. 张三", Type: "text", Group: "advanced"},
 			{Key: "reference_image_url", Label: "品牌视觉参考图", Placeholder: "粘贴图片 URL（支持 JPG, PNG）", Type: "url", Group: "advanced"},
@@ -95,11 +95,14 @@ func GetPlatformConfig(platform string) *PlatformConfig {
 	return PlatformConfigs[platform]
 }
 
-// GetAllPlatformConfigs returns a slice of all platform configs.
+// GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-	configs := make([]*PlatformConfig, 0, len(PlatformConfigs))
-	for _, pc := range PlatformConfigs {
-		configs = append(configs, pc)
+	order := []string{PlatformRednote, PlatformArticle, PlatformXLS}
+	configs := make([]*PlatformConfig, 0, len(order))
+	for _, key := range order {
+		if pc, ok := PlatformConfigs[key]; ok {
+			configs = append(configs, pc)
+		}
 	}
 	return configs
 }

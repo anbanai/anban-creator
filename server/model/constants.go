@@ -60,15 +60,24 @@ const (
 	CreditTypeAdminGrant = "admin_grant"
 )
 
-// User tier constants.
+// User tier type.
+type Tier string
+
 const (
-	TierFree       = "free"
-	TierPro        = "pro"
-	TierEnterprise = "enterprise"
+	TierFree       Tier = "free"
+	TierPro        Tier = "pro"
+	TierEnterprise Tier = "enterprise"
 )
 
+// ValidTiers is the set of all valid tier values.
+var ValidTiers = map[Tier]bool{
+	TierFree:       true,
+	TierPro:        true,
+	TierEnterprise: true,
+}
+
 // TierMaxConcurrentTasks maps each tier to its maximum concurrent tasks limit.
-var TierMaxConcurrentTasks = map[string]int{
+var TierMaxConcurrentTasks = map[Tier]int{
 	TierFree:       2,
 	TierPro:        5,
 	TierEnterprise: 10,
@@ -76,16 +85,16 @@ var TierMaxConcurrentTasks = map[string]int{
 
 // GetTierMaxConcurrentTasks returns the max concurrent tasks for a given tier.
 // Returns the free tier default if the tier is unknown.
-func GetTierMaxConcurrentTasks(tier string) int {
+func GetTierMaxConcurrentTasks(tier Tier) int {
 	if v, ok := TierMaxConcurrentTasks[tier]; ok {
 		return v
 	}
 	return TierMaxConcurrentTasks[TierFree]
 }
 
-// ResolveTier normalizes an empty or unknown tier string to TierFree.
-func ResolveTier(tier string) string {
-	if tier == "" {
+// ResolveTier normalizes an empty or unknown tier to TierFree.
+func ResolveTier(tier Tier) Tier {
+	if tier == "" || !ValidTiers[tier] {
 		return TierFree
 	}
 	return tier

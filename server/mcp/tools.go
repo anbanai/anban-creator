@@ -271,6 +271,7 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 			"reference_image_url": ch.ReferenceImageURL,
 		}
 	case "rednote":
+			// For rednote, style is a visual/image style description used for image prompt generation.
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
 		}

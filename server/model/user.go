@@ -12,7 +12,7 @@ type User struct {
 	Password        string    `gorm:"type:varchar(255);not null" json:"-"`
 	OpenID          string    `gorm:"type:varchar(128);uniqueIndex;nullable" json:"-"`
 	UnionID         string    `gorm:"type:varchar(128);index;nullable" json:"-"`
-	Tier            string    `gorm:"type:varchar(20);default:free" json:"tier"`
+	Tier            Tier      `gorm:"type:varchar(20);default:free" json:"tier"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	CreditsBalance  int       `gorm:"default:0" json:"credits_balance"`

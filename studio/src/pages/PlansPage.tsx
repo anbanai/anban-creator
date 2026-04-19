@@ -285,7 +285,7 @@ export default function PlansPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {contentTypeOptions.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

@@ -22,9 +22,9 @@ import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 
 const platformOptions = [
-  { value: 'article', label: '公众号 (Article)' },
-  { value: 'xls', label: '小绿书 (Xiaolvshu)' },
-  { value: 'rednote', label: '小红书 (RedNote)' },
+  { value: 'rednote', label: '小红书' },
+  { value: 'article', label: '公众号' },
+  { value: 'xls', label: '小绿书' },
 ]
 
 const statusTabs: { label: string; value: string }[] = [
@@ -98,12 +98,6 @@ export default function ChannelsPage() {
 
   const selectedPlatform = form.watch('platform')
   const profileUrl = form.watch('profile_url')
-
-  const { data: currentUser } = useQuery({
-    queryKey: ['auth', 'me'],
-    queryFn: () => api.auth.me(),
-    staleTime: 5 * 60 * 1000,
-  })
 
   const { data: platformConfigs } = useQuery({
     queryKey: ['platform-configs'],
@@ -284,6 +278,7 @@ export default function ChannelsPage() {
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
+  const isRednote = selectedPlatform === 'rednote'
 
   return (
     <div className="space-y-6">
@@ -362,7 +357,7 @@ export default function ChannelsPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {platformOptions.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -491,20 +486,29 @@ export default function ChannelsPage() {
 
                   <FormField control={form.control} name="style" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>写作风格</FormLabel>
-                      <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                      <FormLabel>{isRednote ? '视觉风格' : '写作风格'}</FormLabel>
+                      {isRednote ? (
                         <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="选择写作风格" />
-                          </SelectTrigger>
+                          <Textarea
+                            placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
+                            {...field}
+                          />
                         </FormControl>
-                        <SelectContent>
-                          {styleOptions.map((opt) => (
-                            <SelectItem key={opt.value || '_none'} value={opt.value || '_none'}>{opt.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>选择内置写作风格模板</FormDescription>
+                      ) : (
+                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="选择写作风格" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {styleOptions.map((opt) => (
+                              <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <FormDescription>{isRednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -520,7 +524,7 @@ export default function ChannelsPage() {
                         </FormControl>
                         <SelectContent>
                           {themeOptions.map((opt) => (
-                            <SelectItem key={opt.value || '_none'} value={opt.value || '_none'}>{opt.label}</SelectItem>
+                            <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -558,7 +562,7 @@ export default function ChannelsPage() {
                       <FormLabel>最大并发任务数</FormLabel>
                       <div className="flex items-center gap-2">
                         <Badge variant="secondary">
-                          {currentUser?.tier || 'Free'} 等级 · 最大 {currentUser?.max_concurrent_limit || 2} 并发
+                          由账号等级决定
                         </Badge>
                       </div>
                       <FormDescription>并发数由账号等级决定，升级等级可提高并发上限</FormDescription>

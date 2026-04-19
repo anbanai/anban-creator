@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { tierLabels } from '@/lib/labels'
 
 export default function UserAccountPopover() {
   const { user, logout } = useAuth()
@@ -30,6 +31,7 @@ export default function UserAccountPopover() {
           <DropdownMenuLabel>
             <p className="truncate text-sm font-medium text-foreground">{user.nickname || '用户'}</p>
             <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{tierLabels[user.tier] || user.tier} · 最大 {user.max_concurrent_limit} 并发</p>
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />

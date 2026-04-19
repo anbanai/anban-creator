@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -85,6 +86,31 @@ func (e *DockerExecutor) Close() error {
 	return nil
 }
 
+// CleanupOrphanedContainers removes stopped ephemeral task containers
+// (abwriter-task-*) left behind by previous runs. Safe to call at startup.
+func (e *DockerExecutor) CleanupOrphanedContainers() {
+	containers, err := e.dockerCLI.ContainerList(context.Background(), container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.KeyValuePair{Key: "name", Value: "^/abwriter-task-"}),
+	})
+	if err != nil {
+		e.logger.Warn().Err(err).Msg("failed to list containers for orphan cleanup")
+		return
+	}
+
+	removed := 0
+	for _, c := range containers {
+		if err := e.dockerCLI.ContainerRemove(context.Background(), c.ID, container.RemoveOptions{Force: true}); err != nil {
+			e.logger.Warn().Err(err).Str("container", c.ID).Msg("failed to remove orphan container")
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		e.logger.Info().Int("removed", removed).Msg("cleaned up orphaned abwriter containers")
+	}
+}
+
 // Execute runs the standalone abwriter-agent in Docker and returns its final JSON result.
 func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	model := opts.Model
@@ -142,7 +168,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 
 	var execRes execResult
 	if e.dockerCfg.ContainerName != "" {
-		execRes = e.executeViaExec(ctx, opts.Task.ID, workDirInContainer, cmd, env)
+		execRes = e.executeViaExec(ctx, opts.Task.ID, workDirInContainer, cmd, env, opts.HeartbeatFunc)
 	} else {
 		execRes = e.executeInNewContainer(ctx, opts.Task.ID, workDir, cmd, env)
 	}
@@ -229,7 +255,7 @@ type execResult struct {
 	err    error
 }
 
-func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInContainer string, cmd []string, env []string) execResult {
+func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInContainer string, cmd []string, env []string, heartbeatFunc func(string)) execResult {
 	containerName := e.dockerCfg.ContainerName
 	if containerName == "" {
 		return execResult{err: fmt.Errorf("persistent container name is empty")}
@@ -275,9 +301,14 @@ func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInCo
 		case <-ctx.Done():
 			res.err = fmt.Errorf("task cancelled")
 			e.killExecProcess(execCreate.ID, containerName)
-			<-done
+			e.waitForDone(done, execCreate.ID, containerName)
 			return res
 		default:
+		}
+
+		// Update heartbeat each poll iteration for stuck-task detection.
+		if heartbeatFunc != nil {
+			heartbeatFunc(taskID)
 		}
 
 		inspect, err := e.dockerCLI.ContainerExecInspect(ctx, execCreate.ID)
@@ -299,7 +330,7 @@ func (e *DockerExecutor) executeViaExec(ctx context.Context, taskID, workDirInCo
 		if time.Now().After(deadline) {
 			res.err = fmt.Errorf("exec timed out after %d seconds", e.dockerCfg.TimeoutSec)
 			e.killExecProcess(execCreate.ID, containerName)
-			<-done
+			e.waitForDone(done, execCreate.ID, containerName)
 			return res
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -320,6 +351,42 @@ func (e *DockerExecutor) killExecProcess(execID, containerName string) {
 		return
 	}
 	_ = e.dockerCLI.ContainerExecStart(context.Background(), killExec.ID, container.ExecStartOptions{})
+}
+
+// forceKillExecProcess sends SIGKILL (-9) to the exec process.
+// Used as a fallback when SIGTERM fails to terminate the process.
+func (e *DockerExecutor) forceKillExecProcess(execID, containerName string) {
+	inspect, err := e.dockerCLI.ContainerExecInspect(context.Background(), execID)
+	if err != nil || !inspect.Running || inspect.Pid == 0 {
+		return
+	}
+
+	e.logger.Warn().Int("pid", inspect.Pid).Msg("exec process did not respond to SIGTERM, sending SIGKILL")
+
+	killExec, err := e.dockerCLI.ContainerExecCreate(context.Background(), containerName, container.ExecOptions{
+		Cmd:  []string{"kill", "-9", fmt.Sprintf("%d", inspect.Pid)},
+		User: "root",
+	})
+	if err != nil {
+		e.logger.Error().Err(err).Msg("failed to create SIGKILL exec")
+		return
+	}
+	_ = e.dockerCLI.ContainerExecStart(context.Background(), killExec.ID, container.ExecStartOptions{})
+}
+
+// waitForDone waits for the stdout copy goroutine with a secondary timeout.
+// If the goroutine doesn't finish within killWaitTimeout, it sends SIGKILL
+// to force-terminate the exec process.
+const killWaitTimeout = 10 * time.Second
+
+func (e *DockerExecutor) waitForDone(done chan error, execID, containerName string) error {
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(killWaitTimeout):
+		e.forceKillExecProcess(execID, containerName)
+		return <-done
+	}
 }
 
 func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, workDir string, cmd []string, env []string) execResult {
@@ -343,7 +410,7 @@ func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, work
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 
-	containerName := "abwriter-" + taskID
+	containerName := "abwriter-task-" + taskID
 	resp, err := e.dockerCLI.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
 	if err != nil {
 		return execResult{err: fmt.Errorf("docker create: %w", err)}

@@ -22,7 +22,7 @@ const navItems = [
   { to: '/channels', label: '渠道', icon: Rss },
   { to: '/plans', label: '计划', icon: CalendarRange },
   { to: '/tasks', label: '任务', icon: ListChecks },
-  { to: '/timeline', label: '时间线', icon: Clock },
+  { to: '/timeline', label: '时间轴', icon: Clock },
   { to: '/credits', label: '积分', icon: Coins },
 ]
 

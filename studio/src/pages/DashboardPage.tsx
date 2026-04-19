@@ -377,7 +377,7 @@ export default function DashboardPage() {
           >
             <Clock className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <div>
-              <p className="font-medium text-foreground">查看时间线</p>
+              <p className="font-medium text-foreground">查看时间轴</p>
               <p className="mt-0.5 text-sm text-muted-foreground">查看已排期内容</p>
             </div>
           </Link>

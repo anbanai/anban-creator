@@ -1,3 +1,16 @@
+// 用户等级
+export const tierLabels: Record<string, string> = {
+  free: '免费版',
+  pro: '专业版',
+  enterprise: '企业版',
+}
+
+export const tierDescriptions: Record<string, string> = {
+  free: '最大 2 并发，API 限速 100 次/分钟',
+  pro: '最大 5 并发，API 限速 300 次/分钟',
+  enterprise: '最大 10 并发，API 限速 300 次/分钟',
+}
+
 // 任务状态
 export const taskStatusLabel: Record<string, string> = {
   pending: '待执行',

@@ -33,7 +33,7 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const channelSchema = z.object({
-  platform: z.enum(["article", "xls", "rednote"]),
+  platform: z.enum(["rednote", "article", "xls"]),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
@@ -41,7 +41,7 @@ export const channelSchema = z.object({
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
   positioning: z.string().max(300, "账号定位不能超过 300 个字符").optional(),
-  style: z.string().max(500, "风格描述不能超过 500 个字符").optional(),
+  style: z.string().max(1024, "风格描述不能超过 1024 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
   author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
   reference_image_url: z.string().url("请输入有效的图片 URL").or(z.literal("")).optional(),

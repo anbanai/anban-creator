@@ -16,11 +16,13 @@ type Task struct {
 	ErrorMessage string     `gorm:"type:text" json:"error_message,omitempty"`
 	StartedAt    *time.Time `gorm:"index" json:"started_at"`
 	CompletedAt  *time.Time `gorm:"index" json:"completed_at"`
-	CleanedUpAt  *time.Time `gorm:"index" json:"cleaned_up_at"`
+	CleanedUpAt     *time.Time `gorm:"index" json:"cleaned_up_at"`
+	LastHeartbeatAt *time.Time `gorm:"index" json:"last_heartbeat_at,omitempty"`
 	RetryCount         int        `gorm:"default:0" json:"retry_count"`
 	MaxRetries         int        `gorm:"default:3" json:"max_retries"`
 	RateLimitRetryCount int       `gorm:"default:0" json:"rate_limit_retry_count"`
 	CreatedAt    time.Time  `gorm:"index:idx_user_created,priority:2" json:"created_at"`
+	UpdatedAt    time.Time  `gorm:"index" json:"updated_at"`
 	Plan         *Plan      `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
 }
 
