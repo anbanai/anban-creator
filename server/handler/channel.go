@@ -123,6 +123,10 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 	}
 
 	ch := req.toChannel()
+
+	// Force max_concurrent_tasks based on user tier.
+	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
+
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create channel failed")
@@ -182,6 +186,10 @@ func (h *ChannelHandler) Update(c fiber.Ctx) error {
 	}
 
 	ch := req.toChannel()
+
+	// Force max_concurrent_tasks based on user tier.
+	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
+
 	updated, err := h.service.Update(c.Context(), userID, channelID, ch)
 	if err != nil {
 		if errors.Is(err, service.ErrChannelNotFound) {
@@ -381,4 +389,15 @@ func (req *channelRequest) getFieldValue(key string) string {
 	default:
 		return ""
 	}
+}
+
+// getTierMaxConcurrent reads the user's tier from auth middleware locals
+// and returns the max concurrent tasks limit for that tier.
+func (h *ChannelHandler) getTierMaxConcurrent(c fiber.Ctx) int {
+	user, _ := c.Locals("user").(*model.User)
+	tier := model.TierFree
+	if user != nil {
+		tier = model.ResolveTier(user.Tier)
+	}
+	return model.GetTierMaxConcurrentTasks(tier)
 }

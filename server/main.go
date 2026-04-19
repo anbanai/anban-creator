@@ -203,6 +203,7 @@ func main() {
 	var timelineHandler *handler.TimelineHandler
 	var creditHandler *handler.CreditHandler
 	var apiKeyHandler *handler.APIKeyHandler
+	var fileHandler *handler.FileHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -217,6 +218,9 @@ func main() {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
+		if store != nil {
+			fileHandler = handler.NewFileHandler(store, log)
+		}
 	}
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
@@ -311,6 +315,7 @@ func main() {
 		CreditHandler:   creditHandler,
 		TimelineHandler: timelineHandler,
 		APIKeyHandler:   apiKeyHandler,
+		FileHandler:     fileHandler,
 		MCPHandler:      mcpHandler,
 		StorageProvider: store,
 	}

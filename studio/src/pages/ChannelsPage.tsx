@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -8,9 +8,12 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api, type Channel, type ChannelStats, type CreateChannelRequest, type PlatformConfig } from '@/lib/api'
 import { ChannelCard } from '@/components/ChannelCard'
 import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/textarea'
+import { TagInput } from '@/components/ui/TagInput'
+import { FileUpload } from '@/components/ui/FileUpload'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -30,6 +33,36 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已归档', value: 'archived' },
 ]
 
+const styleOptions = [
+  { value: '', label: '不设置' },
+  { value: 'casual-science', label: 'casual-science' },
+  { value: 'dan-koe', label: 'dan-koe' },
+  { value: 'cultural-depth', label: 'cultural-depth' },
+]
+
+const themeOptions = [
+  { value: '', label: '不设置' },
+  { value: 'autumn-warm', label: 'autumn-warm' },
+  { value: 'spring-fresh', label: 'spring-fresh' },
+  { value: 'ocean-calm', label: 'ocean-calm' },
+]
+
+const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
+  platform: 'article',
+  name: '',
+  profile_url: '',
+  avatar_url: '',
+  wechat_app_id: '',
+  wechat_secret: '',
+  keywords: '',
+  positioning: '',
+  style: '',
+  theme: '',
+  author: '',
+  reference_image_url: '',
+  max_concurrent_tasks: 2,
+}
+
 function channelToForm(ch: Channel): ChannelFormValues {
   return {
     platform: ch.platform,
@@ -44,7 +77,7 @@ function channelToForm(ch: Channel): ChannelFormValues {
     theme: ch.theme || '',
     author: ch.author || '',
     reference_image_url: ch.reference_image_url || '',
-    max_concurrent_tasks: ch.max_concurrent_tasks || 10,
+    max_concurrent_tasks: ch.max_concurrent_tasks || CHANNEL_FORM_DEFAULTS.max_concurrent_tasks,
   }
 }
 
@@ -60,25 +93,17 @@ export default function ChannelsPage() {
 
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelSchema),
-    defaultValues: {
-      platform: 'article',
-      name: '',
-      profile_url: '',
-      avatar_url: '',
-      wechat_app_id: '',
-      wechat_secret: '',
-      keywords: '',
-      positioning: '',
-      style: '',
-      theme: '',
-      author: '',
-      reference_image_url: '',
-      max_concurrent_tasks: 10,
-    },
+    defaultValues: CHANNEL_FORM_DEFAULTS,
   })
 
   const selectedPlatform = form.watch('platform')
   const profileUrl = form.watch('profile_url')
+
+  const { data: currentUser } = useQuery({
+    queryKey: ['auth', 'me'],
+    queryFn: () => api.auth.me(),
+    staleTime: 5 * 60 * 1000,
+  })
 
   const { data: platformConfigs } = useQuery({
     queryKey: ['platform-configs'],
@@ -86,7 +111,7 @@ export default function ChannelsPage() {
     staleTime: Infinity,
   })
 
-  const platformConfigMap = useCallback(() => {
+  const platformConfigMap = useMemo(() => {
     const map: Record<string, PlatformConfig> = {}
     if (platformConfigs) {
       for (const pc of platformConfigs) {
@@ -96,11 +121,11 @@ export default function ChannelsPage() {
     return map
   }, [platformConfigs])
 
-  const currentPlatformConfig = platformConfigMap()[selectedPlatform]
+  const currentPlatformConfig = platformConfigMap[selectedPlatform]
 
   useEffect(() => {
     if (!profileUrl || !selectedPlatform) return
-    const pc = platformConfigMap()[selectedPlatform]
+    const pc = platformConfigMap[selectedPlatform]
     if (!pc?.supports_auto_fetch) return
     const timer = setTimeout(() => {
       handleFetchProfile(profileUrl)
@@ -214,21 +239,7 @@ export default function ChannelsPage() {
   function openCreate() {
     setEditingChannel(null)
     setAdvancedOpen(false)
-    form.reset({
-      platform: 'article',
-      name: '',
-      profile_url: '',
-      avatar_url: '',
-      wechat_app_id: '',
-      wechat_secret: '',
-      keywords: '',
-      positioning: '',
-      style: '',
-      theme: '',
-      author: '',
-      reference_image_url: '',
-      max_concurrent_tasks: 10,
-    })
+    form.reset(CHANNEL_FORM_DEFAULTS)
     setModalOpen(true)
   }
 
@@ -242,21 +253,7 @@ export default function ChannelsPage() {
   function closeModal() {
     setModalOpen(false)
     setEditingChannel(null)
-    form.reset({
-      platform: 'article',
-      name: '',
-      profile_url: '',
-      avatar_url: '',
-      wechat_app_id: '',
-      wechat_secret: '',
-      keywords: '',
-      positioning: '',
-      style: '',
-      theme: '',
-      author: '',
-      reference_image_url: '',
-      max_concurrent_tasks: 10,
-    })
+    form.reset(CHANNEL_FORM_DEFAULTS)
   }
 
   async function onSubmit(values: ChannelFormValues) {
@@ -271,7 +268,6 @@ export default function ChannelsPage() {
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
       reference_image_url: values.reference_image_url?.trim() || undefined,
-      max_concurrent_tasks: values.max_concurrent_tasks,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
     }
@@ -347,7 +343,7 @@ export default function ChannelsPage() {
             <DialogTitle>{editingChannel ? '编辑频道' : '新建频道'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
-            <form id="channel-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+            <form id="channel-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="platform" render={({ field }) => (
                 <FormItem>
                   <FormLabel>平台</FormLabel>
@@ -482,9 +478,13 @@ export default function ChannelsPage() {
                     <FormItem>
                       <FormLabel>关键词</FormLabel>
                       <FormControl>
-                        <Textarea placeholder="e.g. 科技, AI, 软件工程" {...field} />
+                        <TagInput
+                          value={field.value}
+                          onChange={field.onChange}
+                          placeholder="输入后按回车添加标签"
+                        />
                       </FormControl>
-                      <FormDescription>逗号分隔的关键词，用于内容生成</FormDescription>
+                      <FormDescription>按回车或逗号添加标签，用于内容生成</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -492,10 +492,19 @@ export default function ChannelsPage() {
                   <FormField control={form.control} name="style" render={({ field }) => (
                     <FormItem>
                       <FormLabel>写作风格</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. casual-science, dan-koe" {...field} />
-                      </FormControl>
-                      <FormDescription>内置风格: casual-science, dan-koe, cultural-depth</FormDescription>
+                      <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="选择写作风格" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {styleOptions.map((opt) => (
+                            <SelectItem key={opt.value || '_none'} value={opt.value || '_none'}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>选择内置写作风格模板</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -503,10 +512,19 @@ export default function ChannelsPage() {
                   <FormField control={form.control} name="theme" render={({ field }) => (
                     <FormItem>
                       <FormLabel>主题</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. autumn-warm, spring-fresh" {...field} />
-                      </FormControl>
-                      <FormDescription>内置主题: autumn-warm, spring-fresh, ocean-calm</FormDescription>
+                      <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="选择转换主题" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {themeOptions.map((opt) => (
+                            <SelectItem key={opt.value || '_none'} value={opt.value || '_none'}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>选择内置转换主题模板</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -525,30 +543,25 @@ export default function ChannelsPage() {
                     <FormItem>
                       <FormLabel>品牌视觉参考图</FormLabel>
                       <FormControl>
-                        <Input placeholder="粘贴图片 URL（支持 JPG, PNG）" {...field} />
+                        <FileUpload
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
                       </FormControl>
                       <FormDescription>用于 AI 图片生成的视觉风格参考，保持品牌一致性</FormDescription>
-                      {field.value && (
-                        <div className="mt-2">
-                          <img
-                            src={field.value}
-                            alt="参考图预览"
-                            className="h-24 w-24 rounded-md object-cover border"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                          />
-                        </div>
-                      )}
                       <FormMessage />
                     </FormItem>
                   )} />
 
-                  <FormField control={form.control} name="max_concurrent_tasks" render={({ field }) => (
+                  <FormField control={form.control} name="max_concurrent_tasks" render={() => (
                     <FormItem>
                       <FormLabel>最大并发任务数</FormLabel>
-                      <FormControl>
-                        <Input type="number" min={1} max={100} placeholder="默认 10" {...field} onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} />
-                      </FormControl>
-                      <FormDescription>同一时间最多可执行的任务数量，超出部分自动排队</FormDescription>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">
+                          {currentUser?.tier || 'Free'} 等级 · 最大 {currentUser?.max_concurrent_limit || 2} 并发
+                        </Badge>
+                      </div>
+                      <FormDescription>并发数由账号等级决定，升级等级可提高并发上限</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />

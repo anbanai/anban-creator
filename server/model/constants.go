@@ -60,6 +60,37 @@ const (
 	CreditTypeAdminGrant = "admin_grant"
 )
 
+// User tier constants.
+const (
+	TierFree       = "free"
+	TierPro        = "pro"
+	TierEnterprise = "enterprise"
+)
+
+// TierMaxConcurrentTasks maps each tier to its maximum concurrent tasks limit.
+var TierMaxConcurrentTasks = map[string]int{
+	TierFree:       2,
+	TierPro:        5,
+	TierEnterprise: 10,
+}
+
+// GetTierMaxConcurrentTasks returns the max concurrent tasks for a given tier.
+// Returns the free tier default if the tier is unknown.
+func GetTierMaxConcurrentTasks(tier string) int {
+	if v, ok := TierMaxConcurrentTasks[tier]; ok {
+		return v
+	}
+	return TierMaxConcurrentTasks[TierFree]
+}
+
+// ResolveTier normalizes an empty or unknown tier string to TierFree.
+func ResolveTier(tier string) string {
+	if tier == "" {
+		return TierFree
+	}
+	return tier
+}
+
 // Per-operation credit type constants (for MCP tool billing).
 const (
 	CreditTypeImageGen      = "image_gen"

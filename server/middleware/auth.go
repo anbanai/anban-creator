@@ -16,6 +16,11 @@ import (
 // the user ID, user object, and role in Fiber locals.
 func AuthMiddleware(jwtSvc *auth.JWTService, repo repository.Repository, logger *zerolog.Logger) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		// Skip JWT validation for agent communication endpoints (use API key auth instead).
+		if strings.HasPrefix(c.Path(), "/api/v1/agent/") {
+			return c.Next()
+		}
+
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
 			return handler.Error(c, fiber.StatusUnauthorized, "missing Authorization header")

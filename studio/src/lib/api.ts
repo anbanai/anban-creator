@@ -8,6 +8,9 @@ export interface User {
   phone: string
   nickname: string
   avatar: string
+  credits_balance: number
+  tier: string
+  max_concurrent_limit: number
   created_at: string
   updated_at: string
 }

@@ -47,6 +47,7 @@ type Services struct {
 	ChannelHandler  *handler.ChannelHandler
 	TimelineHandler *handler.TimelineHandler
 	APIKeyHandler   *handler.APIKeyHandler
+	FileHandler     *handler.FileHandler
 	MCPHandler      http.Handler
 	StorageProvider storage.Provider
 }
@@ -156,6 +157,19 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	// ---------------------------------------------------------------------------
+	// Agent communication endpoints (API key auth, no JWT required).
+	// Registered before the JWT-protected group to avoid prefix-matching conflicts.
+	// ---------------------------------------------------------------------------
+
+	if svc.AgentHandler != nil {
+		agentLimiter := appmiddleware.RateLimit(svc.Redis, 300, 1*time.Minute)
+		agentAPI := app.Group("/api/v1/agent", agentLimiter, svc.AgentHandler.AuthMiddleware)
+		agentAPI.Post("/upload", svc.AgentHandler.Upload)
+		agentAPI.Get("/temp/:id/:file", svc.AgentHandler.Temp)
+		agentAPI.Post("/progress", svc.AgentHandler.Progress)
+	}
+
+	// ---------------------------------------------------------------------------
 	// Protected API group — /api/v1 (requires authentication)
 	// ---------------------------------------------------------------------------
 
@@ -220,6 +234,11 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/files/*", svc.TaskHandler.ServeLocalFile)
 	}
 
+	// File upload endpoint.
+	if svc.FileHandler != nil {
+		apiV1.Post("/files/upload", svc.FileHandler.Upload)
+	}
+
 	// ---------------------------------------------------------------------------
 	// Timeline endpoint
 	// ---------------------------------------------------------------------------
@@ -244,15 +263,6 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.CreditHandler != nil {
 		adminLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
 		app.Post("/api/v1/admin/credits/grant", adminLimiter, svc.CreditHandler.AdminGrant)
-	}
-
-	// Agent communication endpoints (API key auth, no JWT required).
-	if svc.AgentHandler != nil {
-		agentLimiter := appmiddleware.RateLimit(svc.Redis, 300, 1*time.Minute)
-		agentAPI := app.Group("/api/v1/agent", agentLimiter, svc.AgentHandler.AuthMiddleware)
-		agentAPI.Post("/upload", svc.AgentHandler.Upload)
-		agentAPI.Get("/temp/:id/:file", svc.AgentHandler.Temp)
-		agentAPI.Post("/progress", svc.AgentHandler.Progress)
 	}
 
 	// ---------------------------------------------------------------------------

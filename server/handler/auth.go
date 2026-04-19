@@ -311,12 +311,26 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	user, err := h.repo.Users().FindByID(c.Context(), userID)
-	if err != nil {
+	// Use the user object already stored by auth middleware to avoid a redundant DB lookup.
+	user, ok := c.Locals("user").(*model.User)
+	if !ok || user == nil {
 		return Error(c, fiber.StatusNotFound, "user not found")
 	}
 
-	return Success(c, user)
+	tier := model.ResolveTier(user.Tier)
+
+	return Success(c, fiber.Map{
+		"id":                   user.ID,
+		"email":                user.Email,
+		"phone":                user.Phone,
+		"nickname":             user.Nickname,
+		"avatar":               user.Avatar,
+		"credits_balance":      user.CreditsBalance,
+		"tier":                 tier,
+		"max_concurrent_limit": model.GetTierMaxConcurrentTasks(tier),
+		"created_at":           user.CreatedAt,
+		"updated_at":           user.UpdatedAt,
+	})
 }
 
 // WXLogin handles POST /api/v1/auth/wx-login.
