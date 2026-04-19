@@ -389,8 +389,11 @@ async function unwrap<T>(request: Promise<{ data: ApiResponse<T> }>): Promise<T>
 export const api = {
   // Auth
   auth: {
-    register: (email: string, password: string, nickname?: string) =>
-      unwrap<AuthResponse>(http.post('/auth/register', { email, password, nickname })),
+    register: (email: string, password: string, code: string, nickname?: string) =>
+      unwrap<AuthResponse>(http.post('/auth/register', { email, password, code, nickname })),
+
+    sendVerificationCode: (email: string) =>
+      unwrap<{ msg: string }>(http.post('/auth/send-code', { email })),
 
     login: (email: string, password: string) =>
       unwrap<AuthResponse>(http.post('/auth/login', { email, password })),

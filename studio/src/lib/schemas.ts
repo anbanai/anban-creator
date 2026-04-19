@@ -8,6 +8,7 @@ export type LoginFormValues = z.infer<typeof loginSchema>
 
 export const registerSchema = z.object({
   email: z.string().min(1, "邮箱不能为空").email("请输入有效的邮箱地址"),
+  code: z.string().min(1, "请输入验证码"),
   password: z.string().min(8, "密码至少 8 个字符"),
   nickname: z.string().optional(),
 })
@@ -40,7 +41,7 @@ export const channelSchema = z.object({
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
   positioning: z.string().max(300, "账号定位不能超过 300 个字符").optional(),
-  style: z.string().max(100, "写作风格不能超过 100 个字符").optional(),
+  style: z.string().max(500, "风格描述不能超过 500 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
   author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
   reference_image_url: z.string().url("请输入有效的图片 URL").or(z.literal("")).optional(),

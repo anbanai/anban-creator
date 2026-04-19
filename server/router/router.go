@@ -147,8 +147,11 @@ func NewRouter(svc *Services) *fiber.App {
 
 	// Stricter rate limiter for auth endpoints (10 requests per minute per IP).
 	authRateLimit := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
+	// Rate limit for send-code: 10 requests per 10 minutes per IP.
+	sendCodeRateLimit := appmiddleware.RateLimit(svc.Redis, 10, 10*time.Minute)
 	authPublic := app.Group("/api/v1/auth", authRateLimit)
 	if svc.AuthHandler != nil {
+		authPublic.Post("/send-code", sendCodeRateLimit, svc.AuthHandler.SendCode)
 		authPublic.Post("/register", svc.AuthHandler.Register)
 		authPublic.Post("/login", svc.AuthHandler.Login)
 		authPublic.Post("/refresh", svc.AuthHandler.Refresh)

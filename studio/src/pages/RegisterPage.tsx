@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useNavigate } from 'react-router-dom'
@@ -10,17 +11,47 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 
+const COUNTDOWN_SECONDS = 60
+
 export default function RegisterPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const [countdown, setCountdown] = useState(0)
+  const [sendingCode, setSendingCode] = useState(false)
+
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { email: '', password: '', nickname: '' },
+    defaultValues: { email: '', code: '', password: '', nickname: '' },
   })
+
+  const emailValue = form.watch('email')
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)
+
+  // Countdown timer
+  useEffect(() => {
+    if (countdown <= 0) return
+    const timer = setInterval(() => setCountdown((c) => c - 1), 1000)
+    return () => clearInterval(timer)
+  }, [countdown])
+
+  const handleSendCode = useCallback(async () => {
+    if (!emailValid || countdown > 0 || sendingCode) return
+    setSendingCode(true)
+    try {
+      await api.auth.sendVerificationCode(emailValue)
+      setCountdown(COUNTDOWN_SECONDS)
+      toast.success('验证码已发送')
+    } catch (err: any) {
+      const msg = err?.response?.data?.msg || '发送验证码失败，请稍后重试'
+      toast.error(msg)
+    } finally {
+      setSendingCode(false)
+    }
+  }, [emailValue, emailValid, countdown, sendingCode])
 
   async function onSubmit(values: RegisterFormValues) {
     try {
-      const response = await api.auth.register(values.email, values.password, values.nickname || undefined)
+      const response = await api.auth.register(values.email, values.password, values.code, values.nickname || undefined)
       login(response.token, response.refresh_token, response.user)
       navigate('/', { replace: true })
     } catch (err: any) {
@@ -47,6 +78,28 @@ export default function RegisterPage() {
                   <FormItem>
                     <FormLabel>邮箱</FormLabel>
                     <FormControl><Input type="email" placeholder="请输入邮箱地址" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="code" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>验证码</FormLabel>
+                    <div className="flex gap-2">
+                      <FormControl>
+                        <Input placeholder="请输入验证码" className="flex-1" {...field} />
+                      </FormControl>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="default"
+                        disabled={!emailValid || countdown > 0 || sendingCode}
+                        loading={sendingCode}
+                        onClick={handleSendCode}
+                        className="shrink-0 whitespace-nowrap"
+                      >
+                        {countdown > 0 ? `${countdown}s` : '发送验证码'}
+                      </Button>
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )} />

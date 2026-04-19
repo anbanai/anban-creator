@@ -10,6 +10,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/auth"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/rs/zerolog"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -20,6 +21,7 @@ type AuthHandler struct {
 	jwtSvc    *auth.JWTService
 	wechatSvc *auth.WeChatService
 	repo      repository.Repository
+	emailSvc  *service.EmailService
 	logger    *zerolog.Logger
 	hub       *WebSocketHub
 }
@@ -29,6 +31,7 @@ func NewAuthHandler(
 	jwtSvc *auth.JWTService,
 	wechatSvc *auth.WeChatService,
 	repo repository.Repository,
+	emailSvc *service.EmailService,
 	logger *zerolog.Logger,
 	hub *WebSocketHub,
 ) *AuthHandler {
@@ -36,6 +39,7 @@ func NewAuthHandler(
 		jwtSvc:    jwtSvc,
 		wechatSvc: wechatSvc,
 		repo:      repo,
+		emailSvc:  emailSvc,
 		logger:    logger,
 		hub:       hub,
 	}
@@ -48,7 +52,12 @@ func NewAuthHandler(
 type registerRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	Code     string `json:"code"`
 	Nickname string `json:"nickname,omitempty"`
+}
+
+type sendCodeRequest struct {
+	Email string `json:"email"`
 }
 
 type loginRequest struct {
@@ -133,6 +142,31 @@ func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse,
 // Endpoint handlers
 // ---------------------------------------------------------------------------
 
+// SendCode handles POST /api/v1/auth/send-code.
+func (h *AuthHandler) SendCode(c fiber.Ctx) error {
+	var req sendCodeRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	req.Email = strings.TrimSpace(req.Email)
+
+	if req.Email == "" || !strings.Contains(req.Email, "@") {
+		return Error(c, fiber.StatusBadRequest, "请输入有效的邮箱地址")
+	}
+
+	if h.emailSvc == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "邮件服务未启用")
+	}
+
+	if err := h.emailSvc.SendVerificationCode(c.Context(), req.Email); err != nil {
+		h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to send verification code")
+		return Error(c, fiber.StatusInternalServerError, "发送验证码失败，请稍后重试")
+	}
+
+	return Success(c, fiber.Map{"msg": "验证码已发送"})
+}
+
 // Register handles POST /api/v1/auth/register.
 func (h *AuthHandler) Register(c fiber.Ctx) error {
 	var req registerRequest
@@ -142,17 +176,35 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 
 	req.Email = strings.TrimSpace(req.Email)
 	req.Password = strings.TrimSpace(req.Password)
+	req.Code = strings.TrimSpace(req.Code)
 
 	if req.Email == "" || req.Password == "" {
 		return Error(c, fiber.StatusBadRequest, "email and password are required")
+	}
+
+	// Verification code is required when email service is configured.
+	if h.emailSvc != nil && req.Code == "" {
+		return Error(c, fiber.StatusBadRequest, "验证码不能为空")
 	}
 
 	if req.Email != "" && !strings.Contains(req.Email, "@") {
 		return Error(c, fiber.StatusBadRequest, "invalid email format")
 	}
 
-	if len(req.Password) < 6 {
-		return Error(c, fiber.StatusBadRequest, "password must be at least 6 characters")
+	if len(req.Password) < 8 {
+		return Error(c, fiber.StatusBadRequest, "password must be at least 8 characters")
+	}
+
+	// Verify the email verification code.
+	if h.emailSvc != nil {
+		ok, err := h.emailSvc.VerifyCode(c.Context(), req.Email, req.Code)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("email", req.Email).Msg("verification failed")
+			return Error(c, fiber.StatusTooManyRequests, err.Error())
+		}
+		if !ok {
+			return Error(c, fiber.StatusBadRequest, "验证码错误或已过期")
+		}
 	}
 
 	// Check if user already exists.

@@ -21,6 +21,21 @@ func AuthMiddleware(jwtSvc *auth.JWTService, repo repository.Repository, logger 
 			return c.Next()
 		}
 
+		// Skip public auth endpoints — they handle their own authentication.
+		// This is necessary because Fiber v3 registers group middleware as USE routes
+		// that match all paths under the prefix, including routes from other groups.
+		switch c.Path() {
+		case "/api/v1/auth/register", "/api/v1/auth/login",
+			"/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/auth/wx-login",
+			"/api/v1/auth/send-code":
+			return c.Next()
+		}
+
+		if repo == nil {
+			logger.Error().Str("path", c.Path()).Msg("auth middleware called but repository is nil")
+			return handler.Error(c, fiber.StatusServiceUnavailable, "service is not available")
+		}
+
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
 			return handler.Error(c, fiber.StatusUnauthorized, "missing Authorization header")
@@ -68,6 +83,10 @@ func AuthMiddleware(jwtSvc *auth.JWTService, repo repository.Repository, logger 
 // in Fiber locals.
 func OptionalAuthMiddleware(jwtSvc *auth.JWTService, repo repository.Repository, logger *zerolog.Logger) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		if repo == nil {
+			return c.Next()
+		}
+
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
 			return c.Next()

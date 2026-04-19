@@ -24,10 +24,24 @@ type Config struct {
 	Storage  StorageConfig  `yaml:"storage"`
 	MCP      MCPConfig      `yaml:"mcp"`
 	ImageAPI ImageAPIConfig `yaml:"image_api"`
+	Writing  WritingConfig  `yaml:"writing"`
 	Claude   ClaudeConfig   `yaml:"claude"`
 	Credits  CreditsConfig  `yaml:"credits"`
 	CORS     CORSConfig     `yaml:"cors"`
 	Asynq    AsynqConfig    `yaml:"asynq"`
+	Email    EmailConfig    `yaml:"email"`
+}
+
+// EmailConfig holds email/verification code configuration.
+type EmailConfig struct {
+	SMTPHost    string        `yaml:"smtp_host"`
+	SMTPPort    int           `yaml:"smtp_port"`
+	SMTPUsername string       `yaml:"smtp_username"`
+	SMTPPassword string       `yaml:"smtp_password"`
+	FromAddress string        `yaml:"from_address"`
+	FromName    string        `yaml:"from_name"`
+	CodeTTL     time.Duration `yaml:"code_ttl"`    // default 5m
+	CodeLength  int           `yaml:"code_length"`  // default 6
 }
 
 type ServerConfig struct {
@@ -97,6 +111,14 @@ type ImageAPIConfig struct {
 	Cover   *appconfig.ImageAPI `yaml:"cover"`
 	Content *appconfig.ImageAPI `yaml:"content"`
 	Sizes   SizesConfig         `yaml:"sizes"`
+}
+
+// WritingConfig holds LLM API configuration for writing services
+// (article writing, humanization, topic research, SEO, outlines).
+type WritingConfig struct {
+	BaseURL string `yaml:"base_url"` // LLM API endpoint
+	Key     string `yaml:"key"`      // API key
+	Model   string `yaml:"model"`    // Model name
 }
 
 // ClaudeConfig holds configuration for the Claude CLI subprocess.
@@ -247,6 +269,17 @@ func (c *Config) applyDefaults() {
 	// Asynq defaults.
 	if c.Asynq.Concurrency == 0 {
 		c.Asynq.Concurrency = 3
+	}
+
+	// Email defaults.
+	if c.Email.CodeTTL == 0 {
+		c.Email.CodeTTL = 5 * time.Minute
+	}
+	if c.Email.CodeLength == 0 {
+		c.Email.CodeLength = 6
+	}
+	if c.Email.SMTPPort == 0 {
+		c.Email.SMTPPort = 587
 	}
 
 	// Claude executor defaults.
@@ -458,6 +491,37 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv(prefix + "ASYNQ_CONCURRENCY"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Asynq.Concurrency = n
+		}
+	}
+
+	if v := os.Getenv(prefix + "EMAIL_SMTP_HOST"); v != "" {
+		c.Email.SMTPHost = v
+	}
+	if v := os.Getenv(prefix + "EMAIL_SMTP_PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Email.SMTPPort = n
+		}
+	}
+	if v := os.Getenv(prefix + "EMAIL_SMTP_USERNAME"); v != "" {
+		c.Email.SMTPUsername = v
+	}
+	if v := os.Getenv(prefix + "EMAIL_SMTP_PASSWORD"); v != "" {
+		c.Email.SMTPPassword = v
+	}
+	if v := os.Getenv(prefix + "EMAIL_FROM_ADDRESS"); v != "" {
+		c.Email.FromAddress = v
+	}
+	if v := os.Getenv(prefix + "EMAIL_FROM_NAME"); v != "" {
+		c.Email.FromName = v
+	}
+	if v := os.Getenv(prefix + "EMAIL_CODE_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Email.CodeTTL = d
+		}
+	}
+	if v := os.Getenv(prefix + "EMAIL_CODE_LENGTH"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Email.CodeLength = n
 		}
 	}
 }

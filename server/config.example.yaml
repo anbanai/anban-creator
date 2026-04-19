@@ -103,6 +103,16 @@ image_api:
     rednote_content: "3:4" # 小红书正文配图
 
 # ---------------------------------------------------------------------------
+# Writing: LLM API configuration for writing services
+# Used by article writing, humanization, topic research, SEO, outlines.
+# Falls back to ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL env vars.
+# ---------------------------------------------------------------------------
+writing:
+  base_url: "" # LLM API endpoint (e.g. "https://open.bigmodel.cn/api/anthropic")
+  key: ""      # API key
+  model: ""    # Model name (e.g. "glm-5-turbo")
+
+# ---------------------------------------------------------------------------
 # Credits: Credits system configuration
 # ---------------------------------------------------------------------------
 credits:
@@ -167,3 +177,18 @@ claude:
     ANTHROPIC_DEFAULT_SONNET_MODEL: "" # Model override for sonnet tier
     ANTHROPIC_DEFAULT_OPUS_MODEL: "" # Model override for opus tier
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" # Disable telemetry
+
+# ---------------------------------------------------------------------------
+# Email: Verification code and email delivery configuration
+# Optional. If smtp_host is empty, verification codes are generated but not
+# sent (dev mode — codes are logged to the server output).
+# ---------------------------------------------------------------------------
+email:
+  smtp_host: "" # SMTP server host (e.g. "smtp.qq.com"). Empty = dev mode.
+  smtp_port: 587 # SMTP server port.
+  smtp_username: "" # SMTP authentication username.
+  smtp_password: "" # SMTP authentication password.
+  from_address: "" # Sender email address (e.g. "noreply@example.com").
+  from_name: "案板创作助手" # Sender display name.
+  code_ttl: 5m # Verification code TTL.
+  code_length: 6 # Number of digits in verification code.

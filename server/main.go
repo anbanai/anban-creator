@@ -127,10 +127,19 @@ func main() {
 	// 10. Create WebSocket hub.
 	wsHub := handler.NewWebSocketHub(jwtSvc)
 
-	// 11. Create auth handler.
+	// 11. Create email service for verification codes.
+	var emailSvc *service.EmailService
+	if rdb != nil {
+		emailSvc = service.NewEmailService(&cfg.Email, rdb, log)
+		log.Info().
+			Bool("smtp_configured", cfg.Email.SMTPHost != "").
+			Msg("email service initialized")
+	}
+
+	// 11.1 Create auth handler.
 	var authHandler *handler.AuthHandler
 	if repo != nil {
-		authHandler = handler.NewAuthHandler(jwtSvc, wechatSvc, repo, log, wsHub)
+		authHandler = handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub)
 	}
 
 	// 11.1 Create API key service (needed before executor for per-user MCP keys).
@@ -153,6 +162,7 @@ func main() {
 			log.Fatal().Err(err).Msg("failed to create Docker executor")
 		}
 		agentExecutor = dockerExec
+		dockerExec.CleanupOrphanedContainers()
 		log.Info().
 			Str("image", cfg.Claude.Docker.Image).
 			Int64("cpu_cores", cfg.Claude.Docker.CPUCores).
@@ -235,18 +245,28 @@ func main() {
 			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, cfg.Claude.Docker.MCPBaseURL, log)
 		}
 		if repo != nil && creditSvc != nil {
-			// Create LLM client from Claude env config for writing operations.
-			llmBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
-			llmAPIKey := os.Getenv("ANTHROPIC_AUTH_TOKEN")
-			llmModel := cfg.Claude.Model
+			// Create LLM client for writing operations.
+			// Prefer config.yaml writing section; fall back to env vars.
+			llmBaseURL := cfg.Writing.BaseURL
+			llmAPIKey := cfg.Writing.Key
+			llmModel := cfg.Writing.Model
+			if llmBaseURL == "" {
+				llmBaseURL = os.Getenv("ANTHROPIC_BASE_URL")
+			}
+			if llmAPIKey == "" {
+				llmAPIKey = os.Getenv("ANTHROPIC_AUTH_TOKEN")
+			}
 			if llmModel == "" {
-				llmModel = os.Getenv("ANTHROPIC_MODEL")
+				llmModel = cfg.Claude.Model
+				if llmModel == "" {
+					llmModel = os.Getenv("ANTHROPIC_MODEL")
+				}
 			}
 			if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
 				llmClient := service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel)
 				writingSvc = service.NewWritingService(repo, creditSvc, llmClient, log)
 			} else {
-				log.Warn().Msg("LLM client not configured (missing ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
+				log.Warn().Msg("LLM client not configured (missing writing config or ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
 			}
 			publishingSvc = service.NewPublishingService(repo, creditSvc, log)
 		}
