@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -57,12 +58,13 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 
 // ExecutionOptions configures a single agent execution.
 type ExecutionOptions struct {
-	Task       *model.Task
-	Channel    *model.Channel
-	Model      string
-	MaxTurns   int
-	OnProgress func(taskID string, message string) // callback for SSE
-	LogWriter  *TaskLogWriter                      // optional per-task log file writer; nil = no log file
+	Task          *model.Task
+	Channel       *model.Channel
+	Model         string
+	MaxTurns      int
+	OnProgress    func(taskID string, message string) // callback for SSE
+	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
+	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
 }
 
 // TokenUsage captures LLM token consumption for a task execution.
@@ -231,6 +233,22 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 7. Execute via SDK with streaming.
+	// Start heartbeat goroutine for stuck-task detection.
+	if opts.HeartbeatFunc != nil {
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					opts.HeartbeatFunc(opts.Task.ID)
+				}
+			}
+		}()
+	}
+
 	var resultText string
 	var execErr error
 	var toolUseCount int

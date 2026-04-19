@@ -126,6 +126,47 @@ func buildAgentTempDownloadURL(baseURL, id, fileName string) string {
 	return strings.TrimRight(baseURL, "/") + path
 }
 
+// resolveTaskWorkspace returns the workspace directory for a task.
+func (s *ImageService) resolveTaskWorkspace(taskID string) string {
+	if taskID == "" {
+		return ""
+	}
+	return filepath.Join(os.TempDir(), "abwriter", taskID)
+}
+
+// publishTaskFile saves a file to task storage and creates a TaskFile record.
+// When taskID is provided, files are stored under {userID}/{taskID}/{relPath}
+// and a TaskFile DB record is created directly.
+func (s *ImageService) publishTaskFile(ctx context.Context, taskID, userID, filePath, relPath string) (string, *model.TaskFile, error) {
+	if s.storage == nil || s.repo == nil {
+		return "", nil, fmt.Errorf("storage or repository not available")
+	}
+	ossKey := fmt.Sprintf("%s/%s/%s", userID, taskID, filepath.ToSlash(relPath))
+	uploadResult, err := s.storage.UploadFile(ctx, ossKey, filePath, DetectTaskFileMIME(filePath))
+	if err != nil {
+		return "", nil, fmt.Errorf("upload task file: %w", err)
+	}
+	fileName := filepath.Base(relPath)
+	mimeType := DetectTaskFileMIME(filePath)
+	taskFile := &model.TaskFile{
+		TaskID:          taskID,
+		Role:            DetermineTaskFileRole(fileName, mimeType),
+		FileName:        fileName,
+		MimeType:        mimeType,
+		FileSize:        uploadResult.Size,
+		OSSKey:          ossKey,
+		OSSURL:          uploadResult.URL,
+		StorageProvider: s.storage.Name(),
+		FilePath:        filepath.ToSlash(relPath),
+	}
+	if err := s.repo.TaskFiles().Create(ctx, taskFile); err != nil {
+		return "", nil, fmt.Errorf("create task file record: %w", err)
+	}
+	return uploadResult.URL, taskFile, nil
+}
+
+// publishAgentTempFile publishes a file to the agent-temp storage for agent download.
+// This is the fallback path when task_id is not provided.
 func (s *ImageService) publishAgentTempFile(ctx context.Context, filePath string) (string, error) {
 	if s.storage == nil {
 		return "", fmt.Errorf("storage provider is required for agent temp downloads")
@@ -175,9 +216,10 @@ func (s *ImageService) buildProcessor(ch *model.Channel, imageType string) (*ima
 
 // GenerateImage generates a single image using the channel's image provider.
 // If outputPath is empty, the image is saved to a system temp directory.
+// If taskID is provided, the image is saved to the task workspace and a TaskFile record is created.
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
-	userID, channelID, prompt, imageType, outputPath, refPath string,
+	userID, channelID, prompt, imageType, outputPath, refPath, taskID string,
 ) (*ImageResult, error) {
 	ch, err := s.repo.Channels().FindByID(ctx, channelID)
 	if err != nil {
@@ -200,6 +242,11 @@ func (s *ImageService) GenerateImage(
 			return nil, fmt.Errorf("create temp dir: %w", err)
 		}
 		outputPath = filepath.Join(tmpDir, "generated.png")
+	} else if taskID != "" {
+		// Resolve relative output paths against task workspace.
+		if !filepath.IsAbs(outputPath) {
+			outputPath = filepath.Join(s.resolveTaskWorkspace(taskID), outputPath)
+		}
 	}
 
 	// Ensure output directory exists.
@@ -228,9 +275,22 @@ func (s *ImageService) GenerateImage(
 		width, height = info.Width, info.Height
 	}
 
-	downloadURL, err := s.publishAgentTempFile(ctx, result.FilePath)
-	if err != nil {
-		return nil, err
+	var downloadURL string
+	if taskID != "" && userID != "" {
+		// Store directly as a task file.
+		relPath := filepath.Base(result.FilePath)
+		url, _, err := s.publishTaskFile(ctx, taskID, userID, result.FilePath, relPath)
+		if err != nil {
+			return nil, err
+		}
+		downloadURL = url
+	} else {
+		// Fallback: publish to agent-temp.
+		tmpURL, err := s.publishAgentTempFile(ctx, result.FilePath)
+		if err != nil {
+			return nil, err
+		}
+		downloadURL = tmpURL
 	}
 
 	return &ImageResult{
@@ -244,11 +304,12 @@ func (s *ImageService) GenerateImage(
 
 // GenerateBatch generates multiple images using the channel's image provider.
 // All images are saved to outputDir. If outputDir is empty, a temp directory is created.
+// If taskID is provided, files are stored as task files directly.
 func (s *ImageService) GenerateBatch(
 	ctx context.Context,
 	userID, channelID, prompt, imageType string,
 	count int,
-	outputDir, refPath string,
+	outputDir, refPath, taskID string,
 ) (*BatchImageResult, error) {
 	ch, err := s.repo.Channels().FindByID(ctx, channelID)
 	if err != nil {
@@ -271,6 +332,11 @@ func (s *ImageService) GenerateBatch(
 			return nil, fmt.Errorf("create temp dir: %w", err)
 		}
 		outputDir = tmpDir
+	} else if taskID != "" {
+		// Resolve relative output dirs against task workspace.
+		if !filepath.IsAbs(outputDir) {
+			outputDir = filepath.Join(s.resolveTaskWorkspace(taskID), outputDir)
+		}
 	}
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
@@ -293,9 +359,20 @@ func (s *ImageService) GenerateBatch(
 
 	items := make([]BatchImageResultItem, 0, len(results))
 	for _, r := range results {
-		downloadURL, err := s.publishAgentTempFile(ctx, r.FilePath)
-		if err != nil {
-			return nil, err
+		var downloadURL string
+		if taskID != "" && userID != "" {
+			relPath := filepath.Base(r.FilePath)
+			url, _, err := s.publishTaskFile(ctx, taskID, userID, r.FilePath, relPath)
+			if err != nil {
+				return nil, err
+			}
+			downloadURL = url
+		} else {
+			tmpURL, err := s.publishAgentTempFile(ctx, r.FilePath)
+			if err != nil {
+				return nil, err
+			}
+			downloadURL = tmpURL
 		}
 		items = append(items, BatchImageResultItem{
 			FilePath:    r.FilePath,

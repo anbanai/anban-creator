@@ -168,6 +168,11 @@ func (r *taskRepository) SetCompletedAt(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("completed_at", now).Error
 }
 
+func (r *taskRepository) UpdateHeartbeat(ctx context.Context, id string) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("last_heartbeat_at", now).Error
+}
+
 func (r *taskRepository) CountByUserID(ctx context.Context, userID string, channelID string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ?", userID)
@@ -204,8 +209,53 @@ func (r *taskRepository) FindPendingByChannel(ctx context.Context, channelID str
 	var tasks []*model.Task
 	err := r.db.WithContext(ctx).
 		Where("channel_id = ? AND status = ?", channelID, model.TaskStatusPending).
+		Where("NOT (retry_count > 0 AND updated_at > DATE_SUB(NOW(), INTERVAL 2 MINUTE))").
 		Order("created_at ASC").
 		Limit(limit).
 		Find(&tasks).Error
 	return tasks, err
+}
+
+// CompareAndSwapStatus atomically transitions task status from expected to newStatus.
+// Returns true if the transition succeeded (status was expected and is now newStatus).
+func (r *taskRepository) CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status = ?", taskID, expected).
+		Update("status", newStatus)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// CompareAndSwapStatusAndStartedAt atomically transitions status and sets started_at.
+func (r *taskRepository) CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status = ?", taskID, expected).
+		Updates(map[string]interface{}{
+			"status":     newStatus,
+			"started_at": time.Now(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// CompareAndSwapStatusAndError atomically transitions status and sets error message.
+// Returns true if the transition succeeded (status was expected and is now newStatus).
+func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status = ?", taskID, expected).
+		Updates(map[string]interface{}{
+			"status": newStatus,
+			"error":  errorMsg,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }

@@ -62,9 +62,9 @@ maxTurns: 20
 
 ### 步骤 2：创建工作目录
 
-调用 `prepare_workspace` MCP 工具（参数：`content_type="flower"`）创建隔离工作目录。
+调用 `prepare_workspace` MCP 工具（参数：`content_type="flower"`, `task_id=TASK_ID`）创建隔离工作目录。
 
-> 此命令自动归档残留 staging 目录，确保工作目录为空。输出路径为 `output/flower/staging/`，后续所有文件保存在此，变量记为 `$DIR`。
+> 此命令自动归档残留 staging 目录，确保工作目录为空。后续所有文件保存在返回的路径内，变量记为 `$DIR`。
 
 ### 步骤 3：调研花卉
 

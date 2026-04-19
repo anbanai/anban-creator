@@ -183,6 +183,75 @@ func (s *TaskService) uploadTaskFileFromPath(ctx context.Context, taskID, userID
 	return s.UploadTaskFileFromReader(ctx, taskID, userID, relPath, f, DetectTaskFileMIME(path), fileSize)
 }
 
+// uploadMissingTaskFiles uploads files from the workspace that aren't already
+// recorded as task files. This handles text files written by the agent directly,
+// while MCP tool-generated files already have TaskFile records.
+func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID, workDir string) error {
+	if s.store == nil {
+		return nil
+	}
+
+	// Collect paths already recorded as task files.
+	existingFiles, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("check existing task files: %w", err)
+	}
+	existingPaths := make(map[string]bool, len(existingFiles))
+	for _, f := range existingFiles {
+		existingPaths[f.FilePath] = true
+	}
+
+	var uploadedCount int
+	err = filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if ShouldSkipTaskFileDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if ShouldSkipTaskFile(d.Name()) {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			s.logger.Warn().Err(err).Str("file", d.Name()).Msg("failed to get file info, skipping")
+			return nil
+		}
+
+		relPath, err := filepath.Rel(workDir, path)
+		if err != nil {
+			relPath = filepath.Base(path)
+		}
+		relPath = filepath.ToSlash(relPath)
+
+		if existingPaths[relPath] {
+			return nil // already recorded, skip
+		}
+
+		if _, err := s.uploadTaskFileFromPath(ctx, taskID, userID, workDir, path, info); err != nil {
+			s.logger.Error().Err(err).Str("file", path).Msg("failed to upload file, skipping")
+			return nil
+		}
+		uploadedCount++
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walk work directory %s: %w", workDir, err)
+	}
+
+	if uploadedCount > 0 {
+		s.logger.Info().
+			Str("task_id", taskID).
+			Int("count", uploadedCount).
+			Msg("uploaded missing workspace files to storage")
+	}
+	return nil
+}
+
 // UploadTaskFiles uploads all files from a task's work directory to storage.
 // It recursively walks the directory tree to find files in nested subdirectories
 // (e.g. output/articles/staging/). Individual upload failures are logged but do

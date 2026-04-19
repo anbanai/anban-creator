@@ -47,17 +47,13 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		return nil
 	}
 
-	// Set status to running.
-	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusRunning); err != nil {
-		return fmt.Errorf("set running status: %w", err)
-	}
-	if err := s.repo.Tasks().SetStartedAt(ctx, taskID); err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set started_at")
-	}
+	// Note: status was already set to "running" and started_at set by
+	// HandleExecutionFromPayload via atomic CAS.
 
 	// Load channel if not provided.
 	if channel == nil {
 		if task.ChannelID == "" {
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "task has no channel_id")
 			return fmt.Errorf("task has no channel_id, cannot execute")
 		}
 		ch, err := s.repo.Channels().FindByID(ctx, task.ChannelID)
@@ -66,9 +62,11 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 				Str("task_id", taskID).
 				Str("channel_id", task.ChannelID).
 				Msg("failed to load channel for task")
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to load channel")
 			return fmt.Errorf("load channel: %w", err)
 		}
 		if ch.UserID != userID {
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "channel not owned by user")
 			return fmt.Errorf("channel not owned by user")
 		}
 		channel = ch
@@ -84,6 +82,11 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 				s.logger.Error().Err(err).Str("task_id", id).Msg("failed to update progress log")
 			}
 		},
+		HeartbeatFunc: func(id string) {
+			if err := s.repo.Tasks().UpdateHeartbeat(ctx, id); err != nil {
+				s.logger.Warn().Err(err).Str("task_id", id).Msg("failed to update task heartbeat")
+			}
+		},
 	})
 
 	// Store result.
@@ -93,7 +96,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	if execErr != nil {
 		s.logger.Error().Err(execErr).Str("task_id", taskID).Msg("task execution failed")
-		return s.HandleExecutionFailure(ctx, task, execErr)
+		_ = s.HandleExecutionFailure(ctx, task, execErr)
+		return nil // retry handled internally, don't trigger Asynq retry
 	}
 
 	if !result.Success {
@@ -102,7 +106,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			errMsg = "execution returned unsuccessful result"
 		}
 		s.logger.Error().Str("task_id", taskID).Str("error", errMsg).Msg("task execution returned failure")
-		return s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+		_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+		return nil // retry handled internally, don't trigger Asynq retry
 	}
 
 	var meaningfulFileCount int
@@ -121,7 +126,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 				Int("meaningful_files", meaningfulFileCount).
 				Bool("agent_likely_failed", result.AgentLikelyFailed).
 				Msg(errMsg)
-			return s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+			_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+			return nil
 		}
 	}
 
@@ -145,17 +151,13 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			Int("file_count", meaningfulFileCount).
 			Msg("workspace contains output files")
 	}
-	// In the remote-agent architecture, the agent uploads files through
-	// /api/v1/agent/upload before completion. Keep a local-executor fallback so
-	// existing non-agent paths still persist outputs if nothing was uploaded.
-	if existingFiles, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID); err != nil {
-		s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to check uploaded task files")
-	} else if len(existingFiles) == 0 && result.WorkDir != "" {
-		if err := s.UploadTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("fallback file upload failed")
+	// Upload any files from the workspace that aren't already recorded.
+	// MCP tools (generate_image etc.) create TaskFile records directly.
+	// The agent may also write text files to the workspace that need uploading.
+	if result.WorkDir != "" {
+		if err := s.uploadMissingTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("workspace file upload failed")
 		}
-	} else if len(existingFiles) == 0 {
-		s.logger.Warn().Str("task_id", taskID).Msg("task completed with no uploaded files and no work directory")
 	}
 
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {
@@ -183,12 +185,12 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 		return fmt.Errorf("find task %s: %w", taskID, err)
 	}
 
-	if task.Status == model.TaskStatusRunning {
-		s.logger.Warn().Str("task_id", taskID).Msg("task already running, skipping")
-		return nil
+	// Atomic CAS: pending → running (with started_at). Eliminates TOCTOU race.
+	swapped, err := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(ctx, taskID, model.TaskStatusPending, model.TaskStatusRunning)
+	if err != nil {
+		return fmt.Errorf("CAS task status: %w", err)
 	}
-
-	if task.Status != model.TaskStatusPending {
+	if !swapped {
 		s.logger.Warn().Str("task_id", taskID).Str("status", task.Status).Msg("task not in pending state, skipping")
 		return nil
 	}

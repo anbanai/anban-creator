@@ -66,6 +66,80 @@ func tryAcquireAndCheck(ctx context.Context, repo repository.Repository, taskSvc
 
 	checkAndTriggerPlans(ctx, repo, taskSvc, logger)
 	checkAndDispatchPendingTasks(ctx, repo, taskSvc, logger)
+	reapStuckTasks(ctx, repo, taskSvc, logger)
+}
+
+// stuckTaskThreshold is how long without a heartbeat before a task is considered stuck.
+const stuckTaskThreshold = 5 * time.Minute
+
+// reapStuckTasks finds running tasks whose heartbeat has stopped and marks them
+// as failed. Uses last_heartbeat_at to distinguish "actively working" from "stuck".
+func reapStuckTasks(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger) {
+	tasks, err := repo.Tasks().FindRunning(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to list running tasks for stuck reaper")
+		return
+	}
+
+	now := time.Now()
+	reaped := 0
+	for _, t := range tasks {
+		stuck := false
+		var staleDuration time.Duration
+
+		if t.LastHeartbeatAt != nil {
+			// Heartbeat was set but is stale.
+			staleDuration = now.Sub(*t.LastHeartbeatAt)
+			if staleDuration > stuckTaskThreshold {
+				stuck = true
+			}
+		} else if t.StartedAt != nil {
+			// Task is running but never sent a heartbeat (executor never entered polling).
+			staleDuration = now.Sub(*t.StartedAt)
+			if staleDuration > stuckTaskThreshold {
+				stuck = true
+			}
+		}
+
+		if !stuck {
+			continue
+		}
+
+		errMsg := fmt.Sprintf("stuck task reaped: no heartbeat for %s (threshold %s)", staleDuration.Round(time.Second), stuckTaskThreshold)
+		logger.Warn().
+			Str("task_id", t.ID).
+			Str("user_id", t.UserID).
+			Str("channel_id", t.ChannelID).
+			Str("stale_duration", staleDuration.Round(time.Second).String()).
+			Msg(errMsg)
+
+		swapped, err := repo.Tasks().CompareAndSwapStatusAndError(ctx, t.ID, model.TaskStatusRunning, model.TaskStatusFailed, errMsg)
+		if err != nil {
+			logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to mark stuck task as failed")
+			continue
+		}
+		if !swapped {
+			logger.Warn().Str("task_id", t.ID).Msg("stuck task already resolved, skipping")
+			continue
+		}
+		if err := repo.Tasks().SetCompletedAt(ctx, t.ID); err != nil {
+			logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to set completed_at on reaped task")
+		}
+
+		if err := taskSvc.RefundForTask(ctx, t.ID); err != nil {
+			logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to refund credits for reaped task")
+		}
+
+		if t.ChannelID != "" {
+			if err := taskSvc.DispatchPendingTasks(ctx, t.ChannelID); err != nil {
+				logger.Warn().Err(err).Str("channel_id", t.ChannelID).Msg("failed to dispatch pending tasks after reaping stuck task")
+			}
+		}
+		reaped++
+	}
+	if reaped > 0 {
+		logger.Info().Int("count", reaped).Msg("reaped stuck tasks")
+	}
 }
 
 // checkAndTriggerPlans queries all active plans that are due and creates

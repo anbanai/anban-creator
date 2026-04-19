@@ -339,7 +339,11 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 					Msg("panic recovered in fallback task execution")
 			}
 		}()
-		if err := s.HandleExecution(context.Background(), task, channel); err != nil {
+		fallbackCtx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
+		defer cancel()
+		// Set running status before execution to prevent plan checker from re-dispatching.
+		s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
+		if err := s.HandleExecution(fallbackCtx, task, channel); err != nil {
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task execution failed")
 		}
 	}()
@@ -384,6 +388,15 @@ func (s *TaskService) DispatchPendingTasks(ctx context.Context, channelID string
 	}
 
 	return nil
+}
+
+// RefundForTask refunds credits for a failed task. This is a public wrapper
+// around CreditService.RefundForTask for use by external callers (e.g., scheduler).
+func (s *TaskService) RefundForTask(ctx context.Context, taskID string) error {
+	if s.creditSvc == nil {
+		return nil
+	}
+	return s.creditSvc.RefundForTask(ctx, taskID)
 }
 
 // UsageStats holds aggregated LLM usage statistics.

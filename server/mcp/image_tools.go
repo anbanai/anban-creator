@@ -11,15 +11,16 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream, or OpenRouter). The server handles API key management and credit deduction. Returns the local file path of the generated image.",
+		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream, or OpenRouter). The server handles API key management and credit deduction. Returns the local file path of the generated image. When task_id is provided, the file is saved to the task workspace and registered as a task output file automatically.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id":    map[string]any{"type": "string", "description": "Channel ID (determines which image API config to use)"},
-				"prompt":        map[string]any{"type": "string", "description": "Image generation prompt"},
-				"image_type":    map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
-				"output_path":   map[string]any{"type": "string", "description": "Local file path to save the image (optional, generates to temp dir if empty)"},
+				"channel_id":     map[string]any{"type": "string", "description": "Channel ID (determines which image API config to use)"},
+				"prompt":         map[string]any{"type": "string", "description": "Image generation prompt"},
+				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
+				"output_path":    map[string]any{"type": "string", "description": "Local file path to save the image (relative to workspace when task_id is provided)"},
 				"ref_image_path": map[string]any{"type": "string", "description": "Path to a reference image for style consistency (optional)"},
+				"task_id":        map[string]any{"type": "string", "description": "Task ID — when provided, file is saved to task workspace and registered as task output"},
 			},
 			"required": []any{"channel_id", "prompt"},
 		},
@@ -27,7 +28,7 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_batch_images",
-		Description: "Generate multiple images at once using the channel's configured image provider. Returns an array of local file paths for the generated images.",
+		Description: "Generate multiple images at once using the channel's configured image provider. Returns an array of local file paths for the generated images. When task_id is provided, all images are saved to the task workspace and registered as task output files.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -35,8 +36,9 @@ func registerImageTools(server *mcp.Server) {
 				"prompt":         map[string]any{"type": "string", "description": "Base prompt for all images"},
 				"count":          map[string]any{"type": "integer", "description": "Number of images to generate (1-20)", "minimum": 1, "maximum": 20},
 				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Cover or content image API config"},
-				"output_dir":     map[string]any{"type": "string", "description": "Directory to save generated images"},
+				"output_dir":     map[string]any{"type": "string", "description": "Directory to save generated images (relative to workspace when task_id is provided)"},
 				"ref_image_path": map[string]any{"type": "string", "description": "Path to reference image for style consistency (optional)"},
+				"task_id":        map[string]any{"type": "string", "description": "Task ID — when provided, files are saved to task workspace and registered as task outputs"},
 			},
 			"required": []any{"channel_id", "prompt", "count", "output_dir"},
 		},
@@ -121,8 +123,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	}
 	outputPath, _ := args["output_path"].(string)
 	refPath, _ := args["ref_image_path"].(string)
+	taskID, _ := args["task_id"].(string)
 
-	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath)
+	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("generate image: %v", err)), nil
 	}
@@ -146,6 +149,7 @@ func generateBatchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (
 	outputDir, _ := args["output_dir"].(string)
 	imageType, _ := args["image_type"].(string)
 	refPath, _ := args["ref_image_path"].(string)
+	taskID, _ := args["task_id"].(string)
 
 	if channelID == "" {
 		return errorResult("channel_id is required"), nil
@@ -160,7 +164,7 @@ func generateBatchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		imageType = "content"
 	}
 
-	result, err := svcs.ImageSvc.GenerateBatch(ctx, userID, channelID, prompt, imageType, count, outputDir, refPath)
+	result, err := svcs.ImageSvc.GenerateBatch(ctx, userID, channelID, prompt, imageType, count, outputDir, refPath, taskID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("batch generate: %v", err)), nil
 	}

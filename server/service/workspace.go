@@ -41,10 +41,17 @@ func NewWorkspaceService(baseDir string, logger *zerolog.Logger) *WorkspaceServi
 	return &WorkspaceService{baseDir: baseDir, logger: logger}
 }
 
-// Prepare creates a clean staging directory at baseDir/<contentType>/staging/,
-// archiving any existing non-empty staging dir first.
-func (s *WorkspaceService) Prepare(contentType string) (*PrepareResult, error) {
-	stagingDir := filepath.Join(s.baseDir, contentType, "staging")
+// Prepare creates a clean staging directory. When taskID is provided,
+// the staging directory is created inside the task workspace at
+// /tmp/abwriter/<taskID>/output/<contentType>/staging/.
+// Otherwise, it uses the server's baseDir/<contentType>/staging/.
+func (s *WorkspaceService) Prepare(contentType, taskID string) (*PrepareResult, error) {
+	var stagingDir string
+	if taskID != "" {
+		stagingDir = filepath.Join(os.TempDir(), "abwriter", taskID, "output", contentType, "staging")
+	} else {
+		stagingDir = filepath.Join(s.baseDir, contentType, "staging")
+	}
 	result := &PrepareResult{Path: stagingDir}
 
 	if info, err := os.Stat(stagingDir); err == nil && info.IsDir() {

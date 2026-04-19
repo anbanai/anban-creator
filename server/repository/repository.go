@@ -78,10 +78,14 @@ type TaskRepository interface {
 	UpdateCleanedUpAt(ctx context.Context, id string, t time.Time) error
 	SetStartedAt(ctx context.Context, id string) error
 	SetCompletedAt(ctx context.Context, id string) error
+	UpdateHeartbeat(ctx context.Context, id string) error
 	CountByUserID(ctx context.Context, userID string, channelID string) (int64, error)
 	CountByUserIDAndStatus(ctx context.Context, userID, status string, channelID string) (int64, error)
 	CountRunningByChannel(ctx context.Context, channelID string) (int64, error)
 	FindPendingByChannel(ctx context.Context, channelID string, limit int) ([]*model.Task, error)
+	CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error)
+	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
+	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
 }
 
 // TaskFileRepository provides access to the task_files table.

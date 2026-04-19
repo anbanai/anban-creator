@@ -51,7 +51,7 @@ maxTurns: 50
 1. 调用 `list_channels` MCP 工具获取可用的 channel 列表，选择 platform 为 `article` 的 channel，记为 `$CHANNEL_ID`
 2. 调用 `get_account_info` MCP 工具（参数：`channel_id=$CHANNEL_ID`, `scope="article"`）获取账号信息，分析定位、受众、写作风格
 3. 调用 `list_drafts` 和 `list_published` MCP 工具（参数：`channel_id=$CHANNEL_ID`）查看草稿箱和已发布文章，列出所有标题，后续选题应避开这些已有主题
-4. **创建内容目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="articles"`）生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有产物保存在 `output/articles/staging/` 内，变量记为 `$DIR`
+4. **创建内容目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="articles"`, `task_id=TASK_ID`）生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有产物保存在返回的路径内，变量记为 `$DIR`
 5. using the topic-research skill 结合账号关键词和用户需求搜索热门话题，创作文章大纲
 6. using the content-writing skill 基于账号定位和大纲输出 Markdown 格式文章（须满足**图文并茂**要求：每个章节至少一个配图占位符，提示词与章节内容强相关）
 7. using the content-writing skill 去除 AI 痕迹，确保语言自然

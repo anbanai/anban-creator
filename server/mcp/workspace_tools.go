@@ -11,11 +11,12 @@ import (
 func registerWorkspaceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_workspace",
-		Description: "Prepare a clean working directory for content creation. Archives any existing staging directory and creates a fresh one. Returns the staging path.",
+		Description: "Prepare a clean working directory for content creation. Archives any existing staging directory and creates a fresh one. When task_id is provided, creates the staging directory inside the task workspace. Returns the staging path.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"content_type": map[string]any{"type": "string", "description": "Content type (articles, xls, rednote, flower)"},
+				"task_id":      map[string]any{"type": "string", "description": "Task ID — when provided, staging is created inside the task workspace"},
 			},
 			"required": []any{"content_type"},
 		},
@@ -42,11 +43,12 @@ func prepareWorkspaceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mc
 	args := parseArgs(req.Params.Arguments)
 
 	contentType, _ := args["content_type"].(string)
+	taskID, _ := args["task_id"].(string)
 	if contentType == "" {
 		return errorResult("content_type is required"), nil
 	}
 
-	result, err := svcs.WorkspaceSvc.Prepare(contentType)
+	result, err := svcs.WorkspaceSvc.Prepare(contentType, taskID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("prepare workspace: %v", err)), nil
 	}
