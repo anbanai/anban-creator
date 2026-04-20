@@ -28,11 +28,10 @@ func main() {
 	}
 
 	if uploadErr := uploader.UploadWorkspace(ctx); uploadErr != nil {
-		if result.Error == "" {
-			result.Error = uploadErr.Error()
-		}
-		result.Success = false
-		runErr = uploadErr
+		// Upload failure is non-fatal: the server's host-side upload
+		// (uploadMissingTaskFiles) will handle missing files from the
+		// workspace directory which is accessible on the host.
+		fmt.Fprintf(os.Stderr, "warning: in-container workspace upload failed (host-side upload will handle it): %v\n", uploadErr)
 	}
 
 	if reportErr := reporter.ReportResult(ctx, result); reportErr != nil {

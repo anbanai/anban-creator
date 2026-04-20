@@ -94,6 +94,16 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to persist task result")
 	}
 
+	// Upload workspace files from the host side regardless of agent success.
+	// The agent binary's in-container upload may fail (e.g. Docker networking),
+	// so we always attempt host-side upload as a safety net. Files already
+	// recorded via agent upload or MCP tool calls are skipped.
+	if result.WorkDir != "" {
+		if err := s.uploadMissingTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("workspace file upload failed")
+		}
+	}
+
 	if execErr != nil {
 		s.logger.Error().Err(execErr).Str("task_id", taskID).Msg("task execution failed")
 		_ = s.HandleExecutionFailure(ctx, task, execErr)
@@ -150,14 +160,6 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			Str("task_id", taskID).
 			Int("file_count", meaningfulFileCount).
 			Msg("workspace contains output files")
-	}
-	// Upload any files from the workspace that aren't already recorded.
-	// MCP tools (generate_image etc.) create TaskFile records directly.
-	// The agent may also write text files to the workspace that need uploading.
-	if result.WorkDir != "" {
-		if err := s.uploadMissingTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("workspace file upload failed")
-		}
 	}
 
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {

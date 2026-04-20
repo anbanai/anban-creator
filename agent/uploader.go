@@ -13,6 +13,11 @@ import (
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
+const (
+	uploadHTTPTimeout = 5 * time.Minute
+	uploadMaxRetries  = 3
+)
+
 type Uploader struct {
 	cfg    *Config
 	client *http.Client
@@ -22,7 +27,7 @@ func NewUploader(cfg *Config) *Uploader {
 	return &Uploader{
 		cfg: cfg,
 		client: &http.Client{
-			Timeout: 2 * time.Minute,
+			Timeout: uploadHTTPTimeout,
 		},
 	}
 }
@@ -57,7 +62,7 @@ func (u *Uploader) UploadWorkspace(ctx context.Context) error {
 			return nil
 		}
 
-		if err := u.uploadFile(ctx, path, relPath); err != nil && firstErr == nil {
+		if err := u.uploadFileWithRetry(ctx, path, relPath); err != nil && firstErr == nil {
 			firstErr = err
 		}
 		return nil
@@ -66,6 +71,41 @@ func (u *Uploader) UploadWorkspace(ctx context.Context) error {
 		return err
 	}
 	return firstErr
+}
+
+// uploadFileWithRetry retries the upload up to uploadMaxRetries times with
+// exponential backoff. Only network/timeout errors are retried; 4xx client
+// errors are not retried.
+func (u *Uploader) uploadFileWithRetry(ctx context.Context, filePath, relPath string) error {
+	var lastErr error
+	for attempt := range uploadMaxRetries {
+		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+		lastErr = u.uploadFile(ctx, filePath, relPath)
+		if lastErr == nil {
+			return nil
+		}
+		// Don't retry client errors (4xx).
+		if isClientError(lastErr) {
+			return lastErr
+		}
+	}
+	return fmt.Errorf("after %d attempts: %w", uploadMaxRetries, lastErr)
+}
+
+// isClientError checks if the error is an HTTP 4xx response.
+func isClientError(err error) bool {
+	type httpStatus interface{ StatusCode() int }
+	if he, ok := err.(httpStatus); ok {
+		return he.StatusCode() >= 400 && he.StatusCode() < 500
+	}
+	return false
 }
 
 func (u *Uploader) uploadFile(ctx context.Context, filePath, relPath string) error {
@@ -127,9 +167,23 @@ func (u *Uploader) uploadFile(ctx context.Context, filePath, relPath string) err
 		return fmt.Errorf("stream multipart upload for %s: %w", cleanRelPath, writeErr)
 	}
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("upload file %s failed: HTTP %d", cleanRelPath, resp.StatusCode)
+		return &httpUploadError{path: cleanRelPath, statusCode: resp.StatusCode}
 	}
 	return nil
+}
+
+// httpUploadError wraps an HTTP error response with StatusCode() for retry logic.
+type httpUploadError struct {
+	path        string
+	statusCode  int
+}
+
+func (e *httpUploadError) Error() string {
+	return fmt.Sprintf("upload file %s failed: HTTP %d", e.path, e.statusCode)
+}
+
+func (e *httpUploadError) StatusCode() int {
+	return e.statusCode
 }
 
 func multipartPipe(ctx context.Context) (*io.PipeReader, *multipart.Writer) {
