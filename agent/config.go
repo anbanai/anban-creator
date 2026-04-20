@@ -68,8 +68,5 @@ func ParseConfig() (*Config, error) {
 }
 
 func (c *Config) UserPrompt() string {
-	if c.Topic != "" {
-		return c.Topic
-	}
-	return fmt.Sprintf("Generate a %s content.", c.TaskType)
+	return serveragent.BuildUserPrompt(c.TaskType, c.Topic)
 }

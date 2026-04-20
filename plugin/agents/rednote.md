@@ -16,6 +16,7 @@ mcpServers:
   - anbanwriter
 memory: project
 skills:
+  - rednote
   - rednote-research
   - rednote-writing
   - rednote-visual-design

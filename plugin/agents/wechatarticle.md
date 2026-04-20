@@ -14,6 +14,7 @@ tools:
 model: inherit
 memory: project
 skills:
+  - article
   - content-writing
   - article-visual-design
   - topic-research

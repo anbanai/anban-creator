@@ -14,6 +14,7 @@ tools:
 model: inherit
 memory: project
 skills:
+  - xls
   - xls-visual-design
   - topic-research
   - content-writing

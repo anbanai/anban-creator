@@ -18,6 +18,25 @@ import (
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
+// BuildUserPrompt constructs the user prompt with a command prefix based on task type.
+// This ensures the model receives an explicit command (e.g., "/rednote topic")
+// instead of a raw topic that could be misinterpreted as a Q&A question.
+func BuildUserPrompt(taskType, topic string) string {
+	if topic == "" {
+		return fmt.Sprintf("/%s", taskType)
+	}
+	switch taskType {
+	case "rednote":
+		return fmt.Sprintf("/rednote %s", topic)
+	case "article":
+		return fmt.Sprintf("/article %s", topic)
+	case "xls":
+		return fmt.Sprintf("/xls %s", topic)
+	default:
+		return topic
+	}
+}
+
 // DefaultMaxTurns returns the max turns for a given task type from the config map.
 // Falls back to 40 if the task type is not configured.
 func DefaultMaxTurns(taskType string, maxTurns map[string]int) int {
@@ -195,11 +214,8 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		}
 	}
 
-	// 4. Build user prompt from task topic.
-	userPrompt := opts.Task.Topic
-	if userPrompt == "" {
-		userPrompt = fmt.Sprintf("Generate a %s content.", opts.Task.Type)
-	}
+	// 4. Build user prompt from task topic with command prefix.
+	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Topic)
 
 	// 5. Map task type to agent name and build --agent flag.
 	agentName := TaskTypeToAgent(opts.Task.Type)
