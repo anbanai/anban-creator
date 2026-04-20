@@ -171,7 +171,7 @@ func main() {
 			Bool("per_user_mcp", apiKeySvc != nil).
 			Msg("docker agent executor created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns)
+		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir)
 		log.Info().
 			Str("plugin_dir", cfg.Claude.PluginDir).
 			Bool("sandbox", cfg.Claude.Sandbox).
@@ -185,7 +185,7 @@ func main() {
 	var channelSvc *service.ChannelService
 	var creditSvc *service.CreditService
 	var asynqClient *scheduler.AsynqClient
-	workspaceSvc := service.NewWorkspaceService("", log)
+	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir, log)
 
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
@@ -202,7 +202,7 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir)
 	}
 
 	// 14. Create handlers.
@@ -242,7 +242,7 @@ func main() {
 		var publishingSvc *service.PublishingService
 
 		if store != nil {
-			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, cfg.Claude.Docker.MCPBaseURL, log)
+			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, cfg.Claude.Docker.MCPBaseURL, cfg.Claude.Docker.WorkspaceDir, log)
 		}
 		if repo != nil && creditSvc != nil {
 			// Create LLM client for writing operations.

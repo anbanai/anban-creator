@@ -85,6 +85,7 @@ type ImageService struct {
 	creditSvc    *CreditService
 	logger       *zerolog.Logger
 	agentBaseURL string
+	workspaceDir string
 }
 
 // NewImageService creates a new ImageService.
@@ -94,6 +95,7 @@ func NewImageService(
 	repo repository.Repository,
 	creditSvc *CreditService,
 	agentBaseURL string,
+	workspaceDir string,
 	logger *zerolog.Logger,
 ) *ImageService {
 	return &ImageService{
@@ -103,6 +105,7 @@ func NewImageService(
 		creditSvc:    creditSvc,
 		logger:       logger,
 		agentBaseURL: agentBaseURL,
+		workspaceDir: workspaceDir,
 	}
 }
 
@@ -111,7 +114,7 @@ func (s *ImageService) resolveTaskWorkspace(taskID string) string {
 	if taskID == "" {
 		return ""
 	}
-	return filepath.Join(os.TempDir(), "abwriter", taskID)
+	return filepath.Join(s.workspaceDir, taskID)
 }
 
 // publishTaskFile saves a file to task storage and creates a TaskFile record.
@@ -243,6 +246,11 @@ func (s *ImageService) GenerateImage(
 		return nil, fmt.Errorf("task_id is required for image generation")
 	}
 	relPath := filepath.Base(result.FilePath)
+	if ws := s.resolveTaskWorkspace(taskID); ws != "" {
+		if rp, err := filepath.Rel(ws, result.FilePath); err == nil {
+			relPath = filepath.ToSlash(rp)
+		}
+	}
 	downloadURL, _, err := s.publishTaskFile(ctx, taskID, userID, result.FilePath, relPath)
 	if err != nil {
 		return nil, err
@@ -319,6 +327,11 @@ func (s *ImageService) GenerateBatch(
 	items := make([]BatchImageResultItem, 0, len(results))
 	for _, r := range results {
 		relPath := filepath.Base(r.FilePath)
+		if ws := s.resolveTaskWorkspace(taskID); ws != "" {
+			if rp, err := filepath.Rel(ws, r.FilePath); err == nil {
+				relPath = filepath.ToSlash(rp)
+			}
+		}
 		downloadURL, _, err := s.publishTaskFile(ctx, taskID, userID, r.FilePath, relPath)
 		if err != nil {
 			return nil, err
@@ -592,10 +605,10 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 		}, nil
 	}
 
-	// Create temp directory for generated images.
-	tmpDir, err := os.MkdirTemp("", "abw-md-img-")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
+	// Create output directory for generated images under task workspace.
+	outputDir := filepath.Join(s.resolveTaskWorkspace(taskID), "output", "markdown")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create output dir: %w", err)
 	}
 
 	results := make([]BatchMarkdownImageItem, 0, len(aiRefs))
@@ -605,7 +618,7 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 			prompt = stylePrompt + "\n\n" + prompt
 		}
 
-		outputPath := filepath.Join(tmpDir, fmt.Sprintf("img-%d.png", ref.Index))
+		outputPath := filepath.Join(outputDir, fmt.Sprintf("img-%d.png", ref.Index))
 
 		genResult, err := processor.GenerateOnly(prompt, outputPath)
 		if err != nil {
@@ -626,7 +639,12 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 			FilePath: genResult.FilePath,
 		}
 
-			relPath := fmt.Sprintf("img-%d.png", ref.Index)
+			relPath := filepath.Base(genResult.FilePath)
+			if ws := s.resolveTaskWorkspace(taskID); ws != "" {
+				if rp, err := filepath.Rel(ws, genResult.FilePath); err == nil {
+					relPath = filepath.ToSlash(rp)
+				}
+			}
 			if downloadURL, _, err := s.publishTaskFile(ctx, taskID, userID, genResult.FilePath, relPath); err != nil {
 				s.logger.Warn().Err(err).
 					Int("index", ref.Index).

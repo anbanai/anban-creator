@@ -28,27 +28,29 @@ type ArchiveResult struct {
 
 // WorkspaceService manages working directories for content creation.
 type WorkspaceService struct {
-	baseDir string
-	logger  *zerolog.Logger
+	baseDir      string
+	workspaceDir string
+	logger       *zerolog.Logger
 }
 
 // NewWorkspaceService creates a new WorkspaceService.
 // baseDir is the root output directory (defaults to "output" in cwd if empty).
-func NewWorkspaceService(baseDir string, logger *zerolog.Logger) *WorkspaceService {
+// workspaceDir is the Docker workspace base directory for task-based staging.
+func NewWorkspaceService(baseDir, workspaceDir string, logger *zerolog.Logger) *WorkspaceService {
 	if baseDir == "" {
 		baseDir = filepath.Join(".", "output")
 	}
-	return &WorkspaceService{baseDir: baseDir, logger: logger}
+	return &WorkspaceService{baseDir: baseDir, workspaceDir: workspaceDir, logger: logger}
 }
 
 // Prepare creates a clean staging directory. When taskID is provided,
 // the staging directory is created inside the task workspace at
-// /tmp/abwriter/<taskID>/output/<contentType>/staging/.
+// {workspaceDir}/{taskID}/output/{contentType}/staging/.
 // Otherwise, it uses the server's baseDir/<contentType>/staging/.
 func (s *WorkspaceService) Prepare(contentType, taskID string) (*PrepareResult, error) {
 	var stagingDir string
 	if taskID != "" {
-		stagingDir = filepath.Join(os.TempDir(), "abwriter", taskID, "output", contentType, "staging")
+		stagingDir = filepath.Join(s.workspaceDir, taskID, "output", contentType, "staging")
 	} else {
 		stagingDir = filepath.Join(s.baseDir, contentType, "staging")
 	}

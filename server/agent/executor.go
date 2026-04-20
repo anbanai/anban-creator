@@ -56,13 +56,14 @@ type LocalExecutor struct {
 	defaultModel      string // configured model; empty means use env vars
 	keyProvider       UserKeyProvider
 	maxTurnsOverrides map[string]int
+	workspaceDir      string
 }
 
 // Compile-time interface check.
 var _ TaskExecutor = (*LocalExecutor)(nil)
 
 // NewLocalExecutor creates a new LocalExecutor.
-func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int) *LocalExecutor {
+func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int, workspaceDir string) *LocalExecutor {
 	return &LocalExecutor{
 		logger:            logger,
 		imageAPICfg:       imageAPICfg,
@@ -72,6 +73,7 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 		defaultModel:      defaultModel,
 		keyProvider:       keyProvider,
 		maxTurnsOverrides: maxTurnsOverrides,
+		workspaceDir:      workspaceDir,
 	}
 }
 
@@ -131,7 +133,12 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 2. Create workspace directory.
-	workDir := filepath.Join(os.TempDir(), "abwriter", opts.Task.ID)
+	var workDir string
+	if e.workspaceDir != "" {
+		workDir = filepath.Join(e.workspaceDir, opts.Task.ID)
+	} else {
+		workDir = filepath.Join(os.TempDir(), "abwriter", opts.Task.ID)
+	}
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
