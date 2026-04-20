@@ -86,7 +86,7 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "batch_generate_from_markdown",
-		Description: "Extract AI image placeholders (__generate:prompt__) from Markdown content, generate all images, and optionally upload them. Returns file paths and/or CDN URLs.",
+		Description: "Extract AI image placeholders (__generate:prompt__) from Markdown content, generate all images, and optionally upload them. Returns file paths and/or CDN URLs. Requires task_id for proper file storage.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -95,8 +95,9 @@ func registerImageTools(server *mcp.Server) {
 				"image_type":   map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use cover or content image API config", "default": "content"},
 				"style_prompt": map[string]any{"type": "string", "description": "Style prompt prepended to all image prompts (optional)"},
 				"upload":       map[string]any{"type": "boolean", "description": "Upload generated images to WeChat CDN", "default": false},
+				"task_id":      map[string]any{"type": "string", "description": "Task ID — required, images are stored as task output files"},
 			},
-			"required": []any{"channel_id", "markdown"},
+			"required": []any{"channel_id", "markdown", "task_id"},
 		},
 	}, batchGenerateFromMarkdownHandler)
 }
@@ -273,12 +274,16 @@ func batchGenerateFromMarkdownHandler(ctx context.Context, req *mcp.CallToolRequ
 		imageType = "content"
 	}
 	stylePrompt, _ := args["style_prompt"].(string)
+	taskID, _ := args["task_id"].(string)
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
+	}
 	upload := false
 	if v, ok := args["upload"].(bool); ok {
 		upload = v
 	}
 
-	result, err := svcs.ImageSvc.BatchGenerateFromMarkdown(ctx, userID, channelID, markdown, imageType, stylePrompt, upload)
+	result, err := svcs.ImageSvc.BatchGenerateFromMarkdown(ctx, userID, channelID, markdown, imageType, stylePrompt, upload, taskID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("batch generate from markdown: %v", err)), nil
 	}

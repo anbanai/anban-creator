@@ -106,26 +106,6 @@ func NewImageService(
 	}
 }
 
-const agentTempStoragePrefix = "agent-temp"
-
-// AgentTempStorageKey returns the storage key used for a temporary agent-downloadable file.
-func AgentTempStorageKey(id, fileName string) string {
-	return filepath.ToSlash(filepath.Join(agentTempStoragePrefix, id, filepath.Base(fileName)))
-}
-
-// AgentTempDownloadPath returns the HTTP path for downloading a temporary agent file.
-func AgentTempDownloadPath(id, fileName string) string {
-	return "/api/v1/agent/temp/" + id + "/" + filepath.Base(fileName)
-}
-
-func buildAgentTempDownloadURL(baseURL, id, fileName string) string {
-	path := AgentTempDownloadPath(id, fileName)
-	if baseURL == "" {
-		return path
-	}
-	return strings.TrimRight(baseURL, "/") + path
-}
-
 // resolveTaskWorkspace returns the workspace directory for a task.
 func (s *ImageService) resolveTaskWorkspace(taskID string) string {
 	if taskID == "" {
@@ -163,22 +143,6 @@ func (s *ImageService) publishTaskFile(ctx context.Context, taskID, userID, file
 		return "", nil, fmt.Errorf("create task file record: %w", err)
 	}
 	return uploadResult.URL, taskFile, nil
-}
-
-// publishAgentTempFile publishes a file to the agent-temp storage for agent download.
-// This is the fallback path when task_id is not provided.
-func (s *ImageService) publishAgentTempFile(ctx context.Context, filePath string) (string, error) {
-	if s.storage == nil {
-		return "", fmt.Errorf("storage provider is required for agent temp downloads")
-	}
-
-	fileName := filepath.Base(filePath)
-	tempID := uuid.NewString()
-	key := AgentTempStorageKey(tempID, fileName)
-	if _, err := s.storage.UploadFile(ctx, key, filePath, DetectTaskFileMIME(filePath)); err != nil {
-		return "", fmt.Errorf("upload temp file: %w", err)
-	}
-	return buildAgentTempDownloadURL(s.agentBaseURL, tempID, fileName), nil
 }
 
 // resolveImageAPI returns the appropriate ImageAPI config based on image_type.
@@ -275,22 +239,13 @@ func (s *ImageService) GenerateImage(
 		width, height = info.Width, info.Height
 	}
 
-	var downloadURL string
-	if taskID != "" && userID != "" {
-		// Store directly as a task file.
-		relPath := filepath.Base(result.FilePath)
-		url, _, err := s.publishTaskFile(ctx, taskID, userID, result.FilePath, relPath)
-		if err != nil {
-			return nil, err
-		}
-		downloadURL = url
-	} else {
-		// Fallback: publish to agent-temp.
-		tmpURL, err := s.publishAgentTempFile(ctx, result.FilePath)
-		if err != nil {
-			return nil, err
-		}
-		downloadURL = tmpURL
+	if taskID == "" {
+		return nil, fmt.Errorf("task_id is required for image generation")
+	}
+	relPath := filepath.Base(result.FilePath)
+	downloadURL, _, err := s.publishTaskFile(ctx, taskID, userID, result.FilePath, relPath)
+	if err != nil {
+		return nil, err
 	}
 
 	return &ImageResult{
@@ -357,22 +312,16 @@ func (s *ImageService) GenerateBatch(
 			Msg("failed to deduct batch image generation credits")
 	}
 
+	if taskID == "" {
+		return nil, fmt.Errorf("task_id is required for batch image generation")
+	}
+
 	items := make([]BatchImageResultItem, 0, len(results))
 	for _, r := range results {
-		var downloadURL string
-		if taskID != "" && userID != "" {
-			relPath := filepath.Base(r.FilePath)
-			url, _, err := s.publishTaskFile(ctx, taskID, userID, r.FilePath, relPath)
-			if err != nil {
-				return nil, err
-			}
-			downloadURL = url
-		} else {
-			tmpURL, err := s.publishAgentTempFile(ctx, r.FilePath)
-			if err != nil {
-				return nil, err
-			}
-			downloadURL = tmpURL
+		relPath := filepath.Base(r.FilePath)
+		downloadURL, _, err := s.publishTaskFile(ctx, taskID, userID, r.FilePath, relPath)
+		if err != nil {
+			return nil, err
 		}
 		items = append(items, BatchImageResultItem{
 			FilePath:    r.FilePath,
@@ -609,7 +558,11 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 	ctx context.Context,
 	userID, channelID, markdown, imageType, stylePrompt string,
 	upload bool,
+	taskID string,
 ) (*BatchMarkdownResult, error) {
+	if taskID == "" {
+		return nil, fmt.Errorf("task_id is required for batch markdown image generation")
+	}
 	ch, err := s.repo.Channels().FindByID(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("find channel: %w", err)
@@ -673,14 +626,16 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 			FilePath: genResult.FilePath,
 		}
 
-		if downloadURL, err := s.publishAgentTempFile(ctx, genResult.FilePath); err == nil {
-			item.DownloadURL = downloadURL
-		} else {
-			s.logger.Warn().Err(err).
-				Int("index", ref.Index).
-				Str("file_path", genResult.FilePath).
-				Msg("failed to publish generated markdown image for agent download")
-		}
+			relPath := fmt.Sprintf("img-%d.png", ref.Index)
+			if downloadURL, _, err := s.publishTaskFile(ctx, taskID, userID, genResult.FilePath, relPath); err != nil {
+				s.logger.Warn().Err(err).
+					Int("index", ref.Index).
+					Str("file_path", genResult.FilePath).
+					Msg("failed to publish generated markdown image for task")
+			} else {
+				item.DownloadURL = downloadURL
+			}
+
 
 		// Optionally upload the generated image.
 		if upload {

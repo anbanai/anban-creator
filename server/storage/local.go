@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -161,22 +160,4 @@ func (p *LocalProvider) Delete(_ context.Context, key string) error {
 // DownloadURL returns the same URL as GetURL since local files don't need signed URLs.
 func (p *LocalProvider) DownloadURL(_ context.Context, key string, _ int) (string, error) {
 	return p.GetURL(key), nil
-}
-
-// CleanupTempFiles removes agent temp files older than threshold from the
-// local storage data directory. Temp files live under dataDir/agent-temp/.
-func (p *LocalProvider) CleanupTempFiles(_ context.Context, threshold time.Time) {
-	tempDir := filepath.Join(p.dataDir, "agent-temp")
-	entries, err := os.ReadDir(tempDir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil || info.ModTime().After(threshold) {
-			continue
-		}
-		filePath := filepath.Join(tempDir, entry.Name())
-		_ = os.RemoveAll(filePath) // remove UUID subdirs recursively
-	}
 }

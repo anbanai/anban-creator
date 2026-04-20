@@ -168,7 +168,6 @@ func NewRouter(svc *Services) *fiber.App {
 		agentLimiter := appmiddleware.RateLimit(svc.Redis, 300, 1*time.Minute)
 		agentAPI := app.Group("/api/v1/agent", agentLimiter, svc.AgentHandler.AuthMiddleware)
 		agentAPI.Post("/upload", svc.AgentHandler.Upload)
-		agentAPI.Get("/temp/:id/:file", svc.AgentHandler.Temp)
 		agentAPI.Post("/progress", svc.AgentHandler.Progress)
 	}
 

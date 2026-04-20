@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Download, Eye, EyeOff } from 'lucide-react'
+import { FileText, Download, Eye, EyeOff, Copy } from 'lucide-react'
+import { toast } from 'sonner'
 import type { TaskFile } from '../lib/api'
 import { api } from '../lib/api'
 
@@ -165,6 +166,22 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
             >
               {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
               {showPreview ? '关闭' : '预览'}
+            </button>
+          )}
+          {isText && (
+            <button
+              onClick={async () => {
+                try {
+                  const text = textContent || await (await api.tasks.downloadFileBlob(taskId, file.id)).text()
+                  navigator.clipboard.writeText(text)
+                  toast.success('已复制')
+                } catch { toast.error('复制失败') }
+              }}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              复制
             </button>
           )}
           <button

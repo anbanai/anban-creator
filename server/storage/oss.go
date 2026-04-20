@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/rs/zerolog"
@@ -121,24 +122,52 @@ func (p *OSSProvider) GetURL(key string) string {
 }
 
 // Read downloads an object from OSS by key and returns its content.
+// Transient server errors (5xx) are retried up to 3 times with exponential backoff.
 func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
 	signedURL, err := p.DownloadURL(ctx, key, 3600)
 	if err != nil {
 		return nil, fmt.Errorf("get signed URL for %s: %w", key, err)
 	}
-	resp, err := http.Get(signedURL)
-	if err != nil {
-		return nil, fmt.Errorf("download %s from OSS: %w", key, err)
+
+	var lastErr error
+	for attempt := range 3 {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(1<<uint(attempt-1)) * time.Second):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create request for %s: %w", key, err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("download %s from OSS: %w", key, err)
+			continue
+		}
+
+		if resp.StatusCode >= 500 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("download %s from OSS: unexpected status %d", key, resp.StatusCode)
+			continue
+		}
+
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read %s from OSS: %w", key, err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("download %s from OSS: unexpected status %d", key, resp.StatusCode)
+		}
+		return data, nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download %s from OSS: unexpected status %d", key, resp.StatusCode)
-	}
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read %s from OSS: %w", key, err)
-	}
-	return data, nil
+
+	return nil, lastErr
 }
 
 // Delete removes an object from the OSS bucket.

@@ -3,7 +3,6 @@ package handler
 import (
 	"crypto/subtle"
 	"mime"
-	"net/http"
 	"path/filepath"
 	"strings"
 
@@ -137,35 +136,6 @@ func (h *AgentHandler) Upload(c fiber.Ctx) error {
 	}
 
 	return Success(c, taskFile)
-}
-
-// Temp handles GET /api/v1/agent/temp/:id/:file.
-func (h *AgentHandler) Temp(c fiber.Ctx) error {
-	if h.store == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "storage provider unavailable")
-	}
-
-	id := strings.TrimSpace(c.Params("id"))
-	fileName := filepath.Base(strings.TrimSpace(c.Params("file")))
-	if id == "" || fileName == "" {
-		return Error(c, fiber.StatusBadRequest, "missing temp file id or name")
-	}
-
-	key := service.AgentTempStorageKey(id, fileName)
-	data, err := h.store.Read(c.Context(), key)
-	if err != nil {
-		if h.logger != nil {
-			h.logger.Warn().Err(err).Str("key", key).Msg("failed to read agent temp file")
-		}
-		return Error(c, fiber.StatusNotFound, "temp file not found")
-	}
-
-	contentType := mime.TypeByExtension(filepath.Ext(fileName))
-	if contentType == "" {
-		contentType = http.DetectContentType(data)
-	}
-	c.Set("Content-Type", contentType)
-	return c.Send(data)
 }
 
 type agentProgressRequest struct {
