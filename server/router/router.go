@@ -173,6 +173,14 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	// ---------------------------------------------------------------------------
+	// Public channel config endpoint (no auth required — returns static data).
+	// ---------------------------------------------------------------------------
+
+	if svc.ChannelHandler != nil {
+		app.Get("/api/v1/channels/platform-configs", svc.ChannelHandler.GetPlatformConfigs)
+	}
+
+	// ---------------------------------------------------------------------------
 	// Protected API group — /api/v1 (requires authentication)
 	// ---------------------------------------------------------------------------
 
@@ -191,7 +199,6 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.ChannelHandler != nil {
 		apiV1.Get("/channels", svc.ChannelHandler.List)
-		apiV1.Get("/channels/platform-configs", svc.ChannelHandler.GetPlatformConfigs)
 		apiV1.Post("/channels", svc.ChannelHandler.Create)
 		apiV1.Post("/channels/fetch-profile", svc.ChannelHandler.FetchProfile)
 		apiV1.Get("/channels/:id", svc.ChannelHandler.Get)

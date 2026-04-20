@@ -278,7 +278,7 @@ func (h *ChannelHandler) Delete(c fiber.Ctx) error {
 			return Forbidden(c, "you do not have access to this channel")
 		}
 		h.logger.Error().Err(err).Str("channel_id", channelID).Msg("delete channel failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to delete channel")
+		return Error(c, fiber.StatusInternalServerError, err.Error())
 	}
 
 	return Success(c, fiber.Map{"message": "channel deleted"})

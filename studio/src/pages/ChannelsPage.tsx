@@ -35,16 +35,16 @@ const statusTabs: { label: string; value: string }[] = [
 
 const styleOptions = [
   { value: '', label: '不设置' },
-  { value: 'casual-science', label: 'casual-science' },
-  { value: 'dan-koe', label: 'dan-koe' },
-  { value: 'cultural-depth', label: 'cultural-depth' },
+  { value: 'casual-science', label: '轻松科普风格' },
+  { value: 'dan-koe', label: 'Dan Koe 风格' },
+  { value: 'cultural-depth', label: '深度文化风格' },
 ]
 
 const themeOptions = [
   { value: '', label: '不设置' },
-  { value: 'autumn-warm', label: 'autumn-warm' },
-  { value: 'spring-fresh', label: 'spring-fresh' },
-  { value: 'ocean-calm', label: 'ocean-calm' },
+  { value: 'autumn-warm', label: '秋日暖光' },
+  { value: 'spring-fresh', label: '春日清新' },
+  { value: 'ocean-calm', label: '深海静谧' },
 ]
 
 const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
@@ -513,7 +513,7 @@ export default function ChannelsPage() {
                     </FormItem>
                   )} />
 
-                  <FormField control={form.control} name="theme" render={({ field }) => (
+                  {!isRednote && <FormField control={form.control} name="theme" render={({ field }) => (
                     <FormItem>
                       <FormLabel>主题</FormLabel>
                       <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
@@ -531,7 +531,7 @@ export default function ChannelsPage() {
                       <FormDescription>选择内置转换主题模板</FormDescription>
                       <FormMessage />
                     </FormItem>
-                  )} />
+                  )} />}
 
                   <FormField control={form.control} name="author" render={({ field }) => (
                     <FormItem>

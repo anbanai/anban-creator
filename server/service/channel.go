@@ -204,6 +204,15 @@ func (s *ChannelService) Delete(ctx context.Context, userID, channelID string) e
 		return fmt.Errorf("cannot delete channel with %d associated tasks; archive it instead", stats.TotalTasks)
 	}
 
+	// Check if the channel has associated plans.
+	planCount, err := s.repo.Plans().CountByUserID(ctx, userID, channelID)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("channel_id", channelID).Msg("failed to count plans before delete")
+	}
+	if planCount > 0 {
+		return fmt.Errorf("cannot delete channel with %d associated plans; archive it instead", planCount)
+	}
+
 	if err := s.repo.Channels().Delete(ctx, channelID); err != nil {
 		return fmt.Errorf("delete channel: %w", err)
 	}
