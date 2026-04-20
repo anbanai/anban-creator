@@ -191,6 +191,11 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		return nil
 	}
 
+	// Workspace may not exist if the executor failed before creating it.
+	if _, err := os.Stat(workDir); os.IsNotExist(err) {
+		return nil
+	}
+
 	// Collect paths already recorded as task files.
 	existingFiles, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
 	if err != nil {

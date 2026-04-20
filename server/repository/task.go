@@ -251,8 +251,8 @@ func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskI
 		Model(&model.Task{}).
 		Where("id = ? AND status = ?", taskID, expected).
 		Updates(map[string]interface{}{
-			"status": newStatus,
-			"error":  errorMsg,
+			"status":        newStatus,
+			"error_message": errorMsg,
 		})
 	if result.Error != nil {
 		return false, result.Error
