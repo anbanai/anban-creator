@@ -86,6 +86,7 @@ type TaskRepository interface {
 	CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
+	IncrementRetryAndSetPending(ctx context.Context, taskID string, field string) error
 }
 
 // TaskFileRepository provides access to the task_files table.

@@ -185,9 +185,7 @@ export interface TaskFile {
   file_name: string
   mime_type: string
   file_size: number
-  oss_url: string
-  oss_key: string
-  storage_provider: string
+  url: string
   media_id?: string
   wechat_url?: string
   created_at: string

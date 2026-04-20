@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -34,6 +35,8 @@ type TaskService struct {
 	creditSvc    *CreditService
 	taskLogDir   string
 	workspaceSvc *WorkspaceService
+	workspaceDir string
+	cancelFuncs  sync.Map // taskID → context.CancelFunc
 }
 
 // NewTaskService creates a new TaskService.
@@ -46,6 +49,7 @@ func NewTaskService(
 	logger *zerolog.Logger,
 	taskLogDir string,
 	workspaceSvc *WorkspaceService,
+	workspaceDir string,
 ) *TaskService {
 	return &TaskService{
 		repo:         repo,
@@ -56,6 +60,7 @@ func NewTaskService(
 		creditSvc:    creditSvc,
 		taskLogDir:   taskLogDir,
 		workspaceSvc: workspaceSvc,
+		workspaceDir: workspaceDir,
 	}
 }
 
@@ -259,12 +264,30 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 	return tasks, total, nil
 }
 
-// Cancel sets a task's status to "cancelled".
+// Cancel sets a task's status to "cancelled" and signals the running execution to stop.
 func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	if err := s.repo.Tasks().UpdateStatus(ctx, id, model.TaskStatusCancelled); err != nil {
 		return fmt.Errorf("cancel task: %w", err)
 	}
+	// Signal the running execution (if any) to cancel via its context.
+	if v, ok := s.cancelFuncs.Load(id); ok {
+		if cancel, ok := v.(context.CancelFunc); ok {
+			cancel()
+			s.logger.Info().Str("task_id", id).Msg("signalled execution context cancellation")
+		}
+	}
 	return nil
+}
+
+// registerCancel stores a context.CancelFunc for a running task so it can be
+// invoked by Cancel() to stop the execution.
+func (s *TaskService) registerCancel(taskID string, cancel context.CancelFunc) {
+	s.cancelFuncs.Store(taskID, cancel)
+}
+
+// deregisterCancel removes the stored cancel func for a completed task.
+func (s *TaskService) deregisterCancel(taskID string) {
+	s.cancelFuncs.Delete(taskID)
 }
 
 // GetFiles returns files associated with a task.
@@ -273,6 +296,7 @@ func (s *TaskService) GetFiles(ctx context.Context, taskID string) ([]*model.Tas
 	if err != nil {
 		return nil, fmt.Errorf("get task files: %w", err)
 	}
+	s.EnrichFilesWithURLs(ctx, files)
 	return files, nil
 }
 

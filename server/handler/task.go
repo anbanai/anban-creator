@@ -408,8 +408,8 @@ func (h *TaskHandler) PreviewHTML(c fiber.Ctx) error {
 	// Rewrite relative image URLs to absolute storage URLs so images render in preview.
 	fileMap := make(map[string]string)
 	for _, f := range files {
-		if (f.Role == model.FileRoleImage || f.Role == model.FileRoleCover) && f.OSSURL != "" {
-			fileMap[strings.ToLower(f.FileName)] = f.OSSURL
+		if (f.Role == model.FileRoleImage || f.Role == model.FileRoleCover) && f.URL != "" {
+			fileMap[strings.ToLower(f.FileName)] = f.URL
 		}
 	}
 	if len(fileMap) > 0 {

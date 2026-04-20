@@ -196,14 +196,16 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		return nil
 	}
 
-	// Collect paths already recorded as task files.
+	// Collect paths and filenames already recorded as task files.
 	existingFiles, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("check existing task files: %w", err)
 	}
 	existingPaths := make(map[string]bool, len(existingFiles))
+	existingNames := make(map[string]bool, len(existingFiles))
 	for _, f := range existingFiles {
 		existingPaths[f.FilePath] = true
+		existingNames[f.FileName] = true
 	}
 
 	var uploadedCount int
@@ -233,7 +235,7 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		}
 		relPath = filepath.ToSlash(relPath)
 
-		if existingPaths[relPath] {
+		if existingPaths[relPath] || existingNames[filepath.Base(path)] {
 			return nil // already recorded, skip
 		}
 
@@ -341,6 +343,30 @@ func (s *TaskService) GetFileStream(ctx context.Context, fileID string) (io.Read
 	}
 
 	return io.NopCloser(bytes.NewReader(data)), file, nil
+}
+
+// EnrichFilesWithURLs populates the computed URL field for each task file.
+// For OSS storage, generates time-limited signed URLs (1 hour expiry).
+// For local storage, uses the authenticated download API path.
+func (s *TaskService) EnrichFilesWithURLs(ctx context.Context, files []*model.TaskFile) {
+	if s.store == nil {
+		return
+	}
+	for _, f := range files {
+		if f.OSSKey == "" {
+			continue
+		}
+		signedURL, err := s.store.DownloadURL(ctx, f.OSSKey, 3600)
+		if err != nil {
+			s.logger.Warn().Err(err).
+				Str("file_id", f.ID).
+				Str("oss_key", f.OSSKey).
+				Msg("failed to generate signed URL, falling back to OSSURL")
+			f.URL = f.OSSURL
+			continue
+		}
+		f.URL = signedURL
+	}
 }
 
 // DownloadZip creates a ZIP archive of all files belonging to a task.

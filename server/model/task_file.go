@@ -11,11 +11,12 @@ type TaskFile struct {
 	FileName        string    `gorm:"type:varchar(255);not null" json:"file_name"`
 	MimeType        string    `gorm:"type:varchar(100)" json:"mime_type"`
 	FileSize        int64     `gorm:"default:0" json:"file_size"`
-	MediaID         string    `gorm:"type:varchar(200)" json:"media_id"`
-	WechatURL       string    `gorm:"type:varchar(500)" json:"wechat_url"`
-	OSSKey          string    `gorm:"type:varchar(500)" json:"oss_key"`
-	OSSURL          string    `gorm:"type:varchar(500)" json:"oss_url"`
-	StorageProvider string    `gorm:"type:varchar(20);default:local" json:"storage_provider"`
+	MediaID         string    `gorm:"type:varchar(200)" json:"media_id,omitempty"`
+	WechatURL       string    `gorm:"type:varchar(500)" json:"wechat_url,omitempty"`
+	OSSKey          string    `gorm:"type:varchar(500)" json:"-"`
+	OSSURL          string    `gorm:"type:varchar(500)" json:"-"`
+	StorageProvider string    `gorm:"type:varchar(20);default:local" json:"-"`
+	URL             string    `gorm:"-" json:"url"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 
