@@ -29,8 +29,10 @@ type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByPhone(ctx context.Context, phone string) (*model.User, error)
 	FindByOpenID(ctx context.Context, openID string) (*model.User, error)
+	FindByInviteCode(ctx context.Context, code string) (*model.User, error)
 	Create(ctx context.Context, user *model.User) error
 	Update(ctx context.Context, user *model.User) error
+	IncrementInviteCount(ctx context.Context, userID string, maxCount int) (bool, error)
 	AdjustBalance(ctx context.Context, userID string, delta int) (int, error)
 	DeductCredits(ctx context.Context, userID string, amount int) (int, bool, error)
 }

@@ -7,6 +7,7 @@ export const loginSchema = z.object({
 export type LoginFormValues = z.infer<typeof loginSchema>
 
 export const registerSchema = z.object({
+  invite_code: z.string(),
   email: z.string().min(1, "邮箱不能为空").email("请输入有效的邮箱地址"),
   code: z.string().min(1, "请输入验证码"),
   password: z.string().min(8, "密码至少 8 个字符"),

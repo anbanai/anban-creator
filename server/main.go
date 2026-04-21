@@ -139,7 +139,7 @@ func main() {
 	// 11.1 Create auth handler.
 	var authHandler *handler.AuthHandler
 	if repo != nil {
-		authHandler = handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub)
+		authHandler = handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser)
 	}
 
 	// 11.1 Create API key service (needed before executor for per-user MCP keys).

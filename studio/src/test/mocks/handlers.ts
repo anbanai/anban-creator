@@ -24,6 +24,9 @@ export const mockUser: User = {
   credits_balance: 1024,
   tier: 'pro',
   max_concurrent_limit: 5,
+  invite_code: 'AB2C4D6E',
+  invite_count: 0,
+  max_invites: 3,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 }

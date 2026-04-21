@@ -23,8 +23,18 @@ describe('loginSchema', () => {
 })
 
 describe('registerSchema', () => {
-  it('accepts valid registration data', () => {
+  it('accepts valid registration data with invite code', () => {
     expect(registerSchema.safeParse({
+      invite_code: 'AB2C4D6E',
+      email: 'test@example.com',
+      code: '123456',
+      password: '12345678',
+    }).success).toBe(true)
+  })
+
+  it('accepts registration without invite code (field always validates as string)', () => {
+    expect(registerSchema.safeParse({
+      invite_code: '',
       email: 'test@example.com',
       code: '123456',
       password: '12345678',
@@ -33,6 +43,7 @@ describe('registerSchema', () => {
 
   it('rejects short password', () => {
     const result = registerSchema.safeParse({
+      invite_code: 'AB2C4D6E',
       email: 'test@example.com',
       code: '123456',
       password: 'short',
@@ -42,6 +53,7 @@ describe('registerSchema', () => {
 
   it('rejects missing verification code', () => {
     const result = registerSchema.safeParse({
+      invite_code: 'AB2C4D6E',
       email: 'test@example.com',
       code: '',
       password: '12345678',
@@ -51,6 +63,7 @@ describe('registerSchema', () => {
 
   it('accepts optional nickname', () => {
     const result = registerSchema.safeParse({
+      invite_code: 'AB2C4D6E',
       email: 'test@example.com',
       code: '123456',
       password: '12345678',

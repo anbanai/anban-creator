@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"crypto/rand"
 	"errors"
+	"math/big"
 	"strings"
 	"time"
 
@@ -18,12 +20,14 @@ import (
 
 // AuthHandler handles authentication-related HTTP endpoints.
 type AuthHandler struct {
-	jwtSvc    *auth.JWTService
-	wechatSvc *auth.WeChatService
-	repo      repository.Repository
-	emailSvc  *service.EmailService
-	logger    *zerolog.Logger
-	hub       *WebSocketHub
+	jwtSvc           *auth.JWTService
+	wechatSvc        *auth.WeChatService
+	repo             repository.Repository
+	emailSvc         *service.EmailService
+	logger           *zerolog.Logger
+	hub              *WebSocketHub
+	inviteEnabled    bool
+	maxInvitePerUser int
 }
 
 // NewAuthHandler creates a new AuthHandler.
@@ -34,14 +38,18 @@ func NewAuthHandler(
 	emailSvc *service.EmailService,
 	logger *zerolog.Logger,
 	hub *WebSocketHub,
+	inviteEnabled bool,
+	maxInvitePerUser int,
 ) *AuthHandler {
 	return &AuthHandler{
-		jwtSvc:    jwtSvc,
-		wechatSvc: wechatSvc,
-		repo:      repo,
-		emailSvc:  emailSvc,
-		logger:    logger,
-		hub:       hub,
+		jwtSvc:           jwtSvc,
+		wechatSvc:        wechatSvc,
+		repo:             repo,
+		emailSvc:         emailSvc,
+		logger:           logger,
+		hub:              hub,
+		inviteEnabled:    inviteEnabled,
+		maxInvitePerUser: maxInvitePerUser,
 	}
 }
 
@@ -50,10 +58,11 @@ func NewAuthHandler(
 // ---------------------------------------------------------------------------
 
 type registerRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Code     string `json:"code"`
-	Nickname string `json:"nickname,omitempty"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	Code       string `json:"code"`
+	Nickname   string `json:"nickname,omitempty"`
+	InviteCode string `json:"invite_code"`
 }
 
 type sendCodeRequest struct {
@@ -85,6 +94,22 @@ type tokenResponse struct {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const inviteCodeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// generateInviteCode generates a random 8-character invite code using crypto/rand.
+// Excludes ambiguous characters: O/0, I/1/L for readability.
+func generateInviteCode() (string, error) {
+	result := make([]byte, 8)
+	for i := range result {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(inviteCodeChars))))
+		if err != nil {
+			return "", err
+		}
+		result[i] = inviteCodeChars[n.Int64()]
+	}
+	return string(result), nil
+}
 
 // generateTokenPair creates an access token, a refresh token, and a LoginSession.
 func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse, error) {
@@ -177,6 +202,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 	req.Email = strings.TrimSpace(req.Email)
 	req.Password = strings.TrimSpace(req.Password)
 	req.Code = strings.TrimSpace(req.Code)
+	req.InviteCode = strings.TrimSpace(strings.ToUpper(req.InviteCode))
 
 	if req.Email == "" || req.Password == "" {
 		return Error(c, fiber.StatusBadRequest, "email and password are required")
@@ -207,6 +233,26 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		}
 	}
 
+	// Validate invite code when invitation is enabled.
+	var inviter *model.User
+	if h.inviteEnabled {
+		if req.InviteCode == "" {
+			return Error(c, fiber.StatusBadRequest, "请输入邀请码")
+		}
+		var err error
+		inviter, err = h.repo.Users().FindByInviteCode(c.Context(), req.InviteCode)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return Error(c, fiber.StatusBadRequest, "邀请码无效")
+			}
+			h.logger.Error().Err(err).Str("invite_code", req.InviteCode).Msg("failed to look up invite code")
+			return Error(c, fiber.StatusInternalServerError, "internal error")
+		}
+		if inviter.InviteCount >= h.maxInvitePerUser {
+			return Error(c, fiber.StatusForbidden, "该邀请码已达使用上限")
+		}
+	}
+
 	// Check if user already exists.
 	ctx := c.Context()
 	existing, err := h.repo.Users().FindByEmail(ctx, req.Email)
@@ -230,16 +276,49 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		nickname = strings.Split(req.Email, "@")[0]
 	}
 
-	user := &model.User{
-		ID:       uuid.New().String(),
-		Email:    req.Email,
-		Nickname: nickname,
-		Password: string(hashed),
+	inviteCode, err := generateInviteCode()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to generate invite code")
+		return Error(c, fiber.StatusInternalServerError, "internal error")
 	}
 
-	if err := h.repo.Users().Create(ctx, user); err != nil {
-		h.logger.Error().Err(err).Msg("failed to create user")
-		return Error(c, fiber.StatusInternalServerError, "failed to create user")
+	user := &model.User{
+		ID:         uuid.New().String(),
+		Email:      req.Email,
+		Nickname:   nickname,
+		Password:   string(hashed),
+		InviteCode: inviteCode,
+	}
+	if inviter != nil {
+		user.InvitedBy = inviter.ID
+	}
+
+	// Use transaction for user creation + invite count increment.
+	if inviter != nil {
+		if err := h.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+			if err := txRepo.Users().Create(ctx, user); err != nil {
+				return err
+			}
+			ok, err := txRepo.Users().IncrementInviteCount(ctx, inviter.ID, h.maxInvitePerUser)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errors.New("invite limit reached")
+			}
+			return nil
+		}); err != nil {
+			if err.Error() == "invite limit reached" {
+				return Error(c, fiber.StatusForbidden, "该邀请码已达使用上限")
+			}
+			h.logger.Error().Err(err).Msg("failed to create user in transaction")
+			return Error(c, fiber.StatusInternalServerError, "failed to create user")
+		}
+	} else {
+		if err := h.repo.Users().Create(ctx, user); err != nil {
+			h.logger.Error().Err(err).Msg("failed to create user")
+			return Error(c, fiber.StatusInternalServerError, "failed to create user")
+		}
 	}
 
 	resp, err := h.generateTokenPair(c, user.ID)
@@ -380,6 +459,9 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 		"credits_balance":      user.CreditsBalance,
 		"tier":                 tier,
 		"max_concurrent_limit": model.GetTierMaxConcurrentTasks(tier),
+		"invite_code":          user.InviteCode,
+		"invite_count":         user.InviteCount,
+		"max_invites":          h.maxInvitePerUser,
 		"created_at":           user.CreatedAt,
 		"updated_at":           user.UpdatedAt,
 	})
@@ -417,10 +499,16 @@ func (h *AuthHandler) WXLogin(c fiber.Ctx) error {
 	}
 
 	if user == nil {
+		inviteCode, err := generateInviteCode()
+		if err != nil {
+			h.logger.Error().Err(err).Msg("failed to generate invite code for wx login")
+			return Error(c, fiber.StatusInternalServerError, "internal error")
+		}
 		user = &model.User{
-			ID:      uuid.New().String(),
-			OpenID:  wxSession.OpenID,
-			UnionID: wxSession.UnionID,
+			ID:         uuid.New().String(),
+			OpenID:     wxSession.OpenID,
+			UnionID:    wxSession.UnionID,
+			InviteCode: inviteCode,
 		}
 		if req.Nickname != "" {
 			user.Nickname = req.Nickname

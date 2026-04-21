@@ -2,8 +2,8 @@ import { http, unwrap } from '@/lib/http-client'
 import type { AuthResponse, User } from '@/types'
 
 export const authApi = {
-  register: (email: string, password: string, code: string, nickname?: string) =>
-    unwrap<AuthResponse>(http.post('/auth/register', { email, password, code, nickname })),
+  register: (email: string, password: string, code: string, inviteCode: string, nickname?: string) =>
+    unwrap<AuthResponse>(http.post('/auth/register', { email, password, code, invite_code: inviteCode, nickname })),
 
   sendVerificationCode: (email: string) =>
     unwrap<{ msg: string }>(http.post('/auth/send-code', { email })),

@@ -7,6 +7,9 @@ export interface User {
   credits_balance: number
   tier: string
   max_concurrent_limit: number
+  invite_code: string
+  invite_count: number
+  max_invites: number
   created_at: string
   updated_at: string
 }

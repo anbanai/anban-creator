@@ -66,7 +66,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, nil, &logger, "", nil, "")
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
-		authHandler := handler.NewAuthHandler(jwtSvc, nil, repo, nil, &logger, wsHub)
+		authHandler := handler.NewAuthHandler(jwtSvc, nil, repo, nil, &logger, wsHub, false, 3)
 		planHandler := handler.NewPlanHandler(planSvc, &logger)
 		taskHandler := handler.NewTaskHandler(taskSvc, &logger)
 		timelineHandler := handler.NewTimelineHandler(repo, &logger)

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
@@ -17,12 +17,15 @@ const COUNTDOWN_SECONDS = 60
 export default function RegisterPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [countdown, setCountdown] = useState(0)
   const [sendingCode, setSendingCode] = useState(false)
 
+  const initialInviteCode = searchParams.get('invite')?.toUpperCase() || ''
+
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { email: '', code: '', password: '', nickname: '' },
+    defaultValues: { invite_code: initialInviteCode, email: '', code: '', password: '', nickname: '' },
   })
 
   const emailValue = form.watch('email')
@@ -51,7 +54,7 @@ export default function RegisterPage() {
 
   async function onSubmit(values: RegisterFormValues) {
     try {
-      const response = await api.auth.register(values.email, values.password, values.code, values.nickname || undefined)
+      const response = await api.auth.register(values.email, values.password, values.code, values.invite_code, values.nickname || undefined)
       login(response.token, response.refresh_token, response.user)
       navigate('/', { replace: true })
     } catch (err) {
@@ -73,6 +76,13 @@ export default function RegisterPage() {
           <CardContent className="pt-6">
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField control={form.control} name="invite_code" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>邀请码</FormLabel>
+                    <FormControl><Input placeholder="请输入邀请码" className="uppercase" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
                 <FormField control={form.control} name="email" render={({ field }) => (
                   <FormItem>
                     <FormLabel>邮箱</FormLabel>

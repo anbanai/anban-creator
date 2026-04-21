@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, Inbox, CalendarPlus, Clock, CreditCard } from 'lucide-react'
+import { Plus, Loader2, Inbox, CalendarPlus, Clock, CreditCard, Copy } from 'lucide-react'
 import {
   LineChart,
   Line,
@@ -196,6 +196,36 @@ export default function DashboardPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Invite card */}
+      {user?.invite_code && (
+        <Card>
+          <CardContent>
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <p className="text-sm text-muted-foreground">我的邀请码</p>
+                <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-foreground">
+                  {user.invite_code}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  已邀请 {user.invite_count ?? 0} / {user.max_invites ?? 3} 人
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const link = `${window.location.origin}/register?invite=${user.invite_code}`
+                  navigator.clipboard.writeText(link)
+                  toast.success('邀请链接已复制')
+                }}
+              >
+                <Copy className="mr-1.5 h-4 w-4" />
+                复制邀请链接
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

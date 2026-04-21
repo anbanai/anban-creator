@@ -48,12 +48,33 @@ func (r *userRepository) FindByOpenID(ctx context.Context, openID string) (*mode
 	return &user, nil
 }
 
+func (r *userRepository) FindByInviteCode(ctx context.Context, code string) (*model.User, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).Where("invite_code = ?", code).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (r *userRepository) Create(ctx context.Context, user *model.User) error {
 	return r.db.WithContext(ctx).Create(user).Error
 }
 
 func (r *userRepository) Update(ctx context.Context, user *model.User) error {
 	return r.db.WithContext(ctx).Save(user).Error
+}
+
+// IncrementInviteCount atomically increments the invite count for a user,
+// but only if the current count is below maxCount. Returns true if the
+// increment succeeded, false if the limit was already reached.
+func (r *userRepository) IncrementInviteCount(ctx context.Context, userID string, maxCount int) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ? AND invite_count < ?", userID, maxCount).
+		Update("invite_count", gorm.Expr("invite_count + 1"))
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }
 
 // AdjustBalance atomically adjusts a user's credit balance by delta and returns the new balance.

@@ -27,9 +27,10 @@ type Config struct {
 	Writing  WritingConfig  `yaml:"writing"`
 	Claude   ClaudeConfig   `yaml:"claude"`
 	Credits  CreditsConfig  `yaml:"credits"`
-	CORS     CORSConfig     `yaml:"cors"`
-	Asynq    AsynqConfig    `yaml:"asynq"`
-	Email    EmailConfig    `yaml:"email"`
+	CORS       CORSConfig       `yaml:"cors"`
+	Asynq      AsynqConfig      `yaml:"asynq"`
+	Email      EmailConfig      `yaml:"email"`
+	Invitation InvitationConfig `yaml:"invitation"`
 }
 
 // EmailConfig holds email/verification code configuration.
@@ -165,6 +166,12 @@ type AsynqConfig struct {
 	Concurrency int `yaml:"concurrency"` // default 3
 }
 
+// InvitationConfig holds invitation system configuration.
+type InvitationConfig struct {
+	Enabled    bool `yaml:"enabled"`      // master switch for invite-required registration
+	MaxPerUser int  `yaml:"max_per_user"` // max invites per user (default 3)
+}
+
 // NewConfig loads configuration from a YAML file, applies defaults, then
 // overlays any ANBAN_SERVER_ prefixed environment variables.
 func NewConfig(path string) (*Config, error) {
@@ -269,6 +276,11 @@ func (c *Config) applyDefaults() {
 	// Asynq defaults.
 	if c.Asynq.Concurrency == 0 {
 		c.Asynq.Concurrency = 3
+	}
+
+	// Invitation defaults.
+	if c.Invitation.MaxPerUser == 0 {
+		c.Invitation.MaxPerUser = 3
 	}
 
 	// Email defaults.
@@ -522,6 +534,15 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv(prefix + "EMAIL_CODE_LENGTH"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Email.CodeLength = n
+		}
+	}
+
+	if v := os.Getenv(prefix + "INVITATION_ENABLED"); v != "" {
+		c.Invitation.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv(prefix + "INVITATION_MAX_PER_USER"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Invitation.MaxPerUser = n
 		}
 	}
 }

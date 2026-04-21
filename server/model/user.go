@@ -13,6 +13,9 @@ type User struct {
 	OpenID          string    `gorm:"type:varchar(128);uniqueIndex;nullable" json:"-"`
 	UnionID         string    `gorm:"type:varchar(128);index;nullable" json:"-"`
 	Tier            Tier      `gorm:"type:varchar(20);default:free" json:"tier"`
+	InviteCode      string    `gorm:"type:varchar(16);uniqueIndex" json:"invite_code"`
+	InvitedBy       string    `gorm:"type:char(36);index;nullable" json:"-"`
+	InviteCount     int       `gorm:"default:0" json:"invite_count"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	CreditsBalance  int       `gorm:"default:0" json:"credits_balance"`
