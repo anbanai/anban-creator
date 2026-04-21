@@ -118,9 +118,18 @@ writing:
 credits:
   daily_sign_in: 1024 # credits awarded per daily sign-in
   task_costs:
-    article: 500 # cost per article task
-    xls: 400 # cost per xls task
-    rednote: 400 # cost per rednote task
+    article: 4000 # cost per article task
+    xls: 3200 # cost per xls task
+    rednote: 3200 # cost per rednote task
+  operation_costs:
+    image_gen: 80
+    image_upload: 40
+    article_write: 400
+    convert: 160
+    humanize: 120
+    topic_research: 80
+    seo: 80
+    draft_publish: 40
   admin_api_key: "" # API key for admin credit grant endpoint (also via ANBAN_SERVER_CREDITS_ADMIN_API_KEY)
 
 # ---------------------------------------------------------------------------

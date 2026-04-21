@@ -33,9 +33,9 @@ const statusTabs: { label: string; value: string }[] = [
 ]
 
 const taskCostMap: Record<string, number> = {
-  article: 500,
-  xls: 400,
-  rednote: 400,
+  article: 4000,
+  xls: 3200,
+  rednote: 3200,
 }
 
 export default function TasksPage() {
@@ -383,7 +383,7 @@ export default function TasksPage() {
 
               {/* Cost display */}
               {(() => {
-                const cost = taskCostMap[watchedType] ?? 400
+                const cost = taskCostMap[watchedType] ?? 3200
                 const totalCost = cost * quantity
                 const balance = creditsBalance?.balance ?? 0
                 const remaining = balance - totalCost
@@ -413,7 +413,7 @@ export default function TasksPage() {
               form="task-create-form"
               loading={createMutation.isPending}
               disabled={(() => {
-                const cost = taskCostMap[watchedType] ?? 400
+                const cost = taskCostMap[watchedType] ?? 3200
                 const totalCost = cost * quantity
                 const balance = creditsBalance?.balance ?? 0
                 return balance - totalCost < 0

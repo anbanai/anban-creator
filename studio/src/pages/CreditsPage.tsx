@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Loader2 } from 'lucide-react'
+import { Loader2, CreditCard } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { CreditTransaction } from '@/types'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import Badge from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { formatFullDateTimeCN } from '@/lib/labels'
@@ -33,6 +34,7 @@ const PAGE_SIZE = 20
 export default function CreditsPage() {
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
+  const [rechargeOpen, setRechargeOpen] = useState(false)
 
   const { data: balanceData, isLoading: balanceLoading } = useQuery({
     queryKey: ['credits', 'balance'],
@@ -95,15 +97,53 @@ export default function CreditsPage() {
         </CardBody>
       </Card>
 
-      {/* Recharge info */}
+      {/* Recharge */}
       <Card>
         <CardBody>
-          <h3 className="text-sm font-semibold text-foreground">充值积分</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            如需充值积分，请联系企业微信客服获取更多积分包。客服将在确认后为您充值。
-          </p>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">充值积分</h3>
+            <Button variant="outline" size="sm" onClick={() => setRechargeOpen(true)}>
+              <CreditCard className="mr-1.5 h-4 w-4" />
+              充值
+            </Button>
+          </div>
         </CardBody>
       </Card>
+
+      {/* Recharge dialog */}
+      <Dialog open={rechargeOpen} onOpenChange={setRechargeOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>充值积分</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center space-y-4 py-2">
+            <img
+              src="https://placehold.co/200x200?text=QR"
+              alt="企微客服二维码"
+              className="rounded-lg border border-border"
+              width={200}
+              height={200}
+            />
+            <p className="text-sm text-muted-foreground">扫码联系客服充值</p>
+            <div className="w-full space-y-2">
+              {[
+                { tier: '基础', price: '10', credits: '10,000' },
+                { tier: '标准', price: '50', credits: '55,000' },
+                { tier: '专业', price: '100', credits: '120,000' },
+              ].map(({ tier, price, credits }) => (
+                <div key={tier} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm">
+                  <span className="font-medium">{tier}</span>
+                  <span>
+                    <span className="text-foreground">{price} 元</span>
+                    <span className="mx-2 text-muted-foreground">=</span>
+                    <span className="text-primary font-semibold">{credits} 积分</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Transaction history */}
       <Card>

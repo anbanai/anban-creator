@@ -149,7 +149,7 @@ type DockerConfig struct {
 // CreditsConfig holds credits/points system configuration.
 type CreditsConfig struct {
 	DailySignIn    int            `yaml:"daily_sign_in"`   // credits awarded per daily sign-in (default 1024)
-	TaskCosts      map[string]int `yaml:"task_costs"`      // per-task-type costs, e.g. {"article": 500, "xls": 400, "rednote": 400}
+	TaskCosts      map[string]int `yaml:"task_costs"`      // per-task-type costs, e.g. {"article": 4000, "xls": 3200, "rednote": 3200}
 	OperationCosts map[string]int `yaml:"operation_costs"` // per-operation costs for MCP tools, e.g. {"image_gen": 10, "article_write": 50}
 	AdminAPIKey    string         `yaml:"admin_api_key"`   // API key for admin credit grant endpoint
 }
@@ -248,21 +248,21 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Credits.TaskCosts == nil {
 		c.Credits.TaskCosts = map[string]int{
-			"article": 500,
-			"xls":     400,
-			"rednote": 400,
+			"article": 4000,
+			"xls":     3200,
+			"rednote": 3200,
 		}
 	}
 	if c.Credits.OperationCosts == nil {
 		c.Credits.OperationCosts = map[string]int{
-			"image_gen":      10,
-			"image_upload":   5,
-			"article_write":  50,
-			"convert":        20,
-			"humanize":       15,
-			"topic_research": 10,
-			"seo":            10,
-			"draft_publish":  5,
+			"image_gen":      80,
+			"image_upload":   40,
+			"article_write":  400,
+			"convert":        160,
+			"humanize":       120,
+			"topic_research": 80,
+			"seo":            80,
+			"draft_publish":  40,
 		}
 	}
 
