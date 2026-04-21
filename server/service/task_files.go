@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -146,6 +148,16 @@ func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, user
 		return existing, nil
 	}
 
+	// Compute content hash for content-based dedup.
+	var buf bytes.Buffer
+	tee := io.TeeReader(reader, &buf)
+	h := sha256.New()
+	if _, err := io.Copy(h, tee); err != nil {
+		return nil, fmt.Errorf("compute content hash: %w", err)
+	}
+	contentHash := hex.EncodeToString(h.Sum(nil))
+	reader = io.MultiReader(&buf, reader)
+
 	ossKey := buildTaskStorageKey(userID, taskID, cleanRelPath)
 	uploadResult, err := s.store.Upload(ctx, ossKey, reader, mimeType)
 	if err != nil {
@@ -162,16 +174,18 @@ func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, user
 		FileName:        filename,
 		MimeType:        mimeType,
 		FileSize:        fileSize,
+		ContentHash:     contentHash,
 		OSSKey:          ossKey,
 		OSSURL:          uploadResult.URL,
 		StorageProvider: s.store.Name(),
 		FilePath:        cleanRelPath,
 	}
-	if err := s.repo.TaskFiles().Create(ctx, taskFile); err != nil {
+	persisted, err := s.repo.TaskFiles().Upsert(ctx, taskFile)
+	if err != nil {
 		return nil, fmt.Errorf("persist task file %s: %w", cleanRelPath, err)
 	}
 
-	return taskFile, nil
+	return persisted, nil
 }
 
 func (s *TaskService) uploadTaskFileFromPath(ctx context.Context, taskID, userID, workDir, path string, info os.FileInfo) (*model.TaskFile, error) {
@@ -245,8 +259,27 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		relPath = filepath.ToSlash(relPath)
 
 			if existingPaths[relPath] {
-			return nil // already recorded, skip
-		}
+				return nil // already recorded, skip
+			}
+
+			// Content-hash dedup: skip files with identical content already recorded
+			// under a different path (e.g. Downloader saves generated-0.png while
+			// the agent model also saves the same image as images/image-1.png).
+			if f, openErr := os.Open(path); openErr == nil {
+				defer f.Close()
+				h := sha256.New()
+				if _, copyErr := io.Copy(h, f); copyErr == nil {
+					contentHash := hex.EncodeToString(h.Sum(nil))
+					if dup, dupErr := s.repo.TaskFiles().FindByTaskIDAndContentHash(ctx, taskID, contentHash); dupErr == nil && dup != nil {
+						s.logger.Debug().
+							Str("task_id", taskID).
+							Str("file", relPath).
+							Str("duplicate_of", dup.FilePath).
+							Msg("skipping workspace file with identical content hash")
+						return nil
+					}
+				}
+			}
 
 		if _, err := s.uploadTaskFileFromPath(ctx, taskID, userID, workDir, path, info); err != nil {
 			s.logger.Error().Err(err).Str("file", path).Msg("failed to upload file, skipping")
@@ -265,64 +298,6 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 			Int("count", uploadedCount).
 			Msg("uploaded missing workspace files to storage")
 	}
-	return nil
-}
-
-// UploadTaskFiles uploads all files from a task's work directory to storage.
-// It recursively walks the directory tree to find files in nested subdirectories.
-// Individual upload failures are logged but do
-// not abort the remaining uploads. Returns an error if no storage provider is
-// configured or if the work directory cannot be read at all.
-func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workDir string) error {
-	if s.store == nil {
-		return fmt.Errorf("no storage provider configured: cannot upload files for task %s", taskID)
-	}
-
-	var uploadedCount int
-
-	err := filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		// Skip config directories entirely to avoid uploading settings.json etc.
-		if d.IsDir() {
-			if ShouldSkipTaskFileDir(d.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		// Skip dotfiles (sensitive config files like .mcp.json, .gitignore, etc.).
-		if ShouldSkipTaskFile(d.Name()) {
-			return nil
-		}
-
-		info, err := d.Info()
-		if err != nil {
-			s.logger.Warn().Err(err).Str("file", d.Name()).Msg("failed to get file info, skipping")
-			return nil
-		}
-
-		if _, err := s.uploadTaskFileFromPath(ctx, taskID, userID, workDir, path, info); err != nil {
-			s.logger.Error().Err(err).
-				Str("file", path).
-				Msg("failed to upload file, skipping")
-			return nil
-		}
-		uploadedCount++
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("walk work directory %s: %w", workDir, err)
-	}
-
-	if uploadedCount > 0 {
-		s.logger.Info().
-			Str("task_id", taskID).
-			Int("count", uploadedCount).
-			Msg("task files uploaded to storage")
-	}
-
 	return nil
 }
 

@@ -5,12 +5,13 @@ import "time"
 // TaskFile stores files produced or consumed by a task.
 type TaskFile struct {
 	ID              string    `gorm:"type:char(36);primaryKey" json:"id"`
-	TaskID          string    `gorm:"type:char(36);index;not null" json:"task_id"`
+	TaskID          string    `gorm:"type:char(36);uniqueIndex:idx_task_file_task_path;not null" json:"task_id"`
 	Role            string    `gorm:"type:varchar(20);not null" json:"role"`
-	FilePath        string    `gorm:"type:varchar(500)" json:"-"`
+	FilePath        string    `gorm:"type:varchar(500);uniqueIndex:idx_task_file_task_path" json:"-"`
 	FileName        string    `gorm:"type:varchar(255);not null" json:"file_name"`
 	MimeType        string    `gorm:"type:varchar(100)" json:"mime_type"`
 	FileSize        int64     `gorm:"default:0" json:"file_size"`
+	ContentHash     string    `gorm:"type:char(64);index" json:"-"`
 	MediaID         string    `gorm:"type:varchar(200)" json:"media_id,omitempty"`
 	WechatURL       string    `gorm:"type:varchar(500)" json:"wechat_url,omitempty"`
 	OSSKey          string    `gorm:"type:varchar(500)" json:"-"`

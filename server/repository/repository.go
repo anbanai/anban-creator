@@ -94,10 +94,12 @@ type TaskRepository interface {
 // TaskFileRepository provides access to the task_files table.
 type TaskFileRepository interface {
 	Create(ctx context.Context, file *model.TaskFile) error
+	Upsert(ctx context.Context, file *model.TaskFile) (*model.TaskFile, error)
 	FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error)
 	FindByID(ctx context.Context, id string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)
+	FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error)
 	BatchCreate(ctx context.Context, files []*model.TaskFile) error
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
 }

@@ -196,6 +196,10 @@ func (d *Downloader) downloadToPath(ctx context.Context, rawURL, target string) 
 	if err != nil {
 		return err
 	}
+	// Skip if file already exists — the agent model may have already saved it.
+	if info, err := os.Stat(targetPath); err == nil && info.Size() > 0 {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return fmt.Errorf("create target directory: %w", err)
 	}
@@ -252,6 +256,10 @@ func (d *Downloader) downloadDataURL(dataURL, target string) error {
 	targetPath, err := d.resolveWorkspacePath(target)
 	if err != nil {
 		return err
+	}
+	// Skip if file already exists — the agent model may have already saved it.
+	if info, err := os.Stat(targetPath); err == nil && info.Size() > 0 {
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return fmt.Errorf("create target directory: %w", err)

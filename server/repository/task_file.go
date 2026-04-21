@@ -7,6 +7,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type taskFileRepository struct {
@@ -22,6 +23,32 @@ func (r *taskFileRepository) Create(ctx context.Context, file *model.TaskFile) e
 		file.ID = uuid.New().String()
 	}
 	return r.db.WithContext(ctx).Create(file).Error
+}
+
+// Upsert inserts a task file or updates the existing record on (task_id, file_path) conflict.
+// The original ID is preserved when a conflict occurs.
+func (r *taskFileRepository) Upsert(ctx context.Context, file *model.TaskFile) (*model.TaskFile, error) {
+	if file.ID == "" {
+		file.ID = uuid.New().String()
+	}
+
+	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "task_id"}, {Name: "file_path"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"file_name", "mime_type", "file_size", "oss_key", "oss_url",
+			"storage_provider", "role", "content_hash",
+		}),
+	}).Create(file)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	// If a conflict occurred (row was updated instead of inserted), fetch the existing row.
+	if result.RowsAffected == 0 {
+		return r.FindExisting(ctx, file.TaskID, file.FilePath)
+	}
+	return file, nil
 }
 
 // FindExisting returns an existing task file record matching (taskID, filePath), or nil if none exists.
@@ -70,6 +97,20 @@ func (r *taskFileRepository) FindByTaskIDAndRole(ctx context.Context, taskID, ro
 		return nil, err
 	}
 	return files, nil
+}
+
+// FindByTaskIDAndContentHash returns a task file with matching content hash for the given task, or nil.
+func (r *taskFileRepository) FindByTaskIDAndContentHash(ctx context.Context, taskID, contentHash string) (*model.TaskFile, error) {
+	var file model.TaskFile
+	if err := r.db.WithContext(ctx).
+		Where("task_id = ? AND content_hash = ?", taskID, contentHash).
+		First(&file).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &file, nil
 }
 
 func (r *taskFileRepository) ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error) {
