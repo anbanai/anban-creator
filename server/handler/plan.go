@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 
 	"github.com/royalrick/anbanwriter/server/service"
@@ -47,23 +46,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 
 	if req.ChannelID == "" {
 		return Error(c, fiber.StatusBadRequest, "channel_id is required")
-	}
-
-	if req.Title == "" {
-		return Error(c, fiber.StatusBadRequest, "title is required")
-	}
-	if len(req.Title) > 200 {
-		return Error(c, fiber.StatusBadRequest, "title must be at most 200 characters")
-	}
-
-	if req.CronExpr != "" {
-		if _, err := cron.ParseStandard(req.CronExpr); err != nil {
-			return Error(c, fiber.StatusBadRequest, "invalid cron expression")
-		}
-	}
-
-	if len(req.TopicHint) > 500 {
-		return Error(c, fiber.StatusBadRequest, "topic_hint must be at most 500 characters")
 	}
 
 	userID := GetUserID(c)
@@ -109,9 +91,9 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 
 // GetByID handles GET /api/v1/plans/:id.
 func (h *PlanHandler) GetByID(c fiber.Ctx) error {
-	id, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
 	}
 
 	userID := GetUserID(c)
@@ -133,9 +115,9 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 
 // Update handles PUT /api/v1/plans/:id.
 func (h *PlanHandler) Update(c fiber.Ctx) error {
-	id, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
 	}
 
 	userID := GetUserID(c)
@@ -146,18 +128,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	var req updatePlanRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-
-	if req.Title != "" && len(req.Title) > 200 {
-		return Error(c, fiber.StatusBadRequest, "title must be at most 200 characters")
-	}
-	if req.CronExpr != "" {
-		if _, err := cron.ParseStandard(req.CronExpr); err != nil {
-			return Error(c, fiber.StatusBadRequest, "invalid cron expression")
-		}
-	}
-	if len(req.TopicHint) > 500 {
-		return Error(c, fiber.StatusBadRequest, "topic_hint must be at most 500 characters")
 	}
 
 	// Verify ownership before update.
@@ -180,9 +150,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/plans/:id.
 func (h *PlanHandler) Delete(c fiber.Ctx) error {
-	id, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
 	}
 
 	userID := GetUserID(c)
@@ -209,9 +179,9 @@ func (h *PlanHandler) Delete(c fiber.Ctx) error {
 
 // Pause handles POST /api/v1/plans/:id/pause.
 func (h *PlanHandler) Pause(c fiber.Ctx) error {
-	id, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
 	}
 
 	userID := GetUserID(c)
@@ -238,9 +208,9 @@ func (h *PlanHandler) Pause(c fiber.Ctx) error {
 
 // Resume handles POST /api/v1/plans/:id/resume.
 func (h *PlanHandler) Resume(c fiber.Ctx) error {
-	id, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
 	}
 
 	userID := GetUserID(c)

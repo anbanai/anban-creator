@@ -10,12 +10,12 @@ import (
 	"strings"
 
 	"github.com/disintegration/imaging"
-	"github.com/rs/zerolog"
+	"go.uber.org/zap"
 )
 
 // Compressor 图片压缩器
 type Compressor struct {
-	log          zerolog.Logger
+	log          *zap.Logger
 	maxWidth     int
 	maxSize      int64
 	quality      int // JPEG 质量 1-100
@@ -24,7 +24,7 @@ type Compressor struct {
 }
 
 // NewCompressor 创建压缩器
-func NewCompressor(log zerolog.Logger, maxWidth int, maxSize int64) *Compressor {
+func NewCompressor(log *zap.Logger, maxWidth int, maxSize int64) *Compressor {
 	return &Compressor{
 		log:          log,
 		maxWidth:     maxWidth,
@@ -46,7 +46,9 @@ func (c *Compressor) CompressImage(filePath string) (string, bool, error) {
 
 	// 检查文件大小
 	if c.enableShrink && fileInfo.Size() <= c.maxSize {
-		c.log.Debug().Int64("size", fileInfo.Size()).Int64("max", c.maxSize).Msg("file size within limit, no compression needed")
+		c.log.Debug("file size within limit, no compression needed",
+			zap.Int64("size", fileInfo.Size()),
+			zap.Int64("max", c.maxSize))
 		return "", false, nil
 	}
 
@@ -61,7 +63,11 @@ func (c *Compressor) CompressImage(filePath string) (string, bool, error) {
 	originalWidth := originalBounds.Dx()
 	originalHeight := originalBounds.Dy()
 
-	c.log.Debug().Str("path", filePath).Int("width", originalWidth).Int("height", originalHeight).Int64("size", fileInfo.Size()).Msg("image loaded")
+	c.log.Debug("image loaded",
+		zap.String("path", filePath),
+		zap.Int("width", originalWidth),
+		zap.Int("height", originalHeight),
+		zap.Int64("size", fileInfo.Size()))
 
 	// 判断是否需要调整尺寸
 	var processedImg image.Image
@@ -72,7 +78,11 @@ func (c *Compressor) CompressImage(filePath string) (string, bool, error) {
 		newHeight := int(float64(c.maxWidth) * float64(originalHeight) / float64(originalWidth))
 		processedImg = imaging.Resize(img, c.maxWidth, newHeight, imaging.Lanczos)
 
-		c.log.Info().Int("original_width", originalWidth).Int("original_height", originalHeight).Int("new_width", c.maxWidth).Int("new_height", newHeight).Msg("image resized")
+		c.log.Info("image resized",
+			zap.Int("original_width", originalWidth),
+			zap.Int("original_height", originalHeight),
+			zap.Int("new_width", c.maxWidth),
+			zap.Int("new_height", newHeight))
 	} else {
 		processedImg = img
 	}
@@ -111,12 +121,16 @@ func (c *Compressor) CompressImage(filePath string) (string, bool, error) {
 
 	compressionRatio := float64(newFileInfo.Size()) / float64(fileInfo.Size()) * 100
 
-	c.log.Info().Int64("original_size", fileInfo.Size()).Int64("compressed_size", newFileInfo.Size()).Float64("ratio", compressionRatio).Str("output_path", tempPath).Msg("image compressed")
+	c.log.Info("image compressed",
+		zap.Int64("original_size", fileInfo.Size()),
+		zap.Int64("compressed_size", newFileInfo.Size()),
+		zap.Float64("ratio", compressionRatio),
+		zap.String("output_path", tempPath))
 
 	// 如果压缩后反而变大，删除临时文件并返回原路径
 	if newFileInfo.Size() >= fileInfo.Size() {
 		os.Remove(tempPath)
-		c.log.Debug().Msg("compressed image larger than original, using original")
+		c.log.Debug("compressed image larger than original, using original")
 		return "", false, nil
 	}
 

@@ -67,19 +67,11 @@ func (p *LocalProvider) safePath(key string) (string, error) {
 }
 
 // Upload writes data from reader to {dataDir}/{key}, creating parent directories as needed.
-func (p *LocalProvider) Upload(ctx context.Context, key string, reader io.Reader, contentType string) (*UploadResult, error) {
+func (p *LocalProvider) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*UploadResult, error) {
 	destPath, err := p.safePath(key)
 	if err != nil {
 		return nil, fmt.Errorf("invalid key: %w", err)
 	}
-
-	// Check context before starting I/O work.
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
 	destDir := filepath.Dir(destPath)
 
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
@@ -112,14 +104,14 @@ func (p *LocalProvider) Upload(ctx context.Context, key string, reader io.Reader
 }
 
 // UploadFile copies a local file into the storage data directory.
-func (p *LocalProvider) UploadFile(ctx context.Context, key string, filePath string, contentType string) (*UploadResult, error) {
+func (p *LocalProvider) UploadFile(_ context.Context, key string, filePath string, contentType string) (*UploadResult, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("open source file %s: %w", filePath, err)
 	}
 	defer f.Close()
 
-	return p.Upload(ctx, key, f, contentType)
+	return p.Upload(context.Background(), key, f, contentType)
 }
 
 // GetURL returns the relative URL path for serving the file via the API.
@@ -128,19 +120,11 @@ func (p *LocalProvider) GetURL(key string) string {
 }
 
 // Read reads a file from local storage by key and returns its content.
-func (p *LocalProvider) Read(ctx context.Context, key string) ([]byte, error) {
+func (p *LocalProvider) Read(_ context.Context, key string) ([]byte, error) {
 	destPath, err := p.safePath(key)
 	if err != nil {
 		return nil, fmt.Errorf("invalid key: %w", err)
 	}
-
-	// Check context before starting I/O work.
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
 	data, err := os.ReadFile(destPath)
 	if err != nil {
 		return nil, fmt.Errorf("read file %s: %w", destPath, err)
@@ -150,17 +134,10 @@ func (p *LocalProvider) Read(ctx context.Context, key string) ([]byte, error) {
 
 // Delete removes the file from local storage.
 // If the file does not exist, a warning is logged but no error is returned.
-func (p *LocalProvider) Delete(ctx context.Context, key string) error {
+func (p *LocalProvider) Delete(_ context.Context, key string) error {
 	destPath, err := p.safePath(key)
 	if err != nil {
 		return fmt.Errorf("invalid key: %w", err)
-	}
-
-	// Check context before starting I/O work.
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
 	}
 
 	if err := os.Remove(destPath); err != nil {

@@ -4,198 +4,127 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**案板创作助手** (anbanwriter) is a multi-component content creation platform: a Go CLI tool for transforming Markdown into WeChat-formatted HTML with AI-powered writing and publishing, plus a web application (Go server + React frontend) for managing content plans and task execution.
+**案板创作助手** (anbanwriter) is a content creation platform with three main components:
+- **Agent** (`agent/`): Standalone Go binary for containerized Claude Code task execution
+- **Server** (`server/`): Fiber v3 HTTP API with MySQL, Redis, Asynq task queue, WebSocket, and MCP endpoint
+- **Studio** (`studio/`): React 19 + TypeScript + Vite 8 frontend for content management
 
-**Components**:
-- **CLI** (`app/`): Go CLI for conversion, writing, humanization, image generation, and direct WeChat publishing
-- **Server** (`server/`): Fiber-based HTTP API with MySQL, Redis, Asynq task queue, and MCP endpoint
-- **Studio** (`studio/`): React 19 + TypeScript + Vite frontend for content management
+The `app/` directory is a **library** (no `main.go`) providing content creation functionality used by both the server and agent. It handles Markdown-to-WeChat-HTML conversion, AI writing, image generation, humanization, and WeChat publishing.
 
-- **Language**: Go 1.26.0 (CLI + Server), TypeScript (Web)
-- **CLI Framework**: Cobra
-- **Logging**: Zerolog (all components — CLI, server, agent)
+- **Language**: Go 1.26.0 (Agent + Server + app library), TypeScript (Studio)
+- **Logging**: Zerolog (all components — app library, server, agent)
 - **WeChat SDK**: silenceper/wechat/v2
 
 ## Build & Test Commands
 
-### CLI
+### Server & Agent
 
 ```bash
-make build                    # Build CLI binary to bin/anbanwriter
-make release                  # Build all platform binaries
+make server-build             # Build server binary to bin/abwriter-server
+make server-run               # Build and run server with config
+make server-dev               # Run server via go run (development)
+make server-test              # Run server tests (go test -v ./server/...)
+
+make docker-agent-image       # Build agent Docker image (Claude Code + plugin)
+make docker-server-image      # Build server Docker image (Go binary)
+make docker-images            # Build both images
+```
+
+### Go Tests
+
+```bash
 make test                     # Run all Go tests (go test -v ./...)
 go test -v ./app/config       # Run specific package tests
 go test -v -run TestConfig_Validate ./app/config  # Run specific test
 make coverage                 # Tests with coverage report
 make ci                       # Run all CI checks (fmt + vet + test + lint)
-make fmt                      # Format code
-make vet                      # Static analysis
+make fmt                      # Format code (go fmt)
+make vet                      # Static analysis (go vet)
 make lint                     # Lint (requires golangci-lint)
-make deps                     # Download and tidy dependencies
-make install                  # Install CLI to GOPATH/bin
-```
-
-### Server
-
-```bash
-make server-build             # Build server binary to bin/anbanwriter-server
-make server-dev               # Run server via go run (development)
-make server-run               # Build and run server with config
-make server-test              # Run server tests
 ```
 
 ### Studio Frontend
 
 ```bash
-cd studio && bun install      # Install frontend dependencies (uses Bun, not npm)
-make web-dev                  # Run frontend dev server (proxies /api → localhost:8080, /ws → ws://localhost:8080)
-make web-build                # Build frontend for production
+cd studio && bun install      # Install dependencies (uses Bun, not npm)
+make web-dev                  # Run dev server (proxies /api → localhost:8080, /ws → ws://localhost:8080)
+make web-build                # Build for production (tsc -b && vite build)
+cd studio && bun run test     # Run vitest tests
+cd studio && bun run test:watch  # Watch mode tests
 ```
 
 ### Docker Infrastructure
 
 ```bash
-make docker-up                # Start MySQL 8.0 and Redis 7 containers
-make docker-down              # Stop containers
+make docker-up                # Start all services: MySQL 8.0, Redis 7, agent, server
+make docker-down              # Stop all containers
 make docker-logs              # Follow container logs
 ```
 
 ## Architecture
 
-### CLI Module Structure (`app/`)
+### Agent (`agent/`)
+
+Standalone Go binary that executes Claude Code tasks in Docker containers. The server dispatches tasks; the agent runs them in isolation.
+
+- `main.go` — Entry point, orchestrates run lifecycle
+- `runner.go` — Creates and manages Claude Code CLI subprocess
+- `config.go` — Agent configuration parsing
+- `downloader.go` — Downloads workspace files from server
+- `reporter.go` — Reports task results back to server
+- `bootstrap.sh` / `install.sh` — Claude Code + plugin installation scripts
+
+### Server (`server/`)
+
+Fiber v3 HTTP API. Layered architecture: handler → service → repository → MySQL/GORM.
+
+Key packages:
+- `handler/` — HTTP handlers (auth, channel, plan, task, timeline, websocket, credit, agent)
+- `service/` — Business logic including `task_execution.go` (agent SDK integration), `task_files.go`, `credit.go`, `publishing.go`, `task_agent.go`, `redis_notifier.go` (Redis pub/sub progress events), `task_events.go` (notifier interface)
+- `agent/` — Agent execution layer using claude-agent-sdk-go, includes MCP server and tool definitions
+- `scheduler/` — Asynq-based background task processing with `plan_checker.go`
+- `model/` — GORM models with auto-migration
+- `storage/` — File storage factory (local filesystem or Alibaba Cloud OSS)
+- `mcp/` — MCP HTTP endpoint
+- `setup.go` — Server bootstrap helpers (config, logger, DB/Redis connections)
+- `services.go` — Core service wiring (returns `coreServices` struct)
+- `handlers.go` — Handler instantiation
+- `workers.go` — Asynq server, periodic cleanup startup
+
+### App Library (`app/`)
+
+Shared library for content creation, used by both server and agent:
+- `converter/` — Markdown → WeChat HTML with theme system and AI mode
+- `writer/` — AI-powered styled writing with YAML-defined writing styles
+- `humanizer/` — AI trace detection and removal with quality scoring
+- `image/` — Multi-provider image generation (OpenAI, Gemini, OpenRouter, Volcengine), compression, processing
+- `storage/` — SQLite via GORM for CLI-side content/draft/image records
+- `draft/` — WeChat draft creation and publishing
+- `wechat/` — WeChat API wrapper with retry logic
+- `config/` — Configuration management (JSON)
+
+### Studio Frontend (`studio/`)
+
+React 19 + TypeScript + Vite 8 + Tailwind CSS v4. State: Zustand v5. Data fetching: TanStack React Query v5. Routing: React Router DOM v7. UI: shadcn/ui + Base UI. Forms: React Hook Form + Zod validation. Package manager: **Bun**.
 
 ```
-app/
-├── main.go                 # CLI entry point, command routing
-├── {command}.go            # Individual command implementations
-├── errors.go               # Hinter interface, AppError type
-├── doctor.go               # Diagnostic checks (config, env, network)
-├── table.go                # CJK-aware table rendering utilities
-│
-├── config/                 # Configuration management (JSON)
-│   └── config.go           # Single-account config
-│
-├── converter/              # Markdown → WeChat HTML conversion
-│   ├── converter.go        # Core conversion interface & orchestration
-│   ├── ai.go               # AI mode (Claude-based)
-│   ├── image.go            # Image reference extraction & placeholder handling
-│   ├── prompt.go           # AI prompt building with theme support
-│   └── theme.go            # Theme management system
-│
-├── writer/                 # Styled writing assistance
-│   ├── assistant.go        # Writing style orchestration
-│   ├── generator.go        # Content generation
-│   ├── cover_generator.go  # Cover image prompt generation
-│   ├── style.go            # Style definition loading (YAML-based)
-│   └── types.go            # Data structures
-│
-├── humanizer/              # AI writing trace removal
-│   ├── humanizer.go        # Detection & removal of AI patterns
-│   ├── prompt.go           # Humanization prompts
-│   └── result.go           # Quality scoring (5 dimensions)
-│
-├── image/                  # Image processing & generation
-│   ├── processor.go        # Unified image handling (upload, compress, generate)
-│   ├── compress.go         # Image compression (max 1920px)
-│   ├── provider.go         # Provider interface & factory
-│   ├── openai.go           # OpenAI DALL-E provider
-│   ├── gemini.go           # Google Gemini provider (google.golang.org/genai)
-│   ├── openrouter.go       # OpenRouter multi-model gateway
-│   └── volcengine.go       # Volcengine Seedream provider (async polling)
-│
-├── storage/                # Persistent storage (SQLite via GORM)
-│   ├── store.go            # Database init, Store struct
-│   ├── models.go           # Content, Draft, Image data models
-│   ├── content.go          # Content lifecycle CRUD
-│   ├── draft.go            # Draft record storage
-│   ├── history.go          # Unified history queries
-│   └── image.go            # Image record storage
-│
-├── draft/                  # WeChat draft management
-│   └── service.go          # Draft creation & publishing
-│
-└── wechat/                 # WeChat API wrapper
-    ├── service.go          # Material upload, access token management
-    └── errors.go           # WechatAPIError with retryable detection
+studio/src/
+├── pages/          # Route pages
+├── components/
+│   ├── ui/         # shadcn/ui primitives
+│   ├── auth/       # LoginDialog, UserAccountPopover
+│   └── layout/     # AppLayout, Sidebar, PageHeader
+├── lib/
+│   ├── api.ts      # Axios API client
+│   ├── sse.ts      # Server-Sent Events for task streaming
+│   ├── schemas.ts  # Zod validation schemas
+│   └── labels.ts   # Label constants
+├── hooks/          # useWebSocket, useKeyboardShortcuts
+├── stores/         # Zustand stores
+└── test/           # Test setup (vitest)
 ```
 
-### Server Module Structure (`server/`)
-
-Fiber v3 HTTP API with MySQL (GORM), Redis, Asynq task queue, WebSocket, and MCP endpoint.
-
-```
-server/
-├── main.go                 # Server entry point (thin, delegates to setup files)
-├── setup.go                # Config, logger, DB/Redis connections, storage
-├── services.go             # Core service wiring (setupCoreServices)
-├── handlers.go             # Handler instantiation
-├── workers.go              # Asynq server, scheduler, periodic cleanup
-├── config.yaml             # Server config (YAML with ANBAN_SERVER_* env overrides)
-│
-├── agent/                  # Agent execution layer
-│   ├── executor.go         # Task execution engine (claude-agent-sdk-go)
-│   ├── prompts.go          # Agent prompt templates
-│   ├── mcp_server.go       # MCP protocol server
-│   ├── mcp_tools.go        # MCP tool definitions
-│   └── mcp_draft.go        # MCP draft operations
-│
-├── auth/                   # Authentication
-│   ├── jwt.go              # JWT service (access + refresh tokens)
-│   └── wechat.go           # WeChat OAuth login
-│
-├── config/                 # Server config loading
-│   └── config.go           # YAML config with env overrides
-│
-├── handler/                # HTTP handlers
-│   ├── auth.go             # Register, login, refresh, logout, wx-login
-│   ├── channel.go          # Channel CRUD (WeChat accounts)
-│   ├── plan.go             # Plan CRUD + pause/resume
-│   ├── task.go             # Task CRUD + file management + streaming
-│   ├── timeline.go         # Unified timeline view
-│   ├── websocket.go        # WebSocket hub for real-time updates
-│   └── credit.go           # Credits/billing (balance, sign-in, transactions)
-│
-├── middleware/              # HTTP middleware
-│   ├── auth.go             # JWT Bearer token validation
-│   ├── mcp_auth.go         # MCP API key or JWT auth
-│   ├── ratelimit.go        # Redis-based rate limiting
-│   └── request_logger.go   # Zerolog request logging
-│
-├── model/                  # GORM models
-│   ├── model.go            # Base model
-│   ├── user.go, channel.go, plan.go, task.go, task_file.go, session.go
-│   ├── user_config.go      # Legacy (migrating to channel)
-│   ├── migration.go        # Auto-migration + UserConfig→Channel migration
-│   └── constants.go        # Status constants
-│
-├── repository/             # Data access layer (MySQL via GORM)
-├── service/                # Business logic
-│   ├── channel.go, plan.go, task.go
-│   ├── task_execution.go   # Task execution with agent SDK
-│   ├── task_agent.go       # Task agent integration
-│   ├── task_files.go       # Task file management
-│   ├── redis_notifier.go   # Redis pub/sub for task progress
-│   ├── task_events.go      # TaskProgressNotifier interface
-│   └── credit.go           # Credits/points billing system
-│
-├── router/                 # Fiber router setup
-│   └── router.go           # All routes + middleware wiring
-│
-├── scheduler/              # Background task processing
-│   ├── scheduler.go        # Asynq client + processor
-│   └── plan_checker.go     # Periodic plan checker
-│
-├── storage/                # File storage providers
-│   ├── factory.go          # Provider factory
-│   ├── local.go            # Local filesystem
-│   └── oss.go              # Alibaba Cloud OSS
-│
-├── mcp/                    # MCP endpoint
-│   └── mcp.go              # MCP HTTP handler
-│
-└── integration/
-    └── e2e_test.go         # End-to-end tests
-```
+Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhost:8080`.
 
 ### Server API Routes
 
@@ -209,90 +138,58 @@ server/
 - `/api/v1/timeline` — Unified timeline view
 - `/api/v1/credits` — Balance, sign-in, transactions
 - `/api/v1/files/*` — Local file serving (local storage mode only)
-- `/mcp` — MCP endpoint (API key or JWT auth, configured in `.mcp.json`)
+- `/mcp` — MCP endpoint (API key or JWT auth, configured in `plugin/.mcp.json`)
 
-### Studio Frontend (`studio/`)
+## Configuration
 
-React 19 + TypeScript + Vite 8 + Tailwind CSS v4. State: Zustand v5. Data fetching: TanStack React Query v5. Routing: React Router DOM v7. UI: shadcn/ui + Base UI. Package manager: **Bun**.
+### Server
 
-```
-studio/src/
-├── pages/          # Route pages: Login, Register, Dashboard, Channels, Plans, Tasks, TaskDetail, Timeline, Credits, Settings
-├── components/
-│   ├── ui/         # shadcn/ui primitives (Button, Card, Input, Dialog, etc.)
-│   ├── auth/       # LoginDialog, UserAccountPopover
-│   └── layout/     # AppLayout, Sidebar, PageHeader
-├── lib/
-│   ├── api.ts      # Axios API client (base URL via Vite proxy)
-│   ├── sse.ts      # Server-Sent Events client for task streaming
-│   ├── schemas.ts  # Zod validation schemas
-│   └── labels.ts   # Label constants
-├── hooks/          # useWebSocket, useKeyboardShortcuts
-└── stores/         # Zustand stores (notification-store)
-```
+YAML config at `server/config.yaml`. All fields overridable via `ANBAN_SERVER_*` env vars.
 
-Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhost:8080`.
+Graceful degradation: MySQL unreachable → degraded mode (no persistence). Redis unreachable → in-process goroutine task execution, rate limiting skipped.
 
-### Configuration System (CLI)
+### App Library (used by CLI commands via plugin skills)
 
-**Single Account Support**: One WeChat account via `.anbanwriter/settings.json`.
+Single WeChat account via `.anbanwriter/settings.json`. Config search priority: CWD → `CLAUDE_PLUGIN_ROOT` → `~/.config/anbanwriter/` → `~/.anbanwriter/` → executable-relative.
 
-**Config Search Priority**: CWD → `CLAUDE_PLUGIN_ROOT` → `~/.config/anbanwriter/` → `~/.anbanwriter/` → executable-relative
+Two loading modes: `Load()`/`LoadWithDefaults()` (full validation) vs `LoadMinimal()` (skips WeChat validation).
 
-**Two Loading Modes**:
-- `Load()` / `LoadWithDefaults()`: Full validation including WeChat AppID/Secret
-- `LoadMinimal()`: Skips WeChat validation, used by commands that don't need WeChat API (write, doctor)
+## Key Data Flows
 
-### Server Configuration
+### Conversion Flow (app/converter)
 
-YAML config at `server/config.yaml`. All fields overridable via `ANBAN_SERVER_*` env vars (e.g. `ANBAN_SERVER_DATABASE_DSN`, `ANBAN_SERVER_JWT_SECRET_KEY`).
+1. Image extraction from Markdown (local/online/AI-generated references)
+2. Markdown → WeChat HTML with inline CSS and theme styling (AI mode uses Claude)
+3. Image placeholders (`<!-- IMG:0 -->`) → compress → upload to WeChat CDN → replace with CDN URLs
+4. Optional draft creation in WeChat backend
 
-Graceful degradation: MySQL unreachable → server runs in degraded mode (no persistence). Redis unreachable → falls back to in-process goroutine task execution, rate limiting skipped.
+### Task Execution (server → agent)
 
-### Conversion Flow
+1. Server creates task, dispatches to agent via Docker container
+2. Agent downloads workspace, runs Claude Code CLI subprocess
+3. Claude Code executes skill-based workflows using the plugin system
+4. Agent reports results back to server
+5. Server streams progress to Studio via WebSocket/SSE
 
-1. **Image Extraction**: Parse Markdown for image references (local/online/AI-generated)
-2. **Markdown → HTML**: WeChat-compatible HTML with theme styling
-   - **AI Mode**: Claude with theme-specific prompts (autumn-warm, spring-fresh, ocean-calm, custom)
-   - All CSS inline, safe HTML tags only
-3. **Image Placeholders**: Replace with `<!-- IMG:0 -->` format
-4. **Image Processing** (if enabled): compress → upload to WeChat CDN
-5. **Placeholder Replacement**: Replace placeholders with CDN URLs
-6. **Draft Publishing** (optional): Create draft in WeChat backend
+## Image Generation Providers
 
-### Image Generation Providers
+All implement `Provider` interface (`app/image/provider.go`).
 
 | Provider | Value | Notes |
 |----------|-------|-------|
 | OpenAI | `openai` (default) | Synchronous, dall-e-2/dall-e-3 |
-| Google Gemini | `gemini` or `google` | Inline image data, `gemini-3-pro-image-preview` |
-| OpenRouter | `openrouter` or `or` | Multi-model gateway, base64 images |
-| Volcengine/Seedream | `volcengine`, `volc`, `seedream` | Async polling, `doubao-seedream-5-0-250128` |
+| Google Gemini | `gemini` or `google` | Inline image data |
+| OpenRouter | `openrouter` or `or` | Multi-model gateway |
+| Volcengine/Seedream | `volcengine`, `volc`, `seedream` | Async polling |
 
-All providers implement the `Provider` interface (`app/image/provider.go`).
+## Important Constraints
 
-### Writing Styles
-
-Located in `plugin/writers/*.yaml`. Each defines core_traits, structure_patterns, language_usage, domain_knowledge.
-
-Built-in: `dan-koe`, `cultural-depth`, `casual-science`
-
-### AI Humanization
-
-Detects and removes 5 categories of AI patterns (content, language, style, filler, collaboration traces).
-
-Intensity levels: `gentle`, `medium`, `aggressive`
-
-Quality scoring (5 dimensions, 10 points each): Directness, Rhythm, Trust, Authenticity, Precision
+1. **WeChat HTML**: All CSS inline, no external resources. Safe tags only: section, p, span, strong, em, h1-h6, ul, ol, li, blockquote, pre, code, table, img, br, hr. No: script, iframe, form, input, style, link.
+2. **Image Processing**: Max 1920px width, < 10MB for upload, preserves aspect ratio. Formats: JPG, JPEG, PNG, GIF, BMP, WebP.
+3. **AI Generation**: Prompts in Chinese for better results. Theme prompts define complete styling.
+4. **Studio**: Uses Bun (not npm). Use `bun install`, `bun run dev`, `bun run test`.
 
 ## Development Patterns
-
-### Adding New CLI Commands
-
-1. Create `app/{command}.go` with cobra command definition
-2. Add command to `rootCmd` in `main.go`
-3. Use `initConfig()` for lazy config loading (allows --help without config)
-4. Return JSON responses via `responseSuccess()` or `responseError()`
 
 ### Adding New Image Providers
 
@@ -305,102 +202,55 @@ Quality scoring (5 dimensions, 10 points each): Directness, Rhythm, Trust, Authe
 1. Create YAML file in `plugin/themes/{name}.yaml`
 2. Theme system auto-loads with hot-reload support
 
-### Writing Tests
+### Server Wire Function Pattern
 
-- Table-driven tests for multiple scenarios
-- `t.TempDir()` for temp files/dirs
-- `httptest.NewServer` for HTTP mocking
-- Test both success and error paths
+`server/main.go` delegates to domain-specific setup files:
+- `setup.go` — `resolveConfig()`, `initLogger()`, `connectMySQL()`, `connectRedis()`, `setupStorage()`
+- `services.go` — `setupCoreServices()` returns `coreServices` struct with all service instances
+- `handlers.go` — `setupHandlers()` + `setupMCPHandler()` return handler instances
+- `workers.go` — `startWorkers()` for Asynq server, scheduler, periodic cleanup
+
+### Task Progress (Redis Pub/Sub)
+
+Task progress events use `TaskProgressNotifier` interface (`server/service/task_events.go`):
+- Redis pub/sub primary (`redisNotifier`), database polling fallback (`pollingNotifier`)
+- SSE handler in `server/handler/task.go` subscribes via notifier
+- Publish points in `task_execution.go`, `task_agent.go`, `task.go`
 
 ### Error Handling
 
-- **CLI**: `Hinter` interface (`app/errors.go`) for user-friendly hints. Zap structured logging. `responseError()` for JSON output.
-- **Server**: Zerolog structured logging. GORM error handling. JWT error responses.
-- `WechatAPIError` (`app/wechat/errors.go`): parses WeChat error codes, `IsRetryable()` for transient errors
+- **App library**: `Hinter` interface (`app/errors.go`) for user-friendly hints, `printJSON()` for JSON output
+- **Server**: Zerolog structured logging, GORM error handling, JWT error responses
+- **WechatAPIError** (`app/wechat/errors.go`): parses WeChat error codes, `IsRetryable()` for transient errors
 
 ### WeChat API Integration
 
-- **Access Token**: Automatically cached/refreshed by wechat SDK
-- **Material Upload**: Images < 10MB, returns media_id and CDN URL, retry on transient failures
-- **Draft Creation**: Content < 20,000 chars or 1MB, HTML safe tags only
-
-## Important Constraints
-
-1. **WeChat HTML**: All CSS inline, no external resources, safe tags only (section, p, span, strong, em, h1-h6, ul, ol, li, blockquote, pre, code, table, img, br, hr). No: script, iframe, form, input, style, link.
-2. **Image Processing**: Max 1920px width, < 10MB for upload, preserves aspect ratio. Formats: JPG, JPEG, PNG, GIF, BMP, WebP.
-3. **Configuration**: CLI config is JSON (`.anbanwriter/settings.json`). Server config is YAML (`server/config.yaml`).
-4. **AI Generation**: Prompts in Chinese for better results. Theme prompts define complete styling. Image prompts descriptive but concise.
-
-## CLI Commands Overview
-
-- `anbanwriter account init` - Create config file with guided setup
-- `anbanwriter account info [--scope article|xls|rednote]` - Show account profile for AI context
-- `anbanwriter account history` - View unified history
-- `anbanwriter convert <file>` - Convert Markdown to WeChat HTML
-- `anbanwriter write` - Style-based writing assistance
-- `anbanwriter humanize <file>` - Remove AI writing traces
-- `anbanwriter score <file>` - Evaluate article quality
-- `anbanwriter outline` - Generate article outline
-- `anbanwriter draft article <json_file>` - Create news article draft from JSON
-- `anbanwriter draft xls` - Create Xiaolvshu image posts (max 20 images)
-- `anbanwriter image generate <prompt>` - Generate AI images
-- `anbanwriter image upload <file>` - Upload image to WeChat CDN
-- `anbanwriter image download <url>` - Download image
-- `anbanwriter video assemble <images_or_dir>` - Assemble images into video (requires ffmpeg)
-- `anbanwriter content track` - Track content lifecycle status
-- `anbanwriter content list` - List tracked content
-- `anbanwriter workspace prepare <type>` - Archive stale staging and create clean workspace
-- `anbanwriter workspace archive <type>` - Archive staging dir to YYYYMMDD-NNN format
-- `anbanwriter rednote` - Xiaohongshu content creation
-- `anbanwriter topics` - Topic research and generation
-- `anbanwriter seo` - SEO analysis and optimization
-- `anbanwriter doctor` - Diagnose config and connection issues
-
-## Skills Integration
-
-Skills in `plugin/skills/`:
-
-- `content-writing` - Article writing workflow
-- `topic-research` - Research and scoring
-- `seo-optimization` - SEO best practices
-- `article-publishing` - Article draft publishing
-- `article-visual-design` - Article image generation and management
-- `xls-publishing` - Xiaolvshu image post publishing
-- `xls-visual-design` - Xiaolvshu visual content (3:4 ratio)
-- `rednote-research` - Xiaohongshu topic research
-- `rednote-writing` - Xiaohongshu content writing
-- `rednote-visual-design` - Xiaohongshu visual content (3:4 ratio)
-- `flower-content-design` - Flower photography prompt design
-- `flower-visual-design` - Flower image series generation
-- `config` - Configuration management
+- Access token automatically cached/refreshed by wechat SDK
+- Material upload: images < 10MB, returns media_id and CDN URL, retry on transient failures
+- Draft creation: content < 20,000 chars or 1MB, HTML safe tags only
 
 ## Plugin & Agent Ecosystem
 
 ```
 plugin/
 ├── .claude-plugin/
-│   ├── plugin.json      # Plugin manifest v2.3.3
+│   ├── plugin.json      # Plugin manifest
 │   └── marketplace.json # Marketplace listing
 ├── agents/
-│   ├── wechatarticle.md # Full article pipeline agent (maxTurns: 50)
-│   ├── wechatxls.md     # Image post pipeline agent (maxTurns: 25)
-│   ├── rednote.md       # Xiaohongshu creation engine (maxTurns: 20)
+│   ├── wechatarticle.md # Full article pipeline agent
+│   ├── wechatxls.md     # Image post pipeline agent
+│   ├── rednote.md       # Xiaohongshu creation engine
 │   └── flower.md        # Flower image generation agent
-├── skills/              # Claude Code skills
+├── skills/              # Claude Code skills (content-writing, topic-research, seo-optimization, etc.)
 ├── hooks/
 │   └── hooks.json       # SessionStart, SubagentStop, TaskCompleted
 ├── themes/              # Conversion themes (YAML)
-└── writers/             # Writing styles (YAML)
+└── writers/             # Writing styles (YAML): dan-koe, cultural-depth, casual-science
 ```
 
-`.mcp.json` configures an MCP server pointing to the server's `/mcp` endpoint.
+## Notes
 
-## Notes for Development
-
-- Go 1.26 features used throughout — ensure compatibility
 - CLI uses zerolog logging — all components use zerolog, never mix with zap
-- JSON responses use `printJSON()` helper in CLI
-- Two Cobra patterns coexist: package-level var with `init()` (older) and factory functions returning `*cobra.Command` (preferred)
-- Server config overrides via `ANBAN_SERVER_*` env vars
-- Docker Compose provides MySQL 8.0 + Redis 7 for local development
-- Studio uses **Bun** as package manager (not npm) — use `bun install`, `bun run dev`
+- Two Cobra patterns coexist in app/: package-level var with `init()` (older) and factory functions returning `*cobra.Command` (preferred)
+- Docker Compose provides MySQL 8.0 + Redis 7 + agent + server containers
+- Server binary is `bin/abwriter-server` (not anbanwriter-server)

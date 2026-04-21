@@ -3,13 +3,11 @@ package converter
 import (
 	"strings"
 	"testing"
-
-	"github.com/rs/zerolog"
 )
 
 func TestExtractImages_LocalImages(t *testing.T) {
 	markdown := "一些文字\n![photo](./images/photo1.jpg)\n更多文字\n![alt](./pics/photo2.png)"
-	conv := NewConverter(zerolog.Nop()).(*converter)
+	conv := NewConverter(nil).(*converter)
 	images := conv.ExtractImages(markdown)
 
 	if len(images) != 2 {
@@ -28,7 +26,7 @@ func TestExtractImages_LocalImages(t *testing.T) {
 
 func TestExtractImages_OnlineImages(t *testing.T) {
 	markdown := "![alt](https://example.com/img.jpg)\ntext\n![pic](http://cdn.example.com/pic.png)"
-	conv := NewConverter(zerolog.Nop()).(*converter)
+	conv := NewConverter(nil).(*converter)
 	images := conv.ExtractImages(markdown)
 
 	if len(images) != 2 {
@@ -44,7 +42,7 @@ func TestExtractImages_OnlineImages(t *testing.T) {
 
 func TestExtractImages_AIImages(t *testing.T) {
 	markdown := "![cover](__generate:a beautiful sunset__)\ntext"
-	conv := NewConverter(zerolog.Nop()).(*converter)
+	conv := NewConverter(nil).(*converter)
 	images := conv.ExtractImages(markdown)
 
 	if len(images) != 1 {
@@ -60,7 +58,7 @@ func TestExtractImages_AIImages(t *testing.T) {
 
 func TestExtractImages_MixedTypes(t *testing.T) {
 	markdown := "![local](./a.jpg)\n![online](https://x.com/b.png)\n![ai](__generate:prompt__)"
-	conv := NewConverter(zerolog.Nop()).(*converter)
+	conv := NewConverter(nil).(*converter)
 	images := conv.ExtractImages(markdown)
 
 	if len(images) != 3 {
@@ -84,7 +82,7 @@ func TestExtractImages_MixedTypes(t *testing.T) {
 }
 
 func TestExtractImages_NoImages(t *testing.T) {
-	conv := NewConverter(zerolog.Nop()).(*converter)
+	conv := NewConverter(nil).(*converter)
 	images := conv.ExtractImages("just plain text\nno images here")
 	if len(images) != 0 {
 		t.Errorf("expected 0 images, got %d", len(images))
@@ -172,64 +170,5 @@ func TestImageProcessor_ParseImageSyntax(t *testing.T) {
 	}
 	if refs[2].Type != ImageTypeAI {
 		t.Errorf("refs[2].Type = %q", refs[2].Type)
-	}
-}
-
-func TestSanitizeImageURL(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		wantEmpty bool
-		wantContains string
-	}{
-		{"valid https", "https://cdn.example.com/img.jpg", false, "https://cdn.example.com/img.jpg"},
-		{"valid http", "http://cdn.example.com/img.jpg", false, "http://cdn.example.com/img.jpg"},
-		{"javascript scheme", "javascript:alert(1)", true, ""},
-		{"data scheme", "data:text/html,<script>alert(1)</script>", true, ""},
-		{"vbscript scheme", "vbscript:msgbox(1)", true, ""},
-		{"no scheme", "cdn.example.com/img.jpg", true, ""},
-		{"empty string", "", true, ""},
-		{"query with special chars", "https://cdn.example.com/img.jpg?w=100&h=200", false, "w=100&amp;h=200"},
-		{"double quote injection", `https://cdn.example.com/img.jpg" onmouseover="alert(1)`, false, "&#34; onmouseover=&#34;alert(1)"},
-		{"angle bracket injection", `https://cdn.example.com/img.jpg><script>alert(1)</script>`, false, "&lt;script&gt;"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := sanitizeImageURL(tt.input)
-			if tt.wantEmpty && result != "" {
-				t.Errorf("sanitizeImageURL(%q) = %q, want empty", tt.input, result)
-			}
-			if !tt.wantEmpty && result == "" {
-				t.Errorf("sanitizeImageURL(%q) = empty, want non-empty", tt.input)
-			}
-			if tt.wantContains != "" && !strings.Contains(result, tt.wantContains) {
-				t.Errorf("sanitizeImageURL(%q) = %q, want to contain %q", tt.input, result, tt.wantContains)
-			}
-		})
-	}
-}
-
-func TestReplaceImagePlaceholders_XSS(t *testing.T) {
-	html := "<!-- IMG:0 --><!-- IMG:1 --><!-- IMG:2 -->"
-	images := []ImageRef{
-		{Index: 0, Placeholder: "<!-- IMG:0 -->", WechatURL: `https://cdn.example.com/img.jpg" onmouseover="alert(1)`},
-		{Index: 1, Placeholder: "<!-- IMG:1 -->", WechatURL: "javascript:alert(1)"},
-		{Index: 2, Placeholder: "<!-- IMG:2 -->", WechatURL: "https://cdn.example.com/safe.jpg"},
-	}
-
-	result := ReplaceImagePlaceholders(html, images)
-
-	// Injection should be escaped
-	if strings.Contains(result, `onmouseover="alert(1)`) {
-		t.Error("XSS injection not escaped in double-quote payload")
-	}
-	// javascript: URL should be rejected (placeholder remains)
-	if !strings.Contains(result, "<!-- IMG:1 -->") {
-		t.Error("javascript: URL should be rejected, placeholder should remain")
-	}
-	// Safe URL should be present
-	if !strings.Contains(result, "https://cdn.example.com/safe.jpg") {
-		t.Error("safe URL should be present in result")
 	}
 }

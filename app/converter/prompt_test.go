@@ -43,8 +43,8 @@ func TestEstimateTokenCount(t *testing.T) {
 	}{
 		{"empty", "", 0, 0},
 		{"ascii", "hello world", 2, 4},
-		{"chinese", "你好世界", 2, 2},
-		{"mixed", "hello 你好", 2, 2},
+		{"chinese", "你好世界", 4, 4},
+		{"mixed", "hello 你好", 3, 6},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

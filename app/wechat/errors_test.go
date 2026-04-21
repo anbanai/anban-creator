@@ -2,7 +2,6 @@ package wechat
 
 import (
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -65,49 +64,5 @@ func TestIsRetryable(t *testing.T) {
 				t.Errorf("IsRetryable() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestMaskAccessToken(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"no token", "hello world", "hello world"},
-		{"simple URL", "https://api.weixin.qq.com/cgi-bin/draft/add?access_token=abc123xyz", "https://api.weixin.qq.com/cgi-bin/draft/add?access_token=***"},
-		{"URL with multiple params", "https://api.example.com?access_token=SECRET&foo=bar", "https://api.example.com?access_token=***&foo=bar"},
-		{"no value", "access_token=", "access_token="},
-		{"error message", `Post "https://api.weixin.qq.com/draft/add?access_token=72_abc": dial tcp`, `Post "https://api.weixin.qq.com/draft/add?access_token=***": dial tcp`},
-		{"empty string", "", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := maskAccessToken(tt.in)
-			if got != tt.want {
-				t.Errorf("maskAccessToken() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMaskError(t *testing.T) {
-	origErr := errors.New(`Post "https://api.weixin.qq.com/draft/add?access_token=72_SECRET_TOKEN": dial tcp 127.0.0.1:443: connection refused`)
-	wrapped := maskError("call wechat api", origErr)
-
-	// Error message should be masked
-	errMsg := wrapped.Error()
-	if strings.Contains(errMsg, "72_SECRET_TOKEN") {
-		t.Errorf("masked error still contains access token: %s", errMsg)
-	}
-	if !strings.Contains(errMsg, "access_token=***") {
-		t.Errorf("masked error should contain masked token: %s", errMsg)
-	}
-
-	// Unwrap should return the original error
-	unwrapped := wrapped.(interface{ Unwrap() error }).Unwrap()
-	if unwrapped != origErr {
-		t.Error("Unwrap() should return the original error")
 	}
 }

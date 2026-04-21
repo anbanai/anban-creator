@@ -84,7 +84,6 @@ type RefineResult struct {
 	BeforeAfter string   // 对比（可选）
 	Success     bool
 	Error       string
-	AIRequest   string // explicit AI refine request prompt (replaces "AI_REFINE_REQUEST:" prefix in Error)
 }
 
 // GenerateCoverRequest 生成封面请求

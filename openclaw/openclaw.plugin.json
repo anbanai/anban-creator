@@ -1,0 +1,22 @@
+{
+  "id": "anbanwriter",
+  "name": "案板创作助手",
+  "description": "WeChat & Xiaohongshu AI content creation suite — writing, visual design, multi-platform publishing",
+  "version": "2.4.0",
+  "enabledByDefault": true,
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "skills": [],
+  "mcp": {
+    "anbanwriter": {
+      "url": "${ANBANWRITER_API_URL:-http://localhost:18060}/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer ${ANBANWRITER_API_KEY}"
+      }
+    }
+  }
+}

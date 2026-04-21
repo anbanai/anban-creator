@@ -4,12 +4,10 @@ package converter
 
 import (
 	"fmt"
-	"html"
-	"net/url"
 	"regexp"
 	"strings"
 
-	"github.com/rs/zerolog"
+	"go.uber.org/zap"
 )
 
 // ImageType 图片类型
@@ -43,12 +41,11 @@ type ImageRef struct {
 
 // ConvertResult 转换结果
 type ConvertResult struct {
-	HTML      string     // 生成的 HTML（含占位符）
-	Theme     string     // 使用的主题
-	Images    []ImageRef // 图片引用列表
-	Success   bool       // 是否成功
-	Error     string     // 错误信息
-	AIRequest string     // explicit AI conversion prompt (replaces "AI_MODE_REQUEST:" prefix in Error)
+	HTML    string     // 生成的 HTML（含占位符）
+	Theme   string     // 使用的主题
+	Images  []ImageRef // 图片引用列表
+	Success bool       // 是否成功
+	Error   string     // 错误信息
 }
 
 // Converter 转换器接口
@@ -62,13 +59,13 @@ type Converter interface {
 
 // converter 转换器实现
 type converter struct {
-	log           zerolog.Logger
+	log           *zap.Logger
 	theme         *ThemeManager
 	promptBuilder *PromptBuilder
 }
 
 // NewConverter 创建转换器
-func NewConverter(log zerolog.Logger) Converter {
+func NewConverter(log *zap.Logger) Converter {
 	return &converter{
 		log:           log,
 		theme:         NewThemeManager(),
@@ -155,31 +152,13 @@ func (c *converter) ExtractImages(markdown string) []ImageRef {
 	return images
 }
 
-// sanitizeImageURL validates and escapes a URL for safe use in an HTML src attribute.
-// Returns empty string if the URL is unsafe (non-http scheme, parse error).
-func sanitizeImageURL(rawURL string) string {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return ""
-	}
-	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return ""
-	}
-	// HTML-encode the entire URL to prevent breaking out of the src attribute
-	return html.EscapeString(rawURL)
-}
-
 // ReplaceImagePlaceholders 在 HTML 中替换图片占位符
 func ReplaceImagePlaceholders(html string, images []ImageRef) string {
 	result := html
 	for _, img := range images {
 		if img.WechatURL != "" {
-			safeURL := sanitizeImageURL(img.WechatURL)
-			if safeURL == "" {
-				continue // 拒绝不安全的 URL，跳过此图片
-			}
-			imgTag := fmt.Sprintf(`<img src="%s" style="max-width:100%%;height:auto;display:block;margin:20px auto;" />`, safeURL)
+			// 替换占位符为实际图片标签
+			imgTag := `<img src="` + img.WechatURL + `" style="max-width:100%;height:auto;display:block;margin:20px auto;" />`
 			result = strings.ReplaceAll(result, img.Placeholder, imgTag)
 		}
 	}

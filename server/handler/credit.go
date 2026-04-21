@@ -65,7 +65,10 @@ func (h *CreditHandler) SignIn(c fiber.Ctx) error {
 	balance, err := h.service.SignIn(c.Context(), userID)
 	if err != nil {
 		if errors.Is(err, service.ErrAlreadySignedIn) {
-			return Error(c, fiber.StatusConflict, "already_signed_in")
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"code": 40900,
+				"msg":  "already_signed_in",
+			})
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("sign-in failed")
 		return Error(c, fiber.StatusInternalServerError, "sign-in failed")

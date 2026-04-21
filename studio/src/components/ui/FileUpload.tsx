@@ -48,9 +48,8 @@ export function FileUpload({
       if (url) {
         onChange?.(url)
       }
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { msg?: string } } }
-      const msg = axiosErr?.response?.data?.msg || "上传失败，请重试"
+    } catch (err: any) {
+      const msg = err?.response?.data?.msg || "上传失败，请重试"
       setError(msg)
     } finally {
       setUploading(false)

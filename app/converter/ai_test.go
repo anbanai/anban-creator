@@ -3,7 +3,7 @@ package converter
 import (
 	"testing"
 
-	"github.com/rs/zerolog"
+	"go.uber.org/zap"
 )
 
 func TestCompleteAIConversion(t *testing.T) {
@@ -89,7 +89,7 @@ func TestGetAIRequestInfo_NotAIRequest(t *testing.T) {
 }
 
 func TestConvertValidation_EmptyMarkdown(t *testing.T) {
-	conv := NewConverter(zerolog.Nop())
+	conv := NewConverter(nil)
 	result := conv.Convert(&ConvertRequest{Markdown: ""})
 	if result.Success {
 		t.Error("expected failure for empty markdown")
@@ -100,7 +100,7 @@ func TestConvertValidation_EmptyMarkdown(t *testing.T) {
 }
 
 func TestConvertValidation_DefaultTheme(t *testing.T) {
-	log := zerolog.Nop()
+	log := zap.NewNop()
 	conv := NewConverter(log)
 	result := conv.Convert(&ConvertRequest{Markdown: "# Test", Theme: ""})
 	// Theme should be set to "default" even though we don't check further

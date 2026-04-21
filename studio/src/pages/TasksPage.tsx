@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { Plus, Loader2, ClipboardList, Check } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { TaskType, TaskStatus, CreateTaskRequest } from '@/types'
+import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -67,8 +68,7 @@ export default function TasksPage() {
   })
 
   const form = useForm<CreateTaskFormValues>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(createTaskSchema) as any,
+    resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
     defaultValues: { type: 'rednote', topic: '', channel_id: '', quantity: 1, image_ratio: '' },
   })
 

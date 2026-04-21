@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rs/zerolog"
+	"go.uber.org/zap"
 )
 
 // AIConvertRequest AI 转换请求（用于传递给 Claude）
@@ -24,12 +24,12 @@ type AIConvertResult struct {
 
 // aiConverter AI 模式转换器
 type aiConverter struct {
-	log   zerolog.Logger
+	log   *zap.Logger
 	theme *ThemeManager
 }
 
 // NewAIConverter 创建 AI 转换器
-func NewAIConverter(log zerolog.Logger, theme *ThemeManager) *aiConverter {
+func NewAIConverter(log *zap.Logger, theme *ThemeManager) *aiConverter {
 	return &aiConverter{
 		log:   log,
 		theme: theme,
@@ -62,10 +62,13 @@ func (c *converter) convertViaAI(req *ConvertRequest) *ConvertResult {
 	// 4. 调用 CompleteAIConversion 填充结果
 
 	// 为了保持接口一致性，这里返回一个包含提示词的特殊结果
-	result.AIRequest = prompt
+	result.Error = "AI_MODE_REQUEST:" + prompt
 	result.Images = images
 
-	c.log.Info().Str("theme", req.Theme).Int("count", len(images)).Int("prompt_length", len(prompt)).Msg("AI conversion request prepared")
+	c.log.Info("AI conversion request prepared",
+		zap.String("theme", req.Theme),
+		zap.Int("count", len(images)),
+		zap.Int("prompt_length", len(prompt)))
 
 	return result
 }
@@ -88,16 +91,18 @@ func (c *converter) buildAIPrompt(req *ConvertRequest) (string, error) {
 			// 使用 PromptBuilder 构建完整 Prompt
 			prompt, err = c.promptBuilder.BuildPromptFromTheme(theme, req.Markdown, nil)
 			if err != nil {
-				c.log.Warn().Err(err).Msg("build prompt from theme failed, using raw prompt")
+				c.log.Warn("build prompt from theme failed, using raw prompt", zap.Error(err))
 				prompt = theme.Prompt + "\n\n```\n" + req.Markdown + "\n```"
 			} else {
 				// 验证 Prompt 内容
 				validation := ValidatePromptContent(prompt)
 				if !validation.Valid {
-					c.log.Warn().Strs("errors", validation.Errors).Msg("prompt validation failed")
+					c.log.Warn("prompt validation failed",
+						zap.Strings("errors", validation.Errors))
 				}
 				if len(validation.Warnings) > 0 {
-					c.log.Debug().Strs("warnings", validation.Warnings).Msg("prompt validation warnings")
+					c.log.Debug("prompt validation warnings",
+						zap.Strings("warnings", validation.Warnings))
 				}
 			}
 			return prompt, nil
@@ -155,26 +160,15 @@ func CompleteAIConversion(html string, images []ImageRef, theme string) *Convert
 
 // IsAIRequest 检查结果是否是 AI 请求
 func IsAIRequest(result *ConvertResult) bool {
-	if result == nil {
-		return false
-	}
-	if result.AIRequest != "" {
-		return true
-	}
-	// Backward compat: check old error-string prefix pattern
 	return result.Error != "" && len(result.Error) > 16 && result.Error[:16] == "AI_MODE_REQUEST:"
 }
 
 // ExtractAIRequest 从结果中提取 AI 请求
 func ExtractAIRequest(result *ConvertResult) string {
-	if result == nil {
-		return ""
+	if IsAIRequest(result) {
+		return strings.TrimPrefix(result.Error, "AI_MODE_REQUEST:")
 	}
-	if result.AIRequest != "" {
-		return result.AIRequest
-	}
-	// Backward compat
-	return strings.TrimPrefix(result.Error, "AI_MODE_REQUEST:")
+	return ""
 }
 
 // GetAIRequestInfo 获取 AI 请求的详细信息

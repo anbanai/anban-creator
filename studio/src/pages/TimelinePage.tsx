@@ -104,15 +104,11 @@ export default function TimelinePage() {
     refetchInterval: (query) => {
       const items = query.state.data?.items
       if (!items) return false
-      return items.some((i) => i.type === 'task' && i.status === 'running') ? 10000 : false
+      return items.some(item => item.type === 'task' && item.status === 'running') ? 10000 : false
     },
   })
 
   const items = data?.items ?? []
-
-  const hasRunningItems = items.some(
-    (i) => i.type === 'task' && i.status === 'running'
-  )
 
   // Sort items
   const sortedItems = useMemo(() => {
@@ -157,6 +153,10 @@ export default function TimelinePage() {
 
     return Object.entries(monthMap).map(([month, dates]) => ({ month, dates }))
   }, [sortedItems])
+
+  const hasRunningItems = items.some(
+    (i) => i.type === 'task' && i.status === 'running'
+  )
 
   // Format the date range display
   const dateRangeLabel = useMemo(() => {

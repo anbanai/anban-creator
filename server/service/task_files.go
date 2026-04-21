@@ -211,20 +211,6 @@ func (s *TaskService) uploadTaskFileFromPath(ctx context.Context, taskID, userID
 // uploadMissingTaskFiles uploads files from the workspace that aren't already
 // recorded as task files. This handles text files written by the agent directly,
 // while MCP tool-generated files already have TaskFile records.
-// computeFileHash computes the SHA-256 hash of a file, closing the handle immediately.
-func computeFileHash(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID, workDir string) error {
 	if s.store == nil {
 		return nil
@@ -279,14 +265,19 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 			// Content-hash dedup: skip files with identical content already recorded
 			// under a different path (e.g. Downloader saves generated-0.png while
 			// the agent model also saves the same image as images/image-1.png).
-			if contentHash, hashErr := computeFileHash(path); hashErr == nil {
-				if dup, dupErr := s.repo.TaskFiles().FindByTaskIDAndContentHash(ctx, taskID, contentHash); dupErr == nil && dup != nil {
-					s.logger.Debug().
-						Str("task_id", taskID).
-						Str("file", relPath).
-						Str("duplicate_of", dup.FilePath).
-						Msg("skipping workspace file with identical content hash")
-					return nil
+			if f, openErr := os.Open(path); openErr == nil {
+				defer f.Close()
+				h := sha256.New()
+				if _, copyErr := io.Copy(h, f); copyErr == nil {
+					contentHash := hex.EncodeToString(h.Sum(nil))
+					if dup, dupErr := s.repo.TaskFiles().FindByTaskIDAndContentHash(ctx, taskID, contentHash); dupErr == nil && dup != nil {
+						s.logger.Debug().
+							Str("task_id", taskID).
+							Str("file", relPath).
+							Str("duplicate_of", dup.FilePath).
+							Msg("skipping workspace file with identical content hash")
+						return nil
+					}
 				}
 			}
 

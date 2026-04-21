@@ -134,8 +134,9 @@ func (a *Assistant) Refine(req *RefineRequest) *RefineResult {
 	prompt := a.buildRefinePrompt(style, req.Content, req.Feedback)
 
 	return &RefineResult{
-		Success:   true,
-		AIRequest: prompt,
+		Success: true,
+		// 实际润色由 AI 完成
+		Error: "AI_REFINE_REQUEST:" + prompt,
 	}
 }
 
@@ -165,27 +166,16 @@ func (a *Assistant) buildRefinePrompt(style *WriterStyle, content, feedback stri
 
 // IsRefineRequest 检查结果是否是润色请求
 func IsRefineRequest(result *RefineResult) bool {
-	if result == nil {
-		return false
-	}
-	if result.AIRequest != "" {
-		return true
-	}
-	// Backward compat: check old error-string prefix pattern
-	return result.Error != "" &&
+	return result != nil && result.Error != "" &&
 		strings.HasPrefix(result.Error, "AI_REFINE_REQUEST:")
 }
 
 // ExtractRefineRequest 提取润色请求
 func ExtractRefineRequest(result *RefineResult) string {
-	if result == nil {
-		return ""
+	if IsRefineRequest(result) {
+		return strings.TrimPrefix(result.Error, "AI_REFINE_REQUEST:")
 	}
-	if result.AIRequest != "" {
-		return result.AIRequest
-	}
-	// Backward compat
-	return strings.TrimPrefix(result.Error, "AI_REFINE_REQUEST:")
+	return ""
 }
 
 // ListStyles 列出所有可用风格

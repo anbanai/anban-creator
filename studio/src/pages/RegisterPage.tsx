@@ -76,13 +76,6 @@ export default function RegisterPage() {
           <CardContent className="pt-6">
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField control={form.control} name="invite_code" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>邀请码</FormLabel>
-                    <FormControl><Input placeholder="请输入邀请码" className="uppercase" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
                 <FormField control={form.control} name="email" render={({ field }) => (
                   <FormItem>
                     <FormLabel>邮箱</FormLabel>
@@ -109,6 +102,13 @@ export default function RegisterPage() {
                         {countdown > 0 ? `${countdown}s` : '发送验证码'}
                       </Button>
                     </div>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="invite_code" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>邀请码</FormLabel>
+                    <FormControl><Input placeholder="请输入邀请码" className="uppercase" {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -269,79 +268,6 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 	}
 
 	ctx := c.Context()
-
-	// Try to subscribe via notifier (Redis pub/sub). Fall back to DB polling.
-	notifier := h.service.Notifier()
-	if notifier != nil {
-		return h.streamViaNotifier(c, ctx, taskID, notifier)
-	}
-	return h.streamViaPolling(c, ctx, taskID)
-}
-
-// streamViaNotifier uses the TaskProgressNotifier (Redis pub/sub) for SSE.
-func (h *TaskHandler) streamViaNotifier(c fiber.Ctx, ctx context.Context, taskID string, notifier service.TaskProgressNotifier) error {
-	eventCh, cleanup, err := notifier.Subscribe(ctx, taskID)
-	if err != nil {
-		// Fallback to polling if Redis subscribe fails.
-		h.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to subscribe via notifier, falling back to polling")
-		return h.streamViaPolling(c, ctx, taskID)
-	}
-	defer cleanup()
-
-	// Check if task is already in a terminal state before entering the loop.
-	task, err := h.service.GetByID(ctx, taskID)
-	if err != nil {
-		return nil
-	}
-	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
-		statusData, _ := json.Marshal(map[string]string{
-			"status": task.Status,
-		})
-		fmt.Fprintf(c, "event: %s\ndata: %s\n\n", task.Status, statusData)
-		return nil
-	}
-
-	// Max SSE timeout: 30 minutes to prevent indefinitely stuck connections.
-	timeout := time.NewTimer(30 * time.Minute)
-	defer timeout.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-timeout.C:
-			fmt.Fprintf(c, "event: timeout\ndata: {}\n\n")
-			return nil
-		case event, ok := <-eventCh:
-			if !ok {
-				// Channel closed — notifier is done.
-				return nil
-			}
-
-			if event.IsComplete {
-				statusData, _ := json.Marshal(map[string]string{
-					"status": event.Status,
-				})
-				fmt.Fprintf(c, "event: %s\ndata: %s\n\n", event.Status, statusData)
-				return nil
-			}
-
-			if event.Message != "" {
-				escaped, err := json.Marshal(event.Message)
-				if err != nil {
-					continue
-				}
-				if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", escaped); err != nil {
-					return nil
-				}
-			}
-		}
-	}
-}
-
-// streamViaPolling polls the database every second as a fallback when no
-// notifier is available (e.g. Redis is down).
-func (h *TaskHandler) streamViaPolling(c fiber.Ctx, ctx context.Context, taskID string) error {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 

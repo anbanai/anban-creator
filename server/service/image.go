@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"go.uber.org/zap"
 
 	appconfig "github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/app/converter"
@@ -133,7 +134,13 @@ func (s *ImageService) buildProcessor(ch *model.Channel, imageType string) (*ima
 		return nil, fmt.Errorf("no image API config available for type %q", imageType)
 	}
 
-	return image.NewProcessor(appCfg, apiCfg, s.logger.With().Str("component", "image-processor").Logger()), nil
+	// Convert zerolog to zap logger for the processor.
+	zapLog, err := zap.NewProduction()
+	if err != nil {
+		zapLog = zap.NewNop()
+	}
+
+	return image.NewProcessor(appCfg, apiCfg, zapLog), nil
 }
 
 // GenerateImage generates a single image using the channel's image provider.
@@ -156,7 +163,7 @@ func (s *ImageService) GenerateImage(
 		processor.SetRefImage(refPath)
 	}
 
-	rawResult, err := processor.GenerateRaw(ctx, prompt)
+	rawResult, err := processor.GenerateRaw(prompt)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
@@ -197,7 +204,7 @@ func (s *ImageService) GenerateBatch(
 		processor.SetRefImage(refPath)
 	}
 
-	rawResults, err := processor.GenerateBatchRaw(ctx, prompt, count)
+	rawResults, err := processor.GenerateBatchRaw(prompt, count)
 	if err != nil {
 		return nil, fmt.Errorf("batch generate: %w", err)
 	}
@@ -324,7 +331,8 @@ func (s *ImageService) CompressImage(filePath string, maxWidth int) (string, boo
 		}
 	}
 
-	compressor := image.NewCompressor(s.logger.With().Str("component", "compressor").Logger(), maxWidth, maxSize)
+	zapLog, _ := zap.NewProduction()
+	compressor := image.NewCompressor(zapLog, maxWidth, maxSize)
 
 	return compressor.CompressImage(filePath)
 }
@@ -462,7 +470,7 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 	}
 
 	// Extract AI image references from markdown.
-	conv := converter.NewConverter(zerolog.Nop())
+	conv := converter.NewConverter(zap.NewNop())
 	refs := conv.ExtractImages(markdown)
 
 	// Filter to AI-only images.
@@ -487,7 +495,7 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 			prompt = stylePrompt + "\n\n" + prompt
 		}
 
-		rawResult, err := processor.GenerateRaw(ctx, prompt)
+		rawResult, err := processor.GenerateRaw(prompt)
 		if err != nil {
 			s.logger.Warn().Err(err).
 				Int("index", ref.Index).
