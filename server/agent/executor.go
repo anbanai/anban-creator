@@ -169,7 +169,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 	// 3. Write channel config to workspace settings.json.
 	if opts.Channel != nil {
-		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg)
+		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}

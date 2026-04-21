@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -60,6 +60,7 @@ const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   theme: '',
   author: '',
   reference_image_url: '',
+  image_ratio: '',
   max_concurrent_tasks: 2,
 }
 
@@ -77,6 +78,7 @@ function channelToForm(ch: Channel): ChannelFormValues {
     theme: ch.theme || '',
     author: ch.author || '',
     reference_image_url: ch.reference_image_url || '',
+    image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
     max_concurrent_tasks: ch.max_concurrent_tasks || CHANNEL_FORM_DEFAULTS.max_concurrent_tasks,
   }
 }
@@ -86,7 +88,6 @@ export default function ChannelsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
-  const [channelStats, setChannelStats] = useState<Record<string, ChannelStats>>({})
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [fetchingProfile, setFetchingProfile] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -125,7 +126,7 @@ export default function ChannelsPage() {
       handleFetchProfile(profileUrl)
     }, 800)
     return () => clearTimeout(timer)
-  }, [profileUrl, selectedPlatform])
+  }, [profileUrl, selectedPlatform, platformConfigMap])
 
   async function handleFetchProfile(url: string) {
     if (!url || !selectedPlatform) return
@@ -153,38 +154,34 @@ export default function ChannelsPage() {
       }),
   })
 
-  useEffect(() => {
-    if (!channels || channels.length === 0) {
-      setChannelStats({})
-      return
-    }
-    const abortController = new AbortController()
-    const statsMap: Record<string, ChannelStats> = {}
-    const promises = channels.map(async (ch) => {
-      if (abortController.signal.aborted) return ch.id
-      try {
-        const detail = await api.channels.get(ch.id)
-        if (!abortController.signal.aborted) {
-          statsMap[ch.id] = detail.stats
-        }
-      } catch {
-        // Ignore stats load failures
-      }
-      return ch.id
-    })
-    Promise.all(promises).then(() => {
-      if (!abortController.signal.aborted) {
-        setChannelStats(prev => ({ ...prev, ...statsMap }))
-      }
-    })
-    return () => abortController.abort()
-  }, [channels])
+  // Batch fetch channel stats via React Query
+  const { data: channelDetails } = useQuery({
+    queryKey: ['channel-details', statusFilter],
+    queryFn: async () => {
+      if (!channels || channels.length === 0) return {} as Record<string, ChannelStats>
+      const entries = await Promise.all(
+        channels.map(async (ch) => {
+          try {
+            const detail = await api.channels.get(ch.id)
+            return [ch.id, detail.stats] as const
+          } catch {
+            return [ch.id, undefined] as const
+          }
+        })
+      )
+      return Object.fromEntries(entries.filter((e): e is [string, ChannelStats] => !!e[1])) as Record<string, ChannelStats>
+    },
+    enabled: !!channels && channels.length > 0,
+  })
+
+  const channelStats = channelDetails ?? {}
 
   const createMutation = useMutation({
     mutationFn: (data: CreateChannelRequest) => api.channels.create(data),
     onSuccess: () => {
       toast.success('频道创建成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
       closeModal()
     },
     onError: (err: any) => {
@@ -198,6 +195,7 @@ export default function ChannelsPage() {
     onSuccess: () => {
       toast.success('频道更新成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
       closeModal()
     },
     onError: () => {
@@ -210,6 +208,7 @@ export default function ChannelsPage() {
     onSuccess: () => {
       toast.success('频道已归档')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
     },
   })
 
@@ -218,6 +217,7 @@ export default function ChannelsPage() {
     onSuccess: () => {
       toast.success('频道已恢复')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
     },
   })
 
@@ -226,6 +226,7 @@ export default function ChannelsPage() {
     onSuccess: () => {
       toast.success('频道已删除')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
       setDeleteTarget(null)
     },
   })
@@ -262,6 +263,7 @@ export default function ChannelsPage() {
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
       reference_image_url: values.reference_image_url?.trim() || undefined,
+      image_ratio: values.image_ratio || undefined,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
     }
@@ -553,6 +555,28 @@ export default function ChannelsPage() {
                         />
                       </FormControl>
                       <FormDescription>用于 AI 图片生成的视觉风格参考，保持品牌一致性</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="image_ratio" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>图片比例</FormLabel>
+                      <Select value={field.value || '_default'} onValueChange={(v) => field.onChange(v === '_default' ? '' : v)}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="跟随平台默认" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="_default">跟随平台默认</SelectItem>
+                          <SelectItem value="3:4">3:4 竖版</SelectItem>
+                          <SelectItem value="1:1">1:1 方形</SelectItem>
+                          <SelectItem value="4:3">4:3 横版</SelectItem>
+                          <SelectItem value="16:9">16:9 宽屏</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>AI 生成图片的宽高比，封面和内容图统一使用此比例</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />

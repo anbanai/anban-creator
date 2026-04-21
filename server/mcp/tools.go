@@ -137,6 +137,18 @@ func registerTaskTools(server *mcp.Server) {
 	}, taskCancelHandler)
 
 	server.AddTool(&mcp.Tool{
+		Name:        "list_topics",
+		Description: "List all existing topic texts for a channel. Use this before selecting a new topic to avoid duplicates within the same channel.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+			},
+			"required": []any{"channel_id"},
+		},
+	}, topicListHandler)
+
+	server.AddTool(&mcp.Tool{
 		Name:        "get_task_files",
 		Description: "List output files for a completed task. Returns file names, roles (cover, html, markdown, image), and sizes.",
 		InputSchema: map[string]any{
@@ -300,7 +312,7 @@ func taskCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		quantity = int(v)
 	}
 
-	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, topic, quantity)
+	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, topic, quantity, "")
 	if err != nil {
 		return errorResult(fmt.Sprintf("create task: %v", err)), nil
 	}
@@ -375,6 +387,25 @@ func taskCancelHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		return errorResult(fmt.Sprintf("cancel task: %v", err)), nil
 	}
 	return textResult(map[string]any{"cancelled": true, "task_id": taskID})
+}
+
+func topicListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+	channelID, _ := args["channel_id"].(string)
+	if channelID == "" {
+		return errorResult("channel_id is required"), nil
+	}
+
+	if _, _, err := svcs.ChannelSvc.Get(context.Background(), userID, channelID); err != nil {
+		return errorResult(fmt.Sprintf("get channel: %v", err)), nil
+	}
+
+	topics, err := svcs.TaskSvc.ListTopics(context.Background(), channelID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("list topics: %v", err)), nil
+	}
+	return textResult(map[string]any{"topics": topics, "count": len(topics)})
 }
 
 func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

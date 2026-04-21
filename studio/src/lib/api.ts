@@ -51,6 +51,7 @@ export interface Channel {
   theme: string
   author: string
   reference_image_url: string
+  image_ratio: string
   max_concurrent_tasks: number
   config: ChannelConfig
   status: ChannelStatus
@@ -84,6 +85,7 @@ export interface CreateChannelRequest {
   theme?: string
   author?: string
   reference_image_url?: string
+  image_ratio?: string
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string
@@ -96,7 +98,7 @@ export interface PlatformFieldConfig {
   label: string
   placeholder: string
   required: boolean
-  type: 'text' | 'password' | 'url' | 'textarea' | 'number'
+  type: 'text' | 'password' | 'url' | 'textarea' | 'number' | 'select'
   group: 'basic' | 'credentials' | 'content' | 'advanced'
   auto_fetched: boolean
 }
@@ -196,6 +198,7 @@ export interface CreateTaskRequest {
   topic: string
   channel_id: string
   quantity?: number
+  image_ratio?: string
 }
 
 // --- Timeline Types ---

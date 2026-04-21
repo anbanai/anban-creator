@@ -80,7 +80,7 @@ func TestBuildAppConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.ch, nil)
+			cfg, err := BuildAppConfig(tt.ch, nil, "")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -179,7 +179,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 				Platform: tt.platform,
 				Name:     "Test",
 			}
-			cfg, err := BuildAppConfig(ch, tt.imageAPICfg)
+			cfg, err := BuildAppConfig(ch, tt.imageAPICfg, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -208,6 +208,92 @@ func getPlatformSizes(cfg *appconfig.Config, platform string) (cover, content st
 		}
 	}
 	return "", ""
+}
+
+func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
+	yamlCfg := &srvconfig.ImageAPIConfig{
+		Sizes: srvconfig.SizesConfig{
+			ArticleCover:   "16:9",
+			ArticleContent: "16:9",
+			RednoteCover:   "3:4",
+			RednoteContent: "3:4",
+		},
+	}
+
+	tests := []struct {
+		name            string
+		channel         *model.Channel
+		imageAPICfg     *srvconfig.ImageAPIConfig
+		taskImageRatio  string
+		wantCoverSize   string
+		wantContentSize string
+	}{
+		{
+			name: "both empty falls back to YAML defaults",
+			channel: &model.Channel{
+				Platform:   model.ScopeArticle,
+				Name:       "Test",
+				ImageRatio: "",
+			},
+			imageAPICfg:    yamlCfg,
+			taskImageRatio: "",
+			wantCoverSize:  "16:9",
+			wantContentSize: "16:9",
+		},
+		{
+			name: "channel ratio overrides YAML defaults",
+			channel: &model.Channel{
+				Platform:   model.ScopeArticle,
+				Name:       "Test",
+				ImageRatio: "1:1",
+			},
+			imageAPICfg:    yamlCfg,
+			taskImageRatio: "",
+			wantCoverSize:  "1:1",
+			wantContentSize: "1:1",
+		},
+		{
+			name: "task ratio overrides channel ratio",
+			channel: &model.Channel{
+				Platform:   model.ScopeArticle,
+				Name:       "Test",
+				ImageRatio: "1:1",
+			},
+			imageAPICfg:    yamlCfg,
+			taskImageRatio: "4:3",
+			wantCoverSize:  "4:3",
+			wantContentSize: "4:3",
+		},
+		{
+			name: "task ratio without channel ratio overrides YAML",
+			channel: &model.Channel{
+				Platform:   model.ScopeRednote,
+				Name:       "Test",
+				ImageRatio: "",
+			},
+			imageAPICfg:    yamlCfg,
+			taskImageRatio: "16:9",
+			wantCoverSize:  "16:9",
+			wantContentSize: "16:9",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := BuildAppConfig(tt.channel, tt.imageAPICfg, tt.taskImageRatio)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			coverSize, contentSize := getPlatformSizes(cfg, tt.channel.Platform)
+			if coverSize != tt.wantCoverSize {
+				t.Errorf("cover size = %q, want %q", coverSize, tt.wantCoverSize)
+			}
+			if contentSize != tt.wantContentSize {
+				t.Errorf("content size = %q, want %q", contentSize, tt.wantContentSize)
+			}
+		})
+	}
 }
 
 func TestTaskTypeToAgent(t *testing.T) {

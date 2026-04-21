@@ -52,6 +52,22 @@ const (
 	PlatformRednote = "rednote"
 )
 
+// ValidImageRatios is the set of allowed image aspect ratios.
+var ValidImageRatios = map[string]bool{
+	"3:4":  true,
+	"1:1":  true,
+	"4:3":  true,
+	"16:9": true,
+}
+
+// DefaultImageRatio returns the default image ratio for a platform.
+func DefaultImageRatio(platform string) string {
+	if platform == PlatformArticle {
+		return "16:9"
+	}
+	return "3:4"
+}
+
 // Credit transaction type constants.
 const (
 	CreditTypeSignIn     = "sign_in"

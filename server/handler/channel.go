@@ -38,6 +38,7 @@ type channelRequest struct {
 	Theme              string `json:"theme"`
 	Author             string `json:"author"`
 	ReferenceImageURL  string `json:"reference_image_url"`
+	ImageRatio         string `json:"image_ratio"`
 	MaxConcurrentTasks int    `json:"max_concurrent_tasks"`
 	// Config fields for platform-specific credentials.
 	WechatAppID  string `json:"wechat_app_id"`
@@ -57,6 +58,7 @@ func (req *channelRequest) toChannel() *model.Channel {
 		Theme:              req.Theme,
 		Author:             req.Author,
 		ReferenceImageURL:  req.ReferenceImageURL,
+		ImageRatio:         req.ImageRatio,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		Config: model.ChannelConfig{
 			WechatAppID:  req.WechatAppID,
@@ -122,6 +124,10 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
+	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
+		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
+	}
+
 	ch := req.toChannel()
 
 	// Force max_concurrent_tasks based on user tier.
@@ -183,6 +189,10 @@ func (h *ChannelHandler) Update(c fiber.Ctx) error {
 	var req channelRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
+		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
 
 	ch := req.toChannel()
@@ -380,6 +390,8 @@ func (req *channelRequest) getFieldValue(key string) string {
 		return req.Author
 	case "reference_image_url":
 		return req.ReferenceImageURL
+	case "image_ratio":
+		return req.ImageRatio
 	case "max_concurrent_tasks":
 		return fmt.Sprintf("%d", req.MaxConcurrentTasks)
 	case "wechat_app_id":

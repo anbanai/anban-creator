@@ -137,7 +137,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if opts.Channel != nil {
-		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg)
+		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -182,9 +182,6 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	result := &ExecutionResult{Success: false, WorkDir: workDir}
 	if parsed, err := parseAgentResult(execRes.stdout.String()); err == nil {
 		result = parsed
-		if result.WorkDir == "" {
-			result.WorkDir = workDir
-		}
 	} else if execRes.err == nil {
 		execRes.err = fmt.Errorf("parse agent result: %w", err)
 	}
@@ -199,6 +196,13 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		}
 		return result, nil
 	}
+
+	// Always override WorkDir with the host-side path. The agent binary
+	// runs inside the container and sets WorkDir to the container path
+	// (e.g. /workspace/{taskID}), but all host-side consumers
+	// (uploadMissingTaskFiles, CountMeaningfulFiles, cleanup) need the
+	// host filesystem path.
+	result.WorkDir = workDir
 
 	if opts.LogWriter != nil {
 		opts.LogWriter.WriteResult(result.Success, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
@@ -428,6 +432,13 @@ func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, work
 	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(e.dockerCfg.TimeoutSec)*time.Second)
 	defer cancel()
 
+	// Stop the container if the parent context is cancelled (e.g. user cancels task).
+	go func() {
+		<-ctx.Done()
+		timeout := 5
+		_ = e.dockerCLI.ContainerStop(context.Background(), resp.ID, container.StopOptions{Timeout: &timeout})
+	}()
+
 	statusCh, errCh := e.dockerCLI.ContainerWait(waitCtx, resp.ID, container.WaitConditionNotRunning)
 	res := execResult{}
 	select {
@@ -440,7 +451,11 @@ func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, work
 			res.err = fmt.Errorf("container exited with code %d", status.StatusCode)
 		}
 	case <-waitCtx.Done():
-		res.err = fmt.Errorf("container timed out after %d seconds", e.dockerCfg.TimeoutSec)
+		if ctx.Err() != nil {
+			res.err = fmt.Errorf("task cancelled")
+		} else {
+			res.err = fmt.Errorf("container timed out after %d seconds", e.dockerCfg.TimeoutSec)
+		}
 	}
 
 	logsReader, err := e.dockerCLI.ContainerLogs(context.Background(), resp.ID, container.LogsOptions{

@@ -12,6 +12,7 @@ import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
@@ -45,6 +46,16 @@ export default function TasksPage() {
   const [channelFilter, setChannelFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(shouldCreate)
   const [quantity, setQuantity] = useState(1)
+  const [channelImageRatio, setChannelImageRatio] = useState('')
+
+  const { data: channels = [] } = useQuery({
+    queryKey: ['channels', 'active'],
+    queryFn: () => api.channels.list({ status: 'active' }),
+  })
+
+  function defaultRatioForPlatform(platform: string) {
+    return platform === 'article' ? '16:9' : '3:4'
+  }
 
   const { data: creditsBalance } = useQuery({
     queryKey: ['credits', 'balance'],
@@ -53,7 +64,7 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as any,
-    defaultValues: { type: 'rednote', topic: '', channel_id: '', quantity: 1 },
+    defaultValues: { type: 'rednote', topic: '', channel_id: '', quantity: 1, image_ratio: '' },
   })
 
   // Clear create param on mount
@@ -89,15 +100,17 @@ export default function TasksPage() {
   })
 
   function openCreate() {
-    form.reset({ type: 'rednote', topic: '', channel_id: '' })
+    form.reset({ type: 'rednote', topic: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
+    setChannelImageRatio('')
     setModalOpen(true)
   }
 
   function closeModal() {
     setModalOpen(false)
-    form.reset({ type: 'rednote', topic: '', channel_id: '' })
+    form.reset({ type: 'rednote', topic: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
+    setChannelImageRatio('')
   }
 
   async function onSubmit(values: CreateTaskFormValues) {
@@ -106,6 +119,7 @@ export default function TasksPage() {
       topic: values.topic.trim(),
       channel_id: values.channel_id,
       quantity: quantity > 1 ? quantity : undefined,
+      image_ratio: values.image_ratio || undefined,
     })
   }
 
@@ -240,7 +254,14 @@ export default function TasksPage() {
                       value={field.value || ''}
                       onChange={(id, platform) => {
                         field.onChange(id)
-                        if (id) form.setValue('type', platform as TaskType)
+                        if (id) {
+                          form.setValue('type', platform as TaskType)
+                          form.setValue('image_ratio', '')
+                          const ch = channels.find((c) => c.id === id)
+                          setChannelImageRatio(ch?.image_ratio || defaultRatioForPlatform(platform))
+                        } else {
+                          setChannelImageRatio('')
+                        }
                       }}
                     />
                   </FormControl>
@@ -275,6 +296,28 @@ export default function TasksPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Image ratio selector */}
+              <FormField control={form.control} name="image_ratio" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>图片比例</FormLabel>
+                  <Select value={field.value || '_default'} onValueChange={(v) => field.onChange(v === '_default' ? '' : v)}>
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={channelImageRatio ? `跟随频道默认 (${channelImageRatio})` : '跟随平台默认'} />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="_default">{channelImageRatio ? `跟随频道默认 (${channelImageRatio})` : '跟随平台默认'}</SelectItem>
+                      <SelectItem value="3:4">3:4 竖版</SelectItem>
+                      <SelectItem value="1:1">1:1 方形</SelectItem>
+                      <SelectItem value="4:3">4:3 横版</SelectItem>
+                      <SelectItem value="16:9">16:9 宽屏</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
               {/* Cost display */}
               {(() => {

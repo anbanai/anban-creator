@@ -45,6 +45,7 @@ type createTaskRequest struct {
 	ChannelID string `json:"channel_id"`
 	Topic     string `json:"topic"`
 	Quantity  int    `json:"quantity"`
+	ImageRatio string `json:"image_ratio"`
 }
 
 // Create handles POST /api/v1/tasks.
@@ -79,7 +80,11 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "quantity must be between 1 and 5")
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, topic, quantity)
+	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
+		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
+	}
+
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, topic, quantity, req.ImageRatio)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {

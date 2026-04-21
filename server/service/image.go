@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -117,37 +118,6 @@ func (s *ImageService) resolveTaskWorkspace(taskID string) string {
 	return filepath.Join(s.workspaceDir, taskID)
 }
 
-// publishTaskFile saves a file to task storage and creates a TaskFile record.
-// When taskID is provided, files are stored under {userID}/{taskID}/{relPath}
-// and a TaskFile DB record is created directly.
-func (s *ImageService) publishTaskFile(ctx context.Context, taskID, userID, filePath, relPath string) (string, *model.TaskFile, error) {
-	if s.storage == nil || s.repo == nil {
-		return "", nil, fmt.Errorf("storage or repository not available")
-	}
-	ossKey := fmt.Sprintf("%s/%s/%s", userID, taskID, filepath.ToSlash(relPath))
-	uploadResult, err := s.storage.UploadFile(ctx, ossKey, filePath, DetectTaskFileMIME(filePath))
-	if err != nil {
-		return "", nil, fmt.Errorf("upload task file: %w", err)
-	}
-	fileName := filepath.Base(relPath)
-	mimeType := DetectTaskFileMIME(filePath)
-	taskFile := &model.TaskFile{
-		TaskID:          taskID,
-		Role:            DetermineTaskFileRole(fileName, mimeType),
-		FileName:        fileName,
-		MimeType:        mimeType,
-		FileSize:        uploadResult.Size,
-		OSSKey:          ossKey,
-		OSSURL:          uploadResult.URL,
-		StorageProvider: s.storage.Name(),
-		FilePath:        filepath.ToSlash(relPath),
-	}
-	if err := s.repo.TaskFiles().Create(ctx, taskFile); err != nil {
-		return "", nil, fmt.Errorf("create task file record: %w", err)
-	}
-	return uploadResult.URL, taskFile, nil
-}
-
 // resolveImageAPI returns the appropriate ImageAPI config based on image_type.
 // For "cover" images, uses the Cover config; for all other types, uses Content.
 func (s *ImageService) resolveImageAPI(imageType string) *appconfig.ImageAPI {
@@ -162,7 +132,7 @@ func (s *ImageService) resolveImageAPI(imageType string) *appconfig.ImageAPI {
 
 // buildProcessor creates a new image.Processor for the given channel and image type.
 func (s *ImageService) buildProcessor(ch *model.Channel, imageType string) (*image.Processor, error) {
-	appCfg, err := agent.BuildAppConfig(ch, s.imageCfg)
+	appCfg, err := agent.BuildAppConfig(ch, s.imageCfg, "")
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}
@@ -182,8 +152,7 @@ func (s *ImageService) buildProcessor(ch *model.Channel, imageType string) (*ima
 }
 
 // GenerateImage generates a single image using the channel's image provider.
-// If outputPath is empty, the image is saved to a system temp directory.
-// If taskID is provided, the image is saved to the task workspace and a TaskFile record is created.
+// Returns the download URL (remote CDN URL or data URL) for the agent to download.
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
 	userID, channelID, prompt, imageType, outputPath, refPath, taskID string,
@@ -202,28 +171,7 @@ func (s *ImageService) GenerateImage(
 		processor.SetRefImage(refPath)
 	}
 
-	// If no output path specified, generate to a temp directory.
-	if outputPath == "" {
-		tmpDir, err := os.MkdirTemp("", "abw-img-")
-		if err != nil {
-			return nil, fmt.Errorf("create temp dir: %w", err)
-		}
-		outputPath = filepath.Join(tmpDir, "generated.png")
-	} else if taskID != "" {
-		// Resolve relative output paths against task workspace.
-		if !filepath.IsAbs(outputPath) {
-			outputPath = filepath.Join(s.resolveTaskWorkspace(taskID), outputPath)
-		}
-	}
-
-	// Ensure output directory exists.
-	if dir := filepath.Dir(outputPath); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create output dir: %w", err)
-		}
-	}
-
-	result, err := processor.GenerateOnly(prompt, outputPath)
+	rawResult, err := processor.GenerateRaw(prompt)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
@@ -236,38 +184,14 @@ func (s *ImageService) GenerateImage(
 			Msg("failed to deduct image generation credits")
 	}
 
-	// Read image dimensions if possible.
-	width, height := 0, 0
-	if info, dimErr := image.GetImageInfo(result.FilePath); dimErr == nil {
-		width, height = info.Width, info.Height
-	}
-
-	if taskID == "" {
-		return nil, fmt.Errorf("task_id is required for image generation")
-	}
-	relPath := filepath.Base(result.FilePath)
-	if ws := s.resolveTaskWorkspace(taskID); ws != "" {
-		if rp, err := filepath.Rel(ws, result.FilePath); err == nil {
-			relPath = filepath.ToSlash(rp)
-		}
-	}
-	downloadURL, _, err := s.publishTaskFile(ctx, taskID, userID, result.FilePath, relPath)
-	if err != nil {
-		return nil, err
-	}
-
 	return &ImageResult{
-		FilePath:    result.FilePath,
-		DownloadURL: downloadURL,
-		Size:        result.Size,
-		Width:       width,
-		Height:      height,
+		DownloadURL: rawResult.URL,
+		Size:        rawResult.Size,
 	}, nil
 }
 
 // GenerateBatch generates multiple images using the channel's image provider.
-// All images are saved to outputDir. If outputDir is empty, a temp directory is created.
-// If taskID is provided, files are stored as task files directly.
+// Returns an array of download URLs (remote CDN URLs or data URLs) for the agent to download.
 func (s *ImageService) GenerateBatch(
 	ctx context.Context,
 	userID, channelID, prompt, imageType string,
@@ -288,25 +212,7 @@ func (s *ImageService) GenerateBatch(
 		processor.SetRefImage(refPath)
 	}
 
-	// If no output dir specified, create a temp directory.
-	if outputDir == "" {
-		tmpDir, err := os.MkdirTemp("", "abw-batch-")
-		if err != nil {
-			return nil, fmt.Errorf("create temp dir: %w", err)
-		}
-		outputDir = tmpDir
-	} else if taskID != "" {
-		// Resolve relative output dirs against task workspace.
-		if !filepath.IsAbs(outputDir) {
-			outputDir = filepath.Join(s.resolveTaskWorkspace(taskID), outputDir)
-		}
-	}
-
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create output dir: %w", err)
-	}
-
-	results, err := processor.GenerateBatchOnly(prompt, count, outputDir)
+	rawResults, err := processor.GenerateBatchRaw(prompt, count)
 	if err != nil {
 		return nil, fmt.Errorf("batch generate: %w", err)
 	}
@@ -320,25 +226,10 @@ func (s *ImageService) GenerateBatch(
 			Msg("failed to deduct batch image generation credits")
 	}
 
-	if taskID == "" {
-		return nil, fmt.Errorf("task_id is required for batch image generation")
-	}
-
-	items := make([]BatchImageResultItem, 0, len(results))
-	for _, r := range results {
-		relPath := filepath.Base(r.FilePath)
-		if ws := s.resolveTaskWorkspace(taskID); ws != "" {
-			if rp, err := filepath.Rel(ws, r.FilePath); err == nil {
-				relPath = filepath.ToSlash(rp)
-			}
-		}
-		downloadURL, _, err := s.publishTaskFile(ctx, taskID, userID, r.FilePath, relPath)
-		if err != nil {
-			return nil, err
-		}
+	items := make([]BatchImageResultItem, 0, len(rawResults))
+	for _, r := range rawResults {
 		items = append(items, BatchImageResultItem{
-			FilePath:    r.FilePath,
-			DownloadURL: downloadURL,
+			DownloadURL: r.URL,
 			Size:        r.Size,
 			Index:       r.Index,
 		})
@@ -605,12 +496,6 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 		}, nil
 	}
 
-	// Create output directory for generated images under task workspace.
-	outputDir := filepath.Join(s.resolveTaskWorkspace(taskID), "output", "markdown")
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create output dir: %w", err)
-	}
-
 	results := make([]BatchMarkdownImageItem, 0, len(aiRefs))
 	for _, ref := range aiRefs {
 		prompt := ref.AIPrompt
@@ -618,9 +503,7 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 			prompt = stylePrompt + "\n\n" + prompt
 		}
 
-		outputPath := filepath.Join(outputDir, fmt.Sprintf("img-%d.png", ref.Index))
-
-		genResult, err := processor.GenerateOnly(prompt, outputPath)
+		rawResult, err := processor.GenerateRaw(prompt)
 		if err != nil {
 			s.logger.Warn().Err(err).
 				Int("index", ref.Index).
@@ -634,34 +517,18 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 		}
 
 		item := BatchMarkdownImageItem{
-			Index:    ref.Index,
-			Prompt:   prompt,
-			FilePath: genResult.FilePath,
+			Index:       ref.Index,
+			Prompt:      prompt,
+			DownloadURL: rawResult.URL,
 		}
 
-			relPath := filepath.Base(genResult.FilePath)
-			if ws := s.resolveTaskWorkspace(taskID); ws != "" {
-				if rp, err := filepath.Rel(ws, genResult.FilePath); err == nil {
-					relPath = filepath.ToSlash(rp)
-				}
-			}
-			if downloadURL, _, err := s.publishTaskFile(ctx, taskID, userID, genResult.FilePath, relPath); err != nil {
-				s.logger.Warn().Err(err).
-					Int("index", ref.Index).
-					Str("file_path", genResult.FilePath).
-					Msg("failed to publish generated markdown image for task")
-			} else {
-				item.DownloadURL = downloadURL
-			}
-
-
-		// Optionally upload the generated image.
+		// Optionally upload the generated image to WeChat CDN.
 		if upload {
-			uploadResult, uploadErr := processor.UploadLocalImage(genResult.FilePath)
+			uploadResult, uploadErr := s.uploadFromRawURL(ctx, processor, rawResult.URL)
 			if uploadErr != nil {
 				s.logger.Warn().Err(uploadErr).
 					Int("index", ref.Index).
-					Str("file_path", genResult.FilePath).
+					Str("url", rawResult.URL).
 					Msg("failed to upload generated image")
 			} else {
 				item.URL = uploadResult.WechatURL
@@ -674,7 +541,7 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 	// Deduct credits for all successfully generated images.
 	successCount := 0
 	for _, r := range results {
-		if r.FilePath != "" {
+		if r.DownloadURL != "" {
 			successCount++
 		}
 	}
@@ -693,3 +560,89 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 		Results: results,
 	}, nil
 }
+
+// uploadFromRawURL downloads an image from a remote URL or data URL to a temp file,
+// then uploads it to WeChat CDN via the processor.
+func (s *ImageService) uploadFromRawURL(ctx context.Context, processor *image.Processor, rawURL string) (*image.UploadResult, error) {
+	var localPath string
+	var err error
+
+	if strings.HasPrefix(rawURL, "data:") {
+		localPath, err = s.dataURLToTempFile(rawURL)
+	} else {
+		localPath, err = s.downloadURLToTempFile(rawURL)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("prepare image for upload: %w", err)
+	}
+	defer os.Remove(localPath)
+
+	return processor.UploadLocalImage(localPath)
+}
+
+// dataURLToTempFile decodes a data URL and writes the content to a temp file.
+func (s *ImageService) dataURLToTempFile(dataURL string) (string, error) {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return "", fmt.Errorf("invalid data URL")
+	}
+	parts := strings.SplitN(dataURL[5:], ",", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid data URL format")
+	}
+	if !strings.HasSuffix(parts[0], ";base64") {
+		return "", fmt.Errorf("only base64 data URLs are supported")
+	}
+	data, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", fmt.Errorf("decode base64: %w", err)
+	}
+	tmpDir, err := os.MkdirTemp("", "abw-upload-")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	ext := ".png"
+	if strings.Contains(parts[0], "jpeg") || strings.Contains(parts[0], "jpg") {
+		ext = ".jpg"
+	} else if strings.Contains(parts[0], "webp") {
+		ext = ".webp"
+	} else if strings.Contains(parts[0], "gif") {
+		ext = ".gif"
+	}
+	localPath := filepath.Join(tmpDir, "upload"+ext)
+	if err := os.WriteFile(localPath, data, 0644); err != nil {
+		return "", fmt.Errorf("write temp file: %w", err)
+	}
+	return localPath, nil
+}
+
+// downloadURLToTempFile downloads a remote URL to a temp file.
+func (s *ImageService) downloadURLToTempFile(url string) (string, error) {
+	tmpDir, err := os.MkdirTemp("", "abw-upload-")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	localPath := filepath.Join(tmpDir, "downloaded.png")
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download image: HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(localPath)
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return "", fmt.Errorf("write temp file: %w", err)
+	}
+
+	return localPath, nil
+}
+

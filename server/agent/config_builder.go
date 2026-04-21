@@ -18,7 +18,7 @@ import (
 // BuildAppConfig constructs an app/config.Config from a Channel DB record.
 // This bridges the multi-user server config to the single-account app config
 // used by the abwriter CLI binary.
-func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*appconfig.Config, error) {
+func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
 		Name:        ch.Name,
 		Positioning: ch.Positioning,
@@ -100,6 +100,25 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig) (*
 			if cfg.Rednote.Content.Image.Size == "" {
 				cfg.Rednote.Content.Image.Size = imageAPICfg.Sizes.RednoteContent
 			}
+		}
+	}
+
+	// Apply image ratio override: task-level > channel-level > server YAML defaults.
+	effectiveRatio := taskImageRatio
+	if effectiveRatio == "" {
+		effectiveRatio = ch.ImageRatio
+	}
+	if effectiveRatio != "" {
+		switch ch.Platform {
+		case model.ScopeArticle:
+			cfg.Wechat.Article.Cover.Image.Size = effectiveRatio
+			cfg.Wechat.Article.Content.Image.Size = effectiveRatio
+		case model.ScopeXls:
+			cfg.Wechat.Xls.Cover.Image.Size = effectiveRatio
+			cfg.Wechat.Xls.Content.Image.Size = effectiveRatio
+		case model.ScopeRednote:
+			cfg.Rednote.Cover.Image.Size = effectiveRatio
+			cfg.Rednote.Content.Image.Size = effectiveRatio
 		}
 	}
 

@@ -135,6 +135,8 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	}
 	// ReferenceImageURL: unconditional assign to support clearing.
 	existing.ReferenceImageURL = ch.ReferenceImageURL
+	// ImageRatio: unconditional assign to support clearing.
+	existing.ImageRatio = ch.ImageRatio
 	if ch.MaxConcurrentTasks > 0 {
 		existing.MaxConcurrentTasks = ch.MaxConcurrentTasks
 	}

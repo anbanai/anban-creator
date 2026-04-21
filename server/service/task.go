@@ -80,7 +80,7 @@ func (s *TaskService) StorageProviderName() string {
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The quantity parameter (1-5) determines how many tasks to create, each independently billed.
-func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic string, quantity int) ([]*model.Task, error) {
+func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic string, quantity int, imageRatio string) ([]*model.Task, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
 	}
@@ -148,7 +148,8 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic
 			ChannelID: channelID,
 			Type:      taskType,
 			Status:    model.TaskStatusPending,
-			Topic:     topic,
+			Topic:      topic,
+			ImageRatio: imageRatio,
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -262,6 +263,11 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 	}
 
 	return tasks, total, nil
+}
+
+// ListTopics returns all existing topic texts for a channel, ordered by creation time descending.
+func (s *TaskService) ListTopics(ctx context.Context, channelID string) ([]string, error) {
+	return s.repo.Tasks().FindTopicsByChannelID(ctx, channelID)
 }
 
 // Cancel sets a task's status to "cancelled" and signals the running execution to stop.

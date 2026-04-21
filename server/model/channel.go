@@ -22,6 +22,7 @@ type Channel struct {
 	Theme       string        `gorm:"type:varchar(50)" json:"theme"`           // 主题
 	Author             string        `gorm:"type:varchar(50)" json:"author"`               // 作者名
 	ReferenceImageURL  string        `gorm:"type:varchar(500)" json:"reference_image_url"` // 品牌视觉参考图 URL
+	ImageRatio         string        `gorm:"type:varchar(10);default:''" json:"image_ratio"`   // 图片比例: "3:4", "1:1", "4:3", "16:9"
 	MaxConcurrentTasks int           `gorm:"type:int;default:10" json:"max_concurrent_tasks"` // 最大并发任务数
 	Config             ChannelConfig `gorm:"type:json;serializer:json" json:"config"`       // 平台特有配置
 	Status      string        `gorm:"type:varchar(20);default:active" json:"status"` // active, archived

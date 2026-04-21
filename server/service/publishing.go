@@ -68,7 +68,7 @@ type XlsPublishResult struct {
 
 // buildAppConfig creates an app config from a channel (nil image config since publishing doesn't need image API).
 func (s *PublishingService) buildAppConfig(ch *model.Channel) (*appconfig.Config, error) {
-	return agent.BuildAppConfig(ch, nil)
+	return agent.BuildAppConfig(ch, nil, "")
 }
 
 // createDraftService creates a draft.Service for the given channel.
