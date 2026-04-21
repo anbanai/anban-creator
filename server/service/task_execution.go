@@ -426,20 +426,6 @@ func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
 			continue
 		}
 
-		// Also delete uploaded storage objects for this task.
-		if s.store != nil {
-			files, err := s.repo.TaskFiles().FindByTaskID(ctx, task.ID)
-			if err != nil {
-				s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("failed to list task files for storage cleanup")
-			} else {
-				for _, f := range files {
-					if err := s.store.Delete(ctx, f.OSSKey); err != nil {
-						s.logger.Warn().Err(err).Str("task_id", task.ID).Str("oss_key", f.OSSKey).Msg("failed to delete storage object")
-					}
-				}
-			}
-		}
-
 		now := time.Now()
 		if err := s.repo.Tasks().UpdateCleanedUpAt(ctx, task.ID, now); err != nil {
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("failed to update cleaned_up_at")

@@ -191,3 +191,8 @@ func (p *OSSProvider) DownloadURL(_ context.Context, key string, expirySeconds i
 	}
 	return signedURL, nil
 }
+
+// HasCustomDomain reports whether a custom CDN domain is configured for public access.
+func (p *OSSProvider) HasCustomDomain() bool {
+	return p.customDomain != ""
+}

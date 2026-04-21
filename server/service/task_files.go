@@ -330,7 +330,8 @@ func (s *TaskService) GetFileStream(ctx context.Context, fileID string) (io.Read
 }
 
 // EnrichFilesWithURLs populates the computed URL field for each task file.
-// For OSS storage, generates time-limited signed URLs (1 hour expiry).
+// For OSS with custom domain, uses permanent public URLs.
+// For OSS without custom domain, generates time-limited signed URLs (1 hour expiry).
 // For local storage, uses the authenticated download API path.
 func (s *TaskService) EnrichFilesWithURLs(ctx context.Context, files []*model.TaskFile) {
 	if s.store == nil {
@@ -338,6 +339,10 @@ func (s *TaskService) EnrichFilesWithURLs(ctx context.Context, files []*model.Ta
 	}
 	for _, f := range files {
 		if f.OSSKey == "" {
+			continue
+		}
+		if s.store.HasCustomDomain() {
+			f.URL = s.store.GetURL(f.OSSKey)
 			continue
 		}
 		signedURL, err := s.store.DownloadURL(ctx, f.OSSKey, 3600)

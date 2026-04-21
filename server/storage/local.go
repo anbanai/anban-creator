@@ -161,3 +161,8 @@ func (p *LocalProvider) Delete(_ context.Context, key string) error {
 func (p *LocalProvider) DownloadURL(_ context.Context, key string, _ int) (string, error) {
 	return p.GetURL(key), nil
 }
+
+// HasCustomDomain returns false for local storage (no CDN domain).
+func (p *LocalProvider) HasCustomDomain() bool {
+	return false
+}

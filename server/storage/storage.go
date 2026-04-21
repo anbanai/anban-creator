@@ -22,4 +22,5 @@ type Provider interface {
 	Read(ctx context.Context, key string) ([]byte, error)
 	Delete(ctx context.Context, key string) error
 	DownloadURL(ctx context.Context, key string, expirySeconds int) (string, error)
+	HasCustomDomain() bool
 }
