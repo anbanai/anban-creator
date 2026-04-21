@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check } from 'lucide-react'
 import { api, type TaskType, type CreateTaskRequest } from '@/lib/api'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
@@ -97,6 +97,15 @@ export default function TasksPage() {
     onError: () => {
       toast.error('创建任务失败，请重试')
     },
+  })
+
+  const togglePublished = useMutation({
+    mutationFn: ({ id, published }: { id: string; published: boolean }) =>
+      api.tasks.markPublished(id, published),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onError: () => toast.error('更新发布状态失败'),
   })
 
   function openCreate() {
@@ -231,6 +240,29 @@ export default function TasksPage() {
                   <Badge variant={statusBadgeVariant(task.status)}>
                     {taskStatusLabel[task.status] || task.status}
                   </Badge>
+                  {task.status === 'completed' && (
+                    <button
+                      type="button"
+                      disabled={togglePublished.isPending}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        togglePublished.mutate({ id: task.id, published: !task.published })
+                      }}
+                      className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                        task.published
+                          ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                          : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      {togglePublished.isPending ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : task.published ? (
+                        <Check className="h-3 w-3" />
+                      ) : null}
+                      {task.published ? '已发布' : '标记发布'}
+                    </button>
+                  )}
                 </div>
               </Card>
             </Link>
