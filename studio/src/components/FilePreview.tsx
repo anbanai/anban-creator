@@ -34,9 +34,11 @@ function isMarkdownFile(fileName: string): boolean {
 function FilePreviewModalContent({
   file,
   taskId,
+  children,
 }: {
   file: TaskFile
   taskId: string
+  children?: React.ReactNode
 }) {
   const [loading, setLoading] = useState(false)
   const [htmlContent, setHtmlContent] = useState('')
@@ -239,6 +241,7 @@ function FilePreviewModalContent({
           下载
         </Button>
       </div>
+      {children}
     </DialogContent>
   )
 }
@@ -306,31 +309,32 @@ export function FilePreviewGallery({ files, taskId, inlineItemClassName }: { fil
       ))}
       {open && currentFile && (
         <Dialog open={open} onOpenChange={setOpen}>
-          <FilePreviewModalContent file={currentFile} taskId={taskId} />
-          {hasMultiple && (
-            <>
-              {/* Counter */}
-              <div className="pointer-events-none absolute bottom-4 left-1/2 z-50 -translate-x-1/2">
-                <span className="rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white">
-                  {currentIndex + 1} / {files.length}
-                </span>
-              </div>
-              {/* Prev arrow */}
-              <button
-                onClick={goPrev}
-                className="absolute left-2 top-1/2 z-50 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              {/* Next arrow */}
-              <button
-                onClick={goNext}
-                className="absolute right-2 top-1/2 z-50 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            </>
-          )}
+          <FilePreviewModalContent file={currentFile} taskId={taskId}>
+            {hasMultiple && (
+              <>
+                {/* Counter */}
+                <div className="pointer-events-none absolute bottom-4 left-1/2 z-50 -translate-x-1/2">
+                  <span className="rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white">
+                    {currentIndex + 1} / {files.length}
+                  </span>
+                </div>
+                {/* Prev arrow */}
+                <button
+                  onClick={goPrev}
+                  className="absolute left-2 top-1/2 z-50 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                {/* Next arrow */}
+                <button
+                  onClick={goNext}
+                  className="absolute right-2 top-1/2 z-50 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </>
+            )}
+          </FilePreviewModalContent>
         </Dialog>
       )}
     </>
