@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rs/zerolog"
 	"github.com/royalrick/anbanwriter/app/config"
-	"go.uber.org/zap"
 )
 
 // 各图片生成服务商的默认模型和 API 地址
@@ -101,7 +101,7 @@ func isContentSafetyError(errMsg string) bool {
 }
 
 // NewProvider 根据 ImageAPI 配置创建对应的 Provider
-func NewProvider(apiCfg *config.ImageAPI, log *zap.Logger) (Provider, error) {
+func NewProvider(apiCfg *config.ImageAPI, log zerolog.Logger) (Provider, error) {
 	switch apiCfg.Provider {
 	case "openai", "":
 		if err := validateOpenAIConfig(apiCfg); err != nil {

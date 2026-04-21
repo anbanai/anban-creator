@@ -64,14 +64,30 @@ func (p *OSSProvider) Name() string {
 }
 
 // Upload streams data from reader into the OSS bucket under the given key.
-func (p *OSSProvider) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*UploadResult, error) {
+// Since aliyun-oss-go-sdk does not support context cancellation in PutObject,
+// the upload is wrapped in a goroutine with ctx.Done() monitoring.
+func (p *OSSProvider) Upload(ctx context.Context, key string, reader io.Reader, contentType string) (*UploadResult, error) {
+	type result struct {
+		err error
+	}
+
 	options := []oss.Option{}
 	if contentType != "" {
 		options = append(options, oss.ContentType(contentType))
 	}
 
-	if err := p.bucket.PutObject(key, reader, options...); err != nil {
-		return nil, fmt.Errorf("oss put object %s: %w", key, err)
+	ch := make(chan result, 1)
+	go func() {
+		ch <- result{err: p.bucket.PutObject(key, reader, options...)}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("oss put object %s: %w", key, ctx.Err())
+	case r := <-ch:
+		if r.err != nil {
+			return nil, fmt.Errorf("oss put object %s: %w", key, r.err)
+		}
 	}
 
 	p.logger.Debug().
@@ -87,14 +103,30 @@ func (p *OSSProvider) Upload(_ context.Context, key string, reader io.Reader, co
 }
 
 // UploadFile uploads a local file to the OSS bucket.
-func (p *OSSProvider) UploadFile(_ context.Context, key string, filePath string, contentType string) (*UploadResult, error) {
+// Since aliyun-oss-go-sdk does not support context cancellation in PutObjectFromFile,
+// the upload is wrapped in a goroutine with ctx.Done() monitoring.
+func (p *OSSProvider) UploadFile(ctx context.Context, key string, filePath string, contentType string) (*UploadResult, error) {
+	type result struct {
+		err error
+	}
+
 	options := []oss.Option{}
 	if contentType != "" {
 		options = append(options, oss.ContentType(contentType))
 	}
 
-	if err := p.bucket.PutObjectFromFile(key, filePath, options...); err != nil {
-		return nil, fmt.Errorf("oss put object from file %s: %w", key, err)
+	ch := make(chan result, 1)
+	go func() {
+		ch <- result{err: p.bucket.PutObjectFromFile(key, filePath, options...)}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("oss put object from file %s: %w", key, ctx.Err())
+	case r := <-ch:
+		if r.err != nil {
+			return nil, fmt.Errorf("oss put object from file %s: %w", key, r.err)
+		}
 	}
 
 	p.logger.Debug().
@@ -171,9 +203,25 @@ func (p *OSSProvider) Read(ctx context.Context, key string) ([]byte, error) {
 }
 
 // Delete removes an object from the OSS bucket.
-func (p *OSSProvider) Delete(_ context.Context, key string) error {
-	if err := p.bucket.DeleteObject(key); err != nil {
-		return fmt.Errorf("oss delete object %s: %w", key, err)
+// Since aliyun-oss-go-sdk does not support context cancellation in DeleteObject,
+// the delete is wrapped in a goroutine with ctx.Done() monitoring.
+func (p *OSSProvider) Delete(ctx context.Context, key string) error {
+	type result struct {
+		err error
+	}
+
+	ch := make(chan result, 1)
+	go func() {
+		ch <- result{err: p.bucket.DeleteObject(key)}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("oss delete object %s: %w", key, ctx.Err())
+	case r := <-ch:
+		if r.err != nil {
+			return fmt.Errorf("oss delete object %s: %w", key, r.err)
+		}
 	}
 
 	p.logger.Debug().
@@ -184,12 +232,29 @@ func (p *OSSProvider) Delete(_ context.Context, key string) error {
 }
 
 // DownloadURL generates a time-limited signed URL for the given key.
-func (p *OSSProvider) DownloadURL(_ context.Context, key string, expirySeconds int) (string, error) {
-	signedURL, err := p.bucket.SignURL(key, http.MethodGet, int64(expirySeconds))
-	if err != nil {
-		return "", fmt.Errorf("oss sign url for %s: %w", key, err)
+// Since aliyun-oss-go-sdk does not support context cancellation in SignURL,
+// the call is wrapped in a goroutine with ctx.Done() monitoring.
+func (p *OSSProvider) DownloadURL(ctx context.Context, key string, expirySeconds int) (string, error) {
+	type result struct {
+		url string
+		err error
 	}
-	return signedURL, nil
+
+	ch := make(chan result, 1)
+	go func() {
+		url, err := p.bucket.SignURL(key, http.MethodGet, int64(expirySeconds))
+		ch <- result{url: url, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", fmt.Errorf("oss sign url for %s: %w", key, ctx.Err())
+	case r := <-ch:
+		if r.err != nil {
+			return "", fmt.Errorf("oss sign url for %s: %w", key, r.err)
+		}
+		return r.url, nil
+	}
 }
 
 // HasCustomDomain reports whether a custom CDN domain is configured for public access.

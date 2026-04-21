@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
-	"go.uber.org/zap"
 )
 
 // VolcengineProvider 火山方舟 Seedream 图片生成服务提供者
@@ -18,7 +18,7 @@ import (
 type VolcengineProvider struct {
 	client     *arkruntime.Client
 	model      string
-	log        *zap.Logger
+	log        zerolog.Logger
 	sizePixel  string // 像素格式 "WIDTHxHEIGHT"，如 "1728x2304"
 	volcConfig *config.VolcengineConfig
 }
@@ -47,7 +47,7 @@ func volcenginePixelSize(aspectRatio, sizeTier string) string {
 }
 
 // NewVolcengineProvider 创建火山方舟 Seedream Provider
-func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zap.Logger) (*VolcengineProvider, error) {
+func NewVolcengineProvider(apiCfg *config.ImageAPI, log zerolog.Logger) (*VolcengineProvider, error) {
 	mdl := apiCfg.Model
 	if mdl == "" {
 		mdl = DefaultVolcengineModel

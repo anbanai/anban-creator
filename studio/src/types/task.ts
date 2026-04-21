@@ -10,7 +10,7 @@ export interface Task {
   error: string | null
   plan_id: string | null
   channel_id: string
-  result: TaskResult
+  result: TaskResult | null
   published: boolean
   published_at: string | null
   created_at: string

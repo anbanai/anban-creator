@@ -9,10 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/app/wechat"
-	"go.uber.org/zap"
 )
 
 // ProcessorError 图片处理错误，携带修复建议
@@ -28,17 +29,18 @@ func (e *ProcessorError) Hint() string  { return e.HintText }
 type Processor struct {
 	cfg          *config.Config
 	apiCfg       *config.ImageAPI
-	log          *zap.Logger
+	log          zerolog.Logger
 	ws           *wechat.Service
 	compressor   *Compressor
 	provider     Provider
 	stylePrompt  string
 	refImagePath string // 参考图本地路径（可选）
+	mu           sync.RWMutex
 }
 
 // NewProcessor 创建图片处理器
 // apiCfg 决定使用哪套图片生成配置（article.image 或 xls.image）
-func NewProcessor(cfg *config.Config, apiCfg *config.ImageAPI, log *zap.Logger) *Processor {
+func NewProcessor(cfg *config.Config, apiCfg *config.ImageAPI, log zerolog.Logger) *Processor {
 	// 创建图片生成 Provider
 	var provider Provider
 	if apiCfg != nil {
@@ -47,7 +49,7 @@ func NewProcessor(cfg *config.Config, apiCfg *config.ImageAPI, log *zap.Logger) 
 		if err != nil {
 			// 如果配置了 API Key 但创建失败，记录警告
 			if apiCfg.Key != "" {
-				log.Warn("failed to create image provider, AI image generation will be unavailable", zap.Error(err))
+				log.Warn().Err(err).Msg("failed to create image provider, AI image generation will be unavailable")
 			}
 		}
 	}
@@ -82,16 +84,29 @@ func (p *Processor) wechatUpload(filePath string) (*wechat.UploadMaterialResult,
 
 // SetStylePrompt 设置风格提示词（CLI --style 传入，优先级高于配置文件）
 func (p *Processor) SetStylePrompt(prompt string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.stylePrompt = prompt
 }
 
 // SetRefImage 设置参考图路径（CLI --ref 传入）
 func (p *Processor) SetRefImage(path string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.refImagePath = path
+}
+
+// styleAndRef returns the current stylePrompt and refImagePath under a read lock.
+func (p *Processor) styleAndRef() (stylePrompt, refImagePath string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.stylePrompt, p.refImagePath
 }
 
 // 优先级：CLI --style > config style_prompt > preset prompt > 无风格（原样返回）
 func (p *Processor) buildPrompt(userPrompt string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	style := strings.TrimSpace(p.stylePrompt)
 	userPrompt = strings.TrimSpace(userPrompt)
 
@@ -117,7 +132,7 @@ type UploadResult struct {
 
 // UploadLocalImage 上传本地图片
 func (p *Processor) UploadLocalImage(filePath string) (*UploadResult, error) {
-	p.log.Debug("uploading local image", zap.String("path", filePath))
+	p.log.Debug().Str("path", filePath).Msg("uploading local image")
 
 	// 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -134,11 +149,11 @@ func (p *Processor) UploadLocalImage(filePath string) (*UploadResult, error) {
 	if p.apiCfg.Compress {
 		compressedPath, compressed, err := p.compressor.CompressImage(filePath)
 		if err != nil {
-			p.log.Warn("compress failed, using original", zap.Error(err))
+			p.log.Warn().Err(err).Msg("compress failed, using original")
 		} else if compressed {
 			processedPath = compressedPath
 			defer os.Remove(compressedPath)
-			p.log.Info("using compressed image", zap.String("path", processedPath))
+			p.log.Info().Str("path", processedPath).Msg("using compressed image")
 		}
 	}
 
@@ -156,7 +171,7 @@ func (p *Processor) UploadLocalImage(filePath string) (*UploadResult, error) {
 
 // DownloadAndUpload 下载在线图片并上传
 func (p *Processor) DownloadAndUpload(url string) (*UploadResult, error) {
-	p.log.Info("downloading and uploading image", zap.String("url", url))
+	p.log.Info().Str("url", url).Msg("downloading and uploading image")
 
 	// 下载图片
 	tmpPath, err := wechat.DownloadFile(url)
@@ -175,11 +190,11 @@ func (p *Processor) DownloadAndUpload(url string) (*UploadResult, error) {
 	if p.apiCfg.Compress {
 		compressedPath, compressed, err := p.compressor.CompressImage(tmpPath)
 		if err != nil {
-			p.log.Warn("compress failed, using original", zap.Error(err))
+			p.log.Warn().Err(err).Msg("compress failed, using original")
 		} else if compressed {
 			processedPath = compressedPath
 			defer os.Remove(compressedPath)
-			p.log.Info("using compressed image", zap.String("path", processedPath))
+			p.log.Info().Str("path", processedPath).Msg("using compressed image")
 		}
 	}
 
@@ -231,7 +246,10 @@ type GenerateRawResult struct {
 
 // GenerateRaw 调用 AI provider 生成图片，返回原始 URL 或 data URL。
 // 不下载、不压缩、不写磁盘（本地临时文件会被读取并转为 data URL 后清理）。
-func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
+func (p *Processor) GenerateRaw(ctx context.Context, prompt string) (*GenerateRawResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
@@ -239,16 +257,14 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
 	}
 
-	ctx := context.Background()
-	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+	_, refImg := p.styleAndRef()
+	genOpts := &GenerateOptions{RefImagePath: refImg}
 	result, err := p.provider.Generate(ctx, p.buildPrompt(prompt), genOpts)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
 
-	p.log.Debug("image generated (raw)",
-		zap.String("provider", result.Model),
-		zap.String("size", result.Size))
+	p.log.Debug().Str("provider", result.Model).Str("size", result.Size).Msg("image generated (raw)")
 
 	url, err := p.resolveRawURL(result.URL)
 	if err != nil {
@@ -263,7 +279,10 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 
 // GenerateBatchRaw 批量生成图片，返回原始 URL 或 data URL。
 // 不下载、不压缩、不写磁盘。
-func (p *Processor) GenerateBatchRaw(prompt string, count int) ([]*GenerateRawResult, error) {
+func (p *Processor) GenerateBatchRaw(ctx context.Context, prompt string, count int) ([]*GenerateRawResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
@@ -272,23 +291,23 @@ func (p *Processor) GenerateBatchRaw(prompt string, count int) ([]*GenerateRawRe
 	}
 
 	builtPrompt := p.buildPrompt(prompt)
-	ctx := context.Background()
+	_, refImg := p.styleAndRef()
 	opts := &GenerateOptions{
-		RefImagePath: p.refImagePath,
+		RefImagePath: refImg,
 		MaxImages:    count,
 	}
 
 	var rawResults []*GenerateResult
 	if bp, ok := p.provider.(BatchProvider); ok {
-		p.log.Info("using native batch generation (raw)", zap.Int("count", count), zap.String("provider", p.provider.Name()))
+		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using native batch generation (raw)")
 		batchResult, err := bp.GenerateBatch(ctx, builtPrompt, opts)
 		if err != nil {
 			return nil, fmt.Errorf("batch generate images: %w", err)
 		}
 		rawResults = batchResult.Images
 	} else {
-		p.log.Info("using sequential generation (raw)", zap.Int("count", count), zap.String("provider", p.provider.Name()))
-		singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using sequential generation (raw)")
+		singleOpts := &GenerateOptions{RefImagePath: refImg}
 		for i := 0; i < count; i++ {
 			result, err := p.provider.Generate(ctx, builtPrompt, singleOpts)
 			if err != nil {
@@ -367,11 +386,11 @@ func (p *Processor) processRawResult(result *GenerateResult, outputPath string) 
 	if p.apiCfg.Compress {
 		compressedPath, compressed, err := p.compressor.CompressImage(processedPath)
 		if err != nil {
-			p.log.Warn("compress failed, using original", zap.Error(err))
+			p.log.Warn().Err(err).Msg("compress failed, using original")
 		} else if compressed {
 			toClean = append(toClean, compressedPath)
 			processedPath = compressedPath
-			p.log.Debug("using compressed image", zap.String("path", processedPath))
+			p.log.Debug().Str("path", processedPath).Msg("using compressed image")
 		}
 	}
 
@@ -408,7 +427,10 @@ func (p *Processor) processRawResult(result *GenerateResult, outputPath string) 
 // generateOnly 生成图片到本地，不上传到微信。
 // outputPath 非空时复制到目标路径并清理所有临时文件；
 // outputPath 为空时返回临时文件路径（调用方负责清理）。
-func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnlyResult, error) {
+func (p *Processor) generateOnly(ctx context.Context, prompt, size, outputPath string) (*GenerateOnlyResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	// 验证配置
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
@@ -432,15 +454,13 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 	}
 
 	// 调用图片生成 API
-	ctx := context.Background()
-	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+	_, refImg := p.styleAndRef()
+	genOpts := &GenerateOptions{RefImagePath: refImg}
 	result, err := activeProvider.Generate(ctx, p.buildPrompt(prompt), genOpts)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
-	p.log.Debug("image generated",
-		zap.String("provider", result.Model),
-		zap.String("size", result.Size))
+	p.log.Debug().Str("provider", result.Model).Str("size", result.Size).Msg("image generated")
 
 	return p.processRawResult(result, outputPath)
 }
@@ -449,7 +469,10 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 // count 为期望生成数量，outputDir 为已存在的输出目录。
 // 若 provider 实现了 BatchProvider，使用原生组图 API（一次调用）；否则降级为逐张生成。
 // 处理过程使用并发以提高效率。
-func (p *Processor) GenerateBatchOnly(prompt string, count int, outputDir string) ([]*BatchImageResult, error) {
+func (p *Processor) GenerateBatchOnly(ctx context.Context, prompt string, count int, outputDir string) ([]*BatchImageResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
@@ -458,15 +481,15 @@ func (p *Processor) GenerateBatchOnly(prompt string, count int, outputDir string
 	}
 
 	builtPrompt := p.buildPrompt(prompt)
-	ctx := context.Background()
+	_, refImg := p.styleAndRef()
 	opts := &GenerateOptions{
-		RefImagePath: p.refImagePath,
+		RefImagePath: refImg,
 		MaxImages:    count,
 	}
 
 	var rawResults []*GenerateResult
 	if bp, ok := p.provider.(BatchProvider); ok {
-		p.log.Info("using native batch generation", zap.Int("count", count), zap.String("provider", p.provider.Name()))
+		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using native batch generation")
 		batchResult, err := bp.GenerateBatch(ctx, builtPrompt, opts)
 		if err != nil {
 			return nil, fmt.Errorf("batch generate images: %w", err)
@@ -474,8 +497,8 @@ func (p *Processor) GenerateBatchOnly(prompt string, count int, outputDir string
 		rawResults = batchResult.Images
 	} else {
 		// 降级：循环单图生成
-		p.log.Info("using sequential generation", zap.Int("count", count), zap.String("provider", p.provider.Name()))
-		singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using sequential generation")
+		singleOpts := &GenerateOptions{RefImagePath: refImg}
 		for i := 0; i < count; i++ {
 			result, err := p.provider.Generate(ctx, builtPrompt, singleOpts)
 			if err != nil {
@@ -524,7 +547,7 @@ func (p *Processor) processBatchConcurrent(rawResults []*GenerateResult, outputD
 				Size:     processed.Size,
 				Index:    index + 1,
 			}
-			p.log.Debug("batch image processed", zap.Int("index", index+1), zap.String("path", outputPath))
+			p.log.Debug().Int("index", index+1).Str("path", outputPath).Msg("batch image processed")
 		}(i, raw)
 	}
 
@@ -544,24 +567,22 @@ func (p *Processor) processBatchConcurrent(rawResults []*GenerateResult, outputD
 }
 
 // GenerateOnly AI 生成图片到本地文件，不上传到微信
-func (p *Processor) GenerateOnly(prompt, outputPath string) (*GenerateOnlyResult, error) {
-	p.log.Debug("generating image via AI", zap.String("prompt", prompt))
-	return p.generateOnly(prompt, "", outputPath)
+func (p *Processor) GenerateOnly(ctx context.Context, prompt, outputPath string) (*GenerateOnlyResult, error) {
+	p.log.Debug().Str("prompt", prompt).Msg("generating image via AI")
+	return p.generateOnly(ctx, prompt, "", outputPath)
 }
 
 // GenerateOnlyWithSize AI 生成指定尺寸的图片到本地文件，不上传到微信
-func (p *Processor) GenerateOnlyWithSize(prompt, size, outputPath string) (*GenerateOnlyResult, error) {
-	p.log.Debug("generating image via AI with size",
-		zap.String("prompt", prompt),
-		zap.String("size", size))
-	return p.generateOnly(prompt, size, outputPath)
+func (p *Processor) GenerateOnlyWithSize(ctx context.Context, prompt, size, outputPath string) (*GenerateOnlyResult, error) {
+	p.log.Debug().Str("prompt", prompt).Str("size", size).Msg("generating image via AI with size")
+	return p.generateOnly(ctx, prompt, size, outputPath)
 }
 
 // GenerateAndUpload AI 生成图片并上传
-func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, error) {
-	p.log.Debug("generating image via AI", zap.String("prompt", prompt))
+func (p *Processor) GenerateAndUpload(ctx context.Context, prompt string) (*GenerateAndUploadResult, error) {
+	p.log.Debug().Str("prompt", prompt).Msg("generating image via AI")
 
-	onlyResult, err := p.generateOnly(prompt, "", "")
+	onlyResult, err := p.generateOnly(ctx, prompt, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -582,12 +603,10 @@ func (p *Processor) GenerateAndUpload(prompt string) (*GenerateAndUploadResult, 
 }
 
 // GenerateAndUploadWithSize AI 生成指定尺寸的图片并上传
-func (p *Processor) GenerateAndUploadWithSize(prompt string, size string) (*GenerateAndUploadResult, error) {
-	p.log.Debug("generating image via AI with size",
-		zap.String("prompt", prompt),
-		zap.String("size", size))
+func (p *Processor) GenerateAndUploadWithSize(ctx context.Context, prompt string, size string) (*GenerateAndUploadResult, error) {
+	p.log.Debug().Str("prompt", prompt).Str("size", size).Msg("generating image via AI with size")
 
-	onlyResult, err := p.generateOnly(prompt, size, "")
+	onlyResult, err := p.generateOnly(ctx, prompt, size, "")
 	if err != nil {
 		return nil, err
 	}
@@ -615,7 +634,7 @@ type DownloadResult struct {
 
 // DownloadOnly 下载图片到本地，不上传到微信
 func (p *Processor) DownloadOnly(url, outputPath string) (*DownloadResult, error) {
-	p.log.Info("downloading image", zap.String("url", url))
+	p.log.Info().Str("url", url).Msg("downloading image")
 
 	tmpPath, err := wechat.DownloadFile(url)
 	if err != nil {
@@ -631,7 +650,7 @@ func (p *Processor) DownloadOnly(url, outputPath string) (*DownloadResult, error
 	if p.apiCfg.Compress {
 		compressedPath, compressed, err := p.compressor.CompressImage(tmpPath)
 		if err != nil {
-			p.log.Warn("compress failed, using original", zap.Error(err))
+			p.log.Warn().Err(err).Msg("compress failed, using original")
 		} else if compressed {
 			processedPath = compressedPath
 			defer os.Remove(compressedPath)

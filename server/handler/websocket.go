@@ -44,6 +44,7 @@ type WebSocketHub struct {
 	register   chan *WSClient
 	unregister chan *WSClient
 	broadcast  chan *WSMessage
+	stop       chan struct{}
 	jwtService *auth.JWTService
 }
 
@@ -54,6 +55,7 @@ func NewWebSocketHub(jwtSvc *auth.JWTService) *WebSocketHub {
 		register:   make(chan *WSClient),
 		unregister: make(chan *WSClient),
 		broadcast:  make(chan *WSMessage, 256),
+		stop:       make(chan struct{}),
 		jwtService: jwtSvc,
 	}
 	go hub.run()
@@ -128,6 +130,18 @@ func (h *WebSocketHub) run() {
 				}
 				h.mu.Unlock()
 			}
+
+			case <-h.stop:
+				// Graceful shutdown: close all connections and exit.
+				h.mu.Lock()
+				for scene, conns := range h.clients {
+					for conn := range conns {
+						conn.Close()
+					}
+					delete(h.clients, scene)
+				}
+				h.mu.Unlock()
+				return
 		}
 	}
 }
@@ -145,6 +159,11 @@ func (h *WebSocketHub) Unregister(client *WSClient) {
 // Broadcast sends a message to all connections in a scene.
 func (h *WebSocketHub) Broadcast(scene, msgType string, data interface{}) {
 	h.broadcast <- &WSMessage{Scene: scene, Type: msgType, Data: data}
+}
+
+// Shutdown closes all WebSocket connections and stops the event loop.
+func (h *WebSocketHub) Shutdown() {
+	close(h.stop)
 }
 
 // HandleWebSocket returns a Fiber handler that upgrades HTTP to WebSocket.

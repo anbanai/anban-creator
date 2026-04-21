@@ -2,11 +2,22 @@ package middleware
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 )
+
+// uuidSegmentRe matches UUID path segments to normalize rate limit keys.
+var uuidSegmentRe = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+
+// normalizeRateLimitPath strips UUID and numeric segments from a path
+// so that e.g. /tasks/abc-123-def and /tasks/xyz-456-uvw share the same key.
+func normalizeRateLimitPath(path string) string {
+	normalized := uuidSegmentRe.ReplaceAllString(path, ":id")
+	return normalized
+}
 
 // RateLimit creates a rate limiting middleware using Redis.
 // Limits to maxRequests per window per IP address.
@@ -22,7 +33,7 @@ func RateLimit(redisClient *redis.Client, maxRequests int, window time.Duration)
 			ip = "unknown"
 		}
 
-		key := fmt.Sprintf("ratelimit:%s:%s", ip, c.Path())
+		key := fmt.Sprintf("ratelimit:%s:%s", ip, normalizeRateLimitPath(c.Path()))
 		ctx := c.Context()
 
 		// Use Redis INCR + EXPIRE for sliding window rate limiting.

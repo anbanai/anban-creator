@@ -119,8 +119,12 @@ func (p *imageProcessor) ReplacePlaceholders(html string, images []ImageRef) str
 
 // buildImageTag 构建图片标签
 func (p *imageProcessor) buildImageTag(img ImageRef) string {
+	safeURL := sanitizeImageURL(img.WechatURL)
+	if safeURL == "" {
+		return "" // 拒绝不安全的 URL
+	}
 	style := "max-width:100%;height:auto;display:block;margin:20px auto;"
-	return fmt.Sprintf(`<img src="%s" style="%s" alt="" />`, img.WechatURL, style)
+	return fmt.Sprintf(`<img src="%s" style="%s" alt="" />`, safeURL, style)
 }
 
 // CountImages 统计 Markdown 中的图片数量

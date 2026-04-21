@@ -33,6 +33,11 @@ func (s *TaskService) AppendProgressLog(ctx context.Context, taskID, message str
 	if err := s.repo.Tasks().AppendProgressLog(ctx, taskID, message); err != nil {
 		return fmt.Errorf("append progress log: %w", err)
 	}
+	// Notify subscribers of the new progress message.
+	s.publishProgressEvent(ctx, &ProgressEvent{
+		TaskID:  taskID,
+		Message: message,
+	})
 	return nil
 }
 

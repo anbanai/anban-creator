@@ -28,13 +28,14 @@ type GenerateRequest struct {
 
 // GenerateResult 生成结果
 type GenerateResult struct {
-	Article string
-	Title   string
-	Quotes  []string
-	Success bool
-	Error   string
-	Prompt  string       // 用于调试，显示使用的提示词
-	Style   *WriterStyle // 使用的风格（用于完成请求时提取金句）
+	Article   string
+	Title     string
+	Quotes    []string
+	Success   bool
+	Error     string
+	AIRequest string       // explicit AI request prompt (replaces "AI_MODE_REQUEST:" prefix in Error)
+	Prompt    string       // 用于调试，显示使用的提示词
+	Style     *WriterStyle // 使用的风格（用于完成请求时提取金句）
 }
 
 // articleGenerator 文章生成器实现
@@ -76,7 +77,7 @@ func (g *articleGenerator) Generate(req *GenerateRequest) *GenerateResult {
 	// 注意：实际的 AI 调用在外部（Claude）完成
 	// 这里返回特殊标记，告诉调用者需要使用 AI
 	result.Article = ""
-	result.Error = "AI_MODE_REQUEST:" + prompt
+	result.AIRequest = prompt
 
 	return result
 }
@@ -227,16 +228,27 @@ func (g *articleGenerator) extractQuotesFromArticle(article string, count int) [
 
 // IsAIRequest 检查结果是否是 AI 请求
 func IsAIRequest(result *GenerateResult) bool {
-	return result != nil && result.Error != "" &&
+	if result == nil {
+		return false
+	}
+	if result.AIRequest != "" {
+		return true
+	}
+	// Backward compat: check old error-string prefix pattern
+	return result.Error != "" &&
 		strings.HasPrefix(result.Error, "AI_MODE_REQUEST:")
 }
 
 // ExtractAIRequest 从结果中提取 AI 请求
 func ExtractAIRequest(result *GenerateResult) string {
-	if IsAIRequest(result) {
-		return strings.TrimPrefix(result.Error, "AI_MODE_REQUEST:")
+	if result == nil {
+		return ""
 	}
-	return ""
+	if result.AIRequest != "" {
+		return result.AIRequest
+	}
+	// Backward compat
+	return strings.TrimPrefix(result.Error, "AI_MODE_REQUEST:")
 }
 
 // CompleteAIRequest 完成 AI 请求（AI 返回结果后调用）

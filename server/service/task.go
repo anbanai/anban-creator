@@ -37,6 +37,7 @@ type TaskService struct {
 	workspaceSvc *WorkspaceService
 	workspaceDir string
 	cancelFuncs  sync.Map // taskID → context.CancelFunc
+	notifier     TaskProgressNotifier
 }
 
 // NewTaskService creates a new TaskService.
@@ -50,8 +51,9 @@ func NewTaskService(
 	taskLogDir string,
 	workspaceSvc *WorkspaceService,
 	workspaceDir string,
+	opts ...TaskServiceOption,
 ) *TaskService {
-	return &TaskService{
+	svc := &TaskService{
 		repo:         repo,
 		executor:     executor,
 		logger:       logger,
@@ -61,6 +63,20 @@ func NewTaskService(
 		taskLogDir:   taskLogDir,
 		workspaceSvc: workspaceSvc,
 		workspaceDir: workspaceDir,
+	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc
+}
+
+// TaskServiceOption is a functional option for NewTaskService.
+type TaskServiceOption func(*TaskService)
+
+// WithNotifier sets the TaskProgressNotifier for the TaskService.
+func WithNotifier(n TaskProgressNotifier) TaskServiceOption {
+	return func(s *TaskService) {
+		s.notifier = n
 	}
 }
 
@@ -76,6 +92,22 @@ func (s *TaskService) StorageProviderName() string {
 		return ""
 	}
 	return s.store.Name()
+}
+
+// Notifier returns the task progress notifier, or nil if none is configured.
+func (s *TaskService) Notifier() TaskProgressNotifier {
+	return s.notifier
+}
+
+// publishProgressEvent sends a progress event via the notifier. If the
+// notifier is nil or publish fails, it logs a warning and continues.
+func (s *TaskService) publishProgressEvent(ctx context.Context, event *ProgressEvent) {
+	if s.notifier == nil {
+		return
+	}
+	if err := s.notifier.Publish(ctx, event); err != nil {
+		s.logger.Warn().Err(err).Str("task_id", event.TaskID).Msg("failed to publish progress event")
+	}
 }
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
@@ -107,71 +139,61 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic
 
 	taskType := channel.Platform
 
-	// Pre-calculate total credit cost and deduct upfront to avoid race conditions.
-	var deductedTaskIDs []string
 	tasks := make([]*model.Task, 0, quantity)
 
-	if s.creditSvc != nil {
-		cost, ok := s.creditSvc.TaskCost(taskType)
-		if !ok {
-			return nil, fmt.Errorf("unknown task type: %s", taskType)
-		}
-		totalCost := cost * quantity
-
-		// Generate all task IDs upfront so we can create individual transactions.
+	createTasks := func(txRepo repository.Repository) error {
+		// Generate all task IDs upfront.
 		taskIDs := make([]string, quantity)
 		for i := range taskIDs {
 			taskIDs[i] = generateTaskID()
 		}
 
-		// Deduct total cost in a single atomic transaction.
-		if err := s.creditSvc.DeductBatch(ctx, userID, taskType, totalCost, taskIDs); err != nil {
-			if errors.Is(err, ErrInsufficientCredits) {
-				return nil, fmt.Errorf("积分不足: %w", err)
+		// Deduct credits within the same transaction.
+		if s.creditSvc != nil {
+			cost, ok := s.creditSvc.TaskCost(taskType)
+			if !ok {
+				return fmt.Errorf("unknown task type: %s", taskType)
 			}
-			return nil, fmt.Errorf("deduct credits: %w", err)
+			totalCost := cost * quantity
+			if err := s.creditSvc.DeductBatch(ctx, userID, taskType, totalCost, taskIDs, txRepo); err != nil {
+				if errors.Is(err, ErrInsufficientCredits) {
+					return fmt.Errorf("积分不足: %w", err)
+				}
+				return fmt.Errorf("deduct credits: %w", err)
+			}
 		}
-		deductedTaskIDs = taskIDs
+
+		for i := 0; i < quantity; i++ {
+			task := &model.Task{
+				ID:        taskIDs[i],
+				UserID:    userID,
+				ChannelID: channelID,
+				Type:      taskType,
+				Status:    model.TaskStatusPending,
+				Topic:      topic,
+				ImageRatio: imageRatio,
+			}
+
+			if err := txRepo.Tasks().Create(ctx, task); err != nil {
+				return fmt.Errorf("create task: %w", err)
+			}
+
+			tasks = append(tasks, task)
+		}
+		return nil
 	}
 
-	for i := 0; i < quantity; i++ {
-		var taskID string
-		if s.creditSvc != nil && len(deductedTaskIDs) > i {
-			taskID = deductedTaskIDs[i]
-		} else {
-			taskID = generateTaskID()
-		}
+	// Use a transaction so that credit deduction and task creation are atomic.
+	if err := s.repo.WithTx(ctx, createTasks); err != nil {
+		return nil, err
+	}
 
-		task := &model.Task{
-			ID:        taskID,
-			UserID:    userID,
-			ChannelID: channelID,
-			Type:      taskType,
-			Status:    model.TaskStatusPending,
-			Topic:      topic,
-			ImageRatio: imageRatio,
-		}
-
-		if err := s.repo.Tasks().Create(ctx, task); err != nil {
-			// Refund only the tasks that were NOT successfully created.
-			// deductedTaskIDs[0..i) were created successfully; [i..) were not.
-			if s.creditSvc != nil {
-				for j := i; j < len(deductedTaskIDs); j++ {
-					if refundErr := s.creditSvc.RefundForTask(ctx, deductedTaskIDs[j]); refundErr != nil {
-						s.logger.Error().Err(refundErr).Str("task_id", deductedTaskIDs[j]).Msg("failed to refund credits during rollback")
-					}
-				}
-			}
-			return nil, fmt.Errorf("create task: %w", err)
-		}
-
-		// Enqueue for async execution.
+	// Enqueue tasks for async execution outside the transaction.
+	for _, task := range tasks {
 		if err := s.EnqueueExecution(ctx, task, nil); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue task, marking as failed")
-			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to enqueue: "+err.Error())
+			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("failed to enqueue task, marking as failed")
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, task.ID, model.TaskStatusFailed, "failed to enqueue: "+err.Error())
 		}
-
-		tasks = append(tasks, task)
 	}
 
 	return tasks, nil
@@ -275,6 +297,11 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	if err := s.repo.Tasks().UpdateStatus(ctx, id, model.TaskStatusCancelled); err != nil {
 		return fmt.Errorf("cancel task: %w", err)
 	}
+	s.publishProgressEvent(ctx, &ProgressEvent{
+		TaskID:     id,
+		Status:     model.TaskStatusCancelled,
+		IsComplete: true,
+	})
 	// Signal the running execution (if any) to cancel via its context.
 	if v, ok := s.cancelFuncs.Load(id); ok {
 		if cancel, ok := v.(context.CancelFunc); ok {

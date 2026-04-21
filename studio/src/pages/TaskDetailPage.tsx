@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -8,8 +8,8 @@ import { ArrowLeft, Loader2, Download, Eye } from 'lucide-react'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import type { TaskFile } from '@/types'
-import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
+import { useTaskSSE } from '@/hooks/useTaskSSE'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
@@ -31,18 +31,7 @@ export default function TaskDetailPage() {
   const queryClient = useQueryClient()
   const { token } = useAuth()
 
-  const [sseLogs, setSseLogs] = useState<string[]>([])
-  const [sseError, setSseError] = useState<string | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
-  const tokenRef = useRef(token)
-  tokenRef.current = token
-
-  const MAX_SSE_LOGS = 500
-  function appendLog(prev: string[], entry: string): string[] {
-    const next = [...prev, entry]
-    return next.length > MAX_SSE_LOGS ? next.slice(-MAX_SSE_LOGS) : next
-  }
 
   const { data: task, isLoading } = useQuery({
     queryKey: ['task', id],
@@ -69,12 +58,18 @@ export default function TaskDetailPage() {
   })
   const channel = channelDetail?.channel
 
+  // Connect SSE only when task status transitions to "running"
+  const { logs: sseLogs, error: sseError, abort: abortSSE } = useTaskSSE({
+    taskId: id,
+    token,
+    enabled: task?.status === 'running',
+  })
+
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
     onSuccess: () => {
       toast.success('任务已取消')
-      abortRef.current?.abort()
-      abortRef.current = null
+      abortSSE()
       queryClient.invalidateQueries({ queryKey: ['task', id] })
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
       setShowCancelDialog(false)
@@ -89,100 +84,6 @@ export default function TaskDetailPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
     },
   })
-
-  const connectSSE = async (retries = 0) => {
-    if (!id) return
-    const currentToken = tokenRef.current
-    if (!currentToken) return
-
-    // Abort any existing connection
-    if (abortRef.current) {
-      abortRef.current.abort()
-    }
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    try {
-      for await (const event of streamTaskProgress(id, currentToken, controller.signal)) {
-        handleSSEEvent(event)
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      if (retries < 3 && !controller.signal.aborted) {
-        setSseLogs((prev) => appendLog(prev, `连接断开，正在重试 (${retries + 1}/3)...`))
-        await new Promise((r) => setTimeout(r, 2000 * (retries + 1)))
-        if (controller.signal.aborted) return
-        return connectSSE(retries + 1)
-      }
-      setSseError('连接断开，正在刷新任务状态...')
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-    }
-  }
-
-  function handleSSEEvent(event: SSEEvent) {
-    const parsed = typeof event.data === 'string'
-      ? (() => { try { return JSON.parse(event.data) } catch { return event.data } })()
-      : event.data
-
-    switch (event.event) {
-      case 'progress': {
-        if (typeof parsed === 'string') {
-          setSseLogs((prev) => appendLog(prev, parsed))
-        } else {
-          const data = parsed as { progress: number; message: string }
-          if (data.progress != null) {
-            setSseLogs((prev) => appendLog(prev, `[${data.progress}%] ${data.message}`))
-          }
-        }
-        break
-      }
-      case 'output': {
-        const data = typeof parsed === 'string' ? parsed : (parsed as { text?: string }).text || ''
-        if (data) {
-          setSseLogs((prev) => appendLog(prev, data))
-        }
-        break
-      }
-      case 'error': {
-        const data = typeof parsed === 'string' ? parsed : (parsed as { error?: string }).error || 'Unknown error'
-        setSseLogs((prev) => appendLog(prev, `错误：${data}`))
-        break
-      }
-      case 'done':
-      case 'completed':
-      case 'failed':
-      case 'cancelled': {
-        queryClient.invalidateQueries({ queryKey: ['task', id] })
-        queryClient.invalidateQueries({ queryKey: ['task-files', id] })
-        const statusText = event.event === 'completed' ? '任务完成'
-          : event.event === 'failed' ? '任务失败'
-            : event.event === 'cancelled' ? '任务取消' : '任务完成'
-        setSseLogs((prev) => appendLog(prev, `--- ${statusText} ---`))
-        break
-      }
-      default: {
-        const text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed)
-        if (text && text !== '{}' && text.length > 0) {
-          setSseLogs((prev) => appendLog(prev, text))
-        }
-      }
-    }
-  }
-
-  // Connect SSE only when task status transitions to "running"
-  useEffect(() => {
-    if (task?.status === 'running') {
-      setSseLogs([])
-      setSseError(null)
-      connectSSE()
-    }
-    return () => {
-      if (abortRef.current) {
-        abortRef.current.abort()
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.status])
 
   if (isLoading) {
     return (

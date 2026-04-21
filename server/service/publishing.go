@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/rs/zerolog"
-	"go.uber.org/zap"
 
 	"github.com/royalrick/anbanwriter/app/draft"
 	appconfig "github.com/royalrick/anbanwriter/app/config"
@@ -77,8 +76,7 @@ func (s *PublishingService) createDraftService(ch *model.Channel) (*draft.Servic
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}
-	zapLog, _ := zap.NewProduction()
-	return draft.NewService(appCfg, zapLog), nil
+	return draft.NewService(appCfg, s.logger.With().Str("component", "draft-service").Logger()), nil
 }
 
 // getChannel retrieves and validates a channel for the given user.

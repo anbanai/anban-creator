@@ -54,6 +54,7 @@ func (sm *StyleManager) LoadStyles() error {
 		stylePath := filepath.Join(sm.writersDir, name)
 		if err := sm.loadStyle(stylePath); err != nil {
 			// 记录错误但继续加载其他风格
+				fmt.Fprintf(os.Stderr, "warning: failed to load style %s: %v\n", name, err)
 			continue
 		}
 	}
@@ -117,10 +118,11 @@ func (sm *StyleManager) getWritersDir() string {
 		)
 	}
 
+	home, _ := os.UserHomeDir()
 	paths = append(paths,
 		"writers",
-		filepath.Join(os.Getenv("HOME"), ".config", "anbanwriter", "writers"),
-		filepath.Join(os.Getenv("HOME"), ".anbanwriter", "writers"),
+		filepath.Join(home, ".config", "anbanwriter", "writers"),
+		filepath.Join(home, ".anbanwriter", "writers"),
 	)
 
 	for _, path := range paths {

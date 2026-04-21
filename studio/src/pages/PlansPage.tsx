@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -181,6 +181,7 @@ export default function PlansPage() {
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const watchedChannelId = useWatch({ control: form.control, name: 'channel_id' })
 
   return (
     <div className="space-y-6">
@@ -293,7 +294,7 @@ export default function PlansPage() {
                 <FormItem>
                   <FormLabel>内容类型</FormLabel>
                   <FormControl>
-                    <Select value={field.value} onValueChange={(v) => field.onChange(v as PlanType)} disabled={!!form.watch('channel_id')}>
+                    <Select value={field.value} onValueChange={(v) => field.onChange(v as PlanType)} disabled={!!watchedChannelId}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="选择类型" />
                       </SelectTrigger>
@@ -304,7 +305,7 @@ export default function PlansPage() {
                       </SelectContent>
                     </Select>
                   </FormControl>
-                  {form.watch('channel_id') && (
+                  {watchedChannelId && (
                     <FormDescription>内容类型随所选频道自动确定</FormDescription>
                   )}
                   <FormMessage />

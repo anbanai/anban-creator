@@ -19,12 +19,6 @@ const (
 	TypeTaskCleanup     = "task:cleanup"
 )
 
-// TaskEnqueuer abstracts the async task enqueue mechanism.
-type TaskEnqueuer interface {
-	Enqueue(taskType string, payload []byte) error
-	EnqueueIn(taskType string, payload []byte, delay time.Duration) error
-}
-
 // AsynqClient wraps an asynq.Client for enqueuing tasks.
 type AsynqClient struct {
 	client *asynq.Client

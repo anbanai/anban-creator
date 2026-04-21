@@ -36,14 +36,17 @@ func (cg *CoverGenerator) GeneratePrompt(req *GenerateCoverRequest) (*GenerateCo
 		content = fmt.Sprintf("标题：%s\n\n内容：%s", req.ArticleTitle, req.ArticleContent)
 	}
 
+	// 安全化内容，防止提示注入
+	safeContent := TruncateAndSanitizeForPrompt(content)
+
 	// 使用风格的封面提示词模板
 	prompt := style.CoverPrompt
 
 	// 替换占位符
 	if strings.Contains(prompt, "{article_content}") {
-		prompt = strings.ReplaceAll(prompt, "{article_content}", content)
+		prompt = strings.ReplaceAll(prompt, "{article_content}", safeContent)
 	} else {
-		prompt = prompt + "\n\n# 文章内容\n" + content
+		prompt = prompt + "\n\n# 文章内容\n" + safeContent
 	}
 
 	return &GenerateCoverResult{
@@ -212,11 +215,13 @@ func (cg *CoverGenerator) GenerateCoverPromptWithStyle(style *WriterStyle, artic
 		content = fmt.Sprintf("标题：%s\n\n%s", articleTitle, articleContent)
 	}
 
+	safeContent := TruncateAndSanitizeForPrompt(content)
+
 	prompt := style.CoverPrompt
 	if strings.Contains(prompt, "{article_content}") {
-		prompt = strings.ReplaceAll(prompt, "{article_content}", content)
+		prompt = strings.ReplaceAll(prompt, "{article_content}", safeContent)
 	} else {
-		prompt = prompt + "\n\n# 文章内容\n" + content
+		prompt = prompt + "\n\n# 文章内容\n" + safeContent
 	}
 
 	return prompt

@@ -170,6 +170,11 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to completed")
 	}
+	s.publishProgressEvent(ctx, &ProgressEvent{
+		TaskID:     taskID,
+		Status:     model.TaskStatusCompleted,
+		IsComplete: true,
+	})
 	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
 	}
@@ -269,6 +274,11 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
 			}
+			s.publishProgressEvent(ctx, &ProgressEvent{
+				TaskID:     taskID,
+				Status:     model.TaskStatusFailed,
+				IsComplete: true,
+			})
 			if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
 			}
@@ -340,6 +350,11 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			Msg("task permanently failed after max retries")
 		if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
+			s.publishProgressEvent(ctx, &ProgressEvent{
+				TaskID:     taskID,
+				Status:     model.TaskStatusFailed,
+				IsComplete: true,
+			})
 		}
 		if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")

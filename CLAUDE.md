@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Language**: Go 1.26.0 (CLI + Server), TypeScript (Web)
 - **CLI Framework**: Cobra
-- **Logging**: Zap (CLI), Zerolog (Server)
+- **Logging**: Zerolog (all components — CLI, server, agent)
 - **WeChat SDK**: silenceper/wechat/v2
 
 ## Build & Test Commands
@@ -125,7 +125,11 @@ Fiber v3 HTTP API with MySQL (GORM), Redis, Asynq task queue, WebSocket, and MCP
 
 ```
 server/
-├── main.go                 # Server entry point, wiring, graceful shutdown
+├── main.go                 # Server entry point (thin, delegates to setup files)
+├── setup.go                # Config, logger, DB/Redis connections, storage
+├── services.go             # Core service wiring (setupCoreServices)
+├── handlers.go             # Handler instantiation
+├── workers.go              # Asynq server, scheduler, periodic cleanup
 ├── config.yaml             # Server config (YAML with ANBAN_SERVER_* env overrides)
 │
 ├── agent/                  # Agent execution layer
@@ -168,7 +172,10 @@ server/
 ├── service/                # Business logic
 │   ├── channel.go, plan.go, task.go
 │   ├── task_execution.go   # Task execution with agent SDK
+│   ├── task_agent.go       # Task agent integration
 │   ├── task_files.go       # Task file management
+│   ├── redis_notifier.go   # Redis pub/sub for task progress
+│   ├── task_events.go      # TaskProgressNotifier interface
 │   └── credit.go           # Credits/points billing system
 │
 ├── router/                 # Fiber router setup
@@ -391,7 +398,7 @@ plugin/
 ## Notes for Development
 
 - Go 1.26 features used throughout — ensure compatibility
-- CLI uses zap logging, server uses zerolog — don't mix
+- CLI uses zerolog logging — all components use zerolog, never mix with zap
 - JSON responses use `printJSON()` helper in CLI
 - Two Cobra patterns coexist: package-level var with `init()` (older) and factory functions returning `*cobra.Command` (preferred)
 - Server config overrides via `ANBAN_SERVER_*` env vars

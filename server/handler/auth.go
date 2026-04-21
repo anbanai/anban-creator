@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"math/big"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -112,7 +114,7 @@ func generateInviteCode() (string, error) {
 }
 
 // generateTokenPair creates an access token, a refresh token, and a LoginSession.
-func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse, error) {
+func (h *AuthHandler) generateTokenPair(ctx context.Context, userID string) (*tokenResponse, error) {
 	accessToken, err := h.jwtSvc.GenerateAccessToken(userID)
 	if err != nil {
 		return nil, err
@@ -132,25 +134,13 @@ func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse,
 		ExpiresAt:    expiresAt,
 	}
 
-	fiberCtx, ok := ctx.(fiber.Ctx)
-	var errCtx error
-	if ok {
-		errCtx = h.repo.Sessions().Create(fiberCtx.Context(), session)
-	} else {
-		errCtx = h.repo.Sessions().Create(nil, session)
-	}
-	if errCtx != nil {
-		h.logger.Error().Err(errCtx).Msg("failed to create login session")
+	if err := h.repo.Sessions().Create(ctx, session); err != nil {
+		h.logger.Error().Err(err).Msg("failed to create login session")
 		// Non-fatal: still return tokens
 	}
 
 	// Fetch the user for the response.
-	var user *model.User
-	if ok {
-		user, err = h.repo.Users().FindByID(fiberCtx.Context(), userID)
-	} else {
-		user, err = h.repo.Users().FindByID(nil, userID)
-	}
+	user, err := h.repo.Users().FindByID(ctx, userID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("failed to find user for token response")
 	}
@@ -176,7 +166,7 @@ func (h *AuthHandler) SendCode(c fiber.Ctx) error {
 
 	req.Email = strings.TrimSpace(req.Email)
 
-	if req.Email == "" || !strings.Contains(req.Email, "@") {
+	if req.Email == "" || !isValidEmail(req.Email) {
 		return Error(c, fiber.StatusBadRequest, "请输入有效的邮箱地址")
 	}
 
@@ -321,7 +311,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		}
 	}
 
-	resp, err := h.generateTokenPair(c, user.ID)
+	resp, err := h.generateTokenPair(c.Context(), user.ID)
 	if err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to generate tokens")
 	}
@@ -358,7 +348,7 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "invalid email or password")
 	}
 
-	resp, err := h.generateTokenPair(c, user.ID)
+	resp, err := h.generateTokenPair(c.Context(), user.ID)
 	if err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to generate tokens")
 	}
@@ -401,7 +391,7 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 	}
 
 	// Generate new token pair.
-	resp, err := h.generateTokenPair(c, claims.UserID)
+	resp, err := h.generateTokenPair(c.Context(), claims.UserID)
 	if err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to generate tokens")
 	}
@@ -542,7 +532,7 @@ func (h *AuthHandler) WXLogin(c fiber.Ctx) error {
 		}
 	}
 
-	resp, err := h.generateTokenPair(c, user.ID)
+	resp, err := h.generateTokenPair(c.Context(), user.ID)
 	if err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to generate tokens")
 	}
@@ -556,4 +546,11 @@ func GetUserID(c fiber.Ctx) string {
 		return userID
 	}
 	return ""
+}
+
+
+// isValidEmail checks that the given string is a valid email address.
+func isValidEmail(email string) bool {
+	_, err := mail.ParseAddress(email)
+	return err == nil
 }

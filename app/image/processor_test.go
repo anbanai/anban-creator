@@ -1,22 +1,24 @@
 package image
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/royalrick/anbanwriter/app/config"
-	"go.uber.org/zap"
 )
 
 func newTestProcessor(apiCfg *config.ImageAPI) *Processor {
 	return &Processor{
 		apiCfg: apiCfg,
-		log:    zap.NewNop(),
+		log:    zerolog.Nop(),
 	}
 }
 
 func TestProcessor_GenerateOnly_NoAPIKey(t *testing.T) {
 	p := newTestProcessor(&config.ImageAPI{})
-	_, err := p.GenerateOnly("春天的茶园", "output.png")
+	_, err := p.GenerateOnly(context.Background(), "春天的茶园", "output.png")
 	if err == nil {
 		t.Fatal("expected error when API key is missing, got nil")
 	}
@@ -26,7 +28,7 @@ func TestProcessor_GenerateOnly_NoProvider(t *testing.T) {
 	// API key is set but provider is nil (creation failed silently)
 	p := newTestProcessor(&config.ImageAPI{Key: "test-key"})
 	// provider is nil by default in newTestProcessor
-	_, err := p.GenerateOnly("春天的茶园", "output.png")
+	_, err := p.GenerateOnly(context.Background(), "春天的茶园", "output.png")
 	if err == nil {
 		t.Fatal("expected error when provider is nil, got nil")
 	}
@@ -34,7 +36,7 @@ func TestProcessor_GenerateOnly_NoProvider(t *testing.T) {
 
 func TestProcessor_GenerateOnlyWithSize_NoAPIKey(t *testing.T) {
 	p := newTestProcessor(&config.ImageAPI{})
-	_, err := p.GenerateOnlyWithSize("春天的茶园", "16:9", "output.png")
+	_, err := p.GenerateOnlyWithSize(context.Background(), "春天的茶园", "16:9", "output.png")
 	if err == nil {
 		t.Fatal("expected error when API key is missing, got nil")
 	}
@@ -43,13 +45,15 @@ func TestProcessor_GenerateOnlyWithSize_NoAPIKey(t *testing.T) {
 func TestProcessor_SetRefImage(t *testing.T) {
 	p := newTestProcessor(&config.ImageAPI{})
 	p.SetRefImage("/path/to/ref.png")
-	if p.refImagePath != "/path/to/ref.png" {
-		t.Errorf("SetRefImage() refImagePath = %q, want %q", p.refImagePath, "/path/to/ref.png")
+	_, refImg := p.styleAndRef()
+	if refImg != "/path/to/ref.png" {
+		t.Errorf("SetRefImage() refImagePath = %q, want %q", refImg, "/path/to/ref.png")
 	}
 	// Zero-value should be empty
 	p2 := newTestProcessor(&config.ImageAPI{})
-	if p2.refImagePath != "" {
-		t.Errorf("default refImagePath should be empty, got %q", p2.refImagePath)
+	_, refImg2 := p2.styleAndRef()
+	if refImg2 != "" {
+		t.Errorf("default refImagePath should be empty, got %q", refImg2)
 	}
 }
 
@@ -124,8 +128,10 @@ func TestProcessor_buildPrompt(t *testing.T) {
 				Size: tt.size,
 			}
 			p := newTestProcessor(apiCfg)
-			if tt.overrideStyle != "" {
-				p.stylePrompt = tt.overrideStyle
+			if strings.TrimSpace(tt.overrideStyle) != "" {
+				p.stylePrompt = tt.overrideStyle // direct access for test setup
+			} else if tt.configStyle != "" {
+				p.stylePrompt = tt.configStyle // simulate config-based style
 			}
 			got := p.buildPrompt(tt.userPrompt)
 			if got != tt.want {

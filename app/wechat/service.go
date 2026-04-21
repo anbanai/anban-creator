@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/silenceper/wechat/v2"
 	wechatcache "github.com/silenceper/wechat/v2/cache"
@@ -19,18 +23,45 @@ import (
 	wechatconfig "github.com/silenceper/wechat/v2/officialaccount/config"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"github.com/silenceper/wechat/v2/officialaccount/material"
-	"go.uber.org/zap"
 )
+
+// accessTokenRegex matches access_token=<value> in URL query strings.
+var accessTokenRegex = regexp.MustCompile(`access_token=[^&\s"]+`)
+
+// maskAccessToken replaces access_token=<value> with access_token=*** in a string
+// to prevent leaking credentials in log and error messages.
+func maskAccessToken(s string) string {
+	return accessTokenRegex.ReplaceAllString(s, "access_token=***")
+}
+
+// maskedError wraps an error with its message masked to prevent leaking
+// access tokens in error strings. Supports Unwrap for errors.Is/As.
+type maskedError struct {
+	msg string
+	err error
+}
+
+func (e *maskedError) Error() string   { return e.msg }
+func (e *maskedError) Unwrap() error   { return e.err }
+
+// maskError wraps err so that Error() returns the access-token-masked message.
+// The original error is preserved via Unwrap for errors.Is/As compatibility.
+func maskError(prefix string, err error) error {
+	return &maskedError{
+		msg: fmt.Sprintf("%s: %s", prefix, maskAccessToken(err.Error())),
+		err: err,
+	}
+}
 
 // Service 微信服务
 type Service struct {
 	cfg *config.Config
-	log *zap.Logger
+	log zerolog.Logger
 	oa  *officialaccount.OfficialAccount
 }
 
 // NewService 创建微信服务
-func NewService(cfg *config.Config, log *zap.Logger) *Service {
+func NewService(cfg *config.Config, log zerolog.Logger) *Service {
 	wc := wechat.NewWechat()
 	memory := wechatcache.NewMemory()
 	wechatCfg := &wechatconfig.Config{
@@ -69,20 +100,15 @@ func (s *Service) UploadMaterial(filePath string) (*UploadMaterialResult, error)
 	// 调用微信 API 上传（SDK 接受文件路径字符串）
 	mediaID, url, err := mat.AddMaterial(material.MediaTypeImage, filePath)
 	if err != nil {
-		s.log.Error("upload material failed",
-			zap.String("path", filePath),
-			zap.Error(err))
+		s.log.Error().Str("path", filePath).Str("error", maskAccessToken(err.Error())).Msg("upload material failed")
 		if wErr := ParseWechatError(err); wErr != nil {
 			return nil, wErr
 		}
-		return nil, fmt.Errorf("upload material: %w", err)
+		return nil, maskError("upload material", err)
 	}
 
 	duration := time.Since(startTime)
-	s.log.Debug("material uploaded",
-		zap.String("path", filePath),
-		zap.String("media_id", MaskMediaID(mediaID)),
-		zap.Duration("duration", duration))
+	s.log.Debug().Str("path", filePath).Str("media_id", MaskMediaID(mediaID)).Dur("duration", duration).Msg("material uploaded")
 
 	return &UploadMaterialResult{
 		MediaID:   mediaID,
@@ -105,14 +131,12 @@ func (s *Service) CreateDraft(articles []*draft.Article) (*CreateDraftResult, er
 	// 直接调用 SDK 方法，SDK 接受 []*draft.Article
 	mediaID, err := dm.AddDraft(articles)
 	if err != nil {
-		s.log.Error("create draft failed", zap.Error(err))
-		return nil, fmt.Errorf("create draft: %w", err)
+		s.log.Error().Str("error", maskAccessToken(err.Error())).Msg("create draft failed")
+		return nil, maskError("create draft", err)
 	}
 
 	duration := time.Since(startTime)
-	s.log.Info("article draft created",
-		zap.String("media_id", MaskMediaID(mediaID)),
-		zap.Duration("duration", duration))
+	s.log.Info().Str("media_id", MaskMediaID(mediaID)).Dur("duration", duration).Msg("article draft created")
 
 	// 构造草稿 URL
 	draftURL := fmt.Sprintf("https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2&action=edit&createType=0&token=")
@@ -178,7 +202,7 @@ func (s *Service) CreateNewspicDraft(articles []NewspicArticle) (*CreateDraftRes
 	oa := s.getOfficialAccount()
 	accessToken, err := oa.GetAccessToken()
 	if err != nil {
-		return nil, fmt.Errorf("get access token: %w", err)
+		return nil, maskError("get access token", err)
 	}
 
 	// 构造请求
@@ -193,7 +217,7 @@ func (s *Service) CreateNewspicDraft(articles []NewspicArticle) (*CreateDraftRes
 
 	httpResp, err := http.Post(apiURL, "application/json", bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, fmt.Errorf("call wechat api: %w", err)
+		return nil, fmt.Errorf("call wechat api: %s", maskAccessToken(err.Error()))
 	}
 	defer httpResp.Body.Close()
 
@@ -210,9 +234,7 @@ func (s *Service) CreateNewspicDraft(articles []NewspicArticle) (*CreateDraftRes
 
 	// 检查错误
 	if resp.ErrCode != 0 {
-		s.log.Error("create newspic draft failed",
-			zap.Int("errcode", resp.ErrCode),
-			zap.String("errmsg", resp.ErrMsg))
+		s.log.Error().Int("errcode", resp.ErrCode).Str("errmsg", resp.ErrMsg).Msg("create newspic draft failed")
 		syntheticErr := fmt.Errorf("errcode=%d, %s", resp.ErrCode, resp.ErrMsg)
 		if wErr := ParseWechatError(syntheticErr); wErr != nil {
 			return nil, wErr
@@ -221,9 +243,7 @@ func (s *Service) CreateNewspicDraft(articles []NewspicArticle) (*CreateDraftRes
 	}
 
 	duration := time.Since(startTime)
-	s.log.Info("xls draft created",
-		zap.String("media_id", MaskMediaID(resp.MediaID)),
-		zap.Duration("duration", duration))
+	s.log.Info().Str("media_id", MaskMediaID(resp.MediaID)).Dur("duration", duration).Msg("xls draft created")
 
 	return &CreateDraftResult{
 		MediaID:  resp.MediaID,
@@ -254,11 +274,11 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 
 	list, err := dm.PaginateDraft(offset, count, true)
 	if err != nil {
-		s.log.Error("list drafts failed", zap.Error(err))
+		s.log.Error().Str("error", maskAccessToken(err.Error())).Msg("list drafts failed")
 		if wErr := ParseWechatError(err); wErr != nil {
 			return nil, wErr
 		}
-		return nil, fmt.Errorf("list drafts: %w", err)
+		return nil, maskError("list drafts", err)
 	}
 
 	result := &ListDraftsResult{
@@ -290,11 +310,11 @@ func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, erro
 	list, err := fp.Paginate(offset, count, true)
 	if err != nil {
 		if wErr := ParseWechatError(err); wErr != nil {
-			s.log.Debug("list published failed", zap.Int("errcode", wErr.ErrCode), zap.String("msg", wErr.UserMsg))
+			s.log.Debug().Int("errcode", wErr.ErrCode).Str("msg", wErr.UserMsg).Msg("list published failed")
 			return nil, wErr
 		}
-		s.log.Error("list published failed", zap.Error(err))
-		return nil, fmt.Errorf("list published: %w", err)
+		s.log.Error().Str("error", maskAccessToken(err.Error())).Msg("list published failed")
+		return nil, maskError("list published", err)
 	}
 
 	result := &ListPublishedResult{
@@ -348,7 +368,7 @@ func (s *Service) GetAccessToken() (*AccessTokenResult, error) {
 	oa := s.getOfficialAccount()
 	accessToken, err := oa.GetAccessToken()
 	if err != nil {
-		return nil, fmt.Errorf("get access token: %w", err)
+		return nil, maskError("get access token", err)
 	}
 
 	return &AccessTokenResult{
@@ -375,12 +395,14 @@ func (s *Service) UploadMaterialWithRetry(filePath string, maxRetries int) (*Upl
 		}
 		lastErr = err
 		if !IsRetryable(err) {
-			s.log.Info("upload error is not retryable, aborting", zap.Error(err))
+			s.log.Info().Str("error", maskAccessToken(err.Error())).Msg("upload error is not retryable, aborting")
 			return nil, err
 		}
 		if i < maxRetries-1 {
-			delay := time.Duration(i+1) * time.Second
-			s.log.Info("retrying upload", zap.Int("attempt", i+2), zap.Duration("delay", delay))
+			delay := time.Duration(math.Pow(2, float64(i+1)) * float64(time.Second))
+				jitter := time.Duration(rand.Int63n(int64(delay / 2)))
+				delay += jitter
+			s.log.Info().Int("attempt", i+2).Dur("delay", delay).Msg("retrying upload")
 			time.Sleep(delay)
 		}
 	}

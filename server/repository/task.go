@@ -295,6 +295,19 @@ func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskI
 	return result.RowsAffected > 0, nil
 }
 
+// GetTaskProgressAndStatus returns only the progress_log and status columns for
+// efficient polling without loading the full task row.
+func (r *taskRepository) GetTaskProgressAndStatus(ctx context.Context, taskID string) (progressLog string, status string, err error) {
+	var row struct {
+		ProgressLog string `gorm:"column:progress_log"`
+		Status      string `gorm:"column:status"`
+	}
+	if err := r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", taskID).Select("progress_log, status").Scan(&row).Error; err != nil {
+		return "", "", err
+	}
+	return row.ProgressLog, row.Status, nil
+}
+
 // SetPublished toggles the published flag and updates published_at timestamp.
 func (r *taskRepository) SetPublished(ctx context.Context, id string, published bool) error {
 	updates := map[string]interface{}{"published": published}

@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/rs/zerolog"
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/app/wechat"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
-	"go.uber.org/zap"
 )
 
 // ServiceError 草稿服务错误，携带修复建议
@@ -26,14 +27,20 @@ func (e *ServiceError) Hint() string  { return e.HintText }
 // Service 草稿服务
 type Service struct {
 	cfg *config.Config
-	log *zap.Logger
+	log zerolog.Logger
+	ws  *wechat.Service
 }
 
 // NewService 创建草稿服务
-func NewService(cfg *config.Config, log *zap.Logger) *Service {
+func NewService(cfg *config.Config, log zerolog.Logger) *Service {
+	var ws *wechat.Service
+	if cfg.Wechat.AppID != "" && cfg.Wechat.Secret != "" {
+		ws = wechat.NewService(cfg, log)
+	}
 	return &Service{
 		cfg: cfg,
 		log: log,
+		ws:  ws,
 	}
 }
 
@@ -62,7 +69,7 @@ type DraftResult struct {
 
 // CreateDraftFromFile 从 JSON 文件创建草稿
 func (s *Service) CreateDraftFromFile(jsonFile string) (*DraftResult, error) {
-	s.log.Info("creating draft from file", zap.String("file", jsonFile))
+	s.log.Info().Str("file", jsonFile).Msg("creating draft from file")
 
 	// 读取 JSON 文件
 	data, err := os.ReadFile(jsonFile)
@@ -87,10 +94,12 @@ func (s *Service) CreateDraftFromFile(jsonFile string) (*DraftResult, error) {
 
 // CreateDraft 创建草稿
 func (s *Service) CreateDraft(articles []Article) (*DraftResult, error) {
-	s.log.Info("creating draft")
+	s.log.Info().Msg("creating draft")
 
-	// 创建 WeChat Service
-	ws := wechat.NewService(s.cfg, s.log)
+	if s.ws == nil {
+		return nil, &ServiceError{Message: "wechat not configured", HintText: "请先配置微信公众号 AppID 和 Secret"}
+	}
+	ws := s.ws
 
 	// 转换为 SDK 格式
 	var draftArticles []*draft.Article
@@ -169,7 +178,10 @@ type PublishedItem struct {
 
 // ListDrafts 获取草稿列表
 func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
-	ws := wechat.NewService(s.cfg, s.log)
+	if s.ws == nil {
+		return nil, &ServiceError{Message: "wechat not configured", HintText: "请先配置微信公众号 AppID 和 Secret"}
+	}
+	ws := s.ws
 	result, err := ws.ListDrafts(offset, count)
 	if err != nil {
 		return nil, err
@@ -195,7 +207,10 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 
 // ListPublished 获取已发布文章列表
 func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, error) {
-	ws := wechat.NewService(s.cfg, s.log)
+	if s.ws == nil {
+		return nil, &ServiceError{Message: "wechat not configured", HintText: "请先配置微信公众号 AppID 和 Secret"}
+	}
+	ws := s.ws
 	result, err := ws.ListPublished(offset, count)
 	if err != nil {
 		return nil, err
@@ -241,7 +256,7 @@ type ImageXlsResult struct {
 
 // CreateImageXls 创建小绿书（图文笔记）
 func (s *Service) CreateImageXls(req *ImageXlsRequest) (*ImageXlsResult, error) {
-	s.log.Info("creating image xls", zap.String("title", req.Title))
+	s.log.Info().Str("title", req.Title).Msg("creating image xls")
 
 	// 验证标题
 	if req.Title == "" {
@@ -274,9 +289,10 @@ func (s *Service) CreateImageXls(req *ImageXlsRequest) (*ImageXlsResult, error) 
 	}
 
 	// 创建 WeChat Service
-	ws := wechat.NewService(s.cfg, s.log)
-
-	// 上传图片获取 media_id
+	if s.ws == nil {
+		return nil, &ServiceError{Message: "wechat not configured", HintText: "请先配置微信公众号 AppID 和 Secret"}
+	}
+	ws := s.ws
 	var imageList []wechat.NewspicImageItem
 	var uploadedIDs []string
 
@@ -288,10 +304,7 @@ func (s *Service) CreateImageXls(req *ImageXlsRequest) (*ImageXlsResult, error) 
 
 	// 再上传本地图片
 	for i, imgPath := range images {
-		s.log.Info("uploading image",
-			zap.Int("index", len(req.MediaIDs)+i+1),
-			zap.Int("total", totalCount),
-			zap.String("path", imgPath))
+			s.log.Info().Int("index", len(req.MediaIDs)+i+1).Int("total", totalCount).Str("path", imgPath).Msg("uploading image")
 
 		result, err := ws.UploadMaterialWithRetry(imgPath, 3)
 		if err != nil {
@@ -425,7 +438,7 @@ func GenerateDigestFromContent(content string, maxLen int) string {
 	content = stripHTML(content)
 
 	// 截取
-	if len(content) > maxLen {
+	if utf8.RuneCountInString(content) > maxLen {
 		runes := []rune(content)
 		if len(runes) > maxLen {
 			content = string(runes[:maxLen]) + "..."

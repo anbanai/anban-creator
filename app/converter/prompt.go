@@ -443,5 +443,5 @@ func EstimateTokenCount(text string) int {
 		}
 	}
 
-	return (chineseChars / 1) + (otherChars / 4)
+	return (chineseChars * 2 / 3) + (otherChars / 4)
 }
