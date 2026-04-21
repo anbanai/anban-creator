@@ -73,6 +73,14 @@ export default function TaskDetailPage() {
     },
   })
 
+  const togglePublished = useMutation({
+    mutationFn: ({ published }: { published: boolean }) =>
+      api.tasks.markPublished(id!, published),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+    },
+  })
+
   const connectSSE = async (retries = 0) => {
     if (!id) return
     const currentToken = tokenRef.current
@@ -181,14 +189,6 @@ export default function TaskDetailPage() {
   }
 
   const canCancel = task.status === 'pending' || task.status === 'running'
-
-  const togglePublished = useMutation({
-    mutationFn: ({ published }: { published: boolean }) =>
-      api.tasks.markPublished(task.id, published),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['task', id] })
-    },
-  })
 
   return (
     <div className="space-y-6">
