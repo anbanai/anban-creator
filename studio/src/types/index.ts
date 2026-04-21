@@ -49,5 +49,8 @@ export type {
 // API Key
 export type { APIKey, CreateAPIKeyResponse } from './api-key'
 
+// Usage
+export type { UsageStats, TypeStatEntry } from './usage'
+
 // Common
 export type { PaginatedResponse } from './common'

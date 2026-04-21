@@ -13,6 +13,7 @@ import {
   Coins,
   Menu,
   X,
+  Activity,
 } from 'lucide-react'
 import UserAccountPopover from '@/components/auth/UserAccountPopover'
 
@@ -23,6 +24,7 @@ const navItems = [
   { to: '/tasks', label: '任务', icon: ListChecks },
   { to: '/timeline', label: '时间轴', icon: Clock },
   { to: '/credits', label: '积分', icon: Coins },
+  { to: '/usage', label: '用量', icon: Activity },
 ]
 
 function ThemeToggle() {

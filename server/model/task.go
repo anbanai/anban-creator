@@ -6,14 +6,19 @@ import "time"
 type Task struct {
 	ID           string     `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID       string     `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
-	ChannelID    string     `gorm:"type:char(36);index:idx_channel_status,priority:1" json:"channel_id"`
+	ChannelID    string     `gorm:"type:char(36);index" json:"channel_id"`
 	PlanID       *uint      `gorm:"index" json:"plan_id"`
 	Type         string     `gorm:"type:varchar(20);not null" json:"type"`
-	Status       string     `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2;index:idx_channel_status,priority:2" json:"status"`
+	Status       string     `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
 	Topic        string     `gorm:"type:varchar(500)" json:"topic"`
 	ImageRatio   string     `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ProgressLog  string     `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Result       *string    `gorm:"type:json" json:"result,omitempty"`
+	InputTokens         *int64   `json:"input_tokens,omitempty"`
+	OutputTokens        *int64   `json:"output_tokens,omitempty"`
+	CacheReadTokens     *int64   `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens *int64   `json:"cache_creation_tokens,omitempty"`
+	TotalCostUSD        *float64 `json:"total_cost_usd,omitempty"`
 	ErrorMessage string     `gorm:"type:text" json:"error_message,omitempty"`
 	StartedAt    *time.Time `gorm:"index" json:"started_at"`
 	CompletedAt  *time.Time `gorm:"index" json:"completed_at"`

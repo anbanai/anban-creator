@@ -295,19 +295,6 @@ func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskI
 	return result.RowsAffected > 0, nil
 }
 
-// GetTaskProgressAndStatus returns only the progress_log and status columns for
-// efficient polling without loading the full task row.
-func (r *taskRepository) GetTaskProgressAndStatus(ctx context.Context, taskID string) (progressLog string, status string, err error) {
-	var row struct {
-		ProgressLog string `gorm:"column:progress_log"`
-		Status      string `gorm:"column:status"`
-	}
-	if err := r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", taskID).Select("progress_log, status").Scan(&row).Error; err != nil {
-		return "", "", err
-	}
-	return row.ProgressLog, row.Status, nil
-}
-
 // SetPublished toggles the published flag and updates published_at timestamp.
 func (r *taskRepository) SetPublished(ctx context.Context, id string, published bool) error {
 	updates := map[string]interface{}{"published": published}
@@ -318,5 +305,85 @@ func (r *taskRepository) SetPublished(ctx context.Context, id string, published 
 		updates["published_at"] = nil
 	}
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// UpdateTokenUsage writes denormalized token usage and cost columns for a task.
+func (r *taskRepository) UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"input_tokens":          inputTokens,
+			"output_tokens":         outputTokens,
+			"cache_read_tokens":     cacheReadTokens,
+			"cache_creation_tokens": cacheCreationTokens,
+			"total_cost_usd":        costUSD,
+		}).Error
+}
+
+// AggregateUsageByUser returns SQL-level SUM aggregates for token usage and cost.
+func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, channelID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error) {
+	type row struct {
+		Tasks        int64
+		Input        int64
+		Output       int64
+		CacheRead    int64
+		CacheCreated int64
+		Cost         float64
+	}
+	var r2 row
+	q := r.db.WithContext(ctx).Model(&model.Task{}).
+		Select(
+			"COUNT(*) AS tasks",
+			"COALESCE(SUM(input_tokens), 0) AS input",
+			"COALESCE(SUM(output_tokens), 0) AS output",
+			"COALESCE(SUM(cache_read_tokens), 0) AS cache_read",
+			"COALESCE(SUM(cache_creation_tokens), 0) AS cache_created",
+			"COALESCE(SUM(total_cost_usd), 0) AS cost",
+		).
+		Where("user_id = ?", userID).
+		Where("created_at >= ? AND created_at <= ?", from, to).
+		Where("status IN ?", []string{model.TaskStatusCompleted, model.TaskStatusFailed})
+	if channelID != "" {
+		q = q.Where("channel_id = ?", channelID)
+	}
+	if err = q.Scan(&r2).Error; err != nil {
+		return
+	}
+	return r2.Tasks, r2.Input, r2.Output, r2.CacheRead, r2.CacheCreated, r2.Cost, nil
+}
+
+// TypeUsageRow holds per-type aggregated usage data from a SQL GROUP BY query.
+type TypeUsageRow struct {
+	Type               string
+	Count              int64
+	InputTokens        int64
+	OutputTokens       int64
+	CacheReadTokens    int64
+	CacheCreationTokens int64
+	CostUSD            float64
+}
+
+// AggregateUsageByType returns per-type token usage and cost via SQL GROUP BY.
+func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, channelID string) ([]TypeUsageRow, error) {
+	var rows []TypeUsageRow
+	q := r.db.WithContext(ctx).Model(&model.Task{}).
+		Select(
+			"type",
+			"COUNT(*) AS count",
+			"COALESCE(SUM(input_tokens), 0) AS input_tokens",
+			"COALESCE(SUM(output_tokens), 0) AS output_tokens",
+			"COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens",
+			"COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens",
+			"COALESCE(SUM(total_cost_usd), 0) AS cost_usd",
+		).
+		Where("user_id = ?", userID).
+		Where("created_at >= ? AND created_at <= ?", from, to).
+		Where("status IN ?", []string{model.TaskStatusCompleted, model.TaskStatusFailed})
+	if channelID != "" {
+		q = q.Where("channel_id = ?", channelID)
+	}
+	if err := q.Group("type").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 

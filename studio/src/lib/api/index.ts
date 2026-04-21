@@ -5,6 +5,7 @@ import { timelineApi } from './timeline'
 import { channelsApi } from './channels'
 import { creditsApi } from './credits'
 import { apiKeysApi } from './api-keys'
+import { usageApi } from './usage'
 
 export const api = {
   auth: authApi,
@@ -14,4 +15,5 @@ export const api = {
   channels: channelsApi,
   credits: creditsApi,
   apiKeys: apiKeysApi,
+  usage: usageApi,
 }
