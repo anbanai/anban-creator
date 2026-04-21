@@ -1,6 +1,6 @@
-import { type Channel, type ChannelStats } from '@/lib/api'
+import type { Channel, ChannelStats } from '@/types'
 import { platformLabels } from '@/lib/labels'
-import { Badge } from '@/components/ui/Badge'
+import Badge from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 
 interface ChannelCardProps {
@@ -23,7 +23,7 @@ export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDe
   const platformBadge = platformBadgeVariant[channel.platform] || ('neutral' as const)
 
   return (
-    <div className="group rounded-lg border border-border bg-card p-5 transition-colors duration-150 hover:border-primary/30">
+    <div className="group rounded-lg border border-border bg-card p-5 transition-all duration-200 hover:border-primary/30 hover:shadow-md active:scale-[0.98]">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           {channel.avatar_url ? (
@@ -60,22 +60,22 @@ export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDe
       )}
       <div className="mt-3 flex gap-1.5">
         {onEdit && (
-          <Button variant="ghost" size="xs" onClick={() => onEdit(channel)}>
+          <Button variant="ghost" size="xs" onClick={() => onEdit(channel)} aria-label="编辑频道">
             编辑
           </Button>
         )}
         {channel.status === 'active' && onArchive && (
-          <Button variant="ghost" size="xs" onClick={() => onArchive(channel.id)}>
+          <Button variant="ghost" size="xs" onClick={() => onArchive(channel.id)} aria-label="归档频道">
             归档
           </Button>
         )}
         {channel.status === 'archived' && onRestore && (
-          <Button variant="ghost" size="xs" onClick={() => onRestore(channel.id)}>
+          <Button variant="ghost" size="xs" onClick={() => onRestore(channel.id)} aria-label="恢复频道">
             恢复
           </Button>
         )}
         {onDelete && (
-          <Button variant="destructive" size="xs" onClick={() => onDelete(channel.id)}>
+          <Button variant="destructive" size="xs" onClick={() => onDelete(channel.id)} aria-label="删除频道">
             删除
           </Button>
         )}

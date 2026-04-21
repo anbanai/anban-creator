@@ -145,7 +145,7 @@ function FilePreviewModalContent({
         <iframe
           srcDoc={htmlContent}
           sandbox="allow-scripts"
-          className="w-full rounded-lg border border-border bg-white"
+          className="w-full rounded-lg border border-border bg-background"
           style={{ height: '70vh' }}
           title="文章预览"
         />
@@ -309,7 +309,7 @@ export function FilePreviewGallery({ files, taskId, inlineItemClassName }: { fil
       ))}
       {open && currentFile && (
         <Dialog open={open} onOpenChange={setOpen}>
-          <FilePreviewModalContent file={currentFile} taskId={taskId}>
+          <FilePreviewModalContent key={currentFile.id} file={currentFile} taskId={taskId}>
             {hasMultiple && (
               <>
                 {/* Counter */}
@@ -321,6 +321,7 @@ export function FilePreviewGallery({ files, taskId, inlineItemClassName }: { fil
                 {/* Prev arrow */}
                 <button
                   onClick={goPrev}
+                  aria-label="上一张"
                   className="absolute left-2 top-1/2 z-50 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
                 >
                   <ChevronLeft className="h-5 w-5" />
@@ -328,6 +329,7 @@ export function FilePreviewGallery({ files, taskId, inlineItemClassName }: { fil
                 {/* Next arrow */}
                 <button
                   onClick={goNext}
+                  aria-label="下一张"
                   className="absolute right-2 top-1/2 z-50 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
                 >
                   <ChevronRight className="h-5 w-5" />

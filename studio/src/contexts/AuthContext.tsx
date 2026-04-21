@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
-import { api, type User, type AuthResponse } from '@/lib/api'
+import { api } from '@/lib/api'
+import type { User, AuthResponse } from '@/types'
 
 // --- Types ---
 

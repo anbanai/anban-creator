@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import { useAuth } from '@/contexts/AuthContext'
 import { registerSchema, type RegisterFormValues } from '@/lib/schemas'
 import { Input } from '@/components/ui/Input'
@@ -41,9 +42,8 @@ export default function RegisterPage() {
       await api.auth.sendVerificationCode(emailValue)
       setCountdown(COUNTDOWN_SECONDS)
       toast.success('验证码已发送')
-    } catch (err: any) {
-      const msg = err?.response?.data?.msg || '发送验证码失败，请稍后重试'
-      toast.error(msg)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '发送验证码失败，请稍后重试'))
     } finally {
       setSendingCode(false)
     }
@@ -54,9 +54,8 @@ export default function RegisterPage() {
       const response = await api.auth.register(values.email, values.password, values.code, values.nickname || undefined)
       login(response.token, response.refresh_token, response.user)
       navigate('/', { replace: true })
-    } catch (err: any) {
-      const msg = err?.response?.data?.msg || err?.message || '注册失败，请重试。'
-      toast.error(msg)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '注册失败，请重试。'))
     }
   }
 

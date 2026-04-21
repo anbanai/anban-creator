@@ -5,6 +5,7 @@ import React, { useState, Suspense } from 'react'
 import { Loader2 } from 'lucide-react'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { Toaster } from '@/components/ui/sonner'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import AppLayout from '@/components/layout/AppLayout'
 import ShortcutHelp from '@/components/ShortcutHelp'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
@@ -26,6 +27,16 @@ function LoadingSpinner() {
     <div className="flex items-center justify-center py-16">
       <Loader2 className="h-8 w-8 animate-spin text-primary" />
     </div>
+  )
+}
+
+function LazyPage({ component: Component }: { component: React.LazyExoticComponent<React.ComponentType> }) {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <ErrorBoundary>
+        <Component />
+      </ErrorBoundary>
+    </Suspense>
   )
 }
 
@@ -76,46 +87,44 @@ function KeyboardShortcuts() {
 
 function AppRoutes() {
   return (
-    <Routes>
-      <Route
-        path="/login"
-        element={
-          <PublicRoute>
-            <Suspense fallback={<LoadingSpinner />}>
-              <LoginPage />
-            </Suspense>
-          </PublicRoute>
-        }
-      />
-      <Route
-        path="/register"
-        element={
-          <PublicRoute>
-            <Suspense fallback={<LoadingSpinner />}>
-              <RegisterPage />
-            </Suspense>
-          </PublicRoute>
-        }
-      />
-      <Route
-        element={
-          <ProtectedRoute>
-            <KeyboardShortcuts />
-            <AppLayout />
-          </ProtectedRoute>
-        }
-      >
-        <Route index element={<Suspense fallback={<LoadingSpinner />}><DashboardPage /></Suspense>} />
-        <Route path="timeline" element={<Suspense fallback={<LoadingSpinner />}><TimelinePage /></Suspense>} />
-        <Route path="channels" element={<Suspense fallback={<LoadingSpinner />}><ChannelsPage /></Suspense>} />
-        <Route path="plans" element={<Suspense fallback={<LoadingSpinner />}><PlansPage /></Suspense>} />
-        <Route path="tasks" element={<Suspense fallback={<LoadingSpinner />}><TasksPage /></Suspense>} />
-        <Route path="tasks/:id" element={<Suspense fallback={<LoadingSpinner />}><TaskDetailPage /></Suspense>} />
-        <Route path="credits" element={<Suspense fallback={<LoadingSpinner />}><CreditsPage /></Suspense>} />
-        <Route path="settings" element={<Suspense fallback={<LoadingSpinner />}><SettingsPage /></Suspense>} />
-      </Route>
-      <Route path="*" element={<NotFoundPage />} />
-    </Routes>
+    <ErrorBoundary>
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            <PublicRoute>
+              <LazyPage component={LoginPage} />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <PublicRoute>
+              <LazyPage component={RegisterPage} />
+            </PublicRoute>
+          }
+        />
+        <Route
+          element={
+            <ProtectedRoute>
+              <KeyboardShortcuts />
+              <AppLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<LazyPage component={DashboardPage} />} />
+          <Route path="timeline" element={<LazyPage component={TimelinePage} />} />
+          <Route path="channels" element={<LazyPage component={ChannelsPage} />} />
+          <Route path="plans" element={<LazyPage component={PlansPage} />} />
+          <Route path="tasks" element={<LazyPage component={TasksPage} />} />
+          <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />
+          <Route path="credits" element={<LazyPage component={CreditsPage} />} />
+          <Route path="settings" element={<LazyPage component={SettingsPage} />} />
+        </Route>
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </ErrorBoundary>
   )
 }
 
@@ -134,7 +143,7 @@ export default function App() {
       <BrowserRouter>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthProvider>
-            <Toaster richColors position="bottom-right" />
+            <Toaster richColors position="bottom-right" closeButton duration={4000} />
             <AppRoutes />
           </AuthProvider>
         </ThemeProvider>

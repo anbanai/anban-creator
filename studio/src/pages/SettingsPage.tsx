@@ -1,59 +1,61 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
-import { api, type APIKey, type CreateAPIKeyResponse } from '@/lib/api'
+import { api } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
+import type { CreateAPIKeyResponse } from '@/types'
 
 export default function SettingsPage() {
   const { user } = useAuth()
-  const [apiKeys, setApiKeys] = useState<APIKey[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
   const [keyName, setKeyName] = useState('')
-  const [creating, setCreating] = useState(false)
   const [newKeyData, setNewKeyData] = useState<CreateAPIKeyResponse | null>(null)
   const [copied, setCopied] = useState(false)
+  const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
 
-  const fetchKeys = useCallback(async () => {
-    try {
+  const { data: apiKeys = [], isLoading } = useQuery({
+    queryKey: queryKeys.apiKeys.all,
+    queryFn: async () => {
       const data = await api.apiKeys.list()
-      setApiKeys(data.items || [])
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+      return data.items || []
+    },
+  })
 
-  useEffect(() => {
-    fetchKeys()
-  }, [fetchKeys])
-
-  const handleCreate = async () => {
-    setCreating(true)
-    try {
-      const result = await api.apiKeys.create(keyName || 'Default')
+  const createMutation = useMutation({
+    mutationFn: (name: string) => api.apiKeys.create(name || 'Default'),
+    onSuccess: (result) => {
+      toast.success('密钥创建成功')
       setNewKeyData(result)
       setKeyName('')
       setShowCreate(false)
-      fetchKeys()
-    } catch {
-      // ignore
-    } finally {
-      setCreating(false)
-    }
-  }
+      queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.all })
+    },
+    onError: () => {
+      toast.error('创建密钥失败，请重试')
+    },
+  })
 
-  const handleRevoke = async (id: string) => {
-    if (!confirm('确定要吊销此密钥吗？吊销后使用此密钥的应用将无法继续访问。')) return
-    try {
-      await api.apiKeys.revoke(id)
-      fetchKeys()
-    } catch {
-      // ignore
-    }
+  const revokeMutation = useMutation({
+    mutationFn: (id: string) => api.apiKeys.revoke(id),
+    onSuccess: () => {
+      toast.success('密钥已吊销')
+      queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.all })
+      setRevokeTarget(null)
+    },
+    onError: () => {
+      toast.error('吊销密钥失败，请重试')
+    },
+  })
+
+  const handleCreate = () => {
+    createMutation.mutate(keyName)
   }
 
   const handleCopy = (text: string) => {
@@ -135,8 +137,8 @@ export default function SettingsPage() {
                 onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
                 className="flex-1"
               />
-              <Button size="sm" onClick={handleCreate} disabled={creating}>
-                {creating ? '创建中...' : '确定'}
+              <Button size="sm" onClick={handleCreate} disabled={createMutation.isPending}>
+                {createMutation.isPending ? '创建中...' : '确定'}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => { setShowCreate(false); setKeyName('') }}>
                 取消
@@ -145,7 +147,7 @@ export default function SettingsPage() {
           )}
 
           {/* Key list */}
-          {loading ? (
+          {isLoading ? (
             <p className="text-xs text-muted-foreground">加载中...</p>
           ) : apiKeys.length === 0 ? (
             <p className="text-xs text-muted-foreground">暂无密钥。创建一个密钥以在 Claude Code 中使用。</p>
@@ -166,7 +168,7 @@ export default function SettingsPage() {
                       )}
                     </p>
                   </div>
-                  <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-600" onClick={() => handleRevoke(key.id)}>
+                  <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-600" onClick={() => setRevokeTarget(key.id)}>
                     吊销
                   </Button>
                 </div>
@@ -175,6 +177,22 @@ export default function SettingsPage() {
           )}
         </CardBody>
       </Card>
+
+      {/* Revoke confirmation */}
+      <AlertDialog open={!!revokeTarget} onOpenChange={(v) => { if (!v) setRevokeTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定要吊销此密钥吗？</AlertDialogTitle>
+            <AlertDialogDescription>吊销后使用此密钥的应用将无法继续访问，此操作不可撤销。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => { if (revokeTarget) revokeMutation.mutate(revokeTarget) }}>
+              吊销
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

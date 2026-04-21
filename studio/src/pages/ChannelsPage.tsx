@@ -1,14 +1,16 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Plus, Loader2, Inbox, ChevronDown } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { api, type Channel, type ChannelStats, type CreateChannelRequest, type PlatformConfig } from '@/lib/api'
+import { api } from '@/lib/api'
+import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig } from '@/types'
+import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
+import Badge from '@/components/ui/Badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/textarea'
@@ -18,6 +20,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { channelSchema, type ChannelFormValues } from '@/lib/schemas'
+import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 
@@ -91,14 +94,25 @@ export default function ChannelsPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [fetchingProfile, setFetchingProfile] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [showDirtyDialog, setShowDirtyDialog] = useState(false)
 
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelSchema),
     defaultValues: CHANNEL_FORM_DEFAULTS,
   })
 
-  const selectedPlatform = form.watch('platform')
-  const profileUrl = form.watch('profile_url')
+  const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
+  const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
+
+  // Auto-focus profile_url field when dialog opens
+  useEffect(() => {
+    if (modalOpen) {
+      setTimeout(() => form.setFocus('profile_url'), 100)
+    }
+  }, [modalOpen, form])
+
+  // Warn before closing with unsaved changes
+  useFormDirtyCheck(form, modalOpen)
 
   const { data: platformConfigs } = useQuery({
     queryKey: ['platform-configs'],
@@ -182,10 +196,10 @@ export default function ChannelsPage() {
       toast.success('频道创建成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-details'] })
-      closeModal()
+      resetModal()
     },
-    onError: (err: any) => {
-      toast.error(err?.response?.data?.msg || '创建频道失败，请重试')
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '创建频道失败，请重试'))
     },
   })
 
@@ -196,7 +210,7 @@ export default function ChannelsPage() {
       toast.success('频道更新成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-details'] })
-      closeModal()
+      resetModal()
     },
     onError: () => {
       toast.error('更新频道失败，请重试')
@@ -246,8 +260,17 @@ export default function ChannelsPage() {
   }
 
   function closeModal() {
+    if (form.formState.isDirty) {
+      setShowDirtyDialog(true)
+      return
+    }
+    resetModal()
+  }
+
+  function resetModal() {
     setModalOpen(false)
     setEditingChannel(null)
+    setAdvancedOpen(false)
     form.reset(CHANNEL_FORM_DEFAULTS)
   }
 
@@ -618,6 +641,20 @@ export default function ChannelsPage() {
             <AlertDialogAction variant="destructive" onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
               删除
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Dirty form confirmation */}
+      <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>放弃编辑？</AlertDialogTitle>
+            <AlertDialogDescription>你有未保存的更改，确定要关闭吗？</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>继续编辑</AlertDialogCancel>
+            <AlertDialogAction onClick={resetModal}>放弃</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

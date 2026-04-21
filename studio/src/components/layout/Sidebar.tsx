@@ -15,7 +15,6 @@ import {
   X,
 } from 'lucide-react'
 import UserAccountPopover from '@/components/auth/UserAccountPopover'
-import NotificationCenter from '@/components/NotificationCenter'
 
 const navItems = [
   { to: '/', label: '仪表盘', icon: LayoutDashboard, end: true },
@@ -140,7 +139,6 @@ export default function Sidebar() {
         {/* Bottom: Notifications + User + Theme */}
         <div className="flex items-center gap-1 border-t border-sidebar-border px-3 py-3">
           <UserAccountPopover />
-          <NotificationCenter />
           <ThemeToggle />
         </div>
       </aside>

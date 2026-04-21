@@ -3,6 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import { useAuth } from '@/contexts/AuthContext'
 import { loginSchema, type LoginFormValues } from '@/lib/schemas'
 import { Input } from '@/components/ui/Input'
@@ -23,9 +24,8 @@ export default function LoginPage() {
       const response = await api.auth.login(values.email, values.password)
       login(response.token, response.refresh_token, response.user)
       navigate('/', { replace: true })
-    } catch (err: any) {
-      const msg = err?.response?.data?.msg || err?.message || '登录失败，请重试。'
-      toast.error(msg)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '登录失败，请重试。'))
     }
   }
 

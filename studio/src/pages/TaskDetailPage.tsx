@@ -6,7 +6,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ArrowLeft, Loader2, Download, Eye } from 'lucide-react'
 import { api } from '@/lib/api'
-import type { TaskFile } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
+import type { TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/Button'
@@ -36,6 +37,12 @@ export default function TaskDetailPage() {
   const abortRef = useRef<AbortController | null>(null)
   const tokenRef = useRef(token)
   tokenRef.current = token
+
+  const MAX_SSE_LOGS = 500
+  function appendLog(prev: string[], entry: string): string[] {
+    const next = [...prev, entry]
+    return next.length > MAX_SSE_LOGS ? next.slice(-MAX_SSE_LOGS) : next
+  }
 
   const { data: task, isLoading } = useQuery({
     queryKey: ['task', id],
@@ -69,6 +76,7 @@ export default function TaskDetailPage() {
       abortRef.current?.abort()
       abortRef.current = null
       queryClient.invalidateQueries({ queryKey: ['task', id] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
       setShowCancelDialog(false)
     },
   })
@@ -78,6 +86,7 @@ export default function TaskDetailPage() {
       api.tasks.markPublished(id!, published),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['task', id] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
     },
   })
 
@@ -100,7 +109,7 @@ export default function TaskDetailPage() {
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       if (retries < 3 && !controller.signal.aborted) {
-        setSseLogs((prev) => [...prev, `连接断开，正在重试 (${retries + 1}/3)...`])
+        setSseLogs((prev) => appendLog(prev, `连接断开，正在重试 (${retries + 1}/3)...`))
         await new Promise((r) => setTimeout(r, 2000 * (retries + 1)))
         if (controller.signal.aborted) return
         return connectSSE(retries + 1)
@@ -118,11 +127,11 @@ export default function TaskDetailPage() {
     switch (event.event) {
       case 'progress': {
         if (typeof parsed === 'string') {
-          setSseLogs((prev) => [...prev, parsed])
+          setSseLogs((prev) => appendLog(prev, parsed))
         } else {
           const data = parsed as { progress: number; message: string }
           if (data.progress != null) {
-            setSseLogs((prev) => [...prev, `[${data.progress}%] ${data.message}`])
+            setSseLogs((prev) => appendLog(prev, `[${data.progress}%] ${data.message}`))
           }
         }
         break
@@ -130,13 +139,13 @@ export default function TaskDetailPage() {
       case 'output': {
         const data = typeof parsed === 'string' ? parsed : (parsed as { text?: string }).text || ''
         if (data) {
-          setSseLogs((prev) => [...prev, data])
+          setSseLogs((prev) => appendLog(prev, data))
         }
         break
       }
       case 'error': {
         const data = typeof parsed === 'string' ? parsed : (parsed as { error?: string }).error || 'Unknown error'
-        setSseLogs((prev) => [...prev, `错误：${data}`])
+        setSseLogs((prev) => appendLog(prev, `错误：${data}`))
         break
       }
       case 'done':
@@ -148,13 +157,13 @@ export default function TaskDetailPage() {
         const statusText = event.event === 'completed' ? '任务完成'
           : event.event === 'failed' ? '任务失败'
             : event.event === 'cancelled' ? '任务取消' : '任务完成'
-        setSseLogs((prev) => [...prev, `--- ${statusText} ---`])
+        setSseLogs((prev) => appendLog(prev, `--- ${statusText} ---`))
         break
       }
       default: {
         const text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed)
         if (text && text !== '{}' && text.length > 0) {
-          setSseLogs((prev) => [...prev, text])
+          setSseLogs((prev) => appendLog(prev, text))
         }
       }
     }
@@ -353,7 +362,7 @@ export default function TaskDetailPage() {
               </div>
               <div className="h-2 w-full rounded-full bg-muted">
                 <div
-                  className="h-2 rounded-full bg-primary transition-all duration-500"
+                  className="h-2 rounded-full bg-primary transition-all duration-500 animate-pulse"
                   style={{ width: `${task.progress ?? 0}%` }}
                 />
               </div>

@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Loader2, ClipboardList, Check } from 'lucide-react'
-import { api, type TaskType, type CreateTaskRequest } from '@/lib/api'
+import { api } from '@/lib/api'
+import type { TaskType, TaskStatus, CreateTaskRequest } from '@/types'
+import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -14,10 +16,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/Input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
+import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -47,6 +51,7 @@ export default function TasksPage() {
   const [modalOpen, setModalOpen] = useState(shouldCreate)
   const [quantity, setQuantity] = useState(1)
   const [channelImageRatio, setChannelImageRatio] = useState('')
+  const [showDirtyDialog, setShowDirtyDialog] = useState(false)
 
   const { data: channels = [] } = useQuery({
     queryKey: ['channels', 'active'],
@@ -63,9 +68,21 @@ export default function TasksPage() {
   })
 
   const form = useForm<CreateTaskFormValues>({
-    resolver: zodResolver(createTaskSchema) as any,
+    resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
     defaultValues: { type: 'rednote', topic: '', channel_id: '', quantity: 1, image_ratio: '' },
   })
+
+  const watchedType = useWatch({ control: form.control, name: 'type' })
+
+  // Auto-focus topic field when dialog opens
+  useEffect(() => {
+    if (modalOpen) {
+      setTimeout(() => form.setFocus('topic'), 100)
+    }
+  }, [modalOpen, form])
+
+  // Warn before closing with unsaved changes
+  useFormDirtyCheck(form, modalOpen)
 
   // Clear create param on mount
   useEffect(() => {
@@ -91,8 +108,11 @@ export default function TasksPage() {
     mutationFn: (data: CreateTaskRequest) => api.tasks.create(data),
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      closeModal()
-      navigate(`/tasks/${task.id}`)
+      toast.success('任务创建成功')
+      setTimeout(() => {
+        resetModal()
+        navigate(`/tasks/${task.id}`)
+      }, 800)
     },
     onError: () => {
       toast.error('创建任务失败，请重试')
@@ -116,6 +136,14 @@ export default function TasksPage() {
   }
 
   function closeModal() {
+    if (form.formState.isDirty) {
+      setShowDirtyDialog(true)
+      return
+    }
+    resetModal()
+  }
+
+  function resetModal() {
     setModalOpen(false)
     form.reset({ type: 'rednote', topic: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
@@ -153,10 +181,12 @@ export default function TasksPage() {
       {/* Filters row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         {/* Status filter tabs */}
-        <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted p-1">
+        <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted p-1" role="tablist">
           {statusTabs.map((tab) => (
             <button
               key={tab.value}
+              role="tab"
+              aria-selected={statusFilter === tab.value}
               onClick={() => {
                 setStatusFilter(tab.value)
                 if (tab.value !== 'all') {
@@ -192,7 +222,7 @@ export default function TasksPage() {
       ) : tasks.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
-          title={statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter]}的任务`}
+          title={statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
           description={
             statusFilter === 'all'
               ? '创建任务开始生成内容。'
@@ -208,7 +238,7 @@ export default function TasksPage() {
         <div className="space-y-2">
           {tasks.map((task) => (
             <Link key={task.id} to={`/tasks/${task.id}`} className="block">
-              <Card className="transition-colors hover:border-foreground/20">
+              <Card className="transition-all duration-200 hover:border-foreground/20 hover:shadow-sm active:scale-[0.99]">
                 <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -231,7 +261,7 @@ export default function TasksPage() {
                     {task.status === 'running' && (
                       <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
                         <div
-                          className="h-1.5 rounded-full bg-primary transition-all"
+                          className="h-1.5 rounded-full bg-primary transition-all animate-pulse"
                           style={{ width: `${task.progress ?? 0}%` }}
                         />
                       </div>
@@ -353,8 +383,7 @@ export default function TasksPage() {
 
               {/* Cost display */}
               {(() => {
-                const taskType = form.watch('type')
-                const cost = taskCostMap[taskType] ?? 400
+                const cost = taskCostMap[watchedType] ?? 400
                 const totalCost = cost * quantity
                 const balance = creditsBalance?.balance ?? 0
                 const remaining = balance - totalCost
@@ -384,8 +413,7 @@ export default function TasksPage() {
               form="task-create-form"
               loading={createMutation.isPending}
               disabled={(() => {
-                const taskType = form.watch('type')
-                const cost = taskCostMap[taskType] ?? 400
+                const cost = taskCostMap[watchedType] ?? 400
                 const totalCost = cost * quantity
                 const balance = creditsBalance?.balance ?? 0
                 return balance - totalCost < 0
@@ -396,6 +424,20 @@ export default function TasksPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Dirty form confirmation */}
+      <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>放弃编辑？</AlertDialogTitle>
+            <AlertDialogDescription>你有未保存的更改，确定要关闭吗？</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>继续编辑</AlertDialogCancel>
+            <AlertDialogAction onClick={resetModal}>放弃</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -1,4 +1,7 @@
-// 用户等级
+import type { TaskStatus, PlanStatus, TaskType, CreditTransactionType } from '@/types'
+
+// --- Label Maps ---
+
 export const tierLabels: Record<string, string> = {
   free: '免费版',
   pro: '专业版',
@@ -11,8 +14,7 @@ export const tierDescriptions: Record<string, string> = {
   enterprise: '最大 10 并发，API 限速 300 次/分钟',
 }
 
-// 任务状态
-export const taskStatusLabel: Record<string, string> = {
+export const taskStatusLabel: Record<TaskStatus, string> = {
   pending: '待执行',
   running: '运行中',
   completed: '已完成',
@@ -20,67 +22,58 @@ export const taskStatusLabel: Record<string, string> = {
   cancelled: '已取消',
 }
 
-// 计划状态
-export const planStatusLabel: Record<string, string> = {
+export const planStatusLabel: Record<PlanStatus, string> = {
   active: '运行中',
   paused: '已暂停',
   completed: '已完成',
 }
 
-// 内容类型
-export const contentTypeLabel: Record<string, string> = {
-  rednote: '小红书',
-  article: '公众号文章',
-  xls: '小绿书',
-}
-
-// 平台标签
-export const platformLabels: Record<string, string> = {
-  article: '公众号',
-  xls: '小绿书',
-  rednote: '小红书',
-}
-
-// 状态 Badge 变体
-export function statusBadgeVariant(status: string): 'success' | 'danger' | 'warning' | 'neutral' {
-  switch (status) {
-    case 'completed': return 'success'
-    case 'failed': return 'danger'
-    case 'running': return 'warning'
-    case 'cancelled': return 'neutral'
-    default: return 'neutral'
-  }
-}
-
-// 内容类型选项（用于 Select 组件）
-export const contentTypeOptions = [
-  { value: 'rednote', label: '小红书' },
-  { value: 'article', label: '公众号文章' },
-  { value: 'xls', label: '小绿书' },
-]
-
-// 时间线项类型
 export const timelineItemTypeLabel: Record<string, string> = {
   task: '任务',
   plan: '计划',
 }
 
-// 时间线项类型选项（用于 Select 组件）
+export const transactionTypeLabel: Record<CreditTransactionType, string> = {
+  sign_in: '签到',
+  task_deduct: '任务消耗',
+  task_refund: '任务退还',
+  admin_grant: '管理员充值',
+}
+
+// --- Single Source of Truth for Content Types ---
+
+export const contentTypes = {
+  rednote: { label: '小红书', platform: '小红书' },
+  article: { label: '公众号文章', platform: '公众号' },
+  xls: { label: '小绿书', platform: '小绿书' },
+} as const satisfies Record<TaskType, { label: string; platform: string }>
+
+export const contentTypeLabel = Object.fromEntries(
+  Object.entries(contentTypes).map(([key, val]) => [key, val.label]),
+) as Record<TaskType, string>
+
+export const platformLabels = Object.fromEntries(
+  Object.entries(contentTypes).map(([key, val]) => [key, val.platform]),
+) as Record<TaskType, string>
+
+export const contentTypeOptions = Object.entries(contentTypes).map(([value, { label }]) => ({
+  value,
+  label,
+}))
+
+export const contentTypeFilterOptions = [
+  { value: '', label: '全部内容' },
+  ...contentTypeOptions,
+]
+
+// --- Option Arrays ---
+
 export const timelineItemTypeOptions = [
   { value: '', label: '全部类型' },
   { value: 'task', label: '任务' },
   { value: 'plan', label: '计划' },
 ]
 
-// 内容类型筛选选项（含"全部"选项）
-export const contentTypeFilterOptions = [
-  { value: '', label: '全部内容' },
-  { value: 'rednote', label: '小红书' },
-  { value: 'article', label: '公众号文章' },
-  { value: 'xls', label: '小绿书' },
-]
-
-// 时间线状态选项
 export const timelineStatusOptions = [
   { value: '', label: '全部状态' },
   { value: 'pending', label: '待执行' },
@@ -92,7 +85,6 @@ export const timelineStatusOptions = [
   { value: 'paused', label: '已暂停(计划)' },
 ]
 
-// 排序选项
 export const timelineSortOptions = [
   { value: 'date_asc', label: '日期 ↑' },
   { value: 'date_desc', label: '日期 ↓' },
@@ -100,10 +92,58 @@ export const timelineSortOptions = [
   { value: 'title', label: '按标题' },
 ]
 
-// 星期名称
+// --- Badge Variants ---
+
+export type BadgeVariant = 'success' | 'danger' | 'warning' | 'info' | 'neutral'
+
+export function getBadgeVariant(status: string, type?: 'task' | 'plan'): BadgeVariant {
+  if (type === 'plan' || status === 'active' || status === 'paused') {
+    switch (status) {
+      case 'active': return 'info'
+      case 'paused': return 'warning'
+      case 'completed': return 'success'
+      default: return 'neutral'
+    }
+  }
+  switch (status) {
+    case 'completed': return 'success'
+    case 'failed': return 'danger'
+    case 'running': return 'warning'
+    case 'cancelled': return 'neutral'
+    default: return 'neutral'
+  }
+}
+
+/** Convenience wrapper for task status badges */
+export function statusBadgeVariant(status: string): BadgeVariant {
+  return getBadgeVariant(status, 'task')
+}
+
+// --- Week Day Labels ---
+
 export const weekDayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
-// 格式化日期为中文格式（月/日 时:分）
+// --- Cron to Human ---
+
+export function cronToHuman(cron: string): string {
+  const parts = cron.trim().split(/\s+/)
+  if (parts.length < 5) return cron
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts
+
+  if (dayOfWeek !== '*' && month === '*' && dayOfMonth === '*') {
+    const dayNum = parseInt(dayOfWeek, 10)
+    const dayLabel = !isNaN(dayNum) && dayNum >= 0 && dayNum < weekDayLabels.length
+      ? weekDayLabels[dayNum]
+      : dayOfWeek
+    return `每周${dayLabel} ${hour}:${minute.padStart(2, '0')}`
+  }
+
+  return `${hour}:${minute.padStart(2, '0')}`
+}
+
+// --- Date Formatting ---
+
 export function formatDateTimeCN(dateStr: string): string {
   if (!dateStr) return '--'
   return new Date(dateStr).toLocaleString('zh-CN', {
@@ -114,7 +154,6 @@ export function formatDateTimeCN(dateStr: string): string {
   })
 }
 
-// 格式化完整日期时间
 export function formatFullDateTimeCN(dateStr: string): string {
   if (!dateStr) return '--'
   return new Date(dateStr).toLocaleString('zh-CN', {
@@ -127,7 +166,6 @@ export function formatFullDateTimeCN(dateStr: string): string {
   })
 }
 
-// 格式化日期标签（今天、明天、昨天、或中文日期）
 export function formatDateLabelCN(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00')
   const today = new Date()
@@ -139,21 +177,18 @@ export function formatDateLabelCN(dateStr: string): string {
   return d.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })
 }
 
-// 格式化月份
 export function formatMonthCN(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00')
   return d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' })
 }
 
-// 格式化时间
 export function formatTimeCN(dateStr: string): string {
   const d = new Date(dateStr)
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
-// 日期工具函数
+// --- Date Utilities ---
 
-/** Format a Date to YYYY-MM-DD string */
 export function formatDateYMD(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -161,7 +196,6 @@ export function formatDateYMD(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-/** Get this week's Mon-Sun range */
 export function getWeekRange(today: Date): { from: string; to: string } {
   const day = today.getDay()
   const mondayOffset = day === 0 ? -6 : 1 - day
@@ -172,7 +206,6 @@ export function getWeekRange(today: Date): { from: string; to: string } {
   return { from: formatDateYMD(monday), to: formatDateYMD(sunday) }
 }
 
-/** Get this month's first-to-last day range */
 export function getMonthRange(today: Date): { from: string; to: string } {
   const first = new Date(today.getFullYear(), today.getMonth(), 1)
   const last = new Date(today.getFullYear(), today.getMonth() + 1, 0)

@@ -1,9 +1,11 @@
 import { useState, useMemo, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Calendar, Loader2, RefreshCw } from 'lucide-react'
 import PageHeader from '@/components/layout/PageHeader'
-import { api, type TimelineItem } from '@/lib/api'
+import { api } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
+import type { TimelineItem, PlanStatus, TaskStatus } from '@/types'
 import {
   taskStatusLabel,
   planStatusLabel,
@@ -17,6 +19,7 @@ import {
   formatMonthCN,
   formatTimeCN,
   getWeekRange,
+  getBadgeVariant,
 } from '@/lib/labels'
 import Badge from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -34,16 +37,7 @@ function getDefaultRange(): { from: string; to: string } {
 }
 
 function statusBadge(status: string, type: string) {
-  if (type === 'plan') {
-    return status === 'active' ? 'info' : 'neutral'
-  }
-  switch (status) {
-    case 'completed': return 'success'
-    case 'failed': return 'danger'
-    case 'running': return 'warning'
-    case 'cancelled': return 'neutral'
-    default: return 'neutral'
-  }
+  return getBadgeVariant(status, type as 'task' | 'plan')
 }
 
 const getItemDate = (item: TimelineItem) => {
@@ -61,6 +55,7 @@ interface MonthGroup {
 
 export default function TimelinePage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const queryClient = useQueryClient()
 
   // Read filter state from URL params
   const [calendarOpen, setCalendarOpen] = useState(false)
@@ -106,7 +101,11 @@ export default function TimelinePage() {
         status: status || undefined,
         channel_id: channelId || undefined,
       }),
-    refetchInterval: 10000,
+    refetchInterval: (query) => {
+      const items = query.state.data?.items
+      if (!items) return false
+      return items.some(item => item.type === 'task' && item.status === 'running') ? 10000 : false
+    },
   })
 
   const items = data?.items ?? []
@@ -354,7 +353,9 @@ export default function TimelinePage() {
                                   )}
                                 </div>
                                 <Badge variant={statusBadge(item.status, item.type)}>
-                                  {item.type === 'plan' ? (planStatusLabel[item.status] || item.status) : (taskStatusLabel[item.status] || item.status)}
+                                  {item.type === 'plan'
+                                    ? (planStatusLabel[item.status as PlanStatus] || item.status)
+                                    : (taskStatusLabel[item.status as TaskStatus] || item.status)}
                                 </Badge>
                               </div>
                             </Link>
@@ -366,7 +367,10 @@ export default function TimelinePage() {
                                     className="text-xs text-primary hover:text-primary/80"
                                     onClick={(e) => {
                                       e.preventDefault()
-                                      api.plans.pause(item.id).then(() => refetch())
+                                      api.plans.pause(item.id).then(() => {
+                                        queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
+                                        refetch()
+                                      })
                                     }}
                                   >
                                     暂停
@@ -377,7 +381,10 @@ export default function TimelinePage() {
                                     className="text-xs text-emerald-400 hover:text-emerald-300"
                                     onClick={(e) => {
                                       e.preventDefault()
-                                      api.plans.resume(item.id).then(() => refetch())
+                                      api.plans.resume(item.id).then(() => {
+                                        queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
+                                        refetch()
+                                      })
                                     }}
                                   >
                                     恢复

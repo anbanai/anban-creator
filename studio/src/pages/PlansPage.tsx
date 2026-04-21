@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Plus, Loader2, FileText } from 'lucide-react'
-import { api, type Plan, type PlanType, type CreatePlanRequest } from '@/lib/api'
+import { api } from '@/lib/api'
+import type { Plan, PlanType, CreatePlanRequest } from '@/types'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -16,25 +17,11 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import SchedulePicker from '@/components/SchedulePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN } from '@/lib/labels'
+import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
+import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
-
-function planStatusBadge(status: string) {
-  return status === 'active' ? 'success' : 'neutral'
-}
-
-function cronToHuman(cron: string): string {
-  const parts = cron.trim().split(/\s+/)
-  if (parts.length !== 5) return cron
-  const [min, hourStr, , , weekday] = parts
-  const time = `${hourStr.padStart(2, '0')}:${min.padStart(2, '0')}`
-  if (weekday === '*') return `每天 ${time}`
-  const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-  const dayList = weekday.split(',').map((d) => dayNames[Number(d)] ?? d).join('、')
-  return `每${dayList} ${time}`
-}
 
 function planToFormValues(plan: Plan): PlanFormValues {
   return {
@@ -53,6 +40,7 @@ export default function PlansPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [showDirtyDialog, setShowDirtyDialog] = useState(false)
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema),
@@ -65,6 +53,16 @@ export default function PlansPage() {
       topic_hint: '',
     },
   })
+
+  // Auto-focus title field when dialog opens
+  useEffect(() => {
+    if (modalOpen) {
+      setTimeout(() => form.setFocus('title'), 100)
+    }
+  }, [modalOpen, form])
+
+  // Warn before closing with unsaved changes
+  useFormDirtyCheck(form, modalOpen)
 
   const { data, isLoading } = useQuery({
     queryKey: ['plans', channelFilter],
@@ -81,7 +79,7 @@ export default function PlansPage() {
     onSuccess: () => {
       toast.success('计划创建成功')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
-      closeModal()
+      resetModal()
     },
     onError: () => {
       toast.error('创建计划失败')
@@ -93,7 +91,7 @@ export default function PlansPage() {
     onSuccess: () => {
       toast.success('计划更新成功')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
-      closeModal()
+      resetModal()
     },
     onError: () => {
       toast.error('更新计划失败')
@@ -145,8 +143,24 @@ export default function PlansPage() {
   }
 
   function closeModal() {
+    if (form.formState.isDirty) {
+      setShowDirtyDialog(true)
+      return
+    }
+    resetModal()
+  }
+
+  function resetModal() {
     setModalOpen(false)
     setEditingPlan(null)
+    form.reset({
+      channel_id: '',
+      type: 'rednote',
+      title: '',
+      description: '',
+      cron_expr: '0 9 * * 1,3,5',
+      topic_hint: '',
+    })
   }
 
   async function onSubmit(values: PlanFormValues) {
@@ -207,7 +221,7 @@ export default function PlansPage() {
                     <Badge variant="outline" className="shrink-0 text-[10px]">
                       {contentTypeLabel[plan.type] || plan.type}
                     </Badge>
-                    <Badge variant={planStatusBadge(plan.status)} className="shrink-0">
+                    <Badge variant={getBadgeVariant(plan.status, 'plan')} className="shrink-0">
                       {planStatusLabel[plan.status] || plan.status}
                     </Badge>
                   </div>
@@ -359,6 +373,20 @@ export default function PlansPage() {
             <AlertDialogAction variant="destructive" onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
               删除
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Dirty form confirmation */}
+      <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>放弃编辑？</AlertDialogTitle>
+            <AlertDialogDescription>你有未保存的更改，确定要关闭吗？</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>继续编辑</AlertDialogCancel>
+            <AlertDialogAction onClick={resetModal}>放弃</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

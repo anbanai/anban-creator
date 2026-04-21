@@ -17,6 +17,7 @@ import {
 } from 'recharts'
 import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
@@ -51,7 +52,9 @@ export default function DashboardPage() {
     mutationFn: () => api.credits.signIn(),
     onSuccess: () => {
       toast.success('签到成功，积分 +1024')
-      queryClient.invalidateQueries({ queryKey: ['credits'] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.credits.all })
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+      queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
     },
     onError: () => {
       toast.error('签到失败，请重试')
@@ -71,13 +74,15 @@ export default function DashboardPage() {
   const plans = plansData?.items ?? []
   const tasks = tasksData?.items ?? []
 
-  const activePlans = plans.filter((p) => p.status === 'active').length
-  const todayTasks = tasks.filter((t) => {
+  const activePlans = useMemo(() => plans.filter((p) => p.status === 'active').length, [plans])
+
+  const todayTasks = useMemo(() => tasks.filter((t) => {
     const created = new Date(t.created_at).toDateString()
     return created === new Date().toDateString()
-  })
-  const completedToday = todayTasks.filter((t) => t.status === 'completed').length
-  const failedToday = todayTasks.filter((t) => t.status === 'failed').length
+  }), [tasks])
+
+  const completedToday = useMemo(() => todayTasks.filter((t) => t.status === 'completed').length, [todayTasks])
+  const failedToday = useMemo(() => todayTasks.filter((t) => t.status === 'failed').length, [todayTasks])
   const totalToday = todayTasks.length
   const successRate = totalToday > 0
     ? Math.round((completedToday / (completedToday + failedToday || 1)) * 100)
@@ -130,12 +135,12 @@ export default function DashboardPage() {
     ].filter((d) => d.value > 0)
   }, [tasks])
 
-  const stats = [
+  const stats = useMemo(() => [
     { title: '活跃计划', value: activePlans, description: '运行中的调度' },
     { title: '今日任务', value: totalToday, description: `${completedToday} 已完成, ${failedToday} 失败` },
     { title: '成功率', value: `${successRate}%`, description: '仅今日' },
     { title: '总任务数', value: tasks.length, description: '全部时间' },
-  ]
+  ], [activePlans, totalToday, completedToday, failedToday, successRate, tasks.length])
 
   const isLoading = plansLoading || tasksLoading
 
@@ -353,7 +358,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Link
             to="/tasks?create=true"
-            className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/30 hover:bg-accent"
+            className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-all duration-200 hover:border-primary/30 hover:bg-accent hover:shadow-sm active:scale-[0.98]"
           >
             <Plus className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <div>
@@ -363,7 +368,7 @@ export default function DashboardPage() {
           </Link>
           <Link
             to="/plans"
-            className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/30 hover:bg-accent"
+            className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-all duration-200 hover:border-primary/30 hover:bg-accent hover:shadow-sm active:scale-[0.98]"
           >
             <CalendarPlus className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <div>
@@ -373,7 +378,7 @@ export default function DashboardPage() {
           </Link>
           <Link
             to="/timeline"
-            className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/30 hover:bg-accent"
+            className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-all duration-200 hover:border-primary/30 hover:bg-accent hover:shadow-sm active:scale-[0.98]"
           >
             <Clock className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <div>

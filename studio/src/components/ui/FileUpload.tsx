@@ -1,7 +1,7 @@
 import * as React from "react"
 import { X, ImageIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import http from "@/lib/api"
+import http from "@/lib/http-client"
 
 interface FileUploadProps {
   value?: string

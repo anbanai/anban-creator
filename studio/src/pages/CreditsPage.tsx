@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
-import { api, type CreditTransaction } from '@/lib/api'
+import { api } from '@/lib/api'
+import type { CreditTransaction } from '@/types'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
+import { Pagination } from '@/components/ui/Pagination'
 import { formatFullDateTimeCN } from '@/lib/labels'
 import PageHeader from '@/components/layout/PageHeader'
 
@@ -160,24 +162,7 @@ export default function CreditsPage() {
                 <p className="text-xs text-muted-foreground">
                   共 {total} 条记录，第 {page}/{totalPages} 页
                 </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page <= 1}
-                    onClick={() => setPage(page - 1)}
-                  >
-                    上一页
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page >= totalPages}
-                    onClick={() => setPage(page + 1)}
-                  >
-                    下一页
-                  </Button>
-                </div>
+                <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
               </div>
             )}
           </>
