@@ -22,6 +22,8 @@ type Task struct {
 	RetryCount         int        `gorm:"default:0" json:"retry_count"`
 	MaxRetries         int        `gorm:"default:3" json:"max_retries"`
 	RateLimitRetryCount int       `gorm:"default:0" json:"rate_limit_retry_count"`
+	Published         bool       `gorm:"default:false" json:"published"`
+	PublishedAt       *time.Time `gorm:"index" json:"published_at,omitempty"`
 	CreatedAt    time.Time  `gorm:"index:idx_user_created,priority:2" json:"created_at"`
 	UpdatedAt    time.Time  `gorm:"index" json:"updated_at"`
 	Plan         *Plan      `gorm:"foreignKey:PlanID" json:"plan,omitempty"`

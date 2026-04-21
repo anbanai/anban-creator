@@ -134,7 +134,7 @@ export default function App() {
       <BrowserRouter>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthProvider>
-            <Toaster richColors position="top-right" />
+            <Toaster richColors position="bottom-right" />
             <AppRoutes />
           </AuthProvider>
         </ThemeProvider>

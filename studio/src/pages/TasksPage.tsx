@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check } from 'lucide-react'
 import { api, type TaskType, type CreateTaskRequest } from '@/lib/api'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
@@ -96,6 +96,14 @@ export default function TasksPage() {
     },
     onError: () => {
       toast.error('创建任务失败，请重试')
+    },
+  })
+
+  const togglePublished = useMutation({
+    mutationFn: ({ id, published }: { id: string; published: boolean }) =>
+      api.tasks.markPublished(id, published),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
   })
 
@@ -199,10 +207,36 @@ export default function TasksPage() {
         <div className="space-y-2">
           {tasks.map((task) => (
             <Link key={task.id} to={`/tasks/${task.id}`} className="block">
-              <Card className="transition-colors hover:border-foreground/20">
+              <Card className={`transition-colors hover:border-foreground/20 ${task.published ? 'opacity-60' : ''}`}>
                 <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={togglePublished.isPending}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          togglePublished.mutate(
+                            { id: task.id, published: !task.published },
+                            {
+                              onError: () => toast.error('更新发布状态失败'),
+                            },
+                          )
+                        }}
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+                          task.published
+                            ? 'border-emerald-500 bg-emerald-500 text-white'
+                            : 'border-border hover:border-foreground/30'
+                        }`}
+                        title={task.published ? '取消已发布' : '标记已发布'}
+                      >
+                        {togglePublished.isPending ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : task.published ? (
+                          <Check className="h-3 w-3" />
+                        ) : null}
+                      </button>
                       <h3 className="truncate text-sm font-medium text-foreground">{task.topic}</h3>
                       <Badge variant="outline" className="shrink-0 text-[10px]">
                         {contentTypeLabel[task.type] || task.type}

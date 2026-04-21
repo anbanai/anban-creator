@@ -18,7 +18,6 @@ func main() {
 
 	reporter := NewReporter(cfg)
 	downloader := NewDownloader(cfg)
-	uploader := NewUploader(cfg)
 	runner := NewRunner(cfg, reporter, downloader)
 
 	ctx := context.Background()
@@ -27,18 +26,8 @@ func main() {
 		result = serverExecutionFailure(cfg.Workspace, runErr)
 	}
 
-	if uploadErr := uploader.UploadWorkspace(ctx); uploadErr != nil {
-		// Upload failure is non-fatal: the server's host-side upload
-		// (uploadMissingTaskFiles) will handle missing files from the
-		// workspace directory which is accessible on the host.
-		fmt.Fprintf(os.Stderr, "warning: in-container workspace upload failed (host-side upload will handle it): %v\n", uploadErr)
-	}
-
 	if reportErr := reporter.ReportResult(ctx, result); reportErr != nil {
 		fmt.Fprintf(os.Stderr, "failed to report result: %v\n", reportErr)
-		if runErr == nil {
-			runErr = reportErr
-		}
 	}
 
 	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {

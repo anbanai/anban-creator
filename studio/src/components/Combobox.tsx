@@ -114,7 +114,7 @@ export function Combobox({
                 {items.map((opt) => (
                   <CommandItem
                     key={opt.value}
-                    value={`${opt.group ? `${opt.group} ` : ''}${opt.label}`}
+                    value={`${opt.group ? `${opt.group} ` : ''}${opt.label} ${opt.value}`}
                     onSelect={() => {
                       onChange(opt.value)
                       setOpen(false)

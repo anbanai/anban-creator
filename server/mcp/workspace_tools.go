@@ -11,12 +11,12 @@ import (
 func registerWorkspaceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_workspace",
-		Description: "Prepare a clean working directory for content creation. Archives any existing staging directory and creates a fresh one. When task_id is provided, creates the staging directory inside the task workspace. Returns the staging path.",
+		Description: "Prepare a clean working directory for content creation. Archives any existing files and creates a fresh directory. When task_id is provided, the working directory is the task workspace root. Otherwise, uses the base output directory for the content type. Returns the working directory path.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"content_type": map[string]any{"type": "string", "description": "Content type (articles, xls, rednote, flower)"},
-				"task_id":      map[string]any{"type": "string", "description": "Task ID — when provided, staging is created inside the task workspace"},
+				"task_id":      map[string]any{"type": "string", "description": "Task ID — when provided, working directory is the task workspace root"},
 			},
 			"required": []any{"content_type"},
 		},
@@ -24,7 +24,7 @@ func registerWorkspaceTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "archive_workspace",
-		Description: "Archive the staging directory for a content type. Moves staging to a dated or named archive directory.",
+		Description: "Archive files from the content type directory to a dated or named archive subdirectory. Leaves existing archive subdirectories in place.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

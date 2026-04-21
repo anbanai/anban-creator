@@ -230,6 +230,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks", svc.TaskHandler.List)
 		apiV1.Get("/tasks/:id", svc.TaskHandler.GetByID)
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)
+		apiV1.Patch("/tasks/:id/published", svc.TaskHandler.MarkPublished)
 		apiV1.Get("/tasks/:id/files", svc.TaskHandler.GetFiles)
 		apiV1.Get("/tasks/:id/stream", svc.TaskHandler.Stream)
 		apiV1.Get("/tasks/:id/preview", svc.TaskHandler.PreviewHTML)

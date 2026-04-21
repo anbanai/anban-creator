@@ -11,16 +11,16 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream, or OpenRouter). The server handles API key management and credit deduction. Returns the local file path of the generated image. When task_id is provided, the file is saved to the task workspace and registered as a task output file automatically.",
+		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream, or OpenRouter). The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL) of the generated image. The agent should download and save the image to the desired local path.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id":     map[string]any{"type": "string", "description": "Channel ID (determines which image API config to use)"},
 				"prompt":         map[string]any{"type": "string", "description": "Image generation prompt"},
 				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
-				"output_path":    map[string]any{"type": "string", "description": "Local file path to save the image (relative to workspace when task_id is provided)"},
+				"output_path":    map[string]any{"type": "string", "description": "Suggested local file path to save the image (agent decides actual path)"},
 				"ref_image_path": map[string]any{"type": "string", "description": "Path to a reference image for style consistency (optional)"},
-				"task_id":        map[string]any{"type": "string", "description": "Task ID — when provided, file is saved to task workspace and registered as task output"},
+				"task_id":        map[string]any{"type": "string", "description": "Task ID (for logging and credit tracking)"},
 			},
 			"required": []any{"channel_id", "prompt"},
 		},
@@ -28,7 +28,7 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_batch_images",
-		Description: "Generate multiple images at once using the channel's configured image provider. Returns an array of local file paths for the generated images. When task_id is provided, all images are saved to the task workspace and registered as task output files.",
+		Description: "Generate multiple images at once using the channel's configured image provider. Returns an array of download URLs (remote CDN URLs or data URLs) for the generated images. The agent should download and save each image to the desired directory.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -36,9 +36,9 @@ func registerImageTools(server *mcp.Server) {
 				"prompt":         map[string]any{"type": "string", "description": "Base prompt for all images"},
 				"count":          map[string]any{"type": "integer", "description": "Number of images to generate (1-20)", "minimum": 1, "maximum": 20},
 				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Cover or content image API config"},
-				"output_dir":     map[string]any{"type": "string", "description": "Directory to save generated images (relative to workspace when task_id is provided)"},
+				"output_dir":     map[string]any{"type": "string", "description": "Suggested directory to save generated images (agent decides actual path)"},
 				"ref_image_path": map[string]any{"type": "string", "description": "Path to reference image for style consistency (optional)"},
-				"task_id":        map[string]any{"type": "string", "description": "Task ID — when provided, files are saved to task workspace and registered as task outputs"},
+				"task_id":        map[string]any{"type": "string", "description": "Task ID (for logging and credit tracking)"},
 			},
 			"required": []any{"channel_id", "prompt", "count", "output_dir"},
 		},
@@ -86,7 +86,7 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "batch_generate_from_markdown",
-		Description: "Extract AI image placeholders (__generate:prompt__) from Markdown content, generate all images, and optionally upload them. Returns file paths and/or CDN URLs. Requires task_id for proper file storage.",
+		Description: "Extract AI image placeholders (__generate:prompt__) from Markdown content, generate all images, and optionally upload them. Returns download URLs (remote CDN URLs or data URLs) and/or CDN URLs. Requires task_id for logging and credit tracking.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -95,7 +95,7 @@ func registerImageTools(server *mcp.Server) {
 				"image_type":   map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use cover or content image API config", "default": "content"},
 				"style_prompt": map[string]any{"type": "string", "description": "Style prompt prepended to all image prompts (optional)"},
 				"upload":       map[string]any{"type": "boolean", "description": "Upload generated images to WeChat CDN", "default": false},
-				"task_id":      map[string]any{"type": "string", "description": "Task ID — required, images are stored as task output files"},
+				"task_id":      map[string]any{"type": "string", "description": "Task ID (required, for logging and credit tracking)"},
 			},
 			"required": []any{"channel_id", "markdown", "task_id"},
 		},

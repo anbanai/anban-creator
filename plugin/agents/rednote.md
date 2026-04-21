@@ -52,7 +52,7 @@ maxTurns: 20
 
 3. **研究选题**：using the rednote-research skill 采集热门笔记数据，自动选 Top 1 选题，评分结果与选题理由写入 `$DIR/topic-analysis.md`
 
-4. **创建工作目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="rednote"`, `task_id=TASK_ID`）生成隔离工作目录（自动归档残留 staging，确保目录为空），后续所有文件保存在返回的路径内，变量记为 `$DIR`
+4. **创建工作目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="rednote"`, `task_id=TASK_ID`）生成隔离工作目录（自动归档残留文件，确保目录为空），后续所有文件保存在返回的路径内，变量记为 `$DIR`
 
 5. **创作内容**：using the rednote-writing skill 生成标题、正文和话题标签，内容保存到 `$DIR/content.md`
 
@@ -71,7 +71,7 @@ maxTurns: 20
 
 4. **分析源笔记模板**：using the rednote-writing skill 分析源笔记，结果写入 `$DIR/source-analysis.md`。额外提取**视觉结构模板**：图片总张数（含封面）、各内容页主题关键词；若无法提取，记录"视觉结构：无法提取"，`tight` 模式图片规划自动降级为 `medium`
 
-5. **创建工作目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="rednote"`, `task_id=TASK_ID`）生成隔离工作目录，变量记为 `$DIR`
+5. **创建工作目录**：调用 `prepare_workspace` MCP 工具（参数：`content_type="rednote"`, `task_id=TASK_ID`）生成隔离工作目录，自动归档残留文件，变量记为 `$DIR`
 
 6. **按改写模式生成内容**：using the rednote-writing skill 根据用户指定或默认模式改写，内容保存到 `$DIR/content.md`，决策记录到 `$DIR/source-analysis.md`
 
@@ -138,7 +138,7 @@ maxTurns: 20
 
 ### 文件组织
 
-- 当前运行使用 `output/rednote/staging/`（创建工作目录步骤，变量 `$DIR`），完成后按笔记标题归档为 `output/rednote/{标题}/`
+- 当前运行使用任务工作目录（创建工作目录步骤，变量 `$DIR`），完成后按笔记标题归档为 `output/rednote/{标题}/`
 - 图片命名：`$DIR/cover.png`（封面）, `$DIR/image_01.png` ... `$DIR/image_0{N-2}.png`（内容图）, `$DIR/tail.png`（尾图）（N 由 image-plan.md 决定）
 - 内容草稿：`$DIR/content.md`（含标题/正文/话题标签）
 - 图片规划：`$DIR/image-plan.md`（rednote-visual-design 技能内部产物，包含每页具体知识内容）

@@ -184,6 +184,33 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"message": "task cancelled"})
 }
 
+// MarkPublished handles PATCH /api/v1/tasks/:id/published.
+func (h *TaskHandler) MarkPublished(c fiber.Ctx) error {
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	var body struct {
+		Published bool `json:"published"`
+	}
+	if err := c.Bind().Body(&body); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	if err := h.service.SetPublished(c.Context(), userID, id, body.Published); err != nil {
+		h.logger.Error().Err(err).Msg("mark published failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to update published status")
+	}
+
+	return Success(c, fiber.Map{"published": body.Published})
+}
+
 // GetFiles handles GET /api/v1/tasks/:id/files.
 func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 	id, err := validateUUIDParam(c, "id")

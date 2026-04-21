@@ -113,6 +113,8 @@ func buildTaskStorageKey(userID, taskID, relPath string) string {
 }
 
 // UploadTaskFileFromReader uploads one task output file and persists its metadata.
+// If a record with the same (taskID, filePath) already exists, the existing record is returned
+// to prevent duplicates from MCP tool retries or overlapping upload paths.
 func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
 	if s.store == nil {
 		return nil, fmt.Errorf("no storage provider configured: cannot upload files for task %s", taskID)
@@ -133,6 +135,15 @@ func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, user
 	}
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
+	}
+
+	// Deduplicate: if a record with the same (taskID, filePath) already exists, skip.
+	existing, err := s.repo.TaskFiles().FindExisting(ctx, taskID, cleanRelPath)
+	if err != nil {
+		return nil, fmt.Errorf("check existing task file: %w", err)
+	}
+	if existing != nil {
+		return existing, nil
 	}
 
 	ossKey := buildTaskStorageKey(userID, taskID, cleanRelPath)
@@ -196,16 +207,14 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		return nil
 	}
 
-	// Collect paths and filenames already recorded as task files.
+	// Collect paths already recorded as task files.
 	existingFiles, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("check existing task files: %w", err)
 	}
 	existingPaths := make(map[string]bool, len(existingFiles))
-	existingNames := make(map[string]bool, len(existingFiles))
 	for _, f := range existingFiles {
 		existingPaths[f.FilePath] = true
-		existingNames[f.FileName] = true
 	}
 
 	var uploadedCount int
@@ -235,7 +244,7 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		}
 		relPath = filepath.ToSlash(relPath)
 
-		if existingPaths[relPath] || existingNames[filepath.Base(path)] {
+			if existingPaths[relPath] {
 			return nil // already recorded, skip
 		}
 
@@ -260,8 +269,8 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 }
 
 // UploadTaskFiles uploads all files from a task's work directory to storage.
-// It recursively walks the directory tree to find files in nested subdirectories
-// (e.g. output/articles/staging/). Individual upload failures are logged but do
+// It recursively walks the directory tree to find files in nested subdirectories.
+// Individual upload failures are logged but do
 // not abort the remaining uploads. Returns an error if no storage provider is
 // configured or if the work directory cannot be read at all.
 func (s *TaskService) UploadTaskFiles(ctx context.Context, taskID, userID, workDir string) error {
@@ -368,6 +377,7 @@ func (s *TaskService) EnrichFilesWithURLs(ctx context.Context, files []*model.Ta
 		f.URL = signedURL
 	}
 }
+
 
 // DownloadZip creates a ZIP archive of all files belonging to a task.
 // Returns the ZIP buffer and the suggested download filename.

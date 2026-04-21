@@ -18,8 +18,5 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 
-	// Drop legacy unique index on (user_id, name) for Channel — names should not be unique.
-	_ = db.Migrator().DropIndex(&Channel{}, "idx_channels_user_id_name")
-
 	return nil
 }

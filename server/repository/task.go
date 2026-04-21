@@ -294,3 +294,16 @@ func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskI
 	}
 	return result.RowsAffected > 0, nil
 }
+
+// SetPublished toggles the published flag and updates published_at timestamp.
+func (r *taskRepository) SetPublished(ctx context.Context, id string, published bool) error {
+	updates := map[string]interface{}{"published": published}
+	if published {
+		now := time.Now()
+		updates["published_at"] = &now
+	} else {
+		updates["published_at"] = nil
+	}
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Updates(updates).Error
+}
+

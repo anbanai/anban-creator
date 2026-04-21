@@ -64,7 +64,7 @@ maxTurns: 20
 
 调用 `prepare_workspace` MCP 工具（参数：`content_type="flower"`, `task_id=TASK_ID`）创建隔离工作目录。
 
-> 此命令自动归档残留 staging 目录，确保工作目录为空。后续所有文件保存在返回的路径内，变量记为 `$DIR`。
+> 此命令自动归档残留文件，确保工作目录为空。后续所有文件保存在返回的路径内，变量记为 `$DIR`。
 
 ### 步骤 3：调研花卉
 
@@ -230,7 +230,7 @@ using the flower-content-design skill 生成图片。命令参考和参考图策
 
 ### 文件组织
 
-- 工作目录：`output/flower/staging/`（变量 `$DIR`）
+- 工作目录：任务工作目录（变量 `$DIR`）
 - 图片命名：`$DIR/flower_01_[英文花名].png`
 - 调研记录：`$DIR/flower-research.md`
 - Prompt 文件：`$DIR/prompts.md`

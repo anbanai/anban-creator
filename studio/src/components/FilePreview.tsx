@@ -306,23 +306,20 @@ export function FilePreview({ file, taskId }: FilePreviewProps) {
   if (isImage) {
     return (
       <>
-        <div className="space-y-2">
+        <div className="space-y-1">
           {imgSrc ? (
             <img
               src={imgSrc}
               alt={file.file_name}
-              className="max-h-80 max-w-full cursor-pointer rounded-lg object-contain ring-1 ring-border transition-opacity hover:opacity-90"
+              className="h-48 w-auto cursor-pointer rounded-md ring-1 ring-border transition-opacity hover:opacity-90"
               onClick={() => setModalOpen(true)}
             />
           ) : (
-            <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+            <div className="flex h-48 w-36 items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
               加载中...
             </div>
           )}
-          <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <span className="truncate">{file.file_name}</span>
-            <span className="shrink-0">{formatSize(file.file_size)}</span>
-          </div>
+          <p className="truncate text-xs text-muted-foreground" title={file.file_name}>{file.file_name}</p>
         </div>
         <FilePreviewModal file={file} taskId={taskId} open={modalOpen} onOpenChange={setModalOpen} />
       </>

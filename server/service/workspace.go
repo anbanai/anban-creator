@@ -43,59 +43,84 @@ func NewWorkspaceService(baseDir, workspaceDir string, logger *zerolog.Logger) *
 	return &WorkspaceService{baseDir: baseDir, workspaceDir: workspaceDir, logger: logger}
 }
 
-// Prepare creates a clean staging directory. When taskID is provided,
-// the staging directory is created inside the task workspace at
-// {workspaceDir}/{taskID}/output/{contentType}/staging/.
-// Otherwise, it uses the server's baseDir/<contentType>/staging/.
+// Prepare creates a clean working directory. When taskID is provided,
+// the working directory is the task workspace root {workspaceDir}/{taskID}/.
+// Otherwise, it uses the server's baseDir/<contentType>/ (for CLI mode).
 func (s *WorkspaceService) Prepare(contentType, taskID string) (*PrepareResult, error) {
-	var stagingDir string
+	var workDir string
 	if taskID != "" {
-		stagingDir = filepath.Join(s.workspaceDir, taskID, "output", contentType, "staging")
+		workDir = filepath.Join(s.workspaceDir, taskID)
 	} else {
-		stagingDir = filepath.Join(s.baseDir, contentType, "staging")
+		workDir = filepath.Join(s.baseDir, contentType)
 	}
-	result := &PrepareResult{Path: stagingDir}
+	result := &PrepareResult{Path: workDir}
 
-	if info, err := os.Stat(stagingDir); err == nil && info.IsDir() {
-		entries, err := os.ReadDir(stagingDir)
+	if info, err := os.Stat(workDir); err == nil && info.IsDir() {
+		entries, err := os.ReadDir(workDir)
 		if err != nil {
-			return nil, fmt.Errorf("read staging dir: %w", err)
+			return nil, fmt.Errorf("read work dir: %w", err)
 		}
 		if len(entries) > 0 {
 			archiveDir, err := s.nextArchiveDir(contentType)
 			if err != nil {
 				return nil, fmt.Errorf("compute archive dir: %w", err)
 			}
-			entriesBefore, _ := os.ReadDir(stagingDir)
-			if err := os.Rename(stagingDir, archiveDir); err != nil {
-				return nil, fmt.Errorf("archive staging: %w", err)
+			moved, err := s.moveFilesToArchive(workDir, archiveDir)
+			if err != nil {
+				return nil, fmt.Errorf("archive files: %w", err)
 			}
 			result.Archived = filepath.Base(archiveDir)
-			result.FileCount = len(entriesBefore)
+			result.FileCount = moved
 			if s.logger != nil {
 				s.logger.Info().
 					Str("content_type", contentType).
 					Str("archived_to", filepath.Base(archiveDir)).
-					Int("files", len(entriesBefore)).
-					Msg("archived existing staging directory")
+					Int("files", moved).
+					Msg("archived existing files")
 			}
 		}
 	}
 
-	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create staging dir: %w", err)
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create work dir: %w", err)
 	}
 
 	return result, nil
 }
 
-// Archive moves the staging directory to a dated or named archive directory.
-// If name is empty, uses YYYYMMDD-NNN format.
-func (s *WorkspaceService) Archive(contentType, name string) (*ArchiveResult, error) {
-	stagingDir := filepath.Join(s.baseDir, contentType, "staging")
+// moveFilesToArchive moves regular files (not subdirectories) from srcDir to destDir.
+// Subdirectories (e.g. previous archive dirs) are left in place.
+func (s *WorkspaceService) moveFilesToArchive(srcDir, destDir string) (int, error) {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return 0, fmt.Errorf("create archive dir: %w", err)
+	}
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return 0, err
+	}
+	var moved int
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		src := filepath.Join(srcDir, entry.Name())
+		dst := filepath.Join(destDir, entry.Name())
+		if err := os.Rename(src, dst); err != nil {
+			return moved, fmt.Errorf("move %s to archive: %w", entry.Name(), err)
+		}
+		moved++
+	}
+	return moved, nil
+}
 
-	if _, err := os.Stat(stagingDir); os.IsNotExist(err) {
-		return nil, fmt.Errorf("staging directory does not exist: %s", stagingDir)
+// Archive moves regular files from the content type directory to a dated or
+// named archive directory. Subdirectories (e.g. previous archives) are left in
+// place. If name is empty, uses YYYYMMDD-NNN format.
+func (s *WorkspaceService) Archive(contentType, name string) (*ArchiveResult, error) {
+	contentDir := filepath.Join(s.baseDir, contentType)
+
+	if _, err := os.Stat(contentDir); os.IsNotExist(err) {
+		return nil, fmt.Errorf("content directory does not exist: %s", contentDir)
 	}
 
 	var archiveDir string
@@ -109,24 +134,40 @@ func (s *WorkspaceService) Archive(contentType, name string) (*ArchiveResult, er
 		return nil, fmt.Errorf("compute archive dir: %w", err)
 	}
 
-	entriesBefore, _ := os.ReadDir(stagingDir)
-	if err := os.Rename(stagingDir, archiveDir); err != nil {
-		return nil, fmt.Errorf("archive staging: %w", err)
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create archive dir: %w", err)
+	}
+
+	entries, err := os.ReadDir(contentDir)
+	if err != nil {
+		return nil, fmt.Errorf("read content dir: %w", err)
+	}
+	var moved int
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		src := filepath.Join(contentDir, entry.Name())
+		dst := filepath.Join(archiveDir, entry.Name())
+		if err := os.Rename(src, dst); err != nil {
+			return nil, fmt.Errorf("archive %s: %w", entry.Name(), err)
+		}
+		moved++
 	}
 
 	if s.logger != nil {
 		s.logger.Info().
 			Str("content_type", contentType).
 			Str("archived_to", filepath.Base(archiveDir)).
-			Int("files", len(entriesBefore)).
-			Msg("archived staging directory")
+			Int("files", moved).
+			Msg("archived content files")
 	}
 
 	return &ArchiveResult{
-		From:      stagingDir,
+		From:      contentDir,
 		To:        archiveDir,
 		Archived:  filepath.Base(archiveDir),
-		FileCount: len(entriesBefore),
+		FileCount: moved,
 	}, nil
 }
 

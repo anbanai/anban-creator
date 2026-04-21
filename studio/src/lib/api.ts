@@ -170,6 +170,8 @@ export interface Task {
   plan_id: number | null
   channel_id: string
   result: TaskResult
+  published: boolean
+  published_at: string | null
   created_at: string
   started_at: string
   completed_at: string
@@ -451,6 +453,9 @@ export const api = {
 
     cancel: (id: string) =>
       unwrap<void>(http.post(`/tasks/${id}/cancel`)),
+
+    markPublished: (id: string, published: boolean) =>
+      unwrap<{ published: boolean }>(http.patch(`/tasks/${id}/published`, { published })),
 
     files: (id: string) =>
       unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),

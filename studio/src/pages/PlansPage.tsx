@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import SchedulePicker from '@/components/SchedulePicker'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN } from '@/lib/labels'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
@@ -279,7 +279,7 @@ export default function PlansPage() {
                 <FormItem>
                   <FormLabel>内容类型</FormLabel>
                   <FormControl>
-                    <Select value={field.value} onValueChange={(v) => field.onChange(v as PlanType)}>
+                    <Select value={field.value} onValueChange={(v) => field.onChange(v as PlanType)} disabled={!!form.watch('channel_id')}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="选择类型" />
                       </SelectTrigger>
@@ -290,6 +290,9 @@ export default function PlansPage() {
                       </SelectContent>
                     </Select>
                   </FormControl>
+                  {form.watch('channel_id') && (
+                    <FormDescription>内容类型随所选频道自动确定</FormDescription>
+                  )}
                   <FormMessage />
                 </FormItem>
               )} />

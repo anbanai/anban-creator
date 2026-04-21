@@ -66,7 +66,7 @@ func TestTaskService_CreateManual(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	tasks, err := svc.CreateManual(context.Background(), userID, channelID, "Test topic", 1)
+	tasks, err := svc.CreateManual(context.Background(), userID, channelID, "Test topic", 1, "")
 	if err != nil {
 		t.Fatalf("CreateManual: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestTaskService_CreateManual(t *testing.T) {
 
 func TestTaskService_CreateManual_NoChannel(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
-	_, err := svc.CreateManual(context.Background(), "user1", "", "topic", 1)
+	_, err := svc.CreateManual(context.Background(), "user1", "", "topic", 1, "")
 	if err == nil {
 		t.Error("expected error for empty channel_id")
 	}
@@ -104,7 +104,7 @@ func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	_, err := svc.CreateManual(context.Background(), "wrong-user", channelID, "topic", 1)
+	_, err := svc.CreateManual(context.Background(), "wrong-user", channelID, "topic", 1, "")
 	if err == nil {
 		t.Error("expected error for wrong user")
 	}
@@ -115,7 +115,7 @@ func TestTaskService_GetByID(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Find me", 1)
+	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Find me", 1, "")
 	task := taskSlice[0]
 
 	found, err := svc.GetByID(context.Background(), task.ID)
@@ -140,7 +140,7 @@ func TestTaskService_Cancel(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Cancel me", 1)
+	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Cancel me", 1, "")
 	task := taskSlice[0]
 
 	err := svc.Cancel(context.Background(), task.ID)
@@ -159,8 +159,8 @@ func TestTaskService_List(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	svc.CreateManual(context.Background(), userID, channelID, "Task 1", 1)
-	svc.CreateManual(context.Background(), userID, channelID, "Task 2", 1)
+	svc.CreateManual(context.Background(), userID, channelID, "Task 1", 1, "")
+	svc.CreateManual(context.Background(), userID, channelID, "Task 2", 1, "")
 
 	tasks, total, err := svc.List(context.Background(), userID, 0, 10, "", "")
 	if err != nil {
@@ -179,7 +179,7 @@ func TestTaskService_List_ByStatus(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Pending task", 1)
+	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Pending task", 1, "")
 	task := taskSlice[0]
 	svc.Cancel(context.Background(), task.ID)
 

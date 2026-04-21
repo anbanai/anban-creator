@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -118,7 +119,13 @@ func (d *Downloader) singleTargetPath(call trackedToolCall, payload downloadPayl
 	if payload.FilePath != "" {
 		return filepath.Base(payload.FilePath)
 	}
-	return filepath.Base(payload.DownloadURL)
+	// 只在非 data URL 时从 URL 提取文件名
+	if !strings.HasPrefix(payload.DownloadURL, "data:") {
+		if base := filepath.Base(payload.DownloadURL); base != "" && base != "." {
+			return base
+		}
+	}
+	return "generated.png"
 }
 
 func (d *Downloader) batchTargetPath(call trackedToolCall, payload downloadPayload) string {
@@ -126,9 +133,12 @@ func (d *Downloader) batchTargetPath(call trackedToolCall, payload downloadPaylo
 	outputDir = strings.TrimSpace(outputDir)
 	fileName := filepath.Base(payload.FilePath)
 	if fileName == "." || fileName == "" || fileName == string(filepath.Separator) {
-		fileName = filepath.Base(payload.DownloadURL)
+		// 只在非 data URL 时从 URL 提取文件名
+		if !strings.HasPrefix(payload.DownloadURL, "data:") {
+			fileName = filepath.Base(payload.DownloadURL)
+		}
 	}
-	if fileName == "" {
+	if fileName == "" || fileName == "." {
 		fileName = fmt.Sprintf("generated-%d.png", payload.Index)
 	}
 	if outputDir == "" {
@@ -172,6 +182,11 @@ func (d *Downloader) resolveDownloadURL(raw string) (string, error) {
 }
 
 func (d *Downloader) downloadToPath(ctx context.Context, rawURL, target string) error {
+	// data URL 直接解码写入
+	if strings.HasPrefix(rawURL, "data:") {
+		return d.downloadDataURL(rawURL, target)
+	}
+
 	downloadURL, err := d.resolveDownloadURL(rawURL)
 	if err != nil {
 		return err
@@ -189,7 +204,6 @@ func (d *Downloader) downloadToPath(ctx context.Context, rawURL, target string) 
 	if err != nil {
 		return fmt.Errorf("create download request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+d.cfg.APIKey)
 
 	resp, err := d.client.Do(req)
 	if err != nil {
@@ -212,4 +226,36 @@ func (d *Downloader) downloadToPath(ctx context.Context, rawURL, target string) 
 	}
 
 	return nil
+}
+
+// downloadDataURL decodes a data URL and writes the content to target path.
+// Expected format: data:<mime>;base64,<encoded-data>
+func (d *Downloader) downloadDataURL(dataURL, target string) error {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return fmt.Errorf("invalid data URL")
+	}
+
+	parts := strings.SplitN(dataURL[5:], ",", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid data URL format")
+	}
+
+	if !strings.HasSuffix(parts[0], ";base64") {
+		return fmt.Errorf("only base64 data URLs are supported")
+	}
+
+	data, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return fmt.Errorf("decode base64: %w", err)
+	}
+
+	targetPath, err := d.resolveWorkspacePath(target)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return fmt.Errorf("create target directory: %w", err)
+	}
+
+	return os.WriteFile(targetPath, data, 0644)
 }

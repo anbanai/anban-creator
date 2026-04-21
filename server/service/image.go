@@ -110,14 +110,6 @@ func NewImageService(
 	}
 }
 
-// resolveTaskWorkspace returns the workspace directory for a task.
-func (s *ImageService) resolveTaskWorkspace(taskID string) string {
-	if taskID == "" {
-		return ""
-	}
-	return filepath.Join(s.workspaceDir, taskID)
-}
-
 // resolveImageAPI returns the appropriate ImageAPI config based on image_type.
 // For "cover" images, uses the Cover config; for all other types, uses Content.
 func (s *ImageService) resolveImageAPI(imageType string) *appconfig.ImageAPI {
@@ -575,7 +567,7 @@ func (s *ImageService) uploadFromRawURL(ctx context.Context, processor *image.Pr
 	if err != nil {
 		return nil, fmt.Errorf("prepare image for upload: %w", err)
 	}
-	defer os.Remove(localPath)
+	defer os.RemoveAll(filepath.Dir(localPath))
 
 	return processor.UploadLocalImage(localPath)
 }

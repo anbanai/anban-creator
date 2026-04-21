@@ -2,7 +2,9 @@ package image
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,6 +219,122 @@ type BatchImageResult struct {
 	FilePath string `json:"file_path"`
 	Size     string `json:"size"`
 	Index    int    `json:"index"`
+}
+
+// GenerateRawResult 调用 AI provider 生成图片后返回原始结果。
+// URL 字段为 provider 直接返回的内容：远程 HTTPS URL、data URL 或本地临时文件路径（已转为 data URL）。
+type GenerateRawResult struct {
+	URL   string `json:"url"`   // 远程 URL 或 data URL
+	Size  string `json:"size"`  // provider 报告的尺寸（如 "1024x1024"）
+	Index int    `json:"index"` // 批量时的序号
+}
+
+// GenerateRaw 调用 AI provider 生成图片，返回原始 URL 或 data URL。
+// 不下载、不压缩、不写磁盘（本地临时文件会被读取并转为 data URL 后清理）。
+func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
+	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
+		return nil, err
+	}
+	if p.provider == nil {
+		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
+	}
+
+	ctx := context.Background()
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+	result, err := p.provider.Generate(ctx, p.buildPrompt(prompt), genOpts)
+	if err != nil {
+		return nil, fmt.Errorf("generate image: %w", err)
+	}
+
+	p.log.Debug("image generated (raw)",
+		zap.String("provider", result.Model),
+		zap.String("size", result.Size))
+
+	url, err := p.resolveRawURL(result.URL)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GenerateRawResult{
+		URL:  url,
+		Size: result.Size,
+	}, nil
+}
+
+// GenerateBatchRaw 批量生成图片，返回原始 URL 或 data URL。
+// 不下载、不压缩、不写磁盘。
+func (p *Processor) GenerateBatchRaw(prompt string, count int) ([]*GenerateRawResult, error) {
+	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
+		return nil, err
+	}
+	if p.provider == nil {
+		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
+	}
+
+	builtPrompt := p.buildPrompt(prompt)
+	ctx := context.Background()
+	opts := &GenerateOptions{
+		RefImagePath: p.refImagePath,
+		MaxImages:    count,
+	}
+
+	var rawResults []*GenerateResult
+	if bp, ok := p.provider.(BatchProvider); ok {
+		p.log.Info("using native batch generation (raw)", zap.Int("count", count), zap.String("provider", p.provider.Name()))
+		batchResult, err := bp.GenerateBatch(ctx, builtPrompt, opts)
+		if err != nil {
+			return nil, fmt.Errorf("batch generate images: %w", err)
+		}
+		rawResults = batchResult.Images
+	} else {
+		p.log.Info("using sequential generation (raw)", zap.Int("count", count), zap.String("provider", p.provider.Name()))
+		singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+		for i := 0; i < count; i++ {
+			result, err := p.provider.Generate(ctx, builtPrompt, singleOpts)
+			if err != nil {
+				return nil, fmt.Errorf("generate image %d: %w", i+1, err)
+			}
+			rawResults = append(rawResults, result)
+		}
+	}
+
+	results := make([]*GenerateRawResult, 0, len(rawResults))
+	for i, raw := range rawResults {
+		url, err := p.resolveRawURL(raw.URL)
+		if err != nil {
+			return nil, fmt.Errorf("resolve image %d URL: %w", i+1, err)
+		}
+		results = append(results, &GenerateRawResult{
+			URL:   url,
+			Size:  raw.Size,
+			Index: i + 1,
+		})
+	}
+
+	return results, nil
+}
+
+// resolveRawURL 统一处理 provider 返回的 URL：
+// - 远程 URL（http/https）→ 直接返回
+// - data URL → 直接返回
+// - 本地临时文件 → 读取内容转为 data URL 并删除临时文件
+func (p *Processor) resolveRawURL(rawURL string) (string, error) {
+	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
+		return rawURL, nil
+	}
+	if strings.HasPrefix(rawURL, "data:") {
+		return rawURL, nil
+	}
+	// 本地临时文件 → 转 data URL
+	data, err := os.ReadFile(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("read provider temp file: %w", err)
+	}
+	defer os.Remove(rawURL)
+
+	mime := http.DetectContentType(data)
+	encoded := base64.StdEncoding.EncodeToString(data)
+	return fmt.Sprintf("data:%s;base64,%s", mime, encoded), nil
 }
 
 // processRawResult 处理单张原始生成结果：下载（如需）、裁水印、压缩，保存到 outputPath。

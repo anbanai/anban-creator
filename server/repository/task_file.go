@@ -24,6 +24,18 @@ func (r *taskFileRepository) Create(ctx context.Context, file *model.TaskFile) e
 	return r.db.WithContext(ctx).Create(file).Error
 }
 
+// FindExisting returns an existing task file record matching (taskID, filePath), or nil if none exists.
+func (r *taskFileRepository) FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error) {
+	var file model.TaskFile
+	if err := r.db.WithContext(ctx).Where("task_id = ? AND file_path = ?", taskID, filePath).First(&file).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &file, nil
+}
+
 func (r *taskFileRepository) FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error) {
 	var files []*model.TaskFile
 	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Find(&files).Error; err != nil {

@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { ArrowLeft, Check, X, Circle, Loader2, Download } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { TaskFile } from '@/lib/api'
@@ -64,12 +66,14 @@ export default function TaskDetailPage() {
     mutationFn: () => api.tasks.cancel(id!),
     onSuccess: () => {
       toast.success('任务已取消')
+      abortRef.current?.abort()
+      abortRef.current = null
       queryClient.invalidateQueries({ queryKey: ['task', id] })
       setShowCancelDialog(false)
     },
   })
 
-  const connectSSE = async () => {
+  const connectSSE = async (retries = 0) => {
     if (!id) return
     const currentToken = tokenRef.current
     if (!currentToken) return
@@ -86,9 +90,15 @@ export default function TaskDetailPage() {
         handleSSEEvent(event)
       }
     } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        setSseError('连接断开，正在刷新任务状态...')
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      if (retries < 3 && !controller.signal.aborted) {
+        setSseLogs((prev) => [...prev, `连接断开，正在重试 (${retries + 1}/3)...`])
+        await new Promise((r) => setTimeout(r, 2000 * (retries + 1)))
+        if (controller.signal.aborted) return
+        return connectSSE(retries + 1)
       }
+      setSseError('连接断开，正在刷新任务状态...')
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
     }
   }
 
@@ -217,6 +227,108 @@ export default function TaskDetailPage() {
         )}
       </div>
 
+      {/* Details (stats) */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardBody>
+            <p className="text-xs text-muted-foreground">创建时间</p>
+            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.created_at)}</p>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody>
+            <p className="text-xs text-muted-foreground">开始时间</p>
+            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.started_at)}</p>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody>
+            <p className="text-xs text-muted-foreground">完成时间</p>
+            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.completed_at)}</p>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody>
+            <p className="text-xs text-muted-foreground">来源</p>
+            <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
+          </CardBody>
+        </Card>
+      </div>
+
+      {/* Files (top priority - most useful content) */}
+      {files && files.length > 0 && (
+        <Card>
+          <div className="border-b border-border px-4 py-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-foreground">生成文件 ({files.length})</h2>
+            <Button
+              size="sm"
+              onClick={async () => {
+                try {
+                  const blob = await api.tasks.downloadZipBlob(task.id)
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `task_${task.id}_files.zip`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                } catch (err) {
+                  console.error('Failed to download ZIP:', err)
+                }
+              }}
+            >
+              <Download className="h-4 w-4" />
+              下载全部 (ZIP)
+            </Button>
+          </div>
+          <div className="p-4 space-y-4">
+            {/* Image files in compact grid */}
+            {(() => {
+              const imageFiles = files.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
+              if (imageFiles.length === 0) return null
+              return (
+                <div>
+                  <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
+                    {imageFiles.map((file: TaskFile) => (
+                      <div key={file.id} className="shrink-0 snap-start">
+                        <FilePreview file={file} taskId={task.id} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+            {/* HTML files */}
+            {(() => {
+              const htmlFiles = files.filter((f: TaskFile) => f.mime_type === 'text/html')
+              if (htmlFiles.length === 0) return null
+              return (
+                <div>
+                  <div className="space-y-3">
+                    {htmlFiles.map((file: TaskFile) => (
+                      <FilePreview key={file.id} file={file} taskId={task.id} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+            {/* Other files */}
+            {(() => {
+              const otherFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/') && f.mime_type !== 'text/html')
+              if (otherFiles.length === 0) return null
+              return (
+                <div>
+                  <div className="space-y-2">
+                    {otherFiles.map((file: TaskFile) => (
+                      <FilePreview key={file.id} file={file} taskId={task.id} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+        </Card>
+      )}
+
       {/* Progress bar */}
       <Card>
         <CardBody>
@@ -264,34 +376,6 @@ export default function TaskDetailPage() {
         </CardBody>
       </Card>
 
-      {/* Details */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardBody>
-            <p className="text-xs text-muted-foreground">创建时间</p>
-            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.created_at)}</p>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <p className="text-xs text-muted-foreground">开始时间</p>
-            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.started_at)}</p>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <p className="text-xs text-muted-foreground">完成时间</p>
-            <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.completed_at)}</p>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <p className="text-xs text-muted-foreground">来源</p>
-            <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
-          </CardBody>
-        </Card>
-      </div>
-
       {/* Live Output / SSE Logs */}
       {task.status === 'running' && (
         <Card>
@@ -321,95 +405,11 @@ export default function TaskDetailPage() {
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold text-foreground">执行结果</h2>
           </div>
-          <div className="max-h-64 overflow-y-auto bg-background/50 rounded-lg border border-border font-mono px-4 py-3">
-            <pre className="whitespace-pre-wrap text-xs text-foreground">
+          <div className="max-h-64 overflow-y-auto bg-background/50 rounded-lg border border-border px-4 py-3 prose prose-invert prose-sm max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {task.result.output}
-            </pre>
+            </ReactMarkdown>
           </div>
-        </Card>
-      )}
-
-      {/* Files */}
-      {files && files.length > 0 && (
-        <Card>
-          <div className="border-b border-border px-4 py-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">生成文件 ({files.length})</h2>
-            <Button
-              size="sm"
-              onClick={async () => {
-                try {
-                  const blob = await api.tasks.downloadZipBlob(task.id)
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = `task_${task.id}_files.zip`
-                  a.click()
-                  URL.revokeObjectURL(url)
-                } catch (err) {
-                  console.error('Failed to download ZIP:', err)
-                }
-              }}
-            >
-              <Download className="h-4 w-4" />
-              下载全部 (ZIP)
-            </Button>
-          </div>
-          <div className="p-4 space-y-4">
-            {/* Image files in grid */}
-            {(() => {
-              const imageFiles = files.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
-              if (imageFiles.length === 0) return null
-              return (
-                <div>
-                  <h3 className="text-xs font-medium text-muted-foreground mb-2">图片</h3>
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                    {imageFiles.map((file: TaskFile) => (
-                      <FilePreview key={file.id} file={file} taskId={task.id} />
-                    ))}
-                  </div>
-                </div>
-              )
-            })()}
-            {/* HTML files */}
-            {(() => {
-              const htmlFiles = files.filter((f: TaskFile) => f.mime_type === 'text/html')
-              if (htmlFiles.length === 0) return null
-              return (
-                <div>
-                  <h3 className="text-xs font-medium text-muted-foreground mb-2">HTML 文件</h3>
-                  <div className="space-y-3">
-                    {htmlFiles.map((file: TaskFile) => (
-                      <FilePreview key={file.id} file={file} taskId={task.id} />
-                    ))}
-                  </div>
-                </div>
-              )
-            })()}
-            {/* Other files */}
-            {(() => {
-              const otherFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/') && f.mime_type !== 'text/html')
-              if (otherFiles.length === 0) return null
-              return (
-                <div>
-                  <h3 className="text-xs font-medium text-muted-foreground mb-2">其他文件</h3>
-                  <div className="space-y-2">
-                    {otherFiles.map((file: TaskFile) => (
-                      <FilePreview key={file.id} file={file} taskId={task.id} />
-                    ))}
-                  </div>
-                </div>
-              )
-            })()}
-          </div>
-        </Card>
-      )}
-
-      {/* No files message for completed tasks */}
-      {task.status === 'completed' && (!files || files.length === 0) && (
-        <Card>
-          <CardBody>
-            <p className="text-center text-sm text-muted-foreground">没有生成文件</p>
-          </CardBody>
         </Card>
       )}
 

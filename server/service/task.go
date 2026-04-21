@@ -495,3 +495,16 @@ func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to
 
 	return stats, nil
 }
+
+// SetPublished toggles the published flag on a task.
+func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, published bool) error {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("find task: %w", err)
+	}
+	if task.UserID != userID {
+		return fmt.Errorf("task does not belong to user")
+	}
+	return s.repo.Tasks().SetPublished(ctx, taskID, published)
+}
+

@@ -94,17 +94,17 @@ web-build:
 # Docker targets
 # ---------------------------------------------------------------------------
 
-# Start infrastructure services (MySQL, Redis)
+# Start all services (MySQL, Redis, agent, server)
 docker-up:
-	@docker-compose up -d
+	@docker compose up -d
 
 # Stop infrastructure services
 docker-down:
-	@docker-compose down
+	@docker compose down
 
 # Follow infrastructure logs
 docker-logs:
-	@docker-compose logs -f
+	@docker compose logs -f
 
 # Build the abwriter-agent Docker image (required for executor: docker)
 docker-agent-image:
@@ -153,7 +153,7 @@ help:
 	@echo "  make web-build     - Build frontend for production (bun)"
 	@echo ""
 	@echo "Docker targets:"
-	@echo "  make docker-up          - Start MySQL, Redis and agent containers"
+	@echo "  make docker-up          - Start all services (MySQL, Redis, agent, server)"
 	@echo "  make docker-down        - Stop containers"
 	@echo "  make docker-logs        - Follow container logs"
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"

@@ -88,6 +88,7 @@ type TaskRepository interface {
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
 	IncrementRetryAndSetPending(ctx context.Context, taskID string, field string) error
 	FindTopicsByChannelID(ctx context.Context, channelID string) ([]string, error)
+	SetPublished(ctx context.Context, id string, published bool) error
 }
 
 // TaskFileRepository provides access to the task_files table.
