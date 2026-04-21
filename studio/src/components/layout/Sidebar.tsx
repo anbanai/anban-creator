@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   Activity,
+  Cable,
 } from 'lucide-react'
 import UserAccountPopover from '@/components/auth/UserAccountPopover'
 
@@ -121,8 +122,21 @@ export default function Sidebar() {
         {/* Divider */}
         <div className="mx-3 border-t border-sidebar-border" />
 
-        {/* Bottom: Settings */}
-        <div className="px-3 py-2">
+        {/* Bottom: Connect Guide + Settings */}
+        <div className="px-3 py-2 space-y-0.5">
+          <NavLink
+            to="/connect"
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+                isActive
+                  ? 'border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]'
+                  : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+              }`
+            }
+          >
+            <Cable className="h-4 w-4 shrink-0" />
+            接入指南
+          </NavLink>
           <NavLink
             to="/settings"
             className={({ isActive }) =>

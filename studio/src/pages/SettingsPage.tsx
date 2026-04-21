@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useAuth } from '@/contexts/AuthContext'
@@ -103,6 +104,9 @@ export default function SettingsPage() {
           <div>
             <h2 className="text-sm font-semibold text-foreground">平台密钥</h2>
             <p className="text-xs text-muted-foreground mt-0.5">用于 Claude Code 插件或第三方工具访问你的账号。</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              不知道如何使用密钥？<Link to="/connect" className="text-primary hover:underline">查看接入指南 →</Link>
+            </p>
           </div>
           <Button size="sm" onClick={() => setShowCreate(true)} disabled={showCreate}>
             创建密钥

@@ -22,6 +22,7 @@ const TaskDetailPage = React.lazy(() => import('@/pages/TaskDetailPage'))
 const CreditsPage = React.lazy(() => import('@/pages/CreditsPage'))
 const UsagePage = React.lazy(() => import('@/pages/UsagePage'))
 const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
+const ConnectGuidePage = React.lazy(() => import('@/pages/ConnectGuidePage'))
 
 function LoadingSpinner() {
   return (
@@ -123,6 +124,7 @@ function AppRoutes() {
           <Route path="credits" element={<LazyPage component={CreditsPage} />} />
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
+          <Route path="connect" element={<LazyPage component={ConnectGuidePage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
