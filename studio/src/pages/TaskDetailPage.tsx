@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowLeft, Check, X, Circle, Loader2, Download } from 'lucide-react'
+import { ArrowLeft, Check, X, Circle, Loader2, Download, Eye } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { TaskFile } from '@/lib/api'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
@@ -182,6 +182,14 @@ export default function TaskDetailPage() {
 
   const canCancel = task.status === 'pending' || task.status === 'running'
 
+  const togglePublished = useMutation({
+    mutationFn: ({ published }: { published: boolean }) =>
+      api.tasks.markPublished(task.id, published),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+    },
+  })
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -215,16 +223,29 @@ export default function TaskDetailPage() {
             )}
           </div>
         </div>
-        {canCancel && (
-          <Button
-            variant="destructive"
-            size="sm"
-            loading={cancelMutation.isPending}
-            onClick={() => setShowCancelDialog(true)}
-          >
-            取消任务
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {task.status === 'completed' && (
+            <Button
+              variant={task.published ? 'outline' : 'default'}
+              size="sm"
+              loading={togglePublished.isPending}
+              onClick={() => togglePublished.mutate({ published: !task.published })}
+            >
+              <Eye className="h-4 w-4" />
+              {task.published ? '已发布' : '标记已发布'}
+            </Button>
+          )}
+          {canCancel && (
+            <Button
+              variant="destructive"
+              size="sm"
+              loading={cancelMutation.isPending}
+              onClick={() => setShowCancelDialog(true)}
+            >
+              取消任务
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Details (stats) */}
