@@ -9,6 +9,7 @@ description: Researches topics, scores engagement potential, and generates conte
 
 | MCP 工具 | 说明 |
 |----------|------|
+| `list_topics` (channel_id) | 查看系统内已有选题（选题前必调） |
 | `research_topics` (channel_id, keywords?, domain?, count?) | 选题研究 |
 | `score_article` (channel_id, content, title?, domain?) | 话题评分 |
 | `generate_outline` (channel_id, topic, template?, domain?, style?, keywords?) | 内容框架生成 |
@@ -23,9 +24,11 @@ description: Researches topics, scores engagement potential, and generates conte
 
 在开始选题前，先检查已有内容，避免重复主题：
 
+调用 `list_topics(channel_id)` 查看系统内已有选题列表。
+
 调用 `list_drafts` 和 `list_published` 查看已有内容。
 
-列出所有已有标题后，选题应避开这些已有主题。
+列出所有已有标题和选题后，选题应避开这些已有主题。
 
 ### 1. 话题评分
 

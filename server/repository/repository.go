@@ -87,11 +87,13 @@ type TaskRepository interface {
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
 	IncrementRetryAndSetPending(ctx context.Context, taskID string, field string) error
+	FindTopicsByChannelID(ctx context.Context, channelID string) ([]string, error)
 }
 
 // TaskFileRepository provides access to the task_files table.
 type TaskFileRepository interface {
 	Create(ctx context.Context, file *model.TaskFile) error
+	FindExisting(ctx context.Context, taskID, filePath string) (*model.TaskFile, error)
 	FindByID(ctx context.Context, id string) (*model.TaskFile, error)
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.TaskFile, error)
 	FindByTaskIDAndRole(ctx context.Context, taskID, role string) ([]*model.TaskFile, error)

@@ -5,6 +5,12 @@ description: Analyzes Xiaohongshu (小红书) topics and scores engagement poten
 
 # 小红书选题研究知识库
 
+## 选题前必做：查看已有选题
+
+在开始选题研究前，调用 `list_topics(channel_id="$CHANNEL_ID")` 查看系统内已有选题列表，避免重复。
+
+---
+
 ## xsec_token 工作流
 
 **重要**：大多数 MCP 工具需要 `feed_id` 和 `xsec_token` 两个参数。这两个参数**只能**从 `search_feeds` 或 `list_feeds` 的返回结果中获取，不能凭空构造。

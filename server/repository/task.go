@@ -239,6 +239,18 @@ func (r *taskRepository) FindPendingByChannel(ctx context.Context, channelID str
 	return tasks, err
 }
 
+// FindTopicsByChannelID returns all topic texts for a channel, ordered by creation time descending.
+func (r *taskRepository) FindTopicsByChannelID(ctx context.Context, channelID string) ([]string, error) {
+	var topics []string
+	err := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("channel_id = ? AND topic != ''", channelID).
+		Order("created_at DESC").
+		Limit(200).
+		Pluck("topic", &topics).Error
+	return topics, err
+}
+
 // CompareAndSwapStatus atomically transitions task status from expected to newStatus.
 // Returns true if the transition succeeded (status was expected and is now newStatus).
 func (r *taskRepository) CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error) {

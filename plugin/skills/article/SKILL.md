@@ -25,6 +25,7 @@ description: 微信公众号图文文章全自动创作。用户提到"写文章
 - `list_channels()` → 找到 `platform` 为 `article` 的 channel，记为 `$CHANNEL_ID`
 - `get_account_info(channel_id="$CHANNEL_ID", scope="article")` → 获取账号定位、受众、写作风格
 - `list_drafts(channel_id="$CHANNEL_ID")` 和 `list_published(channel_id="$CHANNEL_ID")` → 查看已有文章标题，后续选题避开
+- `list_topics(channel_id="$CHANNEL_ID")` → 查看系统内已有选题，后续选题避开
 
 ### 步骤 2：创建工作目录
 
