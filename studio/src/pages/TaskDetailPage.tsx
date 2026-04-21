@@ -12,7 +12,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
-import { FilePreview } from '@/components/FilePreview'
+import { FilePreviewGallery } from '@/components/FilePreview'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 
@@ -313,14 +313,8 @@ export default function TaskDetailPage() {
               const imageFiles = files.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
               if (imageFiles.length === 0) return null
               return (
-                <div>
-                  <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-                    {imageFiles.map((file: TaskFile) => (
-                      <div key={file.id} className="shrink-0 snap-start">
-                        <FilePreview file={file} taskId={task.id} />
-                      </div>
-                    ))}
-                  </div>
+                <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
+                  <FilePreviewGallery files={imageFiles} taskId={task.id} inlineItemClassName="shrink-0 snap-start" />
                 </div>
               )
             })()}
@@ -329,12 +323,8 @@ export default function TaskDetailPage() {
               const htmlFiles = files.filter((f: TaskFile) => f.mime_type === 'text/html')
               if (htmlFiles.length === 0) return null
               return (
-                <div>
-                  <div className="space-y-3">
-                    {htmlFiles.map((file: TaskFile) => (
-                      <FilePreview key={file.id} file={file} taskId={task.id} />
-                    ))}
-                  </div>
+                <div className="space-y-3">
+                  <FilePreviewGallery files={htmlFiles} taskId={task.id} />
                 </div>
               )
             })()}
@@ -343,12 +333,8 @@ export default function TaskDetailPage() {
               const otherFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/') && f.mime_type !== 'text/html')
               if (otherFiles.length === 0) return null
               return (
-                <div>
-                  <div className="space-y-2">
-                    {otherFiles.map((file: TaskFile) => (
-                      <FilePreview key={file.id} file={file} taskId={task.id} />
-                    ))}
-                  </div>
+                <div className="space-y-2">
+                  <FilePreviewGallery files={otherFiles} taskId={task.id} />
                 </div>
               )
             })()}
