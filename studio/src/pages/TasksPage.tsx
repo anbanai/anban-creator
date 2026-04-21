@@ -216,9 +216,9 @@ export default function TasksPage() {
                       <Badge variant="outline" className="shrink-0 text-[10px]">
                         {contentTypeLabel[task.type] || task.type}
                       </Badge>
-                      {task.status === 'running' && task.progress > 0 && (
+                      {task.status === 'running' && (task.progress ?? 0) > 0 && (
                         <Badge variant="warning" className="shrink-0 text-[10px]">
-                          {task.progress}%
+                          {task.progress ?? 0}%
                         </Badge>
                       )}
                     </div>
@@ -232,7 +232,7 @@ export default function TasksPage() {
                       <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
                         <div
                           className="h-1.5 rounded-full bg-primary transition-all"
-                          style={{ width: `${task.progress}%` }}
+                          style={{ width: `${task.progress ?? 0}%` }}
                         />
                       </div>
                     )}

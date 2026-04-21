@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowLeft, Check, X, Circle, Loader2, Download, Eye } from 'lucide-react'
+import { ArrowLeft, Loader2, Download, Eye } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { TaskFile } from '@/lib/api'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
@@ -117,8 +117,14 @@ export default function TaskDetailPage() {
 
     switch (event.event) {
       case 'progress': {
-        const data = parsed as { progress: number; message: string }
-        setSseLogs((prev) => [...prev, `[${data.progress}%] ${data.message}`])
+        if (typeof parsed === 'string') {
+          setSseLogs((prev) => [...prev, parsed])
+        } else {
+          const data = parsed as { progress: number; message: string }
+          if (data.progress != null) {
+            setSseLogs((prev) => [...prev, `[${data.progress}%] ${data.message}`])
+          }
+        }
         break
       }
       case 'output': {
@@ -357,26 +363,20 @@ export default function TaskDetailPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium text-foreground">进度</span>
-                <span className="text-sm text-primary">{task.progress}%</span>
+                <span className="text-sm text-primary">{task.progress ?? 0}%</span>
               </div>
               <div className="h-2 w-full rounded-full bg-muted">
                 <div
                   className="h-2 rounded-full bg-primary transition-all duration-500"
-                  style={{ width: `${task.progress}%` }}
+                  style={{ width: `${task.progress ?? 0}%` }}
                 />
               </div>
             </div>
           ) : task.status === 'completed' ? (
-            <div className="flex items-center gap-2">
-              <Check className="h-5 w-5 text-emerald-400" />
-              <span className="text-sm text-emerald-400">任务执行成功</span>
-            </div>
+            <p className="text-sm text-emerald-400">任务执行成功</p>
           ) : task.status === 'failed' ? (
             <div>
-              <div className="flex items-center gap-2">
-                <X className="h-5 w-5 text-red-400" />
-                <span className="text-sm text-red-400">任务失败</span>
-              </div>
+              <p className="text-sm text-red-400">任务失败</p>
               {task.error && (
                 <p className="mt-2 bg-red-900/20 border border-red-900/30 rounded-lg px-3 py-2 text-sm text-red-300">
                   {task.error}
@@ -384,15 +384,9 @@ export default function TaskDetailPage() {
               )}
             </div>
           ) : task.status === 'cancelled' ? (
-            <div className="flex items-center gap-2">
-              <X className="h-5 w-5 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">任务已取消</span>
-            </div>
+            <p className="text-sm text-muted-foreground">任务已取消</p>
           ) : (
-            <div className="flex items-center gap-2">
-              <Circle className="h-5 w-5 text-muted-foreground animate-pulse" />
-              <span className="text-sm text-muted-foreground">任务等待执行中...</span>
-            </div>
+            <p className="text-sm text-muted-foreground">任务等待执行中...</p>
           )}
         </CardBody>
       </Card>

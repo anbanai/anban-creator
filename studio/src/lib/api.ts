@@ -165,7 +165,7 @@ export interface Task {
   type: TaskType
   topic: string
   status: TaskStatus
-  progress: number
+  progress?: number
   error: string
   plan_id: number | null
   channel_id: string
