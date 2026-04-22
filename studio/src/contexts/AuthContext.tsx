@@ -109,9 +109,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, user, isAuthenticated: prev.isAuthenticated }))
   }, [])
 
-  // Verify token on mount by fetching current user
+  // Fetch current user on mount to ensure data is fresh
   useEffect(() => {
-    if (state.token && !state.user) {
+    if (state.token) {
       api.auth.me().then((user) => {
         setUser(user)
       }).catch(() => {
@@ -119,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
       })
     }
-  }, [state.token, state.user, setUser])
+  }, [state.token, setUser])
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout, refreshAuthToken, setUser }}>
