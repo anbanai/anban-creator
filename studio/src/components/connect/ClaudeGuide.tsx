@@ -43,18 +43,8 @@ export default function ClaudeGuide() {
         <McpConfigStep apiKeys={apiKeys} />
       </StepCard>
 
-      {/* Step 3: Image Generation */}
-      <StepCard step={3} title="图片生成配置" optional>
-        <p className="text-xs text-muted-foreground">
-          如需使用 AI 配图功能，需要额外配置图片服务的密钥。首次使用配图功能时，插件会引导你完成配置。
-        </p>
-        <p className="text-xs text-muted-foreground">
-          仅做文字创作不配图可跳过此步。
-        </p>
-      </StepCard>
-
-      {/* Step 4: WeChat Configuration */}
-      <StepCard step={4} title="微信公众号配置" optional>
+      {/* Step 3: WeChat Configuration */}
+      <StepCard step={3} title="微信公众号配置" optional>
         <p className="text-xs text-muted-foreground">
           如需发布到微信公众号，需要配置公众号的 AppID 和 Secret。首次发布时，插件会引导你完成配置。
         </p>

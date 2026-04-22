@@ -49,14 +49,6 @@ export default function OpenClawGuide() {
         <McpConfigStep apiKeys={apiKeys} />
       </StepCard>
 
-      {/* Step 3: Image Generation */}
-      <StepCard step={3} title="图片生成配置" optional>
-        <p className="text-xs text-muted-foreground">
-          如需使用 AI 配图功能，需要额外配置图片服务的密钥。首次使用配图功能时，插件会引导你完成配置。
-        </p>
-        <p className="text-xs text-muted-foreground">仅做文字创作不配图可跳过此步。</p>
-      </StepCard>
-
       {/* Usage */}
       <Card>
         <div className="border-b border-border px-4 py-3 flex items-center gap-2">
