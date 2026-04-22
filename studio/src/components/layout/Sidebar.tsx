@@ -14,6 +14,8 @@ import {
   Menu,
   X,
   Activity,
+  Terminal,
+  Puzzle,
 } from 'lucide-react'
 import UserAccountPopover from '@/components/auth/UserAccountPopover'
 
@@ -28,24 +30,8 @@ const navItems = [
 ]
 
 const platformItems = [
-  {
-    to: '/connect/claude-code',
-    label: 'Claude Code',
-    icon: () => (
-      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M17.303 2.244l-3.534 9.858-4.016-4.016 2.79-6.996A8.934 8.934 0 0121.617 0a8.934 8.934 0 018.59 1.09l2.79 6.996-4.016 4.016-3.534-9.858c-.17-.47-.57-.47-.57 0 0-6.765 1.75-10.09 5.36a14.94 14.94 0 00-1.34 11.24c0 5.73 4.18 10.49 9.66 11.39a14.17 14.17 0 007.05-2.11c2.79-2.06 4.58-5.16 4.58-8.82v-1.5l-5.37 2.27 2.62-6.28z" />
-      </svg>
-    ),
-  },
-  {
-    to: '/connect/openclaw',
-    label: 'OpenClaw',
-    icon: () => (
-      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.41 14.59l-2.12-2.12 2.83-2.83-2.83-2.83 2.12-2.12L12 8.41l1.41-1.41-2.83-2.83 2.83-2.83-1.41-1.41L12 4.17l-1.41 1.41-2.83 2.83 2.83 2.83-2.12 2.12L12 15.59l1.41 1.41z" />
-      </svg>
-    ),
-  },
+  { to: '/connect/claude-code', label: 'Claude Code', icon: Terminal },
+  { to: '/connect/openclaw', label: 'OpenClaw', icon: Puzzle },
 ]
 
 function ThemeToggle() {
@@ -157,7 +143,7 @@ export default function Sidebar() {
                 }`
               }
             >
-              <item.icon />
+              <item.icon className="h-4 w-4 shrink-0" />
               {item.label}
             </NavLink>
           ))}
