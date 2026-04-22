@@ -22,7 +22,8 @@ const TaskDetailPage = React.lazy(() => import('@/pages/TaskDetailPage'))
 const CreditsPage = React.lazy(() => import('@/pages/CreditsPage'))
 const UsagePage = React.lazy(() => import('@/pages/UsagePage'))
 const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
-const ConnectGuidePage = React.lazy(() => import('@/pages/ConnectGuidePage'))
+const ClaudeCodeGuidePage = React.lazy(() => import('@/pages/ConnectGuidePage'))
+const OpenClawGuidePage = React.lazy(() => import('@/pages/OpenClawGuidePage'))
 
 function LoadingSpinner() {
   return (
@@ -124,7 +125,8 @@ function AppRoutes() {
           <Route path="credits" element={<LazyPage component={CreditsPage} />} />
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
-          <Route path="connect" element={<LazyPage component={ConnectGuidePage} />} />
+          <Route path="connect/claude-code" element={<LazyPage component={ClaudeCodeGuidePage} />} />
+          <Route path="connect/openclaw" element={<LazyPage component={OpenClawGuidePage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

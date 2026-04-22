@@ -14,7 +14,6 @@ import {
   Menu,
   X,
   Activity,
-  Cable,
 } from 'lucide-react'
 import UserAccountPopover from '@/components/auth/UserAccountPopover'
 
@@ -26,6 +25,27 @@ const navItems = [
   { to: '/timeline', label: '时间轴', icon: Clock },
   { to: '/credits', label: '积分', icon: Coins },
   { to: '/usage', label: '用量', icon: Activity },
+]
+
+const platformItems = [
+  {
+    to: '/connect/claude-code',
+    label: 'Claude Code',
+    icon: () => (
+      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M17.303 2.244l-3.534 9.858-4.016-4.016 2.79-6.996A8.934 8.934 0 0121.617 0a8.934 8.934 0 018.59 1.09l2.79 6.996-4.016 4.016-3.534-9.858c-.17-.47-.57-.47-.57 0 0-6.765 1.75-10.09 5.36a14.94 14.94 0 00-1.34 11.24c0 5.73 4.18 10.49 9.66 11.39a14.17 14.17 0 007.05-2.11c2.79-2.06 4.58-5.16 4.58-8.82v-1.5l-5.37 2.27 2.62-6.28z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/connect/openclaw',
+    label: 'OpenClaw',
+    icon: () => (
+      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.41 14.59l-2.12-2.12 2.83-2.83-2.83-2.83 2.12-2.12L12 8.41l1.41-1.41-2.83-2.83 2.83-2.83-1.41-1.41L12 4.17l-1.41 1.41-2.83 2.83 2.83 2.83-2.12 2.12L12 15.59l1.41 1.41z" />
+      </svg>
+    ),
+  },
 ]
 
 function ThemeToggle() {
@@ -99,6 +119,24 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 space-y-0.5 px-3 pt-2">
+          {platformItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={() => setMobileOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+                  isActive
+                    ? 'border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]'
+                    : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                }`
+              }
+            >
+              <item.icon />
+              {item.label}
+            </NavLink>
+          ))}
+          <div className="my-2 border-t border-sidebar-border" />
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -122,21 +160,8 @@ export default function Sidebar() {
         {/* Divider */}
         <div className="mx-3 border-t border-sidebar-border" />
 
-        {/* Bottom: Connect Guide + Settings */}
+        {/* Bottom: Settings */}
         <div className="px-3 py-2 space-y-0.5">
-          <NavLink
-            to="/connect"
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                isActive
-                  ? 'border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]'
-                  : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
-              }`
-            }
-          >
-            <Cable className="h-4 w-4 shrink-0" />
-            接入指南
-          </NavLink>
           <NavLink
             to="/settings"
             className={({ isActive }) =>
