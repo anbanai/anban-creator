@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query'
-import { ExternalLink } from 'lucide-react'
 import { Card, CardBody } from '@/components/ui/Card'
 import CodeBlock from '@/components/connect/CodeBlock'
 import StepCard from '@/components/connect/StepCard'
@@ -34,15 +33,12 @@ export default function ClaudeGuide() {
           在 Claude Code 中安装案板创作助手插件：
         </p>
         <CodeBlock code="/install-plugin anbanai/anbanwriter" />
-        <p className="text-xs text-muted-foreground">
-          安装后通过 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">/plugin</code> 确认版本（当前 2.4.0）。
-        </p>
       </StepCard>
 
-      {/* Step 2: Configure MCP Connection */}
-      <StepCard step={2} title="配置 MCP 连接">
+      {/* Step 2: Configure Connection */}
+      <StepCard step={2} title="连接平台账号">
         <p className="text-xs text-muted-foreground">
-          插件通过 MCP 协议与平台通信，需要配置环境变量将 API Key 关联到你的账号。
+          安装后需要关联你的平台密钥，才能正常使用插件功能：
         </p>
         <McpConfigStep apiKeys={apiKeys} />
       </StepCard>
@@ -50,17 +46,8 @@ export default function ClaudeGuide() {
       {/* Step 3: Image Generation */}
       <StepCard step={3} title="图片生成配置" optional>
         <p className="text-xs text-muted-foreground">
-          图片生成需要额外配置 AI 图片服务的 Key。在 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">~/.anbanwriter/settings.json</code> 中配置：
+          如需使用 AI 配图功能，需要额外配置图片服务的密钥。首次使用配图功能时，插件会引导你完成配置。
         </p>
-        <CodeBlock
-          language="json"
-          code={`{
-  "image": {
-    "provider": "服务商名称",
-    "key": "你的Key"
-  }
-}`}
-        />
         <p className="text-xs text-muted-foreground">
           仅做文字创作不配图可跳过此步。
         </p>
@@ -69,9 +56,8 @@ export default function ClaudeGuide() {
       {/* Step 4: WeChat Configuration */}
       <StepCard step={4} title="微信公众号配置" optional>
         <p className="text-xs text-muted-foreground">
-          如需发布到微信公众号，需要配置 AppID 和 AppSecret。在 Claude Code 中通过自然语言或 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">/config</code> skill 进行配置：
+          如需发布到微信公众号，需要配置公众号的 AppID 和 Secret。首次发布时，插件会引导你完成配置。
         </p>
-        <CodeBlock code='请帮我配置微信公众号，AppID 是 xxx，Secret 是 yyy' />
         <p className="text-xs text-muted-foreground">
           只写文章不发布到微信可跳过此步。
         </p>
@@ -80,7 +66,9 @@ export default function ClaudeGuide() {
       {/* Quick Start */}
       <Card>
         <div className="border-b border-border px-4 py-3 flex items-center gap-2">
-          <ExternalLink className="h-4 w-4 text-primary" />
+          <svg className="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
           <h3 className="text-sm font-semibold text-foreground">快速开始</h3>
         </div>
         <CardBody className="space-y-2">
@@ -94,7 +82,7 @@ export default function ClaudeGuide() {
             <p>帮我生成一组郁金香的鲜花图片</p>
           </div>
           <p className="text-xs text-muted-foreground">
-            Agent 会自动编排研究、写作、配图、发布等全部流程，无需手动调用各个步骤。
+            AI 会自动编排研究、写作、配图、发布等全部流程，无需手动操作。
           </p>
         </CardBody>
       </Card>

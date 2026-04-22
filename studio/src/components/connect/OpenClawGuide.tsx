@@ -39,15 +39,12 @@ export default function OpenClawGuide() {
           将案板创作助手安装为 OpenClaw 原生插件：
         </p>
         <CodeBlock code="openclaw plugins install ./openclaw" />
-        <p className="text-xs text-muted-foreground">
-          安装后通过 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">openclaw plugins list</code> 确认插件已加载。
-        </p>
       </StepCard>
 
-      {/* Step 2: Configure MCP Connection */}
-      <StepCard step={2} title="配置 MCP 连接">
+      {/* Step 2: Configure Connection */}
+      <StepCard step={2} title="连接平台账号">
         <p className="text-xs text-muted-foreground">
-          插件通过 MCP 协议与案板平台通信。需要配置环境变量关联 API Key：
+          安装后需要关联你的平台密钥，才能正常使用插件功能：
         </p>
         <McpConfigStep apiKeys={apiKeys} />
       </StepCard>
@@ -55,17 +52,8 @@ export default function OpenClawGuide() {
       {/* Step 3: Image Generation */}
       <StepCard step={3} title="图片生成配置" optional>
         <p className="text-xs text-muted-foreground">
-          图片生成需要额外配置 AI 图片服务的 Key。在 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">~/.anbanwriter/settings.json</code> 中配置：
+          如需使用 AI 配图功能，需要额外配置图片服务的密钥。首次使用配图功能时，插件会引导你完成配置。
         </p>
-        <CodeBlock
-          language="json"
-          code={`{
-  "image": {
-    "provider": "服务商名称",
-    "key": "你的Key"
-  }
-}`}
-        />
         <p className="text-xs text-muted-foreground">仅做文字创作不配图可跳过此步。</p>
       </StepCard>
 
@@ -73,7 +61,7 @@ export default function OpenClawGuide() {
       <Card>
         <div className="border-b border-border px-4 py-3 flex items-center gap-2">
           <svg className="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3z" />
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
           </svg>
           <h3 className="text-sm font-semibold text-foreground">使用方式</h3>
         </div>
@@ -81,7 +69,7 @@ export default function OpenClawGuide() {
           <div>
             <p className="text-xs font-medium text-foreground mb-1.5">自然语言触发</p>
             <p className="text-xs text-muted-foreground mb-2">
-              输入包含触发关键词的消息，Agent 会自动识别并注入工作流：
+              输入包含关键词的消息，AI 会自动识别并开始创作：
             </p>
             <div className="space-y-1 text-xs font-mono text-muted-foreground">
               <p>帮我写一篇关于 AI Agent 的文章</p>
@@ -100,27 +88,6 @@ export default function OpenClawGuide() {
               <p>/wechat-xls 春日旅行</p>
               <p>/rednote 降噪耳机推荐</p>
               <p>/flower 郁金香</p>
-            </div>
-          </div>
-          <div className="border-t border-border pt-3">
-            <p className="text-xs font-medium text-foreground mb-1.5">触发关键词</p>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded border border-border px-2 py-1.5">
-                <p className="text-[10px] font-medium text-foreground">微信公众号</p>
-                <p className="text-[10px] text-muted-foreground">写文章、写一篇、发文章</p>
-              </div>
-              <div className="rounded border border-border px-2 py-1.5">
-                <p className="text-[10px] font-medium text-foreground">小绿书</p>
-                <p className="text-[10px] text-muted-foreground">小绿书、图片帖、newspic</p>
-              </div>
-              <div className="rounded border border-border px-2 py-1.5">
-                <p className="text-[10px] font-medium text-foreground">小红书</p>
-                <p className="text-[10px] text-muted-foreground">小红书、种草笔记、仿写</p>
-              </div>
-              <div className="rounded border border-border px-2 py-1.5">
-                <p className="text-[10px] font-medium text-foreground">鲜花图片</p>
-                <p className="text-[10px] text-muted-foreground">鲜花、花卉图片</p>
-              </div>
             </div>
           </div>
         </CardBody>
