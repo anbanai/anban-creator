@@ -1,6 +1,5 @@
-import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, ArrowRight } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 import { Card, CardBody } from '@/components/ui/Card'
 import CodeBlock from '@/components/connect/CodeBlock'
 import StepCard from '@/components/connect/StepCard'
@@ -57,47 +56,11 @@ export default function ClaudeGuide() {
           language="json"
           code={`{
   "image": {
-    "provider": "volcengine",
-    "key": "你的Key",
-    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-    "model": "doubao-seedream-5-0-260128"
+    "provider": "服务商名称",
+    "key": "你的Key"
   }
 }`}
         />
-        <p className="text-xs text-muted-foreground mt-1">支持的图片生成服务商：</p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="py-1.5 text-left font-medium text-foreground">服务商</th>
-                <th className="py-1.5 text-left font-medium text-foreground">provider 值</th>
-                <th className="py-1.5 text-left font-medium text-foreground">说明</th>
-              </tr>
-            </thead>
-            <tbody className="text-muted-foreground">
-              <tr className="border-b border-border/50">
-                <td className="py-1.5">OpenAI (DALL-E)</td>
-                <td className="py-1.5"><code className="font-mono">openai</code></td>
-                <td className="py-1.5">同步生成</td>
-              </tr>
-              <tr className="border-b border-border/50">
-                <td className="py-1.5">Google Gemini</td>
-                <td className="py-1.5"><code className="font-mono">gemini</code></td>
-                <td className="py-1.5">内联图片数据</td>
-              </tr>
-              <tr className="border-b border-border/50">
-                <td className="py-1.5">OpenRouter</td>
-                <td className="py-1.5"><code className="font-mono">openrouter</code></td>
-                <td className="py-1.5">多模型网关</td>
-              </tr>
-              <tr>
-                <td className="py-1.5">火山引擎 Seedream</td>
-                <td className="py-1.5"><code className="font-mono">volcengine</code></td>
-                <td className="py-1.5">异步轮询</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
         <p className="text-xs text-muted-foreground">
           仅做文字创作不配图可跳过此步。
         </p>

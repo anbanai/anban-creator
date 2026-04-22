@@ -25,10 +25,10 @@ export default function OpenClawGuide() {
             通过 OpenClaw 原生插件，你可以在 OpenClaw 平台中使用自然语言驱动 AI 创作流程。插件支持微信公众号图文、小红书笔记、小绿书图片帖、鲜花图片等多种内容类型的自动化创作。
           </p>
           <div className="flex flex-wrap gap-1.5 pt-1">
-            <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">Agent 工作流</span>
+            <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">自动化工作流</span>
             <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">斜杠命令</span>
-            <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">MCP 工具</span>
-            <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">质量检查钩子</span>
+            <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">AI 配图</span>
+            <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">质量检查</span>
           </div>
         </CardBody>
       </Card>
@@ -61,10 +61,8 @@ export default function OpenClawGuide() {
           language="json"
           code={`{
   "image": {
-    "provider": "volcengine",
-    "key": "你的Key",
-    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-    "model": "doubao-seedream-5-0-260128"
+    "provider": "服务商名称",
+    "key": "你的Key"
   }
 }`}
         />
