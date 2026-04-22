@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import { PageTransition } from '@/components/PageTransition'
 import Sidebar from './Sidebar'
+import FeedbackFab from './FeedbackFab'
 
 export default function AppLayout() {
   return (
@@ -11,6 +12,7 @@ export default function AppLayout() {
           <Outlet />
         </PageTransition>
       </main>
+      <FeedbackFab />
     </div>
   )
 }

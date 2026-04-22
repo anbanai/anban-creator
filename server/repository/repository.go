@@ -19,6 +19,7 @@ type Repository interface {
 	Channels() ChannelRepository
 	Credits() CreditRepository
 	APIKeys() APIKeyRepository
+	Feedbacks() FeedbackRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -109,20 +110,26 @@ type TaskFileRepository interface {
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
 }
 
+// FeedbackRepository provides access to the feedbacks table.
+type FeedbackRepository interface {
+	Create(ctx context.Context, feedback *model.Feedback) error
+}
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
 
 type repository struct {
-	db       *gorm.DB
-	users    UserRepository
-	sessions SessionRepository
-	plans    PlanRepository
-	tasks    TaskRepository
-	files    TaskFileRepository
-	channels ChannelRepository
-	credits  CreditRepository
-	apiKeys  APIKeyRepository
+	db        *gorm.DB
+	users     UserRepository
+	sessions  SessionRepository
+	plans     PlanRepository
+	tasks     TaskRepository
+	files     TaskFileRepository
+	channels  ChannelRepository
+	credits   CreditRepository
+	apiKeys   APIKeyRepository
+	feedbacks FeedbackRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -135,17 +142,19 @@ func New(db *gorm.DB) Repository {
 	channels := newChannelRepository(db)
 	credits := newCreditRepository(db)
 	apiKeys := newAPIKeyRepository(db)
+	feedbacks := newFeedbackRepository(db)
 
 	return &repository{
-		db:       db,
-		users:    users,
-		sessions: sessions,
-		plans:    plans,
-		tasks:    tasks,
-		files:    files,
-		channels: channels,
-		credits:  credits,
-		apiKeys:  apiKeys,
+		db:        db,
+		users:     users,
+		sessions:  sessions,
+		plans:     plans,
+		tasks:     tasks,
+		files:     files,
+		channels:  channels,
+		credits:   credits,
+		apiKeys:   apiKeys,
+		feedbacks: feedbacks,
 	}
 }
 
@@ -157,6 +166,7 @@ func (r *repository) TaskFiles() TaskFileRepository     { return r.files }
 func (r *repository) Channels() ChannelRepository       { return r.channels }
 func (r *repository) Credits() CreditRepository         { return r.credits }
 func (r *repository) APIKeys() APIKeyRepository         { return r.apiKeys }
+func (r *repository) Feedbacks() FeedbackRepository     { return r.feedbacks }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -182,28 +192,30 @@ func (r *repository) Close() error {
 // -----------------------------------------------------------------------------
 
 type txRepository struct {
-	db       *gorm.DB
-	users    UserRepository
-	sessions SessionRepository
-	plans    PlanRepository
-	tasks    TaskRepository
-	files    TaskFileRepository
-	channels ChannelRepository
-	credits  CreditRepository
-	apiKeys  APIKeyRepository
+	db        *gorm.DB
+	users     UserRepository
+	sessions  SessionRepository
+	plans     PlanRepository
+	tasks     TaskRepository
+	files     TaskFileRepository
+	channels  ChannelRepository
+	credits   CreditRepository
+	apiKeys   APIKeyRepository
+	feedbacks FeedbackRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
 	return &txRepository{
-		db:       tx,
-		users:    newUserRepository(tx),
-		sessions: newSessionRepository(tx),
-		plans:    newPlanRepository(tx),
-		tasks:    newTaskRepository(tx),
-		files:    newTaskFileRepository(tx),
-		channels: newChannelRepository(tx),
-		credits:  newCreditRepository(tx),
-		apiKeys:  newAPIKeyRepository(tx),
+		db:        tx,
+		users:     newUserRepository(tx),
+		sessions:  newSessionRepository(tx),
+		plans:     newPlanRepository(tx),
+		tasks:     newTaskRepository(tx),
+		files:     newTaskFileRepository(tx),
+		channels:  newChannelRepository(tx),
+		credits:   newCreditRepository(tx),
+		apiKeys:   newAPIKeyRepository(tx),
+		feedbacks: newFeedbackRepository(tx),
 	}
 }
 
@@ -215,6 +227,7 @@ func (r *txRepository) TaskFiles() TaskFileRepository     { return r.files }
 func (r *txRepository) Channels() ChannelRepository       { return r.channels }
 func (r *txRepository) Credits() CreditRepository         { return r.credits }
 func (r *txRepository) APIKeys() APIKeyRepository         { return r.apiKeys }
+func (r *txRepository) Feedbacks() FeedbackRepository     { return r.feedbacks }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

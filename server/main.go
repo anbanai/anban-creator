@@ -184,6 +184,7 @@ func main() {
 	var taskSvc *service.TaskService
 	var channelSvc *service.ChannelService
 	var creditSvc *service.CreditService
+	var feedbackSvc *service.FeedbackService
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir, log)
 
@@ -191,6 +192,7 @@ func main() {
 		planSvc = service.NewPlanService(repo, log)
 		channelSvc = service.NewChannelService(repo, log)
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
+		feedbackSvc = service.NewFeedbackService(repo, log)
 
 		// Create Asynq client if Redis is available.
 		if rdb != nil {
@@ -214,6 +216,7 @@ func main() {
 	var creditHandler *handler.CreditHandler
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
+	var feedbackHandler *handler.FeedbackHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -231,6 +234,7 @@ func main() {
 		if store != nil {
 			fileHandler = handler.NewFileHandler(store, log)
 		}
+		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 	}
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
@@ -336,6 +340,7 @@ func main() {
 		TimelineHandler: timelineHandler,
 		APIKeyHandler:   apiKeyHandler,
 		FileHandler:     fileHandler,
+			FeedbackHandler: feedbackHandler,
 		MCPHandler:      mcpHandler,
 		StorageProvider: store,
 	}
