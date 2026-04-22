@@ -18,6 +18,8 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /abwriter-server /app/abwriter-server
 
+COPY config.example.yaml /app/conf/config.yaml
+
 WORKDIR /app
 RUN ls /app
 RUN ls /app/conf
