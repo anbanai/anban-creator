@@ -33,19 +33,8 @@ export default function OpenClawGuide() {
         </CardBody>
       </Card>
 
-      {/* Step 1: Install OpenClaw */}
-      <StepCard step={1} title="安装 OpenClaw">
-        <p className="text-xs text-muted-foreground">
-          OpenClaw 是一个开源的 AI 助手平台。请先按照官方文档安装：
-        </p>
-        <CodeBlock code="npm install -g openclaw" />
-        <p className="text-xs text-muted-foreground">
-          安装完成后，在终端运行 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">openclaw</code> 启动。
-        </p>
-      </StepCard>
-
-      {/* Step 2: Install Plugin */}
-      <StepCard step={2} title="安装插件">
+      {/* Step 1: Install Plugin */}
+      <StepCard step={1} title="安装插件">
         <p className="text-xs text-muted-foreground">
           将案板创作助手安装为 OpenClaw 原生插件：
         </p>
@@ -55,16 +44,16 @@ export default function OpenClawGuide() {
         </p>
       </StepCard>
 
-      {/* Step 3: Configure MCP Connection */}
-      <StepCard step={3} title="配置 MCP 连接">
+      {/* Step 2: Configure MCP Connection */}
+      <StepCard step={2} title="配置 MCP 连接">
         <p className="text-xs text-muted-foreground">
           插件通过 MCP 协议与案板平台通信。需要配置环境变量关联 API Key：
         </p>
         <McpConfigStep apiKeys={apiKeys} />
       </StepCard>
 
-      {/* Step 4: Image Generation */}
-      <StepCard step={4} title="图片生成配置" optional>
+      {/* Step 3: Image Generation */}
+      <StepCard step={3} title="图片生成配置" optional>
         <p className="text-xs text-muted-foreground">
           图片生成需要额外配置 AI 图片服务的 Key。在 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">~/.anbanwriter/settings.json</code> 中配置：
         </p>

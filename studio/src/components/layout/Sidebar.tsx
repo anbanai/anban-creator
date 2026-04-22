@@ -119,24 +119,6 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 space-y-0.5 px-3 pt-2">
-          {platformItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={() => setMobileOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                  isActive
-                    ? 'border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]'
-                    : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
-                }`
-              }
-            >
-              <item.icon />
-              {item.label}
-            </NavLink>
-          ))}
-          <div className="my-2 border-t border-sidebar-border" />
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -160,8 +142,25 @@ export default function Sidebar() {
         {/* Divider */}
         <div className="mx-3 border-t border-sidebar-border" />
 
-        {/* Bottom: Settings */}
+        {/* Bottom: Platform + Settings */}
         <div className="px-3 py-2 space-y-0.5">
+          {platformItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={() => setMobileOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+                  isActive
+                    ? 'border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]'
+                    : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                }`
+              }
+            >
+              <item.icon />
+              {item.label}
+            </NavLink>
+          ))}
           <NavLink
             to="/settings"
             className={({ isActive }) =>

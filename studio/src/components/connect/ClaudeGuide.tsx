@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, ArrowRight } from 'lucide-react'
 import { Card, CardBody } from '@/components/ui/Card'
 import CodeBlock from '@/components/connect/CodeBlock'
 import StepCard from '@/components/connect/StepCard'
@@ -29,19 +29,8 @@ export default function ClaudeGuide() {
         </CardBody>
       </Card>
 
-      {/* Step 1: Install Claude Code */}
-      <StepCard step={1} title="安装 Claude Code">
-        <p className="text-xs text-muted-foreground">
-          Claude Code 是 Anthropic 官方的 AI 编程助手 CLI 工具。请先安装它：
-        </p>
-        <CodeBlock code="npm install -g @anthropic-ai/claude-code" />
-        <p className="text-xs text-muted-foreground">
-          安装完成后，在终端运行 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">claude</code> 即可启动。
-        </p>
-      </StepCard>
-
-      {/* Step 2: Install Plugin */}
-      <StepCard step={2} title="安装插件">
+      {/* Step 1: Install Plugin */}
+      <StepCard step={1} title="安装插件">
         <p className="text-xs text-muted-foreground">
           在 Claude Code 中安装案板创作助手插件：
         </p>
@@ -51,16 +40,16 @@ export default function ClaudeGuide() {
         </p>
       </StepCard>
 
-      {/* Step 3: Configure MCP Connection */}
-      <StepCard step={3} title="配置 MCP 连接">
+      {/* Step 2: Configure MCP Connection */}
+      <StepCard step={2} title="配置 MCP 连接">
         <p className="text-xs text-muted-foreground">
           插件通过 MCP 协议与平台通信，需要配置环境变量将 API Key 关联到你的账号。
         </p>
         <McpConfigStep apiKeys={apiKeys} />
       </StepCard>
 
-      {/* Step 4: Image Generation */}
-      <StepCard step={4} title="图片生成配置" optional>
+      {/* Step 3: Image Generation */}
+      <StepCard step={3} title="图片生成配置" optional>
         <p className="text-xs text-muted-foreground">
           图片生成需要额外配置 AI 图片服务的 Key。在 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">~/.anbanwriter/settings.json</code> 中配置：
         </p>
@@ -114,8 +103,8 @@ export default function ClaudeGuide() {
         </p>
       </StepCard>
 
-      {/* Step 5: WeChat Configuration */}
-      <StepCard step={5} title="微信公众号配置" optional>
+      {/* Step 4: WeChat Configuration */}
+      <StepCard step={4} title="微信公众号配置" optional>
         <p className="text-xs text-muted-foreground">
           如需发布到微信公众号，需要配置 AppID 和 AppSecret。在 Claude Code 中通过自然语言或 <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">/config</code> skill 进行配置：
         </p>
