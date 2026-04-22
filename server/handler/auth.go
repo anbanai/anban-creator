@@ -450,6 +450,19 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 
 	tier := model.ResolveTier(user.Tier)
 
+	// Auto-generate invite code for existing users who don't have one.
+	if user.InviteCode == "" {
+		inviteCode, err := generateInviteCode()
+		if err != nil {
+			h.logger.Error().Err(err).Msg("failed to generate invite code for existing user")
+		} else {
+			user.InviteCode = inviteCode
+			if err := h.repo.Users().Update(c.Context(), user); err != nil {
+				h.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to save invite code for existing user")
+			}
+		}
+	}
+
 	return Success(c, fiber.Map{
 		"id":                   user.ID,
 		"email":                user.Email,
