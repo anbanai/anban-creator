@@ -30,7 +30,7 @@ export default function OpenClawGuide() {
         <p className="text-xs text-muted-foreground">
           将案板创作助手安装为 OpenClaw 原生插件：
         </p>
-        <CodeBlock code="openclaw plugins install ./openclaw" />
+        <CodeBlock code={`git clone https://github.com/anbanai/anbanwriter-plugins.git\ncd anbanwriter-plugins\nopenclaw plugins install ./openclaw`} />
       </StepCard>
 
       <StepCard step={2} title="连接平台账号">

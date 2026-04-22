@@ -138,7 +138,7 @@ Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhos
 - `/api/v1/timeline` — Unified timeline view
 - `/api/v1/credits` — Balance, sign-in, transactions
 - `/api/v1/files/*` — Local file serving (local storage mode only)
-- `/mcp` — MCP endpoint (API key or JWT auth, configured in `plugin/.mcp.json`)
+- `/mcp` — MCP endpoint (API key or JWT auth, configured in `plugins/claude-code/.mcp.json`)
 
 ## Configuration
 

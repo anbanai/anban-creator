@@ -190,7 +190,7 @@ The converter module orchestrates a multi-step process:
 
 ### Writing Styles
 
-Located in `plugin/writers/*.yaml`, each style defines:
+Located in `plugins/shared/writers/*.yaml`, each style defines:
 
 - **Core Traits**: Distinctive voice characteristics
 - **Structure Patterns**: Preferred content organization
@@ -248,7 +248,7 @@ Quality scoring (5 dimensions, 10 points each):
 
 ### Adding New Themes
 
-1. Create YAML file in `plugin/themes/{name}.yaml`
+1. Create YAML file in `plugins/shared/themes/{name}.yaml`
 2. Theme system auto-loads from YAML with hot-reload support
 3. Theme structure includes: core_traits, structure_patterns, language_usage, domain_knowledge
 
@@ -352,7 +352,7 @@ func TestFeature(t *testing.T) {
 
 ## Skills Integration
 
-The project includes Claude Code skills in `plugin/skills/` directory:
+The project includes Claude Code skills in `plugins/claude-code/skills/` directory:
 
 - `content-writing` - Article writing workflow
 - `visual-design` - Image and theme management
@@ -364,7 +364,7 @@ The project includes Claude Code skills in `plugin/skills/` directory:
 - `rednote-research` - 小红书热门内容研究与评分
 - `rednote-writing` - 小红书文案写作、标题优化、爆款改写
 
-Skills are auto-loaded when working in this repository or via plugin marketplace.
+Skills are auto-loaded via the [anbanwriter-plugins](https://github.com/anbanai/anbanwriter-plugins) submodule or marketplace.
 
 ## Notes for Development
 
@@ -377,18 +377,17 @@ Skills are auto-loaded when working in this repository or via plugin marketplace
 
 ## Plugin & Agent Ecosystem
 
+Plugins live in a separate repo ([anbanai/anbanwriter-plugins](https://github.com/anbanai/anbanwriter-plugins)) as a git submodule at `plugins/`.
+
 ```
-plugin/
-├── .claude-plugin/
-│   ├── plugin.json      # Plugin manifest
-│   └── marketplace.json # Marketplace listing
-├── agents/
-│   ├── wechatarticle.md # Full article pipeline agent (maxTurns: 50)
-│   ├── wechatxls.md     # Image post pipeline agent (maxTurns: 25)
-│   └── rednote.md       # Xiaohongshu creation engine (maxTurns: 20)
-├── skills/              # Claude Code skills
-├── hooks/
-│   └── hooks.json       # SessionStart, SubagentStop, TaskCompleted
-├── themes/              # Conversion themes (YAML)
-└── writers/             # Writing styles (YAML)
+plugins/                          # git submodule
+├── claude-code/                  # Claude Code plugin
+│   ├── agents/                   # Agent definitions
+│   ├── skills/                   # Claude Code skills
+│   └── hooks/                    # Lifecycle hooks
+├── openclaw/                     # OpenClaw plugin
+│   └── src/                      # TypeScript source
+└── shared/                       # Shared resources
+    ├── themes/                   # Conversion themes (YAML)
+    └── writers/                  # Writing styles (YAML)
 ```
