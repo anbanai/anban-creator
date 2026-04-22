@@ -21,4 +21,6 @@ COPY --from=builder /abwriter-server /app/abwriter-server
 COPY /server/config.example.yaml /app/conf/config.yaml
 
 WORKDIR /app
+RUN ls /app
+RUN ls /app/conf
 CMD ["/app/abwriter-server -f /app/conf/config.yaml"]
