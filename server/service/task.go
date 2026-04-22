@@ -36,10 +36,12 @@ type TaskService struct {
 	taskLogDir   string
 	workspaceSvc *WorkspaceService
 	workspaceDir string
+	pubsub       *RedisPubSub
 	cancelFuncs  sync.Map // taskID → context.CancelFunc
 }
 
 // NewTaskService creates a new TaskService.
+// If pubsub is nil, cross-replica cancel signaling and progress events are disabled.
 func NewTaskService(
 	repo repository.Repository,
 	executor agent.TaskExecutor,
@@ -50,8 +52,9 @@ func NewTaskService(
 	taskLogDir string,
 	workspaceSvc *WorkspaceService,
 	workspaceDir string,
+	pubsub *RedisPubSub,
 ) *TaskService {
-	return &TaskService{
+	svc := &TaskService{
 		repo:         repo,
 		executor:     executor,
 		logger:       logger,
@@ -61,12 +64,42 @@ func NewTaskService(
 		taskLogDir:   taskLogDir,
 		workspaceSvc: workspaceSvc,
 		workspaceDir: workspaceDir,
+		pubsub:       pubsub,
+	}
+
+	// Start listening for cross-replica cancel events.
+	if pubsub != nil && pubsub.Available() {
+		go svc.listenCancelEvents()
+	}
+
+	return svc
+}
+
+// listenCancelEvents subscribes to Redis cancel events and triggers local
+// context cancellation for tasks executing on this replica.
+func (s *TaskService) listenCancelEvents() {
+	ctx := context.Background()
+	ch, cancel := s.pubsub.SubscribeCancel(ctx)
+	defer cancel()
+
+	for taskID := range ch {
+		if v, ok := s.cancelFuncs.Load(taskID); ok {
+			if fn, ok := v.(context.CancelFunc); ok {
+				fn()
+				s.logger.Info().Str("task_id", taskID).Msg("received cross-replica cancel signal")
+			}
+		}
 	}
 }
 
 // TaskLogDir returns the configured task log directory.
 func (s *TaskService) TaskLogDir() string {
 	return s.taskLogDir
+}
+
+// PubSub returns the Redis pub/sub instance (may be nil if Redis is unavailable).
+func (s *TaskService) PubSub() *RedisPubSub {
+	return s.pubsub
 }
 
 // StorageProviderName returns the name of the configured storage provider,
@@ -271,6 +304,8 @@ func (s *TaskService) ListTopics(ctx context.Context, channelID string) ([]strin
 }
 
 // Cancel sets a task's status to "cancelled" and signals the running execution to stop.
+// If Redis pub/sub is available, it also publishes a cancel event so other replicas
+// can propagate the cancellation to their in-process execution contexts.
 func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	if err := s.repo.Tasks().UpdateStatus(ctx, id, model.TaskStatusCancelled); err != nil {
 		return fmt.Errorf("cancel task: %w", err)
@@ -281,6 +316,10 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 			cancel()
 			s.logger.Info().Str("task_id", id).Msg("signalled execution context cancellation")
 		}
+	}
+	// Publish to Redis so other replicas can cancel their local contexts.
+	if s.pubsub != nil {
+		s.pubsub.PublishCancel(ctx, id)
 	}
 	return nil
 }

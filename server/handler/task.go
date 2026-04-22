@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -242,6 +243,8 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 }
 
 // Stream handles GET /api/v1/tasks/:id/stream — SSE endpoint for real-time progress.
+// When Redis pub/sub is available, it subscribes to progress events for immediate
+// push delivery. Falls back to 1-second DB polling when Redis is unavailable.
 func (h *TaskHandler) Stream(c fiber.Ctx) error {
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
@@ -268,10 +271,86 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 	}
 
 	ctx := c.Context()
+
+	// Try Redis pub/sub for real-time push; fall back to DB polling.
+	pubsub := h.service.PubSub()
+	if pubsub != nil && pubsub.Available() {
+		return h.streamWithPubSub(c, ctx, taskID, pubsub)
+	}
+	return h.streamWithPolling(c, ctx, taskID)
+}
+
+// streamWithPubSub uses Redis pub/sub for real-time progress delivery.
+// It also runs a slow DB poll as a fallback for any events missed by pub/sub.
+func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID string, pubsub *service.RedisPubSub) error {
+	sub := pubsub.SubscribeProgress(ctx, taskID)
+	if sub == nil {
+		return h.streamWithPolling(c, ctx, taskID)
+	}
+	defer sub.Close()
+
+	// Slow fallback poll every 5 seconds to catch any missed pub/sub events.
+	fallbackTicker := time.NewTicker(5 * time.Second)
+	defer fallbackTicker.Stop()
+
+	// Max SSE timeout: 30 minutes.
+	timeout := time.NewTimer(30 * time.Minute)
+	defer timeout.Stop()
+
+	lastLogLen := len(getTaskProgressLog(ctx, h.service, taskID))
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-timeout.C:
+			fmt.Fprintf(c, "event: timeout\ndata: {}\n\n")
+			return nil
+		case msg, ok := <-sub.Events():
+			if !ok {
+				// Subscription closed, fall back to polling.
+				return h.streamWithPolling(c, ctx, taskID)
+			}
+			var event service.ProgressEvent
+			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
+				continue
+			}
+			escaped, _ := json.Marshal(event.Message)
+			if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", escaped); err != nil {
+				return nil
+			}
+			// Check terminal state.
+			if isTerminalState(ctx, h.service, taskID, c) {
+				return nil
+			}
+		case <-fallbackTicker.C:
+			task, err := h.service.GetByID(ctx, taskID)
+			if err != nil {
+				return nil
+			}
+			// Send any progress entries missed by pub/sub.
+			if len(task.ProgressLog) > lastLogLen {
+				newLog := task.ProgressLog[lastLogLen:]
+				lastLogLen = len(task.ProgressLog)
+				escaped, _ := json.Marshal(newLog)
+				if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", escaped); err != nil {
+					return nil
+				}
+			}
+			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
+				statusData, _ := json.Marshal(map[string]string{"status": task.Status})
+				fmt.Fprintf(c, "event: %s\ndata: %s\n\n", task.Status, statusData)
+				return nil
+			}
+		}
+	}
+}
+
+// streamWithPolling falls back to 1-second DB polling for progress updates.
+func (h *TaskHandler) streamWithPolling(c fiber.Ctx, ctx context.Context, taskID string) error {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	// Max SSE timeout: 30 minutes to prevent indefinitely stuck connections.
 	timeout := time.NewTimer(30 * time.Minute)
 	defer timeout.Stop()
 
@@ -282,26 +361,17 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 		case <-ctx.Done():
 			return nil
 		case <-timeout.C:
-			// Send timeout event and close.
-			if _, err := fmt.Fprintf(c, "event: timeout\ndata: {}\n\n"); err != nil {
-				return nil
-			}
+			fmt.Fprintf(c, "event: timeout\ndata: {}\n\n")
 			return nil
 		case <-ticker.C:
 			task, err := h.service.GetByID(ctx, taskID)
 			if err != nil {
-				// Client likely disconnected or task no longer exists.
 				return nil
 			}
 
-			// Send new progress entries if the log grew.
-			newLog := ""
 			if len(task.ProgressLog) > lastLogLen {
-				newLog = task.ProgressLog[lastLogLen:]
+				newLog := task.ProgressLog[lastLogLen:]
 				lastLogLen = len(task.ProgressLog)
-			}
-
-			if len(newLog) > 0 {
 				escaped, err := json.Marshal(newLog)
 				if err != nil {
 					continue
@@ -311,7 +381,6 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 				}
 			}
 
-			// Terminal states: close the stream.
 			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
 				statusData, _ := json.Marshal(map[string]string{
 					"status": task.Status,
@@ -323,6 +392,29 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 			}
 		}
 	}
+}
+
+// getTaskProgressLog fetches the current progress log length for a task.
+func getTaskProgressLog(ctx context.Context, svc *service.TaskService, taskID string) string {
+	task, err := svc.GetByID(ctx, taskID)
+	if err != nil {
+		return ""
+	}
+	return task.ProgressLog
+}
+
+// isTerminalState checks if a task has reached a terminal state and sends the SSE event.
+func isTerminalState(ctx context.Context, svc *service.TaskService, taskID string, c fiber.Ctx) bool {
+	task, err := svc.GetByID(ctx, taskID)
+	if err != nil {
+		return true
+	}
+	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
+		statusData, _ := json.Marshal(map[string]string{"status": task.Status})
+		fmt.Fprintf(c, "event: %s\ndata: %s\n\n", task.Status, statusData)
+		return true
+	}
+	return false
 }
 
 // verifyTaskOwnership is a helper that fetches a task and verifies the

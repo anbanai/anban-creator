@@ -25,6 +25,8 @@ func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authe
 }
 
 // AppendProgressLog appends one progress line to the task log atomically.
+// If Redis pub/sub is available, it also publishes a progress event so
+// SSE handlers on any replica can push updates to their clients immediately.
 func (s *TaskService) AppendProgressLog(ctx context.Context, taskID, message string) error {
 	message = strings.TrimSpace(message)
 	if message == "" {
@@ -32,6 +34,10 @@ func (s *TaskService) AppendProgressLog(ctx context.Context, taskID, message str
 	}
 	if err := s.repo.Tasks().AppendProgressLog(ctx, taskID, message); err != nil {
 		return fmt.Errorf("append progress log: %w", err)
+	}
+	// Publish to Redis for real-time SSE delivery across replicas.
+	if s.pubsub != nil {
+		s.pubsub.PublishProgress(ctx, taskID, message)
 	}
 	return nil
 }

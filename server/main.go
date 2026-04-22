@@ -204,7 +204,7 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir)
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log))
 	}
 
 	// 14. Create handlers.

@@ -1,6 +1,7 @@
 # Binaries (current directory only)
 /anbanwriter
 /anbanwriter.exe
+agent/agent
 
 # Ignore all binaries (anywhere in the repo)
 **/bin/
