@@ -37,7 +37,8 @@ type TaskService struct {
 	workspaceSvc *WorkspaceService
 	workspaceDir string
 	pubsub       *RedisPubSub
-	cancelFuncs  sync.Map // taskID → context.CancelFunc
+	pubsubCancel context.CancelFunc // stops the listenCancelEvents goroutine
+	cancelFuncs  sync.Map            // taskID → context.CancelFunc
 }
 
 // NewTaskService creates a new TaskService.
@@ -69,16 +70,25 @@ func NewTaskService(
 
 	// Start listening for cross-replica cancel events.
 	if pubsub != nil && pubsub.Available() {
-		go svc.listenCancelEvents()
+		ctx, cancel := context.WithCancel(context.Background())
+		svc.pubsubCancel = cancel
+		go svc.listenCancelEvents(ctx)
 	}
 
 	return svc
 }
 
+// Close stops the Redis pub/sub subscriber goroutine.
+// Call this during server graceful shutdown.
+func (s *TaskService) Close() {
+	if s.pubsubCancel != nil {
+		s.pubsubCancel()
+	}
+}
+
 // listenCancelEvents subscribes to Redis cancel events and triggers local
 // context cancellation for tasks executing on this replica.
-func (s *TaskService) listenCancelEvents() {
-	ctx := context.Background()
+func (s *TaskService) listenCancelEvents(ctx context.Context) {
 	ch, cancel := s.pubsub.SubscribeCancel(ctx)
 	defer cancel()
 

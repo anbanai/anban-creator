@@ -281,7 +281,8 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 }
 
 // streamWithPubSub uses Redis pub/sub for real-time progress delivery.
-// It also runs a slow DB poll as a fallback for any events missed by pub/sub.
+// It also runs a slow DB poll as a fallback for any events missed by pub/sub
+// and for terminal state detection.
 func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID string, pubsub *service.RedisPubSub) error {
 	sub := pubsub.SubscribeProgress(ctx, taskID)
 	if sub == nil {
@@ -289,7 +290,8 @@ func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID 
 	}
 	defer sub.Close()
 
-	// Slow fallback poll every 5 seconds to catch any missed pub/sub events.
+	// Slow fallback poll every 5 seconds to catch any missed pub/sub events
+	// and detect terminal states.
 	fallbackTicker := time.NewTicker(5 * time.Second)
 	defer fallbackTicker.Stop()
 
@@ -297,7 +299,11 @@ func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID 
 	timeout := time.NewTimer(30 * time.Minute)
 	defer timeout.Stop()
 
-	lastLogLen := len(getTaskProgressLog(ctx, h.service, taskID))
+	// Fetch initial progress log length from DB.
+	lastLogLen := 0
+	if task, err := h.service.GetByID(ctx, taskID); err == nil {
+		lastLogLen = len(task.ProgressLog)
+	}
 
 	for {
 		select {
@@ -319,10 +325,6 @@ func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID 
 			if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", escaped); err != nil {
 				return nil
 			}
-			// Check terminal state.
-			if isTerminalState(ctx, h.service, taskID, c) {
-				return nil
-			}
 		case <-fallbackTicker.C:
 			task, err := h.service.GetByID(ctx, taskID)
 			if err != nil {
@@ -337,6 +339,7 @@ func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID 
 					return nil
 				}
 			}
+			// Terminal state detection (reliable via DB).
 			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
 				statusData, _ := json.Marshal(map[string]string{"status": task.Status})
 				fmt.Fprintf(c, "event: %s\ndata: %s\n\n", task.Status, statusData)
@@ -392,29 +395,6 @@ func (h *TaskHandler) streamWithPolling(c fiber.Ctx, ctx context.Context, taskID
 			}
 		}
 	}
-}
-
-// getTaskProgressLog fetches the current progress log length for a task.
-func getTaskProgressLog(ctx context.Context, svc *service.TaskService, taskID string) string {
-	task, err := svc.GetByID(ctx, taskID)
-	if err != nil {
-		return ""
-	}
-	return task.ProgressLog
-}
-
-// isTerminalState checks if a task has reached a terminal state and sends the SSE event.
-func isTerminalState(ctx context.Context, svc *service.TaskService, taskID string, c fiber.Ctx) bool {
-	task, err := svc.GetByID(ctx, taskID)
-	if err != nil {
-		return true
-	}
-	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
-		statusData, _ := json.Marshal(map[string]string{"status": task.Status})
-		fmt.Fprintf(c, "event: %s\ndata: %s\n\n", task.Status, statusData)
-		return true
-	}
-	return false
 }
 
 // verifyTaskOwnership is a helper that fetches a task and verifies the

@@ -340,7 +340,7 @@ func main() {
 		TimelineHandler: timelineHandler,
 		APIKeyHandler:   apiKeyHandler,
 		FileHandler:     fileHandler,
-			FeedbackHandler: feedbackHandler,
+		FeedbackHandler: feedbackHandler,
 		MCPHandler:      mcpHandler,
 		StorageProvider: store,
 	}
@@ -384,6 +384,11 @@ func main() {
 			if err := asynqClient.Close(); err != nil {
 				log.Error().Err(err).Msg("failed to close Asynq client")
 			}
+		}
+
+		// Stop Redis pub/sub subscriber.
+		if taskSvc != nil {
+			taskSvc.Close()
 		}
 
 		if repo != nil {

@@ -148,7 +148,7 @@ func (ps *RedisPubSub) SubscribeProgress(ctx context.Context, taskID string) *Pr
 	sub := ps.rdb.Subscribe(ctx, channel)
 	return &ProgressSubscriber{
 		ch:      sub,
-		msgChan: sub.Channel(),
+		msgChan: sub.Channel(redis.WithChannelSize(64)),
 	}
 }
 
