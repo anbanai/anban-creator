@@ -108,6 +108,7 @@ docker-logs:
 
 # Build the abwriter-agent Docker image (required for executor: docker)
 docker-agent-image:
+	@git submodule update --init --recursive
 	@echo "Building abwriter-agent:latest..."
 	@docker build -f agent/Dockerfile -t abwriter-agent:latest .
 	@echo "Image build complete: abwriter-agent:latest"

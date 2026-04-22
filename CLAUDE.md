@@ -231,22 +231,23 @@ Task progress events use `TaskProgressNotifier` interface (`server/service/task_
 
 ## Plugin & Agent Ecosystem
 
+Plugins live in a separate repo (`anbanai/anbanwriter-plugins`) added as a git submodule at `plugins/`.
+
 ```
-plugin/
-├── .claude-plugin/
-│   ├── plugin.json      # Plugin manifest
-│   └── marketplace.json # Marketplace listing
-├── agents/
-│   ├── wechatarticle.md # Full article pipeline agent
-│   ├── wechatxls.md     # Image post pipeline agent
-│   ├── rednote.md       # Xiaohongshu creation engine
-│   └── flower.md        # Flower image generation agent
-├── skills/              # Claude Code skills (content-writing, topic-research, seo-optimization, etc.)
-├── hooks/
-│   └── hooks.json       # SessionStart, SubagentStop, TaskCompleted
-├── themes/              # Conversion themes (YAML)
-└── writers/             # Writing styles (YAML): dan-koe, cultural-depth, casual-science
+plugins/                          # git submodule → anbanai/anbanwriter-plugins
+├── claude-code/                  # Claude Code plugin
+│   ├── .claude-plugin/           # Plugin manifest
+│   ├── agents/                   # Agent definitions (markdown)
+│   ├── skills/                   # Claude Code skills
+│   └── hooks/                    # Lifecycle hooks
+├── openclaw/                     # OpenClaw plugin (TypeScript)
+│   └── src/                      # Plugin source
+└── shared/                       # Shared resources
+    ├── themes/                   # Conversion themes (YAML)
+    └── writers/                  # Writing styles (YAML)
 ```
+
+Note: `claude-code/themes` and `claude-code/writers` are symlinks to `../shared/`.
 
 ## Notes
 
