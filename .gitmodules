@@ -1,3 +1,6 @@
 [submodule "plugins"]
 	path = plugins
 	url = https://github.com/anbanai/anbanwriter-plugins.git
+[submodule "claudecode"]
+	path = claudecode
+	url = https://github.com/anbanai/anbanwriter-claudecode.git
