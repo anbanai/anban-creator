@@ -6,6 +6,7 @@ import { channelsApi } from './channels'
 import { creditsApi } from './credits'
 import { apiKeysApi } from './api-keys'
 import { usageApi } from './usage'
+import { feedbackApi } from './feedback'
 
 export const api = {
   auth: authApi,
@@ -16,4 +17,5 @@ export const api = {
   credits: creditsApi,
   apiKeys: apiKeysApi,
   usage: usageApi,
+  feedback: feedbackApi,
 }
