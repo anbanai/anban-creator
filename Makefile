@@ -1,7 +1,15 @@
 # AnbanWriter Makefile
 # Content creation platform: MCP Server + Web Studio
 
-.PHONY: all clean test help lint fmt vet \
+.DELETE_ON_ERROR:
+
+BINARY      := abwriter-server
+BINDIR      := bin
+AGENT_IMAGE := abwriter-agent:latest
+SERVER_IMAGE := abwriter-server:latest
+SERVER_CONFIG := server/config.yaml
+
+.PHONY: all clean distclean test help lint fmt vet deps ci coverage \
         server-build server-run server-dev server-test \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
@@ -16,9 +24,11 @@ all: server-build
 
 # Clean all build artifacts
 clean:
-	@rm -rf bin/ studio/dist/ studio/node_modules/
-	@rm -rf dist/ release/
+	@rm -rf $(BINDIR)/ studio/dist/ dist/ release/
 	@rm -f *.log
+
+distclean: clean
+	@rm -rf studio/node_modules/
 
 # Run all tests
 test:
@@ -31,7 +41,6 @@ lint:
 # Format code
 fmt:
 	@go fmt ./...
-	@gofmt -w .
 
 # Static analysis
 vet:
@@ -58,13 +67,13 @@ coverage:
 
 # Build the server binary
 server-build:
-	@mkdir -p bin
-	@go build -o bin/abwriter-server ./server
-	@echo "Server build complete: bin/abwriter-server"
+	@mkdir -p $(BINDIR)
+	@go build -o $(BINDIR)/$(BINARY) ./server
+	@echo "Server build complete: $(BINDIR)/$(BINARY)"
 
 # Build and run the server
 server-run: server-build
-	./bin/abwriter-server -config server/config.yaml
+	./$(BINDIR)/$(BINARY) -config $(SERVER_CONFIG)
 
 # Run the server via go run (development)
 server-dev:
@@ -109,15 +118,16 @@ docker-logs:
 # Build the abwriter-agent Docker image (required for executor: docker)
 docker-agent-image:
 	@git submodule update --init --recursive
-	@echo "Building abwriter-agent:latest..."
-	@docker build -f agent/Dockerfile -t abwriter-agent:latest .
-	@echo "Image build complete: abwriter-agent:latest"
+	@echo "Building $(AGENT_IMAGE)..." && \
+	docker build -f agent/Dockerfile -t $(AGENT_IMAGE) . && \
+	echo "Image build complete: $(AGENT_IMAGE)"
 
 # Build the abwriter-server Docker image
 docker-server-image:
-	@echo "Building abwriter-server:latest..."
-	@docker build -f server/Dockerfile -t abwriter-server:latest .
-	@echo "Image build complete: abwriter-server:latest"
+	@git submodule update --init --recursive
+	@echo "Building $(SERVER_IMAGE)..." && \
+	docker build -f server/Dockerfile -t $(SERVER_IMAGE) . && \
+	echo "Image build complete: $(SERVER_IMAGE)"
 
 # Build both images
 docker-images: docker-agent-image docker-server-image
@@ -140,7 +150,8 @@ help:
 	@echo "  make fmt           - Format code"
 	@echo "  make lint          - Lint code (requires golangci-lint)"
 	@echo "  make deps          - Download and tidy dependencies"
-	@echo "  make clean         - Remove all build artifacts"
+	@echo "  make clean         - Remove build artifacts"
+	@echo "  make distclean     - Remove build artifacts + dependencies"
 	@echo ""
 	@echo "Server targets:"
 	@echo "  make server-build  - Build server binary to bin/abwriter-server"

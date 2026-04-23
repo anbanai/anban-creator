@@ -11,14 +11,30 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /abwriter-server ./server/
 
-# Stage 2: Minimal runtime image
-FROM alpine:3.21
+# Stage 2: Runtime with Node.js + Claude CLI + Plugin
+FROM node:25-slim
 
-RUN apk add --no-cache ca-certificates
+RUN npm install -g @anthropic-ai/claude-code
 
 COPY --from=builder /abwriter-server /app/abwriter-server
 
-COPY /server/config.example.yaml /app/conf/config.yaml
+COPY server/config.example.yaml /app/conf/config.yaml
+
+# Copy plugin files (claudecode/ contains agents/, skills/, hooks/, themes/, writers/)
+COPY claudecode/ /anbanai/
+
+# Install plugin as non-root user (Claude CLI requires this for --scope user)
+USER node
+RUN claude plugin marketplace add /anbanai && \
+    claude plugin install --scope user anbanwriter@anbanai
+
+# Ensure data directories are writable by node user.
+# Switch back to root only to create/chown directories, then drop to node.
+USER root
+RUN mkdir -p /app/data/files /app/data/workspace /app/data/logs/tasks && \
+    chown -R node:node /app/data
+
+USER node
 
 WORKDIR /app
-CMD ["/app/abwriter-server","-config","/app/conf/config.yaml"]
+CMD ["/app/abwriter-server", "-config", "/app/conf/config.yaml"]

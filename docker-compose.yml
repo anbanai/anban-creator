@@ -38,19 +38,21 @@ services:
       timeout: 5s
       retries: 5
 
-  agent:
-    build:
-      context: .
-      dockerfile: agent/Dockerfile
-    image: abwriter-agent:latest
-    container_name: abwriter-agent
-    restart: unless-stopped
-    volumes:
-      - ./data/workspace:/workspace
-    networks:
-      - abwriter-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+  # NOTE: agent service disabled — server now uses local executor (Claude CLI subprocess).
+  # Uncomment only if you need Docker executor mode (separate agent containers).
+  # agent:
+  #   build:
+  #     context: .
+  #     dockerfile: agent/Dockerfile
+  #   image: abwriter-agent:latest
+  #   container_name: abwriter-agent
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./data/workspace:/workspace
+  #   networks:
+  #     - abwriter-network
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
 
   server:
     build:
