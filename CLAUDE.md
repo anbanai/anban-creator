@@ -138,7 +138,7 @@ Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhos
 - `/api/v1/timeline` — Unified timeline view
 - `/api/v1/credits` — Balance, sign-in, transactions
 - `/api/v1/files/*` — Local file serving (local storage mode only)
-- `/mcp` — MCP endpoint (API key or JWT auth, configured in `plugins/claude-code/.mcp.json`)
+- `/mcp` — MCP endpoint (API key or JWT auth, configured in `claudecode/.mcp.json`)
 
 ## Configuration
 
@@ -199,7 +199,7 @@ All implement `Provider` interface (`app/image/provider.go`).
 
 ### Adding New Themes
 
-1. Create YAML file in `plugin/themes/{name}.yaml`
+1. Create YAML file in `claudecode/themes/{name}.yaml`
 2. Theme system auto-loads with hot-reload support
 
 ### Server Wire Function Pattern
@@ -231,23 +231,17 @@ Task progress events use `TaskProgressNotifier` interface (`server/service/task_
 
 ## Plugin & Agent Ecosystem
 
-Plugins live in a separate repo (`anbanai/anbanwriter-plugins`) added as a git submodule at `plugins/`.
+The Claude Code plugin lives in a separate repo (`anbanai/anbanwriter-claudecode`) added as a git submodule at `claudecode/`.
 
 ```
-plugins/                          # git submodule → anbanai/anbanwriter-plugins
-├── claude-code/                  # Claude Code plugin
-│   ├── .claude-plugin/           # Plugin manifest
-│   ├── agents/                   # Agent definitions (markdown)
-│   ├── skills/                   # Claude Code skills
-│   └── hooks/                    # Lifecycle hooks
-├── openclaw/                     # OpenClaw plugin (TypeScript)
-│   └── src/                      # Plugin source
-└── shared/                       # Shared resources
-    ├── themes/                   # Conversion themes (YAML)
-    └── writers/                  # Writing styles (YAML)
+claudecode/                        # git submodule → anbanai/anbanwriter-claudecode
+├── .claude-plugin/                # Plugin manifest
+├── agents/                        # Agent definitions (markdown)
+├── skills/                        # Claude Code skills
+├── hooks/                         # Lifecycle hooks
+├── themes/                        # Conversion themes (YAML)
+└── writers/                       # Writing styles (YAML)
 ```
-
-Note: `claude-code/themes` and `claude-code/writers` are symlinks to `../shared/`.
 
 ## Notes
 

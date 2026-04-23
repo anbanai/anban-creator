@@ -548,14 +548,14 @@ func (c *Config) applyEnvOverrides() {
 }
 
 // detectPluginDir attempts to locate the abwriter plugin directory
-// that contains agents/. It checks the plugins submodule first,
+// that contains agents/. It checks the claudecode submodule first,
 // then the legacy plugin/ subdirectory, then searches upward from CWD.
 func detectPluginDir() string {
 	var candidates []string
 	if wd, err := os.Getwd(); err == nil {
-		// Check for plugins submodule (claude-code/agents).
-		if info, err := os.Stat(filepath.Join(wd, "plugins", "claude-code", "agents")); err == nil && info.IsDir() {
-			return filepath.Join(wd, "plugins", "claude-code")
+		// Check for claudecode submodule.
+		if info, err := os.Stat(filepath.Join(wd, "claudecode", "agents")); err == nil && info.IsDir() {
+			return filepath.Join(wd, "claudecode")
 		}
 		// Check for legacy plugin/ subdirectory.
 		if info, err := os.Stat(filepath.Join(wd, "plugin", "agents")); err == nil && info.IsDir() {

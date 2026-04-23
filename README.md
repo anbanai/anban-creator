@@ -4,7 +4,7 @@ Professional WeChat content creation toolkit for Claude Code with AI-powered wri
 
 ## Installation
 
-See [anbanai/anbanwriter-plugins](https://github.com/anbanai/anbanwriter-plugins) for Claude Code and OpenClaw plugin installation instructions.
+See [anbanai/anbanwriter-claudecode](https://github.com/anbanai/anbanwriter-claudecode) for Claude Code plugin installation instructions.
 
 ## Features
 

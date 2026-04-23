@@ -190,7 +190,7 @@ The converter module orchestrates a multi-step process:
 
 ### Writing Styles
 
-Located in `plugins/shared/writers/*.yaml`, each style defines:
+Located in `claudecode/writers/*.yaml`, each style defines:
 
 - **Core Traits**: Distinctive voice characteristics
 - **Structure Patterns**: Preferred content organization
@@ -248,7 +248,7 @@ Quality scoring (5 dimensions, 10 points each):
 
 ### Adding New Themes
 
-1. Create YAML file in `plugins/shared/themes/{name}.yaml`
+1. Create YAML file in `claudecode/themes/{name}.yaml`
 2. Theme system auto-loads from YAML with hot-reload support
 3. Theme structure includes: core_traits, structure_patterns, language_usage, domain_knowledge
 
@@ -352,7 +352,7 @@ func TestFeature(t *testing.T) {
 
 ## Skills Integration
 
-The project includes Claude Code skills in `plugins/claude-code/skills/` directory:
+The project includes Claude Code skills in `claudecode/skills/` directory:
 
 - `content-writing` - Article writing workflow
 - `visual-design` - Image and theme management
@@ -377,17 +377,14 @@ Skills are auto-loaded via the [anbanwriter-plugins](https://github.com/anbanai/
 
 ## Plugin & Agent Ecosystem
 
-Plugins live in a separate repo ([anbanai/anbanwriter-plugins](https://github.com/anbanai/anbanwriter-plugins)) as a git submodule at `plugins/`.
+The Claude Code plugin lives in a separate repo ([anbanai/anbanwriter-claudecode](https://github.com/anbanai/anbanwriter-claudecode)) as a git submodule at `claudecode/`.
 
 ```
-plugins/                          # git submodule
-├── claude-code/                  # Claude Code plugin
-│   ├── agents/                   # Agent definitions
-│   ├── skills/                   # Claude Code skills
-│   └── hooks/                    # Lifecycle hooks
-├── openclaw/                     # OpenClaw plugin
-│   └── src/                      # TypeScript source
-└── shared/                       # Shared resources
-    ├── themes/                   # Conversion themes (YAML)
-    └── writers/                  # Writing styles (YAML)
+claudecode/                        # git submodule
+├── .claude-plugin/                # Plugin manifest
+├── agents/                        # Agent definitions
+├── skills/                        # Claude Code skills
+├── hooks/                         # Lifecycle hooks
+├── themes/                        # Conversion themes (YAML)
+└── writers/                       # Writing styles (YAML)
 ```
