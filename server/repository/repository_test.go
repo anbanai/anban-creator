@@ -238,7 +238,7 @@ func TestTaskRepository_CRUD(t *testing.T) {
 		UserID: "user-task-1",
 		Type:   model.ScopeRednote,
 		Status: model.TaskStatusPending,
-		Topic:  "AI trends",
+		Prompt:  "AI trends",
 	}
 
 	// Create
@@ -251,8 +251,8 @@ func TestTaskRepository_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if found.Topic != "AI trends" {
-		t.Errorf("expected topic 'AI trends', got %s", found.Topic)
+	if found.Prompt != "AI trends" {
+		t.Errorf("expected topic 'AI trends', got %s", found.Prompt)
 	}
 
 	// UpdateStatus

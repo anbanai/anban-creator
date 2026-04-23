@@ -86,8 +86,8 @@ func TestTaskService_CreateManual(t *testing.T) {
 	if task.Status != model.TaskStatusPending {
 		t.Errorf("Status = %q, want %q", task.Status, model.TaskStatusPending)
 	}
-	if task.Topic != "Test topic" {
-		t.Errorf("Topic = %q, want %q", task.Topic, "Test topic")
+	if task.Prompt != "Test topic" {
+		t.Errorf("Prompt = %q, want %q", task.Prompt, "Test topic")
 	}
 }
 

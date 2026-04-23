@@ -218,7 +218,7 @@ export default function TaskDetailPage() {
             返回任务列表
           </button>
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-foreground">{task.topic}</h1>
+            <h1 className="text-xl font-bold text-foreground">{task.prompt || contentTypeLabel[task.type] + ' 任务'}</h1>
             <Badge variant="outline">{contentTypeLabel[task.type] || task.type}</Badge>
             <Badge variant={statusBadgeVariant(task.status)}>{taskStatusLabel[task.status] || task.status}</Badge>
             {channel && (

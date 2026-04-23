@@ -78,7 +78,7 @@ describe('createTaskSchema', () => {
     expect(createTaskSchema.safeParse({
       channel_id: 'ch-1',
       type: 'article',
-      topic: '测试主题',
+      prompt: '测试主题',
     }).success).toBe(true)
   })
 
@@ -86,25 +86,25 @@ describe('createTaskSchema', () => {
     const result = createTaskSchema.safeParse({
       channel_id: '',
       type: 'article',
-      topic: '测试主题',
+      prompt: '测试主题',
     })
     expect(result.success).toBe(false)
   })
 
-  it('rejects empty topic', () => {
+  it('accepts optional prompt', () => {
     const result = createTaskSchema.safeParse({
       channel_id: 'ch-1',
       type: 'article',
-      topic: '',
+      prompt: '',
     })
-    expect(result.success).toBe(false)
+    expect(result.success).toBe(true)
   })
 
-  it('rejects topic exceeding max length', () => {
+  it('rejects prompt exceeding max length', () => {
     const result = createTaskSchema.safeParse({
       channel_id: 'ch-1',
       type: 'article',
-      topic: 'a'.repeat(201),
+      prompt: 'a'.repeat(501),
     })
     expect(result.success).toBe(false)
   })
@@ -114,7 +114,7 @@ describe('createTaskSchema', () => {
       expect(createTaskSchema.safeParse({
         channel_id: 'ch-1',
         type,
-        topic: '测试',
+        prompt: '测试',
       }).success).toBe(true)
     }
   })
@@ -123,7 +123,7 @@ describe('createTaskSchema', () => {
     const result = createTaskSchema.parse({
       channel_id: 'ch-1',
       type: 'article',
-      topic: '测试',
+      prompt: '测试',
     })
     expect(result.quantity).toBe(1)
     expect(result.image_ratio).toBe('')
@@ -134,24 +134,22 @@ describe('planSchema', () => {
   it('accepts valid plan data', () => {
     expect(planSchema.safeParse({
       type: 'article',
-      title: '测试计划',
       cron_expr: '0 9 * * 1',
     }).success).toBe(true)
   })
 
-  it('rejects empty title', () => {
+  it('accepts optional prompt', () => {
     const result = planSchema.safeParse({
       type: 'article',
-      title: '',
       cron_expr: '0 9 * * 1',
+      prompt: '写一篇护肤指南',
     })
-    expect(result.success).toBe(false)
+    expect(result.success).toBe(true)
   })
 
   it('rejects empty cron expression', () => {
     const result = planSchema.safeParse({
       type: 'article',
-      title: '测试计划',
       cron_expr: '',
     })
     expect(result.success).toBe(false)
@@ -160,10 +158,8 @@ describe('planSchema', () => {
   it('accepts optional fields', () => {
     const result = planSchema.safeParse({
       type: 'rednote',
-      title: '测试',
       cron_expr: '0 9 * * 1',
-      description: '描述',
-      topic_hint: '主题方向',
+      prompt: '主题方向',
       channel_id: 'ch-1',
     })
     expect(result.success).toBe(true)

@@ -12,7 +12,6 @@ import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
-import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import SchedulePicker from '@/components/SchedulePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
@@ -27,10 +26,8 @@ function planToFormValues(plan: Plan): PlanFormValues {
   return {
     channel_id: plan.channel_id || '',
     type: plan.type,
-    title: plan.title,
-    description: plan.description || '',
     cron_expr: plan.cron_expr,
-    topic_hint: plan.topic_hint || '',
+    prompt: plan.prompt || '',
   }
 }
 
@@ -47,17 +44,15 @@ export default function PlansPage() {
     defaultValues: {
       channel_id: '',
       type: 'rednote',
-      title: '',
-      description: '',
       cron_expr: '0 9 * * 1,3,5',
-      topic_hint: '',
+      prompt: '',
     },
   })
 
   // Auto-focus title field when dialog opens
   useEffect(() => {
     if (modalOpen) {
-      setTimeout(() => form.setFocus('title'), 100)
+      setTimeout(() => form.setFocus('cron_expr'), 100)
     }
   }, [modalOpen, form])
 
@@ -128,10 +123,8 @@ export default function PlansPage() {
     form.reset({
       channel_id: '',
       type: 'rednote',
-      title: '',
-      description: '',
       cron_expr: '0 9 * * 1,3,5',
-      topic_hint: '',
+      prompt: '',
     })
     setModalOpen(true)
   }
@@ -156,20 +149,16 @@ export default function PlansPage() {
     form.reset({
       channel_id: '',
       type: 'rednote',
-      title: '',
-      description: '',
       cron_expr: '0 9 * * 1,3,5',
-      topic_hint: '',
+      prompt: '',
     })
   }
 
   async function onSubmit(values: PlanFormValues) {
     const payload: CreatePlanRequest = {
       type: values.type,
-      title: values.title.trim(),
-      description: values.description?.trim() || undefined,
       cron_expr: values.cron_expr.trim(),
-      topic_hint: values.topic_hint?.trim() || undefined,
+      prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id || undefined,
     }
 
@@ -217,7 +206,7 @@ export default function PlansPage() {
               <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <h3 className="truncate text-sm font-medium text-foreground">{plan.title}</h3>
+                    <h3 className="truncate text-sm font-medium text-foreground">{plan.prompt || contentTypeLabel[plan.type] + '计划'}</h3>
                     <Badge variant="outline" className="shrink-0 text-[10px]">
                       {contentTypeLabel[plan.type] || plan.type}
                     </Badge>
@@ -225,12 +214,8 @@ export default function PlansPage() {
                       {planStatusLabel[plan.status] || plan.status}
                     </Badge>
                   </div>
-                  {plan.description && (
-                    <p className="mt-1 truncate text-xs text-muted-foreground">{plan.description}</p>
-                  )}
                   <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     <span>{cronToHuman(plan.cron_expr)}</span>
-                    {plan.topic_hint && <span>主题：{plan.topic_hint}</span>}
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     下次执行：{formatDateTimeCN(plan.next_run_at)}
@@ -311,26 +296,6 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="title" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>标题</FormLabel>
-                  <FormControl>
-                    <Input placeholder="例如：每周小红书发布" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              <FormField control={form.control} name="description" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>描述</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="可选的计划描述" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
               <FormField control={form.control} name="cron_expr" render={({ field }) => (
                 <FormItem>
                   <FormLabel>排期设置</FormLabel>
@@ -341,11 +306,11 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="topic_hint" render={({ field }) => (
+              <FormField control={form.control} name="prompt" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>主题方向（可选）</FormLabel>
+                  <FormLabel>Prompt（可选）</FormLabel>
                   <FormControl>
-                    <Input placeholder="例如：美妆技巧、科技评测" {...field} />
+                    <Input placeholder="留空则根据频道信息自动生成" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

@@ -123,7 +123,7 @@ func (s *TaskService) StorageProviderName() string {
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The quantity parameter (1-5) determines how many tasks to create, each independently billed.
-func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic string, quantity int, imageRatio string) ([]*model.Task, error) {
+func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio string) ([]*model.Task, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
 	}
@@ -191,7 +191,7 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, topic
 			ChannelID: channelID,
 			Type:      taskType,
 			Status:    model.TaskStatusPending,
-			Topic:      topic,
+			Prompt:     prompt,
 			ImageRatio: imageRatio,
 		}
 
@@ -236,9 +236,9 @@ func (s *TaskService) refundTasks(ctx context.Context, taskIDs []string) {
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
 	taskID := generateTaskID()
 
-	topic := plan.TopicHint
-	if topic == "" {
-		topic = plan.Title
+	prompt := plan.Prompt
+	if prompt == "" {
+		prompt = plan.Title
 	}
 
 	// Derive task type from the channel if ChannelID is set.
@@ -256,7 +256,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ChannelID: plan.ChannelID,
 		Type:      taskType,
 		Status:    model.TaskStatusPending,
-		Topic:     topic,
+		Prompt:    prompt,
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {

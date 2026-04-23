@@ -10,7 +10,7 @@ type Task struct {
 	PlanID       *uint      `gorm:"index" json:"plan_id"`
 	Type         string     `gorm:"type:varchar(20);not null" json:"type"`
 	Status       string     `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
-	Topic        string     `gorm:"type:varchar(500)" json:"topic"`
+	Prompt       string     `gorm:"column:topic;type:varchar(500)" json:"prompt"`
 	ImageRatio   string     `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ProgressLog  string     `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Result       *string    `gorm:"type:json" json:"result,omitempty"`

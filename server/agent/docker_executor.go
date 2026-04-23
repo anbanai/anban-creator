@@ -133,7 +133,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if opts.LogWriter != nil {
-		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Topic, model, maxTurns)
+		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Prompt, model, maxTurns)
 	}
 
 	if opts.Channel != nil {
@@ -234,7 +234,7 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string,
 		"--api-key", apiKey,
 		"--task-id", opts.Task.ID,
 		"--task-type", opts.Task.Type,
-		"--topic", opts.Task.Topic,
+		"--topic", opts.Task.Prompt,
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--workspace", workspace,
 		"--agent-flag", "anbanwriter:" + TaskTypeToAgent(opts.Task.Type),

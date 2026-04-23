@@ -28,7 +28,7 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 // time, and persists the plan. The task type is derived from the channel's platform.
 func (s *PlanService) Create(
 	ctx context.Context,
-	userID, channelID, title, description, cronExpr, topicHint string,
+	userID, channelID, cronExpr, prompt string,
 ) (*model.Plan, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
@@ -55,16 +55,14 @@ func (s *PlanService) Create(
 	}
 
 	plan := &model.Plan{
-		ID:          uuid.New().String(),
-		UserID:      userID,
-		ChannelID:   channelID,
-		Type:        channel.Platform,
-		Title:       title,
-		Description: description,
-		CronExpr:    cronExpr,
-		TopicHint:   topicHint,
-		Status:      model.PlanStatusActive,
-		NextRunAt:   nextRun,
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      channel.Platform,
+		CronExpr:  cronExpr,
+		Prompt:    prompt,
+		Status:    model.PlanStatusActive,
+		NextRunAt:  nextRun,
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -102,16 +100,14 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 // Update modifies a plan's fields. If the cron expression changed, next_run_at is recomputed.
 func (s *PlanService) Update(
 	ctx context.Context,
-	id, title, description, cronExpr, topicHint string,
+	id, cronExpr, prompt string,
 ) (*model.Plan, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("find plan: %w", err)
 	}
 
-	plan.Title = title
-	plan.Description = description
-	plan.TopicHint = topicHint
+	plan.Prompt = prompt
 
 	// If cron expression changed, validate and recompute next run.
 	if cronExpr != "" && cronExpr != plan.CronExpr {

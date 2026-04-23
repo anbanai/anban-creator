@@ -39,7 +39,7 @@ func NewTaskLogWriter(path, taskID string) (*TaskLogWriter, error) {
 // WriteHeader writes the task metadata header block.
 func (w *TaskLogWriter) WriteHeader(taskType, topic, model string, maxTurns int) {
 	w.writeLine("=== Task %s started at %s ===", w.taskID, w.started.Format(time.RFC3339))
-	w.writeLine("Type: %s | Topic: %q | MaxTurns: %d", taskType, topic, maxTurns)
+	w.writeLine("Type: %s | Prompt: %q | MaxTurns: %d", taskType, topic, maxTurns)
 	if model != "" {
 		w.writeLine("Model: %s", model)
 	}

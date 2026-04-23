@@ -58,7 +58,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 		UserID:    userID,
 		Type:      model.ScopeRednote,
 		Status:    model.TaskStatusCompleted,
-		Topic:     "Test topic 1",
+		Prompt:     "Test topic 1",
 		CreatedAt: time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC),
 	}
 	completedAt := time.Date(2026, 4, 1, 9, 15, 0, 0, time.UTC)
@@ -69,7 +69,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 		UserID:    userID,
 		Type:      model.ScopeArticle,
 		Status:    model.TaskStatusPending,
-		Topic:     "Test topic 2",
+		Prompt:     "Test topic 2",
 		CreatedAt: time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC),
 	}
 
@@ -78,7 +78,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 		UserID:    "other-user",
 		Type:      model.ScopeRednote,
 		Status:    model.TaskStatusCompleted,
-		Topic:     "Other user task",
+		Prompt:     "Other user task",
 		CreatedAt: time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC),
 	}
 
@@ -97,7 +97,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 		Title:       "Scheduled Plan",
 		Description: "A scheduled plan",
 		CronExpr:    "0 9 * * 1-5",
-		TopicHint:   "scheduled topic",
+		Prompt:   "scheduled topic",
 		Status:      model.PlanStatusActive,
 		NextRunAt:   &nextRun,
 	}
@@ -209,7 +209,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 			if task.UserID != userID {
 				continue
 			}
-			title := task.Topic
+			title := task.Prompt
 			if title == "" {
 				title = task.Type + " task"
 			}
@@ -232,7 +232,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 			if p.NextRunAt != nil && p.NextRunAt.After(from) && p.NextRunAt.Before(to) {
 				title := p.Title
 				if title == "" {
-					title = p.TopicHint
+					title = p.Prompt
 				}
 				if title == "" {
 					title = p.Type + " plan"

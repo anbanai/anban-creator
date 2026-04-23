@@ -7,7 +7,7 @@ export interface Plan {
   title: string
   description: string
   cron_expr: string
-  topic_hint: string
+  prompt: string
   status: PlanStatus
   next_run_at: string
   channel_id: string
@@ -17,16 +17,12 @@ export interface Plan {
 
 export interface CreatePlanRequest {
   type: PlanType
-  title: string
-  description?: string
   cron_expr: string
-  topic_hint?: string
+  prompt?: string
   channel_id?: string
 }
 
 export interface UpdatePlanRequest {
-  title?: string
-  description?: string
   cron_expr?: string
-  topic_hint?: string
+  prompt?: string
 }

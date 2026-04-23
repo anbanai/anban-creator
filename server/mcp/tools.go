@@ -92,10 +92,10 @@ func registerTaskTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id": map[string]any{"type": "string", "description": "Channel ID to create task for"},
-				"topic":      map[string]any{"type": "string", "description": "Content topic or title"},
+				"prompt":     map[string]any{"type": "string", "description": "Optional prompt/instructions for content creation"},
 				"quantity":   map[string]any{"type": "integer", "description": "Number of tasks (1-5, default 1)", "minimum": 1, "maximum": 5, "default": 1},
 			},
-			"required": []any{"channel_id", "topic"},
+			"required": []any{"channel_id"},
 		},
 	}, taskCreateHandler)
 
@@ -191,11 +191,10 @@ func registerPlanTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
-				"title":      map[string]any{"type": "string", "description": "Plan title"},
 				"cron_expr":  map[string]any{"type": "string", "description": "Cron expression (e.g. '0 9 * * *' for daily at 9am)"},
-				"topic_hint": map[string]any{"type": "string", "description": "Topic hint for auto-generated content"},
+				"prompt":     map[string]any{"type": "string", "description": "Optional prompt/instructions for auto-generated content"},
 			},
-			"required": []any{"channel_id", "title", "cron_expr"},
+			"required": []any{"channel_id", "cron_expr"},
 		},
 	}, planCreateHandler)
 }
@@ -300,19 +299,16 @@ func taskCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	channelID, _ := args["channel_id"].(string)
-	topic, _ := args["topic"].(string)
+	prompt, _ := args["prompt"].(string)
 	if channelID == "" {
 		return errorResult("channel_id is required"), nil
-	}
-	if topic == "" {
-		return errorResult("topic is required"), nil
 	}
 	quantity := 1
 	if v, ok := args["quantity"].(float64); ok && int(v) > 0 {
 		quantity = int(v)
 	}
 
-	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, topic, quantity, "")
+	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, prompt, quantity, "")
 	if err != nil {
 		return errorResult(fmt.Sprintf("create task: %v", err)), nil
 	}
@@ -365,7 +361,7 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 		"id":            task.ID,
 		"type":          task.Type,
 		"status":        task.Status,
-		"topic":         task.Topic,
+		"prompt":         task.Prompt,
 		"progress_log":  task.ProgressLog,
 		"result":        result,
 		"error_message": task.ErrorMessage,
@@ -447,15 +443,14 @@ func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	channelID, _ := args["channel_id"].(string)
-	title, _ := args["title"].(string)
 	cronExpr, _ := args["cron_expr"].(string)
-	topicHint, _ := args["topic_hint"].(string)
+	prompt, _ := args["prompt"].(string)
 
-	if channelID == "" || title == "" || cronExpr == "" {
-		return errorResult("channel_id, title, and cron_expr are required"), nil
+	if channelID == "" || cronExpr == "" {
+		return errorResult("channel_id and cron_expr are required"), nil
 	}
 
-	plan, err := svcs.PlanSvc.Create(context.Background(), userID, channelID, title, "", cronExpr, topicHint)
+	plan, err := svcs.PlanSvc.Create(context.Background(), userID, channelID, cronExpr, prompt)
 	if err != nil {
 		return errorResult(fmt.Sprintf("create plan: %v", err)), nil
 	}

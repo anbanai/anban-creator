@@ -57,7 +57,7 @@ export const mockPlans: PaginatedResponse<Plan> = {
       title: '测试计划',
       description: '',
       cron_expr: '0 9 * * 1',
-      topic_hint: '',
+      prompt: '',
       status: 'active',
       next_run_at: '2025-01-20T09:00:00Z',
       channel_id: 'ch-1',
@@ -73,7 +73,7 @@ export const mockTasks: PaginatedResponse<Task> = {
     {
       id: 'task-1',
       type: 'article',
-      topic: '测试任务',
+      prompt: '测试任务',
       status: 'completed',
       progress: 100,
       error: null,

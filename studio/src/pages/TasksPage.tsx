@@ -69,15 +69,15 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'rednote', topic: '', channel_id: '', quantity: 1, image_ratio: '' },
+    defaultValues: { type: 'rednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
 
-  // Auto-focus topic field when dialog opens
+  // Auto-focus prompt field when dialog opens
   useEffect(() => {
     if (modalOpen) {
-      setTimeout(() => form.setFocus('topic'), 100)
+      setTimeout(() => form.setFocus('prompt'), 100)
     }
   }, [modalOpen, form])
 
@@ -129,7 +129,7 @@ export default function TasksPage() {
   })
 
   function openCreate() {
-    form.reset({ type: 'rednote', topic: '', channel_id: '', image_ratio: '' })
+    form.reset({ type: 'rednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
     setChannelImageRatio('')
     setModalOpen(true)
@@ -145,7 +145,7 @@ export default function TasksPage() {
 
   function resetModal() {
     setModalOpen(false)
-    form.reset({ type: 'rednote', topic: '', channel_id: '', image_ratio: '' })
+    form.reset({ type: 'rednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
     setChannelImageRatio('')
   }
@@ -153,7 +153,7 @@ export default function TasksPage() {
   async function onSubmit(values: CreateTaskFormValues) {
     createMutation.mutate({
       type: values.type,
-      topic: values.topic.trim(),
+      prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id,
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
@@ -242,7 +242,7 @@ export default function TasksPage() {
                 <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="truncate text-sm font-medium text-foreground">{task.topic}</h3>
+                      <h3 className="truncate text-sm font-medium text-foreground">{task.prompt || task.type + ' 任务'}</h3>
                       <Badge variant="outline" className="shrink-0 text-[10px]">
                         {contentTypeLabel[task.type] || task.type}
                       </Badge>
@@ -331,11 +331,11 @@ export default function TasksPage() {
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="topic" render={({ field }) => (
+              <FormField control={form.control} name="prompt" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>主题</FormLabel>
+                  <FormLabel>Prompt（可选）</FormLabel>
                   <FormControl>
-                    <Input placeholder="例如：2026夏季最佳护肤指南" {...field} />
+                    <Input placeholder="留空则根据频道信息自动生成" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

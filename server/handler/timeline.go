@@ -96,7 +96,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 		if channelID != "" && t.ChannelID != channelID {
 			continue
 		}
-		title := t.Topic
+		title := t.Prompt
 		if title == "" {
 			title = t.Type + " task"
 		}
@@ -129,7 +129,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 			if p.NextRunAt != nil && p.NextRunAt.After(from) && p.NextRunAt.Before(to) {
 				title := p.Title
 				if title == "" {
-					title = p.TopicHint
+					title = p.Prompt
 				}
 				if title == "" {
 					title = p.Type + " plan"
@@ -172,7 +172,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 			if alreadyAdded {
 				continue
 			}
-			title := t.Topic
+			title := t.Prompt
 			if title == "" {
 				title = t.Type + " task"
 			}

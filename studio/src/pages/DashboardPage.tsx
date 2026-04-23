@@ -367,7 +367,7 @@ export default function DashboardPage() {
                 className="flex items-center justify-between px-4 py-3 transition-colors hover:bg-accent"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{task.topic}</p>
+                  <p className="truncate text-sm font-medium text-foreground">{task.prompt || contentTypeLabel[task.type] + ' 任务'}</p>
                   <div className="mt-1 flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">
                       {formatDateTimeCN(task.created_at)}

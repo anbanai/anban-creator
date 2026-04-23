@@ -202,7 +202,7 @@ func TestE2E_FullUserFlow(t *testing.T) {
 	// Step 2: Create a manual task.
 	taskBody, _ := json.Marshal(map[string]string{
 		"channel_id": testChannel.ID,
-		"topic":      "TestTopic",
+		"prompt":      "TestTopic",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -331,10 +331,8 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 	// Step 1: Create a plan.
 	planBody, _ := json.Marshal(map[string]string{
 		"channel_id":  testChannel.ID,
-		"title":       "Daily Rednote Plan",
-		"description": "Generate rednote content daily",
 		"cron_expr":   "0 9 * * *",
-		"topic_hint":  "spring fashion",
+		"prompt":      "spring fashion",
 	})
 	createReq := httptest.NewRequest("POST", "/api/v1/plans", strings.NewReader(string(planBody)))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -564,7 +562,7 @@ func TestE2E_TaskOwnershipIsolation(t *testing.T) {
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
 		"channel_id": testChannel.ID,
-		"topic":      "User1 Article",
+		"prompt":      "User1 Article",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -650,9 +648,8 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 	// User 1 creates a plan.
 	planBody, _ := json.Marshal(map[string]string{
 		"channel_id": testChannel.ID,
-		"title":      "User1 XLS Plan",
 		"cron_expr":  "0 10 * * *",
-		"topic_hint": "daily inspiration",
+		"prompt": "daily inspiration",
 	})
 	planReq := httptest.NewRequest("POST", "/api/v1/plans", strings.NewReader(string(planBody)))
 	planReq.Header.Set("Content-Type", "application/json")
@@ -741,7 +738,7 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			name:       "create task without channel_id",
 			method:     "POST",
 			path:       "/api/v1/tasks",
-			body:       `{"topic":"test"}`,
+			body:       `{"prompt":"test"}`,
 			auth:       true,
 			wantStatus: fiber.StatusBadRequest,
 		},
@@ -749,7 +746,7 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			name:       "create task with non-existent channel_id",
 			method:     "POST",
 			path:       "/api/v1/tasks",
-			body:       `{"channel_id":"nonexistent-id","topic":"test"}`,
+			body:       `{"channel_id":"nonexistent-id","prompt":"test"}`,
 			auth:       true,
 			wantStatus: fiber.StatusInternalServerError,
 		},
@@ -819,7 +816,7 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
 		"channel_id": testChannel.ID,
-		"topic":      "Runner1 Task",
+		"prompt":      "Runner1 Task",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")

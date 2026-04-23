@@ -11,7 +11,7 @@ type Plan struct {
 	Title       string     `gorm:"type:varchar(200)" json:"title"`
 	Description string     `gorm:"type:text" json:"description"`
 	CronExpr    string     `gorm:"type:varchar(100)" json:"cron_expr"`
-	TopicHint   string     `gorm:"type:text" json:"topic_hint"`
+	Prompt      string     `gorm:"column:topic_hint;type:text" json:"prompt"`
 	Status      string     `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
 	NextRunAt   *time.Time `gorm:"index" json:"next_run_at"`
 	CreatedAt   time.Time  `json:"created_at"`

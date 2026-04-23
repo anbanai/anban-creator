@@ -43,9 +43,9 @@ func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...st
 // Request types.
 
 type createTaskRequest struct {
-	ChannelID string `json:"channel_id"`
-	Topic     string `json:"topic"`
-	Quantity  int    `json:"quantity"`
+	ChannelID  string `json:"channel_id"`
+	Prompt     string `json:"prompt"`
+	Quantity   int    `json:"quantity"`
 	ImageRatio string `json:"image_ratio"`
 }
 
@@ -60,12 +60,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "channel_id is required")
 	}
 
-	topic := strings.TrimSpace(req.Topic)
-	if topic == "" {
-		return Error(c, fiber.StatusBadRequest, "topic is required")
-	}
-	if len(topic) > 500 {
-		return Error(c, fiber.StatusBadRequest, "topic must not exceed 500 characters")
+	prompt := strings.TrimSpace(req.Prompt)
+	if len(prompt) > 500 {
+		return Error(c, fiber.StatusBadRequest, "prompt must not exceed 500 characters")
 	}
 
 	userID := GetUserID(c)
@@ -85,7 +82,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, topic, quantity, req.ImageRatio)
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {

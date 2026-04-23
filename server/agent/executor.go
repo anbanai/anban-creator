@@ -146,7 +146,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	logEvt := e.logger.Info().
 		Str("task_id", opts.Task.ID).
 		Str("type", opts.Task.Type).
-		Str("topic", opts.Task.Topic).
+		Str("topic", opts.Task.Prompt).
 		Int("max_turns", maxTurns).
 		Str("work_dir", workDir).
 		Str("plugin_dir", e.pluginDir).
@@ -164,7 +164,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 	// 2.5 Write task log header.
 	if opts.LogWriter != nil {
-		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Topic, model, maxTurns)
+		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Prompt, model, maxTurns)
 	}
 
 	// 3. Write channel config to workspace settings.json.
@@ -222,7 +222,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 4. Build user prompt from task topic with command prefix.
-	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Topic)
+	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt)
 
 	// 5. Map task type to agent name and build --agent flag.
 	agentName := TaskTypeToAgent(opts.Task.Type)

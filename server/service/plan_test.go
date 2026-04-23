@@ -121,7 +121,7 @@ func TestPlanService_Create(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := svc.Create(ctx, "user-1", tt.channelID, "Test Plan", "Description", tt.cronExpr, "topic hint")
+			plan, err := svc.Create(ctx, "user-1", tt.channelID, tt.cronExpr, "topic hint")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -159,7 +159,7 @@ func TestPlanService_GetByID(t *testing.T) {
 
 	// Create a test channel and plan.
 	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
-	created, err := svc.Create(ctx, "user-1", chID, "My Plan", "desc", "0 9 * * *", "hint")
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -169,8 +169,8 @@ func TestPlanService_GetByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get by id: %v", err)
 	}
-	if found.Title != "My Plan" {
-		t.Errorf("expected title 'My Plan', got %q", found.Title)
+	if found.Prompt != "hint" {
+		t.Errorf("expected prompt 'hint', got %q", found.Prompt)
 	}
 
 	// Non-existent ID.
@@ -191,14 +191,14 @@ func TestPlanService_List(t *testing.T) {
 
 	// Create multiple plans for user-1.
 	for i := 0; i < 5; i++ {
-		_, err := svc.Create(ctx, "user-1", chID, "Plan "+string(rune('A'+i)), "desc", "0 9 * * *", "hint")
+		_, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
 		if err != nil {
 			t.Fatalf("create plan %d: %v", i, err)
 		}
 	}
 
 	// Create plans for another user.
-	_, err := svc.Create(ctx, "user-2", chID2, "Other Plan", "desc", "0 10 * * *", "hint")
+	_, err := svc.Create(ctx, "user-2", chID2, "0 10 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan for user-2: %v", err)
 	}
@@ -239,18 +239,18 @@ func TestPlanService_Update(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
-	created, err := svc.Create(ctx, "user-1", chID, "Old Title", "old desc", "0 9 * * *", "old hint")
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "old hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
 
 	// Update title only.
-	updated, err := svc.Update(ctx, created.ID, "New Title", "new desc", "", "new hint")
+	updated, err := svc.Update(ctx, created.ID, "", "new hint")
 	if err != nil {
 		t.Fatalf("update plan: %v", err)
 	}
-	if updated.Title != "New Title" {
-		t.Errorf("expected title 'New Title', got %q", updated.Title)
+	if updated.Prompt != "new hint" {
+		t.Errorf("expected prompt 'new hint', got %q", updated.Prompt)
 	}
 	// Cron should not have changed since we passed empty.
 	if updated.CronExpr != "0 9 * * *" {
@@ -258,7 +258,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with new cron expression.
-	updated, err = svc.Update(ctx, created.ID, "New Title", "new desc", "0 18 * * *", "new hint")
+	updated, err = svc.Update(ctx, created.ID, "0 18 * * *", "new hint")
 	if err != nil {
 		t.Fatalf("update plan cron: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with invalid cron.
-	_, err = svc.Update(ctx, created.ID, "Title", "desc", "bad cron", "hint")
+	_, err = svc.Update(ctx, created.ID, "bad cron", "hint")
 	if err == nil {
 		t.Error("expected error for invalid cron expression")
 	}
@@ -281,7 +281,7 @@ func TestPlanService_Pause_Resume(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
-	created, err := svc.Create(ctx, "user-1", chID, "Plan", "desc", "0 9 * * *", "hint")
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestPlanService_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
-	created, err := svc.Create(ctx, "user-1", chID, "Plan", "desc", "0 9 * * *", "hint")
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
