@@ -66,11 +66,11 @@ export default function FeedbackFab() {
             {/* Contact tab */}
             <TabsContent value="contact" className="flex flex-col items-center gap-3 p-4">
               <img
-                src="/wechat-qr.png"
+                src="/contact-qr.JPG"
                 alt="企业微信客服二维码"
                 className="h-[200px] w-[200px] rounded-md object-contain"
               />
-              <p className="text-sm text-muted-foreground">扫码添加企业微信客服</p>
+              <p className="text-sm text-muted-foreground">微信扫码添加客服</p>
             </TabsContent>
 
             {/* Feedback tab */}

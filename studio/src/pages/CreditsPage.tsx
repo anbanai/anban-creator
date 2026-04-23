@@ -118,7 +118,7 @@ export default function CreditsPage() {
           </DialogHeader>
           <div className="flex flex-col items-center space-y-4 py-2">
             <img
-              src="https://placehold.co/200x200?text=QR"
+              src="/contact-qr.JPG"
               alt="企微客服二维码"
               className="rounded-lg border border-border"
               width={200}
