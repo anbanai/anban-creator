@@ -223,12 +223,12 @@ export default function PlansPage() {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {plan.status === 'active' && (
-                    <Button variant="ghost" size="sm" onClick={() => pauseMutation.mutate(plan.id)}>
+                    <Button variant="ghost" size="sm" loading={pauseMutation.isPending} onClick={() => pauseMutation.mutate(plan.id)}>
                       暂停
                     </Button>
                   )}
                   {plan.status === 'paused' && (
-                    <Button variant="ghost" size="sm" onClick={() => resumeMutation.mutate(plan.id)}>
+                    <Button variant="ghost" size="sm" loading={resumeMutation.isPending} onClick={() => resumeMutation.mutate(plan.id)}>
                       恢复
                     </Button>
                   )}
@@ -335,7 +335,7 @@ export default function PlansPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
+            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
               删除
             </AlertDialogAction>
           </AlertDialogFooter>

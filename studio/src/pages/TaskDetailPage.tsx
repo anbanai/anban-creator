@@ -432,7 +432,7 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => cancelMutation.mutate()}>
+            <AlertDialogAction variant="destructive" loading={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>
               确定取消
             </AlertDialogAction>
           </AlertDialogFooter>

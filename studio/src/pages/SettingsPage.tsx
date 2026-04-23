@@ -191,7 +191,7 @@ export default function SettingsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => { if (revokeTarget) revokeMutation.mutate(revokeTarget) }}>
+            <AlertDialogAction variant="destructive" loading={revokeMutation.isPending} onClick={() => { if (revokeTarget) revokeMutation.mutate(revokeTarget) }}>
               吊销
             </AlertDialogAction>
           </AlertDialogFooter>

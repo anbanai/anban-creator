@@ -638,7 +638,7 @@ export default function ChannelsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
+            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
               删除
             </AlertDialogAction>
           </AlertDialogFooter>
