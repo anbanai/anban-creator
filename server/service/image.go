@@ -110,14 +110,28 @@ func NewImageService(
 	}
 }
 
-// resolveImageAPI returns the appropriate ImageAPI config based on image_type.
-// For "cover" images, uses the Cover config; for all other types, uses Content.
-func (s *ImageService) resolveImageAPI(imageType string) *appconfig.ImageAPI {
-	if imageType == "cover" && s.imageCfg != nil && s.imageCfg.Cover != nil {
-		return s.imageCfg.Cover
-	}
-	if s.imageCfg != nil && s.imageCfg.Content != nil {
-		return s.imageCfg.Content
+// resolveAppImageAPI extracts the ImageAPI config from a channel-aware appCfg
+// (built by BuildAppConfig) based on platform and image type.
+func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *appconfig.ImageAPI {
+	switch platform {
+	case model.ScopeArticle:
+		if imageType == "cover" {
+			return &appCfg.Wechat.Article.Cover.Image
+		}
+		return &appCfg.Wechat.Article.Content.Image
+	case model.ScopeXls:
+		if imageType == "cover" {
+			return &appCfg.Wechat.Xls.Cover.Image
+		}
+		return &appCfg.Wechat.Xls.Content.Image
+	case model.ScopeRednote:
+		if appCfg.Rednote == nil {
+			return nil
+		}
+		if imageType == "cover" {
+			return &appCfg.Rednote.Cover.Image
+		}
+		return &appCfg.Rednote.Content.Image
 	}
 	return nil
 }
@@ -129,7 +143,7 @@ func (s *ImageService) buildProcessor(ch *model.Channel, imageType string) (*ima
 		return nil, fmt.Errorf("build app config: %w", err)
 	}
 
-	apiCfg := s.resolveImageAPI(imageType)
+	apiCfg := resolveAppImageAPI(appCfg, ch.Platform, imageType)
 	if apiCfg == nil {
 		return nil, fmt.Errorf("no image API config available for type %q", imageType)
 	}
