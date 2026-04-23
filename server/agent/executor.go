@@ -143,6 +143,16 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
 
+	// Write task context file so the agent knows its task ID.
+	// Unlike DockerExecutor (which passes --task-id to the binary),
+	// LocalExecutor runs a Claude Code CLI subprocess that has no way
+	// to know the task UUID. Without this file, the LLM may pass a
+	// made-up ID to prepare_workspace, causing a path mismatch.
+	taskContext := fmt.Sprintf("TASK_ID=%s\n", opts.Task.ID)
+	if err := os.WriteFile(filepath.Join(workDir, ".task-context"), []byte(taskContext), 0644); err != nil {
+		return nil, fmt.Errorf("write task context: %w", err)
+	}
+
 	logEvt := e.logger.Info().
 		Str("task_id", opts.Task.ID).
 		Str("type", opts.Task.Type).

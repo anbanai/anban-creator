@@ -29,10 +29,31 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	defer s.deregisterCancel(taskID)
 	s.registerCancel(taskID, cancel)
 
+	// Clean up workspace and task log files after execution completes.
+	// In K8s with local executor, files accumulate inside the container,
+	// so we remove them immediately once the task is done.
+	var cleanupWorkDir string
+	var cleanupLogPath string
+	defer func() {
+		if cleanupWorkDir != "" {
+			if err := os.RemoveAll(cleanupWorkDir); err != nil {
+				s.logger.Warn().Err(err).Str("task_id", taskID).Str("path", cleanupWorkDir).Msg("failed to cleanup workspace after execution")
+			} else {
+				s.logger.Info().Str("task_id", taskID).Str("path", cleanupWorkDir).Msg("cleaned up workspace directory")
+			}
+		}
+		if cleanupLogPath != "" {
+			if err := os.Remove(cleanupLogPath); err != nil && !os.IsNotExist(err) {
+				s.logger.Warn().Err(err).Str("task_id", taskID).Str("path", cleanupLogPath).Msg("failed to cleanup task log file")
+			}
+		}
+	}()
+
 	// Create per-task log writer if task_log_dir is configured.
 	var taskLogWriter *agent.TaskLogWriter
 	if s.taskLogDir != "" {
 		logPath := filepath.Join(s.taskLogDir, taskID+".log")
+		cleanupLogPath = logPath
 		var err error
 		taskLogWriter, err = agent.NewTaskLogWriter(logPath, taskID)
 		if err != nil {
@@ -107,6 +128,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		if err := s.uploadMissingTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("workspace file upload failed")
 		}
+		// Schedule workspace cleanup after all processing is done.
+		cleanupWorkDir = result.WorkDir
 	}
 
 	if execErr != nil {
@@ -126,24 +149,48 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	}
 
 	var meaningfulFileCount int
-	// Check if agent produced no output — treat as failure when num_turns <= 1
-	// and workspace has zero meaningful files (agent definition likely didn't load).
-	if result.AgentLikelyFailed || (result.NumTurns <= 1 && result.WorkDir != "") {
+	// Always count meaningful files when a workspace exists.
+	if result.WorkDir != "" {
 		meaningfulFileCount = agent.CountMeaningfulFiles(result.WorkDir)
-		if meaningfulFileCount == 0 {
+	}
+
+	// Treat as failure when the agent likely failed (standalone agent binary).
+	if result.AgentLikelyFailed {
+		if meaningfulFileCount == 0 && result.WorkDir != "" {
 			errMsg := fmt.Sprintf(
-				"agent execution produced no output files (num_turns=%d, output_files=0); agent definition may not have loaded or model does not support tool use",
+				"agent execution produced no output files (num_turns=%d, output_files=0); agent definition may not have loaded, model does not support tool use, or files were written to the wrong directory",
 				result.NumTurns,
 			)
 			s.logger.Error().
 				Str("task_id", taskID).
 				Int("num_turns", result.NumTurns).
 				Int("meaningful_files", meaningfulFileCount).
-				Bool("agent_likely_failed", result.AgentLikelyFailed).
 				Msg(errMsg)
 			_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
 			return nil
 		}
+		// Agent reported failure but produced output files — allow completion with a warning.
+		s.logger.Warn().
+			Str("task_id", taskID).
+			Int("num_turns", result.NumTurns).
+			Int("meaningful_files", meaningfulFileCount).
+			Msg("agent likely failed but produced output files, marking as completed")
+	}
+
+	// Treat as failure when workspace has zero meaningful files
+	// (agent wrote to wrong directory or produced no output).
+	if meaningfulFileCount == 0 && result.WorkDir != "" {
+		errMsg := fmt.Sprintf(
+			"agent execution produced no output files (num_turns=%d, output_files=0); agent definition may not have loaded, model does not support tool use, or files were written to the wrong directory",
+			result.NumTurns,
+		)
+		s.logger.Error().
+			Str("task_id", taskID).
+			Int("num_turns", result.NumTurns).
+			Int("meaningful_files", meaningfulFileCount).
+			Msg(errMsg)
+		_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+		return nil
 	}
 
 	// Check if task was cancelled during execution before marking as completed.
@@ -156,11 +203,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	// Success.
 	s.logger.Info().Str("task_id", taskID).Str("work_dir", result.WorkDir).Msg("task completed successfully")
 
-	// Log workspace file count for diagnostics (reuse count from above if already computed).
+	// Log workspace file count for diagnostics.
 	if result.WorkDir != "" {
-		if meaningfulFileCount == 0 {
-			meaningfulFileCount = agent.CountMeaningfulFiles(result.WorkDir)
-		}
 		s.logger.Info().
 			Str("task_id", taskID).
 			Int("file_count", meaningfulFileCount).
