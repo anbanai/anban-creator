@@ -221,6 +221,13 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		return nil
 	}
 
+	// Prefer the output/ subdirectory (created by prepare_workspace) to isolate
+	// content files from agent runtime artifacts (node_modules, .claude, etc.).
+	scanDir := workDir
+	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
+		scanDir = filepath.Join(workDir, "output")
+	}
+
 	// Collect paths already recorded as task files.
 	existingFiles, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
 	if err != nil {
@@ -232,7 +239,7 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 	}
 
 	var uploadedCount int
-	err = filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(scanDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

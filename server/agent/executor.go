@@ -494,8 +494,14 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 }
 
 // ListWorkDirFiles returns a summary of files in a task's work directory.
+// When an output/ subdirectory exists (created by prepare_workspace), lists
+// its contents for meaningful diagnostics.
 func ListWorkDirFiles(workDir string) ([]map[string]any, error) {
-	entries, err := os.ReadDir(workDir)
+	listDir := workDir
+	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
+		listDir = filepath.Join(workDir, "output")
+	}
+	entries, err := os.ReadDir(listDir)
 	if err != nil {
 		return nil, err
 	}
@@ -515,11 +521,17 @@ func ListWorkDirFiles(workDir string) ([]map[string]any, error) {
 }
 
 // CountMeaningfulFiles recursively counts files in workDir, excluding
-// .anbanwriter/, .claude/, and dotfiles. Returns the count of actual files
-// (not directories) at any nesting depth.
+// .anbanwriter/, .claude/, and dotfiles. Prefers the output/ subdirectory
+// (created by prepare_workspace) to exclude agent runtime artifacts.
+// Returns the count of actual files (not directories) at any nesting depth.
 func CountMeaningfulFiles(workDir string) int {
+	scanDir := workDir
+	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
+		scanDir = filepath.Join(workDir, "output")
+	}
+
 	count := 0
-	filepath.WalkDir(workDir, func(path string, d fs.DirEntry, err error) error {
+	filepath.WalkDir(scanDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}

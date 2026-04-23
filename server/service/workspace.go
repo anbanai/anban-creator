@@ -44,12 +44,13 @@ func NewWorkspaceService(baseDir, workspaceDir string, logger *zerolog.Logger) *
 }
 
 // Prepare creates a clean working directory. When taskID is provided,
-// the working directory is the task workspace root {workspaceDir}/{taskID}/.
+// the working directory is {workspaceDir}/{taskID}/output/, isolating
+// content output from agent runtime artifacts in the workspace root.
 // Otherwise, it uses the server's baseDir/<contentType>/ (for CLI mode).
 func (s *WorkspaceService) Prepare(contentType, taskID string) (*PrepareResult, error) {
 	var workDir string
 	if taskID != "" {
-		workDir = filepath.Join(s.workspaceDir, taskID)
+		workDir = filepath.Join(s.workspaceDir, taskID, "output")
 	} else {
 		workDir = filepath.Join(s.baseDir, contentType)
 	}
