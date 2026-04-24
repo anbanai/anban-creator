@@ -14,6 +14,11 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /abwriter-server ./server/
 # Stage 2: Runtime with Node.js + Claude CLI + Plugin
 FROM node:25-slim
 
+# Install CA certificates for Go binary TLS verification (slim images lack these)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g @anthropic-ai/claude-code
 
 COPY --from=builder /abwriter-server /app/abwriter-server
