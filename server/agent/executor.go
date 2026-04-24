@@ -57,13 +57,14 @@ type LocalExecutor struct {
 	keyProvider       UserKeyProvider
 	maxTurnsOverrides map[string]int
 	workspaceDir      string
+	serverBaseURL     string // server base URL for MCP (e.g. "http://localhost:8080")
 }
 
 // Compile-time interface check.
 var _ TaskExecutor = (*LocalExecutor)(nil)
 
 // NewLocalExecutor creates a new LocalExecutor.
-func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int, workspaceDir string) *LocalExecutor {
+func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int, workspaceDir string, serverBaseURL string) *LocalExecutor {
 	return &LocalExecutor{
 		logger:            logger,
 		imageAPICfg:       imageAPICfg,
@@ -74,6 +75,7 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 		keyProvider:       keyProvider,
 		maxTurnsOverrides: maxTurnsOverrides,
 		workspaceDir:      workspaceDir,
+		serverBaseURL:     serverBaseURL,
 	}
 }
 
@@ -273,6 +275,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// ${ANBANWRITER_API_KEY} for the anbanwriter MCP server.
 	if mcpAPIKey != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_API_KEY", mcpAPIKey))
+	}
+	// Inject MCP server base URL so plugin/.mcp.json can resolve
+	// ${ANBANWRITER_API_URL} for the anbanwriter MCP server.
+	if e.serverBaseURL != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_API_URL", e.serverBaseURL))
 	}
 
 	// 7. Execute via SDK with streaming.

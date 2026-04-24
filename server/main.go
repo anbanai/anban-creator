@@ -171,7 +171,7 @@ func main() {
 			Bool("per_user_mcp", apiKeySvc != nil).
 			Msg("docker agent executor created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir)
+		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, fmt.Sprintf("http://localhost:%d", cfg.Server.Port))
 		log.Info().
 			Str("plugin_dir", cfg.Claude.PluginDir).
 			Bool("sandbox", cfg.Claude.Sandbox).

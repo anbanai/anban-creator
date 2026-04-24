@@ -123,6 +123,9 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 
 	resp, err := p.client.GenerateImages(ctx, req)
 	if err != nil {
+		p.log.Error("volcengine batch image generation failed",
+			zap.Error(err),
+			zap.String("model", p.model))
 		return nil, p.convertSDKError(err)
 	}
 
@@ -216,6 +219,9 @@ func (p *VolcengineProvider) GenerateBatch(ctx context.Context, prompt string, o
 
 	resp, err := p.client.GenerateImages(ctx, req)
 	if err != nil {
+		p.log.Error("volcengine single image generation failed",
+			zap.Error(err),
+			zap.String("model", p.model))
 		return nil, p.convertSDKError(err)
 	}
 
