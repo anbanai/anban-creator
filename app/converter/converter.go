@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 // ImageType 图片类型
@@ -59,13 +59,13 @@ type Converter interface {
 
 // converter 转换器实现
 type converter struct {
-	log           *zap.Logger
+	log           *zerolog.Logger
 	theme         *ThemeManager
 	promptBuilder *PromptBuilder
 }
 
 // NewConverter 创建转换器
-func NewConverter(log *zap.Logger) Converter {
+func NewConverter(log *zerolog.Logger) Converter {
 	return &converter{
 		log:           log,
 		theme:         NewThemeManager(),

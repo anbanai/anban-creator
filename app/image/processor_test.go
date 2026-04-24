@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/royalrick/anbanwriter/app/config"
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 func newTestProcessor(apiCfg *config.ImageAPI) *Processor {
+	nopLog := zerolog.Nop()
 	return &Processor{
 		apiCfg: apiCfg,
-		log:    zap.NewNop(),
+		log:    &nopLog,
 	}
 }
 

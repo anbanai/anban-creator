@@ -19,18 +19,18 @@ import (
 	wechatconfig "github.com/silenceper/wechat/v2/officialaccount/config"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"github.com/silenceper/wechat/v2/officialaccount/material"
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 // Service 微信服务
 type Service struct {
 	cfg *config.Config
-	log *zap.Logger
+	log *zerolog.Logger
 	oa  *officialaccount.OfficialAccount
 }
 
 // NewService 创建微信服务
-func NewService(cfg *config.Config, log *zap.Logger) *Service {
+func NewService(cfg *config.Config, log *zerolog.Logger) *Service {
 	wc := wechat.NewWechat()
 	memory := wechatcache.NewMemory()
 	wechatCfg := &wechatconfig.Config{
@@ -69,9 +69,7 @@ func (s *Service) UploadMaterial(filePath string) (*UploadMaterialResult, error)
 	// 调用微信 API 上传（SDK 接受文件路径字符串）
 	mediaID, url, err := mat.AddMaterial(material.MediaTypeImage, filePath)
 	if err != nil {
-		s.log.Error("upload material failed",
-			zap.String("path", filePath),
-			zap.Error(err))
+		s.log.Error().Str("path", filePath).Err(err).Msg("upload material failed")
 		if wErr := ParseWechatError(err); wErr != nil {
 			return nil, wErr
 		}
@@ -79,10 +77,7 @@ func (s *Service) UploadMaterial(filePath string) (*UploadMaterialResult, error)
 	}
 
 	duration := time.Since(startTime)
-	s.log.Debug("material uploaded",
-		zap.String("path", filePath),
-		zap.String("media_id", MaskMediaID(mediaID)),
-		zap.Duration("duration", duration))
+	s.log.Debug().Str("path", filePath).Str("media_id", MaskMediaID(mediaID)).Dur("duration", duration).Msg("material uploaded")
 
 	return &UploadMaterialResult{
 		MediaID:   mediaID,
@@ -105,14 +100,12 @@ func (s *Service) CreateDraft(articles []*draft.Article) (*CreateDraftResult, er
 	// 直接调用 SDK 方法，SDK 接受 []*draft.Article
 	mediaID, err := dm.AddDraft(articles)
 	if err != nil {
-		s.log.Error("create draft failed", zap.Error(err))
+		s.log.Error().Err(err).Msg("create draft failed")
 		return nil, fmt.Errorf("create draft: %w", err)
 	}
 
 	duration := time.Since(startTime)
-	s.log.Info("article draft created",
-		zap.String("media_id", MaskMediaID(mediaID)),
-		zap.Duration("duration", duration))
+	s.log.Info().Str("media_id", MaskMediaID(mediaID)).Dur("duration", duration).Msg("article draft created")
 
 	// 构造草稿 URL
 	draftURL := fmt.Sprintf("https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2&action=edit&createType=0&token=")
@@ -210,9 +203,7 @@ func (s *Service) CreateNewspicDraft(articles []NewspicArticle) (*CreateDraftRes
 
 	// 检查错误
 	if resp.ErrCode != 0 {
-		s.log.Error("create newspic draft failed",
-			zap.Int("errcode", resp.ErrCode),
-			zap.String("errmsg", resp.ErrMsg))
+		s.log.Error().Int("errcode", resp.ErrCode).Str("errmsg", resp.ErrMsg).Msg("create newspic draft failed")
 		syntheticErr := fmt.Errorf("errcode=%d, %s", resp.ErrCode, resp.ErrMsg)
 		if wErr := ParseWechatError(syntheticErr); wErr != nil {
 			return nil, wErr
@@ -221,9 +212,7 @@ func (s *Service) CreateNewspicDraft(articles []NewspicArticle) (*CreateDraftRes
 	}
 
 	duration := time.Since(startTime)
-	s.log.Info("xls draft created",
-		zap.String("media_id", MaskMediaID(resp.MediaID)),
-		zap.Duration("duration", duration))
+	s.log.Info().Str("media_id", MaskMediaID(resp.MediaID)).Dur("duration", duration).Msg("xls draft created")
 
 	return &CreateDraftResult{
 		MediaID:  resp.MediaID,
@@ -254,7 +243,7 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 
 	list, err := dm.PaginateDraft(offset, count, true)
 	if err != nil {
-		s.log.Error("list drafts failed", zap.Error(err))
+		s.log.Error().Err(err).Msg("list drafts failed")
 		if wErr := ParseWechatError(err); wErr != nil {
 			return nil, wErr
 		}
@@ -290,10 +279,10 @@ func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, erro
 	list, err := fp.Paginate(offset, count, true)
 	if err != nil {
 		if wErr := ParseWechatError(err); wErr != nil {
-			s.log.Debug("list published failed", zap.Int("errcode", wErr.ErrCode), zap.String("msg", wErr.UserMsg))
+			s.log.Debug().Int("errcode", wErr.ErrCode).Str("msg", wErr.UserMsg).Msg("list published failed")
 			return nil, wErr
 		}
-		s.log.Error("list published failed", zap.Error(err))
+		s.log.Error().Err(err).Msg("list published failed")
 		return nil, fmt.Errorf("list published: %w", err)
 	}
 
@@ -375,12 +364,12 @@ func (s *Service) UploadMaterialWithRetry(filePath string, maxRetries int) (*Upl
 		}
 		lastErr = err
 		if !IsRetryable(err) {
-			s.log.Info("upload error is not retryable, aborting", zap.Error(err))
+			s.log.Info().Err(err).Msg("upload error is not retryable, aborting")
 			return nil, err
 		}
 		if i < maxRetries-1 {
 			delay := time.Duration(i+1) * time.Second
-			s.log.Info("retrying upload", zap.Int("attempt", i+2), zap.Duration("delay", delay))
+			s.log.Info().Int("attempt", i+2).Dur("delay", delay).Msg("retrying upload")
 			time.Sleep(delay)
 		}
 	}

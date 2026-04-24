@@ -10,7 +10,7 @@ import (
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 // VolcengineProvider 火山方舟 Seedream 图片生成服务提供者
@@ -18,7 +18,7 @@ import (
 type VolcengineProvider struct {
 	client     *arkruntime.Client
 	model      string
-	log        *zap.Logger
+	log        *zerolog.Logger
 	sizePixel  string // 像素格式 "WIDTHxHEIGHT"，如 "1728x2304"
 	volcConfig *config.VolcengineConfig
 }
@@ -47,7 +47,7 @@ func volcenginePixelSize(aspectRatio, sizeTier string) string {
 }
 
 // NewVolcengineProvider 创建火山方舟 Seedream Provider
-func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zap.Logger) (*VolcengineProvider, error) {
+func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*VolcengineProvider, error) {
 	mdl := apiCfg.Model
 	if mdl == "" {
 		mdl = DefaultVolcengineModel
@@ -123,9 +123,7 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 
 	resp, err := p.client.GenerateImages(ctx, req)
 	if err != nil {
-		p.log.Error("volcengine batch image generation failed",
-			zap.Error(err),
-			zap.String("model", p.model))
+		p.log.Error().Err(err).Str("model", p.model).Msg("volcengine batch image generation failed")
 		return nil, p.convertSDKError(err)
 	}
 
@@ -219,9 +217,7 @@ func (p *VolcengineProvider) GenerateBatch(ctx context.Context, prompt string, o
 
 	resp, err := p.client.GenerateImages(ctx, req)
 	if err != nil {
-		p.log.Error("volcengine single image generation failed",
-			zap.Error(err),
-			zap.String("model", p.model))
+		p.log.Error().Err(err).Str("model", p.model).Msg("volcengine single image generation failed")
 		return nil, p.convertSDKError(err)
 	}
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/rs/zerolog"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 )
 
@@ -129,11 +130,13 @@ func makeVolcengineProvider(t *testing.T, serverURL string, volcCfg *config.Volc
 		arkruntime.WithBaseUrl(serverURL),
 		arkruntime.WithTimeout(5*time.Second),
 	)
+	nopLog := zerolog.Nop()
 	return &VolcengineProvider{
 		client:     client,
 		model:      "doubao-seedream-4-5-251128",
 		sizePixel:  "1728x2304",
 		volcConfig: volcCfg,
+		log:        &nopLog,
 	}
 }
 

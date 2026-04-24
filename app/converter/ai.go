@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 )
 
 // AIConvertRequest AI 转换请求（用于传递给 Claude）
@@ -24,12 +24,12 @@ type AIConvertResult struct {
 
 // aiConverter AI 模式转换器
 type aiConverter struct {
-	log   *zap.Logger
+	log   *zerolog.Logger
 	theme *ThemeManager
 }
 
 // NewAIConverter 创建 AI 转换器
-func NewAIConverter(log *zap.Logger, theme *ThemeManager) *aiConverter {
+func NewAIConverter(log *zerolog.Logger, theme *ThemeManager) *aiConverter {
 	return &aiConverter{
 		log:   log,
 		theme: theme,
@@ -65,10 +65,7 @@ func (c *converter) convertViaAI(req *ConvertRequest) *ConvertResult {
 	result.Error = "AI_MODE_REQUEST:" + prompt
 	result.Images = images
 
-	c.log.Info("AI conversion request prepared",
-		zap.String("theme", req.Theme),
-		zap.Int("count", len(images)),
-		zap.Int("prompt_length", len(prompt)))
+	c.log.Info().Str("theme", req.Theme).Int("count", len(images)).Int("prompt_length", len(prompt)).Msg("AI conversion request prepared")
 
 	return result
 }
@@ -91,18 +88,15 @@ func (c *converter) buildAIPrompt(req *ConvertRequest) (string, error) {
 			// 使用 PromptBuilder 构建完整 Prompt
 			prompt, err = c.promptBuilder.BuildPromptFromTheme(theme, req.Markdown, nil)
 			if err != nil {
-				c.log.Warn("build prompt from theme failed, using raw prompt", zap.Error(err))
+				c.log.Warn().Err(err).Msg("build prompt from theme failed, using raw prompt")
 				prompt = theme.Prompt + "\n\n```\n" + req.Markdown + "\n```"
 			} else {
 				// 验证 Prompt 内容
 				validation := ValidatePromptContent(prompt)
 				if !validation.Valid {
-					c.log.Warn("prompt validation failed",
-						zap.Strings("errors", validation.Errors))
 				}
 				if len(validation.Warnings) > 0 {
-					c.log.Debug("prompt validation warnings",
-						zap.Strings("warnings", validation.Warnings))
+				c.log.Debug().Strs("warnings", validation.Warnings).Msg("prompt validation warnings")
 				}
 			}
 			return prompt, nil
