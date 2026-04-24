@@ -27,7 +27,7 @@ func registerImageTools(server *mcp.Server) {
 	}, generateImageHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "generate_batch_images",
+		Name:        "generate_images",
 		Description: "Generate multiple images at once using the channel's configured image provider. Returns an array of download URLs (remote CDN URLs or data URLs) for the generated images. The agent should download and save each image to the desired directory.",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -85,7 +85,7 @@ func registerImageTools(server *mcp.Server) {
 	}, downloadImageHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "batch_generate_from_markdown",
+		Name:        "generate_images_from_markdown",
 		Description: "Extract AI image placeholders (__generate:prompt__) from Markdown content, generate all images, and optionally upload them. Returns download URLs (remote CDN URLs or data URLs) and/or CDN URLs. Requires task_id for logging and credit tracking.",
 		InputSchema: map[string]any{
 			"type": "object",

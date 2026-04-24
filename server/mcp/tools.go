@@ -71,7 +71,7 @@ func registerChannelTools(server *mcp.Server) {
 	}, channelGetHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "get_account_info",
+		Name:        "get_channel_profile",
 		Description: "Get formatted account information for AI content creation context. Returns account positioning, keywords, style, theme, and platform-specific configuration. Does NOT expose sensitive credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -137,7 +137,7 @@ func registerTaskTools(server *mcp.Server) {
 	}, taskCancelHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "list_topics",
+		Name:        "list_channel_topics",
 		Description: "List all existing topic texts for a channel. Use this before selecting a new topic to avoid duplicates within the same channel.",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -149,7 +149,7 @@ func registerTaskTools(server *mcp.Server) {
 	}, topicListHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "get_task_files",
+		Name:        "list_task_files",
 		Description: "List output files for a completed task. Returns file names, roles (cover, html, markdown, image), and sizes.",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -163,7 +163,7 @@ func registerTaskTools(server *mcp.Server) {
 
 func registerCreditTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
-		Name:        "get_credits",
+		Name:        "get_credit_balance",
 		Description: "Get the authenticated user's current credit balance.",
 		InputSchema: map[string]any{
 			"type":       "object",

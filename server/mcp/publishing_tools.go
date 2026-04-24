@@ -33,7 +33,7 @@ func registerPublishingTools(server *mcp.Server) {
 	}, publishDraftHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "publish_xls",
+		Name:        "publish_xls_draft",
 		Description: "Create a WeChat Xiaolvshu (image post/newspic) draft. Uploads local images to WeChat and creates an image-based post. Supports up to 20 images.",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -66,7 +66,7 @@ func registerPublishingTools(server *mcp.Server) {
 	}, listDraftsHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "list_published",
+		Name:        "list_published_articles",
 		Description: "List published WeChat articles for a channel. Returns article IDs, titles, URLs, and update times.",
 		InputSchema: map[string]any{
 			"type": "object",

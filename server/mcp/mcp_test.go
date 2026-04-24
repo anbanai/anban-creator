@@ -173,7 +173,7 @@ func TestMCPHandlerToolsList(t *testing.T) {
 			}
 		}
 	}
-	for _, expected := range []string{"list_channels", "create_task", "get_credits"} {
+	for _, expected := range []string{"list_channels", "create_task", "get_credit_balance"} {
 		if !toolNames[expected] {
 			t.Errorf("expected tool %q not found in tools/list response", expected)
 		}
