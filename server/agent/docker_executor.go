@@ -35,6 +35,7 @@ type DockerExecutor struct {
 	imageAPICfg       *srvconfig.ImageAPIConfig
 	claudeEnv         map[string]string
 	dockerCfg         srvconfig.DockerConfig
+	serverURL         string
 	dockerCLI         *client.Client
 	defaultModel      string
 	keyProvider       UserKeyProvider
@@ -47,6 +48,7 @@ func NewDockerExecutor(
 	imageAPICfg *srvconfig.ImageAPIConfig,
 	claudeEnv map[string]string,
 	dockerCfg srvconfig.DockerConfig,
+	serverURL string,
 	defaultModel string,
 	keyProvider UserKeyProvider,
 	maxTurnsOverrides map[string]int,
@@ -71,6 +73,7 @@ func NewDockerExecutor(
 		imageAPICfg:       imageAPICfg,
 		claudeEnv:         claudeEnv,
 		dockerCfg:         dockerCfg,
+			serverURL:         serverURL,
 		dockerCLI:         cli,
 		defaultModel:      defaultModel,
 		keyProvider:       keyProvider,
@@ -230,7 +233,7 @@ func (e *DockerExecutor) resolveAgentAPIKey(ctx context.Context, opts *Execution
 func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string, maxTurns int, workspace, apiKey string) []string {
 	cmd := []string{
 		"abwriter-agent",
-		"--server-url", strings.TrimRight(e.dockerCfg.MCPBaseURL, "/"),
+		"--server-url", strings.TrimRight(e.serverURL, "/"),
 		"--api-key", apiKey,
 		"--task-id", opts.Task.ID,
 		"--task-type", opts.Task.Type,
