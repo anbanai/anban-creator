@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -22,18 +23,32 @@ func RequestLogger(logger *zerolog.Logger) fiber.Handler {
 		// Extract request ID if available (set by requestid middleware).
 		requestID := c.Get("X-Request-ID")
 
+		// Determine the HTTP status code.
+		// When c.Next() returns an error (e.g. fiber.ErrNotFound for unmatched routes),
+		// the Fiber error handler hasn't set the response status yet.
+		// Derive the status from the error to log the correct code.
+		status := c.Response().StatusCode()
+		if err != nil && status == fiber.StatusOK {
+			var fiberErr *fiber.Error
+			if errors.As(err, &fiberErr) {
+				status = fiberErr.Code
+			} else {
+				status = fiber.StatusInternalServerError
+			}
+		}
+
 		// Build log event.
 		event := logger.Info()
-		if c.Response().StatusCode() >= 500 {
+		if status >= 500 {
 			event = logger.Error()
-		} else if c.Response().StatusCode() >= 400 {
+		} else if status >= 400 {
 			event = logger.Warn()
 		}
 
 		event.
 			Str("method", c.Method()).
 			Str("path", c.Path()).
-			Int("status", c.Response().StatusCode()).
+			Int("status", status).
 			Dur("duration", duration).
 			Str("ip", c.IP())
 

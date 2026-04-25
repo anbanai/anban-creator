@@ -270,7 +270,8 @@ func (c *Config) applyDefaults() {
 			"topic_research": 80,
 			"seo":            80,
 			"draft_publish":  40,
-		}
+			"outline":        80,
+			}
 	}
 
 	// Asynq defaults.

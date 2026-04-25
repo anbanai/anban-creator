@@ -13,8 +13,9 @@ server:
 # ---------------------------------------------------------------------------
 # Logging
 logging:
-  level: info # "debug", "info" (default), "warn", "error", "trace"
-              # Override with ANBAN_SERVER_LOGGING_LEVEL or LOG_LEVEL env.
+  level:
+    info # "debug", "info" (default), "warn", "error", "trace"
+    # Override with ANBAN_SERVER_LOGGING_LEVEL or LOG_LEVEL env.
 
 # ---------------------------------------------------------------------------
 # Database: MySQL connection
@@ -109,8 +110,8 @@ image_api:
 # ---------------------------------------------------------------------------
 writing:
   base_url: "" # LLM API endpoint (e.g. "https://open.bigmodel.cn/api/anthropic")
-  key: ""      # API key
-  model: ""    # Model name (e.g. "glm-5-turbo")
+  key: "" # API key
+  model: "" # Model name (e.g. "glm-5-turbo")
 
 # ---------------------------------------------------------------------------
 # Credits: Credits system configuration
@@ -173,6 +174,7 @@ claude:
     cpu_cores: 2 # CPU limit per task container.
     memory_mb: 4096 # Memory limit per task container (MB).
     timeout_sec: 1800 # Container execution timeout (seconds, default 30 min).
+    mcp_base_url: "http://host.docker.internal:8080" # MCP server URL reachable from containers. Empty = auto (http://host.docker.internal:{port}). Override with ANBAN_SERVER_CLAUDE_DOCKER_MCP_BASE_URL.
 
   # Per-task agent execution log directory. Each task gets a {task_id}.log file.
   # Empty = disabled (no log files). Override with ANBAN_SERVER_CLAUDE_TASK_LOG_DIR.

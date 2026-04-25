@@ -137,10 +137,9 @@ func main() {
 	}
 
 	// 11.1 Create auth handler.
-	var authHandler *handler.AuthHandler
-	if repo != nil {
-		authHandler = handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser)
-	}
+	// Always create so auth routes are registered and return 503 when DB is down,
+	// rather than silently disappearing and confusing clients with 404.
+	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser)
 
 	// 11.1 Create API key service (needed before executor for per-user MCP keys).
 	var apiKeySvc *service.APIKeyService

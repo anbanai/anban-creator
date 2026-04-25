@@ -97,6 +97,14 @@ type tokenResponse struct {
 
 const inviteCodeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
+// requireDB returns 503 if the repository (database) is unavailable.
+func (h *AuthHandler) requireDB(c fiber.Ctx) error {
+	if h.repo == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "database is not available")
+	}
+	return nil
+}
+
 // generateInviteCode generates a random 8-character invite code using crypto/rand.
 // Excludes ambiguous characters: O/0, I/1/L for readability.
 func generateInviteCode() (string, error) {
@@ -112,6 +120,7 @@ func generateInviteCode() (string, error) {
 }
 
 // generateTokenPair creates an access token, a refresh token, and a LoginSession.
+// Precondition: h.repo must be non-nil (callers must check via requireDB).
 func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse, error) {
 	accessToken, err := h.jwtSvc.GenerateAccessToken(userID)
 	if err != nil {
@@ -169,6 +178,10 @@ func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse,
 
 // SendCode handles POST /api/v1/auth/send-code.
 func (h *AuthHandler) SendCode(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
 	var req sendCodeRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -194,6 +207,10 @@ func (h *AuthHandler) SendCode(c fiber.Ctx) error {
 
 // Register handles POST /api/v1/auth/register.
 func (h *AuthHandler) Register(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
 	var req registerRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -331,6 +348,10 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 
 // Login handles POST /api/v1/auth/login.
 func (h *AuthHandler) Login(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
 	var req loginRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -368,6 +389,10 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 
 // Refresh handles POST /api/v1/auth/refresh.
 func (h *AuthHandler) Refresh(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
 	var req refreshRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -416,6 +441,10 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 
 // Logout handles POST /api/v1/auth/logout.
 func (h *AuthHandler) Logout(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
 	authHeader := c.Get("Authorization")
 	var token string
 	if authHeader != "" {
@@ -437,6 +466,10 @@ func (h *AuthHandler) Logout(c fiber.Ctx) error {
 
 // Me handles GET /api/v1/auth/me.
 func (h *AuthHandler) Me(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
@@ -482,6 +515,10 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 
 // WXLogin handles POST /api/v1/auth/wx-login.
 func (h *AuthHandler) WXLogin(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
 	if h.wechatSvc == nil {
 		return Error(c, fiber.StatusServiceUnavailable, "WeChat login is not configured")
 	}

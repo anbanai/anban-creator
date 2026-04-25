@@ -234,16 +234,16 @@ func (s *WritingService) WriteArticle(
 		}, nil
 	}
 
-	article, err := s.llmClient.Complete(ctx, "", result.Prompt)
-	if err != nil {
-		return nil, fmt.Errorf("llm generate article: %w", err)
-	}
-
-	// Deduct credits.
+	// Deduct credits before LLM call.
 	if s.creditSvc != nil {
 		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeArticleWrite, 1); err != nil {
 			return nil, fmt.Errorf("deduct credits: %w", err)
 		}
+	}
+
+	article, err := s.llmClient.Complete(ctx, "", result.Prompt)
+	if err != nil {
+		return nil, fmt.Errorf("llm generate article: %w", err)
 	}
 
 	s.logger.Info().
@@ -313,6 +313,13 @@ func (s *WritingService) ConvertMarkdown(
 		}, nil
 	}
 
+	// Deduct credits before LLM call.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeConvert, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	// Call LLM with the assembled prompt.
 	html, err := s.llmClient.Complete(ctx, "", prompt)
 	if err != nil {
@@ -325,13 +332,6 @@ func (s *WritingService) ConvertMarkdown(
 			Original:    img.Original,
 			Placeholder: img.Placeholder,
 		})
-	}
-
-	// Deduct credits.
-	if s.creditSvc != nil {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeConvert, 1); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
 	}
 
 	s.logger.Info().
@@ -367,6 +367,13 @@ func (s *WritingService) HumanizeArticle(
 
 	prompt := humanizer.BuildPrompt(req)
 
+	// Deduct credits before LLM call.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeHumanize, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	raw, err := s.llmClient.Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm humanize: %w", err)
@@ -375,13 +382,6 @@ func (s *WritingService) HumanizeArticle(
 	// Parse the structured response using the humanizer package.
 	h := humanizer.NewHumanizer()
 	parsed := h.ParseAIResponse(raw, req)
-
-	// Deduct credits.
-	if s.creditSvc != nil {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeHumanize, 1); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
-	}
 
 	s.logger.Info().
 		Str("user_id", userID).
@@ -452,6 +452,13 @@ func (s *WritingService) ResearchTopics(
 
 	prompt := s.buildTopicsPrompt(positioning, keywords, count)
 
+	// Deduct credits before LLM call.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeTopicResearch, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	raw, err := s.llmClient.Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm research topics: %w", err)
@@ -460,13 +467,6 @@ func (s *WritingService) ResearchTopics(
 	topics, err := s.parseTopicsResponse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("parse topics response: %w", err)
-	}
-
-	// Deduct credits.
-	if s.creditSvc != nil {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeTopicResearch, 1); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
 	}
 
 	s.logger.Info().
@@ -494,19 +494,19 @@ func (s *WritingService) OptimizeSEO(
 
 	prompt := s.buildSEOPrompt(title, keywords, content)
 
+	// Deduct credits before LLM call.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeSEO, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	raw, err := s.llmClient.Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm seo optimize: %w", err)
 	}
 
 	result := s.parseSEOResponse(raw)
-
-	// Deduct credits.
-	if s.creditSvc != nil {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeSEO, 1); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
-	}
 
 	s.logger.Info().
 		Str("user_id", userID).
@@ -554,6 +554,13 @@ func (s *WritingService) GenerateOutline(
 
 	prompt := buildOutlinePrompt(topic, template, style, keywords)
 
+	// Deduct credits before LLM call.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeOutline, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	raw, err := s.llmClient.Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm generate outline: %w", err)
@@ -562,13 +569,6 @@ func (s *WritingService) GenerateOutline(
 	result, err := parseOutlineResponse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("parse outline response: %w", err)
-	}
-
-	// Deduct credits.
-	if s.creditSvc != nil {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeOutline, 1); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
 	}
 
 	s.logger.Info().
