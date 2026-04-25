@@ -61,8 +61,8 @@ func (r *userRepository) Update(ctx context.Context, user *model.User) error {
 // increment succeeded, false if the limit was already reached.
 func (r *userRepository) IncrementInviteCount(ctx context.Context, userID string, maxCount int) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&model.User{}).
-		Where("id = ? AND invite_count < ?", userID, maxCount).
-		Update("invite_count", gorm.Expr("invite_count + 1"))
+		Where("id = ? AND COALESCE(invite_count, 0) < ?", userID, maxCount).
+		Update("invite_count", gorm.Expr("COALESCE(invite_count, 0) + 1"))
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -73,7 +73,7 @@ func (r *userRepository) IncrementInviteCount(ctx context.Context, userID string
 func (r *userRepository) AdjustBalance(ctx context.Context, userID string, delta int) (int, error) {
 	result := r.db.WithContext(ctx).Model(&model.User{}).
 		Where("id = ?", userID).
-		Update("credits_balance", gorm.Expr("credits_balance + ?", delta))
+		Update("credits_balance", gorm.Expr("COALESCE(credits_balance, 0) + ?", delta))
 	if result.Error != nil {
 		return 0, result.Error
 	}
