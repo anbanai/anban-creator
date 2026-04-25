@@ -1,4 +1,17 @@
-export type CreditTransactionType = 'sign_in' | 'task_deduct' | 'task_refund' | 'admin_grant'
+export type CreditTransactionType =
+  | 'sign_in'
+  | 'task_deduct'
+  | 'task_refund'
+  | 'admin_grant'
+  | 'image_gen'
+  | 'image_upload'
+  | 'article_write'
+  | 'convert'
+  | 'humanize'
+  | 'topic_research'
+  | 'seo'
+  | 'draft_publish'
+  | 'outline'
 
 export interface CreditBalance {
   balance: number

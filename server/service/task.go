@@ -220,18 +220,6 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 	return tasks, nil
 }
 
-// refundTasks refunds credits for a list of task IDs.
-func (s *TaskService) refundTasks(ctx context.Context, taskIDs []string) {
-	if s.creditSvc == nil {
-		return
-	}
-	for _, tid := range taskIDs {
-		if err := s.creditSvc.RefundForTask(ctx, tid); err != nil {
-			s.logger.Error().Err(err).Str("task_id", tid).Msg("failed to refund credits during rollback")
-		}
-	}
-}
-
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
 	taskID := generateTaskID()
@@ -250,6 +238,18 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		}
 	}
 
+	// Deduct credits for the plan task.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForTask(ctx, plan.UserID, taskType, taskID); err != nil {
+			if errors.Is(err, ErrInsufficientCredits) {
+				s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task due to insufficient credits")
+				return nil, nil
+			}
+			s.logger.Error().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("failed to deduct credits for plan task")
+			return nil, nil
+		}
+	}
+
 	task := &model.Task{
 		ID:        taskID,
 		UserID:    plan.UserID,
@@ -260,6 +260,12 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {
+		// Refund the deducted credits if task creation fails.
+		if s.creditSvc != nil {
+			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
+				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits during plan task rollback")
+			}
+		}
 		return nil, fmt.Errorf("create task from plan: %w", err)
 	}
 
@@ -313,12 +319,36 @@ func (s *TaskService) ListTopics(ctx context.Context, channelID string) ([]strin
 	return s.repo.Tasks().FindTopicsByChannelID(ctx, channelID)
 }
 
-// Cancel sets a task's status to "cancelled" and signals the running execution to stop.
+// Cancel atomically transitions a task from pending/running to cancelled and signals
+// the running execution to stop. Credits are refunded if the transition succeeds.
+// Uses CompareAndSwapStatus to prevent cancelling already-completed or already-failed tasks.
 // If Redis pub/sub is available, it also publishes a cancel event so other replicas
 // can propagate the cancellation to their in-process execution contexts.
 func (s *TaskService) Cancel(ctx context.Context, id string) error {
-	if err := s.repo.Tasks().UpdateStatus(ctx, id, model.TaskStatusCancelled); err != nil {
+	// Atomically transition status: only pending or running can be cancelled.
+	swapped, err := s.repo.Tasks().CompareAndSwapStatus(
+		ctx, id, model.TaskStatusRunning, model.TaskStatusCancelled,
+	)
+	if err != nil {
 		return fmt.Errorf("cancel task: %w", err)
+	}
+	if !swapped {
+		// Also try pending → cancelled (task may not have started running yet).
+		swapped, err = s.repo.Tasks().CompareAndSwapStatus(
+			ctx, id, model.TaskStatusPending, model.TaskStatusCancelled,
+		)
+		if err != nil {
+			return fmt.Errorf("cancel task: %w", err)
+		}
+		if !swapped {
+			return fmt.Errorf("task is not in a cancellable state (current status is not pending or running)")
+		}
+	}
+	// Refund credits for the cancelled task (idempotent — double-refund protected).
+	if s.creditSvc != nil {
+		if refundErr := s.creditSvc.RefundForTask(ctx, id, "cancel"); refundErr != nil {
+			s.logger.Error().Err(refundErr).Str("task_id", id).Msg("failed to refund credits for cancelled task")
+		}
 	}
 	// Signal the running execution (if any) to cancel via its context.
 	if v, ok := s.cancelFuncs.Load(id); ok {

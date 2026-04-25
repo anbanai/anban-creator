@@ -126,17 +126,16 @@ func (s *PublishingService) PublishDraft(ctx context.Context, userID, channelID 
 		}
 	}
 
+	// Deduct credits before publishing.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeDraftPublish, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	result, err := ds.CreateDraft(draftArticles)
 	if err != nil {
 		return nil, fmt.Errorf("create draft: %w", err)
-	}
-
-	// Deduct credits.
-	if s.creditSvc != nil {
-		if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeDraftPublish, 1); creditErr != nil {
-			s.logger.Error().Err(creditErr).Str("user_id", userID).Str("media_id", result.MediaID).Msg("failed to deduct credits for draft publish")
-			// Log but do not fail — the draft is already published on WeChat.
-		}
 	}
 
 	s.logger.Info().Str("user_id", userID).Str("channel_id", channelID).Str("media_id", result.MediaID).Msg("article draft published")
@@ -169,17 +168,16 @@ func (s *PublishingService) PublishXls(ctx context.Context, userID, channelID st
 		FromMarkdown: req.FromMarkdown,
 	}
 
+	// Deduct credits before publishing.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeDraftPublish, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	result, err := ds.CreateImageXls(draftReq)
 	if err != nil {
 		return nil, fmt.Errorf("create xls draft: %w", err)
-	}
-
-	// Deduct credits.
-	if s.creditSvc != nil {
-		if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeDraftPublish, 1); creditErr != nil {
-			s.logger.Error().Err(creditErr).Str("user_id", userID).Str("media_id", result.MediaID).Msg("failed to deduct credits for xls publish")
-			// Log but do not fail — the draft is already published on WeChat.
-		}
 	}
 
 	s.logger.Info().Str("user_id", userID).Str("channel_id", channelID).Str("media_id", result.MediaID).Int("count", result.Count).Msg("xls draft published")

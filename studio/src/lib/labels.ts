@@ -38,6 +38,15 @@ export const transactionTypeLabel: Record<CreditTransactionType, string> = {
   task_deduct: '任务消耗',
   task_refund: '任务退还',
   admin_grant: '管理员充值',
+  image_gen: '图片生成',
+  image_upload: '图片上传',
+  article_write: '文章写作',
+  convert: '格式转换',
+  humanize: '文章润色',
+  topic_research: '选题研究',
+  seo: 'SEO优化',
+  draft_publish: '草稿发布',
+  outline: '大纲生成',
 }
 
 // --- Single Source of Truth for Content Types ---

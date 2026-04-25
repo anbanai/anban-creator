@@ -183,8 +183,9 @@ func (s *CreditService) DeductForTask(ctx context.Context, userID, taskType, tas
 	return newBalance, nil
 }
 
-// RefundForTask refunds credits for a failed task.
-func (s *CreditService) RefundForTask(ctx context.Context, taskID string) error {
+// RefundForTask refunds credits for a failed or cancelled task.
+// The reason parameter controls the transaction description ("failed" or "cancel").
+func (s *CreditService) RefundForTask(ctx context.Context, taskID string, reason ...string) error {
 	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
 		// Check for existing refund to prevent double-refund.
 		_, err := txRepo.Credits().FindRefundByTaskID(ctx, taskID)
@@ -213,19 +214,23 @@ func (s *CreditService) RefundForTask(ctx context.Context, taskID string) error 
 		}
 
 		taskIDCopy := taskID
+		desc := "任务失败退还"
+		if len(reason) > 0 && reason[0] == "cancel" {
+			desc = "任务取消退还"
+		}
 		tx := &model.CreditTransaction{
 			UserID:       deduction.UserID,
 			Type:         model.CreditTypeTaskRefund,
 			Amount:       refundAmount,
 			BalanceAfter: newBalance,
 			TaskID:       &taskIDCopy,
-			Description:  fmt.Sprintf("任务失败退还 +%d", refundAmount),
+			Description:  fmt.Sprintf("%s +%d", desc, refundAmount),
 		}
 		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 			return fmt.Errorf("create refund transaction: %w", err)
 		}
 
-		s.logger.Info().Str("task_id", taskID).Int("refund", refundAmount).Msg("credits refunded for failed task")
+		s.logger.Info().Str("task_id", taskID).Int("refund", refundAmount).Msg("credits refunded for task")
 		return nil
 	})
 }

@@ -59,6 +59,14 @@ wechat:
   app_secret: "" # WeChat Mini Program AppSecret.
 
 # ---------------------------------------------------------------------------
+# MCP: Model Context Protocol endpoint
+# Optional. Provides tool-based AI operations (image generation, publishing, etc.)
+# to Claude Code agents running inside containers or local subprocesses.
+# ---------------------------------------------------------------------------
+mcp:
+  api_key: "" # Static API key for MCP endpoint authentication. If empty, only JWT auth is used.
+
+# ---------------------------------------------------------------------------
 # Storage: File storage configuration
 # Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
 # Default is "local" for development.
@@ -131,6 +139,7 @@ credits:
     topic_research: 80
     seo: 80
     draft_publish: 40
+    outline: 80
   admin_api_key: "" # API key for admin credit grant endpoint (also via ANBAN_SERVER_CREDITS_ADMIN_API_KEY)
 
 # ---------------------------------------------------------------------------
@@ -150,8 +159,8 @@ cors:
 # Required for agent execution. The env vars are passed to the CLI process.
 # ---------------------------------------------------------------------------
 claude:
+  model: "" # Agent execution model override. Empty = use ANTHROPIC_MODEL env var.
   executor: local # "local" (subprocess) or "docker" (container).
-  # Override with ANBAN_SERVER_CLAUDE_EXECUTOR.
   plugin_dir: "" # Path to the abwriter plugin directory (local executor only).
   # Auto-detected by searching for agents/ in parent directories.
   # Override with ANBAN_SERVER_CLAUDE_PLUGIN_DIR.
@@ -174,7 +183,6 @@ claude:
     cpu_cores: 2 # CPU limit per task container.
     memory_mb: 4096 # Memory limit per task container (MB).
     timeout_sec: 1800 # Container execution timeout (seconds, default 30 min).
-    mcp_base_url: "http://host.docker.internal:8080" # MCP server URL reachable from containers. Empty = auto (http://host.docker.internal:{port}). Override with ANBAN_SERVER_CLAUDE_DOCKER_MCP_BASE_URL.
 
   # Per-task agent execution log directory. Each task gets a {task_id}.log file.
   # Empty = disabled (no log files). Override with ANBAN_SERVER_CLAUDE_TASK_LOG_DIR.
@@ -203,3 +211,18 @@ email:
   from_name: "案板创作助手" # Sender display name.
   code_ttl: 5m # Verification code TTL.
   code_length: 6 # Number of digits in verification code.
+
+# ---------------------------------------------------------------------------
+# Asynq: Background task queue worker settings
+# Used for scheduled tasks and async processing.
+# ---------------------------------------------------------------------------
+asynq:
+  concurrency: 3 # Number of concurrent task workers.
+
+# ---------------------------------------------------------------------------
+# Invitation: Invitation-based registration system
+# When enabled, new users must provide a valid invitation code to register.
+# ---------------------------------------------------------------------------
+invitation:
+  enabled: false # Master switch for invite-required registration.
+  max_per_user: 3 # Max invitation codes each user can generate.

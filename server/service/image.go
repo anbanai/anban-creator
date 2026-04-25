@@ -79,13 +79,11 @@ type BatchMarkdownResult struct {
 // ImageService handles image generation, upload, and compression
 // for server-side MCP tool use. It wraps the app/image package.
 type ImageService struct {
-	imageCfg     *srvconfig.ImageAPIConfig
-	storage      storage.Provider
-	repo         repository.Repository
-	creditSvc    *CreditService
-	logger       *zerolog.Logger
-	agentBaseURL string
-	workspaceDir string
+	imageCfg  *srvconfig.ImageAPIConfig
+	storage   storage.Provider
+	repo      repository.Repository
+	creditSvc *CreditService
+	logger    *zerolog.Logger
 }
 
 // NewImageService creates a new ImageService.
@@ -94,18 +92,14 @@ func NewImageService(
 	store storage.Provider,
 	repo repository.Repository,
 	creditSvc *CreditService,
-	agentBaseURL string,
-	workspaceDir string,
 	logger *zerolog.Logger,
 ) *ImageService {
 	return &ImageService{
-		imageCfg:     imageCfg,
-		storage:      store,
-		repo:         repo,
-		creditSvc:    creditSvc,
-		logger:       logger,
-		agentBaseURL: agentBaseURL,
-		workspaceDir: workspaceDir,
+		imageCfg:  imageCfg,
+		storage:   store,
+		repo:      repo,
+		creditSvc: creditSvc,
+		logger:    logger,
 	}
 }
 
@@ -170,17 +164,16 @@ func (s *ImageService) GenerateImage(
 		processor.SetRefImage(refPath)
 	}
 
+	// Deduct credits before generation.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	rawResult, err := processor.GenerateRaw(prompt)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
-	}
-
-	// Deduct credits for the generation.
-	if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, 1); creditErr != nil {
-		s.logger.Warn().Err(creditErr).
-			Str("user_id", userID).
-			Str("channel_id", channelID).
-			Msg("failed to deduct image generation credits")
 	}
 
 	return &ImageResult{
@@ -211,18 +204,16 @@ func (s *ImageService) GenerateBatch(
 		processor.SetRefImage(refPath)
 	}
 
+	// Deduct credits before generation.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, count); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	rawResults, err := processor.GenerateBatchRaw(prompt, count)
 	if err != nil {
 		return nil, fmt.Errorf("batch generate: %w", err)
-	}
-
-	// Deduct credits for all generated images.
-	if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, count); creditErr != nil {
-		s.logger.Warn().Err(creditErr).
-			Str("user_id", userID).
-			Str("channel_id", channelID).
-			Int("count", count).
-			Msg("failed to deduct batch image generation credits")
 	}
 
 	items := make([]BatchImageResultItem, 0, len(rawResults))
@@ -262,17 +253,16 @@ func (s *ImageService) UploadImage(
 		return nil, err
 	}
 
+	// Deduct credits before upload.
+	if s.creditSvc != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageUpload, 1); err != nil {
+			return nil, fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	result, err := processor.UploadLocalImage(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("upload image: %w", err)
-	}
-
-	// Deduct credits for the upload.
-	if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageUpload, 1); creditErr != nil {
-		s.logger.Warn().Err(creditErr).
-			Str("user_id", userID).
-			Str("channel_id", channelID).
-			Msg("failed to deduct image upload credits")
 	}
 
 	return &UploadImageResult{
@@ -363,16 +353,16 @@ func (s *ImageService) DownloadImage(
 				return nil, err
 			}
 
+			// Deduct credits before download+upload.
+			if s.creditSvc != nil {
+				if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageUpload, 1); err != nil {
+					return nil, fmt.Errorf("deduct credits: %w", err)
+				}
+			}
+
 			result, err := processor.DownloadAndUpload(url)
 			if err != nil {
 				return nil, fmt.Errorf("download and upload: %w", err)
-			}
-
-			if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageUpload, 1); creditErr != nil {
-				s.logger.Warn().Err(creditErr).
-					Str("user_id", userID).
-					Str("channel_id", channelID).
-					Msg("failed to deduct image download+upload credits")
 			}
 
 			return &DownloadImageResult{
@@ -535,23 +525,6 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 		}
 
 		results = append(results, item)
-	}
-
-	// Deduct credits for all successfully generated images.
-	successCount := 0
-	for _, r := range results {
-		if r.DownloadURL != "" {
-			successCount++
-		}
-	}
-	if successCount > 0 {
-		if _, creditErr := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, successCount); creditErr != nil {
-			s.logger.Warn().Err(creditErr).
-				Str("user_id", userID).
-				Str("channel_id", channelID).
-				Int("count", successCount).
-				Msg("failed to deduct batch markdown image generation credits")
-		}
 	}
 
 	return &BatchMarkdownResult{

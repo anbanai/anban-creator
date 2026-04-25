@@ -142,7 +142,6 @@ type DockerConfig struct {
 	CPUCores      int64  `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
 	MemoryMB      int64  `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
 	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
-	MCPBaseURL    string `yaml:"mcp_base_url"`   // Base URL for MCP server reachable from containers (default: "http://host.docker.internal:{port}")
 	ContainerName string `yaml:"container_name"` // Name of a persistent container to reuse via docker exec (empty = create+destroy per task)
 	WorkspaceDir  string `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
 }
@@ -318,13 +317,21 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Docker.TimeoutSec == 0 {
 		c.Claude.Docker.TimeoutSec = 1800
 	}
-	if c.Claude.Docker.MCPBaseURL == "" {
-		c.Claude.Docker.MCPBaseURL = fmt.Sprintf("http://host.docker.internal:%d", c.Server.Port)
-	}
-
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
 		c.Claude.PluginDir = detectPluginDir()
+	}
+}
+
+// AgentServerURL returns the server URL as reachable from the agent's network
+// perspective. Docker agents resolve the host via host.docker.internal; local
+// agents use localhost.
+func (c *Config) AgentServerURL() string {
+	switch c.Claude.Executor {
+	case "docker":
+		return fmt.Sprintf("http://host.docker.internal:%d", c.Server.Port)
+	default:
+		return fmt.Sprintf("http://localhost:%d", c.Server.Port)
 	}
 }
 
@@ -483,9 +490,6 @@ func (c *Config) applyEnvOverrides() {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Claude.Docker.TimeoutSec = n
 		}
-	}
-	if v := os.Getenv(prefix + "CLAUDE_DOCKER_MCP_BASE_URL"); v != "" {
-		c.Claude.Docker.MCPBaseURL = v
 	}
 	if v := os.Getenv(prefix + "CLAUDE_DOCKER_CONTAINER_NAME"); v != "" {
 		c.Claude.Docker.ContainerName = v

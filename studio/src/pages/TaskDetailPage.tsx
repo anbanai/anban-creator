@@ -428,7 +428,10 @@ export default function TaskDetailPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确定取消此任务？</AlertDialogTitle>
-            <AlertDialogDescription>取消后任务将停止执行，此操作不可撤销。</AlertDialogDescription>
+            <AlertDialogDescription>
+              取消后任务将停止执行，此操作不可撤销。
+              任务创建费用将全额退还，但执行中已消耗的操作费用（如 AI 写作、图片生成）不予退还。
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>

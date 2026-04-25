@@ -9,15 +9,8 @@ import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import Badge from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
-import { formatFullDateTimeCN } from '@/lib/labels'
+import { formatFullDateTimeCN, transactionTypeLabel } from '@/lib/labels'
 import PageHeader from '@/components/layout/PageHeader'
-
-const transactionTypeLabel: Record<string, string> = {
-  sign_in: '每日签到',
-  task_deduct: '任务消耗',
-  task_refund: '失败退还',
-  admin_grant: '管理员充值',
-}
 
 function transactionBadgeVariant(type: string) {
   switch (type) {
@@ -25,6 +18,16 @@ function transactionBadgeVariant(type: string) {
     case 'task_deduct': return 'danger'
     case 'task_refund': return 'warning'
     case 'admin_grant': return 'info'
+    case 'image_gen':
+    case 'image_upload':
+    case 'article_write':
+    case 'convert':
+    case 'humanize':
+    case 'topic_research':
+    case 'seo':
+    case 'draft_publish':
+    case 'outline':
+      return 'danger'
     default: return 'neutral'
   }
 }
