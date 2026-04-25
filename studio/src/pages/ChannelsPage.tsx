@@ -21,6 +21,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDes
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { channelSchema, type ChannelFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
+import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 
@@ -95,6 +96,7 @@ export default function ChannelsPage() {
   const [fetchingProfile, setFetchingProfile] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const { submit } = useSubmitLock()
 
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelSchema),
@@ -269,6 +271,7 @@ export default function ChannelsPage() {
 
   function resetModal() {
     setModalOpen(false)
+    setShowDirtyDialog(false)
     setEditingChannel(null)
     setAdvancedOpen(false)
     form.reset(CHANNEL_FORM_DEFAULTS)
@@ -291,9 +294,9 @@ export default function ChannelsPage() {
       wechat_secret: values.wechat_secret?.trim() || undefined,
     }
     if (editingChannel) {
-      updateMutation.mutate({ id: editingChannel.id, data: payload })
+      await submit(async () => updateMutation.mutateAsync({ id: editingChannel.id, data: payload }))
     } else {
-      createMutation.mutate(payload)
+      await submit(async () => createMutation.mutateAsync(payload))
     }
   }
 
@@ -348,8 +351,10 @@ export default function ChannelsPage() {
               channel={channel}
               stats={channelStats[channel.id]}
               onEdit={openEdit}
-              onArchive={(id) => archiveMutation.mutate(id)}
-              onRestore={(id) => restoreMutation.mutate(id)}
+              archiving={archiveMutation.isPending}
+              restoring={restoreMutation.isPending}
+              onArchive={(id) => submit(async () => archiveMutation.mutateAsync(id))}
+              onRestore={(id) => submit(async () => restoreMutation.mutateAsync(id))}
               onDelete={handleDelete}
             />
           ))}
@@ -638,7 +643,7 @@ export default function ChannelsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
+            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
               删除
             </AlertDialogAction>
           </AlertDialogFooter>

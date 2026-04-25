@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { MessageCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/textarea'
@@ -16,7 +17,7 @@ export default function FeedbackFab() {
   // Feedback form state
   const [type, setType] = useState<FeedbackType>('bug')
   const [content, setContent] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const { submit, isSubmitting } = useSubmitLock()
 
   // Click outside to close
   useEffect(() => {
@@ -33,17 +34,12 @@ export default function FeedbackFab() {
   async function handleSubmit() {
     const trimmed = content.trim()
     if (!trimmed) return
-    setSubmitting(true)
-    try {
+    await submit(async () => {
       await feedbackApi.create({ type, content: trimmed })
       toast.success('反馈提交成功，感谢您的建议！')
       setContent('')
       setType('bug')
-    } catch {
-      toast.error('提交失败，请稍后重试')
-    } finally {
-      setSubmitting(false)
-    }
+    })
   }
 
   return (
@@ -105,7 +101,7 @@ export default function FeedbackFab() {
               {/* Submit */}
               <Button
                 className="w-full"
-                loading={submitting}
+                loading={isSubmitting}
                 disabled={!content.trim()}
                 onClick={handleSubmit}
               >

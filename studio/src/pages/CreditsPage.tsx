@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { toast } from 'sonner'
 import { Loader2, CreditCard } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -38,6 +39,7 @@ export default function CreditsPage() {
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [rechargeOpen, setRechargeOpen] = useState(false)
+  const { submit } = useSubmitLock()
 
   const { data: balanceData, isLoading: balanceLoading } = useQuery({
     queryKey: ['credits', 'balance'],
@@ -90,7 +92,7 @@ export default function CreditsPage() {
               </p>
             </div>
             <Button
-              onClick={() => signInMutation.mutate()}
+              onClick={() => submit(async () => signInMutation.mutateAsync())}
               disabled={signedInToday || signInMutation.isPending}
               loading={signInMutation.isPending}
             >

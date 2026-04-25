@@ -7,6 +7,8 @@ interface ChannelCardProps {
   channel: Channel
   stats?: ChannelStats
   onEdit?: (channel: Channel) => void
+  archiving?: boolean
+  restoring?: boolean
   onArchive?: (id: string) => void
   onRestore?: (id: string) => void
   onDelete?: (id: string) => void
@@ -18,7 +20,7 @@ const platformBadgeVariant: Record<string, 'success' | 'info' | 'danger' | 'neut
   rednote: 'danger',
 }
 
-export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDelete }: ChannelCardProps) {
+export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {
   const platformLabel = platformLabels[channel.platform] || channel.platform
   const platformBadge = platformBadgeVariant[channel.platform] || ('neutral' as const)
 
@@ -65,12 +67,12 @@ export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDe
           </Button>
         )}
         {channel.status === 'active' && onArchive && (
-          <Button variant="ghost" size="xs" onClick={() => onArchive(channel.id)} aria-label="归档频道">
+          <Button variant="ghost" size="xs" disabled={archiving} loading={archiving} onClick={() => onArchive(channel.id)} aria-label="归档频道">
             归档
           </Button>
         )}
         {channel.status === 'archived' && onRestore && (
-          <Button variant="ghost" size="xs" onClick={() => onRestore(channel.id)} aria-label="恢复频道">
+          <Button variant="ghost" size="xs" disabled={restoring} loading={restoring} onClick={() => onRestore(channel.id)} aria-label="恢复频道">
             恢复
           </Button>
         )}

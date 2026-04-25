@@ -22,6 +22,7 @@ import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
+import { useSubmitLock } from '@/hooks/useSubmitLock'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -52,6 +53,7 @@ export default function TasksPage() {
   const [quantity, setQuantity] = useState(1)
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const { submit } = useSubmitLock()
 
   const { data: channels = [] } = useQuery({
     queryKey: ['channels', 'active'],
@@ -145,19 +147,20 @@ export default function TasksPage() {
 
   function resetModal() {
     setModalOpen(false)
+    setShowDirtyDialog(false)
     form.reset({ type: 'rednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
     setChannelImageRatio('')
   }
 
   async function onSubmit(values: CreateTaskFormValues) {
-    createMutation.mutate({
+    await submit(async () => createMutation.mutateAsync({
       type: values.type,
       prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id,
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
-    })
+    }))
   }
 
   const runningCount = tasks.filter((t) => t.status === 'running').length
@@ -277,7 +280,7 @@ export default function TasksPage() {
                       onClick={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        togglePublished.mutate({ id: task.id, published: !task.published })
+                        submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published }))
                       }}
                       className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
                         task.published

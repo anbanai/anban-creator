@@ -19,6 +19,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
+import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 
@@ -38,6 +39,7 @@ export default function PlansPage() {
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const { submit } = useSubmitLock()
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema),
@@ -145,6 +147,7 @@ export default function PlansPage() {
 
   function resetModal() {
     setModalOpen(false)
+    setShowDirtyDialog(false)
     setEditingPlan(null)
     form.reset({
       channel_id: '',
@@ -163,9 +166,9 @@ export default function PlansPage() {
     }
 
     if (editingPlan) {
-      updateMutation.mutate({ id: editingPlan.id, data: payload })
+      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: payload }))
     } else {
-      createMutation.mutate(payload)
+      await submit(async () => createMutation.mutateAsync(payload))
     }
   }
 
@@ -223,12 +226,12 @@ export default function PlansPage() {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {plan.status === 'active' && (
-                    <Button variant="ghost" size="sm" loading={pauseMutation.isPending} onClick={() => pauseMutation.mutate(plan.id)}>
+                    <Button variant="ghost" size="sm" loading={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
                       暂停
                     </Button>
                   )}
                   {plan.status === 'paused' && (
-                    <Button variant="ghost" size="sm" loading={resumeMutation.isPending} onClick={() => resumeMutation.mutate(plan.id)}>
+                    <Button variant="ghost" size="sm" loading={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
                       恢复
                     </Button>
                   )}
@@ -335,7 +338,7 @@ export default function PlansPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}>
+            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
               删除
             </AlertDialogAction>
           </AlertDialogFooter>

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Loader2, Inbox, CalendarPlus, Clock, Copy } from 'lucide-react'
@@ -37,6 +38,7 @@ export default function DashboardPage() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const { submit } = useSubmitLock()
 
   const { data: creditsBalance } = useQuery({
     queryKey: ['credits', 'balance'],
@@ -182,7 +184,7 @@ export default function DashboardPage() {
             </div>
             <Button
               size="sm"
-              onClick={() => signInMutation.mutate()}
+              onClick={() => submit(async () => signInMutation.mutateAsync())}
               disabled={(signInStatus?.signed_in_today ?? false) || signInMutation.isPending}
               loading={signInMutation.isPending}
             >

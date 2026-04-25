@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -20,6 +21,7 @@ export default function SettingsPage() {
   const [newKeyData, setNewKeyData] = useState<CreateAPIKeyResponse | null>(null)
   const [copied, setCopied] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
+  const { submit } = useSubmitLock()
 
   const { data: apiKeys = [], isLoading } = useQuery({
     queryKey: queryKeys.apiKeys.all,
@@ -56,7 +58,7 @@ export default function SettingsPage() {
   })
 
   const handleCreate = () => {
-    createMutation.mutate(keyName)
+    submit(async () => createMutation.mutateAsync(keyName))
   }
 
   const handleCopy = (text: string) => {
@@ -191,7 +193,7 @@ export default function SettingsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" loading={revokeMutation.isPending} onClick={() => { if (revokeTarget) revokeMutation.mutate(revokeTarget) }}>
+            <AlertDialogAction variant="destructive" loading={revokeMutation.isPending} onClick={() => { if (revokeTarget) submit(async () => revokeMutation.mutateAsync(revokeTarget)) }}>
               吊销
             </AlertDialogAction>
           </AlertDialogFooter>

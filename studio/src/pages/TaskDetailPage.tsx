@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -35,6 +36,7 @@ export default function TaskDetailPage() {
   const [sseError, setSseError] = useState<string | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const { submit } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
 
@@ -244,7 +246,7 @@ export default function TaskDetailPage() {
               variant={task.published ? 'outline' : 'default'}
               size="sm"
               loading={togglePublished.isPending}
-              onClick={() => togglePublished.mutate({ published: !task.published })}
+              onClick={() => submit(async () => togglePublished.mutateAsync({ published: !task.published }))}
             >
               <Eye className="h-4 w-4" />
               {task.published ? '已发布' : '标记已发布'}
@@ -435,7 +437,7 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" loading={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>
+            <AlertDialogAction variant="destructive" loading={cancelMutation.isPending} onClick={() => submit(async () => cancelMutation.mutateAsync())}>
               确定取消
             </AlertDialogAction>
           </AlertDialogFooter>
