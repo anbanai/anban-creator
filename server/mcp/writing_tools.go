@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -139,7 +138,7 @@ func writeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 
 	result, err := svcs.WritingSvc.WriteArticle(ctx, userID, channelID, topic, inputType, articleType, length)
 	if err != nil {
-		return errorResult(fmt.Sprintf("write article: %v", err)), nil
+		return creditsErrorResult("write article", err), nil
 	}
 
 	return textResult(result)
@@ -165,7 +164,7 @@ func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 
 	result, err := svcs.WritingSvc.ConvertMarkdown(ctx, userID, channelID, markdown, theme)
 	if err != nil {
-		return errorResult(fmt.Sprintf("convert markdown: %v", err)), nil
+		return creditsErrorResult("convert markdown", err), nil
 	}
 
 	return textResult(result)
@@ -191,7 +190,7 @@ func humanizeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 
 	result, err := svcs.WritingSvc.HumanizeArticle(ctx, userID, channelID, content, intensity)
 	if err != nil {
-		return errorResult(fmt.Sprintf("humanize article: %v", err)), nil
+		return creditsErrorResult("humanize article", err), nil
 	}
 
 	return textResult(result)
@@ -226,7 +225,7 @@ func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 
 	result, err := svcs.WritingSvc.ResearchTopics(ctx, userID, channelID, keywords, domain, count)
 	if err != nil {
-		return errorResult(fmt.Sprintf("research topics: %v", err)), nil
+		return creditsErrorResult("research topics", err), nil
 	}
 
 	return textResult(result)
@@ -263,7 +262,7 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 
 	result, err := svcs.WritingSvc.OptimizeSEO(ctx, userID, channelID, content, title, keywords)
 	if err != nil {
-		return errorResult(fmt.Sprintf("optimize seo: %v", err)), nil
+		return creditsErrorResult("optimize seo", err), nil
 	}
 
 	return textResult(result)
@@ -290,7 +289,7 @@ func generateOutlineHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 
 	result, err := svcs.WritingSvc.GenerateOutline(ctx, userID, channelID, topic, template, style)
 	if err != nil {
-		return errorResult(fmt.Sprintf("generate outline: %v", err)), nil
+		return creditsErrorResult("generate outline", err), nil
 	}
 
 	return textResult(result)

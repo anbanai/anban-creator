@@ -310,7 +310,7 @@ func taskCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 
 	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, prompt, quantity, "")
 	if err != nil {
-		return errorResult(fmt.Sprintf("create task: %v", err)), nil
+		return creditsErrorResult("create task", err), nil
 	}
 
 	ids := make([]string, len(tasks))

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +17,19 @@ import (
 
 	"github.com/royalrick/anbanwriter/server/service"
 )
+
+// insufficientCreditsMsg is the Chinese guidance message for credit errors.
+const insufficientCreditsMsg = "积分不足，请前往 https://creator.anbanai.com 充值"
+
+// creditsErrorResult checks if err wraps ErrInsufficientCredits.
+// If so, returns an errorResult with recharge guidance.
+// Otherwise, returns an errorResult with the formatted prefix and error.
+func creditsErrorResult(prefix string, err error) *mcp.CallToolResult {
+	if errors.Is(err, service.ErrInsufficientCredits) {
+		return errorResult(fmt.Sprintf("%s: %s", prefix, insufficientCreditsMsg))
+	}
+	return errorResult(fmt.Sprintf("%s: %v", prefix, err))
+}
 
 // statusWriter wraps http.ResponseWriter to capture the status code.
 type statusWriter struct {
