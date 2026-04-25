@@ -23,7 +23,7 @@ RUN npm install -g @anthropic-ai/claude-code
 
 COPY --from=builder /abwriter-server /app/abwriter-server
 
-COPY server/config.yaml /app/conf/config.yaml
+# COPY server/config.yaml /app/conf/config.yaml
 
 # Copy plugin files (claudecode/ contains agents/, skills/, hooks/, themes/, writers/)
 COPY claudecode/ /anbanai/
