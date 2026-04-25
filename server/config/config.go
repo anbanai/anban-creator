@@ -148,10 +148,12 @@ type DockerConfig struct {
 
 // CreditsConfig holds credits/points system configuration.
 type CreditsConfig struct {
-	DailySignIn    int            `yaml:"daily_sign_in"`   // credits awarded per daily sign-in (default 1024)
-	TaskCosts      map[string]int `yaml:"task_costs"`      // per-task-type costs, e.g. {"article": 4000, "xls": 3200, "rednote": 3200}
-	OperationCosts map[string]int `yaml:"operation_costs"` // per-operation costs for MCP tools, e.g. {"image_gen": 10, "article_write": 50}
-	AdminAPIKey    string         `yaml:"admin_api_key"`   // API key for admin credit grant endpoint
+	DailySignIn    int            `yaml:"daily_sign_in"`    // credits awarded per daily sign-in (default 1024)
+	RegisterBonus  int            `yaml:"register_bonus"`   // credits awarded on registration (default 4096)
+	InviteReward   int            `yaml:"invite_reward"`    // credits awarded to inviter when invitee registers (default 2048)
+	TaskCosts      map[string]int `yaml:"task_costs"`       // per-task-type costs, e.g. {"article": 4000, "xls": 3200, "rednote": 3200}
+	OperationCosts map[string]int `yaml:"operation_costs"`  // per-operation costs for MCP tools, e.g. {"image_gen": 10, "article_write": 50}
+	AdminAPIKey    string         `yaml:"admin_api_key"`    // API key for admin credit grant endpoint
 }
 
 // CORSConfig holds Cross-Origin Resource Sharing configuration.
@@ -251,6 +253,12 @@ func (c *Config) applyDefaults() {
 	// Credits defaults.
 	if c.Credits.DailySignIn == 0 {
 		c.Credits.DailySignIn = 1024
+	}
+	if c.Credits.RegisterBonus == 0 {
+		c.Credits.RegisterBonus = 4096
+	}
+	if c.Credits.InviteReward == 0 {
+		c.Credits.InviteReward = 2048
 	}
 	if c.Credits.TaskCosts == nil {
 		c.Credits.TaskCosts = map[string]int{
@@ -623,6 +631,16 @@ func (c *Config) Validate() error {
 
 	if c.Claude.Executor != "local" && c.Claude.Executor != "docker" {
 		errs = append(errs, fmt.Sprintf("claude.executor must be 'local' or 'docker', got %q", c.Claude.Executor))
+	}
+
+	if c.Credits.DailySignIn < 0 {
+		errs = append(errs, "credits.daily_sign_in must not be negative")
+	}
+	if c.Credits.RegisterBonus < 0 {
+		errs = append(errs, "credits.register_bonus must not be negative")
+	}
+	if c.Credits.InviteReward < 0 {
+		errs = append(errs, "credits.invite_reward must not be negative")
 	}
 	if c.Claude.Executor == "local" {
 		if strings.TrimSpace(c.Claude.PluginDir) == "" {

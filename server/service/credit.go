@@ -142,6 +142,41 @@ func (s *CreditService) AdminGrant(ctx context.Context, userID string, amount in
 	})
 }
 
+// GrantBonus adds credits to a user's account as a bonus (registration, invite, etc.).
+func (s *CreditService) GrantBonus(ctx context.Context, userID string, amount int, bonusType, description string) error {
+	if amount <= 0 {
+		return ErrInvalidAmount
+	}
+
+	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		_, err := txRepo.Users().FindByID(ctx, userID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("user not found: %s", userID)
+			}
+			return fmt.Errorf("find user: %w", err)
+		}
+
+		newBalance, err := txRepo.Users().AdjustBalance(ctx, userID, amount)
+		if err != nil {
+			return fmt.Errorf("adjust balance: %w", err)
+		}
+
+		tx := &model.CreditTransaction{
+			UserID:       userID,
+			Type:         bonusType,
+			Amount:       amount,
+			BalanceAfter: newBalance,
+			Description:  description,
+		}
+		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
+			return fmt.Errorf("create bonus transaction: %w", err)
+		}
+		s.logger.Info().Str("user_id", userID).Str("type", bonusType).Int("amount", amount).Int("balance", newBalance).Msg("bonus credits granted")
+		return nil
+	})
+}
+
 // DeductForTask deducts credits for a single task creation.
 func (s *CreditService) DeductForTask(ctx context.Context, userID, taskType, taskID string) (int, error) {
 	cost, ok := s.cfg.TaskCosts[taskType]

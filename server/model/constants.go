@@ -70,10 +70,12 @@ func DefaultImageRatio(platform string) string {
 
 // Credit transaction type constants.
 const (
-	CreditTypeSignIn     = "sign_in"
-	CreditTypeTaskDeduct = "task_deduct"
-	CreditTypeTaskRefund = "task_refund"
-	CreditTypeAdminGrant = "admin_grant"
+	CreditTypeSignIn        = "sign_in"
+	CreditTypeTaskDeduct    = "task_deduct"
+	CreditTypeTaskRefund    = "task_refund"
+	CreditTypeAdminGrant    = "admin_grant"
+	CreditTypeRegisterBonus = "register_bonus"
+	CreditTypeInviteReward  = "invite_reward"
 )
 
 // User tier type.

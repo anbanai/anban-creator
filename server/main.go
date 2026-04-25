@@ -137,11 +137,6 @@ func main() {
 			Msg("email service initialized")
 	}
 
-	// 11.1 Create auth handler.
-	// Always create so auth routes are registered and return 503 when DB is down,
-	// rather than silently disappearing and confusing clients with 404.
-	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser)
-
 	// 11.1 Create API key service (needed before executor for per-user MCP keys).
 	var apiKeySvc *service.APIKeyService
 	if repo != nil {
@@ -206,6 +201,9 @@ func main() {
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log))
 	}
+
+	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
+	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits)
 
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler

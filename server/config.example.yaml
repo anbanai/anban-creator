@@ -126,6 +126,8 @@ writing:
 # ---------------------------------------------------------------------------
 credits:
   daily_sign_in: 1024 # credits awarded per daily sign-in
+  register_bonus: 4096 # credits awarded on registration (2^12)
+  invite_reward: 2048 # credits awarded to inviter when invitee registers (2^11)
   task_costs:
     article: 4000 # cost per article task
     xls: 3200 # cost per xls task

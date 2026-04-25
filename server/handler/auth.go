@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/royalrick/anbanwriter/server/auth"
+	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
@@ -24,6 +26,8 @@ type AuthHandler struct {
 	wechatSvc        *auth.WeChatService
 	repo             repository.Repository
 	emailSvc         *service.EmailService
+	creditSvc        *service.CreditService
+	creditsCfg       *config.CreditsConfig
 	logger           *zerolog.Logger
 	hub              *WebSocketHub
 	inviteEnabled    bool
@@ -40,12 +44,16 @@ func NewAuthHandler(
 	hub *WebSocketHub,
 	inviteEnabled bool,
 	maxInvitePerUser int,
+	creditSvc *service.CreditService,
+	creditsCfg *config.CreditsConfig,
 ) *AuthHandler {
 	return &AuthHandler{
 		jwtSvc:           jwtSvc,
 		wechatSvc:        wechatSvc,
 		repo:             repo,
 		emailSvc:         emailSvc,
+		creditSvc:        creditSvc,
+		creditsCfg:       creditsCfg,
 		logger:           logger,
 		hub:              hub,
 		inviteEnabled:    inviteEnabled,
@@ -339,6 +347,22 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		if err := h.repo.Users().Create(ctx, user); err != nil {
 			h.logger.Error().Err(err).Msg("failed to create user")
 			return Error(c, fiber.StatusInternalServerError, "failed to create user")
+		}
+	}
+
+	// Grant registration bonus (best-effort, don't fail registration if this fails).
+	if h.creditSvc != nil && h.creditsCfg != nil && h.creditsCfg.RegisterBonus > 0 {
+		if err := h.creditSvc.GrantBonus(ctx, user.ID, h.creditsCfg.RegisterBonus,
+			model.CreditTypeRegisterBonus, fmt.Sprintf("注册赠送 +%d", h.creditsCfg.RegisterBonus)); err != nil {
+			h.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to grant registration bonus")
+		}
+	}
+
+	// Grant invite reward to inviter (best-effort).
+	if inviter != nil && h.creditSvc != nil && h.creditsCfg != nil && h.creditsCfg.InviteReward > 0 {
+		if err := h.creditSvc.GrantBonus(ctx, inviter.ID, h.creditsCfg.InviteReward,
+			model.CreditTypeInviteReward, fmt.Sprintf("邀请用户注册奖励 +%d", h.creditsCfg.InviteReward)); err != nil {
+			h.logger.Error().Err(err).Str("inviter_id", inviter.ID).Str("invitee_id", user.ID).Msg("failed to grant invite reward")
 		}
 	}
 
