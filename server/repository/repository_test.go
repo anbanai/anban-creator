@@ -119,7 +119,6 @@ func TestUserRepository_CRUD(t *testing.T) {
 	user := &model.User{
 		ID:       "user-1",
 		Email:    "test@example.com",
-		Phone:    "13800138000",
 		Nickname: "TestUser",
 		Password: "hashed",
 		Avatar:   "https://example.com/avatar.png",
@@ -148,16 +147,6 @@ func TestUserRepository_CRUD(t *testing.T) {
 		t.Errorf("expected nickname TestUser, got %s", found.Nickname)
 	}
 
-	// FindByPhone
-	found, err = repo.Users().FindByPhone(ctx, "13800138000")
-	if err != nil {
-		t.Fatalf("FindByPhone: %v", err)
-	}
-	if found.ID != "user-1" {
-		t.Errorf("expected id user-1, got %s", found.ID)
-	}
-
-	// FindByOpenID (should not exist)
 	_, err = repo.Users().FindByOpenID(ctx, "nonexistent-openid")
 	if err == nil {
 		t.Fatal("expected error for FindByOpenID with nonexistent ID")

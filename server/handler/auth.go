@@ -370,11 +370,7 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 
 	ctx := c.Context()
 
-	// Try email first, then phone.
 	user, err := h.repo.Users().FindByEmail(ctx, req.Email)
-	if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
-		user, err = h.repo.Users().FindByPhone(ctx, req.Email)
-	}
 	if err != nil {
 		return Error(c, fiber.StatusUnauthorized, "invalid email or password")
 	}
@@ -503,7 +499,6 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 	return Success(c, fiber.Map{
 		"id":                   user.ID,
 		"email":                user.Email,
-		"phone":                user.Phone,
 		"nickname":             user.Nickname,
 		"avatar":               user.Avatar,
 		"credits_balance":      user.CreditsBalance,

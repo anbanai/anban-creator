@@ -32,14 +32,6 @@ func (r *userRepository) FindByEmail(ctx context.Context, email string) (*model.
 	return &user, nil
 }
 
-func (r *userRepository) FindByPhone(ctx context.Context, phone string) (*model.User, error) {
-	var user model.User
-	if err := r.db.WithContext(ctx).Where("phone = ?", phone).First(&user).Error; err != nil {
-		return nil, err
-	}
-	return &user, nil
-}
-
 func (r *userRepository) FindByOpenID(ctx context.Context, openID string) (*model.User, error) {
 	var user model.User
 	if err := r.db.WithContext(ctx).Where("open_id = ?", openID).First(&user).Error; err != nil {

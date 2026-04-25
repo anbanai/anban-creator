@@ -28,7 +28,6 @@ type Repository interface {
 type UserRepository interface {
 	FindByID(ctx context.Context, id string) (*model.User, error)
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
-	FindByPhone(ctx context.Context, phone string) (*model.User, error)
 	FindByOpenID(ctx context.Context, openID string) (*model.User, error)
 	FindByInviteCode(ctx context.Context, code string) (*model.User, error)
 	Create(ctx context.Context, user *model.User) error

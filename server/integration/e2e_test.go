@@ -73,13 +73,6 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	}
 
 
-	// Drop the unique index on users.phone and users.open_id because the auth
-	// handler sets empty string instead of NULL for users without a phone
-	// number or WeChat OpenID, causing unique constraint violations in SQLite
-	// when registering multiple users.
-	db.Exec("DROP INDEX IF EXISTS idx_users_phone")
-	db.Exec("DROP INDEX IF EXISTS idx_users_open_id")
-
 	closeFunc := func() {
 		sqlDB, _ := db.DB()
 		if sqlDB != nil {
