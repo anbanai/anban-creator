@@ -5,15 +5,22 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
-	"net/smtp"
 	"strconv"
-	"strings"
 	"time"
 
+	mail "github.com/wneessen/go-mail"
 	"github.com/redis/go-redis/v9"
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/rs/zerolog"
 )
+
+// UserError is an error intended to be shown to the end user (e.g. validation failures).
+// Handlers should pass its message through instead of replacing with a generic error.
+type UserError struct {
+	Msg string
+}
+
+func (e *UserError) Error() string { return e.Msg }
 
 // EmailService handles verification code generation, storage, delivery, and validation.
 type EmailService struct {
@@ -69,12 +76,17 @@ func (s *EmailService) SendVerificationCode(ctx context.Context, email string) e
 	// Check if a code already exists — enforce per-email cooldown.
 	existingTTL, err := s.rdb.TTL(ctx, s.codeKey(email)).Result()
 	if err == nil && existingTTL > 0 {
-		return fmt.Errorf("验证码已发送，请 %.0f 秒后再试", existingTTL.Seconds())
+		return &UserError{Msg: fmt.Sprintf("验证码已发送，请 %.0f 秒后再试", existingTTL.Seconds())}
 	}
 
 	code, err := s.generateCode()
 	if err != nil {
 		return fmt.Errorf("generate code: %w", err)
+	}
+
+	// Check if recipient's mail server is in China.
+	if !isChineseEmailDomain(email) {
+		return &UserError{Msg: "暂不支持境外邮箱，请使用国内邮箱注册"}
 	}
 
 	ttl := s.cfg.CodeTTL
@@ -102,21 +114,42 @@ func (s *EmailService) SendVerificationCode(ctx context.Context, email string) e
 	}
 	fromAddr := s.cfg.FromAddress
 
-	body := strings.Join([]string{
-		"From: " + fromName + " <" + fromAddr + ">",
-		"To: " + email,
-		"Subject: 案板创作助手 验证码",
-		"Content-Type: text/plain; charset=UTF-8",
-		"",
-		fmt.Sprintf("您的验证码是：%s（%d 分钟内有效）", code, int(ttl.Minutes())),
-		"",
-		"如非本人操作，请忽略此邮件。",
-	}, "\r\n")
+	m := mail.NewMsg()
+	if err := m.FromFormat(fromName, fromAddr); err != nil {
+		s.rdb.Del(ctx, s.codeKey(email))
+		return fmt.Errorf("set from: %w", err)
+	}
+	if err := m.To(email); err != nil {
+		s.rdb.Del(ctx, s.codeKey(email))
+		return fmt.Errorf("set to: %w", err)
+	}
+	m.Subject("案板创作助手 验证码")
+	m.SetBodyString(mail.TypeTextPlain,
+		fmt.Sprintf("您的验证码是：%s（%d 分钟内有效）\r\n\r\n如非本人操作，请忽略此邮件。", code, int(ttl.Minutes())),
+	)
 
-	addr := fmt.Sprintf("%s:%d", s.cfg.SMTPHost, s.cfg.SMTPPort)
-	auth := smtp.PlainAuth("", s.cfg.SMTPUsername, s.cfg.SMTPPassword, s.cfg.SMTPHost)
-	if err := smtp.SendMail(addr, auth, fromAddr, []string{email}, []byte(body)); err != nil {
+	opts := []mail.Option{
+		mail.WithSMTPAuth(mail.SMTPAuthAutoDiscover),
+		mail.WithUsername(s.cfg.SMTPUsername),
+		mail.WithPassword(s.cfg.SMTPPassword),
+		mail.WithTimeout(15 * time.Second),
+	}
+	if s.cfg.SMTPPort == 465 {
+		opts = append(opts, mail.WithSSLPort(false))
+	} else {
+		opts = append(opts, mail.WithPort(s.cfg.SMTPPort))
+	}
+
+	client, err := mail.NewClient(s.cfg.SMTPHost, opts...)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("failed to create mail client")
+		s.rdb.Del(ctx, s.codeKey(email))
+		return fmt.Errorf("create mail client: %w", err)
+	}
+
+	if err := client.DialAndSendWithContext(ctx, m); err != nil {
 		s.logger.Error().Err(err).Str("email", email).Msg("failed to send verification email")
+		s.rdb.Del(ctx, s.codeKey(email))
 		return fmt.Errorf("send email: %w", err)
 	}
 

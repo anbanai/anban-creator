@@ -198,6 +198,10 @@ func (h *AuthHandler) SendCode(c fiber.Ctx) error {
 	}
 
 	if err := h.emailSvc.SendVerificationCode(c.Context(), req.Email); err != nil {
+		var userErr *service.UserError
+		if errors.As(err, &userErr) {
+			return Error(c, fiber.StatusBadRequest, userErr.Msg)
+		}
 		h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to send verification code")
 		return Error(c, fiber.StatusInternalServerError, "发送验证码失败，请稍后重试")
 	}

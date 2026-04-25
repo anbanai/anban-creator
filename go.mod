@@ -13,6 +13,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hibiken/asynq v0.26.0
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260424081445-aab908c9238c
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/openai/openai-go/v3 v3.32.0
 	github.com/redis/go-redis/v9 v9.18.0
@@ -22,6 +23,7 @@ require (
 	github.com/severity1/claude-agent-sdk-go v0.6.15
 	github.com/silenceper/wechat/v2 v2.1.12
 	github.com/volcengine/volcengine-go-sdk v1.2.25
+	github.com/wneessen/go-mail v0.7.2
 	golang.org/x/crypto v0.50.0
 	golang.org/x/net v0.53.0
 	google.golang.org/genai v1.54.0

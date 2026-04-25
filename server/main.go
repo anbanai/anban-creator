@@ -128,6 +128,7 @@ func main() {
 	wsHub := handler.NewWebSocketHub(jwtSvc)
 
 	// 11. Create email service for verification codes.
+	service.InitGeoCheck(log)
 	var emailSvc *service.EmailService
 	if rdb != nil {
 		emailSvc = service.NewEmailService(&cfg.Email, rdb, log)
