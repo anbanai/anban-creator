@@ -129,15 +129,18 @@ func (s *EmailService) SendVerificationCode(ctx context.Context, email string) e
 	)
 
 	opts := []mail.Option{
-		mail.WithSMTPAuth(mail.SMTPAuthAutoDiscover),
+		mail.WithPort(s.cfg.SMTPPort),
 		mail.WithUsername(s.cfg.SMTPUsername),
 		mail.WithPassword(s.cfg.SMTPPassword),
 		mail.WithTimeout(15 * time.Second),
+		mail.WithSMTPAuth(mail.SMTPAuthAutoDiscover),
 	}
 	if s.cfg.SMTPPort == 465 {
-		opts = append(opts, mail.WithSSLPort(false))
+		// Port 465 uses implicit TLS (connection is encrypted from the start).
+		opts = append(opts, mail.WithSSL())
 	} else {
-		opts = append(opts, mail.WithPort(s.cfg.SMTPPort))
+		// Port 587 and others use STARTTLS (upgrade after plaintext handshake).
+		opts = append(opts, mail.WithTLSPolicy(mail.TLSOpportunistic))
 	}
 
 	client, err := mail.NewClient(s.cfg.SMTPHost, opts...)
