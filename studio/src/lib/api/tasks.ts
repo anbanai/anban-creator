@@ -22,7 +22,7 @@ export const tasksApi = {
   files: (id: string) =>
     unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),
 
-  streamUrl: (id: string) => `/api/v1/tasks/${id}/stream`,
+  streamUrl: (id: string) => `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/tasks/${id}/stream`,
 
   downloadFileBlob: async (taskId: string, fileId: string): Promise<Blob> => {
     const response = await http.get(`/tasks/${taskId}/files/${fileId}/download`, {

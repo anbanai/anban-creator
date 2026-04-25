@@ -46,7 +46,8 @@ export async function* streamTaskProgress(
   token: string,
   signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
-  const response = await fetch(`/api/v1/tasks/${taskId}/stream`, {
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+  const response = await fetch(`${apiBaseUrl}/tasks/${taskId}/stream`, {
     headers: { Authorization: `Bearer ${token}` },
     signal,
   })

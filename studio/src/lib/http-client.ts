@@ -5,8 +5,10 @@ const TOKEN_KEY = 'anbanwriter_token'
 const REFRESH_TOKEN_KEY = 'anbanwriter_refresh_token'
 const USER_KEY = 'anbanwriter_user'
 
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+
 export const http = axios.create({
-  baseURL: '/api/v1',
+  baseURL: apiBaseUrl,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -16,7 +18,7 @@ export const http = axios.create({
 // Separate instance for token refresh — bypasses the 401 response interceptor
 // to prevent deadlock when the refresh token itself is expired.
 const refreshHttp = axios.create({
-  baseURL: '/api/v1',
+  baseURL: apiBaseUrl,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
