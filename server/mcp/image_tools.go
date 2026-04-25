@@ -11,14 +11,15 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream, or OpenRouter). The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL) of the generated image. The agent should download and save the image to the desired local path.",
+		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream, or OpenRouter). The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL) of the generated image. If output_path is provided, the server also saves the image to that path and returns file_path.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id":     map[string]any{"type": "string", "description": "Channel ID (determines which image API config to use)"},
 				"prompt":         map[string]any{"type": "string", "description": "Image generation prompt"},
 				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
-				"output_path":    map[string]any{"type": "string", "description": "Suggested local file path to save the image (agent decides actual path)"},
+				"output_path":    map[string]any{"type": "string", "description": "Local file path to save the generated image (optional, server will download and save)"},
+				"size":           map[string]any{"type": "string", "description": "Image size/aspect ratio (e.g., '3:4', '16:9', '1:1'). Overrides channel default when provided."},
 				"ref_image_path": map[string]any{"type": "string", "description": "Path to a reference image for style consistency (optional)"},
 				"task_id":        map[string]any{"type": "string", "description": "Task ID (for logging and credit tracking)"},
 			},
@@ -28,7 +29,7 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_images",
-		Description: "Generate multiple images at once using the channel's configured image provider. Returns an array of download URLs (remote CDN URLs or data URLs) for the generated images. The agent should download and save each image to the desired directory.",
+		Description: "Generate multiple images at once using the channel's configured image provider. Returns an array of download URLs (remote CDN URLs or data URLs) for the generated images. If output_dir is provided, the server also saves each image to that directory and returns file_path for each.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -36,11 +37,12 @@ func registerImageTools(server *mcp.Server) {
 				"prompt":         map[string]any{"type": "string", "description": "Base prompt for all images"},
 				"count":          map[string]any{"type": "integer", "description": "Number of images to generate (1-20)", "minimum": 1, "maximum": 20},
 				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Cover or content image API config"},
-				"output_dir":     map[string]any{"type": "string", "description": "Suggested directory to save generated images (agent decides actual path)"},
+				"output_dir":     map[string]any{"type": "string", "description": "Directory to save generated images (optional, server will download and save)"},
+				"size":           map[string]any{"type": "string", "description": "Image size/aspect ratio for all images (e.g., '3:4', '16:9', '1:1'). Overrides channel default when provided."},
 				"ref_image_path": map[string]any{"type": "string", "description": "Path to reference image for style consistency (optional)"},
 				"task_id":        map[string]any{"type": "string", "description": "Task ID (for logging and credit tracking)"},
 			},
-			"required": []any{"channel_id", "prompt", "count", "output_dir"},
+			"required": []any{"channel_id", "prompt", "count"},
 		},
 	}, generateBatchImagesHandler)
 
@@ -123,10 +125,11 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		imageType = "content"
 	}
 	outputPath, _ := args["output_path"].(string)
+	size, _ := args["size"].(string)
 	refPath, _ := args["ref_image_path"].(string)
 	taskID, _ := args["task_id"].(string)
 
-	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID)
+	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID, size)
 	if err != nil {
 		return errorResult(fmt.Sprintf("generate image: %v", err)), nil
 	}
@@ -149,6 +152,7 @@ func generateBatchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (
 	}
 	outputDir, _ := args["output_dir"].(string)
 	imageType, _ := args["image_type"].(string)
+	size, _ := args["size"].(string)
 	refPath, _ := args["ref_image_path"].(string)
 	taskID, _ := args["task_id"].(string)
 
@@ -158,14 +162,11 @@ func generateBatchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (
 	if prompt == "" {
 		return errorResult("prompt is required"), nil
 	}
-	if outputDir == "" {
-		return errorResult("output_dir is required"), nil
-	}
 	if imageType == "" {
 		imageType = "content"
 	}
 
-	result, err := svcs.ImageSvc.GenerateBatch(ctx, userID, channelID, prompt, imageType, count, outputDir, refPath, taskID)
+	result, err := svcs.ImageSvc.GenerateBatch(ctx, userID, channelID, prompt, imageType, count, outputDir, refPath, taskID, size)
 	if err != nil {
 		return errorResult(fmt.Sprintf("batch generate: %v", err)), nil
 	}

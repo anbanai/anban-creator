@@ -11,7 +11,7 @@ import (
 func registerWorkspaceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_workspace",
-		Description: "Prepare a clean working directory for content creation. Archives any existing files and creates a fresh directory. When task_id is provided, the working directory is the task workspace root. Otherwise, uses the base output directory for the content type. Returns the working directory path.",
+		Description: "Prepare a clean working directory for content creation. Archives any existing files and creates a fresh directory. When task_id is provided, the working directory is the task workspace root. Otherwise, uses the base output directory for the content type. Returns the server-side working directory path (intended for Docker-based agent execution). For local Claude Code usage, the agent should create directories locally instead of calling this tool.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

@@ -259,14 +259,65 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 	}, nil
 }
 
-// GenerateBatchRaw 批量生成图片，返回原始 URL 或 data URL。
-// 不下载、不压缩、不写磁盘。
-func (p *Processor) GenerateBatchRaw(prompt string, count int) ([]*GenerateRawResult, error) {
+// GenerateRawWithSize 调用 AI provider 生成指定尺寸的图片，返回原始 URL 或 data URL。
+// size 为空时使用默认尺寸。
+func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult, error) {
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
 	if p.provider == nil {
 		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
+	}
+
+	activeProvider := p.provider
+	if size != "" {
+		apiCfgWithSize := *p.apiCfg
+		apiCfgWithSize.Size = size
+		var err error
+		activeProvider, err = NewProvider(&apiCfgWithSize, p.log)
+		if err != nil {
+			return nil, fmt.Errorf("create provider with size: %w", err)
+		}
+	}
+
+	ctx := context.Background()
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+	result, err := activeProvider.Generate(ctx, p.buildPrompt(prompt), genOpts)
+	if err != nil {
+		return nil, fmt.Errorf("generate image: %w", err)
+	}
+
+	p.log.Debug().Str("provider", result.Model).Str("size", result.Size).Msg("image generated (raw with size)")
+
+	url, err := p.resolveRawURL(result.URL)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GenerateRawResult{
+		URL:  url,
+		Size: result.Size,
+	}, nil
+}
+// 不下载、不压缩、不写磁盘。
+func (p *Processor) GenerateBatchRaw(prompt string, count int, size string) ([]*GenerateRawResult, error) {
+	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
+		return nil, err
+	}
+	if p.provider == nil {
+		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
+	}
+
+	// 如果指定了尺寸，创建带覆盖尺寸的临时 provider
+	activeProvider := p.provider
+	if size != "" {
+		apiCfgWithSize := *p.apiCfg
+		apiCfgWithSize.Size = size
+		var err error
+		activeProvider, err = NewProvider(&apiCfgWithSize, p.log)
+		if err != nil {
+			return nil, fmt.Errorf("create provider with size: %w", err)
+		}
 	}
 
 	builtPrompt := p.buildPrompt(prompt)
@@ -277,22 +328,41 @@ func (p *Processor) GenerateBatchRaw(prompt string, count int) ([]*GenerateRawRe
 	}
 
 	var rawResults []*GenerateResult
-	if bp, ok := p.provider.(BatchProvider); ok {
-		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using native batch generation (raw)")
+	if bp, ok := activeProvider.(BatchProvider); ok {
+		p.log.Info().Int("count", count).Str("provider", activeProvider.Name()).Str("size", size).Msg("using native batch generation (raw)")
 		batchResult, err := bp.GenerateBatch(ctx, builtPrompt, opts)
 		if err != nil {
 			return nil, fmt.Errorf("batch generate images: %w", err)
 		}
 		rawResults = batchResult.Images
 	} else {
-		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using sequential generation (raw)")
-		singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+		p.log.Info().Int("count", count).Str("provider", activeProvider.Name()).Str("size", size).Msg("using concurrent generation (raw)")
+		rawResults = make([]*GenerateResult, count)
+		var wg sync.WaitGroup
+		errChan := make(chan error, count)
+		sem := make(chan struct{}, 3)
+
 		for i := 0; i < count; i++ {
-			result, err := p.provider.Generate(ctx, builtPrompt, singleOpts)
-			if err != nil {
-				return nil, fmt.Errorf("generate image %d: %w", i+1, err)
-			}
-			rawResults = append(rawResults, result)
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+				result, err := activeProvider.Generate(ctx, builtPrompt, singleOpts)
+				if err != nil {
+					errChan <- fmt.Errorf("generate image %d: %w", index+1, err)
+					return
+				}
+				rawResults[index] = result
+			}(i)
+		}
+
+		wg.Wait()
+		close(errChan)
+		if err := <-errChan; err != nil {
+			return nil, err
 		}
 	}
 
@@ -443,7 +513,7 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 
 // GenerateBatchOnly 组图生成（不上传到微信），将所有图片保存到 outputDir。
 // count 为期望生成数量，outputDir 为已存在的输出目录。
-// 若 provider 实现了 BatchProvider，使用原生组图 API（一次调用）；否则降级为逐张生成。
+// 若 provider 实现了 BatchProvider，使用原生组图 API（一次调用）；否则使用并发生成。
 // 处理过程使用并发以提高效率。
 func (p *Processor) GenerateBatchOnly(prompt string, count int, outputDir string) ([]*BatchImageResult, error) {
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
@@ -469,15 +539,33 @@ func (p *Processor) GenerateBatchOnly(prompt string, count int, outputDir string
 		}
 		rawResults = batchResult.Images
 	} else {
-		// 降级：循环单图生成
-		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using sequential generation")
-		singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
-		for i := 0; i < count; i++ {
-			result, err := p.provider.Generate(ctx, builtPrompt, singleOpts)
-			if err != nil {
-				return nil, fmt.Errorf("generate image %d: %w", i+1, err)
-			}
-			rawResults = append(rawResults, result)
+		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using concurrent generation")
+		rawResults = make([]*GenerateResult, count)
+		var wg sync.WaitGroup
+		errChan := make(chan error, count)
+		sem := make(chan struct{}, 3)
+
+		for i := range count {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+				result, err := p.provider.Generate(ctx, builtPrompt, singleOpts)
+				if err != nil {
+					errChan <- fmt.Errorf("generate image %d: %w", index+1, err)
+					return
+				}
+				rawResults[index] = result
+			}(i)
+		}
+
+		wg.Wait()
+		close(errChan)
+		if err := <-errChan; err != nil {
+			return nil, err
 		}
 	}
 

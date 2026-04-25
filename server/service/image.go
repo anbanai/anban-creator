@@ -103,6 +103,14 @@ func NewImageService(
 	}
 }
 
+// resolveToLocalFile downloads a remote URL or decodes a data URL to a temp file.
+func (s *ImageService) resolveToLocalFile(rawURL string) (string, error) {
+	if strings.HasPrefix(rawURL, "data:") {
+		return s.dataURLToTempFile(rawURL)
+	}
+	return s.downloadURLToTempFile(rawURL)
+}
+
 // resolveAppImageAPI extracts the ImageAPI config from a channel-aware appCfg
 // (built by BuildAppConfig) based on platform and image type.
 func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *appconfig.ImageAPI {
@@ -146,9 +154,10 @@ func (s *ImageService) buildProcessor(ch *model.Channel, imageType string) (*ima
 
 // GenerateImage generates a single image using the channel's image provider.
 // Returns the download URL (remote CDN URL or data URL) for the agent to download.
+// If outputPath is provided, also saves the image to that path and returns file_path.
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
-	userID, channelID, prompt, imageType, outputPath, refPath, taskID string,
+	userID, channelID, prompt, imageType, outputPath, refPath, taskID, size string,
 ) (*ImageResult, error) {
 	ch, err := s.repo.Channels().FindByID(ctx, channelID)
 	if err != nil {
@@ -171,24 +180,54 @@ func (s *ImageService) GenerateImage(
 		}
 	}
 
-	rawResult, err := processor.GenerateRaw(prompt)
+	var rawResult *image.GenerateRawResult
+	if size != "" {
+		rawResult, err = processor.GenerateRawWithSize(prompt, size)
+	} else {
+		rawResult, err = processor.GenerateRaw(prompt)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
 
-	return &ImageResult{
+	result := &ImageResult{
 		DownloadURL: rawResult.URL,
 		Size:        rawResult.Size,
-	}, nil
+	}
+
+	// If outputPath provided, download and save the image there.
+	if outputPath != "" {
+		localPath, dlErr := s.resolveToLocalFile(rawResult.URL)
+		if dlErr != nil {
+			return nil, fmt.Errorf("download generated image: %w", dlErr)
+		}
+		defer os.RemoveAll(filepath.Dir(localPath))
+
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+			return nil, fmt.Errorf("create output directory: %w", err)
+		}
+
+		data, err := os.ReadFile(localPath)
+		if err != nil {
+			return nil, fmt.Errorf("read downloaded image: %w", err)
+		}
+		if err := os.WriteFile(outputPath, data, 0644); err != nil {
+			return nil, fmt.Errorf("save image to %s: %w", outputPath, err)
+		}
+		result.FilePath = outputPath
+	}
+
+	return result, nil
 }
 
 // GenerateBatch generates multiple images using the channel's image provider.
 // Returns an array of download URLs (remote CDN URLs or data URLs) for the agent to download.
+// If outputDir is provided, also saves each image to that directory and returns file_path for each.
 func (s *ImageService) GenerateBatch(
 	ctx context.Context,
 	userID, channelID, prompt, imageType string,
 	count int,
-	outputDir, refPath, taskID string,
+	outputDir, refPath, taskID, size string,
 ) (*BatchImageResult, error) {
 	ch, err := s.repo.Channels().FindByID(ctx, channelID)
 	if err != nil {
@@ -211,18 +250,42 @@ func (s *ImageService) GenerateBatch(
 		}
 	}
 
-	rawResults, err := processor.GenerateBatchRaw(prompt, count)
+	rawResults, err := processor.GenerateBatchRaw(prompt, count, size)
 	if err != nil {
 		return nil, fmt.Errorf("batch generate: %w", err)
 	}
 
 	items := make([]BatchImageResultItem, 0, len(rawResults))
 	for _, r := range rawResults {
-		items = append(items, BatchImageResultItem{
+		item := BatchImageResultItem{
 			DownloadURL: r.URL,
 			Size:        r.Size,
 			Index:       r.Index,
-		})
+		}
+
+		if outputDir != "" {
+			localPath, dlErr := s.resolveToLocalFile(r.URL)
+			if dlErr != nil {
+				return nil, fmt.Errorf("download batch image %d: %w", r.Index, dlErr)
+			}
+			defer os.RemoveAll(filepath.Dir(localPath))
+
+			if err := os.MkdirAll(outputDir, 0755); err != nil {
+				return nil, fmt.Errorf("create output directory: %w", err)
+			}
+
+			destPath := filepath.Join(outputDir, fmt.Sprintf("image_%02d.png", r.Index))
+			data, err := os.ReadFile(localPath)
+			if err != nil {
+				return nil, fmt.Errorf("read batch image %d: %w", r.Index, err)
+			}
+			if err := os.WriteFile(destPath, data, 0644); err != nil {
+				return nil, fmt.Errorf("save batch image %d: %w", r.Index, err)
+			}
+			item.FilePath = destPath
+		}
+
+		items = append(items, item)
 	}
 
 	return &BatchImageResult{
