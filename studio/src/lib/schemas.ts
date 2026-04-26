@@ -21,6 +21,7 @@ export const createTaskSchema = z.object({
   prompt: z.string().max(500, "Prompt 不能超过 500 个字符").optional(),
   quantity: z.number().int().min(1).max(5).default(1),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).default(""),
+  generate_video: z.boolean().default(false),
 })
 export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 

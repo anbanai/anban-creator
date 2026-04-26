@@ -43,10 +43,11 @@ func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...st
 // Request types.
 
 type createTaskRequest struct {
-	ChannelID  string `json:"channel_id"`
-	Prompt     string `json:"prompt"`
-	Quantity   int    `json:"quantity"`
-	ImageRatio string `json:"image_ratio"`
+	ChannelID     string `json:"channel_id"`
+	Prompt        string `json:"prompt"`
+	Quantity      int    `json:"quantity"`
+	ImageRatio    string `json:"image_ratio"`
+	GenerateVideo bool   `json:"generate_video"`
 }
 
 // Create handles POST /api/v1/tasks.
@@ -82,7 +83,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio)
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.GenerateVideo)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {

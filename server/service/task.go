@@ -123,7 +123,7 @@ func (s *TaskService) StorageProviderName() string {
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The quantity parameter (1-5) determines how many tasks to create, each independently billed.
-func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio string) ([]*model.Task, error) {
+func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio string, generateVideo bool) ([]*model.Task, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
 	}
@@ -192,7 +192,8 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 			Type:      taskType,
 			Status:    model.TaskStatusPending,
 			Prompt:     prompt,
-			ImageRatio: imageRatio,
+			ImageRatio:    imageRatio,
+			GenerateVideo: generateVideo,
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -379,6 +380,31 @@ func (s *TaskService) registerCancel(taskID string, cancel context.CancelFunc) {
 // deregisterCancel removes the stored cancel func for a completed task.
 func (s *TaskService) deregisterCancel(taskID string) {
 	s.cancelFuncs.Delete(taskID)
+}
+
+// CancelAllRunning cancels all in-progress task execution contexts.
+// Returns the number of tasks that were cancelled.
+func (s *TaskService) CancelAllRunning() int {
+	count := 0
+	s.cancelFuncs.Range(func(key, value any) bool {
+		if cancel, ok := value.(context.CancelFunc); ok {
+			cancel()
+			count++
+			s.logger.Info().Str("task_id", key.(string)).Msg("cancelled running task for shutdown")
+		}
+		return true
+	})
+	return count
+}
+
+// RunningTaskCount returns the number of currently executing tasks.
+func (s *TaskService) RunningTaskCount() int {
+	count := 0
+	s.cancelFuncs.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
 }
 
 // GetFiles returns files associated with a task.

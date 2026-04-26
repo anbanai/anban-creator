@@ -21,20 +21,27 @@ import (
 // BuildUserPrompt constructs the user prompt with a command prefix based on task type.
 // This ensures the model receives an explicit command (e.g., "/rednote topic")
 // instead of a raw topic that could be misinterpreted as a Q&A question.
-func BuildUserPrompt(taskType, topic string) string {
+// When generateVideo is true, appends a video generation hint to the prompt.
+func BuildUserPrompt(taskType, topic string, generateVideo bool) string {
+	var base string
 	if topic == "" {
-		return fmt.Sprintf("/%s", taskType)
+		base = fmt.Sprintf("/%s", taskType)
+	} else {
+		switch taskType {
+		case "rednote":
+			base = fmt.Sprintf("/rednote %s", topic)
+		case "article":
+			base = fmt.Sprintf("/article %s", topic)
+		case "xls":
+			base = fmt.Sprintf("/xls %s", topic)
+		default:
+			base = topic
+		}
 	}
-	switch taskType {
-	case "rednote":
-		return fmt.Sprintf("/rednote %s", topic)
-	case "article":
-		return fmt.Sprintf("/article %s", topic)
-	case "xls":
-		return fmt.Sprintf("/xls %s", topic)
-	default:
-		return topic
+	if generateVideo {
+		base += "\n\n把生成好的图片合并成为视频"
 	}
+	return base
 }
 
 // DefaultMaxTurns returns the max turns for a given task type from the config map.
@@ -234,7 +241,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 4. Build user prompt from task topic with command prefix.
-	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt)
+	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, opts.Task.GenerateVideo)
 
 	// 5. Map task type to agent name and build --agent flag.
 	agentName := TaskTypeToAgent(opts.Task.Type)

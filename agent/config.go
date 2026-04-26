@@ -68,5 +68,5 @@ func ParseConfig() (*Config, error) {
 }
 
 func (c *Config) UserPrompt() string {
-	return serveragent.BuildUserPrompt(c.TaskType, c.Topic)
+	return serveragent.BuildUserPrompt(c.TaskType, c.Topic, false)
 }

@@ -308,7 +308,7 @@ func taskCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		quantity = int(v)
 	}
 
-	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, prompt, quantity, "")
+	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, prompt, quantity, "", false)
 	if err != nil {
 		return creditsErrorResult("create task", err), nil
 	}
