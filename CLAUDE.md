@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Anban 创作助手** (anbanwriter) is a content creation platform with three main components:
+**Anban 智能创作助手** (anbanwriter) is a content creation platform with three main components:
 - **Agent** (`agent/`): Standalone Go binary for containerized Claude Code task execution
 - **Server** (`server/`): Fiber v3 HTTP API with MySQL, Redis, Asynq task queue, WebSocket, and MCP endpoint
 - **Studio** (`studio/`): React 19 + TypeScript + Vite 8 frontend for content management
@@ -138,7 +138,7 @@ Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhos
 - `/api/v1/timeline` — Unified timeline view
 - `/api/v1/credits` — Balance, sign-in, transactions
 - `/api/v1/files/*` — Local file serving (local storage mode only)
-- `/mcp` — MCP endpoint (API key or JWT auth, configured in `claudecode/.mcp.json`)
+- `/mcp` — MCP endpoint (API key or JWT auth, configured in `claudecode/.mcp.json` and `openclaw/.mcp.json`)
 
 ## Configuration
 
@@ -231,17 +231,37 @@ Task progress events use `TaskProgressNotifier` interface (`server/service/task_
 
 ## Plugin & Agent Ecosystem
 
-The Claude Code plugin lives in a separate repo (`anbanai/anbanwriter-claudecode`) added as a git submodule at `claudecode/`.
+Three client access points share the same server MCP API:
+
+### Claude Code Plugin (`claudecode/`)
+
+Git submodule → `anbanai/anbanwriter-claudecode`. Uses Agent + Skill + MCP architecture.
 
 ```
 claudecode/                        # git submodule → anbanai/anbanwriter-claudecode
 ├── .claude-plugin/                # Plugin manifest
 ├── agents/                        # Agent definitions (markdown)
-├── skills/                        # Claude Code skills
+├── skills/                        # 18 Claude Code skills
 ├── hooks/                         # Lifecycle hooks
 ├── themes/                        # Conversion themes (YAML)
 └── writers/                       # Writing styles (YAML)
 ```
+
+### OpenClaw Plugin (`openclaw/`)
+
+Git submodule → `anbanai/anbanwriter-openclaw`. OpenClaw-native plugin using SKILL.md-based skills aligned with claudecode.
+
+```
+openclaw/                          # git submodule → anbanai/anbanwriter-openclaw
+├── openclaw.plugin.json           # Plugin manifest (MCP config, skills root)
+├── .mcp.json                      # MCP server config (bundle compatibility)
+├── skills/                        # 18 SKILL.md skills (aligned with claudecode)
+├── src/                           # TypeScript hooks (quality verification, delivery summaries)
+├── themes/                        # Conversion themes (YAML, shared with claudecode)
+└── writers/                       # Writing styles (YAML, shared with claudecode)
+```
+
+Both plugins connect to the same `anbanwriter` MCP server and share themes/writers.
 
 ## Notes
 
