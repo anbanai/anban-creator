@@ -139,6 +139,43 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		}
 		// Schedule workspace cleanup after all processing is done.
 		cleanupWorkDir = result.WorkDir
+		if title := ExtractTitleFromWorkspace(result.WorkDir); title != "" {
+			if err := s.repo.Tasks().UpdateTitle(ctx, taskID, title); err != nil {
+				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task title")
+			} else {
+				s.logger.Info().Str("task_id", taskID).Str("title", title).Msg("extracted task title from output files")
+			}
+		}
+	}
+
+	// If the execution context was cancelled (shutdown or user cancel),
+	// mark as cancelled rather than attempting retry or marking as failed.
+	// This handles both CancelAllRunning (shutdown) and Cancel (user-initiated).
+	if execCtx.Err() != nil {
+		errMsg := "task cancelled: " + execCtx.Err().Error()
+		s.logger.Info().Str("task_id", taskID).Msg(errMsg)
+		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndError(
+			ctx, taskID, model.TaskStatusRunning, model.TaskStatusCancelled, errMsg,
+		)
+		if swapped {
+			if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on cancelled task")
+			}
+			if s.creditSvc != nil {
+				if refundErr := s.creditSvc.RefundForTask(ctx, taskID, "cancel"); refundErr != nil {
+					s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits for cancelled task")
+				}
+			}
+			if task.ChannelID != "" && s.pubsub != nil {
+				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+			}
+			if task.ChannelID != "" {
+				if derr := s.DispatchPendingTasks(ctx, task.ChannelID); derr != nil {
+					s.logger.Warn().Err(derr).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after cancellation")
+				}
+			}
+		}
+		return nil
 	}
 
 	if execErr != nil {

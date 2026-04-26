@@ -4,6 +4,7 @@ export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cance
 export interface Task {
   id: string
   type: TaskType
+  title?: string
   prompt: string
   status: TaskStatus
   progress?: number
@@ -42,4 +43,5 @@ export interface CreateTaskRequest {
   channel_id: string
   quantity?: number
   image_ratio?: string
+  generate_video?: boolean
 }

@@ -96,7 +96,10 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 		if channelID != "" && t.ChannelID != channelID {
 			continue
 		}
-		title := t.Prompt
+		title := t.Title
+		if title == "" {
+			title = t.Prompt
+		}
 		if title == "" {
 			title = t.Type + " task"
 		}
@@ -172,7 +175,10 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 			if alreadyAdded {
 				continue
 			}
-			title := t.Prompt
+			title := t.Title
+			if title == "" {
+				title = t.Prompt
+			}
 			if title == "" {
 				title = t.Type + " task"
 			}

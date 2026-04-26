@@ -154,6 +154,10 @@ func (r *taskRepository) Update(ctx context.Context, task *model.Task) error {
 	return r.db.WithContext(ctx).Save(task).Error
 }
 
+func (r *taskRepository) UpdateTitle(ctx context.Context, id string, title string) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("title", title).Error
+}
+
 // UpdateCleanedUpAt sets the cleaned_up_at timestamp for a task.
 func (r *taskRepository) UpdateCleanedUpAt(ctx context.Context, id string, t time.Time) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("cleaned_up_at", t).Error

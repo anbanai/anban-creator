@@ -77,6 +77,7 @@ type TaskRepository interface {
 	AppendProgressLog(ctx context.Context, id, message string) error
 	UpdateResult(ctx context.Context, id, result string) error
 	Update(ctx context.Context, task *model.Task) error
+	UpdateTitle(ctx context.Context, id string, title string) error
 	UpdateCleanedUpAt(ctx context.Context, id string, t time.Time) error
 	SetStartedAt(ctx context.Context, id string) error
 	SetCompletedAt(ctx context.Context, id string) error

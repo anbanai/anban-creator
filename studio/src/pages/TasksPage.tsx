@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Video } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { TaskType, TaskStatus, CreateTaskRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
@@ -51,6 +51,7 @@ export default function TasksPage() {
   const [channelFilter, setChannelFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(shouldCreate)
   const [quantity, setQuantity] = useState(1)
+  const [generateVideo, setGenerateVideo] = useState(false)
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const { submit } = useSubmitLock()
@@ -129,6 +130,7 @@ export default function TasksPage() {
   function openCreate() {
     form.reset({ type: 'rednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
+    setGenerateVideo(false)
     setChannelImageRatio('')
     setModalOpen(true)
   }
@@ -146,6 +148,7 @@ export default function TasksPage() {
     setShowDirtyDialog(false)
     form.reset({ type: 'rednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
+    setGenerateVideo(false)
     setChannelImageRatio('')
   }
 
@@ -156,6 +159,7 @@ export default function TasksPage() {
       channel_id: values.channel_id,
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
+      generate_video: generateVideo || undefined,
     }))
   }
 
@@ -241,7 +245,7 @@ export default function TasksPage() {
                 <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="truncate text-sm font-medium text-foreground">{task.prompt || task.type + ' 任务'}</h3>
+                      <h3 className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
                       <Badge variant="outline" className="shrink-0 text-[10px]">
                         {contentTypeLabel[task.type] || task.type}
                       </Badge>
@@ -384,6 +388,18 @@ export default function TasksPage() {
                 </FormItem>
                 )
               }} />
+
+              {/* Generate video toggle */}
+              <Button
+                type="button"
+                variant={generateVideo ? 'default' : 'outline'}
+                size="sm"
+                className="w-full justify-start gap-2"
+                onClick={() => setGenerateVideo(!generateVideo)}
+              >
+                <Video className="h-4 w-4" />
+                生成视频
+              </Button>
 
               {/* Cost display */}
               {(() => {
