@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight } from 'lucide-react'
+import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight, Video } from 'lucide-react'
 import { toast } from 'sonner'
 import type { TaskFile } from '../lib/api'
 import { api } from '../lib/api'
@@ -47,12 +47,27 @@ function FilePreviewModalContent({
   const blobUrlRef = useRef('')
 
   const isImage = file.mime_type?.startsWith('image/')
+  const isVideo = file.mime_type?.startsWith('video/')
   const isHTML = file.mime_type === 'text/html'
-  const isText = !isImage && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
+  const isText = !isImage && !isVideo && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
   const isMD = isText && isMarkdownFile(file.file_name)
 
   const fetchContent = useCallback(async () => {
     if (isImage) {
+      const url = file.url || ''
+      if (!url) return
+      if (url.startsWith('/api/v1/files/')) {
+        const blob = await api.tasks.downloadFileBlob(taskId, file.id)
+        if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = URL.createObjectURL(blob)
+        setImgSrc(blobUrlRef.current)
+      } else {
+        setImgSrc(url)
+      }
+      return
+    }
+
+    if (isVideo) {
       const url = file.url || ''
       if (!url) return
       if (url.startsWith('/api/v1/files/')) {
@@ -80,7 +95,7 @@ function FilePreviewModalContent({
     } finally {
       setLoading(false)
     }
-  }, [file, taskId, isImage, isHTML, isText])
+  }, [file, taskId, isImage, isVideo, isHTML, isText])
 
   useEffect(() => {
     fetchContent()
@@ -109,11 +124,13 @@ function FilePreviewModalContent({
   // Determine modal size
   const modalClass = isImage
     ? 'sm:max-w-4xl'
-    : isHTML
-      ? 'sm:max-w-4xl'
-      : isMD
-        ? 'sm:max-w-3xl'
-        : 'sm:max-w-2xl'
+    : isVideo
+      ? 'sm:max-w-3xl'
+      : isHTML
+        ? 'sm:max-w-4xl'
+        : isMD
+          ? 'sm:max-w-3xl'
+          : 'sm:max-w-2xl'
 
   return (
     <DialogContent className={modalClass}>
@@ -139,6 +156,14 @@ function FilePreviewModalContent({
             className="max-h-[70vh] max-w-full rounded-lg object-contain"
           />
         </div>
+      )}
+
+      {!loading && isVideo && imgSrc && (
+        <video
+          src={imgSrc}
+          controls
+          className="max-h-[70vh] w-full rounded-lg"
+        />
       )}
 
       {!loading && isHTML && htmlContent && (
@@ -355,8 +380,9 @@ function FilePreviewInline({
   onClick: () => void
 }) {
   const isImage = file.mime_type?.startsWith('image/')
+  const isVideo = file.mime_type?.startsWith('video/')
   const isHTML = file.mime_type === 'text/html'
-  const isText = !isImage && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
+  const isText = !isImage && !isVideo && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
   const isMD = isText && isMarkdownFile(file.file_name)
 
   const handleDownload = async () => {
@@ -376,7 +402,7 @@ function FilePreviewInline({
   const [imgSrc, setImgSrc] = useState<string>('')
   const blobUrlRef = useRef<string>('')
   useEffect(() => {
-    if (!isImage) return
+    if (!isImage && !isVideo) return
     const url = file.url || ''
     if (!url) return
     if (url.startsWith('/api/v1/files/')) {
@@ -396,7 +422,7 @@ function FilePreviewInline({
     } else {
       setImgSrc(url)
     }
-  }, [isImage, file.url, taskId, file.id])
+  }, [isImage, isVideo, file.url, taskId, file.id])
 
   if (isImage) {
     return (
@@ -418,26 +444,19 @@ function FilePreviewInline({
     )
   }
 
-  if (isHTML) {
+  if (isVideo) {
     return (
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onClick}
-            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            <Eye className="h-3.5 w-3.5" />
-            预览
-          </button>
-          <button
-            onClick={handleDownload}
-            className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
-          >
-            <Download className="h-3.5 w-3.5" />
-            下载
-          </button>
-          <span className="text-sm text-muted-foreground">{file.file_name} ({formatSize(file.file_size)})</span>
+      <div className="space-y-1">
+        <div
+          className="flex h-48 w-36 cursor-pointer items-center justify-center rounded-md ring-1 ring-border transition-opacity hover:opacity-90"
+          onClick={onClick}
+        >
+          <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
+            <Video className="h-8 w-8" />
+            <span className="text-xs">{formatSize(file.file_size)}</span>
+          </div>
         </div>
+        <p className="truncate text-xs text-muted-foreground" title={file.file_name}>{file.file_name}</p>
       </div>
     )
   }
@@ -446,7 +465,7 @@ function FilePreviewInline({
     <div className="space-y-2">
       <div className="flex items-center justify-between rounded-lg border border-border p-3">
         <div className="flex items-center gap-3">
-          {isMD ? (
+          {(isMD || isHTML) ? (
             <FileCode className="h-5 w-5 text-muted-foreground" />
           ) : (
             <FileText className="h-5 w-5 text-muted-foreground" />
@@ -457,7 +476,7 @@ function FilePreviewInline({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {isText && (
+          {(isText || isHTML) && (
             <button
               onClick={onClick}
               className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
