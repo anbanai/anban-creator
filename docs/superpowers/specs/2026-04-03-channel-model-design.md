@@ -6,7 +6,7 @@
 
 ## Context
 
-案板创作助手 Online Service currently uses `UserConfig` with a unique constraint on `(user_id, scope)` to store platform credentials and content style settings. This limits users to one configuration per content type (article/xls/rednote). In practice, a user may manage multiple WeChat public accounts (e.g., a food blog and a tech blog) or multiple Xiaohongshu accounts.
+Anban 创作助手 Online Service currently uses `UserConfig` with a unique constraint on `(user_id, scope)` to store platform credentials and content style settings. This limits users to one configuration per content type (article/xls/rednote). In practice, a user may manage multiple WeChat public accounts (e.g., a food blog and a tech blog) or multiple Xiaohongshu accounts.
 
 This redesign introduces **Channel** — a first-class entity representing a single platform account. All tasks and plans belong to a Channel, providing clear ownership, filtering, and statistics per account.
 

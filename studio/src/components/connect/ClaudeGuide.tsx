@@ -19,7 +19,7 @@ export default function ClaudeGuide() {
     <div className="space-y-4">
       <Card>
         <CardBody className="space-y-2">
-          <h2 className="text-sm font-semibold text-foreground">案板创作助手 Claude Code 插件</h2>
+          <h2 className="text-sm font-semibold text-foreground">Anban 创作助手 Claude Code 插件</h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
             通过 Claude Code 插件，你可以用自然语言直接驱动 AI 创作流程。插件支持微信公众号图文、小红书笔记、小绿书图片帖、鲜花图片等多种内容类型的端到端自动化创作——从选题研究、AI 风格化写作、智能配图到草稿发布，全部自动编排。
           </p>
@@ -27,10 +27,20 @@ export default function ClaudeGuide() {
       </Card>
 
       <StepCard step={1} title="安装插件">
-        <p className="text-xs text-muted-foreground">
-          在 Claude Code 中安装案板创作助手插件：
-        </p>
-        <CodeBlock code="/install-plugin anbanai/anbanwriter" />
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">
+              1. 添加插件市场源：
+            </p>
+            <CodeBlock code="claude plugin marketplace add anbanai/anbanwriter-claudecode" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">
+              2. 安装插件：
+            </p>
+            <CodeBlock code="claude plugin install --scope user anbanwriter@anbanai" />
+          </div>
+        </div>
       </StepCard>
 
       <StepCard step={2} title="连接平台账号">

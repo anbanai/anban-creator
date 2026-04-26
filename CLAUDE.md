@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**案板创作助手** (anbanwriter) is a content creation platform with three main components:
+**Anban 创作助手** (anbanwriter) is a content creation platform with three main components:
 - **Agent** (`agent/`): Standalone Go binary for containerized Claude Code task execution
 - **Server** (`server/`): Fiber v3 HTTP API with MySQL, Redis, Asynq task queue, WebSocket, and MCP endpoint
 - **Studio** (`studio/`): React 19 + TypeScript + Vite 8 frontend for content management

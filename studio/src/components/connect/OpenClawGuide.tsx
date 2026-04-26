@@ -19,7 +19,7 @@ export default function OpenClawGuide() {
     <div className="space-y-4">
       <Card>
         <CardBody className="space-y-2">
-          <h2 className="text-sm font-semibold text-foreground">案板创作助手 OpenClaw 插件</h2>
+          <h2 className="text-sm font-semibold text-foreground">Anban 创作助手 OpenClaw 插件</h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
             通过 OpenClaw 原生插件，你可以在 OpenClaw 平台中使用自然语言驱动 AI 创作流程。插件支持微信公众号图文、小红书笔记、小绿书图片帖、鲜花图片等多种内容类型的自动化创作。
           </p>
@@ -28,7 +28,7 @@ export default function OpenClawGuide() {
 
       <StepCard step={1} title="安装插件">
         <p className="text-xs text-muted-foreground">
-          将案板创作助手安装为 OpenClaw 原生插件：
+          将Anban 创作助手安装为 OpenClaw 原生插件：
         </p>
         <CodeBlock code={`git clone https://github.com/anbanai/anbanwriter-plugins.git\ncd anbanwriter-plugins\nopenclaw plugins install ./openclaw`} />
       </StepCard>

@@ -1,11 +1,11 @@
-# 案板创作助手 Online Service — Design Spec
+# Anban 创作助手 Online Service — Design Spec
 
 **Date**: 2026-04-02
 **Status**: Approved
 
 ## Problem
 
-案板创作助手's content generation capabilities (小红书, 公众号图文, 小绿书) are only accessible via CLI within Claude Code. This limits usage to developers with local setup. The goal is to make these capabilities available as a multi-user SaaS web service.
+Anban 创作助手's content generation capabilities (小红书, 公众号图文, 小绿书) are only accessible via CLI within Claude Code. This limits usage to developers with local setup. The goal is to make these capabilities available as a multi-user SaaS web service.
 
 ## Design Decisions
 

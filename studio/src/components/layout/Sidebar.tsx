@@ -1,6 +1,6 @@
-import { NavLink } from 'react-router-dom'
-import { useTheme } from 'next-themes'
-import { useEffect, useState } from 'react'
+import { NavLink } from "react-router-dom";
+import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Rss,
@@ -16,49 +16,49 @@ import {
   Activity,
   Terminal,
   Puzzle,
-} from 'lucide-react'
-import UserAccountPopover from '@/components/auth/UserAccountPopover'
+} from "lucide-react";
+import UserAccountPopover from "@/components/auth/UserAccountPopover";
 
 const navItems = [
-  { to: '/', label: '仪表盘', icon: LayoutDashboard, end: true },
-  { to: '/channels', label: '渠道', icon: Rss },
-  { to: '/plans', label: '计划', icon: CalendarRange },
-  { to: '/tasks', label: '任务', icon: ListChecks },
-  { to: '/timeline', label: '时间轴', icon: Clock },
-  { to: '/credits', label: '积分', icon: Coins },
-  { to: '/usage', label: '用量', icon: Activity },
-]
+  { to: "/", label: "仪表盘", icon: LayoutDashboard, end: true },
+  { to: "/channels", label: "频道", icon: Rss },
+  { to: "/plans", label: "计划", icon: CalendarRange },
+  { to: "/tasks", label: "任务", icon: ListChecks },
+  { to: "/timeline", label: "时间轴", icon: Clock },
+  { to: "/credits", label: "积分", icon: Coins },
+  { to: "/usage", label: "用量", icon: Activity },
+];
 
 const platformItems = [
-  { to: '/connect/claude-code', label: 'Claude Code', icon: Terminal },
-  { to: '/connect/openclaw', label: 'OpenClaw', icon: Puzzle },
-]
+  { to: "/connect/claude-code", label: "Claude Code", icon: Terminal },
+  { to: "/connect/openclaw", label: "OpenClaw", icon: Puzzle },
+];
 
 function ThemeToggle() {
-  const { setTheme, resolvedTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
+  const { setTheme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => setMounted(true), [])
+  useEffect(() => setMounted(true), []);
 
   if (!mounted) {
-    return <div className="h-8 w-8" />
+    return <div className="h-8 w-8" />;
   }
 
-  const isDark = resolvedTheme === 'dark'
+  const isDark = resolvedTheme === "dark";
 
   return (
     <button
-      onClick={() => setTheme(isDark ? 'light' : 'dark')}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
       className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-      title={isDark ? '切换到亮色模式' : '切换到暗色模式'}
+      title={isDark ? "切换到亮色模式" : "切换到暗色模式"}
     >
       {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
-  )
+  );
 }
 
 export default function Sidebar() {
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <>
@@ -93,13 +93,13 @@ export default function Sidebar() {
       {/* Sidebar */}
       <aside
         className={`fixed left-0 top-0 z-40 flex h-screen w-[220px] flex-col border-r border-sidebar-border bg-sidebar transition-transform duration-200 md:static md:translate-x-0 ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         {/* Logo */}
         <div className="flex h-14 items-center px-5">
           <span className="text-base font-bold tracking-tight text-sidebar-foreground">
-            案板创作助手
+            Anban 创作助手
           </span>
         </div>
 
@@ -114,8 +114,8 @@ export default function Sidebar() {
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
                   isActive
-                    ? 'border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]'
-                    : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                    ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
+                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
                 }`
               }
             >
@@ -138,8 +138,8 @@ export default function Sidebar() {
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
                   isActive
-                    ? 'border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]'
-                    : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                    ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
+                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
                 }`
               }
             >
@@ -152,8 +152,8 @@ export default function Sidebar() {
             className={({ isActive }) =>
               `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
                 isActive
-                  ? 'border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]'
-                  : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                  ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
+                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
               }`
             }
           >
@@ -169,5 +169,5 @@ export default function Sidebar() {
         </div>
       </aside>
     </>
-  )
+  );
 }

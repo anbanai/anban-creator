@@ -1,12 +1,12 @@
 #!/bin/bash
-# 案板创作助手 自动安装脚本
+# Anban 创作助手 自动安装脚本
 # 适用于：macOS / Linux
 # 使用方法：DOWNLOAD_URL/main/scripts/install.sh | bash
 
 set -e
 
 echo "========================================"
-echo "   案板创作助手 安装向导"
+echo "   Anban 创作助手 安装向导"
 echo "========================================"
 echo ""
 
