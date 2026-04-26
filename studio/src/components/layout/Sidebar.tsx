@@ -99,7 +99,7 @@ export default function Sidebar() {
         {/* Logo */}
         <div className="flex h-14 items-center px-5">
           <span className="text-base font-bold tracking-tight text-sidebar-foreground">
-            Anban 创作助手
+            Anban 智能创作助手
           </span>
         </div>
 

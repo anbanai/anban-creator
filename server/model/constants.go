@@ -36,6 +36,7 @@ const (
 	FileRoleCover    = "cover"
 	FileRoleHTML     = "html"
 	FileRoleMarkdown = "markdown"
+	FileRoleVideo    = "video"
 	FileRoleOther    = "other"
 )
 

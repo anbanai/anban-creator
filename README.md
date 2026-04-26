@@ -1,4 +1,4 @@
-# Anban 创作助手 Plugin
+# Anban 智能创作助手 Plugin
 
 Professional WeChat content creation toolkit for Claude Code with AI-powered writing, visual design, and publishing optimization.
 

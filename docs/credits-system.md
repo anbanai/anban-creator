@@ -2,7 +2,7 @@
 
 ## 1. 体系概览
 
-Anban 创作助手采用**钱包模式**管理积分：
+Anban 智能创作助手采用**钱包模式**管理积分：
 
 - **余额字段**: `users.credits_balance` — 规范余额（原子更新）
 - **交易账本**: `credit_transactions` 表 — 追加式审计日志，每笔交易记录 `BalanceAfter` 快照

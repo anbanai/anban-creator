@@ -72,6 +72,9 @@ func DetermineTaskFileRole(filename, mimeType string) string {
 	if strings.HasPrefix(mimeType, "image/") {
 		return model.FileRoleImage
 	}
+	if strings.HasPrefix(mimeType, "video/") {
+		return model.FileRoleVideo
+	}
 	return model.FileRoleOther
 }
 

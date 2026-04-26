@@ -353,18 +353,28 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	shutdownDone := make(chan struct{})
 	go func() {
 		<-ctx.Done()
 		log.Info().Msg("shutdown signal received, stopping server...")
 
+		// 1. Cancel all running tasks so executors can wind down.
+		if taskSvc != nil {
+			cancelled := taskSvc.CancelAllRunning()
+			if cancelled > 0 {
+				log.Info().Int("cancelled_tasks", cancelled).Msg("cancelled running tasks")
+			}
+		}
+
+		// 2. Shutdown HTTP server.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-
 		if err := app.ShutdownWithContext(shutdownCtx); err != nil {
 			log.Error().Err(err).Msg("server shutdown error")
 		}
 
-		// Stop Asynq server.
+		// 3. Shutdown Asynq server.
+		// Task contexts are already cancelled, so workers should exit promptly.
 		if asynqServer != nil {
 			asynqServer.Shutdown()
 			log.Info().Msg("Asynq server stopped")
@@ -399,6 +409,8 @@ func main() {
 				log.Error().Err(err).Msg("failed to close Redis")
 			}
 		}
+
+		close(shutdownDone)
 	}()
 
 	log.Info().Str("addr", addr).Msg("server starting")
@@ -406,7 +418,14 @@ func main() {
 		log.Error().Err(err).Msg("server listen error")
 	}
 
-	log.Info().Msg("server exited")
+	// Wait for graceful shutdown to complete, with a timeout guard.
+	select {
+	case <-shutdownDone:
+		log.Info().Msg("graceful shutdown completed")
+	case <-time.After(60 * time.Second):
+		log.Warn().Msg("graceful shutdown timed out after 60s, forcing exit")
+		os.Exit(1)
+	}
 }
 
 // createTaskLogDir ensures the task log directory exists if configured.

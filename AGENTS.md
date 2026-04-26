@@ -4,7 +4,7 @@ This file provides guidance to AI coding assistants when working with code in th
 
 ## Project Overview
 
-**Anban 创作助手** (anbanwriter) is a Go CLI tool that transforms Markdown articles into WeChat-formatted HTML with professional styling, AI-powered writing assistance, humanization features, and direct publishing to WeChat draft box.
+**Anban 智能创作助手** (anbanwriter) is a Go CLI tool that transforms Markdown articles into WeChat-formatted HTML with professional styling, AI-powered writing assistance, humanization features, and direct publishing to WeChat draft box.
 
 - **Language**: Go 1.26.0
 - **CLI Framework**: Cobra

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	serveragent "github.com/royalrick/anbanwriter/server/agent"
 )
@@ -20,13 +22,21 @@ func main() {
 	downloader := NewDownloader(cfg)
 	runner := NewRunner(cfg, reporter, downloader)
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	result, runErr := runner.Run(ctx)
 	if result == nil {
 		result = serverExecutionFailure(cfg.Workspace, runErr)
 	}
 
-	if reportErr := reporter.ReportResult(ctx, result); reportErr != nil {
+	if ctx.Err() != nil && !result.Success {
+		if result.Error == "" {
+			result.Error = "agent shutdown: received termination signal"
+		}
+	}
+
+	if reportErr := reporter.ReportResult(context.Background(), result); reportErr != nil {
 		fmt.Fprintf(os.Stderr, "failed to report result: %v\n", reportErr)
 	}
 

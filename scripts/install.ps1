@@ -1,9 +1,9 @@
-# Anban 创作助手 Windows 自动安装脚本
+# Anban 智能创作助手 Windows 自动安装脚本
 # 使用方法：在 PowerShell 中运行
 # Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/royalrick/anbanwriter/main/scripts/install.ps1'))
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "   Anban 创作助手 安装向导" -ForegroundColor Cyan
+Write-Host "   Anban 智能创作助手 安装向导" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

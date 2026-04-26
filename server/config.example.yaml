@@ -1,4 +1,4 @@
-# Anban 创作助手 Online Service Configuration
+# Anban 智能创作助手 Online Service Configuration
 # Copy this file to config.yaml and adjust values as needed.
 # All fields can also be set via ANBAN_SERVER_ prefixed environment variables
 # (e.g. ANBAN_SERVER_DATABASE_DSN, ANBAN_SERVER_JWT_SECRET_KEY).
@@ -210,7 +210,7 @@ email:
   smtp_username: "" # SMTP authentication username.
   smtp_password: "" # SMTP authentication password.
   from_address: "" # Sender email address (e.g. "noreply@example.com").
-  from_name: "Anban 创作助手" # Sender display name.
+  from_name: "Anban 智能创作助手" # Sender display name.
   code_ttl: 5m # Verification code TTL.
   code_length: 6 # Number of digits in verification code.
 

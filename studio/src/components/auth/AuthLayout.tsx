@@ -32,7 +32,7 @@ export default function AuthLayout({
       {/* Hero section — desktop only */}
       <div className="absolute inset-y-0 left-0 hidden w-[55%] flex-col justify-center px-16 xl:flex">
         <div className="mb-4 text-sm font-semibold tracking-widest text-amber-800 dark:text-amber-300">
-          ✦ Anban 创作助手
+          ✦ Anban 智能创作助手
         </div>
         <h1 className="text-5xl font-black leading-tight text-amber-900 dark:text-amber-100">
           让创作
@@ -59,7 +59,7 @@ export default function AuthLayout({
         {/* Mobile brand header */}
         <div className="mb-6 text-center xl:hidden">
           <div className="text-xs font-semibold tracking-widest text-amber-700 dark:text-amber-400">
-            ✦ Anban 创作助手
+            ✦ Anban 智能创作助手
           </div>
           <div className="mt-2 text-2xl font-black text-amber-900 dark:text-amber-100">让创作更简单</div>
         </div>
