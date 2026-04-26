@@ -37,6 +37,7 @@ export const channelSchema = z.object({
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
+  enable_publishing: z.boolean().default(false),
   wechat_app_id: z.string().optional(),
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
@@ -46,15 +47,13 @@ export const channelSchema = z.object({
   author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
   reference_image_url: z.string().url("请输入有效的图片 URL").or(z.literal("")).optional(),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).optional(),
-  max_concurrent_tasks: z.number().int().min(1, "最小并发数为 1").max(100, "最大并发数为 100").optional(),
 }).refine((data) => {
-  // For article/xls platforms, wechat_app_id is required
-  if (data.platform === 'article' || data.platform === 'xls') {
+  if (data.enable_publishing) {
     return !!data.wechat_app_id?.trim()
   }
   return true
 }, {
-  message: "WeChat App ID 为必填项",
+  message: "启用自动发布时，微信 AppID 为必填项",
   path: ["wechat_app_id"],
 })
 export type ChannelFormValues = z.infer<typeof channelSchema>

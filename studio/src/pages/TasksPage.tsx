@@ -64,6 +64,10 @@ export default function TasksPage() {
     return platform === 'article' ? '16:9' : '3:4'
   }
 
+  function defaultRatioLabelForPlatform(platform: string) {
+    return platform === 'article' ? '16:9（公众号默认）' : '3:4（默认）'
+  }
+
   const { data: creditsBalance } = useQuery({
     queryKey: ['credits', 'balance'],
     queryFn: () => api.credits.balance(),
@@ -363,17 +367,21 @@ export default function TasksPage() {
               </div>
 
               {/* Image ratio selector */}
-              <FormField control={form.control} name="image_ratio" render={({ field }) => (
+              <FormField control={form.control} name="image_ratio" render={({ field }) => {
+                const defaultLabel = channelImageRatio
+                  ? `${channelImageRatio}（频道默认）`
+                  : defaultRatioLabelForPlatform(watchedType)
+                return (
                 <FormItem>
-                  <FormLabel>图片比例</FormLabel>
+                  <FormLabel>封面比例</FormLabel>
                   <Select value={field.value || '_default'} onValueChange={(v) => field.onChange(v === '_default' ? '' : v)}>
                     <FormControl>
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder={channelImageRatio ? `跟随频道默认 (${channelImageRatio})` : '跟随平台默认'} />
+                        <SelectValue placeholder={defaultLabel} />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="_default">{channelImageRatio ? `跟随频道默认 (${channelImageRatio})` : '跟随平台默认'}</SelectItem>
+                      <SelectItem value="_default">{defaultLabel}</SelectItem>
                       <SelectItem value="3:4">3:4 竖版</SelectItem>
                       <SelectItem value="1:1">1:1 方形</SelectItem>
                       <SelectItem value="4:3">4:3 横版</SelectItem>
@@ -382,7 +390,8 @@ export default function TasksPage() {
                   </Select>
                   <FormMessage />
                 </FormItem>
-              )} />
+                )
+              }} />
 
               {/* Cost display */}
               {(() => {

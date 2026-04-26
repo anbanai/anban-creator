@@ -7,11 +7,13 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import Badge from '@/components/ui/Badge'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import type { CreateAPIKeyResponse } from '@/types'
+import { tierLabels, tierDescriptions } from '@/lib/labels'
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -96,6 +98,32 @@ export default function SettingsPage() {
                   })
                 : '--'}
             </p>
+          </div>
+        </CardBody>
+      </Card>
+
+      {/* Account Quota Card */}
+      <Card>
+        <div className="border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold text-foreground">账号与配额</h2>
+        </div>
+        <CardBody className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-muted-foreground">当前等级</p>
+              <p className="text-sm text-foreground">{tierLabels[user?.tier || 'free'] || user?.tier || '免费版'}</p>
+            </div>
+            <Badge variant="secondary">{tierLabels[user?.tier || 'free'] || '免费版'}</Badge>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-muted-foreground">最大并发数</p>
+              <p className="text-sm text-foreground">{user?.max_concurrent_limit ?? 2} 个任务</p>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">配额说明</p>
+            <p className="text-sm text-muted-foreground">{tierDescriptions[user?.tier || 'free'] || tierDescriptions.free}</p>
           </div>
         </CardBody>
       </Card>

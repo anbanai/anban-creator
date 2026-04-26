@@ -65,6 +65,18 @@ export const platformLabels = Object.fromEntries(
   Object.entries(contentTypes).map(([key, val]) => [key, val.platform]),
 ) as Record<TaskType, string>
 
+export const platformDefaultRatio: Record<string, string> = {
+  article: '16:9',
+  rednote: '3:4',
+  xls: '3:4',
+}
+
+export const platformRatioLabel: Record<string, string> = {
+  article: '16:9（公众号默认）',
+  rednote: '3:4（小红书默认）',
+  xls: '3:4（小绿书默认）',
+}
+
 export const contentTypeOptions = Object.entries(contentTypes).map(([value, { label }]) => ({
   value,
   label,

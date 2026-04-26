@@ -167,23 +167,25 @@ describe('planSchema', () => {
 })
 
 describe('channelSchema', () => {
-  it('accepts valid channel data for article platform with wechat_app_id', () => {
+  it('accepts article platform without wechat_app_id when publishing disabled', () => {
     expect(channelSchema.safeParse({
       platform: 'article',
+      enable_publishing: false,
+    }).success).toBe(true)
+  })
+
+  it('accepts article platform with wechat_app_id when publishing enabled', () => {
+    expect(channelSchema.safeParse({
+      platform: 'article',
+      enable_publishing: true,
       wechat_app_id: 'wx123',
     }).success).toBe(true)
   })
 
-  it('rejects article platform without wechat_app_id', () => {
+  it('rejects article platform without wechat_app_id when publishing enabled', () => {
     const result = channelSchema.safeParse({
       platform: 'article',
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it('rejects xls platform without wechat_app_id', () => {
-    const result = channelSchema.safeParse({
-      platform: 'xls',
+      enable_publishing: true,
     })
     expect(result.success).toBe(false)
   })
@@ -197,6 +199,7 @@ describe('channelSchema', () => {
   it('accepts all optional fields', () => {
     const result = channelSchema.safeParse({
       platform: 'article',
+      enable_publishing: true,
       wechat_app_id: 'wx123',
       wechat_secret: 'secret',
       name: '频道名称',
@@ -205,7 +208,6 @@ describe('channelSchema', () => {
       style: 'casual-science',
       theme: 'autumn-warm',
       author: '作者',
-      max_concurrent_tasks: 5,
     })
     expect(result.success).toBe(true)
   })

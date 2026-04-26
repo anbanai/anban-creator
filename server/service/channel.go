@@ -45,10 +45,8 @@ func (s *ChannelService) Create(ctx context.Context, userID string, ch *model.Ch
 	// Platform-specific validation.
 	pc := model.GetPlatformConfig(ch.Platform)
 	if pc != nil {
-		if pc.SupportsPublishing {
-			if ch.Config.WechatAppID == "" {
-				return nil, fmt.Errorf("wechat_app_id is required for %s platform", pc.Label)
-			}
+		if ch.ImageRatio == "" && pc.DefaultImageRatio != "" {
+			ch.ImageRatio = pc.DefaultImageRatio
 		}
 	}
 
@@ -140,13 +138,9 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	if ch.MaxConcurrentTasks > 0 {
 		existing.MaxConcurrentTasks = ch.MaxConcurrentTasks
 	}
-	// Merge Config: only update non-empty fields.
-	if ch.Config.WechatAppID != "" {
-		existing.Config.WechatAppID = ch.Config.WechatAppID
-	}
-	if ch.Config.WechatSecret != "" {
-		existing.Config.WechatSecret = ch.Config.WechatSecret
-	}
+	// Merge Config: unconditionally update to support credential clearing.
+	existing.Config.WechatAppID = ch.Config.WechatAppID
+	existing.Config.WechatSecret = ch.Config.WechatSecret
 
 	if err := s.repo.Channels().Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("update channel: %w", err)

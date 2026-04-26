@@ -20,12 +20,26 @@ const platformBadgeVariant: Record<string, 'success' | 'info' | 'danger' | 'neut
   rednote: 'danger',
 }
 
+const platformBorderColor: Record<string, string> = {
+  article: 'border-l-[#07C160]',
+  xls: 'border-l-[#34C759]',
+  rednote: 'border-l-[#FF2442]',
+}
+
+const platformHoverBorderColor: Record<string, string> = {
+  article: 'hover:border-l-[#07C160]/50',
+  xls: 'hover:border-l-[#34C759]/50',
+  rednote: 'hover:border-l-[#FF2442]/50',
+}
+
 export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {
   const platformLabel = platformLabels[channel.platform] || channel.platform
   const platformBadge = platformBadgeVariant[channel.platform] || ('neutral' as const)
+  const borderColor = platformBorderColor[channel.platform] || ''
+  const hoverBorderColor = platformHoverBorderColor[channel.platform] || ''
 
   return (
-    <div className="group rounded-lg border border-border bg-card p-5 transition-all duration-200 hover:border-primary/30 hover:shadow-md active:scale-[0.98]">
+    <div className={`group rounded-lg border border-border bg-card p-5 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md active:scale-[0.98]`}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           {channel.avatar_url ? (

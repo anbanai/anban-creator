@@ -10,7 +10,6 @@ import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig } from
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
 import { Button } from '@/components/ui/Button'
-import Badge from '@/components/ui/Badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/textarea'
@@ -65,7 +64,7 @@ const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   author: '',
   reference_image_url: '',
   image_ratio: '',
-  max_concurrent_tasks: 2,
+  enable_publishing: false,
 }
 
 function channelToForm(ch: Channel): ChannelFormValues {
@@ -83,7 +82,7 @@ function channelToForm(ch: Channel): ChannelFormValues {
     author: ch.author || '',
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
-    max_concurrent_tasks: ch.max_concurrent_tasks || CHANNEL_FORM_DEFAULTS.max_concurrent_tasks,
+    enable_publishing: !!(ch.config?.wechat_app_id),
   }
 }
 
@@ -105,6 +104,7 @@ export default function ChannelsPage() {
 
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
+  const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
 
   // Auto-focus profile_url field when dialog opens
   useEffect(() => {
@@ -293,6 +293,21 @@ export default function ChannelsPage() {
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
     }
+
+    // Auto-set image_ratio based on platform if not specified
+    if (!payload.image_ratio) {
+      if (payload.platform === 'article') {
+        payload.image_ratio = '16:9'
+      } else if (payload.platform === 'rednote' || payload.platform === 'xls') {
+        payload.image_ratio = '3:4'
+      }
+    }
+
+    // Clear credentials when publishing is disabled
+    if (!values.enable_publishing) {
+      payload.wechat_app_id = ''
+      payload.wechat_secret = ''
+    }
     if (editingChannel) {
       await submit(async () => updateMutation.mutateAsync({ id: editingChannel.id, data: payload }))
     } else {
@@ -379,6 +394,7 @@ export default function ChannelsPage() {
                         field.onChange(v)
                         form.setValue('wechat_app_id', '')
                         form.setValue('wechat_secret', '')
+                        form.setValue('enable_publishing', false)
                       }}
                       disabled={!!editingChannel}
                     >
@@ -430,7 +446,7 @@ export default function ChannelsPage() {
                 <FormItem>
                   <FormLabel>频道名称</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. 我的科技博客" {...field} />
+                    <Input placeholder="例如 我的科技博客" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -450,7 +466,7 @@ export default function ChannelsPage() {
                 <FormItem>
                   <FormLabel>账号定位</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="e.g. 面向开发者的实用 AI 教程" {...field} />
+                    <Textarea placeholder="例如 面向开发者的实用 AI 教程" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -459,29 +475,66 @@ export default function ChannelsPage() {
               {isWechat && (
                 <>
                   <div className="border-t border-border pt-4">
-                    <h4 className="mb-3 text-sm font-medium text-muted-foreground">平台凭证</h4>
+                    <h4 className="mb-3 text-sm font-medium text-muted-foreground">发布配置</h4>
                   </div>
 
-                  <FormField control={form.control} name="wechat_app_id" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>WeChat App ID</FormLabel>
-                      <FormControl>
-                        <Input placeholder="wx..." {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  {!editingChannel && (
-                    <FormField control={form.control} name="wechat_secret" render={({ field }) => (
+                  <FormField
+                    control={form.control}
+                    name="enable_publishing"
+                    render={({ field }) => (
                       <FormItem>
-                        <FormLabel>WeChat App Secret</FormLabel>
-                        <FormControl>
-                          <Input type="password" placeholder="创建后不可查看" {...field} />
-                        </FormControl>
+                        <div className="flex items-center gap-2">
+                          <FormControl>
+                            <input
+                              type="checkbox"
+                              checked={field.value}
+                              onChange={(e) => field.onChange(e.target.checked)}
+                              className="h-4 w-4 rounded border-input"
+                            />
+                          </FormControl>
+                          <FormLabel className="!mt-0 font-normal cursor-pointer" onClick={() => field.onChange(!field.value)}>
+                            启用自动发布
+                          </FormLabel>
+                        </div>
+                        <FormDescription>
+                          {field.value
+                            ? '开启后，任务完成后将自动发布到公众号'
+                            : '未配置微信凭证，将无法使用自动发布到公众号功能'}
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
-                    )} />
+                    )}
+                  />
+
+                  {enablePublishing && (
+                    <>
+                      <FormField control={form.control} name="wechat_app_id" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>微信 AppID</FormLabel>
+                          <FormControl>
+                            <Input placeholder="wx..." {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+
+                      <FormField control={form.control} name="wechat_secret" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>微信 AppSecret</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="password"
+                              placeholder={editingChannel ? '留空则保持原有密钥不变' : '创建后不可查看'}
+                              {...field}
+                            />
+                          </FormControl>
+                          {editingChannel && (
+                            <FormDescription>留空则保持原有密钥不变</FormDescription>
+                          )}
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    </>
                   )}
                 </>
               )}
@@ -567,7 +620,7 @@ export default function ChannelsPage() {
                     <FormItem>
                       <FormLabel>作者名</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. 张三" {...field} />
+                        <Input placeholder="例如 张三" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -587,40 +640,6 @@ export default function ChannelsPage() {
                     </FormItem>
                   )} />
 
-                  <FormField control={form.control} name="image_ratio" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>图片比例</FormLabel>
-                      <Select value={field.value || '_default'} onValueChange={(v) => field.onChange(v === '_default' ? '' : v)}>
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="跟随平台默认" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="_default">跟随平台默认</SelectItem>
-                          <SelectItem value="3:4">3:4 竖版</SelectItem>
-                          <SelectItem value="1:1">1:1 方形</SelectItem>
-                          <SelectItem value="4:3">4:3 横版</SelectItem>
-                          <SelectItem value="16:9">16:9 宽屏</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>AI 生成图片的宽高比，封面和内容图统一使用此比例</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <FormField control={form.control} name="max_concurrent_tasks" render={() => (
-                    <FormItem>
-                      <FormLabel>最大并发任务数</FormLabel>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary">
-                          由账号等级决定
-                        </Badge>
-                      </div>
-                      <FormDescription>并发数由账号等级决定，升级等级可提高并发上限</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
                 </>
               )}
             </form>
