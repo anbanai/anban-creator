@@ -19,7 +19,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
-import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
+import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel } from '@/lib/labels'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
@@ -59,14 +59,6 @@ export default function TasksPage() {
     queryKey: ['channels', 'active'],
     queryFn: () => api.channels.list({ status: 'active' }),
   })
-
-  function defaultRatioForPlatform(platform: string) {
-    return platform === 'article' ? '16:9' : '3:4'
-  }
-
-  function defaultRatioLabelForPlatform(platform: string) {
-    return platform === 'article' ? '16:9（公众号默认）' : '3:4（默认）'
-  }
 
   const { data: creditsBalance } = useQuery({
     queryKey: ['credits', 'balance'],
@@ -327,7 +319,7 @@ export default function TasksPage() {
                           form.setValue('type', platform as TaskType)
                           form.setValue('image_ratio', '')
                           const ch = channels.find((c) => c.id === id)
-                          setChannelImageRatio(ch?.image_ratio || defaultRatioForPlatform(platform))
+                          setChannelImageRatio(ch?.image_ratio || platformDefaultRatio[platform] || '3:4')
                         } else {
                           setChannelImageRatio('')
                         }
@@ -370,7 +362,7 @@ export default function TasksPage() {
               <FormField control={form.control} name="image_ratio" render={({ field }) => {
                 const defaultLabel = channelImageRatio
                   ? `${channelImageRatio}（频道默认）`
-                  : defaultRatioLabelForPlatform(watchedType)
+                  : platformRatioLabel[watchedType] || `${channelImageRatio}（频道默认）`
                 return (
                 <FormItem>
                   <FormLabel>封面比例</FormLabel>
