@@ -134,6 +134,7 @@ export const mockPlatformConfigs: PlatformConfig[] = [
     supports_publishing: true,
     supports_auto_fetch: true,
     profile_url_pattern: 'https://mp.weixin.qq.com/*',
+    default_image_ratio: '16:9',
     fields: [],
   },
   {
@@ -143,6 +144,7 @@ export const mockPlatformConfigs: PlatformConfig[] = [
     supports_publishing: false,
     supports_auto_fetch: false,
     profile_url_pattern: 'https://www.xiaohongshu.com/*',
+    default_image_ratio: '3:4',
     fields: [],
   },
 ]

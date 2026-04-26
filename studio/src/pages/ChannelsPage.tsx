@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -98,7 +98,7 @@ export default function ChannelsPage() {
   const { submit } = useSubmitLock()
 
   const form = useForm<ChannelFormValues>({
-    resolver: zodResolver(channelSchema),
+    resolver: zodResolver(channelSchema) as Resolver<ChannelFormValues>,
     defaultValues: CHANNEL_FORM_DEFAULTS,
   })
 
