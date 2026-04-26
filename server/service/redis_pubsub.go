@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
@@ -10,9 +12,29 @@ import (
 
 const (
 	// Redis channel prefixes for pub/sub.
-	cancelChannelPrefix  = "anban:task:cancel:"
+	cancelChannelPrefix   = "anban:task:cancel:"
 	progressChannelPrefix = "anban:task:progress:"
+
+	// channelRunningCountPrefix is the Redis key prefix for per-channel running task counters.
+	channelRunningCountPrefix = "anban:channel:running:"
+	channelRunningCountTTL    = 1 * time.Hour
 )
+
+// reserveSlotScript is a Lua script that atomically increments a channel's running
+// counter and checks if it exceeds the max. If so, decrements back and returns 0.
+// Otherwise returns the new count. Sets a TTL to prevent key leaks.
+var reserveSlotScript = redis.NewScript(`
+local key = KEYS[1]
+local max = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+local count = redis.call('INCR', key)
+if count > max then
+	redis.call('DECR', key)
+	return 0
+end
+redis.call('EXPIRE', key, ttl)
+return count
+`)
 
 // CancelEvent is published to Redis when a task is cancelled, allowing
 // other server replicas to propagate the cancellation to their in-process
@@ -155,4 +177,65 @@ func (ps *RedisPubSub) SubscribeProgress(ctx context.Context, taskID string) *Pr
 // Available returns true if Redis pub/sub is available.
 func (ps *RedisPubSub) Available() bool {
 	return ps.rdb != nil
+}
+
+// TryReserveSlot atomically increments the running count for a channel and returns
+// true if the slot was reserved (new count <= maxConcurrent). Returns (0, false) if
+// no slot available. When Redis is nil, returns (0, true) to allow fallback to DB check.
+func (ps *RedisPubSub) TryReserveSlot(ctx context.Context, channelID string, maxConcurrent int) (int64, bool, error) {
+	if ps.rdb == nil {
+		return 0, true, nil
+	}
+	key := channelRunningCountPrefix + channelID
+	result, err := reserveSlotScript.Run(ctx, ps.rdb, []string{key}, maxConcurrent, int(channelRunningCountTTL.Seconds())).Int64()
+	if err != nil {
+		return 0, false, fmt.Errorf("reserve slot: %w", err)
+	}
+	if result == 0 {
+		return 0, false, nil
+	}
+	return result, true, nil
+}
+
+// releaseSlotScript atomically decrements the counter, clamping at 0 to prevent
+// negative values from double-release scenarios.
+var releaseSlotScript = redis.NewScript(`
+local key = KEYS[1]
+local count = redis.call('GET', key)
+if count and tonumber(count) > 0 then
+	redis.call('DECR', key)
+end
+return redis.call('GET', key) or 0
+`)
+
+// ReleaseSlot decrements the running count for a channel, clamping at 0.
+// No-op if Redis is nil.
+func (ps *RedisPubSub) ReleaseSlot(ctx context.Context, channelID string) error {
+	if ps.rdb == nil {
+		return nil
+	}
+	key := channelRunningCountPrefix + channelID
+	if err := releaseSlotScript.Run(ctx, ps.rdb, []string{key}).Err(); err != nil {
+		ps.logger.Warn().Err(err).Str("channel_id", channelID).Msg("failed to release concurrency slot")
+	}
+	return nil
+}
+
+// SyncChannelCount sets the Redis counter to the actual DB count for reconciliation.
+// No-op if Redis is nil.
+func (ps *RedisPubSub) SyncChannelCount(ctx context.Context, channelID string, dbCount int64) error {
+	if ps.rdb == nil {
+		return nil
+	}
+	key := channelRunningCountPrefix + channelID
+	if dbCount <= 0 {
+		if err := ps.rdb.Del(ctx, key).Err(); err != nil {
+			ps.logger.Warn().Err(err).Str("channel_id", channelID).Msg("failed to sync concurrency counter")
+		}
+		return nil
+	}
+	if err := ps.rdb.Set(ctx, key, dbCount, channelRunningCountTTL).Err(); err != nil {
+		ps.logger.Warn().Err(err).Str("channel_id", channelID).Msg("failed to sync concurrency counter")
+	}
+	return nil
 }

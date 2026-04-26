@@ -80,6 +80,9 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	if channel == nil {
 		if task.ChannelID == "" {
 			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "task has no channel_id")
+			if s.pubsub != nil {
+				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+			}
 			return fmt.Errorf("task has no channel_id, cannot execute")
 		}
 		ch, err := s.repo.Channels().FindByID(ctx, task.ChannelID)
@@ -89,10 +92,16 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 				Str("channel_id", task.ChannelID).
 				Msg("failed to load channel for task")
 			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to load channel")
+			if task.ChannelID != "" && s.pubsub != nil {
+				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+			}
 			return fmt.Errorf("load channel: %w", err)
 		}
 		if ch.UserID != userID {
 			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "channel not owned by user")
+			if task.ChannelID != "" && s.pubsub != nil {
+				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+			}
 			return fmt.Errorf("channel not owned by user")
 		}
 		channel = ch
@@ -218,6 +227,13 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
 	}
 
+	// Release concurrency slot.
+	if task.ChannelID != "" {
+		if s.pubsub != nil {
+			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		}
+	}
+
 	// Dispatch pending tasks for the same channel now that a slot opened.
 	if task.ChannelID != "" {
 		if err := s.DispatchPendingTasks(ctx, task.ChannelID); err != nil {
@@ -243,6 +259,10 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 	}
 	if !swapped {
 		s.logger.Warn().Str("task_id", taskID).Str("status", task.Status).Msg("task not in pending state, skipping")
+		// Slot was reserved in EnqueueExecution but task won't run — release it.
+		if s.pubsub != nil && task.ChannelID != "" {
+			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		}
 		return nil
 	}
 
@@ -317,6 +337,11 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
 			}
 
+			// Release concurrency slot.
+			if task.ChannelID != "" && s.pubsub != nil {
+				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+			}
+
 			if s.creditSvc != nil {
 				if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
 					s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits")
@@ -350,6 +375,10 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 
 		// Set status to pending first, then enqueue. If enqueue fails,
 		// the task stays pending and will be picked up by the plan checker.
+		// Release the concurrency slot since the task is no longer running.
+		if task.ChannelID != "" && s.pubsub != nil {
+			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		}
 		if err := s.repo.Tasks().IncrementRetryAndSetPending(ctx, taskID, "rate_limit_retry_count"); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task rate limit retry count")
 		}
@@ -389,6 +418,11 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
 		}
 
+		// Release concurrency slot.
+		if task.ChannelID != "" && s.pubsub != nil {
+			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		}
+
 		// Refund credits for failed task.
 		if s.creditSvc != nil {
 			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
@@ -423,6 +457,10 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 
 	// Set status to pending first, then enqueue. If enqueue fails,
 	// the task stays pending and will be picked up by the plan checker.
+	// Release the concurrency slot since the task is no longer running.
+	if task.ChannelID != "" && s.pubsub != nil {
+		s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+	}
 	if err := s.repo.Tasks().IncrementRetryAndSetPending(ctx, taskID, "retry_count"); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task retry count")
 	}

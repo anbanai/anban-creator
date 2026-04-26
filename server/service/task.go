@@ -350,6 +350,12 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 			s.logger.Error().Err(refundErr).Str("task_id", id).Msg("failed to refund credits for cancelled task")
 		}
 	}
+	// Release concurrency slot.
+	if s.pubsub != nil {
+		if task, err := s.repo.Tasks().FindByID(ctx, id); err == nil && task.ChannelID != "" {
+			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		}
+	}
 	// Signal the running execution (if any) to cancel via its context.
 	if v, ok := s.cancelFuncs.Load(id); ok {
 		if cancel, ok := v.(context.CancelFunc); ok {
@@ -404,19 +410,49 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 		if maxConcurrent <= 0 {
 			maxConcurrent = DefaultMaxConcurrentTasks
 		}
-		running, err := s.repo.Tasks().CountRunningByChannel(ctx, channel.ID)
-		if err != nil {
-			s.logger.Warn().Err(err).
-				Str("channel_id", channel.ID).
-				Msg("failed to count running tasks, proceeding without limit check")
-		} else if int(running) >= maxConcurrent {
-			s.logger.Info().
-				Str("task_id", task.ID).
-				Str("channel_id", channel.ID).
-				Int64("running", running).
-				Int("max", maxConcurrent).
-				Msg("channel concurrency limit reached, task will be dispatched later")
-			return nil
+
+		slotReserved := false
+		if s.pubsub != nil && s.pubsub.Available() {
+			// Atomic check-and-reserve via Redis to prevent TOCTOU races.
+			count, ok, err := s.pubsub.TryReserveSlot(ctx, channel.ID, maxConcurrent)
+			if err != nil {
+				s.logger.Warn().Err(err).
+					Str("channel_id", channel.ID).
+					Msg("failed to reserve concurrency slot via Redis, falling back to DB check")
+			} else if !ok {
+				s.logger.Info().
+					Str("task_id", task.ID).
+					Str("channel_id", channel.ID).
+					Int("max", maxConcurrent).
+					Msg("channel concurrency limit reached (Redis), task will be dispatched later")
+				return nil
+			} else {
+				s.logger.Debug().
+					Str("task_id", task.ID).
+					Str("channel_id", channel.ID).
+					Int64("running", count).
+					Int("max", maxConcurrent).
+					Msg("reserved concurrency slot via Redis")
+				slotReserved = true
+			}
+		}
+
+		// DB fallback: non-atomic check (when Redis unavailable or errored).
+		if !slotReserved {
+			running, err := s.repo.Tasks().CountRunningByChannel(ctx, channel.ID)
+			if err != nil {
+				s.logger.Warn().Err(err).
+					Str("channel_id", channel.ID).
+					Msg("failed to count running tasks, proceeding without limit check")
+			} else if int(running) >= maxConcurrent {
+				s.logger.Info().
+					Str("task_id", task.ID).
+					Str("channel_id", channel.ID).
+					Int64("running", running).
+					Int("max", maxConcurrent).
+					Msg("channel concurrency limit reached, task will be dispatched later")
+				return nil
+			}
 		}
 	}
 
@@ -430,6 +466,9 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 		}
 
 		if err := s.enqueuer.Enqueue(TypeContentGenerate, payload); err != nil {
+			if s.pubsub != nil && s.pubsub.Available() && channel != nil {
+				s.pubsub.ReleaseSlot(ctx, channel.ID)
+			}
 			return fmt.Errorf("enqueue task: %w", err)
 		}
 
@@ -446,12 +485,22 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 					Str("task_id", task.ID).
 					Interface("panic", r).
 					Msg("panic recovered in fallback task execution")
+				if s.pubsub != nil && s.pubsub.Available() && channel != nil {
+					s.pubsub.ReleaseSlot(context.Background(), channel.ID)
+				}
 			}
 		}()
 		fallbackCtx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 		defer cancel()
 		// Set running status before execution to prevent plan checker from re-dispatching.
-		s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
+		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
+		if !swapped {
+			// Task was cancelled or already running; release the reserved slot.
+			if s.pubsub != nil && s.pubsub.Available() && channel != nil {
+				s.pubsub.ReleaseSlot(fallbackCtx, channel.ID)
+			}
+			return
+		}
 		if err := s.HandleExecution(fallbackCtx, task, channel); err != nil {
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task execution failed")
 		}
@@ -475,9 +524,21 @@ func (s *TaskService) DispatchPendingTasks(ctx context.Context, channelID string
 		maxConcurrent = DefaultMaxConcurrentTasks
 	}
 
-	running, err := s.repo.Tasks().CountRunningByChannel(ctx, channelID)
-	if err != nil {
-		return fmt.Errorf("count running: %w", err)
+	var running int64
+	if s.pubsub != nil && s.pubsub.Available() {
+		key := channelRunningCountPrefix + channelID
+		val, err := s.pubsub.rdb.Get(ctx, key).Int64()
+		if err != nil {
+			// Key may not exist; fall back to DB.
+			running, _ = s.repo.Tasks().CountRunningByChannel(ctx, channelID)
+		} else {
+			running = val
+		}
+	} else {
+		running, err = s.repo.Tasks().CountRunningByChannel(ctx, channelID)
+		if err != nil {
+			return fmt.Errorf("count running: %w", err)
+		}
 	}
 
 	available := maxConcurrent - int(running)

@@ -130,6 +130,11 @@ func reapStuckTasks(ctx context.Context, repo repository.Repository, taskSvc *se
 			logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to refund credits for reaped task")
 		}
 
+		// Release concurrency slot for the reaped task.
+		if t.ChannelID != "" && taskSvc.PubSub() != nil {
+			taskSvc.PubSub().ReleaseSlot(ctx, t.ChannelID)
+		}
+
 		if t.ChannelID != "" {
 			if err := taskSvc.DispatchPendingTasks(ctx, t.ChannelID); err != nil {
 				logger.Warn().Err(err).Str("channel_id", t.ChannelID).Msg("failed to dispatch pending tasks after reaping stuck task")
@@ -221,6 +226,11 @@ func checkAndDispatchPendingTasks(ctx context.Context, repo repository.Repositor
 	}
 
 	for _, ch := range channels {
+		// Reconcile Redis counter with DB to prevent drift.
+		if taskSvc.PubSub() != nil {
+			dbCount, _ := repo.Tasks().CountRunningByChannel(ctx, ch.ID)
+			taskSvc.PubSub().SyncChannelCount(ctx, ch.ID, dbCount)
+		}
 		if err := taskSvc.DispatchPendingTasks(ctx, ch.ID); err != nil {
 			logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to dispatch pending tasks")
 		}
