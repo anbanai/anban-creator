@@ -3,15 +3,20 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import Badge from '@/components/ui/Badge'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
+import { getApiErrorMessage } from '@/lib/http-client'
+import { changePasswordSchema, type ChangePasswordFormValues } from '@/lib/schemas'
 import type { CreateAPIKeyResponse } from '@/types'
 import { tierLabels, tierDescriptions } from '@/lib/labels'
 
@@ -24,6 +29,11 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
   const { submit } = useSubmitLock()
+
+  const passwordForm = useForm<ChangePasswordFormValues>({
+    resolver: zodResolver(changePasswordSchema),
+    defaultValues: { old_password: '', new_password: '', confirm_password: '' },
+  })
 
   const { data: apiKeys = [], isLoading } = useQuery({
     queryKey: queryKeys.apiKeys.all,
@@ -67,6 +77,16 @@ export default function SettingsPage() {
     navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleChangePassword = (values: ChangePasswordFormValues) => {
+    submit(async () => {
+      await api.auth.changePassword(values.old_password, values.new_password)
+      toast.success('密码修改成功')
+      passwordForm.reset()
+    }).catch((err) => {
+      toast.error(getApiErrorMessage(err, '密码修改失败，请重试'))
+    })
   }
 
   return (
@@ -125,6 +145,67 @@ export default function SettingsPage() {
             <p className="text-xs text-muted-foreground">配额说明</p>
             <p className="text-sm text-muted-foreground">{tierDescriptions[user?.tier || 'free'] || tierDescriptions.free}</p>
           </div>
+        </CardBody>
+      </Card>
+
+      {/* Change Password Card */}
+      <Card>
+        <div className="border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold text-foreground">修改密码</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">修改你的登录密码。</p>
+        </div>
+        <CardBody>
+          <Form {...passwordForm}>
+            <form onSubmit={passwordForm.handleSubmit(handleChangePassword)} className="space-y-3">
+              <FormField
+                control={passwordForm.control}
+                name="old_password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>当前密码</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="输入当前密码" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={passwordForm.control}
+                name="new_password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>新密码</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="输入新密码（至少 8 个字符）" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={passwordForm.control}
+                name="confirm_password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>确认新密码</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="再次输入新密码" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="flex items-center gap-2 pt-1">
+                <Button size="sm" type="submit" disabled={passwordForm.formState.isSubmitting}>
+                  {passwordForm.formState.isSubmitting ? '提交中...' : '修改密码'}
+                </Button>
+                <Button size="sm" variant="ghost" type="button" onClick={() => passwordForm.reset()}>
+                  重置
+                </Button>
+              </div>
+            </form>
+          </Form>
         </CardBody>
       </Card>
 

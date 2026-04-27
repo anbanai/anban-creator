@@ -92,6 +92,11 @@ type wxLoginRequest struct {
 	Avatar   string `json:"avatar,omitempty"`
 }
 
+type changePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
 type tokenResponse struct {
 	Token        string      `json:"token"`
 	RefreshToken string      `json:"refresh_token"`
@@ -621,6 +626,68 @@ func (h *AuthHandler) WXLogin(c fiber.Ctx) error {
 	}
 
 	return Success(c, resp)
+}
+
+// ChangePassword handles PUT /api/v1/auth/password.
+func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
+	var req changePasswordRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	req.OldPassword = strings.TrimSpace(req.OldPassword)
+	req.NewPassword = strings.TrimSpace(req.NewPassword)
+
+	if req.OldPassword == "" || req.NewPassword == "" {
+		return Error(c, fiber.StatusBadRequest, "old_password and new_password are required")
+	}
+
+	if len(req.NewPassword) < 8 {
+		return Error(c, fiber.StatusBadRequest, "新密码至少需要 8 个字符")
+	}
+
+	if len(req.NewPassword) > 128 {
+		return Error(c, fiber.StatusBadRequest, "密码不能超过 128 个字符")
+	}
+
+	user, ok := c.Locals("user").(*model.User)
+	if !ok || user == nil {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	if user.Password == "" {
+		return Error(c, fiber.StatusBadRequest, "该账号未设置密码，无法修改")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)); err != nil {
+		return Error(c, fiber.StatusUnauthorized, "当前密码错误")
+	}
+
+	if req.OldPassword == req.NewPassword {
+		return Error(c, fiber.StatusBadRequest, "新密码不能与当前密码相同")
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to hash new password")
+		return Error(c, fiber.StatusInternalServerError, "internal error")
+	}
+
+	user.Password = string(hashed)
+	if err := h.repo.Users().Update(c.Context(), user); err != nil {
+		h.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to update password")
+		return Error(c, fiber.StatusInternalServerError, "密码修改失败，请重试")
+	}
+
+	if err := h.repo.Sessions().DeleteByUserID(c.Context(), user.ID); err != nil {
+		h.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to invalidate sessions after password change")
+	}
+
+	return Success(c, fiber.Map{"message": "密码修改成功"})
 }
 
 // GetUserID extracts the authenticated user ID from Fiber locals.

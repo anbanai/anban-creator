@@ -45,6 +45,7 @@ type SessionRepository interface {
 	Update(ctx context.Context, session *model.LoginSession) error
 	Delete(ctx context.Context, token string) error
 	DeleteExpired(ctx context.Context) error
+	DeleteByUserID(ctx context.Context, userID string) error
 }
 
 // PlanRepository provides access to the plans table.

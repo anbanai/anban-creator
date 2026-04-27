@@ -58,3 +58,13 @@ export const channelSchema = z.object({
   path: ["wechat_app_id"],
 })
 export type ChannelFormValues = z.infer<typeof channelSchema>
+
+export const changePasswordSchema = z.object({
+  old_password: z.string().min(1, '请输入当前密码'),
+  new_password: z.string().min(8, '新密码至少 8 个字符').max(128, '密码不能超过 128 个字符'),
+  confirm_password: z.string().min(1, '请确认新密码'),
+}).refine((data) => data.new_password === data.confirm_password, {
+  message: '两次输入的密码不一致',
+  path: ['confirm_password'],
+})
+export type ChangePasswordFormValues = z.infer<typeof changePasswordSchema>

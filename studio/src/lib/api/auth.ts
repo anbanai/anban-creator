@@ -22,4 +22,7 @@ export const authApi = {
 
   wxLogin: (code: string, nickname?: string, avatar?: string) =>
     unwrap<AuthResponse>(http.post('/auth/wx-login', { code, nickname, avatar })),
+
+  changePassword: (oldPassword: string, newPassword: string) =>
+    unwrap<null>(http.put('/auth/password', { old_password: oldPassword, new_password: newPassword })),
 }

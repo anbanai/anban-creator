@@ -191,6 +191,7 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.AuthHandler != nil {
 		apiV1.Get("/auth/me", svc.AuthHandler.Me)
+		apiV1.Put("/auth/password", svc.AuthHandler.ChangePassword)
 	}
 
 	// ---------------------------------------------------------------------------
