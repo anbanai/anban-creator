@@ -44,14 +44,14 @@ export default function TasksPage() {
 
   const [statusFilter, setStatusFilter] = useState(initialStatus)
   const [channelFilter, setChannelFilter] = useState('')
-  const [modalOpen, setModalOpen] = useState(shouldCreate)
+  const [modalOpen, setModalOpen] = useState(false)
   const [quantity, setQuantity] = useState(1)
   const [generateVideo, setGenerateVideo] = useState(false)
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const { submit } = useSubmitLock()
 
-  const { data: channels = [] } = useQuery({
+  const { data: channels = [], isLoading: channelsLoading } = useQuery({
     queryKey: ['channels', 'active'],
     queryFn: () => api.channels.list({ status: 'active' }),
   })
@@ -85,12 +85,21 @@ export default function TasksPage() {
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
 
-  // Clear create param on mount
+  // Resolve create intent after channel prerequisites are known.
   useEffect(() => {
-    if (shouldCreate) {
-      setSearchParams({}, { replace: true })
-    }
-  }, [shouldCreate, setSearchParams])
+    if (!shouldCreate || channelsLoading) return
+    openCreate()
+    setSearchParams({}, { replace: true })
+  }, [shouldCreate, channelsLoading, setSearchParams])
+
+  useEffect(() => {
+    if (!modalOpen) return
+    if (channels.length > 0) return
+
+    setModalOpen(false)
+    toast.error('请先创建一个频道，再开始新建任务。')
+    navigate('/channels')
+  }, [channels.length, modalOpen, navigate])
 
   const { data, isLoading } = useQuery({
     queryKey: ['tasks', statusFilter, channelFilter],
@@ -130,6 +139,11 @@ export default function TasksPage() {
   })
 
   function openCreate() {
+    if (channels.length === 0) {
+      toast.error('请先创建一个频道，再开始新建任务。')
+      navigate('/channels')
+      return
+    }
     form.reset({ type: 'rednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
     setGenerateVideo(false)
@@ -230,12 +244,16 @@ export default function TasksPage() {
           title={statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
           description={
             statusFilter === 'all'
-              ? '创建任务开始生成内容。'
+              ? channels.length === 0
+                ? '先创建一个频道，再开始生成内容。'
+                : '创建任务开始生成内容。'
               : '尝试其他筛选条件或创建新任务。'
           }
           action={
             statusFilter === 'all'
-              ? { label: '新建任务', onClick: openCreate }
+              ? channels.length === 0
+                ? { label: '去创建频道', onClick: () => navigate('/channels') }
+                : { label: '新建任务', onClick: openCreate }
               : undefined
           }
         />

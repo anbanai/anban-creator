@@ -29,15 +29,6 @@ export default function LoginPage() {
     }
   }
 
-  async function handleWeChatLogin() {
-    try {
-      // TODO: Implement WeChat OAuth flow to get authorization code
-      toast.info('微信登录功能即将上线')
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, '微信登录失败，请重试。'))
-    }
-  }
-
   return (
     <AuthLayout
       title="欢迎回来"
@@ -91,13 +82,13 @@ export default function LoginPage() {
       <Button
         type="button"
         variant="outline"
-        className="w-full border-green-500/30 bg-green-50 text-green-700 hover:bg-green-100 hover:text-green-800 dark:border-green-600/40 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30"
-        onClick={handleWeChatLogin}
+        disabled
+        className="w-full border-green-500/30 bg-green-50 text-green-700 opacity-70 dark:border-green-600/40 dark:bg-green-900/20 dark:text-green-400"
       >
         <svg className="mr-1.5 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
           <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178A1.17 1.17 0 014.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178 1.17 1.17 0 01-1.162-1.178c0-.651.52-1.18 1.162-1.18zm3.825 2.97c-3.792 0-6.876 2.599-6.876 5.81 0 3.211 3.084 5.81 6.876 5.81a8.08 8.08 0 002.276-.323.67.67 0 01.559.076l1.483.869a.258.258 0 00.13.042.228.228 0 00.226-.23c0-.056-.023-.11-.038-.166l-.305-1.153a.46.46 0 01.166-.518C21.138 18.852 22 17.165 22 15.27c0-3.211-3.084-5.81-6.876-5.81h.3zm-2.583 2.97c.502 0 .909.414.909.924a.917.917 0 01-.909.923.917.917 0 01-.909-.923c0-.51.407-.924.909-.924zm4.554 0c.502 0 .909.414.909.924a.917.917 0 01-.909.923.917.917 0 01-.909-.923c0-.51.407-.924.909-.924z" />
         </svg>
-        微信一键登录
+        微信一键登录（即将上线）
       </Button>
     </AuthLayout>
   )

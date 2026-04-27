@@ -2,6 +2,7 @@ import { http, unwrap } from '@/lib/http-client'
 import type {
   Channel,
   ChannelDetail,
+  ChannelStats,
   CreateChannelRequest,
   PlatformConfig,
   PlatformProfile,
@@ -13,6 +14,13 @@ export const channelsApi = {
 
   get: (id: string) =>
     unwrap<ChannelDetail>(http.get(`/channels/${id}`)),
+
+  stats: (ids: string[]) =>
+    unwrap<Record<string, ChannelStats>>(http.get('/channels/stats', {
+      params: {
+        ids: ids.join(','),
+      },
+    })),
 
   create: (data: CreateChannelRequest) =>
     unwrap<Channel>(http.post('/channels', data)),

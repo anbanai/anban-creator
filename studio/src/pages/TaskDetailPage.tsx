@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowLeft, Loader2, Download, Eye, Trash2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Download, Eye, Trash2, Copy, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import type { TaskFile } from '@/types'
@@ -37,7 +37,9 @@ export default function TaskDetailPage() {
   const [sseError, setSseError] = useState<string | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
+  const logContainerRef = useRef<HTMLDivElement | null>(null)
   const { submit } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
@@ -72,6 +74,14 @@ export default function TaskDetailPage() {
     enabled: !!task?.channel_id,
   })
   const channel = channelDetail?.channel
+  const MAX_PERSISTED_LOGS = 500
+  const persistedLogs = (task?.progress_log
+    ?.split('\n')
+    .map((line) => line.trimEnd())
+    .filter(Boolean) ?? [])
+    .slice(-MAX_PERSISTED_LOGS)
+  const displayLogs = sseLogs.length > 0 ? sseLogs : persistedLogs
+  const showLogs = displayLogs.length > 0 || Boolean(sseError) || task?.status === 'running'
 
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
@@ -191,7 +201,7 @@ export default function TaskDetailPage() {
   // Connect SSE only when task status transitions to "running"
   useEffect(() => {
     if (task?.status === 'running') {
-      setSseLogs([])
+      setSseLogs(persistedLogs)
       setSseError(null)
       connectSSE()
     }
@@ -202,6 +212,11 @@ export default function TaskDetailPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task?.status])
+
+  useEffect(() => {
+    if (!autoScrollLogs || !logContainerRef.current) return
+    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
+  }, [displayLogs, autoScrollLogs])
 
   if (isLoading) {
     return (
@@ -223,6 +238,23 @@ export default function TaskDetailPage() {
   }
 
   const canCancel = task.status === 'pending' || task.status === 'running'
+  const canRetry = task.status === 'failed' || task.status === 'cancelled'
+  const currentTask = task
+
+  async function handleRetry() {
+    await submit(async () => {
+      const nextTask = await api.tasks.create({
+        type: currentTask.type,
+        prompt: currentTask.prompt || undefined,
+        channel_id: currentTask.channel_id,
+        image_ratio: currentTask.image_ratio || undefined,
+        generate_video: currentTask.generate_video || undefined,
+      })
+      toast.success('已重新创建任务')
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+      navigate(`/tasks/${nextTask.id}`)
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -294,6 +326,12 @@ export default function TaskDetailPage() {
               删除
             </Button>
           )}
+          {canRetry && (
+            <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+              <RefreshCw className="h-4 w-4" />
+              重新执行
+            </Button>
+          )}
         </div>
       </div>
 
@@ -342,7 +380,7 @@ export default function TaskDetailPage() {
                   a.click()
                   URL.revokeObjectURL(url)
                 } catch (err) {
-                  console.error('Failed to download ZIP:', err)
+                  toast.error('下载 ZIP 失败，请稍后重试')
                 }
               }}
             >
@@ -404,16 +442,34 @@ export default function TaskDetailPage() {
           ) : task.status === 'completed' ? (
             <p className="text-sm text-emerald-400">任务执行成功</p>
           ) : task.status === 'failed' ? (
-            <div>
+            <div className="space-y-3">
               <p className="text-sm text-red-400">任务失败</p>
               {task.error && (
                 <p className="mt-2 bg-red-900/20 border border-red-900/30 rounded-lg px-3 py-2 text-sm text-red-300">
                   {task.error}
                 </p>
               )}
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+                  <RefreshCw className="h-4 w-4" />
+                  重新执行
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')}>
+                  返回任务列表
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => navigate('/channels')}>
+                  检查频道配置
+                </Button>
+              </div>
             </div>
           ) : task.status === 'cancelled' ? (
-            <p className="text-sm text-muted-foreground">任务已取消</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm text-muted-foreground">任务已取消</p>
+              <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+                <RefreshCw className="h-4 w-4" />
+                再试一次
+              </Button>
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground">任务等待执行中...</p>
           )}
@@ -421,19 +477,40 @@ export default function TaskDetailPage() {
       </Card>
 
       {/* Live Output / SSE Logs */}
-      {task.status === 'running' && (
+      {showLogs && (
         <Card>
-          <div className="border-b border-border px-4 py-3">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold text-foreground">执行日志</h2>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setAutoScrollLogs((prev) => !prev)}
+              >
+                {autoScrollLogs ? '跟随输出' : '暂停跟随'}
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => {
+                  navigator.clipboard.writeText(displayLogs.join('\n'))
+                  toast.success('已复制执行日志')
+                }}
+                disabled={displayLogs.length === 0}
+              >
+                <Copy className="h-3.5 w-3.5" />
+                复制
+              </Button>
+            </div>
           </div>
-          <div className="max-h-96 overflow-y-auto bg-background/50 rounded-lg border border-border font-mono px-4 py-3">
+          <div ref={logContainerRef} className="max-h-96 overflow-y-auto rounded-lg border border-border bg-background/50 px-4 py-3 font-mono">
             {sseError && (
               <p className="mb-2 text-xs text-amber-400">{sseError}</p>
             )}
-            {sseLogs.length === 0 ? (
+            {displayLogs.length === 0 ? (
               <p className="text-xs text-muted-foreground">等待输出中...</p>
             ) : (
-              sseLogs.map((log, idx) => (
+              displayLogs.map((log, idx) => (
                 <pre key={idx} className="mb-1 whitespace-pre-wrap text-xs text-foreground">
                   {log}
                 </pre>
@@ -449,7 +526,7 @@ export default function TaskDetailPage() {
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold text-foreground">执行结果</h2>
           </div>
-          <div className="max-h-64 overflow-y-auto bg-background/50 rounded-lg border border-border px-4 py-3 prose prose-invert prose-sm max-w-none">
+          <div className="max-h-64 overflow-y-auto rounded-lg border border-border bg-background/50 px-4 py-3 prose prose-sm max-w-none dark:prose-invert">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {task.result.output}
             </ReactMarkdown>

@@ -239,9 +239,17 @@ export default function SettingsPage() {
                   {copied ? '已复制' : '复制'}
                 </Button>
               </div>
-              <Button size="sm" variant="ghost" onClick={() => setNewKeyData(null)}>
-                我已保存密钥
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link to="/connect/claude-code">
+                  <Button size="sm">继续配置 Claude Code</Button>
+                </Link>
+                <Link to="/connect/openclaw">
+                  <Button size="sm" variant="outline">继续配置 OpenClaw</Button>
+                </Link>
+                <Button size="sm" variant="ghost" onClick={() => setNewKeyData(null)}>
+                  我已保存密钥
+                </Button>
+              </div>
             </div>
           )}
 
@@ -268,7 +276,7 @@ export default function SettingsPage() {
           {isLoading ? (
             <p className="text-xs text-muted-foreground">加载中...</p>
           ) : apiKeys.length === 0 ? (
-            <p className="text-xs text-muted-foreground">暂无密钥。创建一个密钥以在 Claude Code 中使用。</p>
+            <p className="text-xs text-muted-foreground">暂无密钥。创建一个新密钥后，可以直接继续去完成 Claude Code 或 OpenClaw 的接入。</p>
           ) : (
             <div className="space-y-2">
               {apiKeys.map((key) => (

@@ -90,6 +90,14 @@ func (s *ChannelService) List(ctx context.Context, userID string, opts repositor
 	return channels, nil
 }
 
+func (s *ChannelService) BatchStats(ctx context.Context, channelIDs []string) (map[string]*repository.ChannelStats, error) {
+	stats, err := s.repo.Channels().GetStatsByChannelIDs(ctx, channelIDs)
+	if err != nil {
+		return nil, fmt.Errorf("batch channel stats: %w", err)
+	}
+	return stats, nil
+}
+
 // Update updates mutable fields on a channel owned by the user.
 func (s *ChannelService) Update(ctx context.Context, userID, channelID string, ch *model.Channel) (*model.Channel, error) {
 	existing, err := s.repo.Channels().FindByID(ctx, channelID)

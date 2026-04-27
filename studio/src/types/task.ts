@@ -8,6 +8,9 @@ export interface Task {
   prompt: string
   status: TaskStatus
   progress?: number
+  progress_log?: string
+  image_ratio?: string
+  generate_video?: boolean
   error: string | null
   plan_id: string | null
   channel_id: string

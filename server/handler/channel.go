@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -94,6 +95,49 @@ func (h *ChannelHandler) List(c fiber.Ctx) error {
 	}
 
 	return Success(c, channels)
+}
+
+// Stats handles GET /channels/stats?ids=a,b,c and returns a per-channel stats map.
+func (h *ChannelHandler) Stats(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	idsParam := strings.TrimSpace(c.Query("ids", ""))
+	if idsParam == "" {
+		return Success(c, fiber.Map{})
+	}
+
+	channels, err := h.service.List(c.Context(), userID, repository.ChannelListOptions{})
+	if err != nil {
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("list channels for stats failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to list channels")
+	}
+
+	allowed := make(map[string]struct{}, len(channels))
+	for _, ch := range channels {
+		allowed[ch.ID] = struct{}{}
+	}
+
+	channelIDs := make([]string, 0, len(channels))
+	for _, rawID := range strings.Split(idsParam, ",") {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			continue
+		}
+		if _, ok := allowed[id]; ok {
+			channelIDs = append(channelIDs, id)
+		}
+	}
+
+	stats, err := h.service.BatchStats(c.Context(), channelIDs)
+	if err != nil {
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("get channel stats failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to get channel stats")
+	}
+
+	return Success(c, stats)
 }
 
 // Create handles POST /channels.

@@ -51,10 +51,17 @@ export default function DashboardPage() {
     queryFn: () => api.credits.signInStatus(),
   })
 
+  const { data: pricing } = useQuery({
+    queryKey: ['credits', 'pricing'],
+    queryFn: () => api.credits.pricing(),
+  })
+
+  const dailySignInCredits = pricing?.income.daily_sign_in ?? 1024
+
   const signInMutation = useMutation({
     mutationFn: () => api.credits.signIn(),
     onSuccess: () => {
-      toast.success('签到成功，积分 +1024')
+      toast.success(`签到成功，积分 +${dailySignInCredits}`)
       queryClient.invalidateQueries({ queryKey: queryKeys.credits.all })
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
       queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
@@ -139,10 +146,10 @@ export default function DashboardPage() {
   }, [tasks])
 
   const stats = useMemo(() => [
-    { title: '活跃计划', value: activePlans, description: '运行中的调度' },
-    { title: '今日任务', value: totalToday, description: `${completedToday} 已完成, ${failedToday} 失败` },
-    { title: '成功率', value: `${successRate}%`, description: '仅今日' },
-    { title: '总任务数', value: tasks.length, description: '全部时间' },
+    { title: '活跃计划', value: activePlans, description: '当前启用的自动调度' },
+    { title: '今日任务', value: totalToday, description: `${completedToday} 已完成，${failedToday} 失败` },
+    { title: '成功率', value: `${successRate}%`, description: '按今日完成与失败计算' },
+    { title: '任务样本', value: tasks.length, description: '最近 100 条任务' },
   ], [activePlans, totalToday, completedToday, failedToday, successRate, tasks.length])
 
   const isLoading = plansLoading || tasksLoading
@@ -189,7 +196,7 @@ export default function DashboardPage() {
               disabled={(signInStatus?.signed_in_today ?? false) || signInMutation.isPending}
               loading={signInMutation.isPending}
             >
-              {signInStatus?.signed_in_today ? '已签到' : '签到 +1024'}
+              {signInStatus?.signed_in_today ? '已签到' : `签到 +${dailySignInCredits}`}
             </Button>
           </div>
           <Link to="/credits" className="mt-2 block text-right text-sm text-muted-foreground hover:text-primary">
@@ -235,6 +242,7 @@ export default function DashboardPage() {
             <CardTitle>任务趋势（近30天）</CardTitle>
           </CardHeader>
           <CardContent>
+            <p className="mb-3 text-xs text-muted-foreground">基于最近 100 条任务样本生成</p>
             {trendData.length > 0 ? (
               <ResponsiveContainer width="100%" height={240}>
                 <LineChart data={trendData}>
@@ -284,6 +292,7 @@ export default function DashboardPage() {
             <CardTitle>状态分布</CardTitle>
           </CardHeader>
           <CardContent>
+            <p className="mb-3 text-xs text-muted-foreground">基于最近 100 条任务样本生成</p>
             {statusData.length > 0 ? (
               <div className="flex items-center justify-center">
                 <ResponsiveContainer width="100%" height={240}>

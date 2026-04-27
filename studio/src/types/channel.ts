@@ -24,6 +24,7 @@ export interface Channel {
   max_concurrent_tasks: number
   config: ChannelConfig
   status: ChannelStatus
+  stats?: ChannelStats
   created_at: string
   updated_at: string
 }

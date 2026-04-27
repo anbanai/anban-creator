@@ -16,15 +16,21 @@ import {
   Activity,
   Terminal,
   Puzzle,
+  Workflow,
+  PlugZap,
+  BarChart3,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
 
-const navItems = [
+const workflowItems = [
   { to: "/", label: "仪表盘", icon: LayoutDashboard, end: true },
   { to: "/channels", label: "频道", icon: Rss },
   { to: "/plans", label: "计划", icon: CalendarRange },
   { to: "/tasks", label: "任务", icon: ListChecks },
   { to: "/timeline", label: "时间轴", icon: Clock },
+];
+
+const analyticsItems = [
   { to: "/credits", label: "积分", icon: Coins },
   { to: "/usage", label: "用量", icon: Activity },
 ];
@@ -59,6 +65,19 @@ function ThemeToggle() {
 
 export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileOpen]);
 
   return (
     <>
@@ -104,25 +123,9 @@ export default function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-0.5 px-3 pt-2">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              onClick={() => setMobileOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                  isActive
-                    ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
-                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                }`
-              }
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {item.label}
-            </NavLink>
-          ))}
+        <nav className="flex-1 overflow-y-auto px-3 pt-2">
+          <SidebarSection label="工作区" icon={Workflow} items={workflowItems} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="经营数据" icon={BarChart3} items={analyticsItems} onSelect={() => setMobileOpen(false)} />
         </nav>
 
         {/* Divider */}
@@ -130,6 +133,12 @@ export default function Sidebar() {
 
         {/* Bottom: Platform + Settings */}
         <div className="px-3 py-2 space-y-0.5">
+          <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+            <span className="inline-flex items-center gap-2">
+              <PlugZap className="h-3.5 w-3.5" />
+              接入配置
+            </span>
+          </div>
           {platformItems.map((item) => (
             <NavLink
               key={item.to}
@@ -170,4 +179,47 @@ export default function Sidebar() {
       </aside>
     </>
   );
+}
+
+function SidebarSection({
+  label,
+  icon: Icon,
+  items,
+  onSelect,
+}: {
+  label: string
+  icon: typeof Workflow
+  items: Array<{ to: string; label: string; icon: typeof Workflow; end?: boolean }>
+  onSelect: () => void
+}) {
+  return (
+    <div className="mb-4">
+      <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+        <span className="inline-flex items-center gap-2">
+          <Icon className="h-3.5 w-3.5" />
+          {label}
+        </span>
+      </div>
+      <div className="space-y-0.5">
+        {items.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            onClick={onSelect}
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+                isActive
+                  ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
+                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              }`
+            }
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            {item.label}
+          </NavLink>
+        ))}
+      </div>
+    </div>
+  )
 }

@@ -36,6 +36,7 @@ type ChannelRepository interface {
 	UpdateStatus(ctx context.Context, id, status string) error
 	Delete(ctx context.Context, id string) error
 	GetStats(ctx context.Context, channelID string) (*ChannelStats, error)
+	GetStatsByChannelIDs(ctx context.Context, channelIDs []string) (map[string]*ChannelStats, error)
 }
 
 // -----------------------------------------------------------------------------
@@ -153,4 +154,60 @@ func (r *gormChannelRepository) GetStats(ctx context.Context, channelID string) 
 	}
 
 	return result, nil
+}
+
+func (r *gormChannelRepository) GetStatsByChannelIDs(ctx context.Context, channelIDs []string) (map[string]*ChannelStats, error) {
+	if len(channelIDs) == 0 {
+		return map[string]*ChannelStats{}, nil
+	}
+
+	type statsRow struct {
+		ChannelID      string
+		TotalTasks     int64
+		CompletedTasks int64
+		FailedTasks    int64
+		RunningTasks   int64
+		PendingTasks   int64
+		LastActivityAt *time.Time
+	}
+
+	var rows []statsRow
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT
+			channel_id,
+			COUNT(*) as total_tasks,
+			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_tasks,
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_tasks,
+			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_tasks,
+			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_tasks,
+			MAX(completed_at) as last_activity_at
+		FROM tasks
+		WHERE channel_id IN ?
+		GROUP BY channel_id
+	`, channelIDs).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	statsMap := make(map[string]*ChannelStats, len(channelIDs))
+	for _, channelID := range channelIDs {
+		statsMap[channelID] = &ChannelStats{}
+	}
+
+	for _, row := range rows {
+		stats := &ChannelStats{
+			TotalTasks:     row.TotalTasks,
+			CompletedTasks: row.CompletedTasks,
+			FailedTasks:    row.FailedTasks,
+			RunningTasks:   row.RunningTasks,
+			PendingTasks:   row.PendingTasks,
+			LastActivityAt: row.LastActivityAt,
+		}
+		if row.TotalTasks > 0 {
+			stats.SuccessRate = float64(row.CompletedTasks) / float64(row.TotalTasks)
+		}
+		statsMap[row.ChannelID] = stats
+	}
+
+	return statsMap, nil
 }

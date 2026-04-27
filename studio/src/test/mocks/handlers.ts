@@ -286,6 +286,16 @@ export const handlers = [
     return HttpResponse.json({ code: 0, msg: 'ok', data: mockChannels })
   }),
 
+  http.get('/api/v1/channels/stats', async () => {
+    return HttpResponse.json({
+      code: 0,
+      msg: 'ok',
+      data: {
+        'ch-1': mockChannelDetail.stats,
+      },
+    })
+  }),
+
   http.get('/api/v1/channels/:id', async () => {
     return HttpResponse.json({ code: 0, msg: 'ok', data: mockChannelDetail })
   }),

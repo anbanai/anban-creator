@@ -202,6 +202,8 @@ func TestFindConfigFile(t *testing.T) {
 		t.Fatalf("Getwd() error = %v", err)
 	}
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "")
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("Chdir() error = %v", err)
 	}

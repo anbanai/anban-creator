@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -103,6 +103,7 @@ export default function ChannelsPage() {
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [fetchingProfile, setFetchingProfile] = useState(false)
+  const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const { submit } = useSubmitLock()
@@ -144,19 +145,39 @@ export default function ChannelsPage() {
 
   const currentPlatformConfig = platformConfigMap[selectedPlatform]
 
+  function isValidProfileUrl(value: string) {
+    try {
+      const parsed = new URL(value)
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+    } catch {
+      return false
+    }
+  }
+
+  const skipAutoFetchRef = useRef(false)
+
   useEffect(() => {
-    if (!profileUrl || !selectedPlatform) return
+    if (skipAutoFetchRef.current) {
+      skipAutoFetchRef.current = false
+      return
+    }
+    if (!modalOpen || !profileUrl || !selectedPlatform || !isValidProfileUrl(profileUrl)) return
     const pc = platformConfigMap[selectedPlatform]
     if (!pc?.supports_auto_fetch) return
     const timer = setTimeout(() => {
-      handleFetchProfile(profileUrl)
+      void handleFetchProfile(profileUrl, { silent: true })
     }, 800)
     return () => clearTimeout(timer)
-  }, [profileUrl, selectedPlatform, platformConfigMap])
+  }, [modalOpen, profileUrl, selectedPlatform, platformConfigMap])
 
-  async function handleFetchProfile(url: string) {
+  async function handleFetchProfile(url: string, options?: { silent?: boolean }) {
     if (!url || !selectedPlatform) return
+    if (!isValidProfileUrl(url)) {
+      setProfileFetchHint('请先输入有效的主页链接')
+      return
+    }
     setFetchingProfile(true)
+    setProfileFetchHint(null)
     try {
       const appId = form.getValues('wechat_app_id')
       const secret = form.getValues('wechat_secret')
@@ -164,9 +185,15 @@ export default function ChannelsPage() {
       if (profile.name) form.setValue('name', profile.name)
       if (profile.avatar_url) form.setValue('avatar_url', profile.avatar_url)
       if (profile.positioning) form.setValue('positioning', profile.positioning)
-      toast.success('已自动获取账号信息')
+      setProfileFetchHint('已更新账号信息')
+      if (!options?.silent) {
+        toast.success('已自动获取账号信息')
+      }
     } catch {
-      toast.error('获取账号信息失败，请手动填写')
+      setProfileFetchHint('暂时无法自动获取，请继续手动填写')
+      if (!options?.silent) {
+        toast.error('获取账号信息失败，请手动填写')
+      }
     } finally {
       setFetchingProfile(false)
     }
@@ -180,34 +207,21 @@ export default function ChannelsPage() {
       }),
   })
 
-  // Batch fetch channel stats via React Query
-  const { data: channelDetails } = useQuery({
-    queryKey: ['channel-details', statusFilter],
+  const { data: channelStats = {} } = useQuery({
+    queryKey: ['channel-stats', statusFilter, channels?.map((channel) => channel.id).join(',')],
     queryFn: async () => {
       if (!channels || channels.length === 0) return {} as Record<string, ChannelStats>
-      const entries = await Promise.all(
-        channels.map(async (ch) => {
-          try {
-            const detail = await api.channels.get(ch.id)
-            return [ch.id, detail.stats] as const
-          } catch {
-            return [ch.id, undefined] as const
-          }
-        })
-      )
-      return Object.fromEntries(entries.filter((e): e is [string, ChannelStats] => !!e[1])) as Record<string, ChannelStats>
+      return api.channels.stats(channels.map((channel) => channel.id))
     },
-    enabled: !!channels && channels.length > 0,
+    enabled: Boolean(channels && channels.length > 0),
   })
-
-  const channelStats = channelDetails ?? {}
 
   const createMutation = useMutation({
     mutationFn: (data: CreateChannelRequest) => api.channels.create(data),
     onSuccess: () => {
       toast.success('频道创建成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
     },
     onError: (err) => {
@@ -221,7 +235,7 @@ export default function ChannelsPage() {
     onSuccess: () => {
       toast.success('频道更新成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
     },
     onError: () => {
@@ -234,7 +248,7 @@ export default function ChannelsPage() {
     onSuccess: () => {
       toast.success('频道已归档')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
     },
   })
 
@@ -243,7 +257,7 @@ export default function ChannelsPage() {
     onSuccess: () => {
       toast.success('频道已恢复')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
     },
   })
 
@@ -252,7 +266,7 @@ export default function ChannelsPage() {
     onSuccess: () => {
       toast.success('频道已删除')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-details'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       setDeleteTarget(null)
     },
   })
@@ -260,6 +274,7 @@ export default function ChannelsPage() {
   function openCreate() {
     setEditingChannel(null)
     setAdvancedOpen(false)
+    setProfileFetchHint(null)
     form.reset(CHANNEL_FORM_DEFAULTS)
     setModalOpen(true)
   }
@@ -267,7 +282,9 @@ export default function ChannelsPage() {
   function openEdit(channel: Channel) {
     setEditingChannel(channel)
     setAdvancedOpen(false)
+    setProfileFetchHint(null)
     form.reset(channelToForm(channel))
+    skipAutoFetchRef.current = true
     setModalOpen(true)
   }
 
@@ -284,6 +301,7 @@ export default function ChannelsPage() {
     setShowDirtyDialog(false)
     setEditingChannel(null)
     setAdvancedOpen(false)
+    setProfileFetchHint(null)
     form.reset(CHANNEL_FORM_DEFAULTS)
   }
 
@@ -367,6 +385,7 @@ export default function ChannelsPage() {
           title={statusFilter === 'all' ? '还没有频道' : statusFilter === 'active' ? '没有活跃的频道' : '没有已归档的频道'}
           description="创建你的第一个内容频道开始创作。"
           action={{ label: '新建频道', onClick: openCreate }}
+          note="配置好频道后，任务和计划都会自动继承对应的平台参数。"
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -446,15 +465,17 @@ export default function ChannelsPage() {
                         variant="secondary"
                         size="sm"
                         loading={fetchingProfile}
-                        disabled={!field.value}
-                        onClick={() => handleFetchProfile(field.value || '')}
+                        disabled={!field.value || !isValidProfileUrl(field.value || '')}
+                        onClick={() => void handleFetchProfile(field.value || '')}
                       >
                         获取
                       </Button>
                     )}
                   </div>
-                  {currentPlatformConfig?.supports_auto_fetch && field.value && (
-                    <FormDescription>粘贴链接后自动获取账号信息</FormDescription>
+                  {currentPlatformConfig?.supports_auto_fetch && (
+                    <FormDescription>
+                      {profileFetchHint || '粘贴有效链接后会自动尝试获取账号信息，也可以手动点击获取。'}
+                    </FormDescription>
                   )}
                   <FormMessage />
                 </FormItem>

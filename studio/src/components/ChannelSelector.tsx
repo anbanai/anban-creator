@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { platformLabels } from '@/lib/labels'
@@ -26,20 +27,30 @@ export function ChannelSelector({ value, onChange, platform }: ChannelSelectorPr
   }
 
   return (
-    <Combobox
-      options={options}
-      value={value}
-      onChange={(id) => {
-        if (!id) {
-          onChange('', '')
-          return
-        }
-        const ch = channels.find((c) => c.id === id)
-        if (ch) onChange(ch.id, ch.platform)
-      }}
-      placeholder="选择频道..."
-      searchPlaceholder="搜索频道..."
-      emptyText="没有找到频道"
-    />
+    <div className="space-y-2">
+      <Combobox
+        options={options}
+        value={value}
+        onChange={(id) => {
+          if (!id) {
+            onChange('', '')
+            return
+          }
+          const ch = channels.find((c) => c.id === id)
+          if (ch) onChange(ch.id, ch.platform)
+        }}
+        placeholder="选择频道..."
+        searchPlaceholder="搜索频道..."
+        emptyText="没有找到频道"
+      />
+      {channels.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          还没有可用频道。
+          <Link to="/channels" className="ml-1 text-primary hover:underline">
+            去创建频道
+          </Link>
+        </p>
+      )}
+    </div>
   )
 }
