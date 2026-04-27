@@ -262,30 +262,33 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
         </div>
 
         {/* Image model costs */}
-        {modelOps.some(([op]) => op === 'image_gen') && (
-          <div>
-            <p className="mb-2 font-medium text-foreground">图片生成（使用平台模型按次扣费）</p>
-            <div className="space-y-1">
-              {(modelOps.find(([op]) => op === 'image_gen')?.[1] ?? []).map(([model, cost]) => (
-                <div key={model} className="flex justify-between text-muted-foreground">
-                  <span>{model}</span>
-                  <span className="font-medium text-foreground">{cost} 积分/张</span>
-                </div>
-              ))}
+        {modelOps.some(([op]) => op === 'image_gen') && (() => {
+          const imageModels = modelOps.find(([op]) => op === 'image_gen')?.[1] ?? {}
+          return (
+            <div>
+              <p className="mb-2 font-medium text-foreground">图片生成（使用平台模型按次扣费）</p>
+              <div className="space-y-1">
+                {Object.entries(imageModels).map(([model, cost]) => (
+                  <div key={model} className="flex justify-between text-muted-foreground">
+                    <span>{model}</span>
+                    <span className="font-medium text-foreground">{cost} 积分/张</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Text operation costs */}
         {textModels.size > 0 && (
           <div>
             <p className="mb-2 font-medium text-foreground">文本操作（使用平台模型按次扣费）</p>
             <div className="space-y-3">
-              {Array.from(textModels.entries()).map(([model, costs]) => (
+              {Array.from(textModels.entries()).map(([model]) => (
                 <div key={model}>
                   <p className="mb-1 text-xs text-muted-foreground">{model}</p>
                   <div className="space-y-0.5">
-                    {modelOps.filter(([op]) => op !== 'image_gen').map(([op, models], idx) => {
+                    {modelOps.filter(([op]) => op !== 'image_gen').map(([op, models]) => {
                       const cost = models[model]
                       if (cost === undefined) return null
                       return (
