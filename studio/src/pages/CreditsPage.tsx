@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import Badge from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
+import { AccordionRoot, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
 import { formatFullDateTimeCN, transactionTypeLabel, operationLabel, taskTypeLabelCN } from '@/lib/labels'
 import PageHeader from '@/components/layout/PageHeader'
 
@@ -156,9 +157,6 @@ export default function CreditsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Pricing guide */}
-      {pricing && <PricingGuide pricing={pricing} />}
-
       {/* Transaction history */}
       <Card>
         <div className="border-b border-border px-4 py-3">
@@ -222,6 +220,9 @@ export default function CreditsPage() {
           </>
         )}
       </Card>
+
+      {/* Pricing guide */}
+      {pricing && <PricingGuide pricing={pricing} />}
     </div>
   )
 }
@@ -231,96 +232,107 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
   const modelOps = Object.entries(pricing.model_costs)
   const income = pricing.income
 
-  // Collect unique text models across all text operations
-  const textModels = new Map<string, number[]>()
-  for (const [op, models] of modelOps) {
-    if (op === 'image_gen') continue
-    for (const [model, cost] of Object.entries(models)) {
-      const costs = textModels.get(model) ?? []
-      costs.push(cost)
-      textModels.set(model, costs)
-    }
-  }
+  const imageModels = modelOps.find(([op]) => op === 'image_gen')?.[1] ?? {}
+
+  const textOps = modelOps.filter(([op]) => op !== 'image_gen')
+  const textModels = [...new Set(textOps.flatMap(([, models]) => Object.keys(models)))]
 
   return (
     <Card>
       <div className="border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">计费说明</h2>
       </div>
-      <CardBody className="space-y-5 text-sm">
+      <AccordionRoot>
         {/* Task costs */}
-        <div>
-          <p className="mb-2 font-medium text-foreground">任务费（Web 端创建任务，包含所有操作）</p>
-          <div className="space-y-1">
-            {taskCosts.map(([type, cost]) => (
-              <div key={type} className="flex justify-between text-muted-foreground">
-                <span>{taskTypeLabelCN[type] ?? type}</span>
-                <span className="font-medium text-foreground">{cost.toLocaleString()} 积分</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <AccordionItem>
+          <AccordionTrigger>任务费（Web 端创建任务，包含所有操作）</AccordionTrigger>
+          <AccordionContent>
+            <PricingTable
+              rows={taskCosts.map(([type, cost]) => ({
+                label: taskTypeLabelCN[type] ?? type,
+                value: `${cost.toLocaleString()} 积分`,
+              }))}
+            />
+          </AccordionContent>
+        </AccordionItem>
 
         {/* Image model costs */}
-        {modelOps.some(([op]) => op === 'image_gen') && (() => {
-          const imageModels = modelOps.find(([op]) => op === 'image_gen')?.[1] ?? {}
-          return (
-            <div>
-              <p className="mb-2 font-medium text-foreground">图片生成（使用平台模型按次扣费）</p>
-              <div className="space-y-1">
-                {Object.entries(imageModels).map(([model, cost]) => (
-                  <div key={model} className="flex justify-between text-muted-foreground">
-                    <span>{model}</span>
-                    <span className="font-medium text-foreground">{cost} 积分/张</span>
+        {Object.keys(imageModels).length > 0 && (
+          <AccordionItem>
+            <AccordionTrigger>图片生成（使用平台模型按次扣费）</AccordionTrigger>
+            <AccordionContent>
+              <PricingTable
+                rows={Object.entries(imageModels).map(([model, cost]) => ({
+                  label: model,
+                  value: `${cost} 积分/张`,
+                }))}
+              />
+            </AccordionContent>
+          </AccordionItem>
+        )}
+
+        {/* Text operation costs */}
+        {textOps.length > 0 && (
+          <AccordionItem>
+            <AccordionTrigger>文本操作（使用平台模型按次扣费）</AccordionTrigger>
+            <AccordionContent>
+              <div className="space-y-4">
+                {textModels.map((model) => (
+                  <div key={model}>
+                    <p className="mb-1.5 text-xs font-medium text-muted-foreground">{model}</p>
+                    <PricingTable
+                      rows={textOps
+                        .filter(([, models]) => models[model] !== undefined)
+                        .map(([op, models]) => ({
+                          label: operationLabel[op] ?? op,
+                          value: `${models[model]} 积分`,
+                        }))}
+                    />
                   </div>
                 ))}
               </div>
-            </div>
-          )
-        })()}
-
-        {/* Text operation costs */}
-        {textModels.size > 0 && (
-          <div>
-            <p className="mb-2 font-medium text-foreground">文本操作（使用平台模型按次扣费）</p>
-            <div className="space-y-3">
-              {Array.from(textModels.entries()).map(([model]) => (
-                <div key={model}>
-                  <p className="mb-1 text-xs text-muted-foreground">{model}</p>
-                  <div className="space-y-0.5">
-                    {modelOps.filter(([op]) => op !== 'image_gen').map(([op, models]) => {
-                      const cost = models[model]
-                      if (cost === undefined) return null
-                      return (
-                        <div key={op} className="flex justify-between text-muted-foreground">
-                          <span>{operationLabel[op] ?? op}</span>
-                          <span className="font-medium text-foreground">{cost} 积分</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+            </AccordionContent>
+          </AccordionItem>
         )}
 
-        {/* Free items */}
-        <div className="rounded-lg border border-dashed border-border p-3 space-y-1">
-          <p className="text-muted-foreground">图片上传、草稿发布 → 免费</p>
-          <p className="text-muted-foreground">使用自己的模型（BYOK）→ 全部免费</p>
-        </div>
-
-        {/* Income sources */}
-        <div>
-          <p className="mb-2 font-medium text-foreground">积分获取</p>
-          <div className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground">
-            <span>每日签到 <span className="font-medium text-foreground">+{income.daily_sign_in.toLocaleString()}</span></span>
-            <span>注册奖励 <span className="font-medium text-foreground">+{income.register_bonus.toLocaleString()}</span></span>
-            <span>邀请奖励 <span className="font-medium text-foreground">+{income.invite_reward.toLocaleString()}</span></span>
-          </div>
-        </div>
-      </CardBody>
+        {/* Income & free items */}
+        <AccordionItem>
+          <AccordionTrigger>积分获取 & 免费项目</AccordionTrigger>
+          <AccordionContent>
+            <PricingTable
+              rows={[
+                { label: '每日签到', value: `+${income.daily_sign_in.toLocaleString()}` },
+                { label: '注册奖励', value: `+${income.register_bonus.toLocaleString()}` },
+                { label: '邀请奖励', value: `+${income.invite_reward.toLocaleString()}` },
+              ]}
+            />
+            <div className="mt-3 rounded-lg border border-dashed border-border p-3 space-y-1 text-sm text-muted-foreground">
+              <p>图片上传、草稿发布 → 免费</p>
+              <p>使用自己的模型（BYOK）→ 全部免费</p>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </AccordionRoot>
     </Card>
+  )
+}
+
+function PricingTable({ rows }: { rows: { label: string; value: string }[] }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-border">
+      <table className="w-full text-sm">
+        <tbody>
+          {rows.map((row, i) => (
+            <tr
+              key={row.label}
+              className={i % 2 === 0 ? 'bg-muted/50' : 'bg-background'}
+            >
+              <td className="px-3 py-2 text-muted-foreground">{row.label}</td>
+              <td className="px-3 py-2 text-right font-medium text-foreground">{row.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
