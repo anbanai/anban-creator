@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Video } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Film } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { TaskType, TaskStatus, CreateTaskRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/Input'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -337,9 +337,9 @@ export default function TasksPage() {
 
               <FormField control={form.control} name="prompt" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Prompt（可选）</FormLabel>
+                  <FormLabel>创作要求（可选）</FormLabel>
                   <FormControl>
-                    <Input placeholder="留空则根据频道信息自动生成" {...field} />
+                    <Textarea placeholder="描述你的创作要求，留空则根据频道信息自动生成" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -365,24 +365,30 @@ export default function TasksPage() {
 
               {/* Image ratio selector */}
               <FormField control={form.control} name="image_ratio" render={({ field }) => {
-                const defaultLabel = channelImageRatio
-                  ? `${channelImageRatio}（频道默认）`
-                  : platformRatioLabel[watchedType] || `${channelImageRatio}（频道默认）`
+                const defaultRatio = channelImageRatio || platformDefaultRatio[watchedType] || '3:4'
+                const defaultLabel = platformRatioLabel[watchedType] || `${defaultRatio}（默认）`
+                const ratioOptions = [
+                  { value: '3:4', label: '3:4 竖版' },
+                  { value: '1:1', label: '1:1 方形' },
+                  { value: '4:3', label: '4:3 横版' },
+                  { value: '16:9', label: '16:9 宽屏' },
+                ].map((opt) => opt.value === defaultRatio
+                  ? { ...opt, label: `${opt.label}（默认）` }
+                  : opt,
+                )
                 return (
                 <FormItem>
                   <FormLabel>封面比例</FormLabel>
-                  <Select value={field.value || '_default'} onValueChange={(v) => field.onChange(v === '_default' ? '' : v)}>
+                  <Select value={field.value || undefined} onValueChange={field.onChange}>
                     <FormControl>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder={defaultLabel} />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="_default">{defaultLabel}</SelectItem>
-                      <SelectItem value="3:4">3:4 竖版</SelectItem>
-                      <SelectItem value="1:1">1:1 方形</SelectItem>
-                      <SelectItem value="4:3">4:3 横版</SelectItem>
-                      <SelectItem value="16:9">16:9 宽屏</SelectItem>
+                      {ratioOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -390,17 +396,26 @@ export default function TasksPage() {
                 )
               }} />
 
-              {/* Generate video toggle */}
-              <Button
-                type="button"
-                variant={generateVideo ? 'default' : 'outline'}
-                size="sm"
-                className="w-full justify-start gap-2"
-                onClick={() => setGenerateVideo(!generateVideo)}
-              >
-                <Video className="h-4 w-4" />
-                生成视频
-              </Button>
+              {/* Generate video toggle — only for image-heavy types */}
+              {(watchedType === 'rednote' || watchedType === 'xls') && (
+                <button
+                  type="button"
+                  onClick={() => setGenerateVideo(!generateVideo)}
+                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                    generateVideo
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-foreground/20'
+                  }`}
+                >
+                  <Film className={`mt-0.5 h-5 w-5 shrink-0 ${generateVideo ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <div className="min-w-0">
+                    <p className={`text-sm font-medium ${generateVideo ? 'text-foreground' : 'text-muted-foreground'}`}>
+                      生成视频
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">开启后将自动合成视频</p>
+                  </div>
+                </button>
+              )}
 
               {/* Cost display */}
               {(() => {
