@@ -50,7 +50,16 @@ export default function OpenClawGuide() {
         <McpConfigStep apiKeys={apiKeys} />
       </StepCard>
 
-      <StepCard step={3} title="开始使用">
+      <StepCard step={3} title="初始化配置">
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            安装完成后，运行初始化命令，完成 API 密钥配置和连接验证：
+          </p>
+          <CodeBlock code="/init" />
+        </div>
+      </StepCard>
+
+      <StepCard step={4} title="开始使用">
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
             用斜杠命令快速启动创作，或直接用自然语言描述：

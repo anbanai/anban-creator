@@ -50,14 +50,26 @@ export default function ClaudeGuide() {
         <McpConfigStep apiKeys={apiKeys} />
       </StepCard>
 
-      <StepCard step={3} title="开始使用">
-        <p className="text-xs text-muted-foreground">
-          配置完成后，直接用自然语言描述你想创作的内容即可，例如：
-        </p>
-        <div className="space-y-1.5 text-xs font-mono text-muted-foreground">
-          <p>帮我写一篇关于 AI Agent 的文章</p>
-          <p>小红书种草笔记，主题是降噪耳机</p>
-          <p>小绿书图片帖，主题是春日穿搭</p>
+      <StepCard step={3} title="初始化配置">
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            安装完成后，在终端运行初始化命令，完成 API 密钥配置和连接验证：
+          </p>
+          <CodeBlock code="/init" />
+        </div>
+      </StepCard>
+
+      <StepCard step={4} title="开始使用">
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            用自然语言或指定 Agent 直接启动创作：
+          </p>
+          <div className="space-y-1.5 text-xs font-mono text-muted-foreground">
+            <p>claude --dangerously-skip-permissions --verbose --agent anbanwriter:rednote 降噪耳机种草笔记</p>
+            <p>claude --dangerously-skip-permissions --verbose --agent anbanwriter:article AI Agent 入门指南</p>
+            <p>claude --dangerously-skip-permissions --verbose --agent anbanwriter:xls 春日穿搭图片帖</p>
+            <p>claude --dangerously-skip-permissions --verbose --agent anbanwriter:flower 春日鲜花摄影</p>
+          </div>
         </div>
       </StepCard>
     </div>
