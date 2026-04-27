@@ -20,6 +20,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
+import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -375,7 +376,10 @@ export default function DashboardPage() {
                       {formatDateTimeCN(task.created_at)}
                     </span>
                     <span className="text-xs text-muted-foreground">|</span>
-                    <span className="text-xs text-muted-foreground">{contentTypeLabel[task.type]}</span>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      {renderPlatformIcon(task.type)}
+                      {contentTypeLabel[task.type]}
+                    </span>
                   </div>
                 </div>
                 <Badge variant={statusBadgeVariant(task.status)}>

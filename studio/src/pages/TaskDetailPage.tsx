@@ -17,6 +17,7 @@ import { Card, CardBody } from '@/components/ui/Card'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant } from '@/lib/labels'
+import { renderPlatformIcon } from '@/lib/PlatformIcon'
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -237,7 +238,10 @@ export default function TaskDetailPage() {
           </button>
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-foreground">{task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}</h1>
-            <Badge variant="outline">{contentTypeLabel[task.type] || task.type}</Badge>
+            <Badge variant="outline">
+                {renderPlatformIcon(task.type)}
+                {contentTypeLabel[task.type] || task.type}
+              </Badge>
             <Badge variant={statusBadgeVariant(task.status)}>{taskStatusLabel[task.status] || task.status}</Badge>
             {channel && (
               <Link

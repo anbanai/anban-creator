@@ -21,6 +21,7 @@ import {
   getWeekRange,
   getBadgeVariant,
 } from '@/lib/labels'
+import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import Badge from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
@@ -329,6 +330,7 @@ export default function TimelinePage() {
                                       {formatTimeCN(getItemDate(item))}
                                     </span>
                                     <Badge variant="outline" className="text-[10px]">
+                                      {renderPlatformIcon(item.content_type)}
                                       {contentTypeLabel[item.content_type] || item.content_type}
                                     </Badge>
                                     <Badge variant="outline" className="text-[10px]">

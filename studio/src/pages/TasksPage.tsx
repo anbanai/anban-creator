@@ -20,6 +20,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel } from '@/lib/labels'
+import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
@@ -248,6 +249,7 @@ export default function TasksPage() {
                     <div className="flex items-center gap-2">
                       <h3 className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
                       <Badge variant="outline" className="shrink-0 text-[10px]">
+                        {renderPlatformIcon(task.type)}
                         {contentTypeLabel[task.type] || task.type}
                       </Badge>
                       {task.status === 'running' && (task.progress ?? 0) > 0 && (

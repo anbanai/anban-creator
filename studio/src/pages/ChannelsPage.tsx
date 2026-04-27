@@ -3,7 +3,7 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Loader2, Inbox, ChevronDown } from 'lucide-react'
+import { Plus, Loader2, Inbox, ChevronDown, BookOpen, PenLine, FileImage } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
 import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig } from '@/types'
@@ -24,6 +24,16 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 
+const platformIcons: Record<string, typeof BookOpen> = {
+  rednote: BookOpen,
+  article: PenLine,
+  xls: FileImage,
+}
+const platformIconColors: Record<string, string> = {
+  rednote: 'text-[#FF2442]',
+  article: 'text-[#07C160]',
+  xls: 'text-primary',
+}
 const platformOptions = [
   { value: 'rednote', label: '小红书' },
   { value: 'article', label: '公众号' },
@@ -402,9 +412,17 @@ export default function ChannelsPage() {
                         <SelectValue placeholder="选择平台" />
                       </SelectTrigger>
                       <SelectContent>
-                        {platformOptions.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
-                        ))}
+                        {platformOptions.map((opt) => {
+                          const PIcon = platformIcons[opt.value]
+                          return (
+                            <SelectItem key={opt.value} value={opt.value} label={opt.label}>
+                              <span className="flex items-center gap-1.5">
+                                {PIcon && <PIcon className={`h-3.5 w-3.5 ${platformIconColors[opt.value]}`} />}
+                                {opt.label}
+                              </span>
+                            </SelectItem>
+                          )
+                        })}
                       </SelectContent>
                     </Select>
                   </FormControl>

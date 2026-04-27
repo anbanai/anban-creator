@@ -16,6 +16,7 @@ import SchedulePicker from '@/components/SchedulePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
+import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
@@ -275,6 +276,7 @@ export default function PlansPage() {
                           <span className="truncate text-xs text-muted-foreground">· {channel.name}</span>
                         )}
                         <Badge variant={platformBadge} className="shrink-0 text-[10px]">
+                          {renderPlatformIcon(plan.type)}
                           {contentTypeLabel[plan.type] || plan.type}
                         </Badge>
                         <Badge variant={getBadgeVariant(plan.status, 'plan')} className="shrink-0">

@@ -1,5 +1,6 @@
 import type { Channel, ChannelStats } from '@/types'
 import { platformLabels } from '@/lib/labels'
+import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import Badge from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 
@@ -56,6 +57,7 @@ export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onAr
           <div>
             <h3 className="text-sm font-semibold text-foreground">{channel.name}</h3>
             <Badge variant={platformBadge} className="mt-1 text-[10px]">
+              {renderPlatformIcon(channel.platform)}
               {platformLabel}
             </Badge>
           </div>
