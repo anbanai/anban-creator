@@ -27,18 +27,19 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo         repository.Repository
-	executor     agent.TaskExecutor
-	logger       *zerolog.Logger
-	enqueuer     TaskEnqueuer
-	store        storage.Provider
-	creditSvc    *CreditService
-	taskLogDir   string
-	workspaceSvc *WorkspaceService
-	workspaceDir string
-	pubsub       *RedisPubSub
-	pubsubCancel context.CancelFunc // stops the listenCancelEvents goroutine
-	cancelFuncs  sync.Map            // taskID → context.CancelFunc
+	repo          repository.Repository
+	executor      agent.TaskExecutor
+	logger        *zerolog.Logger
+	enqueuer      TaskEnqueuer
+	store         storage.Provider
+	creditSvc     *CreditService
+	publishingSvc *PublishingService
+	taskLogDir    string
+	workspaceSvc  *WorkspaceService
+	workspaceDir  string
+	pubsub        *RedisPubSub
+	pubsubCancel  context.CancelFunc // stops the listenCancelEvents goroutine
+	cancelFuncs   sync.Map            // taskID → context.CancelFunc
 }
 
 // NewTaskService creates a new TaskService.
@@ -54,18 +55,20 @@ func NewTaskService(
 	workspaceSvc *WorkspaceService,
 	workspaceDir string,
 	pubsub *RedisPubSub,
+	publishingSvc *PublishingService,
 ) *TaskService {
 	svc := &TaskService{
-		repo:         repo,
-		executor:     executor,
-		logger:       logger,
-		enqueuer:     enqueuer,
-		store:        store,
-		creditSvc:    creditSvc,
-		taskLogDir:   taskLogDir,
-		workspaceSvc: workspaceSvc,
-		workspaceDir: workspaceDir,
-		pubsub:       pubsub,
+		repo:          repo,
+		executor:      executor,
+		logger:        logger,
+		enqueuer:      enqueuer,
+		store:         store,
+		creditSvc:     creditSvc,
+		publishingSvc: publishingSvc,
+		taskLogDir:    taskLogDir,
+		workspaceSvc:  workspaceSvc,
+		workspaceDir:  workspaceDir,
+		pubsub:        pubsub,
 	}
 
 	// Start listening for cross-replica cancel events.

@@ -141,6 +141,7 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	// Merge Config: unconditionally update AppID to support credential clearing.
 	// Only update Secret if non-empty to preserve existing secret during edits.
 	existing.Config.WechatAppID = ch.Config.WechatAppID
+	existing.Config.EnablePublishing = ch.Config.EnablePublishing
 	if ch.Config.WechatSecret != "" {
 		existing.Config.WechatSecret = ch.Config.WechatSecret
 	}

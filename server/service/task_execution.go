@@ -257,6 +257,20 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			Msg("workspace contains output files")
 	}
 
+	// Auto-publish if channel has publishing enabled (non-blocking).
+	// Uses a detached context with timeout so it never blocks task completion.
+	if s.publishingSvc != nil && channel != nil && channel.GetEnablePublishing() {
+		publishCtx, publishCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		taskCopy := *task
+		channelCopy := *channel
+		workDirCopy := result.WorkDir
+		logTextCopy := result.LogText
+		go func() {
+			defer publishCancel()
+			s.autoPublishIfNeeded(publishCtx, &taskCopy, &channelCopy, workDirCopy, logTextCopy)
+		}()
+	}
+
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to completed")
 	}
@@ -555,4 +569,164 @@ func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// autoPublishIfNeeded checks if the channel has publishing enabled and
+// attempts to publish the task output as a WeChat draft.
+// If the agent already published during execution (detected via log text),
+// it only sets the published flag. Otherwise it publishes from workspace files.
+// Publishing failure is logged but does not affect task completion.
+func (s *TaskService) autoPublishIfNeeded(ctx context.Context, task *model.Task, channel *model.Channel, workDir, logText string) {
+	taskID := task.ID
+
+	if wasPublishedByAgent(logText) {
+		s.logger.Info().Str("task_id", taskID).Msg("agent already published, setting published flag")
+		if err := s.repo.Tasks().SetPublished(ctx, taskID, true); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set published flag")
+		}
+		return
+	}
+
+	s.logger.Info().Str("task_id", taskID).Msg("agent did not publish, attempting server-side auto-publish")
+
+	var published bool
+
+	switch task.Type {
+	case model.ScopeArticle:
+		articles, err := extractArticleDraftFromWorkspace(workDir)
+		if err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to extract article draft from workspace")
+			return
+		}
+		result, err := s.publishingSvc.PublishDraft(ctx, task.UserID, channel.ID, articles)
+		if err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("auto-publish article draft failed")
+			return
+		}
+		s.logger.Info().Str("task_id", taskID).Str("media_id", result.MediaID).Msg("auto-published article draft")
+		published = true
+
+	case model.ScopeXls:
+		title := task.Title
+		if title == "" {
+			title = ExtractTitleFromWorkspace(workDir)
+		}
+		xlsReq, err := extractXlsDraftFromWorkspace(workDir, title)
+		if err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to extract XLS data from workspace")
+			return
+		}
+		result, err := s.publishingSvc.PublishXls(ctx, task.UserID, channel.ID, *xlsReq)
+		if err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("auto-publish XLS draft failed")
+			return
+		}
+		s.logger.Info().Str("task_id", taskID).Str("media_id", result.MediaID).Msg("auto-published XLS draft")
+		published = true
+
+	default:
+		return
+	}
+
+	if published {
+		if err := s.repo.Tasks().SetPublished(ctx, taskID, true); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set published flag after auto-publish")
+		}
+	}
+}
+
+// wasPublishedByAgent checks the agent's log text for evidence that the agent
+// already called a publish MCP tool during execution.
+func wasPublishedByAgent(logText string) bool {
+	return strings.Contains(logText, "publish_draft") || strings.Contains(logText, "publish_xls_draft")
+}
+
+// extractArticleDraftFromWorkspace reads the agent's draft.json from the workspace
+// and returns articles suitable for PublishingService.PublishDraft.
+// Falls back to finding an HTML file and constructing a minimal article.
+func extractArticleDraftFromWorkspace(workDir string) ([]DraftArticleInput, error) {
+	scanDir := workDir
+	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
+		scanDir = filepath.Join(workDir, "output")
+	}
+
+	// Try draft.json first (created by the agent's publishing skill).
+	draftPath := filepath.Join(scanDir, "draft.json")
+	if data, err := os.ReadFile(draftPath); err == nil {
+		var draft struct {
+			Articles []DraftArticleInput `json:"articles"`
+		}
+		if json.Unmarshal(data, &draft) == nil && len(draft.Articles) > 0 {
+			return draft.Articles, nil
+		}
+	}
+
+	// Fallback: find the first HTML file in the workspace.
+	var htmlPath string
+	_ = filepath.WalkDir(scanDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || htmlPath != "" {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if ext == ".html" || ext == ".htm" {
+			htmlPath = path
+		}
+		return nil
+	})
+
+	if htmlPath == "" {
+		return nil, fmt.Errorf("no draft.json or HTML file found in workspace")
+	}
+
+	content, err := os.ReadFile(htmlPath)
+	if err != nil {
+		return nil, fmt.Errorf("read HTML file: %w", err)
+	}
+
+	title := ExtractTitleFromWorkspace(workDir)
+	return []DraftArticleInput{{
+		Title:   title,
+		Content: string(content),
+	}}, nil
+}
+
+// extractXlsDraftFromWorkspace collects images from the workspace and constructs
+// an XlsPublishRequest for PublishingService.PublishXls.
+func extractXlsDraftFromWorkspace(workDir, title string) (*XlsPublishRequest, error) {
+	scanDir := workDir
+	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
+		scanDir = filepath.Join(workDir, "output")
+	}
+
+	var images []string
+	_ = filepath.WalkDir(scanDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		switch ext {
+		case ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp":
+			images = append(images, path)
+		}
+		return nil
+	})
+
+	if len(images) == 0 {
+		return nil, fmt.Errorf("no images found in workspace for XLS publish")
+	}
+
+	if title == "" {
+		title = "小绿书图片帖"
+	}
+
+	return &XlsPublishRequest{
+		Title:  title,
+		Images: images,
+	}, nil
 }

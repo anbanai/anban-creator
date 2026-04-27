@@ -4,6 +4,7 @@ export type ChannelStatus = 'active' | 'archived'
 export interface ChannelConfig {
   wechat_app_id?: string
   wechat_secret?: string
+  enable_publishing?: boolean
 }
 
 export interface Channel {
@@ -57,6 +58,7 @@ export interface CreateChannelRequest {
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string
+  enable_publishing?: boolean
 }
 
 export interface PlatformFieldConfig {

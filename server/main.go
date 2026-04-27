@@ -180,6 +180,7 @@ func main() {
 	var channelSvc *service.ChannelService
 	var creditSvc *service.CreditService
 	var feedbackSvc *service.FeedbackService
+	var publishingSvc *service.PublishingService
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir, log)
 
@@ -188,6 +189,7 @@ func main() {
 		channelSvc = service.NewChannelService(repo, log)
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
 		feedbackSvc = service.NewFeedbackService(repo, log)
+		publishingSvc = service.NewPublishingService(repo, creditSvc, log)
 
 		// Create Asynq client if Redis is available.
 		if rdb != nil {
@@ -199,7 +201,7 @@ func main() {
 			log.Info().Msg("Asynq client initialized")
 		}
 
-		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log))
+		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 	}
 
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
@@ -241,7 +243,6 @@ func main() {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
 		var writingSvc *service.WritingService
-		var publishingSvc *service.PublishingService
 
 		if store != nil {
 			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, log)
@@ -270,8 +271,7 @@ func main() {
 			} else {
 				log.Warn().Msg("LLM client not configured (missing writing config or ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
 			}
-			publishingSvc = service.NewPublishingService(repo, creditSvc, log)
-		}
+				}
 
 		mcp.SetServices(&mcp.Services{
 			ChannelSvc:    channelSvc,

@@ -4,8 +4,9 @@ import "time"
 
 // ChannelConfig holds platform-specific configuration stored as JSON.
 type ChannelConfig struct {
-	WechatAppID  string `json:"wechat_app_id,omitempty"`
-	WechatSecret string `json:"wechat_secret,omitempty"`
+	WechatAppID      string `json:"wechat_app_id,omitempty"`
+	WechatSecret     string `json:"wechat_secret,omitempty"`
+	EnablePublishing bool   `json:"enable_publishing"`
 }
 
 // Channel represents a user's platform account (e.g., a WeChat public account or Xiaohongshu account).
@@ -40,4 +41,9 @@ func (ch *Channel) GetWechatAppID() string {
 // GetWechatSecret returns the WeChat Secret from config.
 func (ch *Channel) GetWechatSecret() string {
 	return ch.Config.WechatSecret
+}
+
+// GetEnablePublishing returns whether auto-publishing is enabled for this channel.
+func (ch *Channel) GetEnablePublishing() bool {
+	return ch.Config.EnablePublishing
 }

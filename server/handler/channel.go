@@ -41,8 +41,9 @@ type channelRequest struct {
 	ImageRatio         string `json:"image_ratio"`
 	MaxConcurrentTasks int    `json:"max_concurrent_tasks"`
 	// Config fields for platform-specific credentials.
-	WechatAppID  string `json:"wechat_app_id"`
-	WechatSecret string `json:"wechat_secret"`
+	WechatAppID      string `json:"wechat_app_id"`
+	WechatSecret     string `json:"wechat_secret"`
+	EnablePublishing bool   `json:"enable_publishing"`
 }
 
 // toChannel converts a request to a Channel model.
@@ -61,8 +62,9 @@ func (req *channelRequest) toChannel() *model.Channel {
 		ImageRatio:         req.ImageRatio,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		Config: model.ChannelConfig{
-			WechatAppID:  req.WechatAppID,
-			WechatSecret: req.WechatSecret,
+			WechatAppID:      req.WechatAppID,
+			WechatSecret:     req.WechatSecret,
+			EnablePublishing: req.EnablePublishing,
 		},
 	}
 }
@@ -398,6 +400,8 @@ func (req *channelRequest) getFieldValue(key string) string {
 		return req.WechatAppID
 	case "wechat_secret":
 		return req.WechatSecret
+	case "enable_publishing":
+		return fmt.Sprintf("%v", req.EnablePublishing)
 	default:
 		return ""
 	}

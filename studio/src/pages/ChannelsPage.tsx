@@ -82,7 +82,7 @@ function channelToForm(ch: Channel): ChannelFormValues {
     author: ch.author || '',
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
-    enable_publishing: !!(ch.config?.wechat_app_id),
+    enable_publishing: ch.config?.enable_publishing ?? false,
   }
 }
 
@@ -292,6 +292,7 @@ export default function ChannelsPage() {
       image_ratio: values.image_ratio || undefined,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
+      enable_publishing: values.enable_publishing || undefined,
     }
 
     // Auto-set image_ratio based on platform if not specified
@@ -303,10 +304,9 @@ export default function ChannelsPage() {
       }
     }
 
-    // Clear credentials when publishing is disabled
+    // Disable publishing flag when unchecked (credentials preserved)
     if (!values.enable_publishing) {
-      payload.wechat_app_id = ''
-      payload.wechat_secret = ''
+      payload.enable_publishing = false
     }
     if (editingChannel) {
       await submit(async () => updateMutation.mutateAsync({ id: editingChannel.id, data: payload }))
