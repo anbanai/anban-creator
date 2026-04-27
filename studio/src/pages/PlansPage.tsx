@@ -1,15 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Plus, Loader2, FileText } from 'lucide-react'
 import { api } from '@/lib/api'
-import type { Plan, PlanType, CreatePlanRequest } from '@/types'
+import type { Channel, Plan, PlanType, CreatePlanRequest } from '@/types'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
-import { Card } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
@@ -22,6 +21,24 @@ import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
+
+const platformBadgeVariant: Record<string, 'success' | 'info' | 'danger' | 'neutral'> = {
+  article: 'success',
+  xls: 'info',
+  rednote: 'danger',
+}
+
+const platformBorderColor: Record<string, string> = {
+  article: 'border-l-[#07C160]',
+  xls: 'border-l-[#34C759]',
+  rednote: 'border-l-[#FF2442]',
+}
+
+const platformHoverBorderColor: Record<string, string> = {
+  article: 'hover:border-l-[#07C160]/50',
+  xls: 'hover:border-l-[#34C759]/50',
+  rednote: 'hover:border-l-[#FF2442]/50',
+}
 
 function planToFormValues(plan: Plan): PlanFormValues {
   return {
@@ -70,6 +87,23 @@ export default function PlansPage() {
   })
 
   const plans = data?.items ?? []
+
+  // Fetch channels for name/avatar display
+  const { data: allChannels } = useQuery({
+    queryKey: ['channels-for-plans'],
+    queryFn: () => api.channels.list(),
+    staleTime: 60_000,
+  })
+
+  const channelMap = useMemo(() => {
+    const map: Record<string, Channel> = {}
+    if (allChannels) {
+      for (const ch of allChannels) {
+        map[ch.id] = ch
+      }
+    }
+    return map
+  }, [allChannels])
 
   const createMutation = useMutation({
     mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
@@ -204,52 +238,81 @@ export default function PlansPage() {
         />
       ) : (
         <div className="space-y-3">
-          {plans.map((plan) => (
-            <Card key={plan.id}>
-              <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="truncate text-sm font-medium text-foreground">{plan.prompt || contentTypeLabel[plan.type] + '计划'}</h3>
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
-                      {contentTypeLabel[plan.type] || plan.type}
-                    </Badge>
-                    <Badge variant={getBadgeVariant(plan.status, 'plan')} className="shrink-0">
-                      {planStatusLabel[plan.status] || plan.status}
-                    </Badge>
+          {plans.map((plan) => {
+            const channel = channelMap[plan.channel_id]
+            const borderColor = platformBorderColor[plan.type] || ''
+            const hoverBorderColor = platformHoverBorderColor[plan.type] || ''
+            const platformBadge = platformBadgeVariant[plan.type] || ('neutral' as const)
+
+            return (
+              <div
+                key={plan.id}
+                className={`group rounded-lg border border-border bg-card p-4 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md`}
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    {channel?.avatar_url ? (
+                      <img
+                        src={channel.avatar_url}
+                        alt={channel.name}
+                        className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-border"
+                      />
+                    ) : channel?.name ? (
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                        {channel.name.charAt(0)}
+                      </div>
+                    ) : (
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm text-muted-foreground">
+                        <FileText className="h-4 w-4" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-medium text-foreground">
+                          {plan.prompt || contentTypeLabel[plan.type] + '计划'}
+                        </span>
+                        {channel?.name && (
+                          <span className="truncate text-xs text-muted-foreground">· {channel.name}</span>
+                        )}
+                        <Badge variant={platformBadge} className="shrink-0 text-[10px]">
+                          {contentTypeLabel[plan.type] || plan.type}
+                        </Badge>
+                        <Badge variant={getBadgeVariant(plan.status, 'plan')} className="shrink-0">
+                          {planStatusLabel[plan.status] || plan.status}
+                        </Badge>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span>{cronToHuman(plan.cron_expr)}</span>
+                        <span>下次执行：{formatDateTimeCN(plan.next_run_at)}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    <span>{cronToHuman(plan.cron_expr)}</span>
+                  <div className="flex shrink-0 items-center gap-1.5 sm:mt-0.5">
+                    {plan.status === 'active' && (
+                      <Button variant="ghost" size="xs" loading={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
+                        暂停
+                      </Button>
+                    )}
+                    {plan.status === 'paused' && (
+                      <Button variant="ghost" size="xs" loading={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
+                        恢复
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="xs" onClick={() => openEdit(plan)}>
+                      编辑
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="xs"
+                      onClick={() => setDeleteTarget(plan.id)}
+                    >
+                      删除
+                    </Button>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    下次执行：{formatDateTimeCN(plan.next_run_at)}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {plan.status === 'active' && (
-                    <Button variant="ghost" size="sm" loading={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
-                      暂停
-                    </Button>
-                  )}
-                  {plan.status === 'paused' && (
-                    <Button variant="ghost" size="sm" loading={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
-                      恢复
-                    </Button>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={() => openEdit(plan)}>
-                    编辑
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-red-400 hover:text-red-300"
-                    onClick={() => setDeleteTarget(plan.id)}
-                  >
-                    删除
-                  </Button>
                 </div>
               </div>
-            </Card>
-          ))}
+            )
+          })}
         </div>
       )}
 
