@@ -9,6 +9,7 @@ interface AuthState {
   refreshToken: string | null
   user: User | null
   isAuthenticated: boolean
+  isBootstrapping: boolean
 }
 
 interface AuthContextValue extends AuthState {
@@ -47,6 +48,7 @@ function loadStoredState(): AuthState {
     refreshToken,
     user,
     isAuthenticated: !!token && !!user,
+    isBootstrapping: !!token,
   }
 }
 
@@ -64,7 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Listen for token expiration events dispatched by the API interceptor
   useEffect(() => {
     const handler = () => {
-      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
+      clearStoredState()
+      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
     }
     window.addEventListener('auth:token-expired', handler)
     return () => window.removeEventListener('auth:token-expired', handler)
@@ -74,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(TOKEN_KEY, token)
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
     localStorage.setItem(USER_KEY, JSON.stringify(user))
-    setState({ token, refreshToken, user, isAuthenticated: true })
+    setState({ token, refreshToken, user, isAuthenticated: true, isBootstrapping: false })
   }, [])
 
   const logout = useCallback(async () => {
@@ -84,14 +87,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Ignore logout API errors
     }
     clearStoredState()
-    setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
+    setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
   }, [])
 
   const refreshAuthToken = useCallback(async () => {
     const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY)
     if (!storedRefresh) {
       clearStoredState()
-      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
+      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
       return
     }
 
@@ -100,13 +103,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login(response.token, response.refresh_token, response.user)
     } catch {
       clearStoredState()
-      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
+      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
     }
   }, [login])
 
   const setUser = useCallback((user: User) => {
     localStorage.setItem(USER_KEY, JSON.stringify(user))
-    setState((prev) => ({ ...prev, user, isAuthenticated: prev.isAuthenticated }))
+    setState((prev) => ({ ...prev, user, isAuthenticated: prev.isAuthenticated, isBootstrapping: false }))
   }, [])
 
   // Fetch current user on mount to ensure data is fresh
@@ -116,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(user)
       }).catch(() => {
         clearStoredState()
-        setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
+        setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
       })
     }
   }, [state.token, setUser])

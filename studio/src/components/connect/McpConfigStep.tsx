@@ -26,7 +26,7 @@ export default function McpConfigStep({ apiKeys }: McpConfigStepProps) {
   return (
     <>
       <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 space-y-1">
-        <p className="text-xs font-medium text-foreground">你的平台密钥</p>
+        <p className="text-xs font-medium text-foreground">已有平台密钥</p>
         {apiKeys.map((key) => (
           <p key={key.id} className="text-xs text-muted-foreground font-mono">
             {key.name || '未命名'}: {key.key_prefix}{'*'.repeat(20)}
@@ -34,10 +34,10 @@ export default function McpConfigStep({ apiKeys }: McpConfigStepProps) {
         ))}
       </div>
       <p className="text-xs text-muted-foreground">
-        将上方的完整密钥复制到插件配置中，即可完成平台连接。
+        这里展示的只是历史密钥前缀，用来帮助你识别是哪一把密钥，不能直接用于接入配置。
       </p>
       <p className="text-xs text-muted-foreground">
-        需要创建新密钥或管理已有密钥？
+        继续接入前，请前往设置页新建一个平台密钥，并在创建成功时立即复制完整密钥。
         <Link to="/settings" className="ml-1 text-primary hover:underline">前往设置页 →</Link>
       </p>
     </>
