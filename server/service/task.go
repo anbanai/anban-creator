@@ -674,3 +674,42 @@ func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, p
 	return s.repo.Tasks().SetPublished(ctx, taskID, published)
 }
 
+// Delete permanently removes a task and its associated files.
+// Running/pending tasks are cancelled first (with credit refund).
+func (s *TaskService) Delete(ctx context.Context, id string) error {
+	task, err := s.repo.Tasks().FindByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("find task: %w", err)
+	}
+
+	if task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusPending {
+		if cancelErr := s.Cancel(ctx, id); cancelErr != nil {
+			s.logger.Error().Err(cancelErr).Str("task_id", id).Msg("failed to cancel task before delete")
+		}
+	}
+
+	files, err := s.repo.TaskFiles().FindByTaskID(ctx, id)
+	if err != nil {
+		s.logger.Error().Err(err).Str("task_id", id).Msg("failed to list task files for deletion")
+	}
+
+	for _, f := range files {
+		if f.OSSKey != "" && s.store != nil {
+			if delErr := s.store.Delete(ctx, f.OSSKey); delErr != nil {
+				s.logger.Error().Err(delErr).Str("key", f.OSSKey).Msg("failed to delete storage file")
+			}
+		}
+	}
+
+	if err := s.repo.TaskFiles().DeleteByTaskID(ctx, id); err != nil {
+		return fmt.Errorf("delete task files: %w", err)
+	}
+
+	if err := s.repo.Tasks().Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete task: %w", err)
+	}
+
+	s.deregisterCancel(id)
+	return nil
+}
+

@@ -16,6 +16,9 @@ export const tasksApi = {
   cancel: (id: string) =>
     unwrap<void>(http.post(`/tasks/${id}/cancel`)),
 
+  delete: (id: string) =>
+    unwrap<void>(http.delete(`/tasks/${id}`)),
+
   markPublished: (id: string, published: boolean) =>
     unwrap<{ published: boolean }>(http.patch(`/tasks/${id}/published`, { published })),
 

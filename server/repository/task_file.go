@@ -113,6 +113,10 @@ func (r *taskFileRepository) FindByTaskIDAndContentHash(ctx context.Context, tas
 	return &file, nil
 }
 
+func (r *taskFileRepository) DeleteByTaskID(ctx context.Context, taskID string) error {
+	return r.db.WithContext(ctx).Where("task_id = ?", taskID).Delete(&model.TaskFile{}).Error
+}
+
 func (r *taskFileRepository) ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error) {
 	var count int64
 	if err := r.db.WithContext(ctx).Model(&model.TaskFile{}).Where("id = ? AND task_id = ?", fileID, taskID).Count(&count).Error; err != nil {

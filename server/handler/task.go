@@ -183,6 +183,38 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"message": "task cancelled"})
 }
 
+// Delete handles DELETE /api/v1/tasks/:id.
+func (h *TaskHandler) Delete(c fiber.Ctx) error {
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	task, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
+	}
+
+	if task.Status == model.TaskStatusRunning {
+		return Error(c, fiber.StatusConflict, "cannot delete a running task, cancel it first")
+	}
+
+	if err := h.service.Delete(c.Context(), id); err != nil {
+		h.logger.Error().Err(err).Msg("delete task failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to delete task")
+	}
+
+	return Success(c, fiber.Map{"message": "task deleted"})
+}
+
 // MarkPublished handles PATCH /api/v1/tasks/:id/published.
 func (h *TaskHandler) MarkPublished(c fiber.Ctx) error {
 	id, err := validateUUIDParam(c, "id")

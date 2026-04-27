@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowLeft, Loader2, Download, Eye } from 'lucide-react'
+import { ArrowLeft, Loader2, Download, Eye, Trash2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import type { TaskFile } from '@/types'
@@ -35,6 +35,7 @@ export default function TaskDetailPage() {
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const { submit } = useSubmitLock()
   const tokenRef = useRef(token)
@@ -89,6 +90,21 @@ export default function TaskDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['task', id] })
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.tasks.delete(id!),
+    onSuccess: () => {
+      toast.success('任务已删除')
+      abortRef.current?.abort()
+      abortRef.current = null
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+      setShowDeleteDialog(false)
+      navigate('/tasks')
+    },
+    onError: () => {
+      toast.error('删除失败，请稍后重试')
     },
   })
 
@@ -260,6 +276,18 @@ export default function TaskDetailPage() {
               onClick={() => setShowCancelDialog(true)}
             >
               取消任务
+            </Button>
+          )}
+          {!canCancel && (
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={deleteMutation.isPending}
+              onClick={() => setShowDeleteDialog(true)}
+              className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+            >
+              <Trash2 className="h-4 w-4" />
+              删除
             </Button>
           )}
         </div>
@@ -439,6 +467,24 @@ export default function TaskDetailPage() {
             <AlertDialogCancel>再想想</AlertDialogCancel>
             <AlertDialogAction variant="destructive" loading={cancelMutation.isPending} onClick={() => submit(async () => cancelMutation.mutateAsync())}>
               确定取消
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定删除此任务？</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除后任务及所有关联文件将被永久移除，此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>再想想</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => submit(async () => deleteMutation.mutateAsync())}>
+              确定删除
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

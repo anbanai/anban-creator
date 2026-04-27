@@ -311,6 +311,10 @@ func (r *taskRepository) SetPublished(ctx context.Context, id string, published 
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Updates(updates).Error
 }
 
+func (r *taskRepository) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Delete(&model.Task{}, "id = ?", id).Error
+}
+
 // UpdateTokenUsage writes denormalized token usage and cost columns for a task.
 func (r *taskRepository) UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).

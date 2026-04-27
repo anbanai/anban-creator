@@ -232,6 +232,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/tasks", svc.TaskHandler.Create)
 		apiV1.Get("/tasks", svc.TaskHandler.List)
 		apiV1.Get("/tasks/:id", svc.TaskHandler.GetByID)
+		apiV1.Delete("/tasks/:id", svc.TaskHandler.Delete)
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)
 		apiV1.Patch("/tasks/:id/published", svc.TaskHandler.MarkPublished)
 		apiV1.Get("/tasks/:id/files", svc.TaskHandler.GetFiles)
@@ -270,6 +271,7 @@ func NewRouter(svc *Services) *fiber.App {
 		credits.Get("/sign-in/status", svc.CreditHandler.SignInStatus)
 		credits.Post("/sign-in", svc.CreditHandler.SignIn)
 		credits.Get("/transactions", svc.CreditHandler.Transactions)
+			credits.Get("/pricing", svc.CreditHandler.Pricing)
 	}
 
 	// Admin credits endpoint (outside JWT auth group, uses API key auth).
