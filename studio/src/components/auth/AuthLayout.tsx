@@ -81,6 +81,19 @@ export default function AuthLayout({
           </Link>
         </p>
       </div>
+
+      {/* ICP footer */}
+      <div className="absolute bottom-4 w-full text-center text-xs text-amber-600/70 dark:text-amber-400/50">
+        <p>© 2025 成都北冕星辰科技有限公司</p>
+        <a
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noreferrer"
+          className="hover:text-amber-800 dark:hover:text-amber-300"
+        >
+          蜀ICP备2024071665号-3
+        </a>
+      </div>
     </div>
   )
 }
