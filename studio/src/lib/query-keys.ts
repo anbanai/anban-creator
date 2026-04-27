@@ -33,6 +33,9 @@ export const queryKeys = {
   apiKeys: {
     all: ['api-keys'] as const,
   },
+  modelConfig: {
+    all: ['model-config'] as const,
+  },
   usage: {
     stats: (params?: { from?: string; to?: string; channel_id?: string }) =>
       ['usage', 'stats', params] as const,

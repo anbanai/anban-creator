@@ -49,6 +49,7 @@ type Services struct {
 	APIKeyHandler   *handler.APIKeyHandler
 	FileHandler      *handler.FileHandler
 	FeedbackHandler  *handler.FeedbackHandler
+	ModelConfigHandler *handler.ModelConfigHandler
 	MCPHandler       http.Handler
 	StorageProvider storage.Provider
 }
@@ -293,6 +294,15 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.FeedbackHandler != nil {
 		apiV1.Post("/feedback", svc.FeedbackHandler.Create)
+	}
+
+	// Model config endpoints
+	// ---------------------------------------------------------------------------
+
+	if svc.ModelConfigHandler != nil {
+		apiV1.Get("/model-config", svc.ModelConfigHandler.Get)
+		apiV1.Put("/model-config", svc.ModelConfigHandler.Update)
+		apiV1.Delete("/model-config", svc.ModelConfigHandler.Delete)
 	}
 
 	// MCP endpoint (API key auth, no JWT required).

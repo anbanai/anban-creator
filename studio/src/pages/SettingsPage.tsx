@@ -19,6 +19,7 @@ import { getApiErrorMessage } from '@/lib/http-client'
 import { changePasswordSchema, type ChangePasswordFormValues } from '@/lib/schemas'
 import type { CreateAPIKeyResponse } from '@/types'
 import { tierLabels, tierDescriptions } from '@/lib/labels'
+import ModelConfigSection from '@/components/settings/ModelConfigSection'
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -123,6 +124,8 @@ export default function SettingsPage() {
       </Card>
 
       {/* Account Quota Card */}
+      <ModelConfigSection />
+
       <Card>
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">账号与配额</h2>

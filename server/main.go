@@ -204,6 +204,16 @@ func main() {
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 	}
 
+	// 12.1 Create per-user model config service.
+	var modelConfigSvc *service.ModelConfigService
+	if repo != nil {
+		modelConfigSvc = service.NewModelConfigService(repo, cfg, cfg.JWT.SecretKey, log)
+		if taskSvc != nil {
+			taskSvc.SetModelConfigService(modelConfigSvc)
+		}
+		log.Info().Msg("model config service initialized")
+	}
+
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
 	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits)
 
@@ -217,6 +227,7 @@ func main() {
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
 	var feedbackHandler *handler.FeedbackHandler
+	var modelConfigHandler *handler.ModelConfigHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -236,6 +247,9 @@ func main() {
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 	}
+	if modelConfigSvc != nil {
+		modelConfigHandler = handler.NewModelConfigHandler(modelConfigSvc, log)
+	}
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
 	var mcpHandler http.Handler
@@ -246,6 +260,9 @@ func main() {
 
 		if store != nil {
 			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, log)
+			if modelConfigSvc != nil {
+				imageSvc.SetModelConfigService(modelConfigSvc)
+			}
 		}
 		if repo != nil && creditSvc != nil {
 			// Create LLM client for writing operations.
@@ -268,6 +285,9 @@ func main() {
 			if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
 				llmClient := service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel)
 				writingSvc = service.NewWritingService(repo, creditSvc, llmClient, log)
+				if modelConfigSvc != nil {
+					writingSvc.SetModelConfigService(modelConfigSvc)
+				}
 			} else {
 				log.Warn().Msg("LLM client not configured (missing writing config or ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
 			}
@@ -339,6 +359,7 @@ func main() {
 		APIKeyHandler:   apiKeyHandler,
 		FileHandler:     fileHandler,
 		FeedbackHandler: feedbackHandler,
+		ModelConfigHandler: modelConfigHandler,
 		MCPHandler:      mcpHandler,
 		StorageProvider: store,
 	}

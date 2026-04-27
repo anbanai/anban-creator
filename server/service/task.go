@@ -27,19 +27,20 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo          repository.Repository
-	executor      agent.TaskExecutor
-	logger        *zerolog.Logger
-	enqueuer      TaskEnqueuer
-	store         storage.Provider
-	creditSvc     *CreditService
-	publishingSvc *PublishingService
-	taskLogDir    string
-	workspaceSvc  *WorkspaceService
-	workspaceDir  string
-	pubsub        *RedisPubSub
-	pubsubCancel  context.CancelFunc // stops the listenCancelEvents goroutine
-	cancelFuncs   sync.Map            // taskID → context.CancelFunc
+	repo           repository.Repository
+	executor       agent.TaskExecutor
+	logger         *zerolog.Logger
+	enqueuer       TaskEnqueuer
+	store          storage.Provider
+	creditSvc      *CreditService
+	publishingSvc  *PublishingService
+	modelConfigSvc *ModelConfigService
+	taskLogDir     string
+	workspaceSvc   *WorkspaceService
+	workspaceDir   string
+	pubsub         *RedisPubSub
+	pubsubCancel   context.CancelFunc // stops the listenCancelEvents goroutine
+	cancelFuncs    sync.Map            // taskID → context.CancelFunc
 }
 
 // NewTaskService creates a new TaskService.
@@ -79,6 +80,12 @@ func NewTaskService(
 	}
 
 	return svc
+}
+
+// SetModelConfigService sets the model config service for per-user AI model overrides.
+// This is called after TaskService creation to avoid circular dependencies.
+func (s *TaskService) SetModelConfigService(svc *ModelConfigService) {
+	s.modelConfigSvc = svc
 }
 
 // Close stops the Redis pub/sub subscriber goroutine.

@@ -167,7 +167,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		workDirInContainer = "/workspace"
 	}
 	cmd = e.buildAgentCommand(opts, model, maxTurns, workDirInContainer, apiKey)
-	env := e.buildAgentEnv()
+	env := e.buildAgentEnv(opts.UserEnvOverrides)
 
 	var execRes execResult
 	if e.dockerCfg.ContainerName != "" {
@@ -248,9 +248,13 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string,
 	return cmd
 }
 
-func (e *DockerExecutor) buildAgentEnv() []string {
+func (e *DockerExecutor) buildAgentEnv(userEnvOverrides map[string]string) []string {
 	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin"}
 	for k, v := range e.claudeEnv {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	// Per-user overrides take precedence over global claudeEnv.
+	for k, v := range userEnvOverrides {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	return env

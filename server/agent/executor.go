@@ -95,6 +95,7 @@ type ExecutionOptions struct {
 	OnProgress    func(taskID string, message string) // callback for SSE
 	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
+	UserEnvOverrides map[string]string               // per-user env var overrides (applied after global claudeEnv)
 }
 
 // TokenUsage captures LLM token consumption for a task execution.
@@ -275,6 +276,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 	// Environment variables (auth tokens, API keys, etc.).
 	for k, v := range e.claudeEnv {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(k, v))
+	}
+
+	// Per-user env var overrides (take precedence over global claudeEnv).
+	for k, v := range opts.UserEnvOverrides {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(k, v))
 	}
 

@@ -108,7 +108,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	}
 
 	// Execute via agent.
-	result, execErr := s.executor.Execute(execCtx, &agent.ExecutionOptions{
+	opts := &agent.ExecutionOptions{
 		Task:      task,
 		Channel:   channel,
 		LogWriter: taskLogWriter,
@@ -122,7 +122,17 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 				s.logger.Warn().Err(err).Str("task_id", id).Msg("failed to update task heartbeat")
 			}
 		},
-	})
+	}
+
+	// Resolve per-user AI model overrides for agent execution.
+	if s.modelConfigSvc != nil {
+		if envOverrides := s.modelConfigSvc.GetEffectiveTextEnv(ctx, userID); len(envOverrides) > 0 {
+			opts.UserEnvOverrides = envOverrides
+			s.logger.Info().Str("task_id", taskID).Str("user_id", userID).Msg("using per-user text model overrides")
+		}
+	}
+
+	result, execErr := s.executor.Execute(execCtx, opts)
 
 	// Store result.
 	if err := s.UpdateExecutionResult(ctx, taskID, result); err != nil {

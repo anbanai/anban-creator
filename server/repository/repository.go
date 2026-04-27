@@ -20,6 +20,7 @@ type Repository interface {
 	Credits() CreditRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
+	ModelConfigs() ModelConfigRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -131,6 +132,7 @@ type repository struct {
 	credits   CreditRepository
 	apiKeys   APIKeyRepository
 	feedbacks FeedbackRepository
+	modelConfigs ModelConfigRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -144,18 +146,20 @@ func New(db *gorm.DB) Repository {
 	credits := newCreditRepository(db)
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
+	modelConfigs := newModelConfigRepository(db)
 
 	return &repository{
-		db:        db,
-		users:     users,
-		sessions:  sessions,
-		plans:     plans,
-		tasks:     tasks,
-		files:     files,
-		channels:  channels,
-		credits:   credits,
-		apiKeys:   apiKeys,
-		feedbacks: feedbacks,
+		db:           db,
+		users:        users,
+		sessions:     sessions,
+		plans:        plans,
+		tasks:        tasks,
+		files:        files,
+		channels:     channels,
+		credits:      credits,
+		apiKeys:      apiKeys,
+		feedbacks:    feedbacks,
+		modelConfigs: modelConfigs,
 	}
 }
 
@@ -168,6 +172,7 @@ func (r *repository) Channels() ChannelRepository       { return r.channels }
 func (r *repository) Credits() CreditRepository         { return r.credits }
 func (r *repository) APIKeys() APIKeyRepository         { return r.apiKeys }
 func (r *repository) Feedbacks() FeedbackRepository     { return r.feedbacks }
+func (r *repository) ModelConfigs() ModelConfigRepository { return r.modelConfigs }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -203,20 +208,22 @@ type txRepository struct {
 	credits   CreditRepository
 	apiKeys   APIKeyRepository
 	feedbacks FeedbackRepository
+	modelConfigs ModelConfigRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
 	return &txRepository{
-		db:        tx,
-		users:     newUserRepository(tx),
-		sessions:  newSessionRepository(tx),
-		plans:     newPlanRepository(tx),
-		tasks:     newTaskRepository(tx),
-		files:     newTaskFileRepository(tx),
-		channels:  newChannelRepository(tx),
-		credits:   newCreditRepository(tx),
-		apiKeys:   newAPIKeyRepository(tx),
-		feedbacks: newFeedbackRepository(tx),
+		db:           tx,
+		users:        newUserRepository(tx),
+		sessions:     newSessionRepository(tx),
+		plans:        newPlanRepository(tx),
+		tasks:        newTaskRepository(tx),
+		files:        newTaskFileRepository(tx),
+		channels:     newChannelRepository(tx),
+		credits:      newCreditRepository(tx),
+		apiKeys:      newAPIKeyRepository(tx),
+		feedbacks:    newFeedbackRepository(tx),
+		modelConfigs: newModelConfigRepository(tx),
 	}
 }
 
@@ -229,6 +236,7 @@ func (r *txRepository) Channels() ChannelRepository       { return r.channels }
 func (r *txRepository) Credits() CreditRepository         { return r.credits }
 func (r *txRepository) APIKeys() APIKeyRepository         { return r.apiKeys }
 func (r *txRepository) Feedbacks() FeedbackRepository     { return r.feedbacks }
+func (r *txRepository) ModelConfigs() ModelConfigRepository { return r.modelConfigs }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

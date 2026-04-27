@@ -7,6 +7,7 @@ import { creditsApi } from './credits'
 import { apiKeysApi } from './api-keys'
 import { usageApi } from './usage'
 import { feedbackApi } from './feedback'
+import { modelConfigApi } from './model-config'
 
 export const api = {
   auth: authApi,
@@ -18,4 +19,5 @@ export const api = {
   apiKeys: apiKeysApi,
   usage: usageApi,
   feedback: feedbackApi,
+  modelConfig: modelConfigApi,
 }

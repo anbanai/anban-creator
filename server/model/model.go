@@ -14,6 +14,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&CreditTransaction{},
 		&APIKey{},
 		&Feedback{},
+		&UserModelConfig{},
 	)
 	if err != nil {
 		return err

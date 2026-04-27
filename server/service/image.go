@@ -79,11 +79,12 @@ type BatchMarkdownResult struct {
 // ImageService handles image generation, upload, and compression
 // for server-side MCP tool use. It wraps the app/image package.
 type ImageService struct {
-	imageCfg  *srvconfig.ImageAPIConfig
-	storage   storage.Provider
-	repo      repository.Repository
-	creditSvc *CreditService
-	logger    *zerolog.Logger
+	imageCfg       *srvconfig.ImageAPIConfig
+	storage        storage.Provider
+	repo           repository.Repository
+	creditSvc      *CreditService
+	modelConfigSvc *ModelConfigService
+	logger         *zerolog.Logger
 }
 
 // NewImageService creates a new ImageService.
@@ -101,6 +102,20 @@ func NewImageService(
 		creditSvc: creditSvc,
 		logger:    logger,
 	}
+}
+
+// SetModelConfigService sets the model config service for per-user AI model overrides.
+func (s *ImageService) SetModelConfigService(svc *ModelConfigService) {
+	s.modelConfigSvc = svc
+}
+
+// shouldSkipImageCredits returns true if the user has a fully configured image model
+// (provider + api_key + model) and should not be charged credits.
+func (s *ImageService) shouldSkipImageCredits(ctx context.Context, userID string) bool {
+	if s.modelConfigSvc != nil {
+		return s.modelConfigSvc.HasCompleteImageOverride(ctx, userID)
+	}
+	return false
 }
 
 // resolveToLocalFile downloads a remote URL or decodes a data URL to a temp file.
@@ -138,8 +153,16 @@ func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *a
 }
 
 // buildProcessor creates a new image.Processor for the given channel and image type.
-func (s *ImageService) buildProcessor(ch *model.Channel, imageType string) (*image.Processor, error) {
-	appCfg, err := agent.BuildAppConfig(ch, s.imageCfg, "")
+func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, imageType string) (*image.Processor, error) {
+	// Use per-user image config if available, otherwise fall back to server config.
+	effectiveCfg := s.imageCfg
+	if s.modelConfigSvc != nil {
+		if userCfg := s.modelConfigSvc.GetEffectiveImageConfig(ctx, ch.UserID); userCfg != nil {
+			effectiveCfg = userCfg
+		}
+	}
+
+	appCfg, err := agent.BuildAppConfig(ch, effectiveCfg, "")
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}
@@ -164,7 +187,7 @@ func (s *ImageService) GenerateImage(
 		return nil, fmt.Errorf("find channel: %w", err)
 	}
 
-	processor, err := s.buildProcessor(ch, imageType)
+	processor, err := s.buildProcessor(ctx, ch, imageType)
 	if err != nil {
 		return nil, err
 	}
@@ -173,8 +196,8 @@ func (s *ImageService) GenerateImage(
 		processor.SetRefImage(refPath)
 	}
 
-	// Deduct credits before generation.
-	if s.creditSvc != nil {
+	// Deduct credits before generation (skip if user has own image model config).
+	if s.creditSvc != nil && !s.shouldSkipImageCredits(ctx, userID) {
 		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, 1); err != nil {
 			return nil, fmt.Errorf("deduct credits: %w", err)
 		}
@@ -234,7 +257,7 @@ func (s *ImageService) GenerateBatch(
 		return nil, fmt.Errorf("find channel: %w", err)
 	}
 
-	processor, err := s.buildProcessor(ch, imageType)
+	processor, err := s.buildProcessor(ctx, ch, imageType)
 	if err != nil {
 		return nil, err
 	}
@@ -243,8 +266,8 @@ func (s *ImageService) GenerateBatch(
 		processor.SetRefImage(refPath)
 	}
 
-	// Deduct credits before generation.
-	if s.creditSvc != nil {
+	// Deduct credits before generation (skip if user has own image model config).
+	if s.creditSvc != nil && !s.shouldSkipImageCredits(ctx, userID) {
 		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, count); err != nil {
 			return nil, fmt.Errorf("deduct credits: %w", err)
 		}
@@ -311,7 +334,7 @@ func (s *ImageService) UploadImage(
 	}
 
 	// WeChat platforms: upload to WeChat CDN.
-	processor, err := s.buildProcessor(ch, "content")
+	processor, err := s.buildProcessor(ctx, ch, "content")
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +434,7 @@ func (s *ImageService) DownloadImage(
 	if strings.EqualFold(upload, "true") || strings.EqualFold(upload, "wechat") {
 		// WeChat platforms: download and upload to WeChat CDN.
 		if ch.Platform == model.PlatformArticle || ch.Platform == model.PlatformXLS {
-			processor, err := s.buildProcessor(ch, "content")
+			processor, err := s.buildProcessor(ctx, ch, "content")
 			if err != nil {
 				return nil, err
 			}
@@ -440,7 +463,7 @@ func (s *ImageService) DownloadImage(
 	}
 
 	// Download only (all platforms).
-	processor, err := s.buildProcessor(ch, "content")
+	processor, err := s.buildProcessor(ctx, ch, "content")
 	if err != nil {
 		return nil, err
 	}
@@ -523,7 +546,7 @@ func (s *ImageService) BatchGenerateFromMarkdown(
 		return nil, fmt.Errorf("find channel: %w", err)
 	}
 
-	processor, err := s.buildProcessor(ch, imageType)
+	processor, err := s.buildProcessor(ctx, ch, imageType)
 	if err != nil {
 		return nil, err
 	}

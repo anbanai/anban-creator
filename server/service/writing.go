@@ -92,10 +92,11 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 // WritingService wraps prompt assembly packages (writer, converter, humanizer)
 // and calls an LLM for actual generation.
 type WritingService struct {
-	repo      repository.Repository
-	creditSvc *CreditService
-	llmClient LLMClient
-	logger    *zerolog.Logger
+	repo           repository.Repository
+	creditSvc      *CreditService
+	llmClient      LLMClient
+	modelConfigSvc *ModelConfigService
+	logger         *zerolog.Logger
 }
 
 // NewWritingService creates a new WritingService.
@@ -106,6 +107,31 @@ func NewWritingService(repo repository.Repository, creditSvc *CreditService, llm
 		llmClient: llmClient,
 		logger:    logger,
 	}
+}
+
+// SetModelConfigService sets the model config service for per-user AI model overrides.
+func (s *WritingService) SetModelConfigService(svc *ModelConfigService) {
+	s.modelConfigSvc = svc
+}
+
+// getLLMClient returns the default or per-user LLM client for the given user.
+func (s *WritingService) getLLMClient(ctx context.Context, userID string) LLMClient {
+	if s.modelConfigSvc != nil {
+		if baseURL, key, model, ok := s.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID); ok {
+			return NewOpenAILLMClient(baseURL, key, model)
+		}
+	}
+	return s.llmClient
+}
+
+// shouldSkipCredits returns true if the user has a fully configured text model
+// (base_url + api_key + model) and should not be charged credits.
+func (s *WritingService) shouldSkipCredits(ctx context.Context, userID string) bool {
+	if s.modelConfigSvc != nil {
+		_, _, _, ok := s.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID)
+		return ok
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -234,14 +260,14 @@ func (s *WritingService) WriteArticle(
 		}, nil
 	}
 
-	// Deduct credits before LLM call.
-	if s.creditSvc != nil {
+	// Deduct credits before LLM call (skip if user has own model config).
+	if s.creditSvc != nil && !s.shouldSkipCredits(ctx, userID) {
 		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeArticleWrite, 1); err != nil {
 			return nil, fmt.Errorf("deduct credits: %w", err)
 		}
 	}
 
-	article, err := s.llmClient.Complete(ctx, "", result.Prompt)
+	article, err := s.getLLMClient(ctx, userID).Complete(ctx, "", result.Prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm generate article: %w", err)
 	}
@@ -313,15 +339,15 @@ func (s *WritingService) ConvertMarkdown(
 		}, nil
 	}
 
-	// Deduct credits before LLM call.
-	if s.creditSvc != nil {
+	// Deduct credits before LLM call (skip if user has own model config).
+	if s.creditSvc != nil && !s.shouldSkipCredits(ctx, userID) {
 		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeConvert, 1); err != nil {
 			return nil, fmt.Errorf("deduct credits: %w", err)
 		}
 	}
 
 	// Call LLM with the assembled prompt.
-	html, err := s.llmClient.Complete(ctx, "", prompt)
+	html, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm convert markdown: %w", err)
 	}
@@ -367,14 +393,14 @@ func (s *WritingService) HumanizeArticle(
 
 	prompt := humanizer.BuildPrompt(req)
 
-	// Deduct credits before LLM call.
-	if s.creditSvc != nil {
+	// Deduct credits before LLM call (skip if user has own model config).
+	if s.creditSvc != nil && !s.shouldSkipCredits(ctx, userID) {
 		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeHumanize, 1); err != nil {
 			return nil, fmt.Errorf("deduct credits: %w", err)
 		}
 	}
 
-	raw, err := s.llmClient.Complete(ctx, "", prompt)
+	raw, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm humanize: %w", err)
 	}
@@ -452,14 +478,14 @@ func (s *WritingService) ResearchTopics(
 
 	prompt := s.buildTopicsPrompt(positioning, keywords, count)
 
-	// Deduct credits before LLM call.
-	if s.creditSvc != nil {
+	// Deduct credits before LLM call (skip if user has own model config).
+	if s.creditSvc != nil && !s.shouldSkipCredits(ctx, userID) {
 		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeTopicResearch, 1); err != nil {
 			return nil, fmt.Errorf("deduct credits: %w", err)
 		}
 	}
 
-	raw, err := s.llmClient.Complete(ctx, "", prompt)
+	raw, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm research topics: %w", err)
 	}
@@ -494,14 +520,14 @@ func (s *WritingService) OptimizeSEO(
 
 	prompt := s.buildSEOPrompt(title, keywords, content)
 
-	// Deduct credits before LLM call.
-	if s.creditSvc != nil {
+	// Deduct credits before LLM call (skip if user has own model config).
+	if s.creditSvc != nil && !s.shouldSkipCredits(ctx, userID) {
 		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeSEO, 1); err != nil {
 			return nil, fmt.Errorf("deduct credits: %w", err)
 		}
 	}
 
-	raw, err := s.llmClient.Complete(ctx, "", prompt)
+	raw, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm seo optimize: %w", err)
 	}
@@ -554,14 +580,14 @@ func (s *WritingService) GenerateOutline(
 
 	prompt := buildOutlinePrompt(topic, template, style, keywords)
 
-	// Deduct credits before LLM call.
-	if s.creditSvc != nil {
+	// Deduct credits before LLM call (skip if user has own model config).
+	if s.creditSvc != nil && !s.shouldSkipCredits(ctx, userID) {
 		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeOutline, 1); err != nil {
 			return nil, fmt.Errorf("deduct credits: %w", err)
 		}
 	}
 
-	raw, err := s.llmClient.Complete(ctx, "", prompt)
+	raw, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm generate outline: %w", err)
 	}
