@@ -1,5 +1,5 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { CreditBalance, SignInStatus, CreditTransaction, PaginatedResponse } from '@/types'
+import type { CreditBalance, CreditPricing, SignInStatus, CreditTransaction, PaginatedResponse } from '@/types'
 
 export const creditsApi = {
   balance: () =>
@@ -13,4 +13,7 @@ export const creditsApi = {
 
   transactions: (params?: { page?: number; page_size?: number }) =>
     unwrap<PaginatedResponse<CreditTransaction>>(http.get('/credits/transactions', { params })),
+
+  pricing: () =>
+    unwrap<CreditPricing>(http.get('/credits/pricing')),
 }

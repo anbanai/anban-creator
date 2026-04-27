@@ -15,17 +15,15 @@ import (
 
 // PublishingService handles WeChat draft publishing (articles and Xiaolvshu image posts).
 type PublishingService struct {
-	repo      repository.Repository
-	creditSvc *CreditService
-	logger    *zerolog.Logger
+	repo   repository.Repository
+	logger *zerolog.Logger
 }
 
 // NewPublishingService creates a new PublishingService.
-func NewPublishingService(repo repository.Repository, creditSvc *CreditService, logger *zerolog.Logger) *PublishingService {
+func NewPublishingService(repo repository.Repository, logger *zerolog.Logger) *PublishingService {
 	return &PublishingService{
-		repo:      repo,
-		creditSvc: creditSvc,
-		logger:    logger,
+		repo:   repo,
+		logger: logger,
 	}
 }
 
@@ -126,13 +124,6 @@ func (s *PublishingService) PublishDraft(ctx context.Context, userID, channelID 
 		}
 	}
 
-	// Deduct credits before publishing.
-	if s.creditSvc != nil {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeDraftPublish, 1); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
-	}
-
 	result, err := ds.CreateDraft(draftArticles)
 	if err != nil {
 		return nil, fmt.Errorf("create draft: %w", err)
@@ -166,13 +157,6 @@ func (s *PublishingService) PublishXls(ctx context.Context, userID, channelID st
 		OpenComment:  req.OpenComment,
 		FansOnly:     req.FansOnly,
 		FromMarkdown: req.FromMarkdown,
-	}
-
-	// Deduct credits before publishing.
-	if s.creditSvc != nil {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeDraftPublish, 1); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
 	}
 
 	result, err := ds.CreateImageXls(draftReq)

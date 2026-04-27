@@ -37,3 +37,13 @@ export interface AdminGrantRequest {
   amount: number
   description: string
 }
+
+export interface CreditPricing {
+  task_costs: Record<string, number>
+  model_costs: Record<string, Record<string, number>>
+  income: {
+    daily_sign_in: number
+    register_bonus: number
+    invite_reward: number
+  }
+}

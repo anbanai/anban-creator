@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/royalrick/anbanwriter/server/model"
 )
 
 // registerImageTools registers image generation, upload, and compression tools.
@@ -129,9 +131,14 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	refPath, _ := args["ref_image_path"].(string)
 	taskID, _ := args["task_id"].(string)
 
+	provider, mdl := resolveImageModel(ctx, userID)
+	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, provider, mdl, 1); err != nil {
+		return billingError("generate image", err), nil
+	}
+
 	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID, size)
 	if err != nil {
-		return errorResult(fmt.Sprintf("generate image: %v", err)), nil
+		return billingError("generate image", err), nil
 	}
 
 	return textResult(result)
@@ -164,6 +171,11 @@ func generateBatchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (
 	}
 	if imageType == "" {
 		imageType = "content"
+	}
+
+	provider, mdl := resolveImageModel(ctx, userID)
+	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, provider, mdl, count); err != nil {
+		return billingError("batch generate images", err), nil
 	}
 
 	result, err := svcs.ImageSvc.GenerateBatch(ctx, userID, channelID, prompt, imageType, count, outputDir, refPath, taskID, size)

@@ -8,19 +8,21 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
+	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
 // CreditHandler handles credit-related HTTP endpoints.
 type CreditHandler struct {
-	service      *service.CreditService
-	adminAPIKey  string
-	logger       *zerolog.Logger
+	service     *service.CreditService
+	cfg         *config.CreditsConfig
+	adminAPIKey string
+	logger      *zerolog.Logger
 }
 
 // NewCreditHandler creates a new CreditHandler.
-func NewCreditHandler(svc *service.CreditService, adminAPIKey string, logger *zerolog.Logger) *CreditHandler {
-	return &CreditHandler{service: svc, adminAPIKey: adminAPIKey, logger: logger}
+func NewCreditHandler(svc *service.CreditService, cfg *config.CreditsConfig, adminAPIKey string, logger *zerolog.Logger) *CreditHandler {
+	return &CreditHandler{service: svc, cfg: cfg, adminAPIKey: adminAPIKey, logger: logger}
 }
 
 // Balance handles GET /api/v1/credits/balance.
@@ -146,4 +148,17 @@ func (h *CreditHandler) AdminGrant(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{"granted": true})
+}
+
+// Pricing handles GET /api/v1/credits/pricing.
+func (h *CreditHandler) Pricing(c fiber.Ctx) error {
+	return Success(c, fiber.Map{
+		"task_costs":  h.service.TaskCosts(),
+		"model_costs": h.service.ModelCosts(),
+		"income": fiber.Map{
+			"daily_sign_in":  h.cfg.DailySignIn,
+			"register_bonus": h.cfg.RegisterBonus,
+			"invite_reward":  h.cfg.InviteReward,
+		},
+	})
 }

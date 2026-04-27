@@ -132,16 +132,29 @@ credits:
     article: 4000 # cost per article task
     xls: 3200 # cost per xls task
     rednote: 3200 # cost per rednote task
-  operation_costs:
-    image_gen: 80
-    image_upload: 40
-    article_write: 400
-    convert: 160
-    humanize: 120
-    topic_research: 80
-    seo: 80
-    draft_publish: 40
-    outline: 80
+  model_costs:
+    image_gen:
+      "volcengine/doubao-seedream-5-0-260128": 50
+      "openai/dall-e-3": 120
+      "gemini/gemini-2.0-flash": 80
+    article_write:
+      "glm-5-turbo": 300
+      "glm-5.1": 400
+    convert:
+      "glm-5-turbo": 100
+      "glm-5.1": 160
+    humanize:
+      "glm-5-turbo": 80
+      "glm-5.1": 120
+    topic_research:
+      "glm-5-turbo": 60
+      "glm-5.1": 80
+    seo:
+      "glm-5-turbo": 60
+      "glm-5.1": 80
+    outline:
+      "glm-5-turbo": 60
+      "glm-5.1": 80
   admin_api_key: "" # API key for admin credit grant endpoint (also via ANBAN_SERVER_CREDITS_ADMIN_API_KEY)
 
 # ---------------------------------------------------------------------------

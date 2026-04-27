@@ -5,6 +5,8 @@ import (
 	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/royalrick/anbanwriter/server/model"
 )
 
 // registerWritingTools registers article writing, conversion, humanization, topic research, SEO, outline generation, and scoring tools.
@@ -136,9 +138,14 @@ func writeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	articleType, _ := args["article_type"].(string)
 	length, _ := args["length"].(string)
 
+	provider, mdl := resolveTextModel(ctx, userID)
+	if err := maybeDeduct(ctx, userID, model.CreditTypeArticleWrite, provider, mdl, 1); err != nil {
+		return billingError("write article", err), nil
+	}
+
 	result, err := svcs.WritingSvc.WriteArticle(ctx, userID, channelID, topic, inputType, articleType, length)
 	if err != nil {
-		return creditsErrorResult("write article", err), nil
+		return billingError("write article", err), nil
 	}
 
 	return textResult(result)
@@ -162,9 +169,14 @@ func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 
 	theme, _ := args["theme"].(string)
 
+	provider, mdl := resolveTextModel(ctx, userID)
+	if err := maybeDeduct(ctx, userID, model.CreditTypeConvert, provider, mdl, 1); err != nil {
+		return billingError("convert markdown", err), nil
+	}
+
 	result, err := svcs.WritingSvc.ConvertMarkdown(ctx, userID, channelID, markdown, theme)
 	if err != nil {
-		return creditsErrorResult("convert markdown", err), nil
+		return billingError("convert markdown", err), nil
 	}
 
 	return textResult(result)
@@ -188,9 +200,14 @@ func humanizeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 
 	intensity, _ := args["intensity"].(string)
 
+	provider, mdl := resolveTextModel(ctx, userID)
+	if err := maybeDeduct(ctx, userID, model.CreditTypeHumanize, provider, mdl, 1); err != nil {
+		return billingError("humanize article", err), nil
+	}
+
 	result, err := svcs.WritingSvc.HumanizeArticle(ctx, userID, channelID, content, intensity)
 	if err != nil {
-		return creditsErrorResult("humanize article", err), nil
+		return billingError("humanize article", err), nil
 	}
 
 	return textResult(result)
@@ -223,9 +240,14 @@ func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		count = int(v)
 	}
 
+	provider, mdl := resolveTextModel(ctx, userID)
+	if err := maybeDeduct(ctx, userID, model.CreditTypeTopicResearch, provider, mdl, 1); err != nil {
+		return billingError("research topics", err), nil
+	}
+
 	result, err := svcs.WritingSvc.ResearchTopics(ctx, userID, channelID, keywords, domain, count)
 	if err != nil {
-		return creditsErrorResult("research topics", err), nil
+		return billingError("research topics", err), nil
 	}
 
 	return textResult(result)
@@ -260,9 +282,14 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		}
 	}
 
+	provider, mdl := resolveTextModel(ctx, userID)
+	if err := maybeDeduct(ctx, userID, model.CreditTypeSEO, provider, mdl, 1); err != nil {
+		return billingError("optimize seo", err), nil
+	}
+
 	result, err := svcs.WritingSvc.OptimizeSEO(ctx, userID, channelID, content, title, keywords)
 	if err != nil {
-		return creditsErrorResult("optimize seo", err), nil
+		return billingError("optimize seo", err), nil
 	}
 
 	return textResult(result)
@@ -287,9 +314,14 @@ func generateOutlineHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	template, _ := args["template"].(string)
 	style, _ := args["style"].(string)
 
+	provider, mdl := resolveTextModel(ctx, userID)
+	if err := maybeDeduct(ctx, userID, model.CreditTypeOutline, provider, mdl, 1); err != nil {
+		return billingError("generate outline", err), nil
+	}
+
 	result, err := svcs.WritingSvc.GenerateOutline(ctx, userID, channelID, topic, template, style)
 	if err != nil {
-		return creditsErrorResult("generate outline", err), nil
+		return billingError("generate outline", err), nil
 	}
 
 	return textResult(result)

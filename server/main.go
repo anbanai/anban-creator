@@ -189,7 +189,7 @@ func main() {
 		channelSvc = service.NewChannelService(repo, log)
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
 		feedbackSvc = service.NewFeedbackService(repo, log)
-		publishingSvc = service.NewPublishingService(repo, creditSvc, log)
+		publishingSvc = service.NewPublishingService(repo, log)
 
 		// Create Asynq client if Redis is available.
 		if rdb != nil {
@@ -236,7 +236,7 @@ func main() {
 		channelHandler = handler.NewChannelHandler(channelSvc, log)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
-			creditHandler = handler.NewCreditHandler(creditSvc, cfg.Credits.AdminAPIKey, log)
+			creditHandler = handler.NewCreditHandler(creditSvc, &cfg.Credits, cfg.Credits.AdminAPIKey, log)
 		}
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
@@ -259,12 +259,12 @@ func main() {
 		var writingSvc *service.WritingService
 
 		if store != nil {
-			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, creditSvc, log)
+			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, log)
 			if modelConfigSvc != nil {
 				imageSvc.SetModelConfigService(modelConfigSvc)
 			}
 		}
-		if repo != nil && creditSvc != nil {
+		if repo != nil {
 			// Create LLM client for writing operations.
 			// Prefer config.yaml writing section; fall back to env vars.
 			llmBaseURL := cfg.Writing.BaseURL
@@ -284,7 +284,7 @@ func main() {
 			}
 			if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
 				llmClient := service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel)
-				writingSvc = service.NewWritingService(repo, creditSvc, llmClient, log)
+				writingSvc = service.NewWritingService(repo, llmClient, log)
 				if modelConfigSvc != nil {
 					writingSvc.SetModelConfigService(modelConfigSvc)
 				}
@@ -303,6 +303,7 @@ func main() {
 			PublishingSvc: publishingSvc,
 			WorkspaceSvc:  workspaceSvc,
 		})
+		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").

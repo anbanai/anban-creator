@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,19 +15,6 @@ import (
 
 	"github.com/royalrick/anbanwriter/server/service"
 )
-
-// insufficientCreditsMsg is the Chinese guidance message for credit errors.
-const insufficientCreditsMsg = "积分不足，请前往 https://creator.anbanai.com 充值"
-
-// creditsErrorResult checks if err wraps ErrInsufficientCredits.
-// If so, returns an errorResult with recharge guidance.
-// Otherwise, returns an errorResult with the formatted prefix and error.
-func creditsErrorResult(prefix string, err error) *mcp.CallToolResult {
-	if errors.Is(err, service.ErrInsufficientCredits) {
-		return errorResult(fmt.Sprintf("%s: %s", prefix, insufficientCreditsMsg))
-	}
-	return errorResult(fmt.Sprintf("%s: %v", prefix, err))
-}
 
 // statusWriter wraps http.ResponseWriter to capture the status code.
 type statusWriter struct {
@@ -132,9 +117,13 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *
 		if apiKeySvc != nil {
 			apiKey, err := apiKeySvc.Validate(ctx, token)
 			if err == nil && apiKey != nil {
+				scopes := []string{"mcp"}
+				if apiKey.IsManaged {
+					scopes = append(scopes, "managed")
+				}
 				return &auth.TokenInfo{
 					UserID:     apiKey.UserID,
-					Scopes:     []string{"mcp"},
+					Scopes:     scopes,
 					Expiration: time.Now().Add(10 * 365 * 24 * time.Hour), // API keys don't expire
 				}, nil
 			}
@@ -201,3 +190,17 @@ func noopLogger() *slog.Logger {
 type ioDiscard struct{}
 
 func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
+
+// isManagedCall returns true if the MCP call is from a managed key (agent task execution).
+func isManagedCall(ctx context.Context) bool {
+	info := auth.TokenInfoFromContext(ctx)
+	if info == nil {
+		return false
+	}
+	for _, s := range info.Scopes {
+		if s == "managed" {
+			return true
+		}
+	}
+	return false
+}

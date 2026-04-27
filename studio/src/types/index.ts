@@ -41,6 +41,7 @@ export type { TimelineItemType, TimelineItem, TimelineResponse } from './timelin
 export type {
   CreditTransactionType,
   CreditBalance,
+  CreditPricing,
   SignInStatus,
   CreditTransaction,
   AdminGrantRequest,

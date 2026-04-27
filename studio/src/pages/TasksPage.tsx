@@ -33,12 +33,6 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已取消', value: 'cancelled' },
 ]
 
-const taskCostMap: Record<string, number> = {
-  article: 4000,
-  xls: 3200,
-  rednote: 3200,
-}
-
 export default function TasksPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -65,6 +59,13 @@ export default function TasksPage() {
     queryKey: ['credits', 'balance'],
     queryFn: () => api.credits.balance(),
   })
+
+  const { data: pricing } = useQuery({
+    queryKey: ['credits', 'pricing'],
+    queryFn: () => api.credits.pricing(),
+  })
+
+  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3200
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
@@ -403,7 +404,7 @@ export default function TasksPage() {
 
               {/* Cost display */}
               {(() => {
-                const cost = taskCostMap[watchedType] ?? 3200
+                const cost = taskCostFor(watchedType)
                 const totalCost = cost * quantity
                 const balance = creditsBalance?.balance ?? 0
                 const remaining = balance - totalCost
@@ -433,7 +434,7 @@ export default function TasksPage() {
               form="task-create-form"
               loading={createMutation.isPending}
               disabled={(() => {
-                const cost = taskCostMap[watchedType] ?? 3200
+                const cost = taskCostFor(watchedType)
                 const totalCost = cost * quantity
                 const balance = creditsBalance?.balance ?? 0
                 return balance - totalCost < 0

@@ -148,12 +148,35 @@ type DockerConfig struct {
 
 // CreditsConfig holds credits/points system configuration.
 type CreditsConfig struct {
-	DailySignIn    int            `yaml:"daily_sign_in"`    // credits awarded per daily sign-in (default 1024)
-	RegisterBonus  int            `yaml:"register_bonus"`   // credits awarded on registration (default 4096)
-	InviteReward   int            `yaml:"invite_reward"`    // credits awarded to inviter when invitee registers (default 2048)
-	TaskCosts      map[string]int `yaml:"task_costs"`       // per-task-type costs, e.g. {"article": 4000, "xls": 3200, "rednote": 3200}
-	OperationCosts map[string]int `yaml:"operation_costs"`  // per-operation costs for MCP tools, e.g. {"image_gen": 10, "article_write": 50}
-	AdminAPIKey    string         `yaml:"admin_api_key"`    // API key for admin credit grant endpoint
+	DailySignIn   int                       `yaml:"daily_sign_in"`    // credits awarded per daily sign-in (default 1024)
+	RegisterBonus int                       `yaml:"register_bonus"`   // credits awarded on registration (default 4096)
+	InviteReward  int                       `yaml:"invite_reward"`    // credits awarded to inviter when invitee registers (default 2048)
+	TaskCosts     map[string]int            `yaml:"task_costs"`       // per-task-type costs, e.g. {"article": 4000, "xls": 3200, "rednote": 3200}
+	ModelCosts    map[string]map[string]int `yaml:"model_costs"`     // per-model costs, key format: "provider/model"
+	AdminAPIKey   string                    `yaml:"admin_api_key"`    // API key for admin credit grant endpoint
+}
+
+// ModelCost returns the per-operation cost for a specific model.
+// Returns (0, false) if no pricing is configured for this operation/model pair.
+func (c *CreditsConfig) ModelCost(opType, provider, model string) (int, bool) {
+	if c.ModelCosts == nil {
+		return 0, false
+	}
+	models, ok := c.ModelCosts[opType]
+	if !ok {
+		return 0, false
+	}
+	// Try with provider prefix first: "provider/model"
+	if provider != "" {
+		if cost, ok := models[provider+"/"+model]; ok {
+			return cost, true
+		}
+	}
+	// Try with just model name
+	if cost, ok := models[model]; ok {
+		return cost, true
+	}
+	return 0, false
 }
 
 // CORSConfig holds Cross-Origin Resource Sharing configuration.
@@ -267,19 +290,7 @@ func (c *Config) applyDefaults() {
 			"rednote": 3200,
 		}
 	}
-	if c.Credits.OperationCosts == nil {
-		c.Credits.OperationCosts = map[string]int{
-			"image_gen":      80,
-			"image_upload":   40,
-			"article_write":  400,
-			"convert":        160,
-			"humanize":       120,
-			"topic_research": 80,
-			"seo":            80,
-			"draft_publish":  40,
-			"outline":        80,
-			}
-	}
+
 
 	// Asynq defaults.
 	if c.Asynq.Concurrency == 0 {

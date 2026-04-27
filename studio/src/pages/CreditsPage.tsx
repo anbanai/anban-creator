@@ -4,13 +4,13 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { toast } from 'sonner'
 import { Loader2, CreditCard } from 'lucide-react'
 import { api } from '@/lib/api'
-import type { CreditTransaction } from '@/types'
+import type { CreditTransaction, CreditPricing } from '@/types'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import Badge from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
-import { formatFullDateTimeCN, transactionTypeLabel } from '@/lib/labels'
+import { formatFullDateTimeCN, transactionTypeLabel, operationLabel, taskTypeLabelCN } from '@/lib/labels'
 import PageHeader from '@/components/layout/PageHeader'
 
 function transactionBadgeVariant(type: string) {
@@ -56,10 +56,15 @@ export default function CreditsPage() {
     queryFn: () => api.credits.transactions({ page, page_size: PAGE_SIZE }),
   })
 
+  const { data: pricing } = useQuery({
+    queryKey: ['credits', 'pricing'],
+    queryFn: () => api.credits.pricing(),
+  })
+
   const signInMutation = useMutation({
     mutationFn: () => api.credits.signIn(),
     onSuccess: () => {
-      toast.success('签到成功，积分 +1024')
+      toast.success(`签到成功，积分 +${dailySignInCredits}`)
       queryClient.invalidateQueries({ queryKey: ['credits'] })
     },
     onError: () => {
@@ -67,6 +72,7 @@ export default function CreditsPage() {
     },
   })
 
+  const dailySignInCredits = pricing?.income.daily_sign_in ?? 1024
   const balance = balanceData?.balance ?? 0
   const signedInToday = signInStatusData?.signed_in_today ?? false
   const transactions = transactionsData?.items ?? []
@@ -96,7 +102,7 @@ export default function CreditsPage() {
               disabled={signedInToday || signInMutation.isPending}
               loading={signInMutation.isPending}
             >
-              {signedInToday ? '已签到' : '签到 +1024'}
+              {signedInToday ? '已签到' : `签到 +${dailySignInCredits}`}
             </Button>
           </div>
         </CardBody>
@@ -149,6 +155,9 @@ export default function CreditsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Pricing guide */}
+      {pricing && <PricingGuide pricing={pricing} />}
 
       {/* Transaction history */}
       <Card>
@@ -214,5 +223,101 @@ export default function CreditsPage() {
         )}
       </Card>
     </div>
+  )
+}
+
+function PricingGuide({ pricing }: { pricing: CreditPricing }) {
+  const taskCosts = Object.entries(pricing.task_costs)
+  const modelOps = Object.entries(pricing.model_costs)
+  const income = pricing.income
+
+  // Collect unique text models across all text operations
+  const textModels = new Map<string, number[]>()
+  for (const [op, models] of modelOps) {
+    if (op === 'image_gen') continue
+    for (const [model, cost] of Object.entries(models)) {
+      const costs = textModels.get(model) ?? []
+      costs.push(cost)
+      textModels.set(model, costs)
+    }
+  }
+
+  return (
+    <Card>
+      <div className="border-b border-border px-4 py-3">
+        <h2 className="text-sm font-semibold text-foreground">计费说明</h2>
+      </div>
+      <CardBody className="space-y-5 text-sm">
+        {/* Task costs */}
+        <div>
+          <p className="mb-2 font-medium text-foreground">任务费（Web 端创建任务，包含所有操作）</p>
+          <div className="space-y-1">
+            {taskCosts.map(([type, cost]) => (
+              <div key={type} className="flex justify-between text-muted-foreground">
+                <span>{taskTypeLabelCN[type] ?? type}</span>
+                <span className="font-medium text-foreground">{cost.toLocaleString()} 积分</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Image model costs */}
+        {modelOps.some(([op]) => op === 'image_gen') && (
+          <div>
+            <p className="mb-2 font-medium text-foreground">图片生成（使用平台模型按次扣费）</p>
+            <div className="space-y-1">
+              {(modelOps.find(([op]) => op === 'image_gen')?.[1] ?? []).map(([model, cost]) => (
+                <div key={model} className="flex justify-between text-muted-foreground">
+                  <span>{model}</span>
+                  <span className="font-medium text-foreground">{cost} 积分/张</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Text operation costs */}
+        {textModels.size > 0 && (
+          <div>
+            <p className="mb-2 font-medium text-foreground">文本操作（使用平台模型按次扣费）</p>
+            <div className="space-y-3">
+              {Array.from(textModels.entries()).map(([model, costs]) => (
+                <div key={model}>
+                  <p className="mb-1 text-xs text-muted-foreground">{model}</p>
+                  <div className="space-y-0.5">
+                    {modelOps.filter(([op]) => op !== 'image_gen').map(([op, models], idx) => {
+                      const cost = models[model]
+                      if (cost === undefined) return null
+                      return (
+                        <div key={op} className="flex justify-between text-muted-foreground">
+                          <span>{operationLabel[op] ?? op}</span>
+                          <span className="font-medium text-foreground">{cost} 积分</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Free items */}
+        <div className="rounded-lg border border-dashed border-border p-3 space-y-1">
+          <p className="text-muted-foreground">图片上传、草稿发布 → 免费</p>
+          <p className="text-muted-foreground">使用自己的模型（BYOK）→ 全部免费</p>
+        </div>
+
+        {/* Income sources */}
+        <div>
+          <p className="mb-2 font-medium text-foreground">积分获取</p>
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground">
+            <span>每日签到 <span className="font-medium text-foreground">+{income.daily_sign_in.toLocaleString()}</span></span>
+            <span>注册奖励 <span className="font-medium text-foreground">+{income.register_bonus.toLocaleString()}</span></span>
+            <span>邀请奖励 <span className="font-medium text-foreground">+{income.invite_reward.toLocaleString()}</span></span>
+          </div>
+        </div>
+      </CardBody>
+    </Card>
   )
 }

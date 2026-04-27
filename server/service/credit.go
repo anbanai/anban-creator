@@ -321,23 +321,23 @@ func (s *CreditService) TaskCost(taskType string) (int, bool) {
 	return cost, ok
 }
 
-var (
-	ErrUnknownOperation = errors.New("unknown operation type for credit costing")
-)
-
-// OperationCost returns the credit cost for a per-operation MCP tool call.
-func (s *CreditService) OperationCost(opType string) (int, bool) {
-	cost, ok := s.cfg.OperationCosts[opType]
-	return cost, ok
+// TaskCosts returns the configured per-task-type costs.
+func (s *CreditService) TaskCosts() map[string]int {
+	return s.cfg.TaskCosts
 }
 
-// DeductForOperation deducts credits for a single MCP tool operation (e.g. image_gen, article_write).
-func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType string, count int) (int, error) {
-	cost, ok := s.cfg.OperationCosts[opType]
-	if !ok {
-		return 0, ErrUnknownOperation
+// ModelCosts returns the configured per-model costs.
+func (s *CreditService) ModelCosts() map[string]map[string]int {
+	return s.cfg.ModelCosts
+}
+
+// DeductForOperation deducts credits for a single MCP tool operation.
+// The amount parameter is the total credits to deduct (already calculated by the caller).
+func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType string, amount int) (int, error) {
+	if amount <= 0 {
+		return 0, ErrInvalidAmount
 	}
-	totalCost := cost * count
+	totalCost := amount
 
 	var newBalance int
 	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
@@ -352,11 +352,11 @@ func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType s
 		}
 
 		tx := &model.CreditTransaction{
-			UserID:      userID,
-			Type:        opType,
-			Amount:      -totalCost,
+			UserID:       userID,
+			Type:         opType,
+			Amount:       -totalCost,
 			BalanceAfter: newBalance,
-			Description: fmt.Sprintf("操作扣费 (%s) x%d -%d", opType, count, totalCost),
+			Description:  fmt.Sprintf("操作扣费 (%s) -%d", opType, totalCost),
 		}
 		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 			return fmt.Errorf("create deduction transaction: %w", err)
@@ -367,6 +367,6 @@ func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType s
 		return 0, err
 	}
 
-	s.logger.Info().Str("user_id", userID).Str("op_type", opType).Int("count", count).Int("cost", totalCost).Int("balance", newBalance).Msg("credits deducted for operation")
+	s.logger.Info().Str("user_id", userID).Str("op_type", opType).Int("amount", totalCost).Int("balance", newBalance).Msg("credits deducted for operation")
 	return newBalance, nil
 }

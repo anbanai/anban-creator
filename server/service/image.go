@@ -82,7 +82,6 @@ type ImageService struct {
 	imageCfg       *srvconfig.ImageAPIConfig
 	storage        storage.Provider
 	repo           repository.Repository
-	creditSvc      *CreditService
 	modelConfigSvc *ModelConfigService
 	logger         *zerolog.Logger
 }
@@ -92,30 +91,19 @@ func NewImageService(
 	imageCfg *srvconfig.ImageAPIConfig,
 	store storage.Provider,
 	repo repository.Repository,
-	creditSvc *CreditService,
 	logger *zerolog.Logger,
 ) *ImageService {
 	return &ImageService{
-		imageCfg:  imageCfg,
-		storage:   store,
-		repo:      repo,
-		creditSvc: creditSvc,
-		logger:    logger,
+		imageCfg: imageCfg,
+		storage:  store,
+		repo:     repo,
+		logger:   logger,
 	}
 }
 
 // SetModelConfigService sets the model config service for per-user AI model overrides.
 func (s *ImageService) SetModelConfigService(svc *ModelConfigService) {
 	s.modelConfigSvc = svc
-}
-
-// shouldSkipImageCredits returns true if the user has a fully configured image model
-// (provider + api_key + model) and should not be charged credits.
-func (s *ImageService) shouldSkipImageCredits(ctx context.Context, userID string) bool {
-	if s.modelConfigSvc != nil {
-		return s.modelConfigSvc.HasCompleteImageOverride(ctx, userID)
-	}
-	return false
 }
 
 // resolveToLocalFile downloads a remote URL or decodes a data URL to a temp file.
@@ -196,13 +184,6 @@ func (s *ImageService) GenerateImage(
 		processor.SetRefImage(refPath)
 	}
 
-	// Deduct credits before generation (skip if user has own image model config).
-	if s.creditSvc != nil && !s.shouldSkipImageCredits(ctx, userID) {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, 1); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
-	}
-
 	var rawResult *image.GenerateRawResult
 	if size != "" {
 		rawResult, err = processor.GenerateRawWithSize(prompt, size)
@@ -264,13 +245,6 @@ func (s *ImageService) GenerateBatch(
 
 	if refPath != "" {
 		processor.SetRefImage(refPath)
-	}
-
-	// Deduct credits before generation (skip if user has own image model config).
-	if s.creditSvc != nil && !s.shouldSkipImageCredits(ctx, userID) {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, count); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
 	}
 
 	rawResults, err := processor.GenerateBatchRaw(prompt, count, size)
@@ -337,13 +311,6 @@ func (s *ImageService) UploadImage(
 	processor, err := s.buildProcessor(ctx, ch, "content")
 	if err != nil {
 		return nil, err
-	}
-
-	// Deduct credits before upload.
-	if s.creditSvc != nil {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageUpload, 1); err != nil {
-			return nil, fmt.Errorf("deduct credits: %w", err)
-		}
 	}
 
 	result, err := processor.UploadLocalImage(filePath)
@@ -437,13 +404,6 @@ func (s *ImageService) DownloadImage(
 			processor, err := s.buildProcessor(ctx, ch, "content")
 			if err != nil {
 				return nil, err
-			}
-
-			// Deduct credits before download+upload.
-			if s.creditSvc != nil {
-				if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageUpload, 1); err != nil {
-					return nil, fmt.Errorf("deduct credits: %w", err)
-				}
 			}
 
 			result, err := processor.DownloadAndUpload(url)

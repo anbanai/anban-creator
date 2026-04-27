@@ -49,6 +49,22 @@ export const transactionTypeLabel: Record<CreditTransactionType, string> = {
   outline: '大纲生成',
 }
 
+export const operationLabel: Record<string, string> = {
+  image_gen: 'AI 生图',
+  article_write: '文章写作',
+  convert: '格式转换',
+  humanize: '文章润色',
+  topic_research: '选题研究',
+  seo: 'SEO 优化',
+  outline: '大纲生成',
+}
+
+export const taskTypeLabelCN: Record<string, string> = {
+  article: '公众号文章',
+  xls: '小绿书',
+  rednote: '小红书',
+}
+
 // --- Single Source of Truth for Content Types ---
 
 export const contentTypes = {

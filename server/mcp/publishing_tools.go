@@ -149,9 +149,10 @@ func publishXlsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		}
 	}
 
+	content, _ := args["content"].(string)
 	publishReq := service.XlsPublishRequest{
 		Title:    title,
-		Content:  args["content"].(string),
+		Content:  content,
 		Images:   images,
 		MediaIDs: mediaIDs,
 	}
