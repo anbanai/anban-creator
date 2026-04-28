@@ -35,8 +35,8 @@ func (c *ImageUserConfig) HasConfig() bool {
 type UserModelConfig struct {
 	ID                   string    `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID               string    `gorm:"type:char(36);uniqueIndex;not null" json:"user_id"`
-	TextConfigEncrypted  []byte    `gorm:"type:text" json:"-"`
-	ImageConfigEncrypted []byte    `gorm:"type:text" json:"-"`
+	TextConfigEncrypted  []byte    `gorm:"type:blob" json:"-"`
+	ImageConfigEncrypted []byte    `gorm:"type:blob" json:"-"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 }
