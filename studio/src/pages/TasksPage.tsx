@@ -97,7 +97,7 @@ export default function TasksPage() {
     if (channels.length > 0) return
 
     setModalOpen(false)
-    toast.error('请先创建一个频道，再开始新建任务。')
+    toast.error('请先创建一个账号，再开始新建任务。')
     navigate('/channels')
   }, [channels.length, modalOpen, navigate])
 
@@ -140,7 +140,7 @@ export default function TasksPage() {
 
   function openCreate() {
     if (channels.length === 0) {
-      toast.error('请先创建一个频道，再开始新建任务。')
+      toast.error('请先创建一个账号，再开始新建任务。')
       navigate('/channels')
       return
     }
@@ -245,14 +245,14 @@ export default function TasksPage() {
           description={
             statusFilter === 'all'
               ? channels.length === 0
-                ? '先创建一个频道，再开始生成内容。'
+                ? '先创建一个账号，再开始生成内容。'
                 : '创建任务开始生成内容。'
               : '尝试其他筛选条件或创建新任务。'
           }
           action={
             statusFilter === 'all'
               ? channels.length === 0
-                ? { label: '去创建频道', onClick: () => navigate('/channels') }
+                ? { label: '去创建账号', onClick: () => navigate('/channels') }
                 : { label: '新建任务', onClick: openCreate }
               : undefined
           }
@@ -334,7 +334,7 @@ export default function TasksPage() {
             <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
               <FormField control={form.control} name="channel_id" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>频道</FormLabel>
+                  <FormLabel>账号</FormLabel>
                   <FormControl>
                     <ChannelSelector
                       value={field.value || ''}
@@ -359,7 +359,7 @@ export default function TasksPage() {
                 <FormItem>
                   <FormLabel>创作要求（可选）</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="描述你的创作要求，留空则根据频道信息自动生成" {...field} />
+                    <Textarea placeholder="描述你的创作要求，留空则根据账号信息自动生成" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

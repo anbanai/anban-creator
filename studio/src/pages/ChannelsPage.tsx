@@ -3,7 +3,7 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Loader2, Inbox, ChevronDown, BookOpen, PenLine, FileImage } from 'lucide-react'
+import { Plus, Loader2, Inbox, ChevronDown } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
 import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig } from '@/types'
@@ -23,17 +23,8 @@ import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
+import { renderPlatformIcon } from '@/lib/PlatformIcon'
 
-const platformIcons: Record<string, typeof BookOpen> = {
-  rednote: BookOpen,
-  article: PenLine,
-  xls: FileImage,
-}
-const platformIconColors: Record<string, string> = {
-  rednote: 'text-[#FF2442]',
-  article: 'text-[#07C160]',
-  xls: 'text-primary',
-}
 const platformOptions = [
   { value: 'rednote', label: '小红书' },
   { value: 'article', label: '公众号' },
@@ -219,13 +210,13 @@ export default function ChannelsPage() {
   const createMutation = useMutation({
     mutationFn: (data: CreateChannelRequest) => api.channels.create(data),
     onSuccess: () => {
-      toast.success('频道创建成功')
+      toast.success('账号创建成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
     },
     onError: (err) => {
-      toast.error(getApiErrorMessage(err, '创建频道失败，请重试'))
+      toast.error(getApiErrorMessage(err, '创建账号失败，请重试'))
     },
   })
 
@@ -233,20 +224,20 @@ export default function ChannelsPage() {
     mutationFn: ({ id, data }: { id: string; data: Partial<CreateChannelRequest> }) =>
       api.channels.update(id, data),
     onSuccess: () => {
-      toast.success('频道更新成功')
+      toast.success('账号更新成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
     },
     onError: () => {
-      toast.error('更新频道失败，请重试')
+      toast.error('更新账号失败，请重试')
     },
   })
 
   const archiveMutation = useMutation({
     mutationFn: (id: string) => api.channels.archive(id),
     onSuccess: () => {
-      toast.success('频道已归档')
+      toast.success('账号已归档')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
     },
@@ -255,7 +246,7 @@ export default function ChannelsPage() {
   const restoreMutation = useMutation({
     mutationFn: (id: string) => api.channels.restore(id),
     onSuccess: () => {
-      toast.success('频道已恢复')
+      toast.success('账号已恢复')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
     },
@@ -264,7 +255,7 @@ export default function ChannelsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.channels.delete(id),
     onSuccess: () => {
-      toast.success('频道已删除')
+      toast.success('账号已删除')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       setDeleteTarget(null)
@@ -353,10 +344,10 @@ export default function ChannelsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="频道" description="管理你的内容频道和账号配置。">
+      <PageHeader title="账号" description="管理你的内容账号和发布配置。">
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4" />
-          新建频道
+          新建账号
         </Button>
       </PageHeader>
 
@@ -382,10 +373,10 @@ export default function ChannelsPage() {
       ) : !channels || channels.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title={statusFilter === 'all' ? '还没有频道' : statusFilter === 'active' ? '没有活跃的频道' : '没有已归档的频道'}
-          description="创建你的第一个内容频道开始创作。"
-          action={{ label: '新建频道', onClick: openCreate }}
-          note="配置好频道后，任务和计划都会自动继承对应的平台参数。"
+          title={statusFilter === 'all' ? '还没有账号' : statusFilter === 'active' ? '没有活跃的账号' : '没有已归档的账号'}
+          description="创建你的第一个内容账号开始创作。"
+          action={{ label: '新建账号', onClick: openCreate }}
+          note="配置好账号后，任务和计划都会自动继承对应的平台参数。"
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -409,13 +400,13 @@ export default function ChannelsPage() {
       <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingChannel ? '编辑频道' : '新建频道'}</DialogTitle>
+            <DialogTitle>{editingChannel ? '编辑账号' : '新建账号'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
             <form id="channel-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="platform" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>平台</FormLabel>
+                <FormItem className="flex items-center gap-3 space-y-0">
+                  <FormLabel className="shrink-0 w-20 text-right">平台</FormLabel>
                   <FormControl>
                     <Select
                       value={field.value}
@@ -428,20 +419,24 @@ export default function ChannelsPage() {
                       disabled={!!editingChannel}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择平台" />
+                        {selectedPlatform ? (
+                          <span className="flex items-center gap-1.5">
+                            {renderPlatformIcon(selectedPlatform)}
+                            {platformOptions.find(o => o.value === selectedPlatform)?.label || selectedPlatform}
+                          </span>
+                        ) : (
+                          <SelectValue placeholder="选择平台" />
+                        )}
                       </SelectTrigger>
                       <SelectContent>
-                        {platformOptions.map((opt) => {
-                          const PIcon = platformIcons[opt.value]
-                          return (
-                            <SelectItem key={opt.value} value={opt.value} label={opt.label}>
-                              <span className="flex items-center gap-1.5">
-                                {PIcon && <PIcon className={`h-3.5 w-3.5 ${platformIconColors[opt.value]}`} />}
-                                {opt.label}
-                              </span>
-                            </SelectItem>
-                          )
-                        })}
+                        {platformOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value} label={opt.label}>
+                            <span className="flex items-center gap-1.5">
+                              {renderPlatformIcon(opt.value)}
+                              {opt.label}
+                            </span>
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </FormControl>
@@ -482,8 +477,8 @@ export default function ChannelsPage() {
               )} />
 
               <FormField control={form.control} name="name" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>频道名称</FormLabel>
+                <FormItem className="flex items-center gap-3 space-y-0">
+                  <FormLabel className="shrink-0 w-20 text-right">账号名称</FormLabel>
                   <FormControl>
                     <Input placeholder="例如 我的科技博客" {...field} />
                   </FormControl>
@@ -492,8 +487,8 @@ export default function ChannelsPage() {
               )} />
 
               <FormField control={form.control} name="avatar_url" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>头像</FormLabel>
+                <FormItem className="flex items-center gap-3 space-y-0">
+                  <FormLabel className="shrink-0 w-20 text-right">头像</FormLabel>
                   <FormControl>
                     <Input placeholder="自动获取或手动填写 URL" {...field} />
                   </FormControl>
@@ -539,6 +534,11 @@ export default function ChannelsPage() {
                           {field.value
                             ? '开启后，任务完成后将自动发布到公众号'
                             : '未配置微信凭证，将无法使用自动发布到公众号功能'}
+                          {field.value && (
+                            <span className="mt-1 block">
+                              请前往<a href="https://developers.weixin.qq.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">微信开发者</a>添加 API IP 白名单：47.108.177.204
+                            </span>
+                          )}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -656,8 +656,8 @@ export default function ChannelsPage() {
                   )} />}
 
                   <FormField control={form.control} name="author" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>作者名</FormLabel>
+                    <FormItem className="flex items-center gap-3 space-y-0">
+                      <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>
                       <FormControl>
                         <Input placeholder="例如 张三" {...field} />
                       </FormControl>
@@ -696,8 +696,8 @@ export default function ChannelsPage() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确定要删除此频道吗？</AlertDialogTitle>
-            <AlertDialogDescription>此操作不可撤销。删除后频道及其所有配置将永久移除。</AlertDialogDescription>
+            <AlertDialogTitle>确定要删除此账号吗？</AlertDialogTitle>
+            <AlertDialogDescription>此操作不可撤销。删除后账号及其所有配置将永久移除。</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>

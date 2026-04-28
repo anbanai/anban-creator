@@ -60,7 +60,7 @@ export const operationLabel: Record<string, string> = {
 }
 
 export const taskTypeLabelCN: Record<string, string> = {
-  article: '微信公众号',
+  article: '公众号',
   xls: '小绿书',
   rednote: '小红书',
 }
@@ -69,7 +69,7 @@ export const taskTypeLabelCN: Record<string, string> = {
 
 export const contentTypes = {
   rednote: { label: '小红书', platform: '小红书' },
-  article: { label: '公众号', platform: '微信' },
+  article: { label: '公众号', platform: '公众号' },
   xls: { label: '小绿书', platform: '小绿书' },
 } as const satisfies Record<TaskType, { label: string; platform: string }>
 

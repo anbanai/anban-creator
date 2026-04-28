@@ -75,7 +75,7 @@ export default function OpenClawGuide() {
       <StepCard step={5} title="运行 /init">
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            安装并配置好 Key 后，运行 `/init`，让插件检查 API Key、MCP 服务和频道连接：
+            安装并配置好 Key 后，运行 `/init`，让插件检查 API Key、MCP 服务和账号连接：
           </p>
           <CodeBlock code="/init" />
         </div>

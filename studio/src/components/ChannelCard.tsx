@@ -33,6 +33,12 @@ const platformHoverBorderColor: Record<string, string> = {
   rednote: 'hover:border-l-[#FF2442]/50',
 }
 
+const platformBgColor: Record<string, string> = {
+  article: 'bg-[#07C160]/10',
+  xls: 'bg-[#34C759]/10',
+  rednote: 'bg-[#FF2442]/10',
+}
+
 export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {
   const platformLabel = platformLabels[channel.platform] || channel.platform
   const platformBadge = platformBadgeVariant[channel.platform] || ('neutral' as const)
@@ -50,8 +56,8 @@ export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onAr
               className="h-11 w-11 rounded-full object-cover ring-1 ring-border"
             />
           ) : (
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-              {channel.name.charAt(0)}
+            <div className={`flex h-11 w-11 items-center justify-center rounded-full ${platformBgColor[channel.platform] || 'bg-primary/10'}`}>
+              {renderPlatformIcon(channel.platform)}
             </div>
           )}
           <div>
@@ -78,22 +84,22 @@ export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onAr
       )}
       <div className="mt-3 flex gap-1.5">
         {onEdit && (
-          <Button variant="ghost" size="xs" onClick={() => onEdit(channel)} aria-label="编辑频道">
+          <Button variant="ghost" size="xs" onClick={() => onEdit(channel)} aria-label="编辑账号">
             编辑
           </Button>
         )}
         {channel.status === 'active' && onArchive && (
-          <Button variant="ghost" size="xs" disabled={archiving} loading={archiving} onClick={() => onArchive(channel.id)} aria-label="归档频道">
+          <Button variant="ghost" size="xs" disabled={archiving} loading={archiving} onClick={() => onArchive(channel.id)} aria-label="归档账号">
             归档
           </Button>
         )}
         {channel.status === 'archived' && onRestore && (
-          <Button variant="ghost" size="xs" disabled={restoring} loading={restoring} onClick={() => onRestore(channel.id)} aria-label="恢复频道">
+          <Button variant="ghost" size="xs" disabled={restoring} loading={restoring} onClick={() => onRestore(channel.id)} aria-label="恢复账号">
             恢复
           </Button>
         )}
         {onDelete && (
-          <Button variant="destructive" size="xs" onClick={() => onDelete(channel.id)} aria-label="删除频道">
+          <Button variant="destructive" size="xs" onClick={() => onDelete(channel.id)} aria-label="删除账号">
             删除
           </Button>
         )}

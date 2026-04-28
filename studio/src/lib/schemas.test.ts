@@ -202,7 +202,7 @@ describe('channelSchema', () => {
       enable_publishing: true,
       wechat_app_id: 'wx123',
       wechat_secret: 'secret',
-      name: '频道名称',
+      name: '账号名称',
       keywords: '测试',
       positioning: '定位',
       style: 'casual-science',

@@ -39,15 +39,15 @@ export function ChannelSelector({ value, onChange, platform }: ChannelSelectorPr
           const ch = channels.find((c) => c.id === id)
           if (ch) onChange(ch.id, ch.platform)
         }}
-        placeholder="选择频道..."
-        searchPlaceholder="搜索频道..."
-        emptyText="没有找到频道"
+        placeholder="选择账号..."
+        searchPlaceholder="搜索账号..."
+        emptyText="没有找到账号"
       />
       {channels.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          还没有可用频道。
+          还没有可用账号。
           <Link to="/channels" className="ml-1 text-primary hover:underline">
-            去创建频道
+            去创建账号
           </Link>
         </p>
       )}

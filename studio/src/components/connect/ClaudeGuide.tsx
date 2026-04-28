@@ -87,7 +87,7 @@ export default function ClaudeGuide() {
       <StepCard step={5} title="运行 /init">
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            安装并配置好 Key 后，运行初始化命令，检查 API Key、MCP 服务和频道连接是否正常：
+            安装并配置好 Key 后，运行初始化命令，检查 API Key、MCP 服务和账号连接是否正常：
           </p>
           <CodeBlock code="/init" />
         </div>

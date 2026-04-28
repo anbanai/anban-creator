@@ -95,7 +95,7 @@ export const mockChannels: Channel[] = [
     id: 'ch-1',
     user_id: '1',
     platform: 'article',
-    name: '测试频道',
+    name: '测试账号',
     avatar_url: '',
     profile_url: 'https://mp.weixin.qq.com/test',
     positioning: '测试定位',

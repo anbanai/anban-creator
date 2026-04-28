@@ -24,7 +24,7 @@ import UserAccountPopover from "@/components/auth/UserAccountPopover";
 
 const workflowItems = [
   { to: "/", label: "仪表盘", icon: LayoutDashboard, end: true },
-  { to: "/channels", label: "频道", icon: Rss },
+  { to: "/channels", label: "账号", icon: Rss },
   { to: "/plans", label: "计划", icon: CalendarRange },
   { to: "/tasks", label: "任务", icon: ListChecks },
   { to: "/timeline", label: "时间轴", icon: Clock },

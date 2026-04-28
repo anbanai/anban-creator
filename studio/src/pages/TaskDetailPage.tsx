@@ -458,7 +458,7 @@ export default function TaskDetailPage() {
                   返回任务列表
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => navigate('/channels')}>
-                  检查频道配置
+                  检查账号配置
                 </Button>
               </div>
             </div>

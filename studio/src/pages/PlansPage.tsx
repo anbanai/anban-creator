@@ -328,7 +328,7 @@ export default function PlansPage() {
             <form id="plan-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
               <FormField control={form.control} name="channel_id" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>频道</FormLabel>
+                  <FormLabel>账号</FormLabel>
                   <FormControl>
                     <ChannelSelector
                       value={field.value || ''}
@@ -358,7 +358,7 @@ export default function PlansPage() {
                     </Select>
                   </FormControl>
                   {form.watch('channel_id') && (
-                    <FormDescription>内容类型随所选频道自动确定</FormDescription>
+                    <FormDescription>内容类型随所选账号自动确定</FormDescription>
                   )}
                   <FormMessage />
                 </FormItem>
@@ -378,7 +378,7 @@ export default function PlansPage() {
                 <FormItem>
                   <FormLabel>Prompt（可选）</FormLabel>
                   <FormControl>
-                    <Input placeholder="留空则根据频道信息自动生成" {...field} />
+                    <Input placeholder="留空则根据账号信息自动生成" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

@@ -16,7 +16,7 @@ export const registerSchema = z.object({
 export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
-  channel_id: z.string().min(1, "请选择频道"),
+  channel_id: z.string().min(1, "请选择账号"),
   type: z.enum(["rednote", "article", "xls"]),
   prompt: z.string().max(500, "Prompt 不能超过 500 个字符").optional(),
   quantity: z.number().int().min(1).max(5).default(1),

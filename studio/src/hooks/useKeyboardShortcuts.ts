@@ -82,7 +82,7 @@ export function useKeyboardShortcuts(onShowHelp?: () => void) {
 
 export const SHORTCUT_LIST = [
   { keys: "g d", description: "前往仪表盘" },
-  { keys: "g c", description: "前往频道" },
+  { keys: "g c", description: "前往账号" },
   { keys: "g p", description: "前往计划" },
   { keys: "g t", description: "前往任务" },
   { keys: "g l", description: "前往时间轴" },
