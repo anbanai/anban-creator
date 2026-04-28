@@ -1,10 +1,10 @@
-import { BookOpen, PenLine, FileImage } from 'lucide-react'
+import { BookOpen, Signature, FileImage } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { TaskType } from '@/types'
 
 export const platformIcon: Record<TaskType, LucideIcon> = {
   rednote: BookOpen,
-  article: PenLine,
+  article: Signature,
   xls: FileImage,
 }
 
