@@ -252,40 +252,27 @@ export default function PlansPage() {
               >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex items-start gap-3 min-w-0 flex-1">
-                    {channel?.avatar_url ? (
-                      <img
-                        src={channel.avatar_url}
-                        alt={channel.name}
-                        className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-border"
-                      />
-                    ) : channel?.name ? (
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                        {channel.name.charAt(0)}
-                      </div>
-                    ) : (
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm text-muted-foreground">
-                        <FileText className="h-4 w-4" />
-                      </div>
-                    )}
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
+                      {renderPlatformIcon(plan.type)}
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-sm font-medium text-foreground">
                           {plan.prompt || contentTypeLabel[plan.type] + '计划'}
                         </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         {channel?.name && (
-                          <span className="truncate text-xs text-muted-foreground">· {channel.name}</span>
+                          <span className="truncate">{channel.name}</span>
                         )}
                         <Badge variant={platformBadge} className="shrink-0 text-[10px]">
-                          {renderPlatformIcon(plan.type)}
                           {contentTypeLabel[plan.type] || plan.type}
                         </Badge>
                         <Badge variant={getBadgeVariant(plan.status, 'plan')} className="shrink-0">
                           {planStatusLabel[plan.status] || plan.status}
                         </Badge>
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        <span>{cronToHuman(plan.cron_expr)}</span>
-                        <span>下次执行：{formatDateTimeCN(plan.next_run_at)}</span>
+                        <span className="text-xs text-muted-foreground">{cronToHuman(plan.cron_expr)}</span>
+                        <span className="text-xs text-muted-foreground">下次：{formatDateTimeCN(plan.next_run_at)}</span>
                       </div>
                     </div>
                   </div>

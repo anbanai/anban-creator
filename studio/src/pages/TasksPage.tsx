@@ -262,61 +262,65 @@ export default function TasksPage() {
           {tasks.map((task) => (
             <Link key={task.id} to={`/tasks/${task.id}`} className="block">
               <Card className="transition-all duration-200 hover:border-foreground/20 hover:shadow-sm active:scale-[0.99]">
-                <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
+                      {renderPlatformIcon(task.type)}
+                    </div>
+                    <div className="min-w-0 flex-1">
                       <h3 className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
-                      <Badge variant="outline" className="shrink-0 text-[10px]">
-                        {renderPlatformIcon(task.type)}
-                        {contentTypeLabel[task.type] || task.type}
-                      </Badge>
-                      {task.status === 'running' && (task.progress ?? 0) > 0 && (
-                        <Badge variant="warning" className="shrink-0 text-[10px]">
-                          {task.progress ?? 0}%
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                          {contentTypeLabel[task.type] || task.type}
                         </Badge>
-                      )}
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                      <span>创建：{formatDateTimeCN(task.created_at)}</span>
-                      {task.completed_at && (
-                        <span>完成：{formatDateTimeCN(task.completed_at)}</span>
-                      )}
-                    </div>
-                    {task.status === 'running' && (
-                      <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
-                        <div
-                          className="h-1.5 rounded-full bg-primary transition-all animate-pulse"
-                          style={{ width: `${task.progress ?? 0}%` }}
-                        />
+                        {task.status === 'running' && (task.progress ?? 0) > 0 && (
+                          <Badge variant="warning" className="shrink-0 text-[10px]">
+                            {task.progress ?? 0}%
+                          </Badge>
+                        )}
+                        <span>创建：{formatDateTimeCN(task.created_at)}</span>
+                        {task.completed_at && (
+                          <span>完成：{formatDateTimeCN(task.completed_at)}</span>
+                        )}
                       </div>
+                      {task.status === 'running' && (
+                        <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
+                          <div
+                            className="h-1.5 rounded-full bg-primary transition-all animate-pulse"
+                            style={{ width: `${task.progress ?? 0}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5 sm:mt-0.5">
+                    <Badge variant={statusBadgeVariant(task.status)}>
+                      {taskStatusLabel[task.status] || task.status}
+                    </Badge>
+                    {task.status === 'completed' && (
+                      <button
+                        type="button"
+                        disabled={togglePublished.isPending}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published }))
+                        }}
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                          task.published
+                            ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                            : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                        }`}
+                      >
+                        {togglePublished.isPending ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : task.published ? (
+                          <Check className="h-3 w-3" />
+                        ) : null}
+                        {task.published ? '已发布' : '标记发布'}
+                      </button>
                     )}
                   </div>
-                  <Badge variant={statusBadgeVariant(task.status)}>
-                    {taskStatusLabel[task.status] || task.status}
-                  </Badge>
-                  {task.status === 'completed' && (
-                    <button
-                      type="button"
-                      disabled={togglePublished.isPending}
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published }))
-                      }}
-                      className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                        task.published
-                          ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
-                          : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                      }`}
-                    >
-                      {togglePublished.isPending ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : task.published ? (
-                        <Check className="h-3 w-3" />
-                      ) : null}
-                      {task.published ? '已发布' : '标记发布'}
-                    </button>
-                  )}
                 </div>
               </Card>
             </Link>
