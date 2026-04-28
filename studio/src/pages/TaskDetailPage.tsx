@@ -503,7 +503,7 @@ export default function TaskDetailPage() {
               </Button>
             </div>
           </div>
-          <div ref={logContainerRef} className="max-h-96 overflow-y-auto rounded-lg border border-border bg-background/50 px-4 py-3 font-mono">
+          <div ref={logContainerRef} className="max-h-96 overflow-y-auto bg-background/50 px-4 py-3 font-mono">
             {sseError && (
               <p className="mb-2 text-xs text-amber-400">{sseError}</p>
             )}
@@ -526,7 +526,7 @@ export default function TaskDetailPage() {
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold text-foreground">执行结果</h2>
           </div>
-          <div className="max-h-64 overflow-y-auto rounded-lg border border-border bg-background/50 px-4 py-3 prose prose-sm max-w-none dark:prose-invert">
+          <div className="max-h-64 overflow-y-auto bg-background/50 px-4 py-3 prose prose-sm max-w-none dark:prose-invert">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {task.result.output}
             </ReactMarkdown>

@@ -282,7 +282,7 @@ export default function SettingsPage() {
               {apiKeys.map((key) => (
                 <div
                   key={key.id}
-                  className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
+                  className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2"
                 >
                   <div className="space-y-0.5">
                     <p className="text-sm font-medium text-foreground">{key.name || '未命名'}</p>

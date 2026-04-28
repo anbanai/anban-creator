@@ -19,7 +19,7 @@ const IMAGE_PROVIDERS = [
 function ModelSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false)
   return (
-    <div className="border border-border rounded-lg">
+    <div className="rounded-lg">
       <button
         className="flex items-center justify-between w-full px-3 py-2.5 text-left"
         onClick={() => setExpanded(!expanded)}

@@ -319,7 +319,7 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
 
 function PricingTable({ rows }: { rows: { label: string; value: string }[] }) {
   return (
-    <div className="overflow-hidden rounded-md border border-border">
+    <div className="overflow-hidden rounded-md">
       <table className="w-full text-sm">
         <tbody>
           {rows.map((row, i) => (
