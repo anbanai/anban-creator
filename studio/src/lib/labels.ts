@@ -14,6 +14,33 @@ export const tierDescriptions: Record<string, string> = {
   enterprise: '最大 10 并发，API 限速 300 次/分钟',
 }
 
+export const tierBenefits = [
+  {
+    key: 'free',
+    name: '免费版',
+    creditMultiplier: '1.0x',
+    platforms: ['Web 端'],
+    concurrentTasks: 2,
+    recommended: false,
+  },
+  {
+    key: 'pro',
+    name: '专业版',
+    creditMultiplier: '1.2x',
+    platforms: ['Web 端', 'Claude Code', 'OpenClaw'],
+    concurrentTasks: 5,
+    recommended: true,
+  },
+  {
+    key: 'enterprise',
+    name: '企业版',
+    creditMultiplier: '1.5x',
+    platforms: ['全部平台', '业务指导与辅助'],
+    concurrentTasks: 10,
+    recommended: false,
+  },
+] as const
+
 export const taskStatusLabel: Record<TaskStatus, string> = {
   pending: '待执行',
   running: '运行中',

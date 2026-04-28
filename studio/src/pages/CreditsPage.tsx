@@ -13,6 +13,8 @@ import { Pagination } from '@/components/ui/Pagination'
 import { AccordionRoot, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
 import { formatFullDateTimeCN, transactionTypeLabel, operationLabel, taskTypeLabelCN } from '@/lib/labels'
 import PageHeader from '@/components/layout/PageHeader'
+import { useAuth } from '@/contexts/AuthContext'
+import MembershipComparison from '@/components/credits/MembershipComparison'
 
 function transactionBadgeVariant(type: string) {
   switch (type) {
@@ -41,6 +43,7 @@ export default function CreditsPage() {
   const [page, setPage] = useState(1)
   const [rechargeOpen, setRechargeOpen] = useState(false)
   const { submit } = useSubmitLock()
+  const { user } = useAuth()
 
   const { data: balanceData, isLoading: balanceLoading } = useQuery({
     queryKey: ['credits', 'balance'],
@@ -108,6 +111,9 @@ export default function CreditsPage() {
           </div>
         </CardBody>
       </Card>
+
+      {/* Membership comparison */}
+      <MembershipComparison currentTier={user?.tier ?? 'free'} />
 
       {/* Recharge */}
       <Card>
