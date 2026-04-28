@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -99,6 +99,26 @@ export default function ModelConfigSection() {
   const [imageBaseUrl, setImageBaseUrl] = useState('')
   const [imageApiKey, setImageApiKey] = useState('')
   const [imageProxy, setImageProxy] = useState('')
+
+  const initialized = useRef(false)
+
+  useEffect(() => {
+    if (!config || initialized.current) return
+    if (config.text) {
+      setTextModel(config.text.model || '')
+      setTextBaseUrl(config.text.base_url || '')
+      setTextApiKey(config.text.api_key ? '****' : '')
+      setTextProxy(config.text.proxy || '')
+    }
+    if (config.image) {
+      setImageProvider(config.image.provider || '')
+      setImageModel(config.image.model || '')
+      setImageBaseUrl(config.image.base_url || '')
+      setImageApiKey(config.image.api_key ? '****' : '')
+      setImageProxy(config.image.proxy || '')
+    }
+    initialized.current = true
+  }, [config])
 
   const textHasConfig = !!(config?.text?.model || config?.text?.base_url || config?.text?.api_key)
   const imageHasConfig = !!(config?.image?.model || config?.image?.base_url || config?.image?.api_key || config?.image?.provider)
@@ -205,14 +225,14 @@ export default function ModelConfigSection() {
         >
           <MaskedInput
             label="API Base URL"
-            value={textBaseUrl || config?.text?.base_url || ''}
+            value={textBaseUrl}
             onChange={setTextBaseUrl}
             placeholder="https://api.openai.com/v1"
             hasValue={!!config?.text?.base_url}
           />
           <MaskedInput
             label="API Key"
-            value={textApiKey || (config?.text?.api_key ? '****' : '')}
+            value={textApiKey}
             onChange={setTextApiKey}
             placeholder="sk-..."
             hasValue={!!config?.text?.api_key}
@@ -223,7 +243,7 @@ export default function ModelConfigSection() {
               {config?.text?.model && <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" />}
             </div>
             <Input
-              value={textModel || config?.text?.model || ''}
+              value={textModel}
               onChange={(e) => setTextModel(e.target.value)}
               placeholder="gpt-4o / claude-sonnet-4-20250514"
               className="text-xs"
@@ -232,7 +252,7 @@ export default function ModelConfigSection() {
           <div className="space-y-1">
             <Label className="text-xs">代理服务器（可选）</Label>
             <Input
-              value={textProxy || config?.text?.proxy || ''}
+              value={textProxy}
               onChange={(e) => setTextProxy(e.target.value)}
               placeholder="http://proxy:port"
               className="text-xs"
@@ -264,7 +284,7 @@ export default function ModelConfigSection() {
               {config?.image?.provider && <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" />}
             </div>
             <select
-              value={imageProvider || config?.image?.provider || ''}
+              value={imageProvider}
               onChange={(e) => setImageProvider(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs"
             >
@@ -278,14 +298,14 @@ export default function ModelConfigSection() {
           </div>
           <MaskedInput
             label="API Base URL"
-            value={imageBaseUrl || config?.image?.base_url || ''}
+            value={imageBaseUrl}
             onChange={setImageBaseUrl}
             placeholder="https://..."
             hasValue={!!config?.image?.base_url}
           />
           <MaskedInput
             label="API Key"
-            value={imageApiKey || (config?.image?.api_key ? '****' : '')}
+            value={imageApiKey}
             onChange={setImageApiKey}
             placeholder="..."
             hasValue={!!config?.image?.api_key}
@@ -296,7 +316,7 @@ export default function ModelConfigSection() {
               {config?.image?.model && <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" />}
             </div>
             <Input
-              value={imageModel || config?.image?.model || ''}
+              value={imageModel}
               onChange={(e) => setImageModel(e.target.value)}
               placeholder="dall-e-3"
               className="text-xs"
@@ -305,7 +325,7 @@ export default function ModelConfigSection() {
           <div className="space-y-1">
             <Label className="text-xs">代理服务器（可选）</Label>
             <Input
-              value={imageProxy || config?.image?.proxy || ''}
+              value={imageProxy}
               onChange={(e) => setImageProxy(e.target.value)}
               placeholder="http://proxy:port"
               className="text-xs"

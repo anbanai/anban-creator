@@ -118,7 +118,11 @@ func (e *DockerExecutor) CleanupOrphanedContainers() {
 func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	model := opts.Model
 	if model == "" {
-		model = e.defaultModel
+		if opts.UserTextConfig != nil && opts.UserTextConfig.Model != "" {
+			model = opts.UserTextConfig.Model
+		} else {
+			model = e.defaultModel
+		}
 	}
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
@@ -167,7 +171,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		workDirInContainer = "/workspace"
 	}
 	cmd = e.buildAgentCommand(opts, model, maxTurns, workDirInContainer, apiKey)
-	env := e.buildAgentEnv(opts.UserEnvOverrides)
+	env := e.buildAgentEnv(opts)
 
 	var execRes execResult
 	if e.dockerCfg.ContainerName != "" {
@@ -248,13 +252,22 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string,
 	return cmd
 }
 
-func (e *DockerExecutor) buildAgentEnv(userEnvOverrides map[string]string) []string {
+func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin"}
 	for k, v := range e.claudeEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
-	// Per-user overrides take precedence over global claudeEnv.
-	for k, v := range userEnvOverrides {
+	// Per-user text model config (takes precedence over global claudeEnv).
+	if opts.UserTextConfig != nil {
+		if opts.UserTextConfig.BaseURL != "" {
+			env = append(env, fmt.Sprintf("ANTHROPIC_BASE_URL=%s", opts.UserTextConfig.BaseURL))
+		}
+		if opts.UserTextConfig.APIKey != "" {
+			env = append(env, fmt.Sprintf("ANTHROPIC_AUTH_TOKEN=%s", opts.UserTextConfig.APIKey))
+		}
+	}
+	// Additional per-user env var overrides.
+	for k, v := range opts.UserEnvOverrides {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	return env

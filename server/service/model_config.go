@@ -199,6 +199,11 @@ func (s *ModelConfigService) Delete(ctx context.Context, userID string) error {
 	return s.repo.ModelConfigs().Delete(ctx, userID)
 }
 
+// GetTextConfig returns the user's text model config (structured).
+func (s *ModelConfigService) GetTextConfig(ctx context.Context, userID string) (*model.TextUserConfig, error) {
+	return s.loadUserTextConfig(ctx, userID)
+}
+
 // HasTextOverride returns true if the user has custom text model config.
 func (s *ModelConfigService) HasTextOverride(ctx context.Context, userID string) bool {
 	uc, err := s.loadUserTextConfig(ctx, userID)
@@ -225,27 +230,6 @@ func (s *ModelConfigService) HasCompleteImageOverride(ctx context.Context, userI
 		return false
 	}
 	return uc.Provider != "" && uc.APIKey != "" && uc.Model != ""
-}
-
-// GetEffectiveTextEnv returns environment variables for agent execution.
-// User overrides take precedence over server defaults.
-func (s *ModelConfigService) GetEffectiveTextEnv(ctx context.Context, userID string) map[string]string {
-	uc, err := s.loadUserTextConfig(ctx, userID)
-	if err != nil || !uc.HasConfig() {
-		return nil
-	}
-
-	env := make(map[string]string)
-	if uc.APIKey != "" {
-		env["ANTHROPIC_AUTH_TOKEN"] = uc.APIKey
-	}
-	if uc.BaseURL != "" {
-		env["ANTHROPIC_BASE_URL"] = uc.BaseURL
-	}
-	if uc.Model != "" {
-		env["ANTHROPIC_MODEL"] = uc.Model
-	}
-	return env
 }
 
 // GetEffectiveWritingConfig returns the resolved writing config (baseURL, key, model).
