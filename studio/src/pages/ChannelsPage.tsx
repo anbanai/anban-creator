@@ -446,26 +446,29 @@ export default function ChannelsPage() {
 
               <FormField control={form.control} name="profile_url" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{isWechat ? '平台主页' : '主页链接'}</FormLabel>
-                  <div className="flex gap-2">
+                  <div className="flex items-center gap-3">
+                    <FormLabel className="shrink-0 w-20 text-right">账号主页</FormLabel>
                     <FormControl>
-                      <Input
-                        placeholder={isWechat ? 'https://mp.weixin.qq.com/...' : '粘贴小红书主页链接...'}
-                        {...field}
-                      />
+                      <div className="flex gap-2 flex-1">
+                        <Input
+                          className="flex-1 min-w-0"
+                          placeholder="粘贴账号主页链接..."
+                          {...field}
+                        />
+                        {currentPlatformConfig?.supports_auto_fetch && (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            loading={fetchingProfile}
+                            disabled={!field.value || !isValidProfileUrl(field.value || '')}
+                            onClick={() => void handleFetchProfile(field.value || '')}
+                          >
+                            获取
+                          </Button>
+                        )}
+                      </div>
                     </FormControl>
-                    {currentPlatformConfig?.supports_auto_fetch && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        loading={fetchingProfile}
-                        disabled={!field.value || !isValidProfileUrl(field.value || '')}
-                        onClick={() => void handleFetchProfile(field.value || '')}
-                      >
-                        获取
-                      </Button>
-                    )}
                   </div>
                   {currentPlatformConfig?.supports_auto_fetch && (
                     <FormDescription>
@@ -480,7 +483,7 @@ export default function ChannelsPage() {
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">账号名称</FormLabel>
                   <FormControl>
-                    <Input placeholder="例如 我的科技博客" {...field} />
+                    <Input className="flex-1 min-w-0" placeholder="例如 我的科技博客" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -490,7 +493,7 @@ export default function ChannelsPage() {
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">头像</FormLabel>
                   <FormControl>
-                    <Input placeholder="自动获取或手动填写 URL" {...field} />
+                    <Input className="flex-1 min-w-0" placeholder="自动获取或手动填写 URL" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -551,7 +554,7 @@ export default function ChannelsPage() {
                         <FormItem>
                           <FormLabel>微信 AppID</FormLabel>
                           <FormControl>
-                            <Input placeholder="wx..." {...field} />
+                            <Input className="flex-1 min-w-0" placeholder="wx..." {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -659,7 +662,7 @@ export default function ChannelsPage() {
                     <FormItem className="flex items-center gap-3 space-y-0">
                       <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>
                       <FormControl>
-                        <Input placeholder="例如 张三" {...field} />
+                        <Input className="flex-1 min-w-0" placeholder="例如 张三" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
