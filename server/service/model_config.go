@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -19,25 +18,17 @@ const keepExistingKey = "****"
 
 // ModelConfigService manages per-user AI model configuration.
 type ModelConfigService struct {
-	repo      repository.Repository
-	cfg       *config.Config
-	jwtSecret string
-	encKey    []byte
-	logger    *zerolog.Logger
+	repo   repository.Repository
+	cfg    *config.Config
+	logger *zerolog.Logger
 }
 
 // NewModelConfigService creates a new ModelConfigService.
-func NewModelConfigService(repo repository.Repository, cfg *config.Config, jwtSecret string, logger *zerolog.Logger) *ModelConfigService {
-	key, err := deriveKey(jwtSecret)
-	if err != nil {
-		logger.Error().Err(err).Msg("failed to derive encryption key, model config will be unavailable")
-	}
+func NewModelConfigService(repo repository.Repository, cfg *config.Config, logger *zerolog.Logger) *ModelConfigService {
 	return &ModelConfigService{
-		repo:      repo,
-		cfg:       cfg,
-		jwtSecret: jwtSecret,
-		encKey:    key,
-		logger:    logger,
+		repo:   repo,
+		cfg:    cfg,
+		logger: logger,
 	}
 }
 
@@ -53,16 +44,16 @@ type ModelConfigResponse struct {
 
 // TextConfigDTO represents text model config for API display.
 type TextConfigDTO struct {
-	BaseURL string `json:"base_url,omitempty"`
-	APIKey  string `json:"api_key,omitempty"`
-	Model   string `json:"model,omitempty"`
-	Proxy   string `json:"proxy,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Proxy    string `json:"proxy,omitempty"`
 }
 
 // ImageConfigDTO represents image model config for API display.
 type ImageConfigDTO struct {
 	Provider string `json:"provider,omitempty"`
-	BaseURL  string `json:"base_url,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
 	APIKey   string `json:"api_key,omitempty"`
 	Model    string `json:"model,omitempty"`
 	Proxy    string `json:"proxy,omitempty"`
@@ -90,37 +81,27 @@ func (s *ModelConfigService) Get(ctx context.Context, userID string) (*ModelConf
 
 	resp := &ModelConfigResponse{}
 
-	if len(row.TextConfigEncrypted) > 0 {
-		plain, err := s.decrypt(row.TextConfigEncrypted)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("user_id", userID).Msg("failed to decrypt text config, skipping")
-		} else {
-			var uc model.TextUserConfig
-			if json.Unmarshal([]byte(plain), &uc) == nil {
-				resp.Text = &TextConfigDTO{
-					BaseURL: uc.BaseURL,
-					APIKey:  maskKey(uc.APIKey),
-					Model:   uc.Model,
-					Proxy:   uc.Proxy,
-				}
+	if row.TextConfigJSON != "" {
+		var uc model.TextUserConfig
+		if json.Unmarshal([]byte(row.TextConfigJSON), &uc) == nil {
+			resp.Text = &TextConfigDTO{
+				Endpoint: uc.Endpoint,
+				APIKey:   maskKey(uc.APIKey),
+				Model:    uc.Model,
+				Proxy:    uc.Proxy,
 			}
 		}
 	}
 
-	if len(row.ImageConfigEncrypted) > 0 {
-		plain, err := s.decrypt(row.ImageConfigEncrypted)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("user_id", userID).Msg("failed to decrypt image config, skipping")
-		} else {
-			var uc model.ImageUserConfig
-			if json.Unmarshal([]byte(plain), &uc) == nil {
-				resp.Image = &ImageConfigDTO{
-					Provider: uc.Provider,
-					BaseURL:  uc.BaseURL,
-					APIKey:   maskKey(uc.APIKey),
-					Model:    uc.Model,
-					Proxy:    uc.Proxy,
-				}
+	if row.ImageConfigJSON != "" {
+		var uc model.ImageUserConfig
+		if json.Unmarshal([]byte(row.ImageConfigJSON), &uc) == nil {
+			resp.Image = &ImageConfigDTO{
+				Provider: uc.Provider,
+				Endpoint: uc.Endpoint,
+				APIKey:   maskKey(uc.APIKey),
+				Model:    uc.Model,
+				Proxy:    uc.Proxy,
 			}
 		}
 	}
@@ -144,49 +125,47 @@ func (s *ModelConfigService) Update(ctx context.Context, userID string, req *Upd
 
 	// Handle text config.
 	if req.Text != nil {
-		if req.Text.APIKey == "" && req.Text.BaseURL == "" && req.Text.Model == "" && req.Text.Proxy == "" {
-			// All empty = clear.
-			row.TextConfigEncrypted = nil
+		if req.Text.APIKey == "" && req.Text.Endpoint == "" && req.Text.Model == "" && req.Text.Proxy == "" {
+			row.TextConfigJSON = ""
 		} else {
-			// Merge with existing if sentinel is used.
-			existing := s.loadTextConfig(row.TextConfigEncrypted)
+			existing := s.loadTextConfig(row.TextConfigJSON)
 			if req.Text.APIKey == keepExistingKey {
 				req.Text.APIKey = existing.APIKey
 			}
 			uc := model.TextUserConfig{
-				BaseURL: req.Text.BaseURL,
-				APIKey:  req.Text.APIKey,
-				Model:   req.Text.Model,
-				Proxy:   req.Text.Proxy,
+				Endpoint: req.Text.Endpoint,
+				APIKey:   req.Text.APIKey,
+				Model:    req.Text.Model,
+				Proxy:    req.Text.Proxy,
 			}
-			if encrypted, err := s.encryptTextConfig(&uc); err != nil {
+			if data, err := json.Marshal(&uc); err != nil {
 				return err
 			} else {
-				row.TextConfigEncrypted = encrypted
+				row.TextConfigJSON = string(data)
 			}
 		}
 	}
 
 	// Handle image config.
 	if req.Image != nil {
-		if req.Image.APIKey == "" && req.Image.BaseURL == "" && req.Image.Model == "" && req.Image.Provider == "" && req.Image.Proxy == "" {
-			row.ImageConfigEncrypted = nil
+		if req.Image.APIKey == "" && req.Image.Endpoint == "" && req.Image.Model == "" && req.Image.Provider == "" && req.Image.Proxy == "" {
+			row.ImageConfigJSON = ""
 		} else {
-			existing := s.loadImageConfig(row.ImageConfigEncrypted)
+			existing := s.loadImageConfig(row.ImageConfigJSON)
 			if req.Image.APIKey == keepExistingKey {
 				req.Image.APIKey = existing.APIKey
 			}
 			uc := model.ImageUserConfig{
 				Provider: req.Image.Provider,
-				BaseURL:  req.Image.BaseURL,
+				Endpoint: req.Image.Endpoint,
 				APIKey:   req.Image.APIKey,
 				Model:    req.Image.Model,
 				Proxy:    req.Image.Proxy,
 			}
-			if encrypted, err := s.encryptImageConfig(&uc); err != nil {
+			if data, err := json.Marshal(&uc); err != nil {
 				return err
 			} else {
-				row.ImageConfigEncrypted = encrypted
+				row.ImageConfigJSON = string(data)
 			}
 		}
 	}
@@ -232,20 +211,19 @@ func (s *ModelConfigService) HasCompleteImageOverride(ctx context.Context, userI
 	return uc.Provider != "" && uc.APIKey != "" && uc.Model != ""
 }
 
-// GetEffectiveWritingConfig returns the resolved writing config (baseURL, key, model).
-// Returns (baseURL, key, model, ok). ok=false means use server default.
+// GetEffectiveWritingConfig returns the resolved writing config (endpoint, key, model).
+// Returns (endpoint, key, model, ok). ok=false means use server default.
 func (s *ModelConfigService) GetEffectiveWritingConfig(ctx context.Context, userID string) (string, string, string, bool) {
 	uc, err := s.loadUserTextConfig(ctx, userID)
 	if err != nil || !uc.HasConfig() {
 		return "", "", "", false
 	}
 
-	// Need at least API key + base URL + model to create a writing client.
-	if uc.APIKey == "" || uc.BaseURL == "" || uc.Model == "" {
+	if uc.APIKey == "" || uc.Endpoint == "" || uc.Model == "" {
 		return "", "", "", false
 	}
 
-	return uc.BaseURL, uc.APIKey, uc.Model, true
+	return uc.Endpoint, uc.APIKey, uc.Model, true
 }
 
 // GetEffectiveImageConfig returns the resolved image config as an ImageAPIConfig.
@@ -256,19 +234,17 @@ func (s *ModelConfigService) GetEffectiveImageConfig(ctx context.Context, userID
 		return nil
 	}
 
-
-	// Create separate instances for Cover and Content to avoid shared-pointer mutation.
 	cfg := &config.ImageAPIConfig{
 		Cover: &appconfig.ImageAPI{
 			Provider: uc.Provider,
 			Key:      uc.APIKey,
-			BaseURL:  uc.BaseURL,
+			BaseURL:  uc.Endpoint,
 			Model:    uc.Model,
 		},
 		Content: &appconfig.ImageAPI{
 			Provider: uc.Provider,
 			Key:      uc.APIKey,
-			BaseURL:  uc.BaseURL,
+			BaseURL:  uc.Endpoint,
 			Model:    uc.Model,
 		},
 		Sizes: s.cfg.ImageAPI.Sizes,
@@ -307,8 +283,7 @@ func (s *ModelConfigService) loadUserTextConfig(ctx context.Context, userID stri
 	if row == nil {
 		return &model.TextUserConfig{}, nil
 	}
-	uc := s.loadTextConfig(row.TextConfigEncrypted)
-	return uc, nil
+	return s.loadTextConfig(row.TextConfigJSON), nil
 }
 
 func (s *ModelConfigService) loadUserImageConfig(ctx context.Context, userID string) (*model.ImageUserConfig, error) {
@@ -319,72 +294,29 @@ func (s *ModelConfigService) loadUserImageConfig(ctx context.Context, userID str
 	if row == nil {
 		return &model.ImageUserConfig{}, nil
 	}
-	uc := s.loadImageConfig(row.ImageConfigEncrypted)
-	return uc, nil
+	return s.loadImageConfig(row.ImageConfigJSON), nil
 }
 
-func (s *ModelConfigService) loadTextConfig(encrypted []byte) *model.TextUserConfig {
-	if len(encrypted) == 0 {
-		return &model.TextUserConfig{}
-	}
-	plain, err := s.decrypt(encrypted)
-	if err != nil {
-		s.logger.Warn().Err(err).Msg("failed to decrypt text config")
+func (s *ModelConfigService) loadTextConfig(jsonStr string) *model.TextUserConfig {
+	if jsonStr == "" {
 		return &model.TextUserConfig{}
 	}
 	var uc model.TextUserConfig
-	if json.Unmarshal([]byte(plain), &uc) != nil {
+	if json.Unmarshal([]byte(jsonStr), &uc) != nil {
 		return &model.TextUserConfig{}
 	}
 	return &uc
 }
 
-func (s *ModelConfigService) loadImageConfig(encrypted []byte) *model.ImageUserConfig {
-	if len(encrypted) == 0 {
-		return &model.ImageUserConfig{}
-	}
-	plain, err := s.decrypt(encrypted)
-	if err != nil {
-		s.logger.Warn().Err(err).Msg("failed to decrypt image config")
+func (s *ModelConfigService) loadImageConfig(jsonStr string) *model.ImageUserConfig {
+	if jsonStr == "" {
 		return &model.ImageUserConfig{}
 	}
 	var uc model.ImageUserConfig
-	if json.Unmarshal([]byte(plain), &uc) != nil {
+	if json.Unmarshal([]byte(jsonStr), &uc) != nil {
 		return &model.ImageUserConfig{}
 	}
 	return &uc
-}
-
-func (s *ModelConfigService) encryptTextConfig(uc *model.TextUserConfig) ([]byte, error) {
-	data, err := json.Marshal(uc)
-	if err != nil {
-		return nil, err
-	}
-	return s.encrypt(string(data))
-}
-
-func (s *ModelConfigService) encryptImageConfig(uc *model.ImageUserConfig) ([]byte, error) {
-	data, err := json.Marshal(uc)
-	if err != nil {
-		return nil, err
-	}
-	return s.encrypt(string(data))
-}
-
-// decrypt decrypts using the cached encryption key.
-func (s *ModelConfigService) decrypt(ciphertext []byte) (string, error) {
-	if len(s.encKey) == 0 {
-		return "", fmt.Errorf("encryption key not available")
-	}
-	return decryptWithKey(ciphertext, s.encKey)
-}
-
-// encrypt encrypts using the cached encryption key.
-func (s *ModelConfigService) encrypt(plaintext string) ([]byte, error) {
-	if len(s.encKey) == 0 {
-		return nil, fmt.Errorf("encryption key not available")
-	}
-	return encryptWithKey(plaintext, s.encKey)
 }
 
 // maskKey returns only the last 4 characters of the key, prefixed with "****".

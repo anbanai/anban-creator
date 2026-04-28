@@ -207,7 +207,7 @@ func main() {
 	// 12.1 Create per-user model config service.
 	var modelConfigSvc *service.ModelConfigService
 	if repo != nil {
-		modelConfigSvc = service.NewModelConfigService(repo, cfg, cfg.JWT.SecretKey, log)
+		modelConfigSvc = service.NewModelConfigService(repo, cfg, log)
 		if taskSvc != nil {
 			taskSvc.SetModelConfigService(modelConfigSvc)
 		}

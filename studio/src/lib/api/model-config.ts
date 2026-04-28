@@ -2,7 +2,7 @@ import { http } from '@/lib/http-client'
 import type { ApiResponse } from '@/types'
 
 export interface TextConfigDTO {
-  base_url?: string
+  endpoint?: string
   api_key?: string
   model?: string
   proxy?: string
@@ -10,7 +10,7 @@ export interface TextConfigDTO {
 
 export interface ImageConfigDTO {
   provider?: string
-  base_url?: string
+  endpoint?: string
   api_key?: string
   model?: string
   proxy?: string

@@ -259,8 +259,8 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	}
 	// Per-user text model config (takes precedence over global claudeEnv).
 	if opts.UserTextConfig != nil {
-		if opts.UserTextConfig.BaseURL != "" {
-			env = append(env, fmt.Sprintf("ANTHROPIC_BASE_URL=%s", opts.UserTextConfig.BaseURL))
+		if opts.UserTextConfig.Endpoint != "" {
+			env = append(env, fmt.Sprintf("ANTHROPIC_BASE_URL=%s", opts.UserTextConfig.Endpoint))
 		}
 		if opts.UserTextConfig.APIKey != "" {
 			env = append(env, fmt.Sprintf("ANTHROPIC_AUTH_TOKEN=%s", opts.UserTextConfig.APIKey))

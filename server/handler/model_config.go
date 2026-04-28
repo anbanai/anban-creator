@@ -58,7 +58,7 @@ func (h *ModelConfigHandler) Update(c fiber.Ctx) error {
 	const sentinel = "****"
 
 	if req.Text != nil {
-		if err := validateConfigField("text.base_url", req.Text.BaseURL, maxFieldLen, true); err != nil {
+		if err := validateConfigField("text.endpoint", req.Text.Endpoint, maxFieldLen, true); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if err := validateConfigField("text.model", req.Text.Model, maxFieldLen, false); err != nil {
@@ -77,7 +77,7 @@ func (h *ModelConfigHandler) Update(c fiber.Ctx) error {
 	}
 
 	if req.Image != nil {
-		if err := validateConfigField("image.base_url", req.Image.BaseURL, maxFieldLen, true); err != nil {
+		if err := validateConfigField("image.endpoint", req.Image.Endpoint, maxFieldLen, true); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if err := validateConfigField("image.model", req.Image.Model, maxFieldLen, false); err != nil {

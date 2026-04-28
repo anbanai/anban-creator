@@ -34,15 +34,14 @@ func (r *modelConfigRepository) FindByUserID(ctx context.Context, userID string)
 }
 
 func (r *modelConfigRepository) Upsert(ctx context.Context, config *model.UserModelConfig) error {
-	// Use native ON DUPLICATE KEY UPDATE for atomic upsert (avoids race conditions).
 	return r.db.WithContext(ctx).Exec(`
-		INSERT INTO user_model_configs (id, user_id, text_config_encrypted, image_config_encrypted, created_at, updated_at)
+		INSERT INTO user_model_configs (id, user_id, text_config_json, image_config_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, NOW(), NOW())
 		ON DUPLICATE KEY UPDATE
-			text_config_encrypted = VALUES(text_config_encrypted),
-			image_config_encrypted = VALUES(image_config_encrypted),
+			text_config_json = VALUES(text_config_json),
+			image_config_json = VALUES(image_config_json),
 			updated_at = NOW()
-	`, config.ID, config.UserID, config.TextConfigEncrypted, config.ImageConfigEncrypted).Error
+	`, config.ID, config.UserID, config.TextConfigJSON, config.ImageConfigJSON).Error
 }
 
 func (r *modelConfigRepository) Delete(ctx context.Context, userID string) error {

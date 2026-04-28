@@ -286,8 +286,8 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 	// Per-user text model config (takes precedence over global claudeEnv).
 	if opts.UserTextConfig != nil {
-		if opts.UserTextConfig.BaseURL != "" {
-			sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANTHROPIC_BASE_URL", opts.UserTextConfig.BaseURL))
+		if opts.UserTextConfig.Endpoint != "" {
+			sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANTHROPIC_BASE_URL", opts.UserTextConfig.Endpoint))
 		}
 		if opts.UserTextConfig.APIKey != "" {
 			sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANTHROPIC_AUTH_TOKEN", opts.UserTextConfig.APIKey))

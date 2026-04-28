@@ -91,12 +91,12 @@ export default function ModelConfigSection() {
   })
 
   const [textModel, setTextModel] = useState('')
-  const [textBaseUrl, setTextBaseUrl] = useState('')
+  const [textEndpoint, setTextEndpoint] = useState('')
   const [textApiKey, setTextApiKey] = useState('')
   const [textProxy, setTextProxy] = useState('')
   const [imageProvider, setImageProvider] = useState('')
   const [imageModel, setImageModel] = useState('')
-  const [imageBaseUrl, setImageBaseUrl] = useState('')
+  const [imageEndpoint, setImageEndpoint] = useState('')
   const [imageApiKey, setImageApiKey] = useState('')
   const [imageProxy, setImageProxy] = useState('')
 
@@ -106,29 +106,29 @@ export default function ModelConfigSection() {
     if (!config || initialized.current) return
     if (config.text) {
       setTextModel(config.text.model || '')
-      setTextBaseUrl(config.text.base_url || '')
+      setTextEndpoint(config.text.endpoint || '')
       setTextApiKey(config.text.api_key ? '****' : '')
       setTextProxy(config.text.proxy || '')
     }
     if (config.image) {
       setImageProvider(config.image.provider || '')
       setImageModel(config.image.model || '')
-      setImageBaseUrl(config.image.base_url || '')
+      setImageEndpoint(config.image.endpoint || '')
       setImageApiKey(config.image.api_key ? '****' : '')
       setImageProxy(config.image.proxy || '')
     }
     initialized.current = true
   }, [config])
 
-  const textHasConfig = !!(config?.text?.model || config?.text?.base_url || config?.text?.api_key)
-  const imageHasConfig = !!(config?.image?.model || config?.image?.base_url || config?.image?.api_key || config?.image?.provider)
+  const textHasConfig = !!(config?.text?.model || config?.text?.endpoint || config?.text?.api_key)
+  const imageHasConfig = !!(config?.image?.model || config?.image?.endpoint || config?.image?.api_key || config?.image?.provider)
 
   const textMutation = useMutation({
     mutationFn: () =>
       api.modelConfig.update({
         text: {
           model: textModel,
-          base_url: textBaseUrl,
+          endpoint: textEndpoint,
           api_key: textApiKey === '****' ? '****' : textApiKey,
           proxy: textProxy,
         },
@@ -146,7 +146,7 @@ export default function ModelConfigSection() {
         image: {
           provider: imageProvider,
           model: imageModel,
-          base_url: imageBaseUrl,
+          endpoint: imageEndpoint,
           api_key: imageApiKey === '****' ? '****' : imageApiKey,
           proxy: imageProxy,
         },
@@ -164,12 +164,12 @@ export default function ModelConfigSection() {
       toast.success('已恢复系统默认配置')
       queryClient.invalidateQueries({ queryKey: queryKeys.modelConfig.all })
       setTextModel('')
-      setTextBaseUrl('')
+      setTextEndpoint('')
       setTextApiKey('')
       setTextProxy('')
       setImageProvider('')
       setImageModel('')
-      setImageBaseUrl('')
+      setImageEndpoint('')
       setImageApiKey('')
       setImageProxy('')
     },
@@ -177,7 +177,7 @@ export default function ModelConfigSection() {
   })
 
   const handleEditText = () => {
-    if (textBaseUrl && !textModel) {
+    if (textEndpoint && !textModel) {
       toast.error('请填写模型名称')
       return
     }
@@ -185,7 +185,7 @@ export default function ModelConfigSection() {
   }
 
   const handleEditImage = () => {
-    if (imageBaseUrl && !imageModel) {
+    if (imageEndpoint && !imageModel) {
       toast.error('请填写模型名称')
       return
     }
@@ -224,11 +224,11 @@ export default function ModelConfigSection() {
           }
         >
           <MaskedInput
-            label="API Base URL"
-            value={textBaseUrl}
-            onChange={setTextBaseUrl}
+            label="Endpoint"
+            value={textEndpoint}
+            onChange={setTextEndpoint}
             placeholder="https://api.openai.com/v1"
-            hasValue={!!config?.text?.base_url}
+            hasValue={!!config?.text?.endpoint}
           />
           <MaskedInput
             label="API Key"
@@ -297,11 +297,11 @@ export default function ModelConfigSection() {
             </select>
           </div>
           <MaskedInput
-            label="API Base URL"
-            value={imageBaseUrl}
-            onChange={setImageBaseUrl}
+            label="Endpoint"
+            value={imageEndpoint}
+            onChange={setImageEndpoint}
             placeholder="https://..."
-            hasValue={!!config?.image?.base_url}
+            hasValue={!!config?.image?.endpoint}
           />
           <MaskedInput
             label="API Key"
