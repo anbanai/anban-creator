@@ -95,6 +95,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				result.NumTurns = m.NumTurns
 				result.SessionID = m.SessionID
 				result.DurationMs = m.DurationMs
+				result.ToolUseCount = toolUseCount
 				if m.IsError {
 					if m.Result != nil {
 						result.Error = *m.Result
@@ -123,6 +124,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 
 	result.Success = true
 	result.LogText = resultText
+	result.ToolUseCount = toolUseCount
 	if turnNum <= 1 && toolUseCount == 0 {
 		result.AgentLikelyFailed = true
 	}

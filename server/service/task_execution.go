@@ -206,12 +206,14 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	if result.AgentLikelyFailed {
 		if meaningfulFileCount == 0 && result.WorkDir != "" {
 			errMsg := fmt.Sprintf(
-				"agent execution produced no output files (num_turns=%d, output_files=0); agent definition may not have loaded, model does not support tool use, or files were written to the wrong directory",
+				"agent execution produced no output files (num_turns=%d, tool_uses=%d, output_files=0); agent definition may not have loaded, model does not support tool use, or files were written to the wrong directory",
 				result.NumTurns,
+				result.ToolUseCount,
 			)
 			s.logger.Error().
 				Str("task_id", taskID).
 				Int("num_turns", result.NumTurns).
+				Int("tool_use_count", result.ToolUseCount).
 				Int("meaningful_files", meaningfulFileCount).
 				Msg(errMsg)
 			_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
@@ -229,12 +231,14 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	// (agent wrote to wrong directory or produced no output).
 	if meaningfulFileCount == 0 && result.WorkDir != "" {
 		errMsg := fmt.Sprintf(
-			"agent execution produced no output files (num_turns=%d, output_files=0); agent definition may not have loaded, model does not support tool use, or files were written to the wrong directory",
+			"agent execution produced no output files (num_turns=%d, tool_uses=%d, output_files=0); agent definition may not have loaded, model does not support tool use, or files were written to the wrong directory",
 			result.NumTurns,
+			result.ToolUseCount,
 		)
 		s.logger.Error().
 			Str("task_id", taskID).
 			Int("num_turns", result.NumTurns).
+			Int("tool_use_count", result.ToolUseCount).
 			Int("meaningful_files", meaningfulFileCount).
 			Msg(errMsg)
 		_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))

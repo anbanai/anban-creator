@@ -18,6 +18,32 @@ import (
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
+// agentEnvBlocklist lists environment variable names that must NEVER be
+// forwarded to the Claude Code agent process. The agent's model is set
+// exclusively via the --model flag / WithModel SDK option from
+// config.yaml claude.model. Allowing these env vars would let the agent
+// use a different model or API endpoint, causing silent failures (zero
+// tool uses) if a non-Anthropic model is selected.
+var agentEnvBlocklist = map[string]bool{
+	"ANTHROPIC_MODEL":                true,
+	"ANTHROPIC_BASE_URL":             true,
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL":  true,
+	"ANTHROPIC_DEFAULT_SONNET_MODEL": true,
+	"ANTHROPIC_DEFAULT_OPUS_MODEL":   true,
+}
+
+// filterAgentEnv returns a copy of env with blocklisted keys removed.
+func filterAgentEnv(env map[string]string) map[string]string {
+	filtered := make(map[string]string, len(env))
+	for k, v := range env {
+		if agentEnvBlocklist[k] {
+			continue
+		}
+		filtered[k] = v
+	}
+	return filtered
+}
+
 // BuildUserPrompt constructs the user prompt with a command prefix based on task type.
 // This ensures the model receives an explicit command (e.g., "/rednote topic")
 // instead of a raw topic that could be misinterpreted as a Q&A question.
@@ -75,7 +101,7 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 	return &LocalExecutor{
 		logger:            logger,
 		imageAPICfg:       imageAPICfg,
-		claudeEnv:         claudeEnv,
+		claudeEnv:         filterAgentEnv(claudeEnv),
 		pluginDir:         pluginDir,
 		sandbox:           sandbox,
 		defaultModel:      defaultModel,
@@ -95,7 +121,6 @@ type ExecutionOptions struct {
 	OnProgress    func(taskID string, message string) // callback for SSE
 	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
-	UserEnvOverrides map[string]string               // per-user env var overrides (applied after global claudeEnv)
 }
 
 // TokenUsage captures LLM token consumption for a task execution.
@@ -124,6 +149,7 @@ type ExecutionResult struct {
 	// Post-execution diagnostics.
 	NoOutputFiles     bool `json:"no_output_files,omitempty"`
 	AgentLikelyFailed bool `json:"agent_likely_failed,omitempty"`
+	ToolUseCount      int  `json:"tool_use_count,omitempty"`
 }
 
 // Execute runs the Claude Code agent for the given task.
@@ -279,10 +305,6 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(k, v))
 	}
 
-	// Additional per-user env var overrides.
-	for k, v := range opts.UserEnvOverrides {
-		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(k, v))
-	}
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
 	// ${ANBANWRITER_API_KEY} for the anbanwriter MCP server.
@@ -480,6 +502,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			Error:   execErr.Error(),
 			WorkDir: workDir,
 			LogText: resultText,
+				ToolUseCount: toolUseCount,
 		}
 		if resultMsg != nil {
 			result.NumTurns = resultMsg.NumTurns
@@ -500,9 +523,10 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	result := &ExecutionResult{
-		Success: true,
-		WorkDir: workDir,
-		LogText: resultText,
+		Success:      true,
+		WorkDir:      workDir,
+		LogText:      resultText,
+		ToolUseCount: toolUseCount,
 	}
 	if resultMsg != nil {
 		result.NumTurns = resultMsg.NumTurns

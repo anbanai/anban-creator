@@ -34,7 +34,6 @@ type TaskService struct {
 	store          storage.Provider
 	creditSvc      *CreditService
 	publishingSvc  *PublishingService
-	modelConfigSvc *ModelConfigService
 	taskLogDir     string
 	workspaceSvc   *WorkspaceService
 	workspaceDir   string
@@ -80,12 +79,6 @@ func NewTaskService(
 	}
 
 	return svc
-}
-
-// SetModelConfigService sets the model config service for per-user AI model overrides.
-// This is called after TaskService creation to avoid circular dependencies.
-func (s *TaskService) SetModelConfigService(svc *ModelConfigService) {
-	s.modelConfigSvc = svc
 }
 
 // Close stops the Redis pub/sub subscriber goroutine.

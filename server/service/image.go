@@ -146,6 +146,10 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, im
 	effectiveCfg := s.imageCfg
 	if s.modelConfigSvc != nil {
 		if userCfg := s.modelConfigSvc.GetEffectiveImageConfig(ctx, ch.UserID); userCfg != nil {
+			s.logger.Info().
+				Str("user_id", ch.UserID).
+				Str("image_type", imageType).
+				Msg("using user custom image config")
 			effectiveCfg = userCfg
 		}
 	}

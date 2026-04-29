@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
 
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
@@ -13,6 +14,9 @@ import (
 
 // billingServices holds dependencies for billing operations.
 var billSvc *billingServices
+
+// mcpLog is the package-level logger for MCP tool diagnostics.
+var mcpLog *zerolog.Logger
 
 type billingServices struct {
 	creditSvc      *service.CreditService
@@ -27,6 +31,11 @@ func SetBillingServices(creditSvc *service.CreditService, modelConfigSvc *servic
 		modelConfigSvc: modelConfigSvc,
 		config:         cfg,
 	}
+}
+
+// SetLogger sets the package-level logger for MCP tool diagnostics.
+func SetLogger(log *zerolog.Logger) {
+	mcpLog = log
 }
 
 // maybeDeduct handles model operation billing with three rules:
@@ -99,7 +108,11 @@ func resolveTextModel(ctx context.Context, userID string) (provider, mdl string)
 }
 
 // billingError converts an ErrInsufficientCredits into an MCP error result.
+// If mcpLog is set, it also logs the error for diagnostics.
 func billingError(opType string, err error) *mcp.CallToolResult {
+	if mcpLog != nil && !errors.Is(err, service.ErrInsufficientCredits) {
+		mcpLog.Error().Err(err).Str("tool", opType).Msg("MCP tool failed")
+	}
 	if errors.Is(err, service.ErrInsufficientCredits) {
 		return errorResult("积分不足，请前往 https://creator.anbanai.com 充值")
 	}

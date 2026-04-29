@@ -115,6 +115,11 @@ func (s *WritingService) SetModelConfigService(svc *ModelConfigService) {
 func (s *WritingService) getLLMClient(ctx context.Context, userID string) LLMClient {
 	if s.modelConfigSvc != nil {
 		if baseURL, key, model, ok := s.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID); ok {
+			s.logger.Info().
+				Str("user_id", userID).
+				Str("endpoint", baseURL).
+				Str("model", model).
+				Msg("using user custom model for writing")
 			return NewOpenAILLMClient(baseURL, key, model)
 		}
 	}

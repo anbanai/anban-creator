@@ -71,7 +71,7 @@ func NewDockerExecutor(
 	return &DockerExecutor{
 		logger:            logger,
 		imageAPICfg:       imageAPICfg,
-		claudeEnv:         claudeEnv,
+		claudeEnv:         filterAgentEnv(claudeEnv),
 		dockerCfg:         dockerCfg,
 			serverURL:         serverURL,
 		dockerCLI:         cli,
@@ -251,10 +251,6 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string,
 func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin"}
 	for k, v := range e.claudeEnv {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
-	// Additional per-user env var overrides.
-	for k, v := range opts.UserEnvOverrides {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	return env

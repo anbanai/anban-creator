@@ -208,9 +208,6 @@ func main() {
 	var modelConfigSvc *service.ModelConfigService
 	if repo != nil {
 		modelConfigSvc = service.NewModelConfigService(repo, cfg, log)
-		if taskSvc != nil {
-			taskSvc.SetModelConfigService(modelConfigSvc)
-		}
 		log.Info().Msg("model config service initialized")
 	}
 
@@ -304,6 +301,7 @@ func main() {
 			WorkspaceSvc:  workspaceSvc,
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
+		mcp.SetLogger(log)
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log)
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
