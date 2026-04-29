@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -6,12 +6,11 @@ import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Loader2, ClipboardList, Check, Film } from 'lucide-react'
 import { api } from '@/lib/api'
-import type { TaskType, TaskStatus, CreateTaskRequest } from '@/types'
+import type { TaskType, TaskStatus, CreateTaskRequest, Channel } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
-import { Card } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
@@ -20,7 +19,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel } from '@/lib/labels'
-import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
+import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
@@ -55,6 +55,14 @@ export default function TasksPage() {
     queryKey: ['channels', 'active'],
     queryFn: () => api.channels.list({ status: 'active' }),
   })
+
+  const channelMap = useMemo(() => {
+    const map: Record<string, Channel> = {}
+    for (const ch of channels) {
+      map[ch.id] = ch
+    }
+    return map
+  }, [channels])
 
   const { data: creditsBalance } = useQuery({
     queryKey: ['credits', 'balance'],
@@ -259,22 +267,57 @@ export default function TasksPage() {
         />
       ) : (
         <div className="space-y-2">
-          {tasks.map((task) => (
-            <Link key={task.id} to={`/tasks/${task.id}`} className="block">
-              <Card className="transition-all duration-200 hover:border-foreground/20 hover:shadow-sm active:scale-[0.99]">
-                <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex items-start gap-3 min-w-0 flex-1">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
-                      {renderPlatformIcon(task.type)}
-                    </div>
+          {tasks.map((task) => {
+            const channel = channelMap[task.channel_id]
+            const borderColor = platformBorderColor[task.type] || ''
+            const hoverBorderColor = platformHoverBorderColor[task.type] || ''
+
+            return (
+              <Link key={task.id} to={`/tasks/${task.id}`} className="block">
+                <div className={`rounded-lg border border-border bg-card p-4 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-sm active:scale-[0.99]`}>
+                  <div className="flex items-start gap-3">
+                    <PlatformAvatar avatarUrl={channel?.avatar_url} name={channel?.name} platform={task.type} />
                     <div className="min-w-0 flex-1">
-                      <h3 className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <Badge variant={statusBadgeVariant(task.status)}>
+                            {taskStatusLabel[task.status] || task.status}
+                          </Badge>
+                          {task.status === 'completed' && (
+                            <button
+                              type="button"
+                              disabled={togglePublished.isPending}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published }))
+                              }}
+                              className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                                task.published
+                                  ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                                  : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                              }`}
+                            >
+                              {togglePublished.isPending ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : task.published ? (
+                                <Check className="h-3 w-3" />
+                              ) : null}
+                              {task.published ? '已发布' : '标记发布'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {channel?.name && (
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{channel.name}</p>
+                      )}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <Badge variant="outline" className="text-[10px]">
                           {contentTypeLabel[task.type] || task.type}
                         </Badge>
                         {task.status === 'running' && (task.progress ?? 0) > 0 && (
-                          <Badge variant="warning" className="shrink-0 text-[10px]">
+                          <Badge variant="warning" className="text-[10px]">
                             {task.progress ?? 0}%
                           </Badge>
                         )}
@@ -293,38 +336,10 @@ export default function TasksPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1.5 sm:mt-0.5">
-                    <Badge variant={statusBadgeVariant(task.status)}>
-                      {taskStatusLabel[task.status] || task.status}
-                    </Badge>
-                    {task.status === 'completed' && (
-                      <button
-                        type="button"
-                        disabled={togglePublished.isPending}
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published }))
-                        }}
-                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                          task.published
-                            ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
-                            : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                        }`}
-                      >
-                        {togglePublished.isPending ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : task.published ? (
-                          <Check className="h-3 w-3" />
-                        ) : null}
-                        {task.published ? '已发布' : '标记发布'}
-                      </button>
-                    )}
-                  </div>
                 </div>
-              </Card>
-            </Link>
-          ))}
+              </Link>
+            )
+          })}
         </div>
       )}
 

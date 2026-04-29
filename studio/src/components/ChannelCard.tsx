@@ -1,6 +1,7 @@
 import type { Channel, ChannelStats } from '@/types'
 import { platformLabels } from '@/lib/labels'
-import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { renderPlatformIcon, platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
+import { PlatformAvatar } from '@/components/PlatformAvatar'
 import Badge from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 
@@ -15,30 +16,6 @@ interface ChannelCardProps {
   onDelete?: (id: string) => void
 }
 
-const platformBadgeVariant: Record<string, 'success' | 'info' | 'danger' | 'neutral'> = {
-  article: 'success',
-  xls: 'info',
-  rednote: 'danger',
-}
-
-const platformBorderColor: Record<string, string> = {
-  article: 'border-l-[#07C160]',
-  xls: 'border-l-[#34C759]',
-  rednote: 'border-l-[#FF2442]',
-}
-
-const platformHoverBorderColor: Record<string, string> = {
-  article: 'hover:border-l-[#07C160]/50',
-  xls: 'hover:border-l-[#34C759]/50',
-  rednote: 'hover:border-l-[#FF2442]/50',
-}
-
-const platformBgColor: Record<string, string> = {
-  article: 'bg-[#07C160]/10',
-  xls: 'bg-[#34C759]/10',
-  rednote: 'bg-[#FF2442]/10',
-}
-
 export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {
   const platformLabel = platformLabels[channel.platform] || channel.platform
   const platformBadge = platformBadgeVariant[channel.platform] || ('neutral' as const)
@@ -49,17 +26,7 @@ export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onAr
     <div className={`group rounded-lg border border-border bg-card p-5 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md active:scale-[0.98]`}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          {channel.avatar_url ? (
-            <img
-              src={channel.avatar_url}
-              alt={channel.name}
-              className="h-11 w-11 rounded-full object-cover ring-1 ring-border"
-            />
-          ) : (
-            <div className={`flex h-11 w-11 items-center justify-center rounded-full ${platformBgColor[channel.platform] || 'bg-primary/10'}`}>
-              {renderPlatformIcon(channel.platform)}
-            </div>
-          )}
+          <PlatformAvatar avatarUrl={channel.avatar_url} name={channel.name} platform={channel.platform} size="lg" />
           <div>
             <h3 className="text-sm font-semibold text-foreground">{channel.name}</h3>
             <Badge variant={platformBadge} className="mt-1 text-[10px]">

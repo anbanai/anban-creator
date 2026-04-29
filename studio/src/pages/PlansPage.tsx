@@ -16,30 +16,13 @@ import SchedulePicker from '@/components/SchedulePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
-import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
+import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
-
-const platformBadgeVariant: Record<string, 'success' | 'info' | 'danger' | 'neutral'> = {
-  article: 'success',
-  xls: 'info',
-  rednote: 'danger',
-}
-
-const platformBorderColor: Record<string, string> = {
-  article: 'border-l-[#07C160]',
-  xls: 'border-l-[#34C759]',
-  rednote: 'border-l-[#FF2442]',
-}
-
-const platformHoverBorderColor: Record<string, string> = {
-  article: 'hover:border-l-[#07C160]/50',
-  xls: 'hover:border-l-[#34C759]/50',
-  rednote: 'hover:border-l-[#FF2442]/50',
-}
 
 function planToFormValues(plan: Plan): PlanFormValues {
   return {
@@ -250,54 +233,50 @@ export default function PlansPage() {
                 key={plan.id}
                 className={`group rounded-lg border border-border bg-card p-4 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md`}
               >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex items-start gap-3 min-w-0 flex-1">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
-                      {renderPlatformIcon(plan.type)}
+                <div className="flex items-start gap-3">
+                  <PlatformAvatar avatarUrl={channel?.avatar_url} name={channel?.name} platform={plan.type} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {plan.prompt || contentTypeLabel[plan.type] + '计划'}
+                      </span>
+                      <Badge variant={getBadgeVariant(plan.status, 'plan')} className="shrink-0">
+                        {planStatusLabel[plan.status] || plan.status}
+                      </Badge>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-sm font-medium text-foreground">
-                          {plan.prompt || contentTypeLabel[plan.type] + '计划'}
-                        </span>
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        {channel?.name && (
-                          <span className="truncate">{channel.name}</span>
-                        )}
-                        <Badge variant={platformBadge} className="shrink-0 text-[10px]">
-                          {contentTypeLabel[plan.type] || plan.type}
-                        </Badge>
-                        <Badge variant={getBadgeVariant(plan.status, 'plan')} className="shrink-0">
-                          {planStatusLabel[plan.status] || plan.status}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">{cronToHuman(plan.cron_expr)}</span>
-                        <span className="text-xs text-muted-foreground">下次：{formatDateTimeCN(plan.next_run_at)}</span>
-                      </div>
+                    {channel?.name && (
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{channel.name}</p>
+                    )}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <Badge variant={platformBadge} className="text-[10px]">
+                        {contentTypeLabel[plan.type] || plan.type}
+                      </Badge>
+                      <span>{cronToHuman(plan.cron_expr)}</span>
+                      <span>下次：{formatDateTimeCN(plan.next_run_at)}</span>
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1.5 sm:mt-0.5">
-                    {plan.status === 'active' && (
-                      <Button variant="ghost" size="xs" loading={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
-                        暂停
-                      </Button>
-                    )}
-                    {plan.status === 'paused' && (
-                      <Button variant="ghost" size="xs" loading={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
-                        恢复
-                      </Button>
-                    )}
-                    <Button variant="ghost" size="xs" onClick={() => openEdit(plan)}>
-                      编辑
+                </div>
+                <div className="mt-2 flex justify-end gap-1.5 border-t border-border pt-2">
+                  {plan.status === 'active' && (
+                    <Button variant="ghost" size="xs" loading={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
+                      暂停
                     </Button>
-                    <Button
-                      variant="destructive"
-                      size="xs"
-                      onClick={() => setDeleteTarget(plan.id)}
-                    >
-                      删除
+                  )}
+                  {plan.status === 'paused' && (
+                    <Button variant="ghost" size="xs" loading={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
+                      恢复
                     </Button>
-                  </div>
+                  )}
+                  <Button variant="ghost" size="xs" onClick={() => openEdit(plan)}>
+                    编辑
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="xs"
+                    onClick={() => setDeleteTarget(plan.id)}
+                  >
+                    删除
+                  </Button>
                 </div>
               </div>
             )
