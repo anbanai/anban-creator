@@ -67,7 +67,7 @@ export default function TimelinePage() {
   const contentType = searchParams.get('content_type') || ''
   const status = searchParams.get('status') || ''
   const channelId = searchParams.get('channel_id') || ''
-  const sort = searchParams.get('sort') || 'date_asc'
+  const sort = searchParams.get('sort') || 'date_desc'
 
   // Derived date range
   const dateRange = useMemo(() => {
@@ -210,7 +210,7 @@ export default function TimelinePage() {
           </Popover>
 
           {/* Item Type Filter */}
-          <Select value={itemType || undefined} onValueChange={(v) => updateFilter('item_type', v ?? '')}>
+          <Select value={itemType} onValueChange={(v) => updateFilter('item_type', v ?? '')}>
             <SelectTrigger size="sm" className="min-w-[100px]">
               <SelectValue placeholder="全部类型" />
             </SelectTrigger>
@@ -222,7 +222,7 @@ export default function TimelinePage() {
           </Select>
 
           {/* Content Type Filter */}
-          <Select value={contentType || undefined} onValueChange={(v) => updateFilter('content_type', v ?? '')}>
+          <Select value={contentType} onValueChange={(v) => updateFilter('content_type', v ?? '')}>
             <SelectTrigger size="sm" className="min-w-[110px]">
               <SelectValue placeholder="全部内容" />
             </SelectTrigger>
@@ -234,7 +234,7 @@ export default function TimelinePage() {
           </Select>
 
           {/* Status Filter */}
-          <Select value={status || undefined} onValueChange={(v) => updateFilter('status', v ?? '')}>
+          <Select value={status} onValueChange={(v) => updateFilter('status', v ?? '')}>
             <SelectTrigger size="sm" className="min-w-[100px]">
               <SelectValue placeholder="全部状态" />
             </SelectTrigger>
@@ -254,9 +254,9 @@ export default function TimelinePage() {
           </div>
 
           {/* Sort */}
-          <Select value={sort || undefined} onValueChange={(v) => updateFilter('sort', v ?? '')}>
+          <Select value={sort} onValueChange={(v) => updateFilter('sort', v ?? '')}>
             <SelectTrigger size="sm" className="min-w-[100px]">
-              <SelectValue placeholder="日期 ↑" />
+              <SelectValue placeholder="日期 ↓" />
             </SelectTrigger>
             <SelectContent>
               {timelineSortOptions.map((opt) => (

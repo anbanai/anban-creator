@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Check, ChevronsUpDown } from 'lucide-react'
+import { Check, ChevronsUpDown, X } from 'lucide-react'
 import {
   Command,
   CommandEmpty,
@@ -101,6 +101,18 @@ export function Combobox({
           <span className="truncate">{selectedLabel}</span>
         ) : (
           <span className="text-muted-foreground truncate">{placeholder}</span>
+        )}
+        {value && (
+          <button
+            type="button"
+            className="shrink-0 rounded-full p-0.5 hover:bg-muted-foreground/20"
+            onClick={(e) => {
+              e.stopPropagation()
+              onChange('')
+            }}
+          >
+            <X className="size-3 text-muted-foreground" />
+          </button>
         )}
         <ChevronsUpDown className="pointer-events-none shrink-0 size-3.5 text-muted-foreground" />
       </PopoverTrigger>
