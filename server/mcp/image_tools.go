@@ -13,7 +13,7 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream, or OpenRouter). The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL) of the generated image. If output_path is provided, the server also saves the image to that path and returns file_path.",
+		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream). The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL) of the generated image. If output_path is provided, the server also saves the image to that path and returns file_path.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

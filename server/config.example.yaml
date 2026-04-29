@@ -84,7 +84,7 @@ storage:
 # ---------------------------------------------------------------------------
 # Image API: Global image generation API configuration
 # Shared across all channels. Supports cover and content image generation.
-# Provider: openai, gemini, openrouter, volcengine
+# Provider: openai, gemini, volcengine
 # ---------------------------------------------------------------------------
 image_api:
   cover:

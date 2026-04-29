@@ -80,7 +80,7 @@ export ANBANWRITER_API_URL="https://你的域名"  # 本地开发默认 http://l
 
 ### 步骤 4: 图片生成配置（可选）
 
-展示 `~/.anbanwriter/settings.json` 配置模板，包含 provider 对比表格（OpenAI / Gemini / OpenRouter / 火山引擎）。
+展示 `~/.anbanwriter/settings.json` 配置模板，包含 provider 对比表格（OpenAI / Gemini / 火山引擎）。
 
 ### 步骤 5: 微信公众号配置（可选）
 

@@ -152,7 +152,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 			platform: model.ScopeArticle,
 			imageAPICfg: &srvconfig.ImageAPIConfig{
 				Cover: &appconfig.ImageAPI{
-					Provider: "openrouter",
+					Provider: "gemini",
 					Key:      "test-key",
 					Size:     "9:16",
 				},

@@ -124,14 +124,6 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		},
 	}
 
-	// Resolve per-user AI model config for agent execution.
-	if s.modelConfigSvc != nil {
-		if tc, err := s.modelConfigSvc.GetTextConfig(ctx, userID); err == nil && tc.HasConfig() {
-			opts.UserTextConfig = tc
-			s.logger.Info().Str("task_id", taskID).Str("user_id", userID).Msg("using per-user text model config")
-		}
-	}
-
 	result, execErr := s.executor.Execute(execCtx, opts)
 
 	// Store result.

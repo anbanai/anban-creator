@@ -97,7 +97,7 @@ Shared library for content creation, used by both server and agent:
 - `converter/` — Markdown → WeChat HTML with theme system and AI mode
 - `writer/` — AI-powered styled writing with YAML-defined writing styles
 - `humanizer/` — AI trace detection and removal with quality scoring
-- `image/` — Multi-provider image generation (OpenAI, Gemini, OpenRouter, Volcengine), compression, processing
+- `image/` — Multi-provider image generation (OpenAI, Gemini, Volcengine), compression, processing
 - `storage/` — SQLite via GORM for CLI-side content/draft/image records
 - `draft/` — WeChat draft creation and publishing
 - `wechat/` — WeChat API wrapper with retry logic
@@ -179,7 +179,6 @@ All implement `Provider` interface (`app/image/provider.go`).
 |----------|-------|-------|
 | OpenAI | `openai` (default) | Synchronous, dall-e-2/dall-e-3 |
 | Google Gemini | `gemini` or `google` | Inline image data |
-| OpenRouter | `openrouter` or `or` | Multi-model gateway |
 | Volcengine/Seedream | `volcengine`, `volc`, `seedream` | Async polling |
 
 ## Important Constraints

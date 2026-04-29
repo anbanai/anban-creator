@@ -416,7 +416,7 @@ func (p *Processor) processRawResult(result *GenerateResult, outputPath string) 
 		}
 	}()
 
-	// 远程 URL 需要下载，本地路径（Gemini/OpenRouter）直接使用
+	// 远程 URL 需要下载，本地路径（Gemini）直接使用
 	sourcePath := result.URL
 	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
 		tmpPath, err := wechat.DownloadFile(result.URL)

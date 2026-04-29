@@ -17,7 +17,6 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/openai/openai-go/v3 v3.32.0
 	github.com/redis/go-redis/v9 v9.18.0
-	github.com/revrost/go-openrouter v1.2.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.1
 	github.com/severity1/claude-agent-sdk-go v0.6.15

@@ -16,8 +16,6 @@ import (
 const (
 	DefaultGeminiModel       = "gemini-3-pro-image-preview"
 	DefaultOpenAIModel       = "dall-e-3"
-	DefaultOpenRouterModel   = "google/gemini-3-pro-image-preview"
-	DefaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
 	DefaultVolcengineModel   = "doubao-seedream-5-0-250128"
 	DefaultVolcengineBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 )
@@ -110,15 +108,13 @@ func NewProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (Provider, error)
 		return NewOpenAIProvider(apiCfg)
 	case "gemini", "google":
 		return NewGeminiProvider(apiCfg)
-	case "openrouter", "or":
-		return NewOpenRouterProvider(apiCfg)
 	case "volcengine", "volc", "seedream":
 		return NewVolcengineProvider(apiCfg, log)
 	default:
 		return nil, &config.ConfigError{
 			Field:   "ImageProvider",
 			Message: fmt.Sprintf("未知的图片服务提供者: %s", apiCfg.Provider),
-			HintMsg: "支持的提供者: openai, gemini (google), openrouter (or), volcengine (volc, seedream)",
+			HintMsg: "支持的提供者: openai, gemini (google), volcengine (volc, seedream)",
 		}
 	}
 }
@@ -136,7 +132,7 @@ func validateOpenAIConfig(apiCfg *config.ImageAPI) error {
 		return &config.ConfigError{
 			Field:   "ImageAPIBase",
 			Message: "使用 OpenAI 图片服务需要配置 API Base URL",
-			HintMsg: "在配置文件中设置 article.image.base_url，或切换到其他提供者: gemini, openrouter, volcengine",
+			HintMsg: "在配置文件中设置 article.image.base_url，或切换到其他提供者: gemini, volcengine",
 		}
 	}
 	return nil

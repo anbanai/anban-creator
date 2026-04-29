@@ -118,11 +118,7 @@ func (e *DockerExecutor) CleanupOrphanedContainers() {
 func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	model := opts.Model
 	if model == "" {
-		if opts.UserTextConfig != nil && opts.UserTextConfig.Model != "" {
-			model = opts.UserTextConfig.Model
-		} else {
-			model = e.defaultModel
-		}
+		model = e.defaultModel
 	}
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
@@ -256,15 +252,6 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin"}
 	for k, v := range e.claudeEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
-	// Per-user text model config (takes precedence over global claudeEnv).
-	if opts.UserTextConfig != nil {
-		if opts.UserTextConfig.Endpoint != "" {
-			env = append(env, fmt.Sprintf("ANTHROPIC_BASE_URL=%s", opts.UserTextConfig.Endpoint))
-		}
-		if opts.UserTextConfig.APIKey != "" {
-			env = append(env, fmt.Sprintf("ANTHROPIC_AUTH_TOKEN=%s", opts.UserTextConfig.APIKey))
-		}
 	}
 	// Additional per-user env var overrides.
 	for k, v := range opts.UserEnvOverrides {

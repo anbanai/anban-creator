@@ -707,7 +707,7 @@ func TestResolvedXlsContentImage(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Xls.Content.Image = ImageAPI{
 			Key:      "xls-key",
-			Provider: "openrouter",
+			Provider: "volcengine",
 			Size:     "16:9",
 		}
 		cfg.Rednote = &RednoteConfig{}
@@ -720,8 +720,8 @@ func TestResolvedXlsContentImage(t *testing.T) {
 		if result.Key != "xls-key" {
 			t.Errorf("Key = %q, want xls-key (wechat.xls priority)", result.Key)
 		}
-		if result.Provider != "openrouter" {
-			t.Errorf("Provider = %q, want openrouter (wechat.xls priority)", result.Provider)
+		if result.Provider != "volcengine" {
+			t.Errorf("Provider = %q, want volcengine (wechat.xls priority)", result.Provider)
 		}
 		if result.Size != "16:9" {
 			t.Errorf("Size = %q, want 16:9 (wechat.xls priority)", result.Size)

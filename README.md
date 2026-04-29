@@ -14,7 +14,7 @@ See [anbanai/anbanwriter-claudecode](https://github.com/anbanai/anbanwriter-clau
 - **Score** — Evaluate article viral potential (5-dimension quality scoring)
 - **Outline** — Generate structured article outlines
 - **Draft** — Manage WeChat draft box (图文文章 & 小绿书)
-- **Image** — AI image generation (OpenAI DALL-E, Google Gemini, OpenRouter, Volcengine Seedream)
+- **Image** — AI image generation (OpenAI DALL-E, Google Gemini, Volcengine Seedream)
 
 ## Configuration
 
@@ -35,7 +35,7 @@ Run `anbanwriter account init` for guided setup, or create `.anbanwriter/setting
 }
 ```
 
-Supported image providers: `openai`, `gemini`, `openrouter`, `volcengine`
+Supported image providers: `openai`, `gemini`, `volcengine`
 
 ## Skills
 

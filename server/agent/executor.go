@@ -96,7 +96,6 @@ type ExecutionOptions struct {
 	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
 	UserEnvOverrides map[string]string               // per-user env var overrides (applied after global claudeEnv)
-	UserTextConfig   *model.TextUserConfig           // per-user text model config (overrides default)
 }
 
 // TokenUsage captures LLM token consumption for a task execution.
@@ -133,14 +132,10 @@ type ExecutionResult struct {
 // .anbanwriter/settings.json, loads the abwriter plugin with the matching
 // agent definition, and launches execution via the claude-agent-sdk-go SDK.
 func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
-	// 1. Resolve defaults. Priority: opts.Model > user config > config.yaml default.
+	// 1. Resolve defaults. Priority: opts.Model > config.yaml default.
 	model := opts.Model
 	if model == "" {
-		if opts.UserTextConfig != nil && opts.UserTextConfig.Model != "" {
-			model = opts.UserTextConfig.Model
-		} else {
-			model = e.defaultModel
-		}
+		model = e.defaultModel
 	}
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
@@ -282,16 +277,6 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// Environment variables (auth tokens, API keys, etc.).
 	for k, v := range e.claudeEnv {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(k, v))
-	}
-
-	// Per-user text model config (takes precedence over global claudeEnv).
-	if opts.UserTextConfig != nil {
-		if opts.UserTextConfig.Endpoint != "" {
-			sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANTHROPIC_BASE_URL", opts.UserTextConfig.Endpoint))
-		}
-		if opts.UserTextConfig.APIKey != "" {
-			sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANTHROPIC_AUTH_TOKEN", opts.UserTextConfig.APIKey))
-		}
 	}
 
 	// Additional per-user env var overrides.

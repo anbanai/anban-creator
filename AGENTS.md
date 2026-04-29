@@ -118,7 +118,6 @@ app/
 │   ├── provider.go       # Provider interface
 │   ├── openai.go         # OpenAI DALL-E provider
 │   ├── gemini.go         # Google Gemini provider (google.golang.org/genai)
-│   ├── openrouter.go     # OpenRouter multi-model gateway provider
 │   └── volcengine.go     # Volcengine Seedream provider (async polling)
 │
 ├── draft/                # WeChat draft management
@@ -172,14 +171,6 @@ The converter module orchestrates a multi-step process:
 - Default model: `gemini-3-pro-image-preview`
 - Supports image size via `size` field in WIDTHxHEIGHT format (e.g., `2560x1440`, `1728x2304`)
 - Temp file prefix: `anbanwriter_gemini_`
-
-**OpenRouter** (provider: `openrouter` or `or`):
-
-- Multi-model gateway supporting Gemini, Flux, and others
-- Uses Chat Completions API, returns base64-encoded images
-- Default model: `google/gemini-3-pro-image-preview`
-- Default base URL: `https://openrouter.ai/api/v1`
-- Temp file prefix: `anbanwriter_openrouter_`
 
 **Volcengine/Seedream** (provider: `volcengine`, `volc`, or `seedream`):
 

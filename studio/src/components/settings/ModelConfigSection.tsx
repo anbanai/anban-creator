@@ -12,7 +12,6 @@ import { Label } from '@/components/ui/label'
 const IMAGE_PROVIDERS = [
   { value: 'openai', label: 'OpenAI (DALL-E)' },
   { value: 'gemini', label: 'Google Gemini' },
-  { value: 'openrouter', label: 'OpenRouter' },
   { value: 'volcengine', label: 'Volcengine/Seedream' },
 ]
 
