@@ -21,6 +21,8 @@ type Repository interface {
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
 	ModelConfigs() ModelConfigRepository
+	RednoteTrackings() RednoteTrackingRepository
+	RednoteMetricSnapshots() RednoteMetricSnapshotRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -120,22 +122,43 @@ type FeedbackRepository interface {
 	Create(ctx context.Context, feedback *model.Feedback) error
 }
 
+// RednoteTrackingRepository provides access to Rednote post tracking records.
+type RednoteTrackingRepository interface {
+	Create(ctx context.Context, tracking *model.RednotePostTracking) error
+	FindByTaskID(ctx context.Context, taskID string) (*model.RednotePostTracking, error)
+	FindByID(ctx context.Context, id string) (*model.RednotePostTracking, error)
+	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.RednotePostTracking, error)
+	Update(ctx context.Context, tracking *model.RednotePostTracking) error
+	UpdateStatus(ctx context.Context, id, status string) error
+}
+
+// RednoteMetricSnapshotRepository provides access to Rednote metric snapshots.
+type RednoteMetricSnapshotRepository interface {
+	Create(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error
+	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error
+	FindByTaskID(ctx context.Context, taskID string) ([]*model.RednoteMetricSnapshot, error)
+	FindLatestByTrackingID(ctx context.Context, trackingID string) (*model.RednoteMetricSnapshot, error)
+	FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.RednoteMetricSnapshot, error)
+}
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
 
 type repository struct {
-	db           *gorm.DB
-	users        UserRepository
-	sessions     SessionRepository
-	plans        PlanRepository
-	tasks        TaskRepository
-	files        TaskFileRepository
-	channels     ChannelRepository
-	credits      CreditRepository
-	apiKeys      APIKeyRepository
-	feedbacks    FeedbackRepository
-	modelConfigs ModelConfigRepository
+	db                     *gorm.DB
+	users                  UserRepository
+	sessions               SessionRepository
+	plans                  PlanRepository
+	tasks                  TaskRepository
+	files                  TaskFileRepository
+	channels               ChannelRepository
+	credits                CreditRepository
+	apiKeys                APIKeyRepository
+	feedbacks              FeedbackRepository
+	modelConfigs           ModelConfigRepository
+	rednoteTrackings       RednoteTrackingRepository
+	rednoteMetricSnapshots RednoteMetricSnapshotRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -150,32 +173,40 @@ func New(db *gorm.DB) Repository {
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
 	modelConfigs := newModelConfigRepository(db)
+	rednoteTrackings := newRednoteTrackingRepository(db)
+	rednoteMetricSnapshots := newRednoteMetricSnapshotRepository(db)
 
 	return &repository{
-		db:           db,
-		users:        users,
-		sessions:     sessions,
-		plans:        plans,
-		tasks:        tasks,
-		files:        files,
-		channels:     channels,
-		credits:      credits,
-		apiKeys:      apiKeys,
-		feedbacks:    feedbacks,
-		modelConfigs: modelConfigs,
+		db:                     db,
+		users:                  users,
+		sessions:               sessions,
+		plans:                  plans,
+		tasks:                  tasks,
+		files:                  files,
+		channels:               channels,
+		credits:                credits,
+		apiKeys:                apiKeys,
+		feedbacks:              feedbacks,
+		modelConfigs:           modelConfigs,
+		rednoteTrackings:       rednoteTrackings,
+		rednoteMetricSnapshots: rednoteMetricSnapshots,
 	}
 }
 
-func (r *repository) Users() UserRepository               { return r.users }
-func (r *repository) Sessions() SessionRepository         { return r.sessions }
-func (r *repository) Plans() PlanRepository               { return r.plans }
-func (r *repository) Tasks() TaskRepository               { return r.tasks }
-func (r *repository) TaskFiles() TaskFileRepository       { return r.files }
-func (r *repository) Channels() ChannelRepository         { return r.channels }
-func (r *repository) Credits() CreditRepository           { return r.credits }
-func (r *repository) APIKeys() APIKeyRepository           { return r.apiKeys }
-func (r *repository) Feedbacks() FeedbackRepository       { return r.feedbacks }
-func (r *repository) ModelConfigs() ModelConfigRepository { return r.modelConfigs }
+func (r *repository) Users() UserRepository                       { return r.users }
+func (r *repository) Sessions() SessionRepository                 { return r.sessions }
+func (r *repository) Plans() PlanRepository                       { return r.plans }
+func (r *repository) Tasks() TaskRepository                       { return r.tasks }
+func (r *repository) TaskFiles() TaskFileRepository               { return r.files }
+func (r *repository) Channels() ChannelRepository                 { return r.channels }
+func (r *repository) Credits() CreditRepository                   { return r.credits }
+func (r *repository) APIKeys() APIKeyRepository                   { return r.apiKeys }
+func (r *repository) Feedbacks() FeedbackRepository               { return r.feedbacks }
+func (r *repository) ModelConfigs() ModelConfigRepository         { return r.modelConfigs }
+func (r *repository) RednoteTrackings() RednoteTrackingRepository { return r.rednoteTrackings }
+func (r *repository) RednoteMetricSnapshots() RednoteMetricSnapshotRepository {
+	return r.rednoteMetricSnapshots
+}
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -201,45 +232,53 @@ func (r *repository) Close() error {
 // -----------------------------------------------------------------------------
 
 type txRepository struct {
-	db           *gorm.DB
-	users        UserRepository
-	sessions     SessionRepository
-	plans        PlanRepository
-	tasks        TaskRepository
-	files        TaskFileRepository
-	channels     ChannelRepository
-	credits      CreditRepository
-	apiKeys      APIKeyRepository
-	feedbacks    FeedbackRepository
-	modelConfigs ModelConfigRepository
+	db                     *gorm.DB
+	users                  UserRepository
+	sessions               SessionRepository
+	plans                  PlanRepository
+	tasks                  TaskRepository
+	files                  TaskFileRepository
+	channels               ChannelRepository
+	credits                CreditRepository
+	apiKeys                APIKeyRepository
+	feedbacks              FeedbackRepository
+	modelConfigs           ModelConfigRepository
+	rednoteTrackings       RednoteTrackingRepository
+	rednoteMetricSnapshots RednoteMetricSnapshotRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
 	return &txRepository{
-		db:           tx,
-		users:        newUserRepository(tx),
-		sessions:     newSessionRepository(tx),
-		plans:        newPlanRepository(tx),
-		tasks:        newTaskRepository(tx),
-		files:        newTaskFileRepository(tx),
-		channels:     newChannelRepository(tx),
-		credits:      newCreditRepository(tx),
-		apiKeys:      newAPIKeyRepository(tx),
-		feedbacks:    newFeedbackRepository(tx),
-		modelConfigs: newModelConfigRepository(tx),
+		db:                     tx,
+		users:                  newUserRepository(tx),
+		sessions:               newSessionRepository(tx),
+		plans:                  newPlanRepository(tx),
+		tasks:                  newTaskRepository(tx),
+		files:                  newTaskFileRepository(tx),
+		channels:               newChannelRepository(tx),
+		credits:                newCreditRepository(tx),
+		apiKeys:                newAPIKeyRepository(tx),
+		feedbacks:              newFeedbackRepository(tx),
+		modelConfigs:           newModelConfigRepository(tx),
+		rednoteTrackings:       newRednoteTrackingRepository(tx),
+		rednoteMetricSnapshots: newRednoteMetricSnapshotRepository(tx),
 	}
 }
 
-func (r *txRepository) Users() UserRepository               { return r.users }
-func (r *txRepository) Sessions() SessionRepository         { return r.sessions }
-func (r *txRepository) Plans() PlanRepository               { return r.plans }
-func (r *txRepository) Tasks() TaskRepository               { return r.tasks }
-func (r *txRepository) TaskFiles() TaskFileRepository       { return r.files }
-func (r *txRepository) Channels() ChannelRepository         { return r.channels }
-func (r *txRepository) Credits() CreditRepository           { return r.credits }
-func (r *txRepository) APIKeys() APIKeyRepository           { return r.apiKeys }
-func (r *txRepository) Feedbacks() FeedbackRepository       { return r.feedbacks }
-func (r *txRepository) ModelConfigs() ModelConfigRepository { return r.modelConfigs }
+func (r *txRepository) Users() UserRepository                       { return r.users }
+func (r *txRepository) Sessions() SessionRepository                 { return r.sessions }
+func (r *txRepository) Plans() PlanRepository                       { return r.plans }
+func (r *txRepository) Tasks() TaskRepository                       { return r.tasks }
+func (r *txRepository) TaskFiles() TaskFileRepository               { return r.files }
+func (r *txRepository) Channels() ChannelRepository                 { return r.channels }
+func (r *txRepository) Credits() CreditRepository                   { return r.credits }
+func (r *txRepository) APIKeys() APIKeyRepository                   { return r.apiKeys }
+func (r *txRepository) Feedbacks() FeedbackRepository               { return r.feedbacks }
+func (r *txRepository) ModelConfigs() ModelConfigRepository         { return r.modelConfigs }
+func (r *txRepository) RednoteTrackings() RednoteTrackingRepository { return r.rednoteTrackings }
+func (r *txRepository) RednoteMetricSnapshots() RednoteMetricSnapshotRepository {
+	return r.rednoteMetricSnapshots
+}
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.
