@@ -73,7 +73,7 @@ func NewDockerExecutor(
 		imageAPICfg:       imageAPICfg,
 		claudeEnv:         filterAgentEnv(claudeEnv),
 		dockerCfg:         dockerCfg,
-			serverURL:         serverURL,
+		serverURL:         serverURL,
 		dockerCLI:         cli,
 		defaultModel:      defaultModel,
 		keyProvider:       keyProvider,
@@ -116,10 +116,8 @@ func (e *DockerExecutor) CleanupOrphanedContainers() {
 
 // Execute runs the standalone abwriter-agent in Docker and returns its final JSON result.
 func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
-	model := opts.Model
-	if model == "" {
-		model = e.defaultModel
-	}
+	// Claude Code agent model comes only from config.yaml.
+	model := e.defaultModel
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = DefaultMaxTurns(opts.Task.Type, e.maxTurnsOverrides)

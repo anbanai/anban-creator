@@ -197,9 +197,9 @@ export default function ModelConfigSection() {
     <Card>
       <div className="border-b border-border px-4 py-3 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">AI 模型配置</h2>
+          <h2 className="text-sm font-semibold text-foreground">MCP 模型配置</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            配置自己的 API Token 和模型，使用自己的模型时不扣除积分。
+            仅用于 MCP 服务端工具中的写作、排版和图片生成，不会改变 Claude Code Agent 使用的模型。
           </p>
         </div>
         <Button
@@ -215,11 +215,11 @@ export default function ModelConfigSection() {
       <CardBody className="space-y-4">
         {/* Text Model */}
         <ModelSection
-          title="文本模型"
+          title="服务端写作模型"
           description={
             textHasConfig
-              ? '已配置自定义模型（蓝色圆点表示已自定义）'
-              : '使用系统默认模型'
+              ? '已配置 MCP 写作自定义模型'
+              : 'MCP 写作工具使用系统默认模型'
           }
         >
           <MaskedInput
@@ -244,7 +244,7 @@ export default function ModelConfigSection() {
             <Input
               value={textModel}
               onChange={(e) => setTextModel(e.target.value)}
-              placeholder="gpt-4o / claude-sonnet-4-20250514"
+              placeholder="gpt-4o / glm-5.1"
               className="text-xs"
             />
           </div>
@@ -270,11 +270,11 @@ export default function ModelConfigSection() {
 
         {/* Image Model */}
         <ModelSection
-          title="图片模型"
+          title="服务端图片模型"
           description={
             imageHasConfig
-              ? '已配置自定义模型'
-              : '使用系统默认模型'
+              ? '已配置 MCP 图片自定义模型'
+              : 'MCP 图片工具使用系统默认模型'
           }
         >
           <div className="space-y-1">

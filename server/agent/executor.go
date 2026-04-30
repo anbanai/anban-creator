@@ -18,27 +18,12 @@ import (
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
 
-// agentEnvBlocklist lists environment variable names that must NEVER be
-// forwarded to the Claude Code agent process. The agent's model is set
-// exclusively via the --model flag / WithModel SDK option from
-// config.yaml claude.model. Allowing these env vars would let the agent
-// use a different model or API endpoint, causing silent failures (zero
-// tool uses) if a non-Anthropic model is selected.
-var agentEnvBlocklist = map[string]bool{
-	"ANTHROPIC_MODEL":                true,
-	"ANTHROPIC_BASE_URL":             true,
-	"ANTHROPIC_DEFAULT_HAIKU_MODEL":  true,
-	"ANTHROPIC_DEFAULT_SONNET_MODEL": true,
-	"ANTHROPIC_DEFAULT_OPUS_MODEL":   true,
-}
-
-// filterAgentEnv returns a copy of env with blocklisted keys removed.
+// filterAgentEnv returns a copy of the server-owned Claude Code environment.
+// User model configuration must never be merged here; it is only for MCP
+// writing/image tools. The agent may use only config.yaml's claude.model/env.
 func filterAgentEnv(env map[string]string) map[string]string {
 	filtered := make(map[string]string, len(env))
 	for k, v := range env {
-		if agentEnvBlocklist[k] {
-			continue
-		}
 		filtered[k] = v
 	}
 	return filtered
@@ -116,7 +101,6 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 type ExecutionOptions struct {
 	Task          *model.Task
 	Channel       *model.Channel
-	Model         string
 	MaxTurns      int
 	OnProgress    func(taskID string, message string) // callback for SSE
 	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
@@ -158,11 +142,8 @@ type ExecutionResult struct {
 // .anbanwriter/settings.json, loads the abwriter plugin with the matching
 // agent definition, and launches execution via the claude-agent-sdk-go SDK.
 func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
-	// 1. Resolve defaults. Priority: opts.Model > config.yaml default.
-	model := opts.Model
-	if model == "" {
-		model = e.defaultModel
-	}
+	// 1. Resolve defaults. Claude Code agent model comes only from config.yaml.
+	model := e.defaultModel
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = DefaultMaxTurns(opts.Task.Type, e.maxTurnsOverrides)
@@ -304,7 +285,6 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	for k, v := range e.claudeEnv {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(k, v))
 	}
-
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
 	// ${ANBANWRITER_API_KEY} for the anbanwriter MCP server.
@@ -498,11 +478,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			opts.LogWriter.WriteError(execErr.Error())
 		}
 		result := &ExecutionResult{
-			Success: false,
-			Error:   execErr.Error(),
-			WorkDir: workDir,
-			LogText: resultText,
-				ToolUseCount: toolUseCount,
+			Success:      false,
+			Error:        execErr.Error(),
+			WorkDir:      workDir,
+			LogText:      resultText,
+			ToolUseCount: toolUseCount,
 		}
 		if resultMsg != nil {
 			result.NumTurns = resultMsg.NumTurns

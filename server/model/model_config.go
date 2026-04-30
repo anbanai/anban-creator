@@ -3,7 +3,8 @@ package model
 import "time"
 
 // TextUserConfig holds per-user text/LLM model configuration.
-// Used for both Agent (Claude Code) execution and Writing/LLM service.
+// It is only used by MCP server-side writing/LLM tools and must never be
+// applied to Claude Code agent execution.
 type TextUserConfig struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	APIKey   string `json:"api_key,omitempty"`
@@ -12,6 +13,7 @@ type TextUserConfig struct {
 }
 
 // ImageUserConfig holds per-user image generation model configuration.
+// It is only used by MCP server-side image generation tools.
 type ImageUserConfig struct {
 	Provider string `json:"provider,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
@@ -30,7 +32,7 @@ func (c *ImageUserConfig) HasConfig() bool {
 	return c.Provider != "" || c.Endpoint != "" || c.APIKey != "" || c.Model != ""
 }
 
-// UserModelConfig stores per-user AI model overrides (plaintext JSON).
+// UserModelConfig stores per-user MCP tool model overrides (plaintext JSON).
 type UserModelConfig struct {
 	ID              string    `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID          string    `gorm:"type:char(36);uniqueIndex;not null" json:"user_id"`

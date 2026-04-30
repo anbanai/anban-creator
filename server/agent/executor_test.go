@@ -4,12 +4,42 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	appconfig "github.com/royalrick/anbanwriter/app/config"
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
 )
+
+func TestFilterAgentEnvPreservesClaudeConfig(t *testing.T) {
+	env := map[string]string{
+		"ANTHROPIC_AUTH_TOKEN":                     "token",
+		"ANTHROPIC_BASE_URL":                       "https://open.bigmodel.cn/api/anthropic",
+		"ANTHROPIC_MODEL":                          "opusplan",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":            "glm-4.5-air",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL":           "glm-5-turbo",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":             "glm-5.1",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+	}
+
+	got := filterAgentEnv(env)
+	if !reflect.DeepEqual(got, env) {
+		t.Fatalf("filterAgentEnv() = %#v, want %#v", got, env)
+	}
+
+	got["ANTHROPIC_MODEL"] = "changed"
+	if env["ANTHROPIC_MODEL"] == "changed" {
+		t.Fatal("filterAgentEnv returned the input map instead of a copy")
+	}
+}
+
+func TestExecutionOptionsDoesNotExposeModelOverride(t *testing.T) {
+	optsType := reflect.TypeOf(ExecutionOptions{})
+	if _, ok := optsType.FieldByName("Model"); ok {
+		t.Fatal("ExecutionOptions must not expose a per-task Claude model override")
+	}
+}
 
 func TestBuildAppConfig(t *testing.T) {
 	tests := []struct {
@@ -235,9 +265,9 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 				Name:       "Test",
 				ImageRatio: "",
 			},
-			imageAPICfg:    yamlCfg,
-			taskImageRatio: "",
-			wantCoverSize:  "16:9",
+			imageAPICfg:     yamlCfg,
+			taskImageRatio:  "",
+			wantCoverSize:   "16:9",
 			wantContentSize: "16:9",
 		},
 		{
@@ -247,9 +277,9 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 				Name:       "Test",
 				ImageRatio: "1:1",
 			},
-			imageAPICfg:    yamlCfg,
-			taskImageRatio: "",
-			wantCoverSize:  "1:1",
+			imageAPICfg:     yamlCfg,
+			taskImageRatio:  "",
+			wantCoverSize:   "1:1",
 			wantContentSize: "1:1",
 		},
 		{
@@ -259,9 +289,9 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 				Name:       "Test",
 				ImageRatio: "1:1",
 			},
-			imageAPICfg:    yamlCfg,
-			taskImageRatio: "4:3",
-			wantCoverSize:  "4:3",
+			imageAPICfg:     yamlCfg,
+			taskImageRatio:  "4:3",
+			wantCoverSize:   "4:3",
 			wantContentSize: "4:3",
 		},
 		{
@@ -271,9 +301,9 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 				Name:       "Test",
 				ImageRatio: "",
 			},
-			imageAPICfg:    yamlCfg,
-			taskImageRatio: "16:9",
-			wantCoverSize:  "16:9",
+			imageAPICfg:     yamlCfg,
+			taskImageRatio:  "16:9",
+			wantCoverSize:   "16:9",
 			wantContentSize: "16:9",
 		},
 	}
