@@ -77,7 +77,7 @@ var PlatformConfigs = map[string]*PlatformConfig{
 		BadgeVariant:       "danger",
 		SupportsPublishing: false,
 		SupportsAutoFetch:  true,
-		ProfileURLPattern:  `^https?://((www\.)?xiaohongshu\.com|xhslink\.com)/`,
+		ProfileURLPattern:  `^https?://((m\.|www\.)?xiaohongshu\.com|xhslink\.com)/`,
 		DefaultImageRatio:  "3:4",
 		Fields: []PlatformFieldConfig{
 			{Key: "profile_url", Label: "小红书主页", Placeholder: "粘贴小红书主页链接...", Type: "url", Group: "basic"},

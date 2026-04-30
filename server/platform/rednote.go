@@ -34,13 +34,17 @@ func NewRednoteProvider() *RednoteProvider {
 	}
 }
 
-var rednoteURLPattern = regexp.MustCompile(`^https?://((www\.)?xiaohongshu\.com|xhslink\.com)/`)
+var rednoteURLPattern = regexp.MustCompile(`^https?://((m\.|www\.)?xiaohongshu\.com|xhslink\.com)/`)
 var xhslinkPattern = regexp.MustCompile(`^https?://xhslink\.com/`)
+var rednoteAvatarImgPattern = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["'][^>]*>`)
+
+const rednoteBrowserUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 // allowedHosts is the set of hosts permitted after redirect resolution.
 var allowedHosts = map[string]bool{
-	"xiaohongshu.com":      true,
-	"www.xiaohongshu.com":  true,
+	"m.xiaohongshu.com":   true,
+	"xiaohongshu.com":     true,
+	"www.xiaohongshu.com": true,
 }
 
 // FetchProfile fetches a Xiaohongshu user's profile from their public profile page.
@@ -61,7 +65,7 @@ func (p *RednoteProvider) FetchProfile(ctx context.Context, profileURL string) (
 			return nil, fmt.Errorf("resolve short link: %w", err)
 		}
 		parsed, err := url.Parse(resolved)
-		if err != nil || !allowedHosts[parsed.Host] {
+		if err != nil || !allowedHosts[strings.ToLower(parsed.Hostname())] {
 			return nil, fmt.Errorf("short link resolved to disallowed host: %s", resolved)
 		}
 		fetchURL = resolved
@@ -72,10 +76,7 @@ func (p *RednoteProvider) FetchProfile(ctx context.Context, profileURL string) (
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	// Mimic a browser request to avoid basic blocking.
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	setRednoteHeaders(req)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -104,7 +105,7 @@ func (p *RednoteProvider) resolveRedirect(ctx context.Context, shortURL string) 
 		if err != nil {
 			return "", fmt.Errorf("create redirect request: %w", err)
 		}
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		setRednoteHeaders(req)
 
 		resp, err := p.noRedirect.Do(req)
 		if err != nil {
@@ -136,6 +137,15 @@ func (p *RednoteProvider) resolveRedirect(ctx context.Context, shortURL string) 
 	return current, nil
 }
 
+func setRednoteHeaders(req *http.Request) {
+	// Xiaohongshu short links are sensitive to very bare requests. Use a normal
+	// browser-like GET flow instead of HEAD-style probing.
+	req.Header.Set("User-Agent", rednoteBrowserUA)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Referer", "https://www.xiaohongshu.com/")
+}
+
 // parseProfile extracts profile data from Xiaohongshu HTML.
 // Xiaohongshu embeds user data in script tags as JSON.
 func (p *RednoteProvider) parseProfile(html string) *PlatformProfile {
@@ -155,9 +165,20 @@ func (p *RednoteProvider) parseProfile(html string) *PlatformProfile {
 	if profile.Name == "" {
 		if title := extractBetween(html, `<title>`, `</title>`); title != "" {
 			title = strings.TrimSpace(title)
-			// Title format is usually "小红书 - 用户名的主页"
-			if before, _, found := strings.Cut(title, " - "); found {
-				profile.Name = strings.TrimSpace(before)
+			if before, after, found := strings.Cut(title, " - "); found {
+				switch strings.TrimSpace(before) {
+				case "小红书":
+					profile.Name = strings.TrimSuffix(strings.TrimSpace(after), "的主页")
+				default:
+					profile.Name = strings.TrimSpace(before)
+				}
+				if profile.Name == "小红书" {
+					profile.Name = ""
+				}
+			} else if before, _, found := strings.Cut(title, "的主页"); found {
+				if strings.TrimSpace(before) != "小红书" {
+					profile.Name = strings.TrimSpace(before)
+				}
 			}
 		}
 	}
@@ -167,6 +188,17 @@ func (p *RednoteProvider) parseProfile(html string) *PlatformProfile {
 		// Unescape URL encoding.
 		avatar = strings.ReplaceAll(avatar, `\u002F`, "/")
 		profile.AvatarURL = avatar
+	}
+	if profile.AvatarURL == "" {
+		for _, match := range rednoteAvatarImgPattern.FindAllStringSubmatch(html, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			if strings.Contains(match[1], "sns-avatar") || strings.Contains(match[1], "avatar") {
+				profile.AvatarURL = strings.ReplaceAll(match[1], `\u002F`, "/")
+				break
+			}
+		}
 	}
 
 	// Extract description / positioning.
