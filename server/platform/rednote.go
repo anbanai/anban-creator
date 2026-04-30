@@ -44,6 +44,10 @@ var rednoteAnchorPattern = regexp.MustCompile(`(?is)<a[^>]+href=["']([^"']*(?:/e
 var rednoteTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
 var rednoteImgSrcPattern = regexp.MustCompile(`(?is)<img[^>]+src=["']([^"']+)["']`)
 var rednoteNumberPattern = regexp.MustCompile(`\d+(?:,\d{3})*(?:\.\d+)?`)
+var rednoteNoteIDPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`/explore/([^/?#]+)`),
+	regexp.MustCompile(`/discovery/item/([^/?#]+)`),
+}
 
 const rednoteTopPostLimit = 5
 const rednoteMaxProfileBytes = 2 * 1024 * 1024
@@ -115,6 +119,52 @@ func (p *RednoteProvider) FetchProfile(ctx context.Context, profileURL string) (
 	profile.RawData["profile_url"] = extractedURL
 	profile.RawData["resolved_profile_url"] = fetchURL
 	return profile, nil
+}
+
+// FetchProfilePosts fetches visible public posts from a Xiaohongshu profile.
+func (p *RednoteProvider) FetchProfilePosts(ctx context.Context, profileURL string) ([]RednotePost, error) {
+	profile, err := p.FetchProfile(ctx, profileURL)
+	if err != nil {
+		return nil, err
+	}
+	posts, ok := profile.RawData["posts"].([]RednotePost)
+	if !ok {
+		return []RednotePost{}, nil
+	}
+	return posts, nil
+}
+
+// FetchPostMetrics fetches public metrics from a Xiaohongshu note page.
+func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) (*RednotePostMetrics, error) {
+	if strings.TrimSpace(noteURL) == "" {
+		return nil, fmt.Errorf("note URL is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, noteURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	setRednoteHeaders(req)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch note page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, rednoteMaxProfileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if len(body) > rednoteMaxProfileBytes {
+		return nil, fmt.Errorf("note page is too large")
+	}
+
+	metrics := parseRednotePostMetrics(string(body))
+	return &metrics, nil
 }
 
 // resolveRedirect follows HTTP redirects and returns the final URL.
@@ -269,6 +319,7 @@ func parseRednotePosts(html string) []RednotePost {
 		post := RednotePost{
 			Title:        title,
 			URL:          postURL,
+			NoteID:       ExtractRednoteNoteID(postURL),
 			CoverURL:     extractRednoteCover(fragment),
 			LikeCount:    parseMetricAfterLabels(text, "点赞", "赞", "喜欢", "like"),
 			CollectCount: parseMetricAfterLabels(text, "收藏", "collect"),
@@ -279,6 +330,28 @@ func parseRednotePosts(html string) []RednotePost {
 		posts = append(posts, post)
 	}
 	return posts
+}
+
+// RednotePostMetrics holds public engagement counters parsed from a note page.
+type RednotePostMetrics struct {
+	LikeCount    int  `json:"like_count"`
+	CollectCount int  `json:"collect_count"`
+	CommentCount int  `json:"comment_count"`
+	ShareCount   int  `json:"share_count"`
+	ViewCount    *int `json:"view_count,omitempty"`
+}
+
+// ExtractRednoteNoteID extracts a Xiaohongshu note ID from public note URLs.
+func ExtractRednoteNoteID(raw string) string {
+	raw = strings.ReplaceAll(raw, `\u002F`, "/")
+	raw = strings.ReplaceAll(raw, `\/`, "/")
+	for _, pattern := range rednoteNoteIDPatterns {
+		match := pattern.FindStringSubmatch(raw)
+		if len(match) >= 2 {
+			return strings.TrimSpace(match[1])
+		}
+	}
+	return ""
 }
 
 func normalizeRednotePostURL(raw string) string {
@@ -332,7 +405,7 @@ func parseMetricAfterLabels(text string, labels ...string) int {
 		if len([]rune(after)) > 20 {
 			after = string([]rune(after)[:20])
 		}
-		if n := parseRednoteCount(after); n > 0 {
+		if n := NormalizeRednoteMetricCount(after); n > 0 {
 			return n
 		}
 	}
@@ -340,6 +413,11 @@ func parseMetricAfterLabels(text string, labels ...string) int {
 }
 
 func parseRednoteCount(text string) int {
+	return NormalizeRednoteMetricCount(text)
+}
+
+// NormalizeRednoteMetricCount converts public Xiaohongshu metric text into an integer count.
+func NormalizeRednoteMetricCount(text string) int {
 	text = strings.ReplaceAll(strings.TrimSpace(text), ",", "")
 	if text == "" {
 		return 0
@@ -359,6 +437,17 @@ func parseRednoteCount(text string) int {
 		value *= 1000
 	}
 	return int(value)
+}
+
+func parseRednotePostMetrics(html string) RednotePostMetrics {
+	text := normalizeRednoteText(rednoteTagPattern.ReplaceAllString(html, " "))
+	return RednotePostMetrics{
+		LikeCount:    parseMetricAfterLabels(text, "点赞", "赞", "喜欢", "like"),
+		CollectCount: parseMetricAfterLabels(text, "收藏", "collect"),
+		CommentCount: parseMetricAfterLabels(text, "评论", "comment"),
+		ShareCount:   parseMetricAfterLabels(text, "分享", "share"),
+		ViewCount:    nil,
+	}
 }
 
 func selectTopRednotePosts(posts []RednotePost, limit int) []RednotePost {

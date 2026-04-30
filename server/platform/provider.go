@@ -16,6 +16,7 @@ type PlatformProfile struct {
 type RednotePost struct {
 	Title           string `json:"title,omitempty"`
 	URL             string `json:"url,omitempty"`
+	NoteID          string `json:"note_id,omitempty"`
 	CoverURL        string `json:"cover_url,omitempty"`
 	LikeCount       int    `json:"like_count,omitempty"`
 	CollectCount    int    `json:"collect_count,omitempty"`
