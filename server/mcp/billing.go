@@ -85,6 +85,14 @@ func resolveImageModel(ctx context.Context, userID string) (provider, mdl string
 	}
 	if billSvc.modelConfigSvc != nil {
 		if cfg := billSvc.modelConfigSvc.GetEffectiveImageConfig(ctx, userID); cfg != nil {
+			if mcpLog != nil {
+				mcpLog.Info().
+					Str("user_id", userID).
+					Str("provider", cfg.Cover.Provider).
+					Str("model", cfg.Cover.Model).
+					Str("source", "user_override").
+					Msg("MCP tool using user custom image model")
+			}
 			return cfg.Cover.Provider, cfg.Cover.Model
 		}
 	}
@@ -101,6 +109,13 @@ func resolveTextModel(ctx context.Context, userID string) (provider, mdl string)
 	}
 	if billSvc.modelConfigSvc != nil {
 		if _, _, m, ok := billSvc.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID); ok {
+			if mcpLog != nil {
+				mcpLog.Info().
+					Str("user_id", userID).
+					Str("model", m).
+					Str("source", "user_override").
+					Msg("MCP tool using user custom text model")
+			}
 			return "", m
 		}
 	}

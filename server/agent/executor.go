@@ -139,9 +139,10 @@ type ExecutionResult struct {
 	TokenUsage    *TokenUsage `json:"token_usage,omitempty"`
 
 	// Post-execution diagnostics.
-	NoOutputFiles     bool `json:"no_output_files,omitempty"`
-	AgentLikelyFailed bool `json:"agent_likely_failed,omitempty"`
-	ToolUseCount      int  `json:"tool_use_count,omitempty"`
+	NoOutputFiles     bool   `json:"no_output_files,omitempty"`
+	AgentLikelyFailed bool   `json:"agent_likely_failed,omitempty"`
+	ToolUseCount      int    `json:"tool_use_count,omitempty"`
+	Model             string `json:"model,omitempty"` // Claude Code agent model (from config.yaml claude.model)
 }
 
 // Execute runs the Claude Code agent for the given task.
@@ -326,6 +327,8 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		Int("env_var_count", len(e.claudeEnv)).
 		Bool("env_has_anthropic_api_key", e.claudeEnv["ANTHROPIC_API_KEY"] != "").
 		Bool("env_has_anthropic_base_url", e.claudeEnv["ANTHROPIC_BASE_URL"] != "").
+		Bool("env_has_anthropic_model", e.claudeEnv["ANTHROPIC_MODEL"] != "").
+		Str("env_anthropic_model", e.claudeEnv["ANTHROPIC_MODEL"]).
 		Msg("MCP config snapshot for Claude Code subprocess")
 
 	// 7. Execute via SDK with streaming.
@@ -501,6 +504,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			Success: false,
 			Error:   err.Error(),
 			WorkDir: workDir,
+			Model:   model,
 		}, nil
 	}
 
@@ -514,6 +518,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			WorkDir:      workDir,
 			LogText:      resultText,
 			ToolUseCount: toolUseCount,
+			Model:        model,
 		}
 		if resultMsg != nil {
 			result.NumTurns = resultMsg.NumTurns
@@ -538,6 +543,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		WorkDir:      workDir,
 		LogText:      resultText,
 		ToolUseCount: toolUseCount,
+		Model:        model,
 	}
 	if resultMsg != nil {
 		result.NumTurns = resultMsg.NumTurns

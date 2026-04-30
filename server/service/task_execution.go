@@ -202,16 +202,25 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		meaningfulFileCount = agent.CountMeaningfulFiles(result.WorkDir)
 	}
 
+	// Log workspace contents for diagnostics when no output files are found.
+	if meaningfulFileCount == 0 && result.WorkDir != "" {
+		if files, listErr := agent.ListWorkDirFiles(result.WorkDir); listErr == nil {
+			s.logger.Info().
+				Str("task_id", taskID).
+				Int("file_count", len(files)).
+				Interface("files", files).
+				Msg("workspace contents on failure (no output files)")
+		}
+	}
+
 	// Treat as failure when the agent likely failed (standalone agent binary).
 	if result.AgentLikelyFailed {
 		if meaningfulFileCount == 0 && result.WorkDir != "" {
-			errMsg := fmt.Sprintf(
-				"agent execution produced no output files (num_turns=%d, tool_uses=%d, output_files=0); agent definition may not have loaded, model does not support tool use, or files were written to the wrong directory",
-				result.NumTurns,
-				result.ToolUseCount,
-			)
+			errMsg := buildNoOutputFilesError(result)
 			s.logger.Error().
 				Str("task_id", taskID).
+				Str("model", result.Model).
+				Str("user_id", userID).
 				Int("num_turns", result.NumTurns).
 				Int("tool_use_count", result.ToolUseCount).
 				Int("meaningful_files", meaningfulFileCount).
@@ -222,6 +231,8 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		// Agent reported failure but produced output files — allow completion with a warning.
 		s.logger.Warn().
 			Str("task_id", taskID).
+			Str("model", result.Model).
+			Str("user_id", userID).
 			Int("num_turns", result.NumTurns).
 			Int("meaningful_files", meaningfulFileCount).
 			Msg("agent likely failed but produced output files, marking as completed")
@@ -230,13 +241,11 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	// Treat as failure when workspace has zero meaningful files
 	// (agent wrote to wrong directory or produced no output).
 	if meaningfulFileCount == 0 && result.WorkDir != "" {
-		errMsg := fmt.Sprintf(
-			"agent execution produced no output files (num_turns=%d, tool_uses=%d, output_files=0); agent definition may not have loaded, model does not support tool use, or files were written to the wrong directory",
-			result.NumTurns,
-			result.ToolUseCount,
-		)
+		errMsg := buildNoOutputFilesError(result)
 		s.logger.Error().
 			Str("task_id", taskID).
+			Str("model", result.Model).
+			Str("user_id", userID).
 			Int("num_turns", result.NumTurns).
 			Int("tool_use_count", result.ToolUseCount).
 			Int("meaningful_files", meaningfulFileCount).
@@ -782,4 +791,22 @@ func extractXlsDraftFromWorkspace(workDir, title string) (*XlsPublishRequest, er
 		Title:  title,
 		Images: images,
 	}, nil
+}
+
+// buildNoOutputFilesError returns a diagnostic error message when agent produces no output files.
+// Differentiates between "no tool uses" (model/agent issue) and "tool uses but no files" (MCP tool errors).
+func buildNoOutputFilesError(result *agent.ExecutionResult) string {
+	if result.ToolUseCount > 0 {
+		return fmt.Sprintf(
+			"agent execution produced no output files (model=%s, num_turns=%d, tool_uses=%d, output_files=0); "+
+				"agent used tools but produced no output files — MCP tools may have returned errors "+
+				"(check user model config in Studio), or files were written to an unexpected location",
+			result.Model, result.NumTurns, result.ToolUseCount,
+		)
+	}
+	return fmt.Sprintf(
+		"agent execution produced no output files (model=%s, num_turns=%d, tool_uses=%d, output_files=0); "+
+			"agent definition may not have loaded, or model does not support tool use",
+		result.Model, result.NumTurns, result.ToolUseCount,
+	)
 }

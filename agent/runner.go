@@ -48,6 +48,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 	}
 	if r.cfg.Model != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithModel(r.cfg.Model))
+		_ = r.reporter.ReportProgress(ctx, fmt.Sprintf("agent model: %s", r.cfg.Model))
 	}
 
 	var resultText string

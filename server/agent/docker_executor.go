@@ -160,7 +160,9 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		Str("task_id", opts.Task.ID).
 		Str("key_prefix", truncateKey(apiKey)).
 		Str("server_url", e.serverURL).
-		Msg("Docker executor: agent API key resolved")
+		Str("model", model).
+		Bool("model_from_config", model != "").
+		Msg("Docker executor: starting agent execution")
 
 	var cmd []string
 	var workDirInContainer string
@@ -193,6 +195,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if execRes.err != nil {
+		result.Model = model
 		if result.Error == "" {
 			result.Error = execRes.err.Error()
 		}
@@ -209,6 +212,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	// (uploadMissingTaskFiles, CountMeaningfulFiles, cleanup) need the
 	// host filesystem path.
 	result.WorkDir = workDir
+	result.Model = model
 
 	if opts.LogWriter != nil {
 		opts.LogWriter.WriteResult(result.Success, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
