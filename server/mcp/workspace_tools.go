@@ -11,12 +11,12 @@ import (
 func registerWorkspaceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_workspace",
-		Description: "Prepare a clean working directory for content creation. Archives any existing files and creates a fresh directory. When task_id is provided, the working directory is the task workspace root. Otherwise, uses the base output directory for the content type. Returns the server-side working directory path (intended for Docker-based agent execution). For local Claude Code usage, the agent should create directories locally instead of calling this tool.",
+		Description: "Returns the canonical working directory path for the given content type and task. Does NOT create directories — the agent must run mkdir -p locally. When task_id is provided, returns 'output' (relative to the task workspace root). Otherwise, returns the base output directory for the content type (e.g. 'output/rednote').",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"content_type": map[string]any{"type": "string", "description": "Content type (articles, xls, rednote, flower)"},
-				"task_id":      map[string]any{"type": "string", "description": "Task ID — when provided, working directory is the task workspace root"},
+				"task_id":      map[string]any{"type": "string", "description": "Task ID — when provided, returns 'output' relative to task workspace"},
 			},
 			"required": []any{"content_type"},
 		},
@@ -24,7 +24,7 @@ func registerWorkspaceTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "archive_workspace",
-		Description: "Archive files from the content type directory to a dated or named archive subdirectory. Leaves existing archive subdirectories in place.",
+		Description: "Returns the computed archive directory path for the given content type. Does NOT move files — the agent must run mkdir -p and mv locally. If name is provided, the archive directory is named after the sanitized title.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

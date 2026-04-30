@@ -549,7 +549,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 }
 
 // ListWorkDirFiles returns a summary of files in a task's work directory.
-// When an output/ subdirectory exists (created by prepare_workspace), lists
+// When an output/ subdirectory exists (created by the agent via mkdir -p), lists
 // its contents for meaningful diagnostics.
 func ListWorkDirFiles(workDir string) ([]map[string]any, error) {
 	listDir := workDir
@@ -577,7 +577,7 @@ func ListWorkDirFiles(workDir string) ([]map[string]any, error) {
 
 // CountMeaningfulFiles recursively counts files in workDir, excluding
 // .anbanwriter/, .claude/, and dotfiles. Prefers the output/ subdirectory
-// (created by prepare_workspace) to exclude agent runtime artifacts.
+// (created by the agent via mkdir -p) to exclude agent runtime artifacts.
 // Returns the count of actual files (not directories) at any nesting depth.
 func CountMeaningfulFiles(workDir string) int {
 	scanDir := workDir

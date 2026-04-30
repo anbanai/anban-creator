@@ -232,7 +232,7 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		return nil
 	}
 
-	// Prefer the output/ subdirectory (created by prepare_workspace) to isolate
+		// Prefer the output/ subdirectory (created by the agent via mkdir -p) to isolate
 	// content files from agent runtime artifacts (node_modules, .claude, etc.).
 	scanDir := workDir
 	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
