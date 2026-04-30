@@ -315,6 +315,13 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_API_URL", e.serverBaseURL))
 	}
 
+	// Inject the task's channel ID so the agent definition can use it directly
+	// instead of discovering channels via list_channels (which may pick the wrong
+	// one when the user has multiple channels of the same platform type).
+	if opts.Channel != nil {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_DEFAULT_CHANNEL", opts.Channel.ID))
+	}
+
 	// Log full MCP config snapshot for debugging.
 	e.logger.Info().
 		Str("task_id", opts.Task.ID).

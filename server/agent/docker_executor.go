@@ -265,6 +265,9 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	for k, v := range e.claudeEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
+	if opts.Channel != nil {
+		env = append(env, fmt.Sprintf("ANBANWRITER_DEFAULT_CHANNEL=%s", opts.Channel.ID))
+	}
 	return env
 }
 
