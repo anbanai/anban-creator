@@ -1,8 +1,12 @@
 package service
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +17,7 @@ import (
 
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
 
 func setupTaskTestDB(t *testing.T) *gorm.DB {
@@ -213,5 +218,118 @@ func TestTaskService_GetFiles(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Errorf("expected 0 files, got %d", len(files))
+	}
+}
+
+func TestTaskService_DownloadTasksZip(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
+	}
+	svc.store = store
+
+	ctx := context.Background()
+	userID := uuid.New().String()
+	otherUserID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformRednote)
+	otherChannelID := createTestChannel(t, repo, otherUserID, model.PlatformRednote)
+
+	completed := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformRednote,
+		Status:    model.TaskStatusCompleted,
+		Prompt:    "A finished task",
+		Title:     "Finished",
+	}
+	pending := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformRednote,
+		Status:    model.TaskStatusPending,
+		Prompt:    "A pending task",
+	}
+	foreign := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    otherUserID,
+		ChannelID: otherChannelID,
+		Type:      model.PlatformRednote,
+		Status:    model.TaskStatusCompleted,
+		Prompt:    "Foreign task",
+	}
+	for _, task := range []*model.Task{completed, pending, foreign} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+	}
+
+	if _, err := svc.UploadTaskFileFromReader(ctx, completed.ID, userID, "output/article.md", strings.NewReader("# hello"), "text/markdown", 7); err != nil {
+		t.Fatalf("upload completed task file: %v", err)
+	}
+	if _, err := svc.UploadTaskFileFromReader(ctx, foreign.ID, otherUserID, "output/secret.md", strings.NewReader("secret"), "text/markdown", 6); err != nil {
+		t.Fatalf("upload foreign task file: %v", err)
+	}
+
+	buf, zipName, err := svc.DownloadTasksZip(ctx, userID, []string{completed.ID, pending.ID, foreign.ID})
+	if err != nil {
+		t.Fatalf("DownloadTasksZip: %v", err)
+	}
+	if !strings.HasPrefix(zipName, "tasks_export_") || !strings.HasSuffix(zipName, ".zip") {
+		t.Fatalf("unexpected zip name: %s", zipName)
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+
+	var hasManifest bool
+	var hasCompletedFile bool
+	for _, file := range reader.File {
+		if file.Name == "manifest.json" {
+			hasManifest = true
+			rc, err := file.Open()
+			if err != nil {
+				t.Fatalf("open manifest: %v", err)
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				t.Fatalf("read manifest: %v", err)
+			}
+			manifest := string(data)
+			var parsedManifest BulkDownloadZipManifest
+			if err := json.Unmarshal(data, &parsedManifest); err != nil {
+				t.Fatalf("parse manifest: %v", err)
+			}
+			for _, want := range []string{completed.ID, pending.ID, foreign.ID, "task_not_completed", "unavailable"} {
+				if !strings.Contains(manifest, want) {
+					t.Fatalf("manifest missing %q: %s", want, manifest)
+				}
+			}
+			if strings.Contains(manifest, "forbidden") || strings.Contains(manifest, "task_not_found") {
+				t.Fatalf("manifest uses distinguishable unavailable reasons: %s", manifest)
+			}
+			for _, task := range parsedManifest.Tasks {
+				if task.TaskID == foreign.ID && (task.Title != "" || task.Status != "") {
+					t.Fatalf("manifest leaked foreign task metadata: %+v", task)
+				}
+			}
+		}
+		if strings.HasSuffix(file.Name, "output/article.md") {
+			hasCompletedFile = true
+		}
+		if strings.Contains(file.Name, "secret.md") {
+			t.Fatalf("foreign file leaked into zip: %s", file.Name)
+		}
+	}
+	if !hasManifest {
+		t.Fatal("manifest.json missing")
+	}
+	if !hasCompletedFile {
+		t.Fatal("completed task file missing")
 	}
 }

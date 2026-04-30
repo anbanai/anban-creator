@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Film } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Film, Download, Square, CheckSquare } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { TaskType, TaskStatus, CreateTaskRequest, Channel } from '@/types'
 import type { Resolver } from 'react-hook-form'
@@ -49,6 +49,7 @@ export default function TasksPage() {
   const [generateVideo, setGenerateVideo] = useState(false)
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const { submit } = useSubmitLock()
 
   const { data: channels = [], isLoading: channelsLoading } = useQuery({
@@ -121,6 +122,22 @@ export default function TasksPage() {
   })
 
   const tasks = data?.items ?? []
+  const selectedTaskIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
+  const selectedTasks = useMemo(
+    () => tasks.filter((task) => selectedTaskIdSet.has(task.id)),
+    [tasks, selectedTaskIdSet],
+  )
+  const selectedCompletedTasks = selectedTasks.filter((task) => task.status === 'completed')
+  const completedTasksOnPage = tasks.filter((task) => task.status === 'completed')
+  const allCompletedSelected = completedTasksOnPage.length > 0 && completedTasksOnPage.every((task) => selectedTaskIdSet.has(task.id))
+
+  useEffect(() => {
+    const visibleTaskIds = new Set(tasks.map((task) => task.id))
+    setSelectedTaskIds((prev) => {
+      const next = prev.filter((id) => visibleTaskIds.has(id))
+      return next.length === prev.length ? prev : next
+    })
+  }, [tasks])
 
   const createMutation = useMutation({
     mutationFn: (data: CreateTaskRequest) => api.tasks.create(data),
@@ -144,6 +161,20 @@ export default function TasksPage() {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
     onError: () => toast.error('更新发布状态失败'),
+  })
+
+  const bulkDownloadMutation = useMutation({
+    mutationFn: (taskIds: string[]) => api.tasks.downloadBulkZipBlob(taskIds),
+    onSuccess: (blob) => {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `tasks_export_${new Date().toISOString().slice(0, 10)}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('批量下载已开始')
+    },
+    onError: () => toast.error('批量下载失败，请稍后重试'),
   })
 
   function openCreate() {
@@ -185,6 +216,30 @@ export default function TasksPage() {
       image_ratio: values.image_ratio || undefined,
       generate_video: generateVideo || undefined,
     }))
+  }
+
+  function toggleTaskSelection(taskId: string) {
+    setSelectedTaskIds((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId],
+    )
+  }
+
+  function toggleSelectCompletedOnPage() {
+    const completedIds = completedTasksOnPage.map((task) => task.id)
+    if (allCompletedSelected) {
+      setSelectedTaskIds((prev) => prev.filter((id) => !completedIds.includes(id)))
+      return
+    }
+    setSelectedTaskIds((prev) => Array.from(new Set([...prev, ...completedIds])))
+  }
+
+  function handleBulkDownload() {
+    const taskIds = selectedCompletedTasks.map((task) => task.id)
+    if (taskIds.length === 0) {
+      toast.error('请选择已完成的任务')
+      return
+    }
+    bulkDownloadMutation.mutate(taskIds)
   }
 
   const runningCount = tasks.filter((t) => t.status === 'running').length
@@ -267,15 +322,61 @@ export default function TasksPage() {
         />
       ) : (
         <div className="space-y-2">
+          <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Button variant="secondary" size="sm" onClick={toggleSelectCompletedOnPage} disabled={completedTasksOnPage.length === 0}>
+                {allCompletedSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                {allCompletedSelected ? '取消全选已完成' : '全选已完成'}
+              </Button>
+              <span className="text-muted-foreground">
+                已选 {selectedTaskIds.length} 个，{selectedCompletedTasks.length} 个可下载
+              </span>
+              {selectedTaskIds.length > selectedCompletedTasks.length && (
+                <span className="text-xs text-muted-foreground">仅打包已完成任务</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {selectedTaskIds.length > 0 && (
+                <Button variant="ghost" size="sm" onClick={() => setSelectedTaskIds([])}>
+                  清空选择
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={handleBulkDownload}
+                loading={bulkDownloadMutation.isPending}
+                disabled={selectedCompletedTasks.length === 0}
+              >
+                <Download className="h-4 w-4" />
+                下载选中文件
+              </Button>
+            </div>
+          </div>
           {tasks.map((task) => {
             const channel = channelMap[task.channel_id]
             const borderColor = platformBorderColor[task.type] || ''
             const hoverBorderColor = platformHoverBorderColor[task.type] || ''
+            const selected = selectedTaskIdSet.has(task.id)
 
             return (
               <Link key={task.id} to={`/tasks/${task.id}`} className="block">
                 <div className={`rounded-lg border border-border bg-card p-4 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-sm active:scale-[0.99]`}>
                   <div className="flex items-start gap-3">
+                    <button
+                      type="button"
+                      aria-label={selected ? '取消选择任务' : '选择任务'}
+                      aria-pressed={selected}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        toggleTaskSelection(task.id)
+                      }}
+                      className={`mt-1 rounded-md p-1 transition-colors ${
+                        selected ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                      }`}
+                    >
+                      {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                    </button>
                     <PlatformAvatar avatarUrl={channel?.avatar_url} name={channel?.name} platform={task.type} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">

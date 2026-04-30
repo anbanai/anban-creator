@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/royalrick/anbanwriter/server/model"
 )
@@ -36,6 +38,12 @@ var mimeTypes = map[string]string{
 	".pdf":      "application/pdf",
 	".zip":      "application/zip",
 }
+
+const (
+	maxBulkZipTasks = 100
+	maxBulkZipFiles = 500
+	maxBulkZipBytes = 100 * 1024 * 1024
+)
 
 // DetectTaskFileMIME returns the MIME type for a file based on its extension.
 // Falls back to net/http.DetectContentType by reading the first 512 bytes.
@@ -268,28 +276,28 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		}
 		relPath = filepath.ToSlash(relPath)
 
-			if existingPaths[relPath] {
-				return nil // already recorded, skip
-			}
+		if existingPaths[relPath] {
+			return nil // already recorded, skip
+		}
 
-			// Content-hash dedup: skip files with identical content already recorded
-			// under a different path (e.g. Downloader saves generated-0.png while
-			// the agent model also saves the same image as images/image-1.png).
-			if f, openErr := os.Open(path); openErr == nil {
-				defer f.Close()
-				h := sha256.New()
-				if _, copyErr := io.Copy(h, f); copyErr == nil {
-					contentHash := hex.EncodeToString(h.Sum(nil))
-					if dup, dupErr := s.repo.TaskFiles().FindByTaskIDAndContentHash(ctx, taskID, contentHash); dupErr == nil && dup != nil {
-						s.logger.Debug().
-							Str("task_id", taskID).
-							Str("file", relPath).
-							Str("duplicate_of", dup.FilePath).
-							Msg("skipping workspace file with identical content hash")
-						return nil
-					}
+		// Content-hash dedup: skip files with identical content already recorded
+		// under a different path (e.g. Downloader saves generated-0.png while
+		// the agent model also saves the same image as images/image-1.png).
+		if f, openErr := os.Open(path); openErr == nil {
+			defer f.Close()
+			h := sha256.New()
+			if _, copyErr := io.Copy(h, f); copyErr == nil {
+				contentHash := hex.EncodeToString(h.Sum(nil))
+				if dup, dupErr := s.repo.TaskFiles().FindByTaskIDAndContentHash(ctx, taskID, contentHash); dupErr == nil && dup != nil {
+					s.logger.Debug().
+						Str("task_id", taskID).
+						Str("file", relPath).
+						Str("duplicate_of", dup.FilePath).
+						Msg("skipping workspace file with identical content hash")
+					return nil
 				}
 			}
+		}
 
 		if _, err := s.uploadTaskFileFromPath(ctx, taskID, userID, workDir, path, info); err != nil {
 			s.logger.Error().Err(err).Str("file", path).Msg("failed to upload file, skipping")
@@ -368,7 +376,6 @@ func (s *TaskService) EnrichFilesWithURLs(ctx context.Context, files []*model.Ta
 	}
 }
 
-
 // DownloadZip creates a ZIP archive of all files belonging to a task.
 // Returns the ZIP buffer and the suggested download filename.
 func (s *TaskService) DownloadZip(ctx context.Context, taskID string) (*bytes.Buffer, string, error) {
@@ -415,6 +422,230 @@ func (s *TaskService) DownloadZip(ctx context.Context, taskID string) (*bytes.Bu
 
 	zipName := fmt.Sprintf("task_%s_files.zip", taskID)
 	return &buf, zipName, nil
+}
+
+// BulkDownloadZipManifest describes what was included or skipped in a bulk task export.
+type BulkDownloadZipManifest struct {
+	GeneratedAt string                        `json:"generated_at"`
+	Tasks       []BulkDownloadZipManifestTask `json:"tasks"`
+}
+
+// BulkDownloadZipManifestTask is one task entry in the bulk export manifest.
+type BulkDownloadZipManifestTask struct {
+	TaskID   string   `json:"task_id"`
+	Title    string   `json:"title,omitempty"`
+	Status   string   `json:"status,omitempty"`
+	Included bool     `json:"included"`
+	Files    []string `json:"files,omitempty"`
+	Reason   string   `json:"reason,omitempty"`
+}
+
+// DownloadTasksZip creates a ZIP archive with files from multiple completed tasks owned by userID.
+// Each task is written into its own directory and manifest.json records skipped tasks.
+func (s *TaskService) DownloadTasksZip(ctx context.Context, userID string, taskIDs []string) (*bytes.Buffer, string, error) {
+	if userID == "" {
+		return nil, "", fmt.Errorf("user_id is required")
+	}
+	if len(taskIDs) == 0 {
+		return nil, "", fmt.Errorf("task_ids is required")
+	}
+	if len(taskIDs) > maxBulkZipTasks {
+		return nil, "", fmt.Errorf("task_ids must not exceed %d", maxBulkZipTasks)
+	}
+
+	var buf bytes.Buffer
+	zipWriter := zip.NewWriter(&buf)
+	manifest := BulkDownloadZipManifest{
+		GeneratedAt: timeNowUTC(),
+		Tasks:       make([]BulkDownloadZipManifestTask, 0, len(taskIDs)),
+	}
+	usedEntries := make(map[string]int)
+	includedCount := 0
+	includedFiles := 0
+	var includedBytes int64
+
+	for _, taskID := range uniqueNonEmptyStrings(taskIDs) {
+		entry := BulkDownloadZipManifestTask{TaskID: taskID}
+
+		task, err := s.repo.Tasks().FindByID(ctx, taskID)
+		if err != nil {
+			entry.Reason = "unavailable"
+			manifest.Tasks = append(manifest.Tasks, entry)
+			continue
+		}
+
+		if task.UserID != userID {
+			entry.Reason = "unavailable"
+			manifest.Tasks = append(manifest.Tasks, entry)
+			continue
+		}
+
+		entry.Title = task.Title
+		entry.Status = task.Status
+		if task.Status != model.TaskStatusCompleted {
+			entry.Reason = "task_not_completed"
+			manifest.Tasks = append(manifest.Tasks, entry)
+			continue
+		}
+
+		files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+		if err != nil {
+			entry.Reason = "file_lookup_failed"
+			manifest.Tasks = append(manifest.Tasks, entry)
+			continue
+		}
+		if len(files) == 0 {
+			entry.Reason = "no_files"
+			manifest.Tasks = append(manifest.Tasks, entry)
+			continue
+		}
+
+		taskDir := uniqueZipEntryName(usedEntries, buildTaskZipDir(task))
+		for _, file := range files {
+			if includedFiles >= maxBulkZipFiles {
+				entry.Reason = "export_file_limit_reached"
+				break
+			}
+			if file.FileSize > 0 && includedBytes+file.FileSize > maxBulkZipBytes {
+				entry.Reason = "export_size_limit_reached"
+				break
+			}
+
+			data, err := s.getFileContent(ctx, file)
+			if err != nil {
+				s.logger.Warn().Err(err).
+					Str("task_id", taskID).
+					Str("file_name", file.FileName).
+					Str("oss_key", file.OSSKey).
+					Msg("failed to read file for bulk zip, skipping")
+				continue
+			}
+			if includedBytes+int64(len(data)) > maxBulkZipBytes {
+				entry.Reason = "export_size_limit_reached"
+				break
+			}
+
+			fileName := file.FilePath
+			if fileName == "" {
+				fileName = file.FileName
+			}
+			fileName = cleanZipEntryPath(fileName)
+			zipPath := uniqueZipEntryName(usedEntries, taskDir+"/"+fileName)
+			w, err := zipWriter.Create(zipPath)
+			if err != nil {
+				s.logger.Warn().Err(err).Str("zip_path", zipPath).Msg("failed to create bulk zip entry, skipping")
+				continue
+			}
+			if _, err := w.Write(data); err != nil {
+				s.logger.Warn().Err(err).Str("zip_path", zipPath).Msg("failed to write bulk zip entry, skipping")
+				continue
+			}
+			entry.Files = append(entry.Files, zipPath)
+			includedFiles++
+			includedBytes += int64(len(data))
+		}
+
+		if len(entry.Files) == 0 {
+			if entry.Reason == "" {
+				entry.Reason = "no_readable_files"
+			}
+		} else {
+			entry.Included = true
+			includedCount++
+		}
+		manifest.Tasks = append(manifest.Tasks, entry)
+	}
+
+	manifestData, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, "", fmt.Errorf("encode manifest: %w", err)
+	}
+	w, err := zipWriter.Create("manifest.json")
+	if err != nil {
+		return nil, "", fmt.Errorf("create manifest entry: %w", err)
+	}
+	if _, err := w.Write(manifestData); err != nil {
+		return nil, "", fmt.Errorf("write manifest entry: %w", err)
+	}
+
+	if err := zipWriter.Close(); err != nil {
+		return nil, "", fmt.Errorf("close zip writer: %w", err)
+	}
+	if includedCount == 0 {
+		return nil, "", fmt.Errorf("no downloadable files found")
+	}
+
+	zipName := fmt.Sprintf("tasks_export_%s.zip", time.Now().Format("20060102_150405"))
+	return &buf, zipName, nil
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func buildTaskZipDir(task *model.Task) string {
+	label := task.Title
+	if label == "" {
+		label = task.Prompt
+	}
+	if label == "" {
+		label = task.Type + "-task"
+	}
+	return cleanZipEntryPath(label + "-" + task.ID)
+}
+
+func cleanZipEntryPath(path string) string {
+	path = strings.TrimSpace(path)
+	path = strings.ReplaceAll(path, "\\", "/")
+	path = strings.TrimPrefix(path, "/")
+	path = filepath.Clean(path)
+	path = filepath.ToSlash(path)
+	if path == "." || path == "" || path == ".." || strings.HasPrefix(path, "../") {
+		return "file"
+	}
+
+	replacer := strings.NewReplacer(":", "-", "*", "-", "?", "", "\"", "", "<", "", ">", "", "|", "-")
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		part = strings.TrimSpace(replacer.Replace(part))
+		if part == "" || part == "." || part == ".." {
+			part = "file"
+		}
+		if len([]rune(part)) > 80 {
+			part = string([]rune(part)[:80])
+		}
+		parts[i] = part
+	}
+	return strings.Join(parts, "/")
+}
+
+func uniqueZipEntryName(used map[string]int, name string) string {
+	name = cleanZipEntryPath(name)
+	if count, ok := used[name]; ok {
+		used[name] = count + 1
+		ext := filepath.Ext(name)
+		base := strings.TrimSuffix(name, ext)
+		return fmt.Sprintf("%s-%d%s", base, count+1, ext)
+	}
+	used[name] = 1
+	return name
+}
+
+func timeNowUTC() string {
+	return time.Now().UTC().Format(time.RFC3339)
 }
 
 // getFileContent reads the full content of a task file based on its storage provider.

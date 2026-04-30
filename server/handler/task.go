@@ -50,6 +50,10 @@ type createTaskRequest struct {
 	GenerateVideo bool   `json:"generate_video"`
 }
 
+type bulkDownloadTaskFilesRequest struct {
+	TaskIDs []string `json:"task_ids"`
+}
+
 // Create handles POST /api/v1/tasks.
 func (h *TaskHandler) Create(c fiber.Ctx) error {
 	var req createTaskRequest
@@ -578,6 +582,43 @@ func (h *TaskHandler) DownloadZip(c fiber.Ctx) error {
 	buf, zipName, err := h.service.DownloadZip(c.Context(), taskID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", taskID).Msg("download zip failed")
+		return Error(c, fiber.StatusNotFound, "failed to create ZIP archive")
+	}
+
+	c.Set("Content-Type", "application/zip")
+	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipName))
+	c.Set("Content-Length", strconv.Itoa(buf.Len()))
+
+	return c.Send(buf.Bytes())
+}
+
+// DownloadTasksZip handles POST /api/v1/tasks/files/zip.
+// It creates a single ZIP archive containing all readable files from selected completed tasks.
+func (h *TaskHandler) DownloadTasksZip(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	var req bulkDownloadTaskFilesRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if len(req.TaskIDs) == 0 {
+		return Error(c, fiber.StatusBadRequest, "task_ids is required")
+	}
+	if len(req.TaskIDs) > 100 {
+		return Error(c, fiber.StatusBadRequest, "task_ids must not exceed 100")
+	}
+	for _, id := range req.TaskIDs {
+		if _, err := uuid.Parse(strings.TrimSpace(id)); err != nil {
+			return Error(c, fiber.StatusBadRequest, "invalid task_ids format")
+		}
+	}
+
+	buf, zipName, err := h.service.DownloadTasksZip(c.Context(), userID, req.TaskIDs)
+	if err != nil {
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("bulk download zip failed")
 		return Error(c, fiber.StatusNotFound, "failed to create ZIP archive")
 	}
 

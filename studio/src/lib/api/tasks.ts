@@ -41,6 +41,13 @@ export const tasksApi = {
     return response.data
   },
 
+  downloadBulkZipBlob: async (taskIds: string[]): Promise<Blob> => {
+    const response = await http.post('/tasks/files/zip', { task_ids: taskIds }, {
+      responseType: 'blob',
+    })
+    return response.data
+  },
+
   fetchPreviewHTML: async (taskId: string): Promise<string> => {
     const response = await http.get(`/tasks/${taskId}/preview`, {
       responseType: 'text',
