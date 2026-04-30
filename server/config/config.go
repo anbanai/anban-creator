@@ -569,6 +569,16 @@ func (c *Config) applyEnvOverrides() {
 			c.Invitation.MaxPerUser = n
 		}
 	}
+
+	if v := os.Getenv(prefix + "WRITING_BASE_URL"); v != "" {
+		c.Writing.BaseURL = v
+	}
+	if v := os.Getenv(prefix + "WRITING_KEY"); v != "" {
+		c.Writing.Key = v
+	}
+	if v := os.Getenv(prefix + "WRITING_MODEL"); v != "" {
+		c.Writing.Model = v
+	}
 }
 
 // detectPluginDir attempts to locate the abwriter plugin directory

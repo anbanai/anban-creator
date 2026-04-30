@@ -79,7 +79,8 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("llm returned no choices")
+		return "", fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)",
+			c.model, resp.ID, resp.Model)
 	}
 
 	return resp.Choices[0].Message.Content, nil
@@ -95,15 +96,17 @@ type WritingService struct {
 	repo           repository.Repository
 	llmClient      LLMClient
 	modelConfigSvc *ModelConfigService
+	writersDir     string
 	logger         *zerolog.Logger
 }
 
 // NewWritingService creates a new WritingService.
-func NewWritingService(repo repository.Repository, llmClient LLMClient, logger *zerolog.Logger) *WritingService {
+func NewWritingService(repo repository.Repository, llmClient LLMClient, writersDir string, logger *zerolog.Logger) *WritingService {
 	return &WritingService{
-		repo:      repo,
-		llmClient: llmClient,
-		logger:    logger,
+		repo:       repo,
+		llmClient:  llmClient,
+		writersDir: writersDir,
+		logger:     logger,
 	}
 }
 
@@ -230,6 +233,9 @@ func (s *WritingService) WriteArticle(
 	}
 
 	assistant := writer.NewAssistant()
+	if s.writersDir != "" {
+		assistant.SetWritersDir(s.writersDir)
+	}
 
 	req := &writer.WriteRequest{
 		Input:       topic,

@@ -28,6 +28,8 @@ COPY --from=builder /abwriter-server /app/abwriter-server
 # Copy plugin files (claudecode/ contains agents/, skills/, hooks/, themes/, writers/)
 COPY claudecode/ /anbanai/
 
+ENV CLAUDE_PLUGIN_ROOT=/anbanai
+
 # Install plugin as non-root user (Claude CLI requires this for --scope user)
 USER node
 RUN claude plugin marketplace add /anbanai && \

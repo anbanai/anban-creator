@@ -1,290 +1,219 @@
-import { useState, useCallback, useMemo } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/Button'
-import { formatDateYMD, getWeekRange, getMonthRange } from '@/lib/labels'
+import * as React from "react"
+import {
+  DayPicker,
+  getDefaultClassNames,
+  type DayButton,
+  type Locale,
+} from "react-day-picker"
 
-// --- Helpers ---
+import { cn } from "@/lib/utils"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon } from "lucide-react"
 
-function parseDate(s: string): Date {
-  const [y, m, d] = s.split('-').map(Number)
-  return new Date(y, m - 1, d)
-}
-
-function isSameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear()
-    && a.getMonth() === b.getMonth()
-    && a.getDate() === b.getDate()
-}
-
-function getDaysInMonth(year: number, month: number): Date[] {
-  const firstDay = new Date(year, month, 1)
-  // Monday=0, Tuesday=1, ..., Sunday=6
-  let startWeekday = firstDay.getDay() - 1
-  if (startWeekday < 0) startWeekday = 6
-
-  const startDate = new Date(year, month, 1 - startWeekday)
-
-  const days: Date[] = []
-  // Always 6 rows * 7 = 42 cells to keep grid stable
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(startDate)
-    d.setDate(startDate.getDate() + i)
-    days.push(d)
-  }
-  return days
-}
-
-// --- Component ---
-
-interface CalendarRangePickerProps {
-  value: { from: string; to: string } | null
-  onChange: (range: { from: string; to: string } | null) => void
-  onClose: () => void
-}
-
-export function CalendarRangePicker({ value, onChange, onClose }: CalendarRangePickerProps) {
-  const today = useMemo(() => {
-    const now = new Date()
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  }, [])
-
-  const [viewMonth, setViewMonth] = useState(() => {
-    if (value?.from) {
-      const d = parseDate(value.from)
-      return { year: d.getFullYear(), month: d.getMonth() }
-    }
-    return { year: today.getFullYear(), month: today.getMonth() }
-  })
-
-  // Internal selection state: null | { from: Date; to?: Date }
-  const [pending, setPending] = useState<{ from: Date; to?: Date } | null>(() => {
-    if (value?.from) {
-      const from = parseDate(value.from)
-      if (value.to) {
-        return { from, to: parseDate(value.to) }
-      }
-      return { from }
-    }
-    return null
-  })
-
-  const days = useMemo(
-    () => getDaysInMonth(viewMonth.year, viewMonth.month),
-    [viewMonth]
-  )
-
-  const prevMonth = useCallback(() => {
-    setViewMonth((prev) => {
-      const m = prev.month === 0 ? 11 : prev.month - 1
-      const y = prev.month === 0 ? prev.year - 1 : prev.year
-      return { year: y, month: m }
-    })
-  }, [])
-
-  const nextMonth = useCallback(() => {
-    setViewMonth((prev) => {
-      const m = prev.month === 11 ? 0 : prev.month + 1
-      const y = prev.month === 11 ? prev.year + 1 : prev.year
-      return { year: y, month: m }
-    })
-  }, [])
-
-  const handleDayClick = useCallback((day: Date) => {
-    setPending((prev) => {
-      if (!prev || prev.to) {
-        // Start new selection
-        return { from: day }
-      }
-      // Complete selection
-      if (day < prev.from) {
-        return { from: day, to: prev.from }
-      }
-      return { from: prev.from, to: day }
-    })
-  }, [])
-
-  const handleQuickSelect = useCallback(
-    (type: 'today' | 'week' | 'month') => {
-      let range: { from: string; to: string }
-      switch (type) {
-        case 'today':
-          range = { from: formatDateYMD(today), to: formatDateYMD(today) }
-          break
-        case 'week':
-          range = getWeekRange(today)
-          break
-        case 'month':
-          range = getMonthRange(today)
-          break
-      }
-      setPending({ from: parseDate(range.from), to: parseDate(range.to) })
-      // Jump view to the selected month
-      const d = parseDate(range.from)
-      setViewMonth({ year: d.getFullYear(), month: d.getMonth() })
-    },
-    [today]
-  )
-
-  const handleApply = useCallback(() => {
-    if (pending) {
-      if (pending.to) {
-        const from = formatDateYMD(pending.from)
-        const to = formatDateYMD(pending.to)
-        onChange({ from, to })
-      } else {
-        const d = formatDateYMD(pending.from)
-        onChange({ from: d, to: d })
-      }
-      onClose()
-    }
-  }, [pending, onChange, onClose])
-
-  const handleClear = useCallback(() => {
-    setPending(null)
-    onChange(null)
-  }, [onChange])
-
-  // Determine range for highlighting
-  const rangeFrom = pending?.from
-  const rangeTo = pending?.to ?? pending?.from
-
-  const monthLabel = `${viewMonth.year}年${viewMonth.month + 1}月`
-  const weekLabels = ['一', '二', '三', '四', '五', '六', '日']
+function Calendar({
+  className,
+  classNames,
+  showOutsideDays = true,
+  captionLayout = "label",
+  buttonVariant = "ghost",
+  locale,
+  formatters,
+  components,
+  ...props
+}: React.ComponentProps<typeof DayPicker> & {
+  buttonVariant?: React.ComponentProps<typeof Button>["variant"]
+}) {
+  const defaultClassNames = getDefaultClassNames()
 
   return (
-    <div className="w-[320px] select-none rounded-lg border border-border bg-card p-3 shadow-xl">
-      {/* Header: month/year + nav */}
-      <div className="mb-2 flex items-center justify-between">
-        <Button variant="ghost" size="icon-xs" onClick={prevMonth}>
-          <ChevronLeft className="size-4" />
-        </Button>
-        <span className="text-sm font-medium text-foreground">{monthLabel}</span>
-        <Button variant="ghost" size="icon-xs" onClick={nextMonth}>
-          <ChevronRight className="size-4" />
-        </Button>
-      </div>
+    <DayPicker
+      showOutsideDays={showOutsideDays}
+      className={cn(
+        "group/calendar bg-background p-2 [--cell-radius:var(--radius-md)] [--cell-size:--spacing(7)] in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent",
+        String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
+        String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
+        className
+      )}
+      captionLayout={captionLayout}
+      locale={locale}
+      formatters={{
+        formatMonthDropdown: (date) =>
+          date.toLocaleString(locale?.code, { month: "short" }),
+        ...formatters,
+      }}
+      classNames={{
+        root: cn("w-fit", defaultClassNames.root),
+        months: cn(
+          "relative flex flex-col gap-4 md:flex-row",
+          defaultClassNames.months
+        ),
+        month: cn("flex w-full flex-col gap-4", defaultClassNames.month),
+        nav: cn(
+          "absolute inset-x-0 top-0 flex w-full items-center justify-between gap-1",
+          defaultClassNames.nav
+        ),
+        button_previous: cn(
+          buttonVariants({ variant: buttonVariant }),
+          "size-(--cell-size) p-0 select-none aria-disabled:opacity-50",
+          defaultClassNames.button_previous
+        ),
+        button_next: cn(
+          buttonVariants({ variant: buttonVariant }),
+          "size-(--cell-size) p-0 select-none aria-disabled:opacity-50",
+          defaultClassNames.button_next
+        ),
+        month_caption: cn(
+          "flex h-(--cell-size) w-full items-center justify-center px-(--cell-size)",
+          defaultClassNames.month_caption
+        ),
+        dropdowns: cn(
+          "flex h-(--cell-size) w-full items-center justify-center gap-1.5 text-sm font-medium",
+          defaultClassNames.dropdowns
+        ),
+        dropdown_root: cn(
+          "relative rounded-(--cell-radius)",
+          defaultClassNames.dropdown_root
+        ),
+        dropdown: cn(
+          "absolute inset-0 bg-popover opacity-0",
+          defaultClassNames.dropdown
+        ),
+        caption_label: cn(
+          "font-medium select-none",
+          captionLayout === "label"
+            ? "text-sm"
+            : "flex items-center gap-1 rounded-(--cell-radius) text-sm [&>svg]:size-3.5 [&>svg]:text-muted-foreground",
+          defaultClassNames.caption_label
+        ),
+        table: "w-full border-collapse",
+        weekdays: cn("flex", defaultClassNames.weekdays),
+        weekday: cn(
+          "flex-1 rounded-(--cell-radius) text-[0.8rem] font-normal text-muted-foreground select-none",
+          defaultClassNames.weekday
+        ),
+        week: cn("mt-2 flex w-full", defaultClassNames.week),
+        week_number_header: cn(
+          "w-(--cell-size) select-none",
+          defaultClassNames.week_number_header
+        ),
+        week_number: cn(
+          "text-[0.8rem] text-muted-foreground select-none",
+          defaultClassNames.week_number
+        ),
+        day: cn(
+          "group/day relative aspect-square h-full w-full rounded-(--cell-radius) p-0 text-center select-none [&:last-child[data-selected=true]_button]:rounded-r-(--cell-radius)",
+          props.showWeekNumber
+            ? "[&:nth-child(2)[data-selected=true]_button]:rounded-l-(--cell-radius)"
+            : "[&:first-child[data-selected=true]_button]:rounded-l-(--cell-radius)",
+          defaultClassNames.day
+        ),
+        range_start: cn(
+          "relative isolate z-0 rounded-l-(--cell-radius) bg-muted after:absolute after:inset-y-0 after:right-0 after:w-4 after:bg-muted",
+          defaultClassNames.range_start
+        ),
+        range_middle: cn("rounded-none", defaultClassNames.range_middle),
+        range_end: cn(
+          "relative isolate z-0 rounded-r-(--cell-radius) bg-muted after:absolute after:inset-y-0 after:left-0 after:w-4 after:bg-muted",
+          defaultClassNames.range_end
+        ),
+        today: cn(
+          "rounded-(--cell-radius) bg-muted text-foreground data-[selected=true]:rounded-none",
+          defaultClassNames.today
+        ),
+        outside: cn(
+          "text-muted-foreground aria-selected:text-muted-foreground",
+          defaultClassNames.outside
+        ),
+        disabled: cn(
+          "text-muted-foreground opacity-50",
+          defaultClassNames.disabled
+        ),
+        hidden: cn("invisible", defaultClassNames.hidden),
+        ...classNames,
+      }}
+      components={{
+        Root: ({ className, rootRef, ...props }) => {
+          return (
+            <div
+              data-slot="calendar"
+              ref={rootRef}
+              className={cn(className)}
+              {...props}
+            />
+          )
+        },
+        Chevron: ({ className, orientation, ...props }) => {
+          if (orientation === "left") {
+            return (
+              <ChevronLeftIcon className={cn("size-4", className)} {...props} />
+            )
+          }
 
-      {/* Quick select */}
-      <div className="mb-2 flex gap-1">
-        <Button variant="ghost" size="xs" onClick={() => handleQuickSelect('today')}>
-          今天
-        </Button>
-        <Button variant="ghost" size="xs" onClick={() => handleQuickSelect('week')}>
-          本周
-        </Button>
-        <Button variant="ghost" size="xs" onClick={() => handleQuickSelect('month')}>
-          本月
-        </Button>
-      </div>
-
-      {/* Day-of-week headers */}
-      <div className="grid grid-cols-7 mb-1">
-        {weekLabels.map((label) => (
-          <div
-            key={label}
-            className="flex h-8 items-center justify-center text-xs font-medium text-muted-foreground"
-          >
-            {label}
-          </div>
-        ))}
-      </div>
-
-      {/* Day grid */}
-      <div className="grid grid-cols-7">
-        {days.map((day, i) => {
-          const isCurrentMonth = day.getMonth() === viewMonth.month
-          const isToday = isSameDay(day, today)
-          const isInRange =
-            rangeFrom &&
-            rangeTo &&
-            day >= rangeFrom &&
-            day <= rangeTo &&
-            isCurrentMonth
-          const isStart =
-            rangeFrom && isSameDay(day, rangeFrom) && isCurrentMonth
-          const isEnd =
-            rangeTo && !isSameDay(rangeFrom!, rangeTo!) && isSameDay(day, rangeTo) && isCurrentMonth
-          const isSingle =
-            rangeFrom &&
-            rangeTo &&
-            isSameDay(rangeFrom, rangeTo) &&
-            isSameDay(day, rangeFrom) &&
-            isCurrentMonth
+          if (orientation === "right") {
+            return (
+              <ChevronRightIcon className={cn("size-4", className)} {...props} />
+            )
+          }
 
           return (
-            <button
-              key={i}
-              type="button"
-              onClick={() => handleDayClick(day)}
-              className={cn(
-                'relative flex h-8 items-center justify-center rounded-md text-sm transition-colors',
-                isCurrentMonth
-                  ? 'text-foreground'
-                  : 'text-muted-foreground/40',
-                !isInRange && !isStart && !isEnd && !isSingle && isCurrentMonth &&
-                  'hover:bg-muted',
-                isInRange && !isStart && !isEnd && 'bg-primary/15',
-                isToday && !isStart && !isEnd && !isSingle &&
-                  'ring-1 ring-primary/60',
-              )}
-            >
-              {/* Range start highlight */}
-              {isStart && !isSingle && (
-                <>
-                  <span className="absolute inset-y-0 right-0 w-1/2 bg-primary/15" />
-                  <span className="relative flex h-8 w-full items-center justify-center rounded-l-md bg-primary/20">
-                    {day.getDate()}
-                  </span>
-                </>
-              )}
-              {/* Range end highlight */}
-              {isEnd && (
-                <>
-                  <span className="absolute inset-y-0 left-0 w-1/2 bg-primary/15" />
-                  <span className="relative flex h-8 w-full items-center justify-center rounded-r-md bg-primary/20">
-                    {day.getDate()}
-                  </span>
-                </>
-              )}
-              {/* Single day selection */}
-              {isSingle && (
-                <span className="relative flex h-8 w-full items-center justify-center rounded-md bg-primary/20">
-                  {day.getDate()}
-                </span>
-              )}
-              {/* Normal day */}
-              {!isStart && !isEnd && !isSingle && day.getDate()}
-            </button>
+            <ChevronDownIcon className={cn("size-4", className)} {...props} />
           )
-        })}
-      </div>
-
-      {/* Footer: selected range info + actions */}
-      <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
-        <span className="truncate text-xs text-muted-foreground">
-          {pending
-            ? pending.to
-              ? `${formatDateYMD(pending.from)} ~ ${formatDateYMD(pending.to)}`
-              : `${formatDateYMD(pending.from)} ~ ?`
-            : '选择日期范围'}
-        </span>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="xs" onClick={handleClear}>
-            清除
-          </Button>
-          <Button
-            variant="default"
-            size="xs"
-            disabled={!pending}
-            onClick={handleApply}
-          >
-            确定
-          </Button>
-        </div>
-      </div>
-    </div>
+        },
+        DayButton: ({ ...props }) => (
+          <CalendarDayButton locale={locale} {...props} />
+        ),
+        WeekNumber: ({ children, ...props }) => {
+          return (
+            <td {...props}>
+              <div className="flex size-(--cell-size) items-center justify-center text-center">
+                {children}
+              </div>
+            </td>
+          )
+        },
+        ...components,
+      }}
+      {...props}
+    />
   )
 }
 
-export default CalendarRangePicker
+function CalendarDayButton({
+  className,
+  day,
+  modifiers,
+  locale,
+  ...props
+}: React.ComponentProps<typeof DayButton> & { locale?: Partial<Locale> }) {
+  const defaultClassNames = getDefaultClassNames()
+
+  const ref = React.useRef<HTMLButtonElement>(null)
+  React.useEffect(() => {
+    if (modifiers.focused) ref.current?.focus()
+  }, [modifiers.focused])
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      data-day={day.date.toLocaleDateString(locale?.code)}
+      data-selected-single={
+        modifiers.selected &&
+        !modifiers.range_start &&
+        !modifiers.range_end &&
+        !modifiers.range_middle
+      }
+      data-range-start={modifiers.range_start}
+      data-range-end={modifiers.range_end}
+      data-range-middle={modifiers.range_middle}
+      className={cn(
+        "relative isolate z-10 flex aspect-square size-auto w-full min-w-(--cell-size) flex-col gap-1 border-0 leading-none font-normal group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:border-ring group-data-[focused=true]/day:ring-[3px] group-data-[focused=true]/day:ring-ring/50 data-[range-end=true]:rounded-(--cell-radius) data-[range-end=true]:rounded-r-(--cell-radius) data-[range-end=true]:bg-primary data-[range-end=true]:text-primary-foreground data-[range-middle=true]:rounded-none data-[range-middle=true]:bg-muted data-[range-middle=true]:text-foreground data-[range-start=true]:rounded-(--cell-radius) data-[range-start=true]:rounded-l-(--cell-radius) data-[range-start=true]:bg-primary data-[range-start=true]:text-primary-foreground data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground dark:hover:text-foreground [&>span]:text-xs [&>span]:opacity-70",
+        defaultClassNames.day,
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Calendar, CalendarDayButton }

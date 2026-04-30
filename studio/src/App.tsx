@@ -5,6 +5,7 @@ import React, { useState, Suspense } from 'react'
 import { Loader2 } from 'lucide-react'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { Toaster } from '@/components/ui/sonner'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import AppLayout from '@/components/layout/AppLayout'
 import ShortcutHelp from '@/components/ShortcutHelp'
@@ -157,8 +158,10 @@ export default function App() {
       <BrowserRouter>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthProvider>
-            <Toaster richColors position="bottom-right" closeButton duration={4000} />
-            <AppRoutes />
+            <TooltipProvider>
+              <Toaster richColors position="bottom-right" closeButton duration={4000} />
+              <AppRoutes />
+            </TooltipProvider>
           </AuthProvider>
         </ThemeProvider>
       </BrowserRouter>

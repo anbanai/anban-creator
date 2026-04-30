@@ -44,29 +44,14 @@ function Button({
   className,
   variant = "default",
   size = "default",
-  loading,
-  children,
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants> & { loading?: boolean }) {
+}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
   return (
     <ButtonPrimitive
       data-slot="button"
-      disabled={props.disabled || loading}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-    >
-      {loading ? (
-        <>
-          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-          {children}
-        </>
-      ) : (
-        children
-      )}
-    </ButtonPrimitive>
+    />
   )
 }
 

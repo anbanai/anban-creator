@@ -236,6 +236,12 @@ func (sm *StyleManager) GetWritersDir() string {
 	return sm.writersDir
 }
 
+// SetWritersDir sets the directory to search for writer style YAML files.
+func (sm *StyleManager) SetWritersDir(dir string) {
+	sm.writersDir = dir
+	sm.initialized = false
+}
+
 // ReloadStyles 重新加载所有风格
 func (sm *StyleManager) ReloadStyles() error {
 	sm.styles = make(map[string]*WriterStyle)

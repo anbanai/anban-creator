@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -241,6 +243,12 @@ func main() {
 		}
 		if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
 			writingLLMClient = service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel)
+			if strings.Contains(llmBaseURL, "/anthropic") {
+				log.Warn().
+					Str("base_url", llmBaseURL).
+					Msg("writing.base_url contains '/anthropic' — the writing service uses the OpenAI SDK; ensure the endpoint supports /v1/chat/completions")
+			}
+			log.Info().Str("endpoint", llmBaseURL).Str("model", llmModel).Msg("writing LLM client initialized")
 		}
 	}
 
@@ -302,7 +310,11 @@ func main() {
 		}
 		if repo != nil {
 			if writingLLMClient != nil {
-				writingSvc = service.NewWritingService(repo, writingLLMClient, log)
+				writersDir := ""
+				if cfg.Claude.PluginDir != "" {
+					writersDir = filepath.Join(cfg.Claude.PluginDir, "writers")
+				}
+				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, log)
 				if modelConfigSvc != nil {
 					writingSvc.SetModelConfigService(modelConfigSvc)
 				}

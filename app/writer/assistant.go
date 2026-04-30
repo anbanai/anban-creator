@@ -21,6 +21,11 @@ func NewAssistant() *Assistant {
 	}
 }
 
+// SetWritersDir sets the directory to search for writer style YAML files.
+func (a *Assistant) SetWritersDir(dir string) {
+	a.styleManager.SetWritersDir(dir)
+}
+
 // WriteResult 写作结果（对外）
 type WriteResult struct {
 	Article     string   // 生成的文章

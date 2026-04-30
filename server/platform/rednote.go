@@ -44,6 +44,7 @@ var rednoteAnchorPattern = regexp.MustCompile(`(?is)<a[^>]+href=["']([^"']*(?:/e
 var rednoteTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
 var rednoteImgSrcPattern = regexp.MustCompile(`(?is)<img[^>]+src=["']([^"']+)["']`)
 var rednoteNumberPattern = regexp.MustCompile(`\d+(?:,\d{3})*(?:\.\d+)?`)
+var rednoteMetricElementPattern = regexp.MustCompile(`(?is)<(?:div|span|button|li|section|footer|script)[^>]*>(.*?)</(?:div|span|button|li|section|footer|script)>`)
 var rednoteNoteIDPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`/explore/([^/?#]+)`),
 	regexp.MustCompile(`/discovery/item/([^/?#]+)`),
@@ -136,10 +137,16 @@ func (p *RednoteProvider) FetchProfilePosts(ctx context.Context, profileURL stri
 
 // FetchPostMetrics fetches public metrics from a Xiaohongshu note page.
 func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) (*RednotePostMetrics, error) {
-	if strings.TrimSpace(noteURL) == "" {
+	noteURL = strings.TrimSpace(noteURL)
+	if noteURL == "" {
 		return nil, fmt.Errorf("note URL is required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, noteURL, nil)
+	fetchURL, err := p.resolveRednoteNoteURL(ctx, noteURL)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -165,6 +172,35 @@ func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) 
 
 	metrics := parseRednotePostMetrics(string(body))
 	return &metrics, nil
+}
+
+func (p *RednoteProvider) resolveRednoteNoteURL(ctx context.Context, noteURL string) (string, error) {
+	fetchURL := noteURL
+	if xhslinkPattern.MatchString(noteURL) {
+		resolved, err := p.resolveRedirect(ctx, noteURL)
+		if err != nil {
+			return "", fmt.Errorf("resolve short link: %w", err)
+		}
+		fetchURL = strings.TrimSpace(resolved)
+	}
+	if !isSupportedRednoteNoteURL(fetchURL) {
+		return "", fmt.Errorf("unsupported Rednote note URL: %s", fetchURL)
+	}
+	return fetchURL, nil
+}
+
+func isSupportedRednoteNoteURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	if !allowedHosts[strings.ToLower(parsed.Hostname())] {
+		return false
+	}
+	return ExtractRednoteNoteID(parsed.Path) != ""
 }
 
 // resolveRedirect follows HTTP redirects and returns the final URL.
@@ -440,6 +476,9 @@ func NormalizeRednoteMetricCount(text string) int {
 }
 
 func parseRednotePostMetrics(html string) RednotePostMetrics {
+	if metrics, ok := parseRednotePostMetricsFromFragments(html); ok {
+		return metrics
+	}
 	text := normalizeRednoteText(rednoteTagPattern.ReplaceAllString(html, " "))
 	return RednotePostMetrics{
 		LikeCount:    parseMetricAfterLabels(text, "点赞", "赞", "喜欢", "like"),
@@ -448,6 +487,52 @@ func parseRednotePostMetrics(html string) RednotePostMetrics {
 		ShareCount:   parseMetricAfterLabels(text, "分享", "share"),
 		ViewCount:    nil,
 	}
+}
+
+func parseRednotePostMetricsFromFragments(html string) (RednotePostMetrics, bool) {
+	bestText := ""
+	bestScore := 0
+	for _, match := range rednoteMetricElementPattern.FindAllStringSubmatch(html, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		text := normalizeRednoteText(rednoteTagPattern.ReplaceAllString(match[1], " "))
+		score := rednoteMetricLabelScore(text)
+		if score < 2 || score < bestScore {
+			continue
+		}
+		bestText = text
+		bestScore = score
+	}
+	if bestText == "" {
+		return RednotePostMetrics{}, false
+	}
+	return RednotePostMetrics{
+		LikeCount:    parseMetricAfterLabels(bestText, "点赞", "赞", "喜欢", "like"),
+		CollectCount: parseMetricAfterLabels(bestText, "收藏", "collect"),
+		CommentCount: parseMetricAfterLabels(bestText, "评论", "comment"),
+		ShareCount:   parseMetricAfterLabels(bestText, "分享", "share"),
+		ViewCount:    nil,
+	}, true
+}
+
+func rednoteMetricLabelScore(text string) int {
+	lower := strings.ToLower(text)
+	score := 0
+	for _, labels := range [][]string{
+		{"点赞", "赞", "喜欢", "like"},
+		{"收藏", "collect"},
+		{"评论", "comment"},
+		{"分享", "share"},
+	} {
+		for _, label := range labels {
+			if strings.Contains(lower, strings.ToLower(label)) {
+				score++
+				break
+			}
+		}
+	}
+	return score
 }
 
 func selectTopRednotePosts(posts []RednotePost, limit int) []RednotePost {
