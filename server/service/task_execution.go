@@ -360,6 +360,26 @@ func isRateLimitError(err error) bool {
 		strings.Contains(s, "\"1302\"")
 }
 
+// isPermanentAuthError checks for upstream authentication/authorization errors.
+// These are configuration problems (bad token, forbidden model, wrong endpoint)
+// and retrying the same task will not make them succeed.
+func isPermanentAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "failed to authenticate") ||
+		strings.Contains(s, "api error: 401") ||
+		strings.Contains(s, "api error: 403") ||
+		strings.Contains(s, "\"type\":\"forbidden\"") ||
+		strings.Contains(s, "\"type\":\"unauthorized\"") ||
+		strings.Contains(s, "request not allowed") ||
+		strings.Contains(s, "invalid api key") ||
+		strings.Contains(s, "invalid auth") ||
+		strings.Contains(s, "unauthorized") ||
+		strings.Contains(s, "forbidden")
+}
+
 // HandleExecutionFailure handles task execution failures with retry logic.
 // If the task has not exceeded max retries, it schedules a delayed retry.
 // Rate limit (429) errors use a separate counter with longer backoff.
@@ -457,6 +477,33 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 		}
 
 		return nil
+	}
+
+	if isPermanentAuthError(execErr) {
+		s.logger.Error().
+			Err(execErr).
+			Str("task_id", taskID).
+			Msg("task permanently failed due to agent authentication/authorization error")
+		if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
+		}
+		if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
+		}
+		if task.ChannelID != "" && s.pubsub != nil {
+			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		}
+		if s.creditSvc != nil {
+			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
+				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits")
+			}
+		}
+		if task.ChannelID != "" {
+			if derr := s.DispatchPendingTasks(ctx, task.ChannelID); derr != nil {
+				s.logger.Warn().Err(derr).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after failure")
+			}
+		}
+		return execErr
 	}
 
 	// Non-rate-limit errors use the standard retry logic.

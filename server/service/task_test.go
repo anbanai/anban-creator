@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -64,6 +65,66 @@ func (m *mockEnqueuer) Enqueue(taskType string, payload []byte) error {
 func (m *mockEnqueuer) EnqueueIn(taskType string, payload []byte, delay time.Duration) error {
 	m.enqueued = append(m.enqueued, taskType)
 	return nil
+}
+
+func TestTaskService_HandleExecutionFailure_PermanentAuthErrorDoesNotRetry(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	enqueuer := &mockEnqueuer{}
+	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID:                  uuid.New().String(),
+		UserID:              userID,
+		ChannelID:           channelID,
+		Type:                model.PlatformArticle,
+		Status:              model.TaskStatusRunning,
+		Prompt:              "auth failure",
+		MaxRetries:          model.DefaultRetries,
+		RetryCount:          0,
+		RateLimitRetryCount: 0,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	execErr := fmt.Errorf("agent execution failed: Failed to authenticate. API Error: 403 {\"error\":{\"type\":\"forbidden\",\"message\":\"Request not allowed\"}}")
+	if err := svc.HandleExecutionFailure(ctx, task, execErr); err == nil {
+		t.Fatal("expected permanent auth error to be returned")
+	}
+
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want %q", found.Status, model.TaskStatusFailed)
+	}
+	if found.RetryCount != 0 {
+		t.Fatalf("retry_count = %d, want 0", found.RetryCount)
+	}
+	if found.RateLimitRetryCount != 0 {
+		t.Fatalf("rate_limit_retry_count = %d, want 0", found.RateLimitRetryCount)
+	}
+	if found.CompletedAt == nil {
+		t.Fatal("completed_at was not set")
+	}
+	if !strings.Contains(found.ErrorMessage, "API Error: 403") {
+		t.Fatalf("error_message = %q, want API Error: 403", found.ErrorMessage)
+	}
+	if len(enqueuer.enqueued) != 0 {
+		t.Fatalf("auth error should not enqueue retries, got %d", len(enqueuer.enqueued))
+	}
 }
 
 func TestTaskService_CreateManual(t *testing.T) {
