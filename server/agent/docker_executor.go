@@ -156,6 +156,11 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	if err != nil {
 		return nil, err
 	}
+	e.logger.Info().
+		Str("task_id", opts.Task.ID).
+		Str("key_prefix", truncateKey(apiKey)).
+		Str("server_url", e.serverURL).
+		Msg("Docker executor: agent API key resolved")
 
 	var cmd []string
 	var workDirInContainer string
@@ -219,6 +224,11 @@ func (e *DockerExecutor) resolveAgentAPIKey(ctx context.Context, opts *Execution
 	if opts.Task.UserID != "" {
 		if rawKey, err := e.keyProvider.EnsureUserKey(ctx, opts.Task.UserID); err == nil {
 			return rawKey, nil
+		} else {
+			e.logger.Error().Err(err).
+				Str("task_id", opts.Task.ID).
+				Str("user_id", opts.Task.UserID).
+				Msg("failed to resolve user API key for Docker agent, falling back to system key")
 		}
 	}
 	rawKey, err := e.keyProvider.EnsureSystemKey(ctx)

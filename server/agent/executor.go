@@ -55,6 +55,14 @@ func BuildUserPrompt(taskType, topic string, generateVideo bool) string {
 	return base
 }
 
+// truncateKey returns the first 8 characters of a key for safe logging.
+func truncateKey(key string) string {
+	if len(key) <= 8 {
+		return key
+	}
+	return key[:8] + "..."
+}
+
 // DefaultMaxTurns returns the max turns for a given task type from the config map.
 // Falls back to 40 if the task type is not configured.
 func DefaultMaxTurns(taskType string, maxTurns map[string]int) int {
@@ -217,8 +225,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 	// 3.5. Resolve API key for MCP authentication.
 	// Tries per-user key first, falls back to system key.
-	// Unlike DockerExecutor, failures are non-fatal here: local execution
-	// can still produce output via direct tool calls even without MCP.
+	// Fail fast if no key is available — tasks cannot complete without MCP tools.
 	var mcpAPIKey string
 	if e.keyProvider != nil {
 		if opts.Task.UserID != "" {
@@ -227,9 +234,10 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 				e.logger.Info().
 					Str("task_id", opts.Task.ID).
 					Str("user_id", opts.Task.UserID).
+					Str("key_prefix", truncateKey(rawKey)).
 					Msg("using per-user API key for MCP")
 			} else {
-				e.logger.Warn().Err(err).
+				e.logger.Error().Err(err).
 					Str("task_id", opts.Task.ID).
 					Msg("failed to resolve user API key, falling back to system key")
 			}
@@ -239,13 +247,22 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 				mcpAPIKey = rawKey
 				e.logger.Info().
 					Str("task_id", opts.Task.ID).
+					Str("key_prefix", truncateKey(rawKey)).
 					Msg("using system API key for MCP")
 			} else {
-				e.logger.Warn().Err(err).
+				e.logger.Error().Err(err).
 					Str("task_id", opts.Task.ID).
-					Msg("failed to resolve system API key, MCP will not be available")
+					Msg("failed to resolve system API key for MCP authentication")
 			}
 		}
+	} else {
+		e.logger.Error().
+			Str("task_id", opts.Task.ID).
+			Msg("keyProvider is nil, MCP authentication is not configured")
+	}
+
+	if mcpAPIKey == "" {
+		return nil, fmt.Errorf("MCP API key resolution failed for task %q (task_id=%s): no API key available. Check apiKeySvc initialization and api_keys table", opts.Task.Type, opts.Task.ID)
 	}
 
 	// 4. Build user prompt from task topic with command prefix.
@@ -296,6 +313,20 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	if e.serverBaseURL != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_API_URL", e.serverBaseURL))
 	}
+
+	// Log full MCP config snapshot for debugging.
+	e.logger.Info().
+		Str("task_id", opts.Task.ID).
+		Str("mcp_api_url", e.serverBaseURL).
+		Bool("mcp_api_key_set", mcpAPIKey != "").
+		Int("mcp_api_key_len", len(mcpAPIKey)).
+		Str("mcp_api_key_prefix", truncateKey(mcpAPIKey)).
+		Bool("plugin_dir_set", e.pluginDir != "").
+		Str("plugin_dir", e.pluginDir).
+		Int("env_var_count", len(e.claudeEnv)).
+		Bool("env_has_anthropic_api_key", e.claudeEnv["ANTHROPIC_API_KEY"] != "").
+		Bool("env_has_anthropic_base_url", e.claudeEnv["ANTHROPIC_BASE_URL"] != "").
+		Msg("MCP config snapshot for Claude Code subprocess")
 
 	// 7. Execute via SDK with streaming.
 	// Start heartbeat goroutine for stuck-task detection.

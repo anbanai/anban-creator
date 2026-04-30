@@ -3,9 +3,12 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strings"
 	"net/http"
 	"time"
 
@@ -62,13 +65,33 @@ func mcpLoggingMiddleware(next http.Handler, zlog *zerolog.Logger) http.Handler 
 
 		next.ServeHTTP(sw, r)
 		if zlog != nil {
-			zlog.Info().
+			evt := zlog.Info().
 				Str("method", r.Method).
 				Str("path", r.URL.Path).
 				Int("status", sw.status).
 				Dur("duration", time.Since(start)).
-				Str("remote_addr", r.RemoteAddr).
-				Msg("mcp request")
+				Str("remote_addr", r.RemoteAddr)
+
+				// Log Authorization header for auth debugging (strips "Bearer " prefix).
+				if sw.status == 401 {
+					authHeader := r.Header.Get("Authorization")
+					var tokenPreview string
+					if len(authHeader) > 7 && strings.HasPrefix(authHeader, "Bearer ") {
+						token := strings.TrimPrefix(authHeader, "Bearer ")
+						if len(token) > 8 {
+							tokenPreview = token[:8] + "..."
+						} else {
+							tokenPreview = token
+						}
+					} else if len(authHeader) > 0 {
+						tokenPreview = "(non-bearer)"
+					} else {
+						tokenPreview = "(empty)"
+					}
+					evt = evt.
+						Str("auth_token_preview", tokenPreview)
+				}
+			evt.Msg("mcp request")
 		}
 	})
 }
@@ -113,10 +136,25 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 // tokenVerifier validates per-user API keys via APIKeyService, with static key fallback.
 func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *zerolog.Logger) auth.TokenVerifier {
 	return func(ctx context.Context, token string, r *http.Request) (*auth.TokenInfo, error) {
+		if token == "" {
+			if zlog != nil {
+				zlog.Warn().
+					Str("remote_addr", r.RemoteAddr).
+					Msg("mcp auth failed: empty bearer token (ANBANWRITER_API_KEY env var may not be set)")
+			}
+			return nil, auth.ErrInvalidToken
+		}
+
 		// 1. Try per-user API key.
 		if apiKeySvc != nil {
 			apiKey, err := apiKeySvc.Validate(ctx, token)
 			if err == nil && apiKey != nil {
+				if zlog != nil {
+					zlog.Debug().
+						Str("user_id", apiKey.UserID).
+						Bool("managed", apiKey.IsManaged).
+						Msg("mcp auth succeeded via API key")
+				}
 				scopes := []string{"mcp"}
 				if apiKey.IsManaged {
 					scopes = append(scopes, "managed")
@@ -124,13 +162,16 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *
 				return &auth.TokenInfo{
 					UserID:     apiKey.UserID,
 					Scopes:     scopes,
-					Expiration: time.Now().Add(10 * 365 * 24 * time.Hour), // API keys don't expire
+					Expiration: time.Now().Add(10 * 365 * 24 * time.Hour),
 				}, nil
 			}
 		}
 
 		// 2. Fallback to static key (admin mode, no userID).
 		if staticKey != "" && token == staticKey {
+			if zlog != nil {
+				zlog.Debug().Msg("mcp auth succeeded via static key (admin)")
+			}
 			return &auth.TokenInfo{
 				UserID:     "",
 				Scopes:     []string{"mcp", "admin"},
@@ -139,10 +180,14 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *
 		}
 
 		if zlog != nil {
+			tokenHashBytes := sha256.Sum256([]byte(token))
+			tokenHash := hex.EncodeToString(tokenHashBytes[:])[:16]
 			zlog.Warn().
 				Str("remote_addr", r.RemoteAddr).
 				Int("token_len", len(token)).
+				Str("token_hash_prefix", tokenHash).
 				Bool("static_key_set", staticKey != "").
+				Bool("api_key_svc_available", apiKeySvc != nil).
 				Msg("mcp auth failed: invalid token")
 		}
 		return nil, auth.ErrInvalidToken

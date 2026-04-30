@@ -139,13 +139,23 @@ func main() {
 
 	// 11.1 Create API key service (needed before executor for per-user MCP keys).
 	var apiKeySvc *service.APIKeyService
+	var sysKey string
 	if repo != nil {
 		apiKeySvc = service.NewAPIKeyService(repo, log)
+		log.Info().
+			Bool("api_key_svc_initialized", apiKeySvc != nil).
+			Msg("API key service created")
 
 		// Ensure a system default API key exists on startup.
-		if _, err := apiKeySvc.EnsureSystemKey(context.Background()); err != nil {
-			log.Warn().Err(err).Msg("failed to ensure system API key")
+		var err error
+		sysKey, err = apiKeySvc.EnsureSystemKey(context.Background())
+		if err != nil {
+			log.Error().Err(err).Msg("CRITICAL: failed to ensure system API key — all MCP tool calls will fail with 401")
+		} else {
+			log.Info().Msg("system API key verified")
 		}
+	} else {
+		log.Error().Msg("CRITICAL: repository is nil — API key service not created, all MCP authentication will fail. Check MySQL connectivity.")
 	}
 
 	// 12. Create agent executor.
@@ -182,7 +192,7 @@ func main() {
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
 	var asynqClient *scheduler.AsynqClient
-	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir, log)
+	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
 
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
@@ -365,6 +375,15 @@ func main() {
 
 	// 17. Create router.
 	app := router.NewRouter(svcs)
+
+	// 17.1 Async MCP health check — verifies MCP endpoint is accessible with system key.
+	if sysKey != "" {
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		go func() {
+			defer healthCancel()
+			mcp.CheckHealth(healthCtx, cfg.AgentServerURL(), sysKey, log)
+		}()
+	}
 
 	// 18. Start HTTP server with graceful shutdown.
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

@@ -66,8 +66,20 @@ func (s *APIKeyService) List(ctx context.Context, userID string) ([]*model.APIKe
 func (s *APIKeyService) EnsureUserKey(ctx context.Context, userID string) (string, error) {
 	// Check for existing managed key.
 	existing, err := s.repo.APIKeys().FindManagedByUserID(ctx, userID)
-	if err == nil && existing != nil && existing.RawKey != "" {
-		return existing.RawKey, nil
+	if err == nil && existing != nil {
+		if existing.RawKey != "" {
+			return existing.RawKey, nil
+		}
+		// Orphaned managed key with empty RawKey — delete and recreate.
+		s.logger.Warn().
+			Str("user_id", userID).
+			Str("key_id", existing.ID).
+			Msg("found managed API key with empty RawKey, deleting and recreating")
+		if delErr := s.repo.APIKeys().Delete(ctx, existing.ID); delErr != nil {
+			s.logger.Error().Err(delErr).
+				Str("key_id", existing.ID).
+				Msg("failed to delete orphaned managed API key")
+		}
 	}
 
 	// Create a new managed key.
@@ -87,6 +99,9 @@ func (s *APIKeyService) EnsureUserKey(ctx context.Context, userID string) (strin
 	}
 
 	if err := s.repo.APIKeys().Create(ctx, apiKey); err != nil {
+		s.logger.Error().Err(err).
+			Str("user_id", userID).
+			Msg("failed to create managed API key in database")
 		return "", fmt.Errorf("create managed api key: %w", err)
 	}
 
@@ -125,8 +140,26 @@ func (s *APIKeyService) Revoke(ctx context.Context, userID, keyID string) error 
 // Otherwise, it creates a new managed key and returns the raw key.
 func (s *APIKeyService) EnsureSystemKey(ctx context.Context) (string, error) {
 	existing, err := s.repo.APIKeys().FindManagedByUserID(ctx, "system")
-	if err == nil && existing != nil && existing.RawKey != "" {
-		return existing.RawKey, nil
+	if err == nil && existing != nil {
+		if existing.RawKey != "" {
+			s.logger.Info().
+				Str("key_id", existing.ID).
+				Str("key_prefix", existing.KeyPrefix).
+				Str("key_hash", existing.KeyHash[:16]+"...").
+				Msg("system managed API key found in database")
+			return existing.RawKey, nil
+		}
+		// Orphaned managed key with empty RawKey — delete and recreate.
+		s.logger.Warn().
+			Str("key_id", existing.ID).
+			Msg("found system managed API key with empty RawKey, deleting and recreating")
+		if delErr := s.repo.APIKeys().Delete(ctx, existing.ID); delErr != nil {
+			s.logger.Error().Err(delErr).
+				Str("key_id", existing.ID).
+				Msg("failed to delete orphaned system managed API key")
+		}
+	} else if err != nil {
+		s.logger.Debug().Err(err).Msg("no existing system managed key found (may be first startup)")
 	}
 
 	rawKey, keyHash, keyPrefix, err := generateAPIKey()
@@ -145,11 +178,16 @@ func (s *APIKeyService) EnsureSystemKey(ctx context.Context) (string, error) {
 	}
 
 	if err := s.repo.APIKeys().Create(ctx, apiKey); err != nil {
+		s.logger.Error().Err(err).
+			Str("key_hash", keyHash[:16]+"...").
+			Msg("failed to create system managed API key in database")
 		return "", fmt.Errorf("create system api key: %w", err)
 	}
 
 	s.logger.Info().
+		Str("key_id", apiKey.ID).
 		Str("key_prefix", keyPrefix).
+		Str("key_hash", keyHash[:16]+"...").
 		Msg("system API key created")
 
 	return rawKey, nil
@@ -161,11 +199,23 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*model.API
 	hash := hashAPIKey(rawKey)
 	key, err := s.repo.APIKeys().FindByHash(ctx, hash)
 	if err != nil {
+		s.logger.Debug().
+			Int("token_len", len(rawKey)).
+			Str("token_hash", hash[:16]+"...").
+			Err(err).
+			Msg("API key validation failed: hash not found in database")
 		return nil, fmt.Errorf("invalid api key")
 	}
 
 	// Update last used timestamp (best effort).
 	_ = s.repo.APIKeys().UpdateLastUsed(ctx, key.ID)
+
+	s.logger.Debug().
+		Str("key_id", key.ID).
+		Str("user_id", key.UserID).
+		Str("key_prefix", key.KeyPrefix).
+		Bool("managed", key.IsManaged).
+		Msg("API key validated successfully")
 
 	return key, nil
 }
