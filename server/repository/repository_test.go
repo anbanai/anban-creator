@@ -50,6 +50,18 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNew_RednoteTrackingRepositories(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+
+	if repo.RednoteTrackings() == nil {
+		t.Fatal("RednoteTrackings() should not be nil")
+	}
+	if repo.RednoteMetricSnapshots() == nil {
+		t.Fatal("RednoteMetricSnapshots() should not be nil")
+	}
+}
+
 func TestWithTx_Commit(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)
@@ -57,10 +69,10 @@ func TestWithTx_Commit(t *testing.T) {
 	ctx := context.Background()
 
 	user := &model.User{
-		ID:        "user-tx-1",
-		Email:     "tx@example.com",
-		Nickname:  "TxUser",
-		Password:  "hashed",
+		ID:       "user-tx-1",
+		Email:    "tx@example.com",
+		Nickname: "TxUser",
+		Password: "hashed",
 	}
 
 	// Successful transaction -- data should be persisted.
@@ -90,10 +102,10 @@ func TestWithTx_Rollback(t *testing.T) {
 	// Transaction that returns an error -- data should NOT be persisted.
 	err := repo.WithTx(ctx, func(txRepo Repository) error {
 		user := &model.User{
-			ID:        "user-tx-rollback",
-			Email:     "rollback@example.com",
-			Nickname:  "RollbackUser",
-			Password:  "hashed",
+			ID:       "user-tx-rollback",
+			Email:    "rollback@example.com",
+			Nickname: "RollbackUser",
+			Password: "hashed",
 		}
 		if err := txRepo.Users().Create(ctx, user); err != nil {
 			return err
@@ -227,7 +239,7 @@ func TestTaskRepository_CRUD(t *testing.T) {
 		UserID: "user-task-1",
 		Type:   model.ScopeRednote,
 		Status: model.TaskStatusPending,
-		Prompt:  "AI trends",
+		Prompt: "AI trends",
 	}
 
 	// Create
@@ -420,4 +432,3 @@ func TestTaskFileRepository_CRUD(t *testing.T) {
 		t.Errorf("expected 2 batch files, got %d", len(found))
 	}
 }
-
