@@ -62,6 +62,107 @@ func TestNew_RednoteTrackingRepositories(t *testing.T) {
 	}
 }
 
+func TestRednoteTrackingRepository_CRUD(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	nextRun := now.Add(24 * time.Hour)
+
+	tracking := &model.RednotePostTracking{
+		ID:                "tracking-1",
+		TaskID:            "task-1",
+		UserID:            "user-1",
+		ChannelID:         "channel-1",
+		Status:            model.RednoteTrackingStatusWaitingDiscovery,
+		ProfileURL:        "https://www.xiaohongshu.com/user/profile/abc",
+		PublishedMarkedAt: now,
+		NextRunAt:         &nextRun,
+	}
+
+	if err := repo.RednoteTrackings().Create(ctx, tracking); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	found, err := repo.RednoteTrackings().FindByTaskID(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("FindByTaskID: %v", err)
+	}
+	if found.ID != "tracking-1" {
+		t.Fatalf("ID = %q, want tracking-1", found.ID)
+	}
+
+	due, err := repo.RednoteTrackings().FindDue(ctx, nextRun.Add(time.Second), 10)
+	if err != nil {
+		t.Fatalf("FindDue: %v", err)
+	}
+	if len(due) != 1 {
+		t.Fatalf("due length = %d, want 1", len(due))
+	}
+
+	found.Status = model.RednoteTrackingStatusTracking
+	found.NoteID = "note-1"
+	if err := repo.RednoteTrackings().Update(ctx, found); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	updated, err := repo.RednoteTrackings().FindByID(ctx, "tracking-1")
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if updated.Status != model.RednoteTrackingStatusTracking || updated.NoteID != "note-1" {
+		t.Fatalf("updated tracking = %+v", updated)
+	}
+}
+
+func TestRednoteMetricSnapshotRepository_UpsertAndSeries(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	captured := time.Date(2026, 5, 2, 8, 0, 0, 0, time.UTC)
+
+	first := &model.RednoteMetricSnapshot{
+		ID:           "snapshot-1",
+		TrackingID:   "tracking-1",
+		TaskID:       "task-1",
+		CapturedAt:   captured,
+		CapturedDate: model.RednoteCapturedDate(captured),
+		LikeCount:    10,
+		CollectCount: 2,
+		CommentCount: 1,
+		ShareCount:   0,
+	}
+	if err := repo.RednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, first); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+
+	second := *first
+	second.ID = "snapshot-2"
+	second.LikeCount = 15
+	if err := repo.RednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, &second); err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+
+	series, err := repo.RednoteMetricSnapshots().FindByTaskID(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("FindByTaskID: %v", err)
+	}
+	if len(series) != 1 {
+		t.Fatalf("series length = %d, want 1", len(series))
+	}
+	if series[0].LikeCount != 15 {
+		t.Fatalf("LikeCount = %d, want 15", series[0].LikeCount)
+	}
+
+	latest, err := repo.RednoteMetricSnapshots().FindLatestByTrackingID(ctx, "tracking-1")
+	if err != nil {
+		t.Fatalf("FindLatestByTrackingID: %v", err)
+	}
+	if latest.ID != "snapshot-1" {
+		t.Fatalf("latest ID = %q, want snapshot-1 because upsert keeps primary ID", latest.ID)
+	}
+}
+
 func TestWithTx_Commit(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)

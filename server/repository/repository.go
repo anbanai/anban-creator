@@ -122,10 +122,23 @@ type FeedbackRepository interface {
 }
 
 // RednoteTrackingRepository provides access to Rednote post tracking records.
-type RednoteTrackingRepository interface{}
+type RednoteTrackingRepository interface {
+	Create(ctx context.Context, tracking *model.RednotePostTracking) error
+	FindByTaskID(ctx context.Context, taskID string) (*model.RednotePostTracking, error)
+	FindByID(ctx context.Context, id string) (*model.RednotePostTracking, error)
+	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.RednotePostTracking, error)
+	Update(ctx context.Context, tracking *model.RednotePostTracking) error
+	UpdateStatus(ctx context.Context, id, status string) error
+}
 
 // RednoteMetricSnapshotRepository provides access to Rednote metric snapshots.
-type RednoteMetricSnapshotRepository interface{}
+type RednoteMetricSnapshotRepository interface {
+	Create(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error
+	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error
+	FindByTaskID(ctx context.Context, taskID string) ([]*model.RednoteMetricSnapshot, error)
+	FindLatestByTrackingID(ctx context.Context, trackingID string) (*model.RednoteMetricSnapshot, error)
+	FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.RednoteMetricSnapshot, error)
+}
 
 // -----------------------------------------------------------------------------
 // Implementation
@@ -159,6 +172,8 @@ func New(db *gorm.DB) Repository {
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
 	modelConfigs := newModelConfigRepository(db)
+	rednoteTrackings := newRednoteTrackingRepository(db)
+	rednoteMetricSnapshots := newRednoteMetricSnapshotRepository(db)
 
 	return &repository{
 		db:                     db,
@@ -172,8 +187,8 @@ func New(db *gorm.DB) Repository {
 		apiKeys:                apiKeys,
 		feedbacks:              feedbacks,
 		modelConfigs:           modelConfigs,
-		rednoteTrackings:       struct{}{},
-		rednoteMetricSnapshots: struct{}{},
+		rednoteTrackings:       rednoteTrackings,
+		rednoteMetricSnapshots: rednoteMetricSnapshots,
 	}
 }
 
@@ -244,8 +259,8 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		apiKeys:                newAPIKeyRepository(tx),
 		feedbacks:              newFeedbackRepository(tx),
 		modelConfigs:           newModelConfigRepository(tx),
-		rednoteTrackings:       struct{}{},
-		rednoteMetricSnapshots: struct{}{},
+		rednoteTrackings:       newRednoteTrackingRepository(tx),
+		rednoteMetricSnapshots: newRednoteMetricSnapshotRepository(tx),
 	}
 }
 
