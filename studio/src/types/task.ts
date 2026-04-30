@@ -17,6 +17,7 @@ export interface Task {
   result: TaskResult
   published: boolean
   published_at: string | null
+  workflow_status?: WorkflowStatus | string | null
   created_at: string
   started_at: string
   completed_at: string
@@ -47,4 +48,35 @@ export interface CreateTaskRequest {
   quantity?: number
   image_ratio?: string
   generate_video?: boolean
+}
+
+export interface WorkflowStatus {
+  version: string
+  current_stage: string
+  stages: WorkflowStage[]
+  warnings?: WorkflowWarning[]
+  review?: WorkflowReview | null
+}
+
+export interface WorkflowStage {
+  key: string
+  label: string
+  status: 'pending' | 'running' | 'completed' | 'warning' | 'failed' | string
+  artifact_paths?: string[]
+  error?: string
+}
+
+export interface WorkflowWarning {
+  code: string
+  message: string
+}
+
+export interface WorkflowReview {
+  overall_score: number
+  readiness: string
+  scores?: Record<string, number>
+  strengths?: string[]
+  risks?: string[]
+  next_actions?: string[]
+  metadata?: Record<string, string>
 }

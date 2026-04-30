@@ -66,6 +66,10 @@ func DetectTaskFileMIME(filePath string) string {
 
 // DetermineTaskFileRole returns the role for a file based on its name and MIME type.
 func DetermineTaskFileRole(filename, mimeType string) string {
+	if workflowRole := DetermineWorkflowArtifactRole(filename, mimeType); workflowRole != model.FileRoleOther {
+		return workflowRole
+	}
+
 	base := strings.ToLower(filepath.Base(filename))
 	if strings.HasPrefix(base, "cover") {
 		return model.FileRoleCover
@@ -232,7 +236,7 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		return nil
 	}
 
-		// Prefer the output/ subdirectory (created by the agent via mkdir -p) to isolate
+	// Prefer the output/ subdirectory (created by the agent via mkdir -p) to isolate
 	// content files from agent runtime artifacts (node_modules, .claude, etc.).
 	scanDir := workDir
 	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {

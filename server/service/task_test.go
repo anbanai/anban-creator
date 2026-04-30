@@ -394,3 +394,67 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 		t.Fatal("completed task file missing")
 	}
 }
+
+func TestTaskService_RebuildWorkflowStatus(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("create local storage: %v", err)
+	}
+	svc.store = store
+
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusCompleted,
+		Prompt:    "workflow task",
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	files := []struct {
+		path    string
+		body    string
+		mime    string
+		size    int64
+		wantErr bool
+	}{
+		{"output/03-draft.md", "# Draft", "text/markdown", 7, false},
+		{"output/04-final.md", "# Final", "text/markdown", 7, false},
+		{"output/review.json", `{"overall_score":91,"readiness":"ready","strengths":["清晰"],"risks":[],"next_actions":["发布"]}`, "application/json", 92, false},
+	}
+	for _, file := range files {
+		if _, err := svc.UploadTaskFileFromReader(ctx, task.ID, userID, file.path, strings.NewReader(file.body), file.mime, file.size); err != nil {
+			t.Fatalf("upload %s: %v", file.path, err)
+		}
+	}
+
+	if err := svc.RebuildWorkflowStatus(ctx, task.ID); err != nil {
+		t.Fatalf("RebuildWorkflowStatus: %v", err)
+	}
+
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.WorkflowStatus == nil || *found.WorkflowStatus == "" {
+		t.Fatal("workflow_status was not persisted")
+	}
+
+	var status WorkflowStatus
+	if err := json.Unmarshal([]byte(*found.WorkflowStatus), &status); err != nil {
+		t.Fatalf("unmarshal workflow status: %v", err)
+	}
+	if status.Review == nil {
+		t.Fatal("expected review summary")
+	}
+	if status.Review.OverallScore != 91 {
+		t.Fatalf("review score = %d, want 91", status.Review.OverallScore)
+	}
+}

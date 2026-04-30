@@ -32,6 +32,10 @@ export type {
   TaskResult,
   TaskFile,
   CreateTaskRequest,
+  WorkflowStatus,
+  WorkflowStage,
+  WorkflowWarning,
+  WorkflowReview,
 } from './task'
 
 // Timeline

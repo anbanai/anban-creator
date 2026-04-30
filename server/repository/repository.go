@@ -94,6 +94,7 @@ type TaskRepository interface {
 	IncrementRetryAndSetPending(ctx context.Context, taskID string, field string) error
 	FindTopicsByChannelID(ctx context.Context, channelID string) ([]string, error)
 	SetPublished(ctx context.Context, id string, published bool) error
+	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	Delete(ctx context.Context, id string) error
 	UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error
 	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, channelID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error)
@@ -124,16 +125,16 @@ type FeedbackRepository interface {
 // -----------------------------------------------------------------------------
 
 type repository struct {
-	db        *gorm.DB
-	users     UserRepository
-	sessions  SessionRepository
-	plans     PlanRepository
-	tasks     TaskRepository
-	files     TaskFileRepository
-	channels  ChannelRepository
-	credits   CreditRepository
-	apiKeys   APIKeyRepository
-	feedbacks FeedbackRepository
+	db           *gorm.DB
+	users        UserRepository
+	sessions     SessionRepository
+	plans        PlanRepository
+	tasks        TaskRepository
+	files        TaskFileRepository
+	channels     ChannelRepository
+	credits      CreditRepository
+	apiKeys      APIKeyRepository
+	feedbacks    FeedbackRepository
 	modelConfigs ModelConfigRepository
 }
 
@@ -165,15 +166,15 @@ func New(db *gorm.DB) Repository {
 	}
 }
 
-func (r *repository) Users() UserRepository            { return r.users }
-func (r *repository) Sessions() SessionRepository       { return r.sessions }
-func (r *repository) Plans() PlanRepository             { return r.plans }
-func (r *repository) Tasks() TaskRepository             { return r.tasks }
-func (r *repository) TaskFiles() TaskFileRepository     { return r.files }
-func (r *repository) Channels() ChannelRepository       { return r.channels }
-func (r *repository) Credits() CreditRepository         { return r.credits }
-func (r *repository) APIKeys() APIKeyRepository         { return r.apiKeys }
-func (r *repository) Feedbacks() FeedbackRepository     { return r.feedbacks }
+func (r *repository) Users() UserRepository               { return r.users }
+func (r *repository) Sessions() SessionRepository         { return r.sessions }
+func (r *repository) Plans() PlanRepository               { return r.plans }
+func (r *repository) Tasks() TaskRepository               { return r.tasks }
+func (r *repository) TaskFiles() TaskFileRepository       { return r.files }
+func (r *repository) Channels() ChannelRepository         { return r.channels }
+func (r *repository) Credits() CreditRepository           { return r.credits }
+func (r *repository) APIKeys() APIKeyRepository           { return r.apiKeys }
+func (r *repository) Feedbacks() FeedbackRepository       { return r.feedbacks }
 func (r *repository) ModelConfigs() ModelConfigRepository { return r.modelConfigs }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
@@ -200,16 +201,16 @@ func (r *repository) Close() error {
 // -----------------------------------------------------------------------------
 
 type txRepository struct {
-	db        *gorm.DB
-	users     UserRepository
-	sessions  SessionRepository
-	plans     PlanRepository
-	tasks     TaskRepository
-	files     TaskFileRepository
-	channels  ChannelRepository
-	credits   CreditRepository
-	apiKeys   APIKeyRepository
-	feedbacks FeedbackRepository
+	db           *gorm.DB
+	users        UserRepository
+	sessions     SessionRepository
+	plans        PlanRepository
+	tasks        TaskRepository
+	files        TaskFileRepository
+	channels     ChannelRepository
+	credits      CreditRepository
+	apiKeys      APIKeyRepository
+	feedbacks    FeedbackRepository
 	modelConfigs ModelConfigRepository
 }
 
@@ -229,15 +230,15 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 	}
 }
 
-func (r *txRepository) Users() UserRepository            { return r.users }
-func (r *txRepository) Sessions() SessionRepository       { return r.sessions }
-func (r *txRepository) Plans() PlanRepository             { return r.plans }
-func (r *txRepository) Tasks() TaskRepository             { return r.tasks }
-func (r *txRepository) TaskFiles() TaskFileRepository     { return r.files }
-func (r *txRepository) Channels() ChannelRepository       { return r.channels }
-func (r *txRepository) Credits() CreditRepository         { return r.credits }
-func (r *txRepository) APIKeys() APIKeyRepository         { return r.apiKeys }
-func (r *txRepository) Feedbacks() FeedbackRepository     { return r.feedbacks }
+func (r *txRepository) Users() UserRepository               { return r.users }
+func (r *txRepository) Sessions() SessionRepository         { return r.sessions }
+func (r *txRepository) Plans() PlanRepository               { return r.plans }
+func (r *txRepository) Tasks() TaskRepository               { return r.tasks }
+func (r *txRepository) TaskFiles() TaskFileRepository       { return r.files }
+func (r *txRepository) Channels() ChannelRepository         { return r.channels }
+func (r *txRepository) Credits() CreditRepository           { return r.credits }
+func (r *txRepository) APIKeys() APIKeyRepository           { return r.apiKeys }
+func (r *txRepository) Feedbacks() FeedbackRepository       { return r.feedbacks }
 func (r *txRepository) ModelConfigs() ModelConfigRepository { return r.modelConfigs }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {

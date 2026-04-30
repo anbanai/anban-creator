@@ -18,8 +18,8 @@ const (
 
 // Retry constants.
 const (
-	MaxRetries         = 3
-	DefaultRetries     = 3
+	MaxRetries          = 3
+	DefaultRetries      = 3
 	MaxRateLimitRetries = 5
 )
 
@@ -32,12 +32,19 @@ const (
 
 // File role constants.
 const (
-	FileRoleImage    = "image"
-	FileRoleCover    = "cover"
-	FileRoleHTML     = "html"
-	FileRoleMarkdown = "markdown"
-	FileRoleVideo    = "video"
-	FileRoleOther    = "other"
+	FileRoleImage         = "image"
+	FileRoleCover         = "cover"
+	FileRoleHTML          = "html"
+	FileRoleMarkdown      = "markdown"
+	FileRoleVideo         = "video"
+	FileRoleOther         = "other"
+	FileRoleTopic         = "topic"
+	FileRoleOutline       = "outline"
+	FileRoleDraft         = "draft"
+	FileRoleFinalMarkdown = "final_markdown"
+	FileRoleImageManifest = "image_manifest"
+	FileRoleDraftPackage  = "draft_package"
+	FileRoleReview        = "review"
 )
 
 // Channel status constants.

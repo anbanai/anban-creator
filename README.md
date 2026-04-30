@@ -1,75 +1,120 @@
-# Anban 智能创作助手 Plugin
+# AnbanWriter 智能创作平台
 
-Professional WeChat content creation toolkit for Claude Code with AI-powered writing, visual design, and publishing optimization.
+AnbanWriter is a Studio-first content creation platform for WeChat articles, Xiaolvshu image posts, and Rednote-oriented creation workflows. It combines a Web Studio, MCP tools, Claude/OpenClaw agent execution, AI image generation, publishing helpers, task tracking, and credits into one repeatable creator workspace.
 
-## Installation
+## Product Surfaces
 
-See [anbanai/anbanwriter-claudecode](https://github.com/anbanai/anbanwriter-claudecode) for Claude Code plugin installation instructions.
+- **Web Studio** — manage channels, plans, tasks, generated files, credits, model settings, and publishing state.
+- **MCP Server** — exposes writing, image, publishing, billing, workspace, and Rednote formatting tools to connected agents.
+- **Agent Runtime** — executes `wechatarticle`, `wechatxls`, and related content agents locally or in Docker.
+- **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
+- **Plugin Assets** — Claude/OpenClaw skills, agents, themes, and writer styles live under `claudecode/` and `openclaw/`.
 
-## Features
+## Quick Start
 
-- **Convert** — Markdown → WeChat HTML with inline CSS and theme support
-- **Write** — Style-based AI writing assistance (dan-koe, cultural-depth, casual-science)
-- **Humanize** — Remove AI writing traces from articles
-- **Score** — Evaluate article viral potential (5-dimension quality scoring)
-- **Outline** — Generate structured article outlines
-- **Draft** — Manage WeChat draft box (图文文章 & 小绿书)
-- **Image** — AI image generation (OpenAI DALL-E, Google Gemini, Volcengine Seedream)
+```bash
+# Start infra and services with Docker Compose
+make docker-up
+
+# Or run server and web separately during development
+make server-dev
+make web-dev
+```
+
+Server build:
+
+```bash
+make server-build
+./bin/abwriter-server -config server/config.yaml
+```
+
+Frontend build:
+
+```bash
+make web-build
+```
+
+## Development Commands
+
+```bash
+# Go tests
+go test ./...
+
+# Frontend tests
+cd studio && npm test -- --run
+
+# Frontend production build
+cd studio && npm run build
+
+# Format and vet Go code
+make fmt
+make vet
+```
+
+## Core Workflow
+
+1. Create a channel in Studio with platform, account positioning, keywords, style, theme, and optional publishing credentials.
+2. Create a manual task or scheduled plan.
+3. The agent writes canonical artifacts into `output/`.
+4. The server uploads task files and builds workflow metadata from known artifacts.
+5. Studio shows stage progress, generated files, review readiness, warnings, and publishing state.
+6. Optional auto-publishing creates WeChat article or Xiaolvshu draft entries when enabled.
+
+Canonical Creation Workflow v1 artifacts include:
+
+- `01-topic.json`
+- `02-outline.md`
+- `03-draft.md`
+- `04-final.md`
+- `05-article.html`
+- `cover.png`
+- `images.json`
+- `draft.json`
+- `review.json`
+
+## Supported Platforms
+
+- **公众号文章** — long-form Markdown/HTML conversion, cover generation, WeChat draft publishing.
+- **小绿书/XLS** — image post generation, image upload, WeChat newspic draft publishing.
+- **小红书/Rednote** — profile-assisted content creation and export formatting; direct publishing is not part of v1.
 
 ## Configuration
 
-Run `anbanwriter account init` for guided setup, or create `.anbanwriter/settings.json` directly:
+Server configuration lives in `server/config.yaml`; use `server/config.example.yaml` as a starting point.
 
-```json
-{
-  "wechat": {
-    "appid": "your_appid",
-    "secret": "your_secret"
-  },
-  "article": {
-    "image": { "key": "your_api_key", "provider": "gemini" }
-  },
-  "xls": {
-    "image": { "key": "your_api_key", "provider": "gemini" }
-  }
-}
+Important sections:
+
+- database and Redis
+- Claude/OpenClaw executor
+- storage provider
+- image generation providers
+- writing model defaults
+- WeChat auth and publishing settings
+- credits and invitation rules
+
+Users can configure per-account platform credentials and per-user model settings from Studio.
+
+## Repository Layout
+
+```text
+server/       Go API server, MCP tools, scheduling, task execution, storage, publishing
+agent/        Standalone agent runner used by Docker/local execution
+app/          Shared Go packages for config, converter, writer, humanizer, image, WeChat draft helpers
+studio/       React Web Studio
+claudecode/   Claude Code plugin assets: agents, skills, themes, writer styles
+openclaw/     OpenClaw plugin distribution assets
+docs/         Design specs and implementation plans
 ```
 
-Supported image providers: `openai`, `gemini`, `volcengine`
+## Testing
 
-## Skills
+Run full backend and frontend verification before shipping:
 
-| Skill | Description |
-|-------|-------------|
-| `/anbanwriter:config` | Initialize or view account configuration |
-| `/anbanwriter:content-writing` | Writing style, humanization, HTML conversion |
-| `/anbanwriter:visual-design` | Image generation and theme management |
-| `/anbanwriter:topic-research` | Topic scoring and outline generation |
-| `/anbanwriter:seo-optimization` | Title, keyword, and excerpt optimization |
-| `/anbanwriter:article-publishing` | 图文文章 draft publishing |
-| `/anbanwriter:xls-publishing` | 小绿书 image post publishing |
-
-## Agents
-
-- **wechatarticle** — Full article creation pipeline: 选题研究 → 写作 → AI去痕 → SEO优化 → 封面配图 → HTML转换 → 草稿发布
-- **wechatxls** — Image post creation pipeline: 选题研究 → 图片设计 → 草稿发布
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `account init` | Initialize config with guided setup |
-| `account info` | View current account information |
-| `convert <file>` | Convert Markdown to WeChat HTML |
-| `write` | Style-based AI writing assistance |
-| `humanize <file>` | Remove AI writing traces |
-| `score <file>` | Score article viral potential |
-| `outline` | Generate structured article outline |
-| `draft article <json>` | Create 图文文章 draft |
-| `draft xls` | Create 小绿书 image post (max 20 images) |
-| `image generate <prompt>` | Generate AI images |
-| `image upload <file>` | Upload image to WeChat CDN |
-| `doctor` | Diagnose config and connection issues |
+```bash
+go test ./...
+cd studio && npm test -- --run
+cd studio && npm run build
+```
 
 ## License
 

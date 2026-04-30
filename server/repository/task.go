@@ -175,8 +175,8 @@ func (r *taskRepository) SetCompletedAt(ctx context.Context, id string) error {
 
 // validRetryFields restricts which columns IncrementRetryAndSetPending accepts.
 var validRetryFields = map[string]bool{
-	"retry_count":             true,
-	"rate_limit_retry_count":  true,
+	"retry_count":            true,
+	"rate_limit_retry_count": true,
 }
 
 // IncrementRetryAndSetPending atomically increments the given retry counter field
@@ -311,6 +311,10 @@ func (r *taskRepository) SetPublished(ctx context.Context, id string, published 
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Updates(updates).Error
 }
 
+func (r *taskRepository) UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("workflow_status", workflowStatus).Error
+}
+
 func (r *taskRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Delete(&model.Task{}, "id = ?", id).Error
 }
@@ -361,13 +365,13 @@ func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string
 
 // TypeUsageRow holds per-type aggregated usage data from a SQL GROUP BY query.
 type TypeUsageRow struct {
-	Type               string
-	Count              int64
-	InputTokens        int64
-	OutputTokens       int64
-	CacheReadTokens    int64
+	Type                string
+	Count               int64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheReadTokens     int64
 	CacheCreationTokens int64
-	CostUSD            float64
+	CostUSD             float64
 }
 
 // AggregateUsageByType returns per-type token usage and cost via SQL GROUP BY.
@@ -394,4 +398,3 @@ func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string
 	}
 	return rows, nil
 }
-

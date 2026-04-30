@@ -27,19 +27,19 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo           repository.Repository
-	executor       agent.TaskExecutor
-	logger         *zerolog.Logger
-	enqueuer       TaskEnqueuer
-	store          storage.Provider
-	creditSvc      *CreditService
-	publishingSvc  *PublishingService
-	taskLogDir     string
-	workspaceSvc   *WorkspaceService
-	workspaceDir   string
-	pubsub         *RedisPubSub
-	pubsubCancel   context.CancelFunc // stops the listenCancelEvents goroutine
-	cancelFuncs    sync.Map            // taskID → context.CancelFunc
+	repo          repository.Repository
+	executor      agent.TaskExecutor
+	logger        *zerolog.Logger
+	enqueuer      TaskEnqueuer
+	store         storage.Provider
+	creditSvc     *CreditService
+	publishingSvc *PublishingService
+	taskLogDir    string
+	workspaceSvc  *WorkspaceService
+	workspaceDir  string
+	pubsub        *RedisPubSub
+	pubsubCancel  context.CancelFunc // stops the listenCancelEvents goroutine
+	cancelFuncs   sync.Map           // taskID → context.CancelFunc
 }
 
 // NewTaskService creates a new TaskService.
@@ -189,12 +189,12 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 		}
 
 		task := &model.Task{
-			ID:        taskID,
-			UserID:    userID,
-			ChannelID: channelID,
-			Type:      taskType,
-			Status:    model.TaskStatusPending,
-			Prompt:     prompt,
+			ID:            taskID,
+			UserID:        userID,
+			ChannelID:     channelID,
+			Type:          taskType,
+			Status:        model.TaskStatusPending,
+			Prompt:        prompt,
 			ImageRatio:    imageRatio,
 			GenerateVideo: generateVideo,
 		}
@@ -418,6 +418,44 @@ func (s *TaskService) GetFiles(ctx context.Context, taskID string) ([]*model.Tas
 	}
 	s.EnrichFilesWithURLs(ctx, files)
 	return files, nil
+}
+
+func (s *TaskService) RebuildWorkflowStatus(ctx context.Context, taskID string) error {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("find task: %w", err)
+	}
+
+	files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("find task files: %w", err)
+	}
+
+	var reviewJSON []byte
+	for _, file := range files {
+		if DetermineWorkflowArtifactRole(file.FileName, file.MimeType) != model.FileRoleReview {
+			continue
+		}
+		data, err := s.getFileContent(ctx, file)
+		if err != nil {
+			return fmt.Errorf("read review file: %w", err)
+		}
+		reviewJSON = data
+		break
+	}
+
+	status, err := BuildWorkflowStatus(task.Type, files, reviewJSON)
+	if err != nil {
+		return fmt.Errorf("build workflow status: %w", err)
+	}
+	data, err := json.Marshal(status)
+	if err != nil {
+		return fmt.Errorf("marshal workflow status: %w", err)
+	}
+	if err := s.repo.Tasks().UpdateWorkflowStatus(ctx, taskID, string(data)); err != nil {
+		return fmt.Errorf("persist workflow status: %w", err)
+	}
+	return nil
 }
 
 // EnqueueExecution enqueues a task for async execution.
@@ -705,4 +743,3 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 	s.deregisterCancel(id)
 	return nil
 }
-

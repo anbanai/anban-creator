@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
 import { FilePreviewGallery } from '@/components/FilePreview'
+import TaskWorkflowPanel from '@/components/TaskWorkflowPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
@@ -362,6 +363,8 @@ export default function TaskDetailPage() {
           </CardBody>
         </Card>
       </div>
+
+      <TaskWorkflowPanel workflow={task.workflow_status} />
 
       {/* Files (top priority - most useful content) */}
       {files && files.length > 0 && (

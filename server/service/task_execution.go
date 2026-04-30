@@ -139,6 +139,9 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		if err := s.uploadMissingTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("workspace file upload failed")
 		}
+		if err := s.RebuildWorkflowStatus(ctx, taskID); err != nil {
+			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to rebuild workflow status")
+		}
 		// Schedule workspace cleanup after all processing is done.
 		cleanupWorkDir = result.WorkDir
 		if title := ExtractTitleFromWorkspace(result.WorkDir); title != "" {

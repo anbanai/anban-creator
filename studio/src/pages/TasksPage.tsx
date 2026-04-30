@@ -6,7 +6,7 @@ import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Loader2, ClipboardList, Check, Film, Download, Square, CheckSquare } from 'lucide-react'
 import { api } from '@/lib/api'
-import type { TaskType, TaskStatus, CreateTaskRequest, Channel } from '@/types'
+import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { Button } from '@/components/ui/Button'
@@ -33,6 +33,22 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '失败', value: 'failed' },
   { label: '已取消', value: 'cancelled' },
 ]
+
+function workflowReadinessLabel(workflow: WorkflowStatus | string | null | undefined) {
+  if (!workflow) return ''
+  const parsed: WorkflowStatus | null = typeof workflow === 'string' ? (() => {
+    try {
+      return JSON.parse(workflow) as WorkflowStatus
+    } catch {
+      return null
+    }
+  })() : workflow
+  const readiness = parsed?.review?.readiness
+  if (readiness === 'ready') return '可发布'
+  if (readiness === 'ready_with_minor_edits') return '建议修改'
+  if (readiness === 'needs_revision') return '需重做'
+  return ''
+}
 
 export default function TasksPage() {
   const queryClient = useQueryClient()
@@ -407,6 +423,11 @@ export default function TasksPage() {
                               ) : null}
                               {task.published ? '已发布' : '标记发布'}
                             </button>
+                          )}
+                          {task.status === 'completed' && workflowReadinessLabel(task.workflow_status) && (
+                            <Badge variant="outline">
+                              {workflowReadinessLabel(task.workflow_status)}
+                            </Badge>
                           )}
                         </div>
                       </div>
