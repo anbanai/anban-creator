@@ -1,7 +1,7 @@
 import { CheckCircle2, Circle, AlertTriangle } from 'lucide-react'
 import type { WorkflowStatus } from '@/types'
-import { Card, CardBody } from '@/components/ui/Card'
-import Badge from '@/components/ui/Badge'
+import { Card, CardContent } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
 
 interface TaskWorkflowPanelProps {
   workflow?: WorkflowStatus | string | null
@@ -36,13 +36,19 @@ function stageIcon(status: string) {
   return <Circle className="h-4 w-4 text-muted-foreground" />
 }
 
+function readinessClassName(score: number) {
+  if (score >= 80) return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+  if (score >= 60) return 'border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400'
+  return 'border-destructive/30 bg-destructive/10 text-destructive'
+}
+
 export default function TaskWorkflowPanel({ workflow }: TaskWorkflowPanelProps) {
   const data = parseWorkflow(workflow)
   if (!data) return null
 
   return (
     <Card>
-      <CardBody>
+      <CardContent>
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -50,7 +56,7 @@ export default function TaskWorkflowPanel({ workflow }: TaskWorkflowPanelProps) 
               <p className="mt-1 text-xs text-muted-foreground">阶段产物与质量复盘</p>
             </div>
             {data.review && (
-              <Badge variant={data.review.overall_score >= 80 ? 'success' : data.review.overall_score >= 60 ? 'warning' : 'danger'}>
+              <Badge variant="outline" className={readinessClassName(data.review.overall_score)}>
                 {readinessLabel(data.review.readiness)}
               </Badge>
             )}
@@ -95,7 +101,7 @@ export default function TaskWorkflowPanel({ workflow }: TaskWorkflowPanelProps) 
             </div>
           )}
         </div>
-      </CardBody>
+      </CardContent>
     </Card>
   )
 }
