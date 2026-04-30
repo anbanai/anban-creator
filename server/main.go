@@ -221,6 +221,29 @@ func main() {
 		log.Info().Msg("model config service initialized")
 	}
 
+	var writingLLMClient service.LLMClient
+	if repo != nil {
+		// Prefer config.yaml writing section; fall back to env vars.
+		llmBaseURL := cfg.Writing.BaseURL
+		llmAPIKey := cfg.Writing.Key
+		llmModel := cfg.Writing.Model
+		if llmBaseURL == "" {
+			llmBaseURL = os.Getenv("ANTHROPIC_BASE_URL")
+		}
+		if llmAPIKey == "" {
+			llmAPIKey = os.Getenv("ANTHROPIC_AUTH_TOKEN")
+		}
+		if llmModel == "" {
+			llmModel = cfg.Claude.Model
+			if llmModel == "" {
+				llmModel = os.Getenv("ANTHROPIC_MODEL")
+			}
+		}
+		if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
+			writingLLMClient = service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel)
+		}
+	}
+
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
 	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits)
 
@@ -241,6 +264,12 @@ func main() {
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
 		channelHandler = handler.NewChannelHandler(channelSvc, log)
+		if modelConfigSvc != nil {
+			channelHandler.SetModelConfigService(modelConfigSvc)
+		}
+		if writingLLMClient != nil {
+			channelHandler.SetLLMClient(writingLLMClient)
+		}
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
 			creditHandler = handler.NewCreditHandler(creditSvc, &cfg.Credits, cfg.Credits.AdminAPIKey, log)
@@ -272,33 +301,15 @@ func main() {
 			}
 		}
 		if repo != nil {
-			// Create LLM client for writing operations.
-			// Prefer config.yaml writing section; fall back to env vars.
-			llmBaseURL := cfg.Writing.BaseURL
-			llmAPIKey := cfg.Writing.Key
-			llmModel := cfg.Writing.Model
-			if llmBaseURL == "" {
-				llmBaseURL = os.Getenv("ANTHROPIC_BASE_URL")
-			}
-			if llmAPIKey == "" {
-				llmAPIKey = os.Getenv("ANTHROPIC_AUTH_TOKEN")
-			}
-			if llmModel == "" {
-				llmModel = cfg.Claude.Model
-				if llmModel == "" {
-					llmModel = os.Getenv("ANTHROPIC_MODEL")
-				}
-			}
-			if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
-				llmClient := service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel)
-				writingSvc = service.NewWritingService(repo, llmClient, log)
+			if writingLLMClient != nil {
+				writingSvc = service.NewWritingService(repo, writingLLMClient, log)
 				if modelConfigSvc != nil {
 					writingSvc.SetModelConfigService(modelConfigSvc)
 				}
 			} else {
 				log.Warn().Msg("LLM client not configured (missing writing config or ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
 			}
-				}
+		}
 
 		mcp.SetServices(&mcp.Services{
 			ChannelSvc:    channelSvc,
@@ -346,31 +357,31 @@ func main() {
 
 	// 16. Build Services struct.
 	svcs := &router.Services{
-		Config:          cfg,
-		Logger:          log,
-		DB:              mysqlDB,
-		Redis:           rdb,
-		Repo:            repo,
-		JWTService:      jwtSvc,
-		WechatSvc:       wechatSvc,
-		WSHub:           wsHub,
-		AuthHandler:     authHandler,
-		Executor:        agentExecutor,
-		PlanService:     planSvc,
-		TaskService:     taskSvc,
-		CreditService:   creditSvc,
-		ChannelHandler:  channelHandler,
-		PlanHandler:     planHandler,
-		TaskHandler:     taskHandler,
-		AgentHandler:    agentHandler,
-		CreditHandler:   creditHandler,
-		TimelineHandler: timelineHandler,
-		APIKeyHandler:   apiKeyHandler,
-		FileHandler:     fileHandler,
-		FeedbackHandler: feedbackHandler,
+		Config:             cfg,
+		Logger:             log,
+		DB:                 mysqlDB,
+		Redis:              rdb,
+		Repo:               repo,
+		JWTService:         jwtSvc,
+		WechatSvc:          wechatSvc,
+		WSHub:              wsHub,
+		AuthHandler:        authHandler,
+		Executor:           agentExecutor,
+		PlanService:        planSvc,
+		TaskService:        taskSvc,
+		CreditService:      creditSvc,
+		ChannelHandler:     channelHandler,
+		PlanHandler:        planHandler,
+		TaskHandler:        taskHandler,
+		AgentHandler:       agentHandler,
+		CreditHandler:      creditHandler,
+		TimelineHandler:    timelineHandler,
+		APIKeyHandler:      apiKeyHandler,
+		FileHandler:        fileHandler,
+		FeedbackHandler:    feedbackHandler,
 		ModelConfigHandler: modelConfigHandler,
-		MCPHandler:      mcpHandler,
-		StorageProvider: store,
+		MCPHandler:         mcpHandler,
+		StorageProvider:    store,
 	}
 
 	// 17. Create router.

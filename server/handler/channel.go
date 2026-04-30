@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -18,13 +20,25 @@ import (
 
 // ChannelHandler handles channel-related HTTP endpoints.
 type ChannelHandler struct {
-	service *service.ChannelService
-	logger  *zerolog.Logger
+	service        *service.ChannelService
+	logger         *zerolog.Logger
+	llm            service.LLMClient
+	modelConfigSvc *service.ModelConfigService
 }
 
 // NewChannelHandler creates a new ChannelHandler.
 func NewChannelHandler(svc *service.ChannelService, logger *zerolog.Logger) *ChannelHandler {
 	return &ChannelHandler{service: svc, logger: logger}
+}
+
+// SetLLMClient injects an optional LLM client for profile analysis.
+func (h *ChannelHandler) SetLLMClient(llm service.LLMClient) {
+	h.llm = llm
+}
+
+// SetModelConfigService injects per-user model overrides for profile analysis.
+func (h *ChannelHandler) SetModelConfigService(svc *service.ModelConfigService) {
+	h.modelConfigSvc = svc
 }
 
 // channelRequest is the shared request body for creating and updating a channel.
@@ -374,10 +388,8 @@ func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "profile_url is required")
 	}
 
-	// SSRF protection: validate URL scheme and host.
-	parsedURL, err := url.ParseRequestURI(req.ProfileURL)
-	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		return Error(c, fiber.StatusBadRequest, "invalid profile URL")
+	if req.Platform != model.PlatformRednote {
+		return Error(c, fiber.StatusBadRequest, "profile auto-fetch is only available for Xiaohongshu")
 	}
 
 	// Validate URL matches the platform's expected pattern.
@@ -385,7 +397,15 @@ func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
 	if pc != nil && pc.ProfileURLPattern != "" {
 		matched, _ := regexp.MatchString(pc.ProfileURLPattern, req.ProfileURL)
 		if !matched {
-			return Error(c, fiber.StatusBadRequest, "profile URL does not match expected pattern for "+pc.Label)
+			re, err := regexp.Compile(pc.ProfileURLPattern)
+			if err != nil {
+				h.logger.Error().Err(err).Str("platform", req.Platform).Msg("invalid profile URL pattern")
+				return Error(c, fiber.StatusInternalServerError, "invalid platform profile URL configuration")
+			}
+			matched = re.FindString(req.ProfileURL) != ""
+			if !matched {
+				return Error(c, fiber.StatusBadRequest, "profile URL does not match expected pattern for "+pc.Label)
+			}
 		}
 	}
 
@@ -409,8 +429,132 @@ func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
 			Msg("fetch profile failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to fetch profile: "+err.Error())
 	}
+	h.enrichRednoteProfileWithAI(c.Context(), userID, profile)
 
 	return Success(c, profile)
+}
+
+type rednoteProfileAnalysis struct {
+	Positioning    string   `json:"positioning"`
+	Keywords       []string `json:"keywords"`
+	Style          string   `json:"style"`
+	ContentSummary string   `json:"content_summary"`
+}
+
+func (h *ChannelHandler) enrichRednoteProfileWithAI(ctx context.Context, userID string, profile *platform.PlatformProfile) {
+	llm := h.getLLMClient(ctx, userID)
+	if llm == nil || profile == nil {
+		return
+	}
+	prompt := buildRednoteProfileAnalysisPrompt(profile)
+	raw, err := llm.Complete(ctx, "", prompt)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("user_id", userID).Msg("rednote profile AI analysis failed")
+		return
+	}
+	analysis, err := parseRednoteProfileAnalysis(raw)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("user_id", userID).Msg("parse rednote profile AI analysis failed")
+		return
+	}
+	if analysis.Positioning != "" {
+		profile.Positioning = analysis.Positioning
+	}
+	if len(analysis.Keywords) > 0 {
+		keywords := make([]string, 0, len(analysis.Keywords))
+		for _, kw := range analysis.Keywords {
+			kw = strings.TrimSpace(kw)
+			if kw != "" {
+				keywords = append(keywords, kw)
+			}
+		}
+		profile.Keywords = strings.Join(keywords, ", ")
+	}
+	if analysis.Style != "" {
+		profile.Style = analysis.Style
+	}
+	if profile.RawData == nil {
+		profile.RawData = map[string]any{}
+	}
+	profile.RawData["analysis"] = analysis
+}
+
+func (h *ChannelHandler) getLLMClient(ctx context.Context, userID string) service.LLMClient {
+	if h.modelConfigSvc != nil {
+		if baseURL, key, modelName, ok := h.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID); ok {
+			h.logger.Info().
+				Str("user_id", userID).
+				Str("endpoint", baseURL).
+				Str("model", modelName).
+				Msg("using user custom model for rednote profile analysis")
+			return service.NewOpenAILLMClient(baseURL, key, modelName)
+		}
+	}
+	return h.llm
+}
+
+func buildRednoteProfileAnalysisPrompt(profile *platform.PlatformProfile) string {
+	var b strings.Builder
+	b.WriteString("你是小红书账号定位和视觉策略分析师。请基于账号主页信息和表现最好的可见作品，生成账号定位、关键词和视觉风格。\n\n")
+	b.WriteString("## 账号信息\n")
+	b.WriteString("- 昵称: " + truncateRunes(profile.Name, 80) + "\n")
+	b.WriteString("- 简介: " + truncateRunes(profile.Positioning, 240) + "\n\n")
+	b.WriteString("## 表现较好的可见作品\n")
+	for i, post := range topPostsFromProfile(profile) {
+		b.WriteString(fmt.Sprintf("%d. 标题: %s；点赞: %d；收藏: %d；评论: %d；分享: %d；总互动: %d\n",
+			i+1,
+			truncateRunes(post.Title, 120),
+			post.LikeCount,
+			post.CollectCount,
+			post.CommentCount,
+			post.ShareCount,
+			post.EngagementScore,
+		))
+	}
+	b.WriteString("\n## 输出要求\n")
+	b.WriteString("只输出 JSON，不要 markdown 代码块，不要解释。格式如下：\n")
+	b.WriteString(`{"positioning":"80字以内账号定位","keywords":["关键词1","关键词2","关键词3"],"style":"120字以内视觉风格描述","content_summary":"120字以内内容方向摘要"}`)
+	return b.String()
+}
+
+func topPostsFromProfile(profile *platform.PlatformProfile) []platform.RednotePost {
+	if profile == nil || profile.RawData == nil {
+		return nil
+	}
+	posts, ok := profile.RawData["top_posts"].([]platform.RednotePost)
+	if !ok {
+		return nil
+	}
+	if len(posts) > 5 {
+		return posts[:5]
+	}
+	return posts
+}
+
+func parseRednoteProfileAnalysis(raw string) (rednoteProfileAnalysis, error) {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
+	var analysis rednoteProfileAnalysis
+	if err := json.Unmarshal([]byte(raw), &analysis); err != nil {
+		return analysis, fmt.Errorf("unmarshal rednote profile analysis: %w", err)
+	}
+	analysis.Positioning = truncateRunes(strings.TrimSpace(analysis.Positioning), 120)
+	analysis.Style = truncateRunes(strings.TrimSpace(analysis.Style), 180)
+	analysis.ContentSummary = truncateRunes(strings.TrimSpace(analysis.ContentSummary), 180)
+	if len(analysis.Keywords) > 8 {
+		analysis.Keywords = analysis.Keywords[:8]
+	}
+	return analysis, nil
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 || utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max])
 }
 
 // getFieldValue returns the value of a field by key from the request.

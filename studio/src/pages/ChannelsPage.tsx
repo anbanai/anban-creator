@@ -135,14 +135,15 @@ export default function ChannelsPage() {
   }, [platformConfigs])
 
   const currentPlatformConfig = platformConfigMap[selectedPlatform]
+  const hasProfileField = currentPlatformConfig?.fields?.some((field) => field.key === 'profile_url') ?? false
 
-  function isValidProfileUrl(value: string) {
-    try {
-      const parsed = new URL(value)
-      return parsed.protocol === 'http:' || parsed.protocol === 'https:'
-    } catch {
-      return false
-    }
+  function extractSupportedProfileUrl(value: string) {
+    const match = value.match(/https?:\/\/((m\.|www\.)?xiaohongshu\.com|xhslink\.com)\/[^\s"'<>，。！？；、]+/i)
+    return match?.[0]?.replace(/[.,;:!?)]}）】。！？；，、]+$/g, '') || ''
+  }
+
+  function hasSupportedProfileUrl(value?: string) {
+    return !!value && !!extractSupportedProfileUrl(value)
   }
 
   const skipAutoFetchRef = useRef(false)
@@ -152,7 +153,7 @@ export default function ChannelsPage() {
       skipAutoFetchRef.current = false
       return
     }
-    if (!modalOpen || !profileUrl || !selectedPlatform || !isValidProfileUrl(profileUrl)) return
+    if (!modalOpen || !profileUrl || !selectedPlatform || !hasSupportedProfileUrl(profileUrl)) return
     const pc = platformConfigMap[selectedPlatform]
     if (!pc?.supports_auto_fetch) return
     const timer = setTimeout(() => {
@@ -163,8 +164,8 @@ export default function ChannelsPage() {
 
   async function handleFetchProfile(url: string, options?: { silent?: boolean }) {
     if (!url || !selectedPlatform) return
-    if (!isValidProfileUrl(url)) {
-      setProfileFetchHint('请先输入有效的主页链接')
+    if (!hasSupportedProfileUrl(url)) {
+      setProfileFetchHint('请先输入包含小红书链接的主页链接或分享文本')
       return
     }
     setFetchingProfile(true)
@@ -176,6 +177,8 @@ export default function ChannelsPage() {
       if (profile.name) form.setValue('name', profile.name)
       if (profile.avatar_url) form.setValue('avatar_url', profile.avatar_url)
       if (profile.positioning) form.setValue('positioning', profile.positioning)
+      if (profile.keywords) form.setValue('keywords', profile.keywords)
+      if (profile.style) form.setValue('style', profile.style)
       setProfileFetchHint('已更新账号信息')
       if (!options?.silent) {
         toast.success('已自动获取账号信息')
@@ -444,15 +447,15 @@ export default function ChannelsPage() {
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="profile_url" render={({ field }) => (
+              {hasProfileField && <FormField control={form.control} name="profile_url" render={({ field }) => (
                 <FormItem>
-                  <div className="flex items-center gap-3">
-                    <FormLabel className="shrink-0 w-20 text-right">账号主页</FormLabel>
+                  <div className="flex items-start gap-3">
+                    <FormLabel className="shrink-0 w-20 text-right pt-2">账号主页</FormLabel>
                     <FormControl>
                       <div className="flex gap-2 flex-1">
-                        <Input
+                        <Textarea
                           className="flex-1 min-w-0"
-                          placeholder="粘贴账号主页链接..."
+                          placeholder="粘贴小红书主页链接或分享文本..."
                           {...field}
                         />
                         {currentPlatformConfig?.supports_auto_fetch && (
@@ -461,7 +464,7 @@ export default function ChannelsPage() {
                             variant="secondary"
                             size="sm"
                             loading={fetchingProfile}
-                            disabled={!field.value || !isValidProfileUrl(field.value || '')}
+                            disabled={!field.value || !hasSupportedProfileUrl(field.value || '')}
                             onClick={() => void handleFetchProfile(field.value || '')}
                           >
                             获取
@@ -472,12 +475,12 @@ export default function ChannelsPage() {
                   </div>
                   {currentPlatformConfig?.supports_auto_fetch && (
                     <FormDescription>
-                      {profileFetchHint || '粘贴有效链接后会自动尝试获取账号信息，也可以手动点击获取。'}
+                      {profileFetchHint || '粘贴小红书分享文本后会自动提取链接、分析账号和代表作品。'}
                     </FormDescription>
                   )}
                   <FormMessage />
                 </FormItem>
-              )} />
+              )} />}
 
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">

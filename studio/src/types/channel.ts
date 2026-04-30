@@ -87,5 +87,7 @@ export interface PlatformProfile {
   name: string
   avatar_url: string
   positioning: string
+  keywords?: string
+  style?: string
   raw_data: Record<string, unknown>
 }

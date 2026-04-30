@@ -52,7 +52,7 @@ func TestRednoteFetchProfileResolvesShortLink(t *testing.T) {
 		},
 	}
 
-	profile, err := provider.FetchProfile(context.Background(), "https://xhslink.com/m/share")
+	profile, err := provider.FetchProfile(context.Background(), "快来看这个账号 https://xhslink.com/m/share 真的很会写")
 	if err != nil {
 		t.Fatalf("FetchProfile() error = %v", err)
 	}
@@ -67,6 +67,16 @@ func TestRednoteFetchProfileResolvesShortLink(t *testing.T) {
 	}
 	if profile.Positioning != "专注 AI 写作" {
 		t.Fatalf("profile.Positioning = %q, want 专注 AI 写作", profile.Positioning)
+	}
+}
+
+func TestRednoteFetchProfileRejectsTextWithoutSupportedURL(t *testing.T) {
+	_, err := NewRednoteProvider().FetchProfile(context.Background(), "这里只是一段没有链接的分享文案")
+	if err == nil {
+		t.Fatal("FetchProfile() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "supported xiaohongshu URL") {
+		t.Fatalf("FetchProfile() error = %q, want supported URL hint", err.Error())
 	}
 }
 
@@ -96,6 +106,91 @@ func TestRednoteParseProfileFallbacks(t *testing.T) {
 func TestRednoteURLPatternAllowsMobileProfile(t *testing.T) {
 	if !rednoteURLPattern.MatchString("https://m.xiaohongshu.com/user/profile/abc") {
 		t.Fatal("rednoteURLPattern should allow m.xiaohongshu.com profile URLs")
+	}
+}
+
+func TestExtractRednoteURLFromShareText(t *testing.T) {
+	got, err := extractRednoteURLFromText("12 分享给你一个账号 https://xhslink.com/a/b?token=1，复制打开看看")
+	if err != nil {
+		t.Fatalf("extractRednoteURLFromText() error = %v", err)
+	}
+	if got != "https://xhslink.com/a/b?token=1" {
+		t.Fatalf("extractRednoteURLFromText() = %q", got)
+	}
+}
+
+func TestExtractRednoteURLFromTextStartingWithURL(t *testing.T) {
+	got, err := extractRednoteURLFromText("https://www.xiaohongshu.com/user/profile/abc?xsec_token=test 这个账号很适合参考")
+	if err != nil {
+		t.Fatalf("extractRednoteURLFromText() error = %v", err)
+	}
+	if got != "https://www.xiaohongshu.com/user/profile/abc?xsec_token=test" {
+		t.Fatalf("extractRednoteURLFromText() = %q", got)
+	}
+}
+
+func TestParseRednoteCount(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want int
+	}{
+		{name: "plain", in: "123", want: 123},
+		{name: "comma", in: "1,234", want: 1234},
+		{name: "wan", in: "1.2万", want: 12000},
+		{name: "qian", in: "3千", want: 3000},
+		{name: "noise", in: "点赞 8.5万", want: 85000},
+		{name: "empty", in: "", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseRednoteCount(tt.in); got != tt.want {
+				t.Fatalf("parseRednoteCount(%q) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectTopRednotePostsRanksByEngagement(t *testing.T) {
+	posts := []RednotePost{
+		{Title: "first", LikeCount: 10},
+		{Title: "best", LikeCount: 20, CollectCount: 3, CommentCount: 2},
+		{Title: "middle", LikeCount: 12},
+	}
+
+	got := selectTopRednotePosts(posts, 2)
+	if len(got) != 2 {
+		t.Fatalf("len(top posts) = %d, want 2", len(got))
+	}
+	if got[0].Title != "best" || got[1].Title != "middle" {
+		t.Fatalf("top posts order = [%s, %s], want [best, middle]", got[0].Title, got[1].Title)
+	}
+	if got[0].EngagementScore != 25 {
+		t.Fatalf("EngagementScore = %d, want 25", got[0].EngagementScore)
+	}
+}
+
+func TestRednoteParseProfileIncludesRankedTopPosts(t *testing.T) {
+	html := `<html><head><title>小红书 - 用户主页</title></head><body>
+		<script>window.__INITIAL_STATE__={"nickname":"测试账号","desc":"专注 AI 写作"}</script>
+		<section>
+			<a href="/explore/one"><span>普通标题</span><span>点赞 10</span></a>
+			<a href="/explore/two"><span>爆款标题</span><span>点赞 1.2万</span><span>评论 300</span></a>
+			<a href="/explore/three"><span>中等标题</span><span>收藏 800</span></a>
+		</section>
+	</body></html>`
+
+	profile := NewRednoteProvider().parseProfile(html)
+	rawPosts, ok := profile.RawData["top_posts"].([]RednotePost)
+	if !ok {
+		t.Fatalf("RawData[top_posts] type = %T, want []RednotePost", profile.RawData["top_posts"])
+	}
+	if len(rawPosts) < 2 {
+		t.Fatalf("len(top_posts) = %d, want at least 2", len(rawPosts))
+	}
+	if rawPosts[0].Title != "爆款标题" {
+		t.Fatalf("top post title = %q, want 爆款标题", rawPosts[0].Title)
 	}
 }
 
