@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -180,7 +181,7 @@ type TopicSuggestion struct {
 	Angle      string `json:"angle"`
 	ViralScore int    `json:"viral_score"`
 	Reason     string `json:"reason"`
-	Keywords   string `json:"keywords"`
+	Keywords   []string `json:"keywords"`
 	Template   string `json:"template"`
 }
 
@@ -573,11 +574,22 @@ func (s *WritingService) buildTopicsPrompt(positioning string, keywords []string
 			"## 账号画像\n"+
 			"- 定位: %s\n"+
 			"- 关键词: %s\n\n"+
+			"## 输出格式\n"+
+			"严格输出 JSON 数组，不要包含 markdown 代码块标记，不要有尾随逗号。格式如下：\n"+
+			"[\n"+
+			"  {\n"+
+			"    \"topic\": \"话题标题\",\n"+
+			"    \"angle\": \"切入角度\",\n"+
+			"    \"viral_score\": 85,\n"+
+			"    \"reason\": \"推荐理由\",\n"+
+			"    \"keywords\": [\"关键词1\", \"关键词2\"],\n"+
+			"    \"template\": \"authoritative\"\n"+
+			"  }\n"+
+			"]\n\n"+
 			"## 要求\n"+
-			"- 每个话题包含: topic, angle, viral_score(0-100), reason, keywords, template\n"+
-			"- 输出 JSON 数组格式，不要包含 markdown 代码块标记\n"+
+			"- viral_score 范围 0-100，基于话题热度和目标受众匹配度评估\n"+
 			"- 话题要有传播潜力，角度新颖\n"+
-			"- viral_score 基于话题热度和目标受众匹配度评估",
+			"- keywords 为字符串数组，包含 3-5 个相关关键词",
 		count, positioning, keywordStr,
 	)
 }
@@ -615,6 +627,10 @@ func (s *WritingService) buildSEOPrompt(title string, keywords []string, content
 // Private response parsers
 // ---------------------------------------------------------------------------
 
+// trailingCommaRe matches trailing commas before closing brackets/braces —
+// a common JSON syntax error in LLM output.
+var trailingCommaRe = regexp.MustCompile(`,\s*([\]})])`)
+
 // parseTopicsResponse parses the LLM response as a JSON array of topic objects.
 func (s *WritingService) parseTopicsResponse(raw string) ([]TopicSuggestion, error) {
 	// Strip markdown code fences if present.
@@ -623,6 +639,9 @@ func (s *WritingService) parseTopicsResponse(raw string) ([]TopicSuggestion, err
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 	raw = strings.TrimSpace(raw)
+
+	// Repair trailing commas (common LLM JSON issue).
+	raw = trailingCommaRe.ReplaceAllString(raw, "$1")
 
 	var topics []TopicSuggestion
 	if err := json.Unmarshal([]byte(raw), &topics); err != nil {
