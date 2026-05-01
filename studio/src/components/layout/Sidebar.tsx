@@ -10,6 +10,7 @@ import {
   Settings,
   Sun,
   Moon,
+  Monitor,
   Coins,
   Menu,
   X,
@@ -21,6 +22,13 @@ import {
   BarChart3,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const workflowItems = [
   { to: "/", label: "仪表盘", icon: LayoutDashboard, end: true },
@@ -40,8 +48,20 @@ const platformItems = [
   { to: "/connect/openclaw", label: "OpenClaw", icon: Puzzle },
 ];
 
+const themeOptions = [
+  { value: "light", label: "亮色", icon: Sun },
+  { value: "dark", label: "暗色", icon: Moon },
+  { value: "system", label: "系统", icon: Monitor },
+] as const;
+
+type ThemePreference = (typeof themeOptions)[number]["value"];
+
+function isThemePreference(value: string): value is ThemePreference {
+  return themeOptions.some((option) => option.value === value);
+}
+
 function ThemeToggle() {
-  const { setTheme, resolvedTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
@@ -50,16 +70,42 @@ function ThemeToggle() {
     return <div className="h-8 w-8" />;
   }
 
-  const isDark = resolvedTheme === "dark";
+  const currentTheme = isThemePreference(theme ?? "") ? theme : "system";
+  const currentOption = themeOptions.find((option) => option.value === currentTheme) ?? themeOptions[2];
+  const CurrentIcon = currentOption.icon;
 
   return (
-    <button
-      onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-      title={isDark ? "切换到亮色模式" : "切换到暗色模式"}
-    >
-      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-    </button>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            title={`主题模式：${currentOption.label}`}
+            aria-label={`主题模式：${currentOption.label}`}
+          />
+        }
+      >
+        <CurrentIcon className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top" className="w-32">
+        <DropdownMenuRadioGroup
+          value={currentTheme}
+          onValueChange={(value) => {
+            if (isThemePreference(value)) {
+              setTheme(value);
+            }
+          }}
+        >
+          {themeOptions.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value}>
+              <option.icon className="h-4 w-4" />
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
