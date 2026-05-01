@@ -64,26 +64,29 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		planSvc := service.NewPlanService(repo, &logger)
 		agentExecutor := agent.NewLocalExecutor(&logger, nil, nil, "", false, "", nil, nil, "", "")
 		taskSvc := service.NewTaskService(repo, agentExecutor, nil, nil, nil, &logger, "", nil, "", nil, nil)
+		rednoteTrackingSvc := service.NewRednoteTrackingService(repo, nil, nil, nil, &logger)
 
 		wsHub := handler.NewWebSocketHub(jwtSvc)
 		authHandler := handler.NewAuthHandler(jwtSvc, nil, repo, nil, &logger, wsHub, false, 3, nil, nil)
 		planHandler := handler.NewPlanHandler(planSvc, &logger)
 		taskHandler := handler.NewTaskHandler(taskSvc, &logger)
+		rednoteAnalyticsHandler := handler.NewRednoteAnalyticsHandler(rednoteTrackingSvc, &logger)
 		timelineHandler := handler.NewTimelineHandler(repo, &logger)
 
 		svcs = &Services{
-			Config:          cfg,
-			Logger:          &logger,
-			DB:              db,
-			Repo:            repo,
-			JWTService:      jwtSvc,
-			WSHub:           wsHub,
-			AuthHandler:     authHandler,
-			PlanService:     planSvc,
-			TaskService:     taskSvc,
-			PlanHandler:     planHandler,
-			TaskHandler:     taskHandler,
-			TimelineHandler: timelineHandler,
+			Config:                  cfg,
+			Logger:                  &logger,
+			DB:                      db,
+			Repo:                    repo,
+			JWTService:              jwtSvc,
+			WSHub:                   wsHub,
+			AuthHandler:             authHandler,
+			PlanService:             planSvc,
+			TaskService:             taskSvc,
+			PlanHandler:             planHandler,
+			TaskHandler:             taskHandler,
+			RednoteAnalyticsHandler: rednoteAnalyticsHandler,
+			TimelineHandler:         timelineHandler,
 		}
 	} else {
 		svcs = &Services{
@@ -142,6 +145,7 @@ func TestProtectedEndpointsRequireAuth(t *testing.T) {
 		{"GET", "/api/v1/auth/me"},
 		{"GET", "/api/v1/plans"},
 		{"POST", "/api/v1/tasks"},
+		{"GET", "/api/v1/tasks/00000000-0000-0000-0000-000000000001/rednote-analytics"},
 		{"GET", "/api/v1/timeline?from=2025-01-01&to=2025-12-31"},
 		{"GET", "/api/v1/credits/balance"},
 		{"GET", "/api/v1/credits/sign-in/status"},

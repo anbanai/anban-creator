@@ -268,6 +268,7 @@ func main() {
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
 	var taskHandler *handler.TaskHandler
+	var rednoteAnalyticsHandler *handler.RednoteAnalyticsHandler
 	var agentHandler *handler.AgentHandler
 	var channelHandler *handler.ChannelHandler
 	var timelineHandler *handler.TimelineHandler
@@ -281,6 +282,7 @@ func main() {
 		planHandler = handler.NewPlanHandler(planSvc, log)
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
+		rednoteAnalyticsHandler = handler.NewRednoteAnalyticsHandler(rednoteTrackingSvc, log)
 		channelHandler = handler.NewChannelHandler(channelSvc, log)
 		if modelConfigSvc != nil {
 			channelHandler.SetModelConfigService(modelConfigSvc)
@@ -379,31 +381,32 @@ func main() {
 
 	// 16. Build Services struct.
 	svcs := &router.Services{
-		Config:             cfg,
-		Logger:             log,
-		DB:                 mysqlDB,
-		Redis:              rdb,
-		Repo:               repo,
-		JWTService:         jwtSvc,
-		WechatSvc:          wechatSvc,
-		WSHub:              wsHub,
-		AuthHandler:        authHandler,
-		Executor:           agentExecutor,
-		PlanService:        planSvc,
-		TaskService:        taskSvc,
-		CreditService:      creditSvc,
-		ChannelHandler:     channelHandler,
-		PlanHandler:        planHandler,
-		TaskHandler:        taskHandler,
-		AgentHandler:       agentHandler,
-		CreditHandler:      creditHandler,
-		TimelineHandler:    timelineHandler,
-		APIKeyHandler:      apiKeyHandler,
-		FileHandler:        fileHandler,
-		FeedbackHandler:    feedbackHandler,
-		ModelConfigHandler: modelConfigHandler,
-		MCPHandler:         mcpHandler,
-		StorageProvider:    store,
+		Config:                  cfg,
+		Logger:                  log,
+		DB:                      mysqlDB,
+		Redis:                   rdb,
+		Repo:                    repo,
+		JWTService:              jwtSvc,
+		WechatSvc:               wechatSvc,
+		WSHub:                   wsHub,
+		AuthHandler:             authHandler,
+		Executor:                agentExecutor,
+		PlanService:             planSvc,
+		TaskService:             taskSvc,
+		CreditService:           creditSvc,
+		ChannelHandler:          channelHandler,
+		PlanHandler:             planHandler,
+		TaskHandler:             taskHandler,
+		RednoteAnalyticsHandler: rednoteAnalyticsHandler,
+		AgentHandler:            agentHandler,
+		CreditHandler:           creditHandler,
+		TimelineHandler:         timelineHandler,
+		APIKeyHandler:           apiKeyHandler,
+		FileHandler:             fileHandler,
+		FeedbackHandler:         feedbackHandler,
+		ModelConfigHandler:      modelConfigHandler,
+		MCPHandler:              mcpHandler,
+		StorageProvider:         store,
 	}
 
 	// 17. Create router.
