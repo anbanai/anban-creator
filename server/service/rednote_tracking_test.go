@@ -342,6 +342,67 @@ func TestRednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *te
 	}
 }
 
+func TestRednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLifecycle(t *testing.T) {
+	_, repo, _ := setupRednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+	platformFake := &fakeRednotePlatform{metrics: platform.RednotePostMetrics{LikeCount: 99}}
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	enq := &fakeTrackingEnqueuer{}
+	svc := NewRednoteTrackingService(repo, platformFake, &fakeRednoteLLM{}, enq, &logger)
+	now := time.Now()
+	yesterday := now.Add(-24 * time.Hour)
+	tracking := &model.RednotePostTracking{
+		ID:                uuid.New().String(),
+		TaskID:            taskID,
+		UserID:            userID,
+		ChannelID:         channelID,
+		Status:            model.RednoteTrackingStatusTracking,
+		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
+		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
+		PublishedMarkedAt: now.Add(-48 * time.Hour),
+		TrackingStartedAt: &yesterday,
+		LastRunAt:         &yesterday,
+		RunCount:          0,
+	}
+	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+		t.Fatalf("create tracking: %v", err)
+	}
+	if err := repo.RednoteMetricSnapshots().Create(context.Background(), &model.RednoteMetricSnapshot{
+		ID:           uuid.New().String(),
+		TrackingID:   tracking.ID,
+		TaskID:       taskID,
+		CapturedAt:   now.Add(-30 * time.Minute),
+		CapturedDate: model.RednoteCapturedDate(now),
+		LikeCount:    10,
+	}); err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+
+	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err != nil {
+		t.Fatalf("CaptureMetrics: %v", err)
+	}
+
+	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if platformFake.metricsCalls != 0 {
+		t.Fatalf("metricsCalls = %d, want 0", platformFake.metricsCalls)
+	}
+	if updated.RunCount != 1 {
+		t.Fatalf("RunCount = %d, want 1", updated.RunCount)
+	}
+	if updated.LastRunAt == nil || model.RednoteCapturedDate(*updated.LastRunAt) != model.RednoteCapturedDate(now) {
+		t.Fatalf("LastRunAt = %v, want today", updated.LastRunAt)
+	}
+	if updated.NextRunAt == nil {
+		t.Fatal("NextRunAt should be set")
+	}
+	if len(enq.delayed) != 1 || enq.delayed[0] != RednoteCaptureMetricsTaskType {
+		t.Fatalf("delayed jobs = %+v", enq.delayed)
+	}
+}
+
 func TestRednoteTrackingService_ResetHidesOldSnapshotsFromAnalytics(t *testing.T) {
 	svc, repo, _ := setupRednoteTrackingServiceTest(t)
 	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)

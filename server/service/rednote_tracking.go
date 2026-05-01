@@ -285,8 +285,11 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("tracking has no note URL"))
 	}
 	now := time.Now()
-	if s.hasSnapshotForDate(ctx, tracking, model.RednoteCapturedDate(now)) {
-		return nil
+	if snapshot, ok := s.findSnapshotForDate(ctx, tracking, model.RednoteCapturedDate(now)); ok {
+		if tracking.LastRunAt != nil && model.RednoteCapturedDate(*tracking.LastRunAt) == snapshot.CapturedDate {
+			return nil
+		}
+		return s.finishCaptureLifecycle(ctx, tracking, snapshot, now)
 	}
 	if s.platform == nil {
 		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("rednote platform unavailable"))
@@ -313,6 +316,10 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 		return fmt.Errorf("upsert snapshot: %w", err)
 	}
 
+	return s.finishCaptureLifecycle(ctx, tracking, snapshot, now)
+}
+
+func (s *RednoteTrackingService) finishCaptureLifecycle(ctx context.Context, tracking *model.RednotePostTracking, snapshot *model.RednoteMetricSnapshot, now time.Time) error {
 	tracking.RunCount++
 	tracking.FailureCount = 0
 	tracking.LastRunAt = &now
@@ -391,20 +398,20 @@ func filterLifecycleSnapshots(tracking *model.RednotePostTracking, snapshots []*
 	return filtered
 }
 
-func (s *RednoteTrackingService) hasSnapshotForDate(ctx context.Context, tracking *model.RednotePostTracking, capturedDate string) bool {
+func (s *RednoteTrackingService) findSnapshotForDate(ctx context.Context, tracking *model.RednotePostTracking, capturedDate string) (*model.RednoteMetricSnapshot, bool) {
 	snapshots, err := s.repo.RednoteMetricSnapshots().FindByTaskID(ctx, tracking.TaskID)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn().Err(err).Str("tracking_id", tracking.ID).Msg("failed to check rednote same-day snapshot")
 		}
-		return false
+		return nil, false
 	}
 	for _, snapshot := range filterLifecycleSnapshots(tracking, snapshots) {
 		if snapshot.CapturedDate == capturedDate {
-			return true
+			return snapshot, true
 		}
 	}
-	return false
+	return nil, false
 }
 
 func (s *RednoteTrackingService) findPreviousLifecycleSnapshot(ctx context.Context, tracking *model.RednotePostTracking, capturedAt time.Time) (*model.RednoteMetricSnapshot, error) {
