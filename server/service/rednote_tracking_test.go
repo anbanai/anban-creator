@@ -141,6 +141,40 @@ func TestRednoteTrackingService_EnsureTrackingForPublishedTask(t *testing.T) {
 	}
 }
 
+func TestRednoteTrackingService_EnsureTrackingForPublishedTaskMissingProfileCreatesFailedTracking(t *testing.T) {
+	svc, repo, enq := setupRednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+	channel, err := repo.Channels().FindByID(context.Background(), channelID)
+	if err != nil {
+		t.Fatalf("FindByID channel: %v", err)
+	}
+	channel.ProfileURL = ""
+	if err := repo.Channels().Update(context.Background(), channel); err != nil {
+		t.Fatalf("update channel: %v", err)
+	}
+
+	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err != nil {
+		t.Fatalf("EnsureTrackingForPublishedTask: %v", err)
+	}
+
+	tracking, err := repo.RednoteTrackings().FindByTaskID(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("FindByTaskID: %v", err)
+	}
+	if tracking.Status != model.RednoteTrackingStatusFailed {
+		t.Fatalf("Status = %q, want failed", tracking.Status)
+	}
+	if tracking.LastError == "" {
+		t.Fatal("LastError should explain missing profile URL")
+	}
+	if tracking.NextRunAt != nil {
+		t.Fatalf("NextRunAt = %v, want nil", tracking.NextRunAt)
+	}
+	if len(enq.delayed) != 0 {
+		t.Fatalf("delayed jobs = %+v, want none", enq.delayed)
+	}
+}
+
 func TestRednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing.T) {
 	_, repo, _ := setupRednoteTrackingServiceTest(t)
 	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)

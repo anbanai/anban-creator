@@ -119,7 +119,7 @@ func (s *RednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Cont
 	}
 	profileURL := strings.TrimSpace(channel.ProfileURL)
 	if profileURL == "" {
-		return fmt.Errorf("rednote channel profile URL is required")
+		return s.ensureFailedTracking(ctx, task, userID, "rednote channel profile URL is required")
 	}
 
 	now := time.Now()
@@ -169,6 +169,57 @@ func (s *RednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Cont
 		return fmt.Errorf("create tracking: %w", err)
 	}
 	return s.enqueueDiscover(tracking.ID, 24*time.Hour)
+}
+
+func (s *RednoteTrackingService) ensureFailedTracking(ctx context.Context, task *model.Task, userID, lastError string) error {
+	now := time.Now()
+	existing, err := s.repo.RednoteTrackings().FindByTaskID(ctx, task.ID)
+	if err == nil {
+		existing.UserID = userID
+		existing.ChannelID = task.ChannelID
+		existing.Status = model.RednoteTrackingStatusFailed
+		existing.ProfileURL = ""
+		existing.PublishedMarkedAt = now
+		existing.NextRunAt = nil
+		existing.LastRunAt = nil
+		existing.DiscoveredAt = nil
+		existing.TrackingStartedAt = nil
+		existing.TrackingStoppedAt = &now
+		existing.NoteID = ""
+		existing.NoteURL = ""
+		existing.NoteTitle = ""
+		existing.NoteCoverURL = ""
+		existing.RunCount = 0
+		existing.ConsecutiveLowGrowthCount = 0
+		existing.FailureCount = 0
+		existing.DiscoveryAttemptCount = 0
+		existing.MatchConfidence = 0
+		existing.MatchReason = ""
+		existing.StopReason = model.RednoteStopReasonDiscoveryTimeout
+		existing.LastError = lastError
+		if updateErr := s.repo.RednoteTrackings().Update(ctx, existing); updateErr != nil {
+			return fmt.Errorf("update failed tracking: %w", updateErr)
+		}
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("find tracking: %w", err)
+	}
+	tracking := &model.RednotePostTracking{
+		ID:                uuid.New().String(),
+		TaskID:            task.ID,
+		UserID:            userID,
+		ChannelID:         task.ChannelID,
+		Status:            model.RednoteTrackingStatusFailed,
+		PublishedMarkedAt: now,
+		TrackingStoppedAt: &now,
+		StopReason:        model.RednoteStopReasonDiscoveryTimeout,
+		LastError:         lastError,
+	}
+	if err := s.repo.RednoteTrackings().Create(ctx, tracking); err != nil {
+		return fmt.Errorf("create failed tracking: %w", err)
+	}
+	return nil
 }
 
 func (s *RednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trackingID string) error {
