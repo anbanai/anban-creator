@@ -13,6 +13,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/wechat"
 )
 
 // OpenAIProvider OpenAI 图片生成服务提供者
@@ -126,13 +127,11 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 
 	// 调用 SDK 生成图片
 	params := openai.ImageGenerateParams{
-		Prompt: prompt,
-		Model:  openai.ImageModel(p.model),
-		N:      param.NewOpt(int64(1)),
-		Size:   openai.ImageGenerateParamsSize(p.size),
-	}
-	if !isGPTImageModel(p.model) {
-		params.ResponseFormat = openai.ImageGenerateParamsResponseFormatB64JSON
+		Prompt:         prompt,
+		Model:          openai.ImageModel(p.model),
+		N:              param.NewOpt(int64(1)),
+		Size:           openai.ImageGenerateParamsSize(p.size),
+		ResponseFormat: openai.ImageGenerateParamsResponseFormatB64JSON,
 	}
 	resp, err := p.client.Images.Generate(ctx, params)
 
@@ -168,14 +167,12 @@ func (p *OpenAIProvider) generateWithRef(ctx context.Context, prompt, refImagePa
 	defer f.Close()
 
 	params := openai.ImageEditParams{
-		Image:  openai.ImageEditParamsImageUnion{OfFile: f},
-		Prompt: prompt,
-		Model:  openai.ImageModel(p.model),
-		Size:   openai.ImageEditParamsSize(p.size),
-		N:      param.NewOpt(int64(1)),
-	}
-	if !isGPTImageModel(p.model) {
-		params.ResponseFormat = openai.ImageEditParamsResponseFormatB64JSON
+		Image:          openai.ImageEditParamsImageUnion{OfFile: f},
+		Prompt:         prompt,
+		Model:          openai.ImageModel(p.model),
+		Size:           openai.ImageEditParamsSize(p.size),
+		N:              param.NewOpt(int64(1)),
+		ResponseFormat: openai.ImageEditParamsResponseFormatB64JSON,
 	}
 	resp, err := p.client.Images.Edit(ctx, params)
 	if err != nil {
@@ -202,6 +199,8 @@ func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, e
 	}
 
 	if img.B64JSON != "" {
+		result.ResponseType = "b64_json"
+		result.ResponsePreview = previewBase64(img.B64JSON)
 		filePath, saveErr := p.saveBase64Image(img.B64JSON)
 		if saveErr != nil {
 			return nil, saveErr
@@ -211,14 +210,23 @@ func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, e
 	}
 
 	if img.URL != "" {
-		return nil, &GenerateError{
-			Provider: p.Name(),
-			Code:     "url_response_unsupported",
-			Message:  "OpenAI 图片接口返回了 URL，但当前配置要求 base64 图片数据",
-			HintMsg:  "请确认 Endpoint 支持 response_format=b64_json；国内环境不使用 OpenAI 临时图片 URL",
+		result.ResponseType = "url"
+		result.ResponsePreview = img.URL
+		filePath, err := wechat.DownloadFile(img.URL)
+		if err != nil {
+			return nil, &GenerateError{
+				Provider: p.Name(),
+				Code:     "url_download_error",
+				Message:  fmt.Sprintf("OpenAI 图片接口返回了 URL，但下载失败: %s", img.URL),
+				HintMsg:  fmt.Sprintf("RevisedPrompt=%q", img.RevisedPrompt),
+				Original: err,
+			}
 		}
+		result.URL = filePath
+		return result, nil
 	}
 
+	result.ResponseType = "empty"
 	return nil, &GenerateError{
 		Provider: p.Name(),
 		Code:     "no_image",
@@ -227,14 +235,25 @@ func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, e
 	}
 }
 
+func previewBase64(value string) string {
+	const maxPreviewLen = 120
+	value = strings.TrimSpace(value)
+	if len(value) <= maxPreviewLen {
+		return value
+	}
+	return fmt.Sprintf("%s... (truncated, total %d chars)", value[:maxPreviewLen], len(value))
+}
+
 // saveBase64Image 将 base64 编码的图片数据保存到临时文件，返回文件路径
 func (p *OpenAIProvider) saveBase64Image(b64data string) (string, error) {
-	imageData, err := base64.StdEncoding.DecodeString(b64data)
+	preview := previewBase64(b64data)
+	imageData, err := base64.StdEncoding.DecodeString(normalizeBase64ImageData(b64data))
 	if err != nil {
 		return "", &GenerateError{
 			Provider: p.Name(),
 			Code:     "decode_error",
 			Message:  "图片数据解码失败",
+			HintMsg:  fmt.Sprintf("b64_json 预览: %s", preview),
 			Original: err,
 		}
 	}
@@ -249,6 +268,17 @@ func (p *OpenAIProvider) saveBase64Image(b64data string) (string, error) {
 		}
 	}
 	return tmpPath, nil
+}
+
+func normalizeBase64ImageData(value string) string {
+	value = strings.TrimSpace(value)
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "data:") {
+		if comma := strings.Index(value, ","); comma >= 0 {
+			return strings.TrimSpace(value[comma+1:])
+		}
+	}
+	return value
 }
 
 // wrapSDKError 将 SDK 错误包装为 GenerateError

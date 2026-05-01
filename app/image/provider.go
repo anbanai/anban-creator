@@ -57,6 +57,8 @@ type GenerateResult struct {
 	RevisedPrompt string // 优化后的提示词（某些提供者会返回）
 	Model         string // 实际使用的模型
 	Size          string // 实际尺寸
+	ResponseType  string // 返回类型：b64_json / url / empty
+	ResponsePreview string // 原始返回预览：URL 原样输出，base64 截断输出
 }
 
 // GenerateError 图片生成错误
