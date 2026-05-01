@@ -1,0 +1,497 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"gorm.io/gorm"
+
+	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/platform"
+	"github.com/royalrick/anbanwriter/server/repository"
+)
+
+const (
+	RednoteDiscoverTaskType       = "rednote:discover"
+	RednoteCaptureMetricsTaskType = "rednote:capture_metrics"
+)
+
+type RednotePublicPlatform interface {
+	FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.RednotePost, error)
+	FetchPostMetrics(ctx context.Context, noteURL string) (*platform.RednotePostMetrics, error)
+}
+
+type RednoteTrackingService struct {
+	repo     repository.Repository
+	platform RednotePublicPlatform
+	llm      LLMClient
+	enqueuer TaskEnqueuer
+	logger   *zerolog.Logger
+}
+
+func NewRednoteTrackingService(repo repository.Repository, platform RednotePublicPlatform, llm LLMClient, enqueuer TaskEnqueuer, logger *zerolog.Logger) *RednoteTrackingService {
+	return &RednoteTrackingService{
+		repo:     repo,
+		platform: platform,
+		llm:      llm,
+		enqueuer: enqueuer,
+		logger:   logger,
+	}
+}
+
+type RednoteAnalytics struct {
+	Tracking *RednoteTrackingInfo       `json:"tracking,omitempty"`
+	Latest   *RednoteMetricInfo         `json:"latest,omitempty"`
+	Deltas   *RednoteMetricDelta        `json:"deltas,omitempty"`
+	Series   []*RednoteMetricSeriesItem `json:"series"`
+}
+
+type RednoteTrackingInfo struct {
+	Status       string     `json:"status"`
+	NoteURL      string     `json:"note_url,omitempty"`
+	NoteTitle    string     `json:"note_title,omitempty"`
+	NoteCoverURL string     `json:"note_cover_url,omitempty"`
+	DiscoveredAt *time.Time `json:"discovered_at,omitempty"`
+	LastRunAt    *time.Time `json:"last_run_at,omitempty"`
+	NextRunAt    *time.Time `json:"next_run_at,omitempty"`
+	RunCount     int        `json:"run_count"`
+	StopReason   string     `json:"stop_reason,omitempty"`
+	LastError    string     `json:"last_error,omitempty"`
+}
+
+type RednoteMetricInfo struct {
+	LikeCount    int        `json:"like_count"`
+	CollectCount int        `json:"collect_count"`
+	CommentCount int        `json:"comment_count"`
+	ShareCount   int        `json:"share_count"`
+	ViewCount    *int       `json:"view_count"`
+	CapturedAt   *time.Time `json:"captured_at,omitempty"`
+}
+
+type RednoteMetricDelta struct {
+	LikeCount    int `json:"like_count"`
+	CollectCount int `json:"collect_count"`
+	CommentCount int `json:"comment_count"`
+	ShareCount   int `json:"share_count"`
+}
+
+type RednoteMetricSeriesItem struct {
+	CapturedAt   time.Time `json:"captured_at"`
+	LikeCount    int       `json:"like_count"`
+	CollectCount int       `json:"collect_count"`
+	CommentCount int       `json:"comment_count"`
+	ShareCount   int       `json:"share_count"`
+	ViewCount    *int      `json:"view_count"`
+}
+
+type rednoteAIMatch struct {
+	Matched    bool    `json:"matched"`
+	NoteURL    string  `json:"note_url"`
+	NoteID     string  `json:"note_id"`
+	Confidence float64 `json:"confidence"`
+	Reason     string  `json:"reason"`
+}
+
+func (s *RednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("find task: %w", err)
+	}
+	if task.UserID != userID {
+		return fmt.Errorf("task does not belong to user")
+	}
+	if task.Type != model.PlatformRednote {
+		return nil
+	}
+
+	channel, err := s.repo.Channels().FindByID(ctx, task.ChannelID)
+	if err != nil {
+		return fmt.Errorf("find channel: %w", err)
+	}
+	profileURL := strings.TrimSpace(channel.ProfileURL)
+	if profileURL == "" {
+		return fmt.Errorf("rednote channel profile URL is required")
+	}
+
+	now := time.Now()
+	nextRun := now.Add(24 * time.Hour)
+	existing, err := s.repo.RednoteTrackings().FindByTaskID(ctx, taskID)
+	if err == nil {
+		existing.Status = model.RednoteTrackingStatusWaitingDiscovery
+		existing.ProfileURL = profileURL
+		existing.PublishedMarkedAt = now
+		existing.NextRunAt = &nextRun
+		existing.LastRunAt = nil
+		existing.DiscoveredAt = nil
+		existing.TrackingStartedAt = nil
+		existing.TrackingStoppedAt = nil
+		existing.NoteID = ""
+		existing.NoteURL = ""
+		existing.NoteTitle = ""
+		existing.NoteCoverURL = ""
+		existing.RunCount = 0
+		existing.ConsecutiveLowGrowthCount = 0
+		existing.FailureCount = 0
+		existing.DiscoveryAttemptCount = 0
+		existing.MatchConfidence = 0
+		existing.MatchReason = ""
+		existing.StopReason = ""
+		existing.LastError = ""
+		if updateErr := s.repo.RednoteTrackings().Update(ctx, existing); updateErr != nil {
+			return fmt.Errorf("update tracking: %w", updateErr)
+		}
+		return s.enqueueDiscover(existing.ID, 24*time.Hour)
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("find tracking: %w", err)
+	}
+
+	tracking := &model.RednotePostTracking{
+		ID:                uuid.New().String(),
+		TaskID:            taskID,
+		UserID:            userID,
+		ChannelID:         task.ChannelID,
+		Status:            model.RednoteTrackingStatusWaitingDiscovery,
+		ProfileURL:        profileURL,
+		PublishedMarkedAt: now,
+		NextRunAt:         &nextRun,
+	}
+	if err := s.repo.RednoteTrackings().Create(ctx, tracking); err != nil {
+		return fmt.Errorf("create tracking: %w", err)
+	}
+	return s.enqueueDiscover(tracking.ID, 24*time.Hour)
+}
+
+func (s *RednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trackingID string) error {
+	tracking, err := s.repo.RednoteTrackings().FindByID(ctx, trackingID)
+	if err != nil {
+		return fmt.Errorf("find tracking: %w", err)
+	}
+	tracking.DiscoveryAttemptCount++
+
+	if s.platform == nil {
+		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("rednote platform unavailable"))
+	}
+	posts, err := s.platform.FetchProfilePosts(ctx, tracking.ProfileURL)
+	if err != nil {
+		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("fetch profile posts: %w", err))
+	}
+	task, err := s.repo.Tasks().FindByID(ctx, tracking.TaskID)
+	if err != nil {
+		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("find task: %w", err))
+	}
+	match, err := s.matchPublishedNote(ctx, task, posts)
+	if err != nil || !validPublishedNoteMatch(match, posts) {
+		return s.recordDiscoveryMiss(ctx, tracking, err)
+	}
+
+	now := time.Now()
+	tracking.Status = model.RednoteTrackingStatusTracking
+	tracking.NoteID = match.NoteID
+	tracking.NoteURL = match.NoteURL
+	tracking.MatchConfidence = match.Confidence
+	tracking.MatchReason = match.Reason
+	tracking.DiscoveredAt = &now
+	tracking.TrackingStartedAt = &now
+	tracking.LastError = ""
+	for _, post := range posts {
+		if post.NoteID == match.NoteID || post.URL == match.NoteURL {
+			tracking.NoteTitle = post.Title
+			tracking.NoteCoverURL = post.CoverURL
+			if tracking.NoteID == "" {
+				tracking.NoteID = post.NoteID
+			}
+			if tracking.NoteURL == "" {
+				tracking.NoteURL = post.URL
+			}
+			break
+		}
+	}
+	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+		return fmt.Errorf("update matched tracking: %w", err)
+	}
+	return s.CaptureMetrics(ctx, tracking.ID)
+}
+
+func (s *RednoteTrackingService) matchPublishedNote(ctx context.Context, task *model.Task, posts []platform.RednotePost) (*rednoteAIMatch, error) {
+	if s.llm == nil {
+		return &rednoteAIMatch{Matched: false, Reason: "AI client unavailable"}, nil
+	}
+	payload := map[string]any{
+		"task": map[string]any{
+			"id":     task.ID,
+			"title":  task.Title,
+			"prompt": task.Prompt,
+		},
+		"candidates": posts,
+	}
+	raw, _ := json.Marshal(payload)
+	resp, err := s.llm.Complete(ctx, "你是小红书笔记匹配助手，只返回严格 JSON。", string(raw))
+	if err != nil {
+		return nil, err
+	}
+	var match rednoteAIMatch
+	if err := json.Unmarshal([]byte(resp), &match); err != nil {
+		return nil, err
+	}
+	return &match, nil
+}
+
+func validPublishedNoteMatch(match *rednoteAIMatch, posts []platform.RednotePost) bool {
+	return match != nil &&
+		match.Matched &&
+		match.Confidence >= 0.8 &&
+		matchExistsInCandidates(match, posts)
+}
+
+func matchExistsInCandidates(match *rednoteAIMatch, posts []platform.RednotePost) bool {
+	for _, post := range posts {
+		if match.NoteID != "" && post.NoteID == match.NoteID {
+			return true
+		}
+		if match.NoteURL != "" && post.URL == match.NoteURL {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID string) error {
+	tracking, err := s.repo.RednoteTrackings().FindByID(ctx, trackingID)
+	if err != nil {
+		return fmt.Errorf("find tracking: %w", err)
+	}
+	if tracking.NoteURL == "" {
+		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("tracking has no note URL"))
+	}
+	if s.platform == nil {
+		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("rednote platform unavailable"))
+	}
+	metrics, err := s.platform.FetchPostMetrics(ctx, tracking.NoteURL)
+	if err != nil {
+		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("fetch post metrics: %w", err))
+	}
+	now := time.Now()
+	raw, _ := json.Marshal(metrics)
+	snapshot := &model.RednoteMetricSnapshot{
+		ID:           uuid.New().String(),
+		TrackingID:   tracking.ID,
+		TaskID:       tracking.TaskID,
+		CapturedAt:   now,
+		CapturedDate: model.RednoteCapturedDate(now),
+		LikeCount:    metrics.LikeCount,
+		CollectCount: metrics.CollectCount,
+		CommentCount: metrics.CommentCount,
+		ShareCount:   metrics.ShareCount,
+		ViewCount:    metrics.ViewCount,
+		RawData:      string(raw),
+	}
+	if err := s.repo.RednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, snapshot); err != nil {
+		return fmt.Errorf("upsert snapshot: %w", err)
+	}
+
+	tracking.RunCount++
+	tracking.FailureCount = 0
+	tracking.LastRunAt = &now
+	tracking.LastError = ""
+	previous, prevErr := s.repo.RednoteMetricSnapshots().FindPreviousByTrackingID(ctx, tracking.ID, now)
+	if prevErr == nil {
+		growth := totalGrowth(snapshot, previous)
+		if growth < model.RednoteLowGrowthThreshold {
+			tracking.ConsecutiveLowGrowthCount++
+		} else {
+			tracking.ConsecutiveLowGrowthCount = 0
+		}
+	} else if !errors.Is(prevErr, gorm.ErrRecordNotFound) && s.logger != nil {
+		s.logger.Warn().Err(prevErr).Str("tracking_id", tracking.ID).Msg("failed to load previous rednote metrics")
+	}
+
+	if s.shouldStopTracking(tracking, now) {
+		tracking.Status = model.RednoteTrackingStatusStopped
+		tracking.TrackingStoppedAt = &now
+		tracking.NextRunAt = nil
+		if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+			return fmt.Errorf("update stopped tracking: %w", err)
+		}
+		return nil
+	}
+	next := now.Add(24 * time.Hour)
+	tracking.NextRunAt = &next
+	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+		return fmt.Errorf("update tracking after capture: %w", err)
+	}
+	return s.enqueueCapture(tracking.ID, 24*time.Hour)
+}
+
+func (s *RednoteTrackingService) shouldStopTracking(tracking *model.RednotePostTracking, now time.Time) bool {
+	if now.Sub(tracking.PublishedMarkedAt) >= model.RednoteTrackingMaxDays*24*time.Hour {
+		tracking.StopReason = model.RednoteStopReasonMaxDurationReached
+		return true
+	}
+	if shouldStopForLowGrowth(tracking.ConsecutiveLowGrowthCount, model.RednoteLowGrowthConsecutiveCaptures) {
+		tracking.StopReason = model.RednoteStopReasonLowGrowth
+		return true
+	}
+	return false
+}
+
+func shouldStopForLowGrowth(count, threshold int) bool {
+	return count >= threshold
+}
+
+func totalGrowth(current, previous *model.RednoteMetricSnapshot) int {
+	return (current.LikeCount - previous.LikeCount) +
+		(current.CollectCount - previous.CollectCount) +
+		(current.CommentCount - previous.CommentCount) +
+		(current.ShareCount - previous.ShareCount)
+}
+
+func (s *RednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, taskID string) (*RednoteAnalytics, error) {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("find task: %w", err)
+	}
+	if task.UserID != userID {
+		return nil, fmt.Errorf("task does not belong to user")
+	}
+	tracking, err := s.repo.RednoteTrackings().FindByTaskID(ctx, taskID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return &RednoteAnalytics{Series: []*RednoteMetricSeriesItem{}}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find tracking: %w", err)
+	}
+	snapshots, err := s.repo.RednoteMetricSnapshots().FindByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("find snapshots: %w", err)
+	}
+
+	analytics := &RednoteAnalytics{
+		Tracking: &RednoteTrackingInfo{
+			Status:       tracking.Status,
+			NoteURL:      tracking.NoteURL,
+			NoteTitle:    tracking.NoteTitle,
+			NoteCoverURL: tracking.NoteCoverURL,
+			DiscoveredAt: tracking.DiscoveredAt,
+			LastRunAt:    tracking.LastRunAt,
+			NextRunAt:    tracking.NextRunAt,
+			RunCount:     tracking.RunCount,
+			StopReason:   tracking.StopReason,
+			LastError:    tracking.LastError,
+		},
+		Series: make([]*RednoteMetricSeriesItem, 0, len(snapshots)),
+	}
+	for _, snapshot := range snapshots {
+		analytics.Series = append(analytics.Series, &RednoteMetricSeriesItem{
+			CapturedAt:   snapshot.CapturedAt,
+			LikeCount:    snapshot.LikeCount,
+			CollectCount: snapshot.CollectCount,
+			CommentCount: snapshot.CommentCount,
+			ShareCount:   snapshot.ShareCount,
+			ViewCount:    snapshot.ViewCount,
+		})
+	}
+	if len(snapshots) > 0 {
+		latest := snapshots[len(snapshots)-1]
+		analytics.Latest = metricInfoFromSnapshot(latest)
+		if len(snapshots) > 1 {
+			analytics.Deltas = metricDelta(latest, snapshots[len(snapshots)-2])
+		} else {
+			analytics.Deltas = &RednoteMetricDelta{}
+		}
+	}
+	return analytics, nil
+}
+
+func (s *RednoteTrackingService) recordDiscoveryMiss(ctx context.Context, tracking *model.RednotePostTracking, cause error) error {
+	now := time.Now()
+	tracking.LastRunAt = &now
+	if cause != nil {
+		tracking.LastError = cause.Error()
+	} else {
+		tracking.LastError = "published note was not matched"
+	}
+	if tracking.DiscoveryAttemptCount >= model.RednoteDiscoveryMaxAttempts {
+		tracking.Status = model.RednoteTrackingStatusFailed
+		tracking.StopReason = model.RednoteStopReasonDiscoveryTimeout
+		tracking.NextRunAt = nil
+	} else {
+		tracking.Status = model.RednoteTrackingStatusWaitingDiscovery
+		next := now.Add(24 * time.Hour)
+		tracking.NextRunAt = &next
+	}
+	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+		return fmt.Errorf("update discovery retry: %w", err)
+	}
+	if tracking.Status == model.RednoteTrackingStatusWaitingDiscovery {
+		return s.enqueueDiscover(tracking.ID, 24*time.Hour)
+	}
+	return nil
+}
+
+func (s *RednoteTrackingService) recordTrackingFailure(ctx context.Context, tracking *model.RednotePostTracking, cause error) error {
+	now := time.Now()
+	tracking.FailureCount++
+	tracking.LastRunAt = &now
+	tracking.LastError = cause.Error()
+	if tracking.FailureCount >= model.RednoteTrackingMaxFailures {
+		tracking.Status = model.RednoteTrackingStatusFailed
+		tracking.StopReason = model.RednoteStopReasonTooManyFailures
+		tracking.NextRunAt = nil
+	} else {
+		next := now.Add(24 * time.Hour)
+		tracking.NextRunAt = &next
+	}
+	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+		return fmt.Errorf("update tracking failure: %w", err)
+	}
+	if tracking.Status == model.RednoteTrackingStatusWaitingDiscovery {
+		return s.enqueueDiscover(tracking.ID, 24*time.Hour)
+	}
+	if tracking.Status == model.RednoteTrackingStatusTracking {
+		return s.enqueueCapture(tracking.ID, 24*time.Hour)
+	}
+	return nil
+}
+
+func (s *RednoteTrackingService) enqueueDiscover(trackingID string, delay time.Duration) error {
+	if s.enqueuer == nil {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]string{"tracking_id": trackingID})
+	return s.enqueuer.EnqueueIn(RednoteDiscoverTaskType, payload, delay)
+}
+
+func (s *RednoteTrackingService) enqueueCapture(trackingID string, delay time.Duration) error {
+	if s.enqueuer == nil {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]string{"tracking_id": trackingID})
+	return s.enqueuer.EnqueueIn(RednoteCaptureMetricsTaskType, payload, delay)
+}
+
+func metricInfoFromSnapshot(snapshot *model.RednoteMetricSnapshot) *RednoteMetricInfo {
+	return &RednoteMetricInfo{
+		LikeCount:    snapshot.LikeCount,
+		CollectCount: snapshot.CollectCount,
+		CommentCount: snapshot.CommentCount,
+		ShareCount:   snapshot.ShareCount,
+		ViewCount:    snapshot.ViewCount,
+		CapturedAt:   &snapshot.CapturedAt,
+	}
+}
+
+func metricDelta(current, previous *model.RednoteMetricSnapshot) *RednoteMetricDelta {
+	return &RednoteMetricDelta{
+		LikeCount:    current.LikeCount - previous.LikeCount,
+		CollectCount: current.CollectCount - previous.CollectCount,
+		CommentCount: current.CommentCount - previous.CommentCount,
+		ShareCount:   current.ShareCount - previous.ShareCount,
+	}
+}
