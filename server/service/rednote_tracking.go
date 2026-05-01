@@ -287,6 +287,15 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 	now := time.Now()
 	if snapshot, ok := s.findSnapshotForDate(ctx, tracking, model.RednoteCapturedDate(now)); ok {
 		if tracking.LastRunAt != nil && model.RednoteCapturedDate(*tracking.LastRunAt) == snapshot.CapturedDate {
+			if tracking.LastError != "" && tracking.NextRunAt != nil {
+				if err := s.enqueueCapture(tracking.ID, 24*time.Hour); err != nil {
+					return s.recordEnqueueFailure(ctx, tracking, err)
+				}
+				tracking.LastError = ""
+				if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+					return fmt.Errorf("clear enqueue failure: %w", err)
+				}
+			}
 			return nil
 		}
 		return s.finishCaptureLifecycle(ctx, tracking, snapshot, now)
@@ -350,7 +359,10 @@ func (s *RednoteTrackingService) finishCaptureLifecycle(ctx context.Context, tra
 	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
 		return fmt.Errorf("update tracking after capture: %w", err)
 	}
-	return s.enqueueCapture(tracking.ID, 24*time.Hour)
+	if err := s.enqueueCapture(tracking.ID, 24*time.Hour); err != nil {
+		return s.recordEnqueueFailure(ctx, tracking, err)
+	}
+	return nil
 }
 
 func (s *RednoteTrackingService) shouldStopTracking(tracking *model.RednotePostTracking, now time.Time) bool {
@@ -538,6 +550,14 @@ func (s *RednoteTrackingService) recordTrackingFailure(ctx context.Context, trac
 		return s.enqueueCapture(tracking.ID, 24*time.Hour)
 	}
 	return nil
+}
+
+func (s *RednoteTrackingService) recordEnqueueFailure(ctx context.Context, tracking *model.RednotePostTracking, cause error) error {
+	tracking.LastError = fmt.Sprintf("enqueue rednote capture: %s", cause.Error())
+	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+		return fmt.Errorf("record enqueue failure: %w", err)
+	}
+	return cause
 }
 
 func (s *RednoteTrackingService) enqueueDiscover(trackingID string, delay time.Duration) error {

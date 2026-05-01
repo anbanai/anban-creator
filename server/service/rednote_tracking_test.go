@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -44,6 +45,7 @@ func (f *fakeRednoteLLM) Complete(ctx context.Context, systemPrompt, userPrompt 
 type fakeTrackingEnqueuer struct {
 	delayed []string
 	now     []string
+	err     error
 }
 
 func (f *fakeTrackingEnqueuer) Enqueue(taskType string, payload []byte) error {
@@ -52,6 +54,11 @@ func (f *fakeTrackingEnqueuer) Enqueue(taskType string, payload []byte) error {
 }
 
 func (f *fakeTrackingEnqueuer) EnqueueIn(taskType string, payload []byte, delay time.Duration) error {
+	if f.err != nil {
+		err := f.err
+		f.err = nil
+		return err
+	}
 	f.delayed = append(f.delayed, taskType)
 	return nil
 }
@@ -397,6 +404,65 @@ func TestRednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLife
 	}
 	if updated.NextRunAt == nil {
 		t.Fatal("NextRunAt should be set")
+	}
+	if len(enq.delayed) != 1 || enq.delayed[0] != RednoteCaptureMetricsTaskType {
+		t.Fatalf("delayed jobs = %+v", enq.delayed)
+	}
+}
+
+func TestRednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueueFailure(t *testing.T) {
+	_, repo, _ := setupRednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+	platformFake := &fakeRednotePlatform{metrics: platform.RednotePostMetrics{LikeCount: 99}}
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	enq := &fakeTrackingEnqueuer{err: errors.New("queue temporarily unavailable")}
+	svc := NewRednoteTrackingService(repo, platformFake, &fakeRednoteLLM{}, enq, &logger)
+	now := time.Now()
+	startedAt := now.Add(-24 * time.Hour)
+	tracking := &model.RednotePostTracking{
+		ID:                uuid.New().String(),
+		TaskID:            taskID,
+		UserID:            userID,
+		ChannelID:         channelID,
+		Status:            model.RednoteTrackingStatusTracking,
+		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
+		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
+		PublishedMarkedAt: now.Add(-48 * time.Hour),
+		TrackingStartedAt: &startedAt,
+	}
+	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+		t.Fatalf("create tracking: %v", err)
+	}
+
+	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err == nil {
+		t.Fatal("expected enqueue failure")
+	}
+	afterFailure, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	if err != nil {
+		t.Fatalf("FindByID after failure: %v", err)
+	}
+	if afterFailure.LastRunAt == nil || model.RednoteCapturedDate(*afterFailure.LastRunAt) != model.RednoteCapturedDate(now) {
+		t.Fatalf("LastRunAt = %v, want today after partial failure", afterFailure.LastRunAt)
+	}
+	if afterFailure.LastError == "" {
+		t.Fatal("LastError should record enqueue failure")
+	}
+	if platformFake.metricsCalls != 1 {
+		t.Fatalf("metricsCalls = %d, want 1", platformFake.metricsCalls)
+	}
+
+	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err != nil {
+		t.Fatalf("CaptureMetrics retry: %v", err)
+	}
+	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	if err != nil {
+		t.Fatalf("FindByID after retry: %v", err)
+	}
+	if updated.LastError != "" {
+		t.Fatalf("LastError = %q, want cleared", updated.LastError)
+	}
+	if platformFake.metricsCalls != 1 {
+		t.Fatalf("metricsCalls = %d, want no second fetch", platformFake.metricsCalls)
 	}
 	if len(enq.delayed) != 1 || enq.delayed[0] != RednoteCaptureMetricsTaskType {
 		t.Fatalf("delayed jobs = %+v", enq.delayed)
