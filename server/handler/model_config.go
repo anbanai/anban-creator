@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -92,14 +93,52 @@ func (h *ModelConfigHandler) Update(c fiber.Ctx) error {
 		if req.Image.Provider != "" && len(req.Image.Provider) > 64 {
 			return Error(c, fiber.StatusBadRequest, "image.provider too long (max 64 chars)")
 		}
+		if err := validateImageConfig(req.Image, sentinel); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 	}
 
 	if err := h.service.Update(c.Context(), userID, &req); err != nil {
+		if errors.Is(err, service.ErrInvalidModelConfig) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("update model config failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update model config")
 	}
 
 	return Success(c, fiber.Map{"updated": true})
+}
+
+func validateImageConfig(img *service.ImageConfigDTO, sentinel string) error {
+	if img == nil {
+		return nil
+	}
+	if img.APIKey == "" && img.Endpoint == "" && img.Model == "" && img.Provider == "" && img.Proxy == "" {
+		return nil
+	}
+
+	provider := service.NormalizeImageProvider(img.Provider)
+	switch provider {
+	case "openai", "gemini", "volcengine":
+	case "":
+		return fmt.Errorf("image.provider is required when configuring image model")
+	default:
+		return fmt.Errorf("image.provider must be one of: openai, gemini, volcengine")
+	}
+
+	if img.Endpoint == "" {
+		return fmt.Errorf("image.endpoint is required when configuring image model")
+	}
+	if img.Model == "" {
+		return fmt.Errorf("image.model is required when configuring image model")
+	}
+	if img.APIKey == "" {
+		return fmt.Errorf("image.api_key is required when configuring image model")
+	}
+	if img.APIKey != sentinel && len(strings.TrimSpace(img.APIKey)) != len(img.APIKey) {
+		return fmt.Errorf("image.api_key must not be blank or whitespace-only")
+	}
+	return nil
 }
 
 // validateConfigField checks length and URL format for a config field.

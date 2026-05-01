@@ -32,6 +32,10 @@ func (c *ImageUserConfig) HasConfig() bool {
 	return c.Provider != "" || c.Endpoint != "" || c.APIKey != "" || c.Model != ""
 }
 
+func (c *ImageUserConfig) HasCompleteConfig() bool {
+	return c.Provider != "" && c.Endpoint != "" && c.APIKey != "" && c.Model != ""
+}
+
 // UserModelConfig stores per-user MCP tool model overrides (plaintext JSON).
 type UserModelConfig struct {
 	ID              string    `gorm:"type:char(36);primaryKey" json:"id"`

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 )
@@ -35,6 +36,16 @@ func NewChannelService(repo repository.Repository, logger *zerolog.Logger) *Chan
 	return &ChannelService{repo: repo, logger: logger}
 }
 
+func defaultWritingStyleForPlatform(platform, style string) string {
+	if style != "" {
+		return style
+	}
+	if platform == model.PlatformArticle || platform == model.PlatformXLS {
+		return writer.DefaultStyleName
+	}
+	return style
+}
+
 // Create creates a new channel for the given user.
 // It sets UserID and Status, validates the platform, then persists via the repository.
 func (s *ChannelService) Create(ctx context.Context, userID string, ch *model.Channel) (*model.Channel, error) {
@@ -53,6 +64,7 @@ func (s *ChannelService) Create(ctx context.Context, userID string, ch *model.Ch
 	ch.ID = uuid.New().String()
 	ch.UserID = userID
 	ch.Status = model.ChannelStatusActive
+	ch.Style = defaultWritingStyleForPlatform(ch.Platform, ch.Style)
 
 	if err := s.repo.Channels().Create(ctx, ch); err != nil {
 		return nil, fmt.Errorf("create channel: %w", err)
@@ -153,6 +165,7 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	if ch.Config.WechatSecret != "" {
 		existing.Config.WechatSecret = ch.Config.WechatSecret
 	}
+	existing.Style = defaultWritingStyleForPlatform(existing.Platform, existing.Style)
 
 	if err := s.repo.Channels().Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("update channel: %w", err)

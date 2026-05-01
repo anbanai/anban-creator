@@ -53,20 +53,32 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 	}, nil
 }
 
-// mapToDALLESize 将用户配置的 size（比例格式）映射到 DALL-E 支持的尺寸
+// mapToDALLESize 将用户配置的 size（比例格式）映射到 OpenAI Images API 支持的尺寸
 // DALL-E 3 支持: 1024x1024, 1792x1024, 1024x1792
 // DALL-E 2 支持: 256x256, 512x512, 1024x1024
+// GPT image 支持: 1024x1024, 1536x1024, 1024x1536
 func mapToDALLESize(size, model string) string {
 	if size == "" {
 		return "1024x1024"
 	}
 
-	isDallE2 := model == "dall-e-2"
-	if isDallE2 {
+	if isDallE2Model(model) {
 		return "1024x1024"
 	}
 
 	ratio, _ := ParseSize(size)
+
+	if isGPTImageModel(model) {
+		w, h := parseRatioNumbers(ratio)
+		switch {
+		case w > h:
+			return "1536x1024"
+		case h > w:
+			return "1024x1536"
+		default:
+			return "1024x1024"
+		}
+	}
 
 	// 宽高比映射到 DALL-E 3 尺寸
 	ratioMap := map[string]string{
@@ -91,6 +103,15 @@ func mapToDALLESize(size, model string) string {
 	return "1024x1024" // 默认
 }
 
+func isDallE2Model(model string) bool {
+	return strings.EqualFold(strings.TrimSpace(model), "dall-e-2")
+}
+
+func isGPTImageModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(model, "gpt-image-") || model == "chatgpt-image-latest"
+}
+
 // Name 返回提供者名称
 func (p *OpenAIProvider) Name() string {
 	return "OpenAI"
@@ -104,12 +125,16 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 	}
 
 	// 调用 SDK 生成图片
-	resp, err := p.client.Images.Generate(ctx, openai.ImageGenerateParams{
+	params := openai.ImageGenerateParams{
 		Prompt: prompt,
 		Model:  openai.ImageModel(p.model),
 		N:      param.NewOpt(int64(1)),
 		Size:   openai.ImageGenerateParamsSize(p.size),
-	})
+	}
+	if !isGPTImageModel(p.model) {
+		params.ResponseFormat = openai.ImageGenerateParamsResponseFormatB64JSON
+	}
+	resp, err := p.client.Images.Generate(ctx, params)
 
 	if err != nil {
 		// 包装 SDK 错误为 GenerateError
@@ -126,22 +151,7 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 		}
 	}
 
-	result := &GenerateResult{
-		Model: p.model,
-		Size:  p.sizeRatio,
-	}
-
-	// 提取 URL
-	if resp.Data[0].URL != "" {
-		result.URL = resp.Data[0].URL
-	}
-
-	// 提取修订后的提示词（如果有）
-	if resp.Data[0].RevisedPrompt != "" {
-		result.RevisedPrompt = resp.Data[0].RevisedPrompt
-	}
-
-	return result, nil
+	return p.imageDataToResult(resp.Data[0])
 }
 
 // generateWithRef 使用参考图生成图片（调用 Images.Edit() API）
@@ -157,13 +167,17 @@ func (p *OpenAIProvider) generateWithRef(ctx context.Context, prompt, refImagePa
 	}
 	defer f.Close()
 
-	resp, err := p.client.Images.Edit(ctx, openai.ImageEditParams{
+	params := openai.ImageEditParams{
 		Image:  openai.ImageEditParamsImageUnion{OfFile: f},
 		Prompt: prompt,
 		Model:  openai.ImageModel(p.model),
 		Size:   openai.ImageEditParamsSize(p.size),
 		N:      param.NewOpt(int64(1)),
-	})
+	}
+	if !isGPTImageModel(p.model) {
+		params.ResponseFormat = openai.ImageEditParamsResponseFormatB64JSON
+	}
+	resp, err := p.client.Images.Edit(ctx, params)
 	if err != nil {
 		return nil, p.wrapSDKError(err)
 	}
@@ -177,31 +191,40 @@ func (p *OpenAIProvider) generateWithRef(ctx context.Context, prompt, refImagePa
 		}
 	}
 
-	img := resp.Data[0]
+	return p.imageDataToResult(resp.Data[0])
+}
 
-	// GPT image 模型返回 B64JSON，dall-e-2 返回 URL
+func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, error) {
+	result := &GenerateResult{
+		Model:         p.model,
+		Size:          p.sizeRatio,
+		RevisedPrompt: img.RevisedPrompt,
+	}
+
 	if img.B64JSON != "" {
 		filePath, saveErr := p.saveBase64Image(img.B64JSON)
 		if saveErr != nil {
 			return nil, saveErr
 		}
-		result := &GenerateResult{
-			URL:   filePath,
-			Model: p.model,
-			Size:  p.sizeRatio,
-		}
-		if img.RevisedPrompt != "" {
-			result.RevisedPrompt = img.RevisedPrompt
-		}
+		result.URL = filePath
 		return result, nil
 	}
 
-	return &GenerateResult{
-		URL:           img.URL,
-		RevisedPrompt: img.RevisedPrompt,
-		Model:         p.model,
-		Size:          p.sizeRatio,
-	}, nil
+	if img.URL != "" {
+		return nil, &GenerateError{
+			Provider: p.Name(),
+			Code:     "url_response_unsupported",
+			Message:  "OpenAI 图片接口返回了 URL，但当前配置要求 base64 图片数据",
+			HintMsg:  "请确认 Endpoint 支持 response_format=b64_json；国内环境不使用 OpenAI 临时图片 URL",
+		}
+	}
+
+	return nil, &GenerateError{
+		Provider: p.Name(),
+		Code:     "no_image",
+		Message:  "响应中没有图片 URL 或 base64 数据",
+		HintMsg:  "请确认模型支持 OpenAI Images API 图片输出",
+	}
 }
 
 // saveBase64Image 将 base64 编码的图片数据保存到临时文件，返回文件路径
@@ -232,9 +255,20 @@ func (p *OpenAIProvider) saveBase64Image(b64data string) (string, error) {
 func (p *OpenAIProvider) wrapSDKError(err error) error {
 	// SDK 错误已经包含详细信息，我们只需要添加友好的提示
 	errMsg := err.Error()
+	lowerMsg := strings.ToLower(errMsg)
+
+	if strings.Contains(lowerMsg, "text/html") || strings.Contains(lowerMsg, "not 'application/json'") {
+		return &GenerateError{
+			Provider: p.Name(),
+			Code:     "endpoint_protocol",
+			Message:  "API 返回了 HTML 而不是 OpenAI Images API JSON 响应",
+			HintMsg:  "请确认图片模型 Endpoint 支持 OpenAI Images API（/images/generations 或 /images/edits），不是聊天补全接口或需要网页登录的网关",
+			Original: err,
+		}
+	}
 
 	// 尝试识别常见错误类型
-	if strings.Contains(errMsg, "401") || strings.Contains(errMsg, "unauthorized") || strings.Contains(errMsg, "authentication") {
+	if strings.Contains(errMsg, "401") || strings.Contains(lowerMsg, "unauthorized") || strings.Contains(lowerMsg, "authentication") {
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "unauthorized",
@@ -244,7 +278,7 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 		}
 	}
 
-	if strings.Contains(errMsg, "429") || strings.Contains(errMsg, "rate limit") {
+	if strings.Contains(errMsg, "429") || strings.Contains(lowerMsg, "rate limit") {
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "rate_limit",
@@ -254,7 +288,7 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 		}
 	}
 
-	if strings.Contains(errMsg, "400") || strings.Contains(errMsg, "bad request") {
+	if strings.Contains(errMsg, "400") || strings.Contains(lowerMsg, "bad request") {
 		if isContentSafetyError(errMsg) {
 			return &GenerateError{
 				Provider: p.Name(),
@@ -273,7 +307,7 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 		}
 	}
 
-	if strings.Contains(errMsg, "402") || strings.Contains(errMsg, "403") || strings.Contains(errMsg, "insufficient") || strings.Contains(errMsg, "quota") {
+	if strings.Contains(errMsg, "402") || strings.Contains(errMsg, "403") || strings.Contains(lowerMsg, "insufficient") || strings.Contains(lowerMsg, "quota") {
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "payment_required",

@@ -159,7 +159,7 @@ type ImageRefDTO struct {
 // HumanizeArticleResult contains the humanized content and optional quality score.
 type HumanizeArticleResult struct {
 	Content string               `json:"content"`
-	Score    *HumanizeScoreResult `json:"score,omitempty"`
+	Score   *HumanizeScoreResult `json:"score,omitempty"`
 }
 
 // HumanizeScoreResult contains the 5-dimension quality score.
@@ -180,12 +180,12 @@ type ResearchTopicsResult struct {
 
 // TopicSuggestion represents a single topic suggestion from the LLM.
 type TopicSuggestion struct {
-	Topic      string `json:"topic"`
-	Angle      string `json:"angle"`
-	ViralScore int    `json:"viral_score"`
-	Reason     string `json:"reason"`
+	Topic      string   `json:"topic"`
+	Angle      string   `json:"angle"`
+	ViralScore int      `json:"viral_score"`
+	Reason     string   `json:"reason"`
 	Keywords   []string `json:"keywords"`
-	Template   string `json:"template"`
+	Template   string   `json:"template"`
 }
 
 // OptimizeSEOResult contains SEO optimization output.
@@ -236,13 +236,17 @@ func (s *WritingService) WriteArticle(
 	if s.writersDir != "" {
 		assistant.SetWritersDir(s.writersDir)
 	}
+	styleName := ch.Style
+	if styleName == "" && (ch.Platform == "article" || ch.Platform == "xls") {
+		styleName = writer.DefaultStyleName
+	}
 
 	req := &writer.WriteRequest{
 		Input:       topic,
 		InputType:   writer.InputType(inputType),
 		ArticleType: writer.ArticleType(articleType),
 		Length:      writer.Length(length),
-		StyleName:   ch.Style,
+		StyleName:   styleName,
 	}
 
 	result := assistant.Write(req)
@@ -371,8 +375,8 @@ func (s *WritingService) HumanizeArticle(
 	humanizeIntensity := humanizer.ParseIntensity(intensity)
 
 	req := &humanizer.HumanizeRequest{
-		Content:  content,
-		Intensity: humanizeIntensity,
+		Content:      content,
+		Intensity:    humanizeIntensity,
 		IncludeScore: true,
 	}
 

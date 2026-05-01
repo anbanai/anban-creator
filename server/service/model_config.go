@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -15,6 +18,8 @@ import (
 
 // sentinel for "keep existing key" in update requests.
 const keepExistingKey = "****"
+
+var ErrInvalidModelConfig = errors.New("invalid model config")
 
 // ModelConfigService manages per-user AI model configuration.
 type ModelConfigService struct {
@@ -130,6 +135,9 @@ func (s *ModelConfigService) Update(ctx context.Context, userID string, req *Upd
 		} else {
 			existing := s.loadTextConfig(row.TextConfigJSON)
 			if req.Text.APIKey == keepExistingKey {
+				if existing.APIKey == "" {
+					return fmt.Errorf("%w: text.api_key cannot keep existing key because no existing key is saved", ErrInvalidModelConfig)
+				}
 				req.Text.APIKey = existing.APIKey
 			}
 			uc := model.TextUserConfig{
@@ -153,10 +161,13 @@ func (s *ModelConfigService) Update(ctx context.Context, userID string, req *Upd
 		} else {
 			existing := s.loadImageConfig(row.ImageConfigJSON)
 			if req.Image.APIKey == keepExistingKey {
+				if existing.APIKey == "" {
+					return fmt.Errorf("%w: image.api_key cannot keep existing key because no existing key is saved", ErrInvalidModelConfig)
+				}
 				req.Image.APIKey = existing.APIKey
 			}
 			uc := model.ImageUserConfig{
-				Provider: req.Image.Provider,
+				Provider: NormalizeImageProvider(req.Image.Provider),
 				Endpoint: req.Image.Endpoint,
 				APIKey:   req.Image.APIKey,
 				Model:    req.Image.Model,
@@ -208,7 +219,7 @@ func (s *ModelConfigService) HasCompleteImageOverride(ctx context.Context, userI
 	if err != nil {
 		return false
 	}
-	return uc.Provider != "" && uc.APIKey != "" && uc.Model != ""
+	return uc.HasCompleteConfig()
 }
 
 // GetEffectiveWritingConfig returns the resolved writing config (endpoint, key, model).
@@ -230,7 +241,7 @@ func (s *ModelConfigService) GetEffectiveWritingConfig(ctx context.Context, user
 // Returns nil if no user override exists (use server default).
 func (s *ModelConfigService) GetEffectiveImageConfig(ctx context.Context, userID string) *config.ImageAPIConfig {
 	uc, err := s.loadUserImageConfig(ctx, userID)
-	if err != nil || !uc.HasConfig() {
+	if err != nil || !uc.HasCompleteConfig() {
 		return nil
 	}
 
@@ -317,6 +328,10 @@ func (s *ModelConfigService) loadImageConfig(jsonStr string) *model.ImageUserCon
 		return &model.ImageUserConfig{}
 	}
 	return &uc
+}
+
+func NormalizeImageProvider(provider string) string {
+	return strings.ToLower(strings.TrimSpace(provider))
 }
 
 // maskKey returns only the last 4 characters of the key, prefixed with "****".

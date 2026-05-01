@@ -15,6 +15,12 @@ const IMAGE_PROVIDERS = [
   { value: 'volcengine', label: 'Volcengine/Seedream' },
 ]
 
+const imageProviderNotes: Record<string, string> = {
+  openai: 'OpenAI 仅支持 Images API 兼容接口，不是任意 OpenAI-compatible 聊天接口。',
+  gemini: 'Gemini 使用 Google 图片生成接口，请填写支持图片生成的模型。',
+  volcengine: 'Volcengine 使用火山方舟 Seedream 图片生成接口。',
+}
+
 function ModelSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false)
   return (
@@ -184,8 +190,9 @@ export default function ModelConfigSection() {
   }
 
   const handleEditImage = () => {
-    if (imageEndpoint && !imageModel) {
-      toast.error('请填写模型名称')
+    const hasAnyImageConfig = !!(imageProvider || imageEndpoint || imageApiKey || imageModel || imageProxy)
+    if (hasAnyImageConfig && !(imageProvider && imageEndpoint && imageApiKey && imageModel)) {
+      toast.error('图片模型需要同时填写服务商、Endpoint、API Key 和模型名称')
       return
     }
     imageMutation.mutate()
@@ -277,6 +284,9 @@ export default function ModelConfigSection() {
               : 'MCP 图片工具使用系统默认模型'
           }
         >
+          <p className="px-3 text-xs text-muted-foreground">
+            图片自定义配置需要完整填写服务商、Endpoint、API Key 和模型名称。OpenAI 选项只适用于 OpenAI Images API 兼容接口。
+          </p>
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <Label className="text-xs">图片服务商</Label>
@@ -294,6 +304,9 @@ export default function ModelConfigSection() {
                 </option>
               ))}
             </select>
+            {imageProvider && (
+              <p className="text-xs text-muted-foreground">{imageProviderNotes[imageProvider]}</p>
+            )}
           </div>
           <MaskedInput
             label="Endpoint"

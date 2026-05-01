@@ -5,6 +5,7 @@ import (
 
 	"github.com/royalrick/anbanwriter/server/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ModelConfigRepository provides access to the user_model_configs table.
@@ -34,14 +35,14 @@ func (r *modelConfigRepository) FindByUserID(ctx context.Context, userID string)
 }
 
 func (r *modelConfigRepository) Upsert(ctx context.Context, config *model.UserModelConfig) error {
-	return r.db.WithContext(ctx).Exec(`
-		INSERT INTO user_model_configs (id, user_id, text_config_json, image_config_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, NOW(), NOW())
-		ON DUPLICATE KEY UPDATE
-			text_config_json = VALUES(text_config_json),
-			image_config_json = VALUES(image_config_json),
-			updated_at = NOW()
-	`, config.ID, config.UserID, config.TextConfigJSON, config.ImageConfigJSON).Error
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"text_config_json",
+			"image_config_json",
+			"updated_at",
+		}),
+	}).Create(config).Error
 }
 
 func (r *modelConfigRepository) Delete(ctx context.Context, userID string) error {
