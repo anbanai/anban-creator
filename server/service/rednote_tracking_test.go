@@ -176,6 +176,62 @@ func TestRednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing
 	}
 }
 
+func TestRednoteTrackingService_DiscoverPublishedNoteRejectsMismatchedIdentifiers(t *testing.T) {
+	_, repo, _ := setupRednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+	url1 := "https://www.xiaohongshu.com/explore/note-1"
+	url2 := "https://www.xiaohongshu.com/explore/note-2"
+	platformFake := &fakeRednotePlatform{
+		posts: []platform.RednotePost{
+			{Title: "早起效率翻倍的方法", URL: url1, NoteID: "note-1", CoverURL: "https://img.example/1.jpg"},
+			{Title: "午后精力恢复技巧", URL: url2, NoteID: "note-2", CoverURL: "https://img.example/2.jpg"},
+		},
+		metrics: platform.RednotePostMetrics{LikeCount: 99, CollectCount: 9, CommentCount: 9, ShareCount: 9},
+	}
+	llmFake := &fakeRednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-2","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	enq := &fakeTrackingEnqueuer{}
+	svc := NewRednoteTrackingService(repo, platformFake, llmFake, enq, &logger)
+
+	tracking := &model.RednotePostTracking{
+		ID:                uuid.New().String(),
+		TaskID:            taskID,
+		UserID:            userID,
+		ChannelID:         channelID,
+		Status:            model.RednoteTrackingStatusWaitingDiscovery,
+		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
+		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
+	}
+	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+		t.Fatalf("create tracking: %v", err)
+	}
+
+	if err := svc.DiscoverPublishedNote(context.Background(), tracking.ID); err != nil {
+		t.Fatalf("DiscoverPublishedNote: %v", err)
+	}
+
+	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if updated.Status != model.RednoteTrackingStatusWaitingDiscovery {
+		t.Fatalf("Status = %q, want %q", updated.Status, model.RednoteTrackingStatusWaitingDiscovery)
+	}
+	if updated.NoteID != "" || updated.NoteURL != "" {
+		t.Fatalf("matched note fields should remain empty, got note_id=%q note_url=%q", updated.NoteID, updated.NoteURL)
+	}
+	snapshots, err := repo.RednoteMetricSnapshots().FindByTaskID(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("FindByTaskID snapshots: %v", err)
+	}
+	if len(snapshots) != 0 {
+		t.Fatalf("snapshots = %+v, want none", snapshots)
+	}
+	if len(enq.delayed) != 1 || enq.delayed[0] != RednoteDiscoverTaskType {
+		t.Fatalf("delayed jobs = %+v", enq.delayed)
+	}
+}
+
 func TestRednoteTrackingService_ShouldStopForLowGrowth(t *testing.T) {
 	if !shouldStopForLowGrowth(3, model.RednoteLowGrowthConsecutiveCaptures) {
 		t.Fatal("expected low growth stop")

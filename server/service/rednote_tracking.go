@@ -187,32 +187,22 @@ func (s *RednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trac
 		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("find task: %w", err))
 	}
 	match, err := s.matchPublishedNote(ctx, task, posts)
-	if err != nil || !validPublishedNoteMatch(match, posts) {
+	candidate, ok := findMatchedCandidate(match, posts)
+	if err != nil || !validPublishedNoteMatch(match) || !ok {
 		return s.recordDiscoveryMiss(ctx, tracking, err)
 	}
 
 	now := time.Now()
 	tracking.Status = model.RednoteTrackingStatusTracking
-	tracking.NoteID = match.NoteID
-	tracking.NoteURL = match.NoteURL
+	tracking.NoteID = candidate.NoteID
+	tracking.NoteURL = candidate.URL
+	tracking.NoteTitle = candidate.Title
+	tracking.NoteCoverURL = candidate.CoverURL
 	tracking.MatchConfidence = match.Confidence
 	tracking.MatchReason = match.Reason
 	tracking.DiscoveredAt = &now
 	tracking.TrackingStartedAt = &now
 	tracking.LastError = ""
-	for _, post := range posts {
-		if post.NoteID == match.NoteID || post.URL == match.NoteURL {
-			tracking.NoteTitle = post.Title
-			tracking.NoteCoverURL = post.CoverURL
-			if tracking.NoteID == "" {
-				tracking.NoteID = post.NoteID
-			}
-			if tracking.NoteURL == "" {
-				tracking.NoteURL = post.URL
-			}
-			break
-		}
-	}
 	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
 		return fmt.Errorf("update matched tracking: %w", err)
 	}
@@ -243,23 +233,38 @@ func (s *RednoteTrackingService) matchPublishedNote(ctx context.Context, task *m
 	return &match, nil
 }
 
-func validPublishedNoteMatch(match *rednoteAIMatch, posts []platform.RednotePost) bool {
+func validPublishedNoteMatch(match *rednoteAIMatch) bool {
 	return match != nil &&
 		match.Matched &&
-		match.Confidence >= 0.8 &&
-		matchExistsInCandidates(match, posts)
+		match.Confidence >= 0.8
 }
 
-func matchExistsInCandidates(match *rednoteAIMatch, posts []platform.RednotePost) bool {
-	for _, post := range posts {
-		if match.NoteID != "" && post.NoteID == match.NoteID {
-			return true
+func findMatchedCandidate(match *rednoteAIMatch, posts []platform.RednotePost) (*platform.RednotePost, bool) {
+	if match == nil {
+		return nil, false
+	}
+	noteID := strings.TrimSpace(match.NoteID)
+	noteURL := strings.TrimSpace(match.NoteURL)
+	if noteID == "" && noteURL == "" {
+		return nil, false
+	}
+	for i := range posts {
+		postID := strings.TrimSpace(posts[i].NoteID)
+		postURL := strings.TrimSpace(posts[i].URL)
+		if noteID != "" && noteURL != "" {
+			if postID == noteID && postURL == noteURL {
+				return &posts[i], true
+			}
+			continue
 		}
-		if match.NoteURL != "" && post.URL == match.NoteURL {
-			return true
+		if noteID != "" && postID == noteID {
+			return &posts[i], true
+		}
+		if noteURL != "" && postURL == noteURL {
+			return &posts[i], true
 		}
 	}
-	return false
+	return nil, false
 }
 
 func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID string) error {
