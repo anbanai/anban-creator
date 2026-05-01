@@ -1,10 +1,49 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/ui/Button"
 import { ChevronLeftIcon, ChevronRightIcon, MoreHorizontalIcon } from "lucide-react"
 
-function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
+type SimplePaginationProps = {
+  page: number
+  totalPages: number
+  onPageChange: (page: number) => void
+}
+
+function Pagination({
+  className,
+  ...props
+}: React.ComponentProps<"nav"> | (React.ComponentProps<"nav"> & SimplePaginationProps)) {
+  if ("page" in props && "totalPages" in props && "onPageChange" in props) {
+    const { page, totalPages, onPageChange, ...navProps } = props
+    return (
+      <nav
+        role="navigation"
+        aria-label="pagination"
+        data-slot="pagination"
+        className={cn("flex items-center gap-1", className)}
+        {...navProps}
+      >
+        <Button
+          variant="ghost"
+          size="xs"
+          disabled={page <= 1}
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+        >
+          上一页
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+        >
+          下一页
+        </Button>
+      </nav>
+    )
+  }
+
   return (
     <nav
       role="navigation"

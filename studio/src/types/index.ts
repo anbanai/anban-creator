@@ -38,6 +38,15 @@ export type {
   WorkflowReview,
 } from './task'
 
+export type {
+  RednoteAnalytics,
+  RednoteMetricDelta,
+  RednoteMetricInfo,
+  RednoteMetricSeriesItem,
+  RednoteTrackingInfo,
+  RednoteTrackingStatus,
+} from './rednote-analytics'
+
 // Timeline
 export type { TimelineItemType, TimelineItem, TimelineResponse } from './timeline'
 

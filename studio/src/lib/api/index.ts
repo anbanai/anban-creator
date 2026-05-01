@@ -8,6 +8,7 @@ import { apiKeysApi } from './api-keys'
 import { usageApi } from './usage'
 import { feedbackApi } from './feedback'
 import { modelConfigApi } from './model-config'
+import { rednoteAnalyticsApi } from './rednote-analytics'
 
 export const api = {
   auth: authApi,
@@ -20,4 +21,5 @@ export const api = {
   usage: usageApi,
   feedback: feedbackApi,
   modelConfig: modelConfigApi,
+  rednoteAnalytics: rednoteAnalyticsApi,
 }

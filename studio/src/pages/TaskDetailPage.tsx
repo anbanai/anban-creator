@@ -16,6 +16,7 @@ import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import TaskWorkflowPanel from '@/components/TaskWorkflowPanel'
+import RednoteAnalyticsPanel from '@/components/tasks/RednoteAnalyticsPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
@@ -102,6 +103,9 @@ export default function TaskDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['task', id] })
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+      if (id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.rednoteAnalytics(id) })
+      }
     },
   })
 
@@ -365,6 +369,10 @@ export default function TaskDetailPage() {
       </div>
 
       <TaskWorkflowPanel workflow={task.workflow_status} />
+
+      {task.type === 'rednote' && task.published && (
+        <RednoteAnalyticsPanel taskId={task.id} />
+      )}
 
       {/* Files (top priority - most useful content) */}
       {files && files.length > 0 && (

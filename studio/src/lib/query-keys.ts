@@ -19,6 +19,7 @@ export const queryKeys = {
     list: (filters?: { status?: string; channel_id?: string }) => ['tasks', filters] as const,
     detail: (id: string) => ['task', id] as const,
     files: (id: string) => ['task-files', id] as const,
+    rednoteAnalytics: (id: string) => ['task', id, 'rednote-analytics'] as const,
   },
   timeline: {
     range: (from: string, to: string, filters?: Record<string, string>) =>
