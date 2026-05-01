@@ -288,7 +288,7 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 	if snapshot, ok := s.findSnapshotForDate(ctx, tracking, model.RednoteCapturedDate(now)); ok {
 		if tracking.LastRunAt != nil && model.RednoteCapturedDate(*tracking.LastRunAt) == snapshot.CapturedDate {
 			if tracking.LastError != "" && tracking.NextRunAt != nil {
-				if err := s.enqueueCapture(tracking.ID, 24*time.Hour); err != nil {
+				if err := s.enqueueCapture(tracking.ID, delayUntil(*tracking.NextRunAt, now)); err != nil {
 					return s.recordEnqueueFailure(ctx, tracking, err)
 				}
 				tracking.LastError = ""
@@ -298,7 +298,7 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 			}
 			return nil
 		}
-		return s.finishCaptureLifecycle(ctx, tracking, snapshot, now)
+		return s.finishCaptureLifecycle(ctx, tracking, snapshot, now, snapshot.CapturedAt)
 	}
 	if s.platform == nil {
 		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("rednote platform unavailable"))
@@ -325,15 +325,15 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 		return fmt.Errorf("upsert snapshot: %w", err)
 	}
 
-	return s.finishCaptureLifecycle(ctx, tracking, snapshot, now)
+	return s.finishCaptureLifecycle(ctx, tracking, snapshot, now, now)
 }
 
-func (s *RednoteTrackingService) finishCaptureLifecycle(ctx context.Context, tracking *model.RednotePostTracking, snapshot *model.RednoteMetricSnapshot, now time.Time) error {
+func (s *RednoteTrackingService) finishCaptureLifecycle(ctx context.Context, tracking *model.RednotePostTracking, snapshot *model.RednoteMetricSnapshot, now, previousBefore time.Time) error {
 	tracking.RunCount++
 	tracking.FailureCount = 0
 	tracking.LastRunAt = &now
 	tracking.LastError = ""
-	previous, prevErr := s.findPreviousLifecycleSnapshot(ctx, tracking, now)
+	previous, prevErr := s.findPreviousLifecycleSnapshot(ctx, tracking, previousBefore)
 	if prevErr == nil && previous != nil {
 		growth := totalGrowth(snapshot, previous)
 		if growth < model.RednoteLowGrowthThreshold {
@@ -363,6 +363,13 @@ func (s *RednoteTrackingService) finishCaptureLifecycle(ctx context.Context, tra
 		return s.recordEnqueueFailure(ctx, tracking, err)
 	}
 	return nil
+}
+
+func delayUntil(runAt, now time.Time) time.Duration {
+	if !runAt.After(now) {
+		return 0
+	}
+	return runAt.Sub(now)
 }
 
 func (s *RednoteTrackingService) shouldStopTracking(tracking *model.RednotePostTracking, now time.Time) bool {

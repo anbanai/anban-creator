@@ -44,6 +44,7 @@ func (f *fakeRednoteLLM) Complete(ctx context.Context, systemPrompt, userPrompt 
 
 type fakeTrackingEnqueuer struct {
 	delayed []string
+	delays  []time.Duration
 	now     []string
 	err     error
 }
@@ -60,6 +61,7 @@ func (f *fakeTrackingEnqueuer) EnqueueIn(taskType string, payload []byte, delay 
 		return err
 	}
 	f.delayed = append(f.delayed, taskType)
+	f.delays = append(f.delays, delay)
 	return nil
 }
 
@@ -359,17 +361,18 @@ func TestRednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLife
 	now := time.Now()
 	yesterday := now.Add(-24 * time.Hour)
 	tracking := &model.RednotePostTracking{
-		ID:                uuid.New().String(),
-		TaskID:            taskID,
-		UserID:            userID,
-		ChannelID:         channelID,
-		Status:            model.RednoteTrackingStatusTracking,
-		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
-		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
-		PublishedMarkedAt: now.Add(-48 * time.Hour),
-		TrackingStartedAt: &yesterday,
-		LastRunAt:         &yesterday,
-		RunCount:          0,
+		ID:                        uuid.New().String(),
+		TaskID:                    taskID,
+		UserID:                    userID,
+		ChannelID:                 channelID,
+		Status:                    model.RednoteTrackingStatusTracking,
+		ProfileURL:                "https://www.xiaohongshu.com/user/profile/profile-1",
+		NoteURL:                   "https://www.xiaohongshu.com/explore/note-1",
+		PublishedMarkedAt:         now.Add(-48 * time.Hour),
+		TrackingStartedAt:         &yesterday,
+		LastRunAt:                 &yesterday,
+		RunCount:                  0,
+		ConsecutiveLowGrowthCount: model.RednoteLowGrowthConsecutiveCaptures - 1,
 	}
 	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
@@ -398,6 +401,12 @@ func TestRednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLife
 	}
 	if updated.RunCount != 1 {
 		t.Fatalf("RunCount = %d, want 1", updated.RunCount)
+	}
+	if updated.Status != model.RednoteTrackingStatusTracking {
+		t.Fatalf("Status = %q, want tracking", updated.Status)
+	}
+	if updated.ConsecutiveLowGrowthCount != model.RednoteLowGrowthConsecutiveCaptures-1 {
+		t.Fatalf("ConsecutiveLowGrowthCount = %d, want unchanged", updated.ConsecutiveLowGrowthCount)
 	}
 	if updated.LastRunAt == nil || model.RednoteCapturedDate(*updated.LastRunAt) != model.RednoteCapturedDate(now) {
 		t.Fatalf("LastRunAt = %v, want today", updated.LastRunAt)
@@ -447,6 +456,9 @@ func TestRednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueueF
 	if afterFailure.LastError == "" {
 		t.Fatal("LastError should record enqueue failure")
 	}
+	if afterFailure.NextRunAt == nil {
+		t.Fatal("NextRunAt should be set after enqueue failure")
+	}
 	if platformFake.metricsCalls != 1 {
 		t.Fatalf("metricsCalls = %d, want 1", platformFake.metricsCalls)
 	}
@@ -466,6 +478,15 @@ func TestRednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueueF
 	}
 	if len(enq.delayed) != 1 || enq.delayed[0] != RednoteCaptureMetricsTaskType {
 		t.Fatalf("delayed jobs = %+v", enq.delayed)
+	}
+	if len(enq.delays) != 1 {
+		t.Fatalf("delays = %+v, want one delay", enq.delays)
+	}
+	if enq.delays[0] >= 24*time.Hour {
+		t.Fatalf("delay = %s, want remaining time before original NextRunAt", enq.delays[0])
+	}
+	if enq.delays[0] <= 23*time.Hour {
+		t.Fatalf("delay = %s, want close to original NextRunAt", enq.delays[0])
 	}
 }
 
