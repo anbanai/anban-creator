@@ -114,6 +114,9 @@ func (s *RednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Cont
 	if err != nil {
 		return fmt.Errorf("find channel: %w", err)
 	}
+	if channel.UserID != userID {
+		return fmt.Errorf("channel does not belong to user")
+	}
 	profileURL := strings.TrimSpace(channel.ProfileURL)
 	if profileURL == "" {
 		return fmt.Errorf("rednote channel profile URL is required")
@@ -172,6 +175,9 @@ func (s *RednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trac
 	tracking, err := s.repo.RednoteTrackings().FindByID(ctx, trackingID)
 	if err != nil {
 		return fmt.Errorf("find tracking: %w", err)
+	}
+	if tracking.Status != model.RednoteTrackingStatusWaitingDiscovery {
+		return nil
 	}
 	tracking.DiscoveryAttemptCount++
 
@@ -272,8 +278,15 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 	if err != nil {
 		return fmt.Errorf("find tracking: %w", err)
 	}
+	if tracking.Status != model.RednoteTrackingStatusTracking {
+		return nil
+	}
 	if tracking.NoteURL == "" {
 		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("tracking has no note URL"))
+	}
+	now := time.Now()
+	if s.hasSnapshotForDate(ctx, tracking, model.RednoteCapturedDate(now)) {
+		return nil
 	}
 	if s.platform == nil {
 		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("rednote platform unavailable"))
@@ -282,7 +295,6 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 	if err != nil {
 		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("fetch post metrics: %w", err))
 	}
-	now := time.Now()
 	raw, _ := json.Marshal(metrics)
 	snapshot := &model.RednoteMetricSnapshot{
 		ID:           uuid.New().String(),
@@ -305,15 +317,15 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 	tracking.FailureCount = 0
 	tracking.LastRunAt = &now
 	tracking.LastError = ""
-	previous, prevErr := s.repo.RednoteMetricSnapshots().FindPreviousByTrackingID(ctx, tracking.ID, now)
-	if prevErr == nil {
+	previous, prevErr := s.findPreviousLifecycleSnapshot(ctx, tracking, now)
+	if prevErr == nil && previous != nil {
 		growth := totalGrowth(snapshot, previous)
 		if growth < model.RednoteLowGrowthThreshold {
 			tracking.ConsecutiveLowGrowthCount++
 		} else {
 			tracking.ConsecutiveLowGrowthCount = 0
 		}
-	} else if !errors.Is(prevErr, gorm.ErrRecordNotFound) && s.logger != nil {
+	} else if prevErr != nil && !errors.Is(prevErr, gorm.ErrRecordNotFound) && s.logger != nil {
 		s.logger.Warn().Err(prevErr).Str("tracking_id", tracking.ID).Msg("failed to load previous rednote metrics")
 	}
 
@@ -357,6 +369,61 @@ func totalGrowth(current, previous *model.RednoteMetricSnapshot) int {
 		(current.ShareCount - previous.ShareCount)
 }
 
+func lifecycleStartAt(tracking *model.RednotePostTracking) time.Time {
+	if tracking.TrackingStartedAt != nil {
+		return *tracking.TrackingStartedAt
+	}
+	return tracking.PublishedMarkedAt
+}
+
+func filterLifecycleSnapshots(tracking *model.RednotePostTracking, snapshots []*model.RednoteMetricSnapshot) []*model.RednoteMetricSnapshot {
+	startedAt := lifecycleStartAt(tracking)
+	filtered := make([]*model.RednoteMetricSnapshot, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		if snapshot.TrackingID != tracking.ID {
+			continue
+		}
+		if snapshot.CapturedAt.Before(startedAt) {
+			continue
+		}
+		filtered = append(filtered, snapshot)
+	}
+	return filtered
+}
+
+func (s *RednoteTrackingService) hasSnapshotForDate(ctx context.Context, tracking *model.RednotePostTracking, capturedDate string) bool {
+	snapshots, err := s.repo.RednoteMetricSnapshots().FindByTaskID(ctx, tracking.TaskID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn().Err(err).Str("tracking_id", tracking.ID).Msg("failed to check rednote same-day snapshot")
+		}
+		return false
+	}
+	for _, snapshot := range filterLifecycleSnapshots(tracking, snapshots) {
+		if snapshot.CapturedDate == capturedDate {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *RednoteTrackingService) findPreviousLifecycleSnapshot(ctx context.Context, tracking *model.RednotePostTracking, capturedAt time.Time) (*model.RednoteMetricSnapshot, error) {
+	snapshots, err := s.repo.RednoteMetricSnapshots().FindByTaskID(ctx, tracking.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	var previous *model.RednoteMetricSnapshot
+	for _, snapshot := range filterLifecycleSnapshots(tracking, snapshots) {
+		if !snapshot.CapturedAt.Before(capturedAt) {
+			continue
+		}
+		if previous == nil || snapshot.CapturedAt.After(previous.CapturedAt) {
+			previous = snapshot
+		}
+	}
+	return previous, nil
+}
+
 func (s *RednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, taskID string) (*RednoteAnalytics, error) {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -376,6 +443,7 @@ func (s *RednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, t
 	if err != nil {
 		return nil, fmt.Errorf("find snapshots: %w", err)
 	}
+	snapshots = filterLifecycleSnapshots(tracking, snapshots)
 
 	analytics := &RednoteAnalytics{
 		Tracking: &RednoteTrackingInfo{

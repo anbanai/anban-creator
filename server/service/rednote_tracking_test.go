@@ -17,9 +17,10 @@ import (
 )
 
 type fakeRednotePlatform struct {
-	posts   []platform.RednotePost
-	metrics platform.RednotePostMetrics
-	err     error
+	posts        []platform.RednotePost
+	metrics      platform.RednotePostMetrics
+	err          error
+	metricsCalls int
 }
 
 func (f *fakeRednotePlatform) FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.RednotePost, error) {
@@ -27,6 +28,7 @@ func (f *fakeRednotePlatform) FetchProfilePosts(ctx context.Context, profileURL 
 }
 
 func (f *fakeRednotePlatform) FetchPostMetrics(ctx context.Context, noteURL string) (*platform.RednotePostMetrics, error) {
+	f.metricsCalls++
 	return &f.metrics, f.err
 }
 
@@ -229,6 +231,181 @@ func TestRednoteTrackingService_DiscoverPublishedNoteRejectsMismatchedIdentifier
 	}
 	if len(enq.delayed) != 1 || enq.delayed[0] != RednoteDiscoverTaskType {
 		t.Fatalf("delayed jobs = %+v", enq.delayed)
+	}
+}
+
+func TestRednoteTrackingService_StaleJobsNoopForTerminalStatuses(t *testing.T) {
+	_, repo, _ := setupRednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+	platformFake := &fakeRednotePlatform{
+		posts: []platform.RednotePost{
+			{Title: "早起效率翻倍的方法", URL: "https://www.xiaohongshu.com/explore/note-1", NoteID: "note-1"},
+		},
+		metrics: platform.RednotePostMetrics{LikeCount: 10},
+	}
+	llmFake := &fakeRednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-1","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	enq := &fakeTrackingEnqueuer{}
+	svc := NewRednoteTrackingService(repo, platformFake, llmFake, enq, &logger)
+
+	tracking := &model.RednotePostTracking{
+		ID:                uuid.New().String(),
+		TaskID:            taskID,
+		UserID:            userID,
+		ChannelID:         channelID,
+		Status:            model.RednoteTrackingStatusStopped,
+		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
+		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
+		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
+		RunCount:          2,
+	}
+	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+		t.Fatalf("create tracking: %v", err)
+	}
+
+	if err := svc.DiscoverPublishedNote(context.Background(), tracking.ID); err != nil {
+		t.Fatalf("DiscoverPublishedNote: %v", err)
+	}
+	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err != nil {
+		t.Fatalf("CaptureMetrics: %v", err)
+	}
+
+	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if updated.Status != model.RednoteTrackingStatusStopped || updated.RunCount != 2 {
+		t.Fatalf("tracking changed after stale jobs: %+v", updated)
+	}
+	if platformFake.metricsCalls != 0 {
+		t.Fatalf("metricsCalls = %d, want 0", platformFake.metricsCalls)
+	}
+	if len(enq.delayed) != 0 {
+		t.Fatalf("delayed jobs = %+v, want none", enq.delayed)
+	}
+}
+
+func TestRednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *testing.T) {
+	_, repo, _ := setupRednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+	platformFake := &fakeRednotePlatform{metrics: platform.RednotePostMetrics{LikeCount: 99}}
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	enq := &fakeTrackingEnqueuer{}
+	svc := NewRednoteTrackingService(repo, platformFake, &fakeRednoteLLM{}, enq, &logger)
+	now := time.Now()
+	lastRun := now.Add(-time.Hour)
+	nextRun := now.Add(time.Hour)
+	tracking := &model.RednotePostTracking{
+		ID:                uuid.New().String(),
+		TaskID:            taskID,
+		UserID:            userID,
+		ChannelID:         channelID,
+		Status:            model.RednoteTrackingStatusTracking,
+		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
+		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
+		PublishedMarkedAt: now.Add(-24 * time.Hour),
+		TrackingStartedAt: &lastRun,
+		LastRunAt:         &lastRun,
+		NextRunAt:         &nextRun,
+		RunCount:          3,
+	}
+	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+		t.Fatalf("create tracking: %v", err)
+	}
+	if err := repo.RednoteMetricSnapshots().Create(context.Background(), &model.RednoteMetricSnapshot{
+		ID:           uuid.New().String(),
+		TrackingID:   tracking.ID,
+		TaskID:       taskID,
+		CapturedAt:   now.Add(-30 * time.Minute),
+		CapturedDate: model.RednoteCapturedDate(now),
+		LikeCount:    10,
+	}); err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+
+	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err != nil {
+		t.Fatalf("CaptureMetrics: %v", err)
+	}
+
+	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if updated.RunCount != 3 || !updated.LastRunAt.Equal(lastRun) || !updated.NextRunAt.Equal(nextRun) {
+		t.Fatalf("tracking changed after duplicate same-day capture: %+v", updated)
+	}
+	if platformFake.metricsCalls != 0 {
+		t.Fatalf("metricsCalls = %d, want 0", platformFake.metricsCalls)
+	}
+	if len(enq.delayed) != 0 {
+		t.Fatalf("delayed jobs = %+v, want none", enq.delayed)
+	}
+}
+
+func TestRednoteTrackingService_ResetHidesOldSnapshotsFromAnalytics(t *testing.T) {
+	svc, repo, _ := setupRednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+	oldStartedAt := time.Now().Add(-72 * time.Hour)
+	oldCapturedAt := oldStartedAt.Add(time.Hour)
+	tracking := &model.RednotePostTracking{
+		ID:                uuid.New().String(),
+		TaskID:            taskID,
+		UserID:            userID,
+		ChannelID:         channelID,
+		Status:            model.RednoteTrackingStatusStopped,
+		ProfileURL:        "https://www.xiaohongshu.com/user/profile/old",
+		NoteURL:           "https://www.xiaohongshu.com/explore/note-old",
+		PublishedMarkedAt: oldStartedAt,
+		TrackingStartedAt: &oldStartedAt,
+		RunCount:          1,
+	}
+	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+		t.Fatalf("create tracking: %v", err)
+	}
+	if err := repo.RednoteMetricSnapshots().Create(context.Background(), &model.RednoteMetricSnapshot{
+		ID:           uuid.New().String(),
+		TrackingID:   tracking.ID,
+		TaskID:       taskID,
+		CapturedAt:   oldCapturedAt,
+		CapturedDate: model.RednoteCapturedDate(oldCapturedAt),
+		LikeCount:    42,
+	}); err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+
+	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err != nil {
+		t.Fatalf("EnsureTrackingForPublishedTask: %v", err)
+	}
+	analytics, err := svc.GetTaskAnalytics(context.Background(), userID, taskID)
+	if err != nil {
+		t.Fatalf("GetTaskAnalytics: %v", err)
+	}
+	if len(analytics.Series) != 0 || analytics.Latest != nil || analytics.Deltas != nil {
+		t.Fatalf("analytics includes old snapshots after reset: %+v", analytics)
+	}
+}
+
+func TestRednoteTrackingService_EnsureTrackingForPublishedTaskRejectsForeignChannel(t *testing.T) {
+	svc, repo, _ := setupRednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+	otherUserID := uuid.New().String()
+	if err := repo.Users().Create(context.Background(), &model.User{ID: otherUserID, Email: otherUserID + "@example.com", Nickname: "Other", Password: "hashed", InviteCode: "other123"}); err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	channel, err := repo.Channels().FindByID(context.Background(), channelID)
+	if err != nil {
+		t.Fatalf("FindByID channel: %v", err)
+	}
+	channel.UserID = otherUserID
+	if err := repo.Channels().Update(context.Background(), channel); err != nil {
+		t.Fatalf("update channel: %v", err)
+	}
+
+	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err == nil {
+		t.Fatal("expected channel ownership error")
+	}
+	if _, err := repo.RednoteTrackings().FindByTaskID(context.Background(), taskID); err == nil {
+		t.Fatal("tracking should not be created for a foreign channel")
 	}
 }
 
