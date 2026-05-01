@@ -22,24 +22,29 @@ type TaskEnqueuer interface {
 	EnqueueIn(taskType string, payload []byte, delay time.Duration) error
 }
 
+type PublishedTrackingService interface {
+	EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error
+}
+
 // TypeContentGenerate is the Asynq task type for content generation.
 const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo          repository.Repository
-	executor      agent.TaskExecutor
-	logger        *zerolog.Logger
-	enqueuer      TaskEnqueuer
-	store         storage.Provider
-	creditSvc     *CreditService
-	publishingSvc *PublishingService
-	taskLogDir    string
-	workspaceSvc  *WorkspaceService
-	workspaceDir  string
-	pubsub        *RedisPubSub
-	pubsubCancel  context.CancelFunc // stops the listenCancelEvents goroutine
-	cancelFuncs   sync.Map           // taskID → context.CancelFunc
+	repo               repository.Repository
+	executor           agent.TaskExecutor
+	logger             *zerolog.Logger
+	enqueuer           TaskEnqueuer
+	store              storage.Provider
+	creditSvc          *CreditService
+	publishingSvc      *PublishingService
+	taskLogDir         string
+	workspaceSvc       *WorkspaceService
+	workspaceDir       string
+	pubsub             *RedisPubSub
+	pubsubCancel       context.CancelFunc // stops the listenCancelEvents goroutine
+	cancelFuncs        sync.Map           // taskID → context.CancelFunc
+	rednoteTrackingSvc PublishedTrackingService
 }
 
 // NewTaskService creates a new TaskService.
@@ -87,6 +92,10 @@ func (s *TaskService) Close() {
 	if s.pubsubCancel != nil {
 		s.pubsubCancel()
 	}
+}
+
+func (s *TaskService) SetRednoteTrackingService(trackingSvc PublishedTrackingService) {
+	s.rednoteTrackingSvc = trackingSvc
 }
 
 // listenCancelEvents subscribes to Redis cancel events and triggers local
@@ -702,7 +711,20 @@ func (s *TaskService) SetPublished(ctx context.Context, userID, taskID string, p
 	if task.UserID != userID {
 		return fmt.Errorf("task does not belong to user")
 	}
-	return s.repo.Tasks().SetPublished(ctx, taskID, published)
+	return s.setPublishedAndMaybeTrack(ctx, userID, task, published)
+}
+
+func (s *TaskService) setPublishedAndMaybeTrack(ctx context.Context, userID string, task *model.Task, published bool) error {
+	if err := s.repo.Tasks().SetPublished(ctx, task.ID, published); err != nil {
+		return err
+	}
+	if !published || task.Type != model.PlatformRednote || s.rednoteTrackingSvc == nil {
+		return nil
+	}
+	if err := s.rednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, task.ID); err != nil {
+		return fmt.Errorf("ensure rednote tracking: %w", err)
+	}
+	return nil
 }
 
 // Delete permanently removes a task and its associated files.

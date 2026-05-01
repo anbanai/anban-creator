@@ -24,6 +24,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/handler"
 	"github.com/royalrick/anbanwriter/server/mcp"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/platform"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/router"
 	"github.com/royalrick/anbanwriter/server/scheduler"
@@ -193,6 +194,7 @@ func main() {
 	var creditSvc *service.CreditService
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
+	var rednoteTrackingSvc *service.RednoteTrackingService
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
 
@@ -250,6 +252,14 @@ func main() {
 			}
 			log.Info().Str("endpoint", llmBaseURL).Str("model", llmModel).Msg("writing LLM client initialized")
 		}
+	}
+
+	if repo != nil {
+		rednoteTrackingSvc = service.NewRednoteTrackingService(repo, platform.NewRednoteProvider(), writingLLMClient, asynqClient, log)
+		if taskSvc != nil {
+			taskSvc.SetRednoteTrackingService(rednoteTrackingSvc)
+		}
+		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("RedNote tracking service initialized")
 	}
 
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
@@ -350,7 +360,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(taskSvc, cfg, log)
+		asynqServer = startAsynqServer(taskSvc, rednoteTrackingSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -555,7 +565,18 @@ func connectRedis(ctx context.Context, cfg *config.Config, log *zerolog.Logger) 
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(taskSvc *service.TaskService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(taskSvc *service.TaskService, rednoteTrackingSvc *service.RednoteTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+	var rednoteDiscoverHandler scheduler.RednoteTrackingHandler
+	var rednoteCaptureHandler scheduler.RednoteTrackingHandler
+	if rednoteTrackingSvc != nil {
+		rednoteDiscoverHandler = func(ctx context.Context, trackingID string) error {
+			return rednoteTrackingSvc.DiscoverPublishedNote(ctx, trackingID)
+		}
+		rednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
+			return rednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
+		}
+	}
+
 	srv := scheduler.NewTaskProcessor(
 		func(ctx context.Context, taskID, userID string) error {
 			return taskSvc.HandleExecutionFromPayload(ctx, taskID, userID)
@@ -567,6 +588,8 @@ func startAsynqServer(taskSvc *service.TaskService, cfg *config.Config, log *zer
 		func(ctx context.Context) error {
 			return taskSvc.CleanupExpiredWorkspaces(ctx)
 		},
+		rednoteDiscoverHandler,
+		rednoteCaptureHandler,
 		cfg.Redis.Addr,
 		cfg.Redis.Password,
 		cfg.Redis.DB,

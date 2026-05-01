@@ -14,9 +14,11 @@ import (
 
 // Task type constants for Asynq.
 const (
-	TypeContentGenerate = "content:generate"
-	TypePlanTrigger     = "plan:trigger"
-	TypeTaskCleanup     = "task:cleanup"
+	TypeContentGenerate       = "content:generate"
+	TypePlanTrigger           = "plan:trigger"
+	TypeTaskCleanup           = "task:cleanup"
+	TypeRednoteDiscover       = "rednote:discover"
+	TypeRednoteCaptureMetrics = "rednote:capture_metrics"
 )
 
 // TaskEnqueuer abstracts the async task enqueue mechanism.
@@ -81,11 +83,16 @@ type PlanTriggerHandler func(ctx context.Context, planID string) error
 // TaskCleanupHandler is the function signature for handling task cleanup tasks.
 type TaskCleanupHandler func(ctx context.Context) error
 
+// RednoteTrackingHandler is the function signature for RedNote tracking jobs.
+type RednoteTrackingHandler func(ctx context.Context, trackingID string) error
+
 // NewTaskProcessor creates a configured Asynq task processor with registered handlers.
 func NewTaskProcessor(
 	contentHandler ContentGenerateHandler,
 	planHandler PlanTriggerHandler,
 	cleanupHandler TaskCleanupHandler,
+	rednoteDiscoverHandler RednoteTrackingHandler,
+	rednoteCaptureHandler RednoteTrackingHandler,
 	redisAddr, redisPassword string,
 	redisDB int,
 	concurrency int,
@@ -126,6 +133,32 @@ func NewTaskProcessor(
 		return cleanupHandler(ctx)
 	})
 
+	mux.HandleFunc(TypeRednoteDiscover, func(ctx context.Context, t *asynq.Task) error {
+		trackingID, err := parseRednoteTrackingPayload(t.Payload())
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to unmarshal rednote discover payload")
+			return err
+		}
+		logger.Info().Str("tracking_id", trackingID).Msg("processing rednote discover task")
+		if rednoteDiscoverHandler == nil {
+			return fmt.Errorf("rednote discover handler unavailable")
+		}
+		return rednoteDiscoverHandler(ctx, trackingID)
+	})
+
+	mux.HandleFunc(TypeRednoteCaptureMetrics, func(ctx context.Context, t *asynq.Task) error {
+		trackingID, err := parseRednoteTrackingPayload(t.Payload())
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to unmarshal rednote capture payload")
+			return err
+		}
+		logger.Info().Str("tracking_id", trackingID).Msg("processing rednote capture metrics task")
+		if rednoteCaptureHandler == nil {
+			return fmt.Errorf("rednote capture handler unavailable")
+		}
+		return rednoteCaptureHandler(ctx, trackingID)
+	})
+
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{
 			Addr:     redisAddr,
@@ -157,6 +190,19 @@ func NewTaskProcessor(
 	)
 
 	return &TaskProcessor{server: srv, mux: mux}
+}
+
+func parseRednoteTrackingPayload(payloadBytes []byte) (string, error) {
+	var payload struct {
+		TrackingID string `json:"tracking_id"`
+	}
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return "", fmt.Errorf("unmarshal payload: %w", err)
+	}
+	if payload.TrackingID == "" {
+		return "", fmt.Errorf("tracking_id is required")
+	}
+	return payload.TrackingID, nil
 }
 
 // Start starts the Asynq worker server (non-blocking). Call Shutdown to stop.

@@ -67,6 +67,22 @@ func (m *mockEnqueuer) EnqueueIn(taskType string, payload []byte, delay time.Dur
 	return nil
 }
 
+type fakePublishedTrackingService struct {
+	calls []struct {
+		userID string
+		taskID string
+	}
+	err error
+}
+
+func (f *fakePublishedTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error {
+	f.calls = append(f.calls, struct {
+		userID string
+		taskID string
+	}{userID: userID, taskID: taskID})
+	return f.err
+}
+
 func TestTaskService_HandleExecutionFailure_PermanentAuthErrorDoesNotRetry(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
@@ -279,6 +295,67 @@ func TestTaskService_GetFiles(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Errorf("expected 0 files, got %d", len(files))
+	}
+}
+
+func TestTaskService_SetPublishedCreatesRednoteTracking(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	trackingSvc := &fakePublishedTrackingService{}
+	svc.SetRednoteTrackingService(trackingSvc)
+
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformRednote)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformRednote,
+		Status:    model.TaskStatusCompleted,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := svc.SetPublished(ctx, userID, task.ID, true); err != nil {
+		t.Fatalf("SetPublished: %v", err)
+	}
+
+	if len(trackingSvc.calls) != 1 {
+		t.Fatalf("tracking calls = %d, want 1", len(trackingSvc.calls))
+	}
+	if trackingSvc.calls[0].userID != userID || trackingSvc.calls[0].taskID != task.ID {
+		t.Fatalf("tracking call = %+v", trackingSvc.calls[0])
+	}
+}
+
+func TestTaskService_SetPublishedSkipsTrackingForNonRednoteOrUnpublish(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	trackingSvc := &fakePublishedTrackingService{}
+	svc.SetRednoteTrackingService(trackingSvc)
+
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusCompleted,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := svc.SetPublished(ctx, userID, task.ID, true); err != nil {
+		t.Fatalf("SetPublished article: %v", err)
+	}
+	if err := svc.SetPublished(ctx, userID, task.ID, false); err != nil {
+		t.Fatalf("SetPublished false: %v", err)
+	}
+	if len(trackingSvc.calls) != 0 {
+		t.Fatalf("tracking calls = %d, want 0", len(trackingSvc.calls))
 	}
 }
 
