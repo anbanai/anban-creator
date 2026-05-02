@@ -46,5 +46,5 @@ export const channelsApi = {
       profile_url: profileUrl,
       wechat_app_id: wechatAppId,
       wechat_secret: wechatSecret,
-    })),
+    }, { timeout: 120000 })),
 }
