@@ -18,6 +18,7 @@ export const tierBenefits = [
   {
     key: 'free',
     name: '免费版',
+    description: '适合轻量体验',
     creditMultiplier: '1.0x',
     platforms: ['Web 端'],
     concurrentTasks: 2,
@@ -26,6 +27,7 @@ export const tierBenefits = [
   {
     key: 'pro',
     name: '专业版',
+    description: '适合稳定创作',
     creditMultiplier: '1.2x',
     platforms: ['Web 端', 'Claude Code', 'OpenClaw'],
     concurrentTasks: 5,
@@ -34,12 +36,106 @@ export const tierBenefits = [
   {
     key: 'enterprise',
     name: '企业版',
+    description: '适合团队和深度运营',
     creditMultiplier: '1.5x',
     platforms: ['全部平台', '业务指导与辅助'],
     concurrentTasks: 10,
     recommended: false,
   },
 ] as const
+
+type TierKey = typeof tierBenefits[number]['key']
+
+export type MembershipComparisonValue = string | boolean
+
+export interface MembershipComparisonRow {
+  label: string
+  values: Record<TierKey, MembershipComparisonValue>
+}
+
+export interface MembershipComparisonGroup {
+  title: string
+  rows: MembershipComparisonRow[]
+}
+
+export const membershipComparisonGroups: MembershipComparisonGroup[] = [
+  {
+    title: '基础权益',
+    rows: [
+      {
+        label: '积分倍率',
+        values: {
+          free: '1.0x',
+          pro: '1.2x',
+          enterprise: '1.5x',
+        },
+      },
+      {
+        label: '并发任务',
+        values: {
+          free: '2 个',
+          pro: '5 个',
+          enterprise: '10 个',
+        },
+      },
+    ],
+  },
+  {
+    title: '创作能力',
+    rows: [
+      {
+        label: '可用平台',
+        values: {
+          free: 'Web 端',
+          pro: 'Web 端、Claude Code、OpenClaw',
+          enterprise: '全部平台',
+        },
+      },
+      {
+        label: '继承权益',
+        values: {
+          free: '基础权益',
+          pro: '包含免费版',
+          enterprise: '包含专业版',
+        },
+      },
+    ],
+  },
+  {
+    title: '模型能力',
+    rows: [
+      {
+        label: '自定义模型',
+        values: {
+          free: false,
+          pro: '支持',
+          enterprise: '包含专业版',
+        },
+      },
+      {
+        label: '高级模型',
+        values: {
+          free: false,
+          pro: false,
+          enterprise: '企业专享',
+        },
+      },
+    ],
+  },
+  {
+    title: '服务支持',
+    rows: [
+      {
+        label: '业务指导与辅助',
+        values: {
+          free: false,
+          pro: false,
+          enterprise: true,
+        },
+      },
+    ],
+  },
+]
 
 export const taskStatusLabel: Record<TaskStatus, string> = {
   pending: '待执行',
