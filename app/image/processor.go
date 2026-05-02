@@ -107,6 +107,19 @@ func (p *Processor) buildPrompt(userPrompt string) string {
 	return prompt
 }
 
+func allStringsEqual(ss []string) bool {
+	if len(ss) <= 1 {
+		return true
+	}
+	first := ss[0]
+	for _, s := range ss[1:] {
+		if s != first {
+			return false
+		}
+	}
+	return true
+}
+
 // UploadResult 上传结果
 type UploadResult struct {
 	MediaID   string `json:"media_id"`
@@ -300,12 +313,17 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 	}, nil
 }
 // 不下载、不压缩、不写磁盘。
-func (p *Processor) GenerateBatchRaw(prompt string, count int, size string) ([]*GenerateRawResult, error) {
+// prompts 为每张图的独立 prompt，长度即生成数量。
+func (p *Processor) GenerateBatchRaw(prompts []string, size string) ([]*GenerateRawResult, error) {
 	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
 		return nil, err
 	}
 	if p.provider == nil {
 		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
+	}
+	count := len(prompts)
+	if count == 0 {
+		return nil, fmt.Errorf("prompts is empty")
 	}
 
 	// 如果指定了尺寸，创建带覆盖尺寸的临时 provider
@@ -320,16 +338,18 @@ func (p *Processor) GenerateBatchRaw(prompt string, count int, size string) ([]*
 		}
 	}
 
-	builtPrompt := p.buildPrompt(prompt)
 	ctx := context.Background()
 	opts := &GenerateOptions{
 		RefImagePath: p.refImagePath,
 		MaxImages:    count,
 	}
 
+	// 当 provider 支持原生批量且所有 prompt 相同时，走原生批量。
+	allSame := allStringsEqual(prompts)
 	var rawResults []*GenerateResult
-	if bp, ok := activeProvider.(BatchProvider); ok {
+	if bp, ok := activeProvider.(BatchProvider); ok && allSame {
 		p.log.Info().Int("count", count).Str("provider", activeProvider.Name()).Str("size", size).Msg("using native batch generation (raw)")
+		builtPrompt := p.buildPrompt(prompts[0])
 		batchResult, err := bp.GenerateBatch(ctx, builtPrompt, opts)
 		if err != nil {
 			return nil, fmt.Errorf("batch generate images: %w", err)
@@ -349,6 +369,7 @@ func (p *Processor) GenerateBatchRaw(prompt string, count int, size string) ([]*
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
+				builtPrompt := p.buildPrompt(prompts[index])
 				singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
 				result, err := activeProvider.Generate(ctx, builtPrompt, singleOpts)
 				if err != nil {

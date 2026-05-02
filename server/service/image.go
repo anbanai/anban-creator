@@ -229,12 +229,13 @@ func (s *ImageService) GenerateImage(
 }
 
 // GenerateBatch generates multiple images using the channel's image provider.
+// prompts is a per-image prompt array; its length determines the image count.
 // Returns an array of download URLs (remote CDN URLs or data URLs) for the agent to download.
 // If outputDir is provided, also saves each image to that directory and returns file_path for each.
 func (s *ImageService) GenerateBatch(
 	ctx context.Context,
-	userID, channelID, prompt, imageType string,
-	count int,
+	userID, channelID, imageType string,
+	prompts []string,
 	outputDir, refPath, taskID, size string,
 ) (*BatchImageResult, error) {
 	ch, err := s.repo.Channels().FindByID(ctx, channelID)
@@ -251,7 +252,7 @@ func (s *ImageService) GenerateBatch(
 		processor.SetRefImage(refPath)
 	}
 
-	rawResults, err := processor.GenerateBatchRaw(prompt, count, size)
+	rawResults, err := processor.GenerateBatchRaw(prompts, size)
 	if err != nil {
 		return nil, fmt.Errorf("batch generate: %w", err)
 	}

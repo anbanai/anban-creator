@@ -31,20 +31,19 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_images",
-		Description: "Generate multiple images at once using the channel's configured image provider. Returns an array of download URLs (remote CDN URLs or data URLs) for the generated images. If output_dir is provided, the server also saves each image to that directory and returns file_path for each.",
+		Description: "Generate multiple images at once using the channel's configured image provider. Each prompt in the prompts array generates one image with its own content. Returns an array of download URLs (remote CDN URLs or data URLs) for the generated images. If output_dir is provided, the server also saves each image to that directory and returns file_path for each.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id":     map[string]any{"type": "string", "description": "Channel ID"},
-				"prompt":         map[string]any{"type": "string", "description": "Base prompt for all images"},
-				"count":          map[string]any{"type": "integer", "description": "Number of images to generate (1-20)", "minimum": 1, "maximum": 20},
+				"prompts":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Per-image prompts. Each element generates one image. Array length determines the number of images (1-20)."},
 				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Cover or content image API config"},
 				"output_dir":     map[string]any{"type": "string", "description": "Directory to save generated images (optional, server will download and save)"},
 				"size":           map[string]any{"type": "string", "description": "Image size/aspect ratio for all images (e.g., '3:4', '16:9', '1:1'). Overrides channel default when provided."},
 				"ref_image_path": map[string]any{"type": "string", "description": "Path to reference image for style consistency (optional)"},
 				"task_id":        map[string]any{"type": "string", "description": "Task ID (for logging and credit tracking)"},
 			},
-			"required": []any{"channel_id", "prompt", "count"},
+			"required": []any{"channel_id", "prompts"},
 		},
 	}, generateBatchImagesHandler)
 
@@ -152,11 +151,7 @@ func generateBatchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (
 	args := parseArgs(req.Params.Arguments)
 
 	channelID, _ := args["channel_id"].(string)
-	prompt, _ := args["prompt"].(string)
-	count := 1
-	if v, ok := args["count"].(float64); ok && int(v) > 0 {
-		count = int(v)
-	}
+	promptsRaw, _ := args["prompts"].([]any)
 	outputDir, _ := args["output_dir"].(string)
 	imageType, _ := args["image_type"].(string)
 	size, _ := args["size"].(string)
@@ -166,19 +161,30 @@ func generateBatchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (
 	if channelID == "" {
 		return errorResult("channel_id is required"), nil
 	}
-	if prompt == "" {
-		return errorResult("prompt is required"), nil
+	if len(promptsRaw) == 0 {
+		return errorResult("prompts is required and must be a non-empty array"), nil
+	}
+	if len(promptsRaw) > 20 {
+		return errorResult("prompts array must have at most 20 elements"), nil
+	}
+	prompts := make([]string, 0, len(promptsRaw))
+	for _, p := range promptsRaw {
+		s, _ := p.(string)
+		if s == "" {
+			return errorResult("each prompt in prompts array must be a non-empty string"), nil
+		}
+		prompts = append(prompts, s)
 	}
 	if imageType == "" {
 		imageType = "content"
 	}
 
 	provider, mdl := resolveImageModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, provider, mdl, count); err != nil {
+	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, provider, mdl, len(prompts)); err != nil {
 		return billingError("batch generate images", err), nil
 	}
 
-	result, err := svcs.ImageSvc.GenerateBatch(ctx, userID, channelID, prompt, imageType, count, outputDir, refPath, taskID, size)
+	result, err := svcs.ImageSvc.GenerateBatch(ctx, userID, channelID, imageType, prompts, outputDir, refPath, taskID, size)
 	if err != nil {
 		return errorResult(fmt.Sprintf("batch generate: %v", err)), nil
 	}
