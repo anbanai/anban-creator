@@ -3,8 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { Streamdown } from 'streamdown'
 import { ArrowLeft, Loader2, Download, Eye, Trash2, Copy, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
@@ -14,8 +13,9 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
+import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
-import { WorkflowReviewSummary, WorkflowStageProgress } from '@/components/TaskWorkflowPanel'
+import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import RednoteAnalyticsPanel from '@/components/tasks/RednoteAnalyticsPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant } from '@/lib/labels'
@@ -37,6 +37,7 @@ export default function TaskDetailPage() {
 
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
+  const [currentProgressMessage, setCurrentProgressMessage] = useState<string | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
@@ -83,7 +84,14 @@ export default function TaskDetailPage() {
     .filter(Boolean) ?? [])
     .slice(-MAX_PERSISTED_LOGS)
   const displayLogs = sseLogs.length > 0 ? sseLogs : persistedLogs
+  const logMarkdown = displayLogs.join('\n')
   const showLogs = displayLogs.length > 0 || Boolean(sseError) || task?.status === 'running'
+  const latestPersistedProgressMessage = [...persistedLogs].reverse()
+    .map((line) => line.replace(/^\[\d+%]\s*/, '').trim())
+    .find(Boolean)
+  const progressValue = Math.max(0, Math.min(100, task?.progress ?? 0))
+  const progressMessage = currentProgressMessage || latestPersistedProgressMessage ||
+    (task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...')
 
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
@@ -166,6 +174,7 @@ export default function TaskDetailPage() {
           const data = parsed as { progress: number; message: string }
           if (data.progress != null) {
             setSseLogs((prev) => appendLog(prev, `[${data.progress}%] ${data.message}`))
+            setCurrentProgressMessage(data.message || null)
           }
         }
         break
@@ -208,6 +217,7 @@ export default function TaskDetailPage() {
     if (task?.status === 'running') {
       setSseLogs(persistedLogs)
       setSseError(null)
+      setCurrentProgressMessage(null)
       connectSSE()
     }
     return () => {
@@ -372,29 +382,10 @@ export default function TaskDetailPage() {
         <RednoteAnalyticsPanel taskId={task.id} />
       )}
 
-      {/* Progress bar */}
-      <Card>
-        <CardBody>
-          {task.status === 'running' ? (
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium text-foreground">进度</span>
-                <span className="text-sm text-primary">{task.progress ?? 0}%</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-muted">
-                <div
-                  className="h-2 rounded-full bg-primary transition-all duration-500 animate-pulse"
-                  style={{ width: `${task.progress ?? 0}%` }}
-                />
-              </div>
-              <WorkflowStageProgress workflow={task.workflow_status} />
-            </div>
-          ) : task.status === 'completed' ? (
-            <div>
-              <p className="text-sm text-emerald-400">任务执行成功</p>
-              <WorkflowStageProgress workflow={task.workflow_status} />
-            </div>
-          ) : task.status === 'failed' ? (
+      {task.status !== 'completed' && (
+        <Card>
+          <CardBody>
+            {task.status === 'failed' ? (
             <div className="space-y-3">
               <p className="text-sm text-red-400">任务失败</p>
               {task.error && (
@@ -402,7 +393,6 @@ export default function TaskDetailPage() {
                   {task.error}
                 </p>
               )}
-              <WorkflowStageProgress workflow={task.workflow_status} />
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
                   <RefreshCw className="h-4 w-4" />
@@ -416,7 +406,7 @@ export default function TaskDetailPage() {
                 </Button>
               </div>
             </div>
-          ) : task.status === 'cancelled' ? (
+            ) : task.status === 'cancelled' ? (
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm text-muted-foreground">任务已取消</p>
               <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
@@ -424,14 +414,19 @@ export default function TaskDetailPage() {
                 再试一次
               </Button>
             </div>
-          ) : (
-            <div>
-              <p className="text-sm text-muted-foreground">任务等待执行中...</p>
-              <WorkflowStageProgress workflow={task.workflow_status} />
-            </div>
-          )}
-        </CardBody>
-      </Card>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <div className="flex w-full items-center justify-between gap-3">
+                  <span className="text-sm font-medium">进度</span>
+                  <span className="text-sm text-primary tabular-nums">{progressValue}%</span>
+                </div>
+                <Progress value={progressValue} className="w-full" />
+                <p className="w-full text-sm text-muted-foreground">{progressMessage}</p>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      )}
 
       {task.status === 'completed' && (
         <WorkflowReviewSummary workflow={task.workflow_status} />
@@ -524,18 +519,16 @@ export default function TaskDetailPage() {
               </Button>
             </div>
           </div>
-          <div ref={logContainerRef} className="max-h-96 overflow-y-auto bg-background/50 px-4 py-3 font-mono">
+          <div ref={logContainerRef} className="max-h-96 overflow-y-auto bg-background/50 px-4 py-3">
             {sseError && (
               <p className="mb-2 text-xs text-amber-400">{sseError}</p>
             )}
             {displayLogs.length === 0 ? (
               <p className="text-xs text-muted-foreground">等待输出中...</p>
             ) : (
-              displayLogs.map((log, idx) => (
-                <pre key={idx} className="mb-1 whitespace-pre-wrap text-xs text-foreground">
-                  {log}
-                </pre>
-              ))
+              <Streamdown mode="streaming" className="prose prose-sm max-w-none dark:prose-invert">
+                {logMarkdown}
+              </Streamdown>
             )}
           </div>
         </Card>
@@ -548,9 +541,9 @@ export default function TaskDetailPage() {
             <h2 className="text-sm font-semibold text-foreground">执行结果</h2>
           </div>
           <div className="max-h-64 overflow-y-auto bg-background/50 px-4 py-3 prose prose-sm max-w-none dark:prose-invert">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <Streamdown mode="static">
               {task.result.output}
-            </ReactMarkdown>
+            </Streamdown>
           </div>
         </Card>
       )}
