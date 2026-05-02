@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Card, CardBody } from '@/components/ui/Card'
 import { FilePreviewGallery } from '@/components/FilePreview'
-import TaskWorkflowPanel from '@/components/TaskWorkflowPanel'
+import { WorkflowReviewSummary, WorkflowStageProgress } from '@/components/TaskWorkflowPanel'
 import RednoteAnalyticsPanel from '@/components/tasks/RednoteAnalyticsPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant } from '@/lib/labels'
@@ -368,10 +368,73 @@ export default function TaskDetailPage() {
         </Card>
       </div>
 
-      <TaskWorkflowPanel workflow={task.workflow_status} />
-
       {task.type === 'rednote' && task.published && (
         <RednoteAnalyticsPanel taskId={task.id} />
+      )}
+
+      {/* Progress bar */}
+      <Card>
+        <CardBody>
+          {task.status === 'running' ? (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium text-foreground">进度</span>
+                <span className="text-sm text-primary">{task.progress ?? 0}%</span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-muted">
+                <div
+                  className="h-2 rounded-full bg-primary transition-all duration-500 animate-pulse"
+                  style={{ width: `${task.progress ?? 0}%` }}
+                />
+              </div>
+              <WorkflowStageProgress workflow={task.workflow_status} />
+            </div>
+          ) : task.status === 'completed' ? (
+            <div>
+              <p className="text-sm text-emerald-400">任务执行成功</p>
+              <WorkflowStageProgress workflow={task.workflow_status} />
+            </div>
+          ) : task.status === 'failed' ? (
+            <div className="space-y-3">
+              <p className="text-sm text-red-400">任务失败</p>
+              {task.error && (
+                <p className="mt-2 bg-red-900/20 border border-red-900/30 rounded-lg px-3 py-2 text-sm text-red-300">
+                  {task.error}
+                </p>
+              )}
+              <WorkflowStageProgress workflow={task.workflow_status} />
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+                  <RefreshCw className="h-4 w-4" />
+                  重新执行
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')}>
+                  返回任务列表
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => navigate('/channels')}>
+                  检查账号配置
+                </Button>
+              </div>
+            </div>
+          ) : task.status === 'cancelled' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm text-muted-foreground">任务已取消</p>
+              <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+                <RefreshCw className="h-4 w-4" />
+                再试一次
+              </Button>
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm text-muted-foreground">任务等待执行中...</p>
+              <WorkflowStageProgress workflow={task.workflow_status} />
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      {task.status === 'completed' && (
+        <WorkflowReviewSummary workflow={task.workflow_status} />
       )}
 
       {/* Files (top priority - most useful content) */}
@@ -433,59 +496,6 @@ export default function TaskDetailPage() {
           </div>
         </Card>
       )}
-
-      {/* Progress bar */}
-      <Card>
-        <CardBody>
-          {task.status === 'running' ? (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-foreground">进度</span>
-                <span className="text-sm text-primary">{task.progress ?? 0}%</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-muted">
-                <div
-                  className="h-2 rounded-full bg-primary transition-all duration-500 animate-pulse"
-                  style={{ width: `${task.progress ?? 0}%` }}
-                />
-              </div>
-            </div>
-          ) : task.status === 'completed' ? (
-            <p className="text-sm text-emerald-400">任务执行成功</p>
-          ) : task.status === 'failed' ? (
-            <div className="space-y-3">
-              <p className="text-sm text-red-400">任务失败</p>
-              {task.error && (
-                <p className="mt-2 bg-red-900/20 border border-red-900/30 rounded-lg px-3 py-2 text-sm text-red-300">
-                  {task.error}
-                </p>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
-                  <RefreshCw className="h-4 w-4" />
-                  重新执行
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')}>
-                  返回任务列表
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigate('/channels')}>
-                  检查账号配置
-                </Button>
-              </div>
-            </div>
-          ) : task.status === 'cancelled' ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm text-muted-foreground">任务已取消</p>
-              <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
-                <RefreshCw className="h-4 w-4" />
-                再试一次
-              </Button>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">任务等待执行中...</p>
-          )}
-        </CardBody>
-      </Card>
 
       {/* Live Output / SSE Logs */}
       {showLogs && (
