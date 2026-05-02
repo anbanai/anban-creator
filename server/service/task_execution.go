@@ -799,11 +799,21 @@ func extractXlsDraftFromWorkspace(workDir, title string) (*XlsPublishRequest, er
 // buildNoOutputFilesError returns a diagnostic error message when agent produces no output files.
 // Differentiates between "no tool uses" (model/agent issue) and "tool uses but no files" (MCP tool errors).
 func buildNoOutputFilesError(result *agent.ExecutionResult) string {
+	if result.ToolErrorCount > 0 && result.LastToolError != "" {
+		tool := result.LastToolErrorTool
+		if tool == "" {
+			tool = "unknown_tool"
+		}
+		return fmt.Sprintf(
+			"agent execution produced no output files (model=%s, num_turns=%d, tool_uses=%d, tool_errors=%d, output_files=0); "+
+				"last MCP tool error: %s failed: %s",
+			result.Model, result.NumTurns, result.ToolUseCount, result.ToolErrorCount, tool, result.LastToolError,
+		)
+	}
 	if result.ToolUseCount > 0 {
 		return fmt.Sprintf(
 			"agent execution produced no output files (model=%s, num_turns=%d, tool_uses=%d, output_files=0); "+
-				"agent used tools but produced no output files — MCP tools may have returned errors "+
-				"(check user model config in Studio), or files were written to an unexpected location",
+				"agent used tools but produced no output files; files may have been written to an unexpected location",
 			result.Model, result.NumTurns, result.ToolUseCount,
 		)
 	}

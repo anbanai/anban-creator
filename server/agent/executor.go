@@ -142,6 +142,9 @@ type ExecutionResult struct {
 	NoOutputFiles     bool   `json:"no_output_files,omitempty"`
 	AgentLikelyFailed bool   `json:"agent_likely_failed,omitempty"`
 	ToolUseCount      int    `json:"tool_use_count,omitempty"`
+	ToolErrorCount    int    `json:"tool_error_count,omitempty"`
+	LastToolErrorTool string `json:"last_tool_error_tool,omitempty"`
+	LastToolError     string `json:"last_tool_error,omitempty"`
 	Model             string `json:"model,omitempty"` // Claude Code agent model (from config.yaml claude.model)
 }
 
@@ -358,6 +361,10 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	var resultText string
 	var execErr error
 	var toolUseCount int
+	var toolErrorCount int
+	var lastToolErrorTool string
+	var lastToolError string
+	toolUseNames := make(map[string]string)
 	var turnNum int
 	var resultMsg *claudecode.ResultMessage
 
@@ -404,6 +411,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 						}
 					case *claudecode.ToolUseBlock:
 						toolUseCount++
+						if b.ToolUseID != "" {
+							toolUseNames[b.ToolUseID] = b.Name
+						}
 						if opts.OnProgress != nil {
 							opts.OnProgress(opts.Task.ID, fmt.Sprintf("Using tool: %s", b.Name))
 						}
@@ -421,15 +431,31 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 							opts.LogWriter.WriteToolUse(turnNum, b.Name, string(inputJSON))
 						}
 					case *claudecode.ToolResultBlock:
-						if b.Content != nil {
-							contentJSON, _ := json.Marshal(b.Content)
-							contentStr := string(contentJSON)
-							if len(contentStr) > 1000 {
-								contentStr = contentStr[:1000] + "...(truncated)"
+						contentJSON, _ := json.Marshal(b.Content)
+						contentStr := string(contentJSON)
+						if len(contentStr) > 1000 {
+							contentStr = contentStr[:1000] + "...(truncated)"
+						}
+						toolName := toolUseNames[b.ToolUseID]
+						if b.IsError != nil && *b.IsError {
+							toolErrorCount++
+							lastToolErrorTool = toolName
+							lastToolError = compactToolResultContent(b.Content)
+							errEvt := e.logger.Error().
+								Str("task_id", opts.Task.ID).
+								Str("tool_use_id", b.ToolUseID).
+								Str("tool", toolName).
+								Str("error", lastToolError)
+							if lastToolError == "" {
+								errEvt = errEvt.Str("content", contentStr)
 							}
+							errEvt.Msg("claude tool result error")
+						}
+						if b.Content != nil {
 							e.logger.Debug().
 								Str("task_id", opts.Task.ID).
 								Str("tool_use_id", b.ToolUseID).
+								Str("tool", toolName).
 								Str("content", contentStr).
 								Msg("claude tool result")
 							if opts.LogWriter != nil {
@@ -508,10 +534,14 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			opts.LogWriter.WriteResult(false, 0, 0, nil, nil)
 		}
 		return &ExecutionResult{
-			Success: false,
-			Error:   err.Error(),
-			WorkDir: workDir,
-			Model:   model,
+			Success:           false,
+			Error:             err.Error(),
+			WorkDir:           workDir,
+			ToolUseCount:      toolUseCount,
+			ToolErrorCount:    toolErrorCount,
+			LastToolErrorTool: lastToolErrorTool,
+			LastToolError:     lastToolError,
+			Model:             model,
 		}, nil
 	}
 
@@ -520,12 +550,15 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			opts.LogWriter.WriteError(execErr.Error())
 		}
 		result := &ExecutionResult{
-			Success:      false,
-			Error:        execErr.Error(),
-			WorkDir:      workDir,
-			LogText:      resultText,
-			ToolUseCount: toolUseCount,
-			Model:        model,
+			Success:           false,
+			Error:             execErr.Error(),
+			WorkDir:           workDir,
+			LogText:           resultText,
+			ToolUseCount:      toolUseCount,
+			ToolErrorCount:    toolErrorCount,
+			LastToolErrorTool: lastToolErrorTool,
+			LastToolError:     lastToolError,
+			Model:             model,
 		}
 		if resultMsg != nil {
 			result.NumTurns = resultMsg.NumTurns
@@ -546,11 +579,14 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	result := &ExecutionResult{
-		Success:      true,
-		WorkDir:      workDir,
-		LogText:      resultText,
-		ToolUseCount: toolUseCount,
-		Model:        model,
+		Success:           true,
+		WorkDir:           workDir,
+		LogText:           resultText,
+		ToolUseCount:      toolUseCount,
+		ToolErrorCount:    toolErrorCount,
+		LastToolErrorTool: lastToolErrorTool,
+		LastToolError:     lastToolError,
+		Model:             model,
 	}
 	if resultMsg != nil {
 		result.NumTurns = resultMsg.NumTurns
@@ -617,6 +653,46 @@ func CountMeaningfulFiles(workDir string) int {
 		return nil
 	})
 	return count
+}
+
+func compactToolResultContent(content any) string {
+	var text string
+	switch v := content.(type) {
+	case string:
+		text = v
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			switch typed := item.(type) {
+			case string:
+				parts = append(parts, typed)
+			case map[string]any:
+				if s, ok := typed["text"].(string); ok {
+					parts = append(parts, s)
+					continue
+				}
+				b, _ := json.Marshal(typed)
+				if len(b) > 0 {
+					parts = append(parts, string(b))
+				}
+			default:
+				b, _ := json.Marshal(typed)
+				if len(b) > 0 {
+					parts = append(parts, string(b))
+				}
+			}
+		}
+		text = strings.Join(parts, " ")
+	default:
+		b, _ := json.Marshal(v)
+		text = string(b)
+	}
+
+	text = strings.TrimSpace(strings.Join(strings.Fields(text), " "))
+	if len([]rune(text)) > 1000 {
+		text = string([]rune(text)[:1000]) + "...(truncated)"
+	}
+	return text
 }
 
 // MarshalResultJSON serializes an ExecutionResult to JSON.

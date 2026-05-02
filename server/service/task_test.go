@@ -16,6 +16,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/royalrick/anbanwriter/server/agent"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/storage"
@@ -140,6 +141,44 @@ func TestTaskService_HandleExecutionFailure_PermanentAuthErrorDoesNotRetry(t *te
 	}
 	if len(enqueuer.enqueued) != 0 {
 		t.Fatalf("auth error should not enqueue retries, got %d", len(enqueuer.enqueued))
+	}
+}
+
+func TestBuildNoOutputFilesErrorIncludesLastToolError(t *testing.T) {
+	result := &agent.ExecutionResult{
+		Model:             "claude-test",
+		NumTurns:          10,
+		ToolUseCount:      9,
+		ToolErrorCount:    1,
+		LastToolErrorTool: "generate_images",
+		LastToolError:     "batch generate: provider rejected model",
+	}
+
+	msg := buildNoOutputFilesError(result)
+	if !strings.Contains(msg, "tool_errors=1") {
+		t.Fatalf("error = %q, want tool error count", msg)
+	}
+	if !strings.Contains(msg, "generate_images failed: batch generate: provider rejected model") {
+		t.Fatalf("error = %q, want last MCP tool error", msg)
+	}
+	if strings.Contains(msg, "check user model config") {
+		t.Fatalf("error = %q, should not use old generic model-config hint", msg)
+	}
+}
+
+func TestBuildNoOutputFilesErrorWithoutToolErrorKeepsFallback(t *testing.T) {
+	result := &agent.ExecutionResult{
+		Model:        "",
+		NumTurns:     10,
+		ToolUseCount: 9,
+	}
+
+	msg := buildNoOutputFilesError(result)
+	if !strings.Contains(msg, "tool_uses=9") {
+		t.Fatalf("error = %q, want tool use count", msg)
+	}
+	if !strings.Contains(msg, "files may have been written to an unexpected location") {
+		t.Fatalf("error = %q, want fallback location diagnostic", msg)
 	}
 }
 

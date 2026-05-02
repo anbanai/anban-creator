@@ -441,6 +441,18 @@ func TestCountMeaningfulFiles(t *testing.T) {
 			want: 2,
 		},
 		{
+			name: "rednote archived files",
+			setup: func(t *testing.T, dir string) {
+				archiveDir := filepath.Join(dir, "output", "rednote", "测试标题")
+				os.MkdirAll(archiveDir, 0755)
+				os.WriteFile(filepath.Join(archiveDir, "content.md"), []byte("# 测试标题"), 0644)
+				os.WriteFile(filepath.Join(archiveDir, "image-plan.md"), []byte("# 图片内容规划"), 0644)
+				os.WriteFile(filepath.Join(archiveDir, "cover.png"), []byte("pngdata"), 0644)
+				os.WriteFile(filepath.Join(archiveDir, "tail.png"), []byte("pngdata"), 0644)
+			},
+			want: 4,
+		},
+		{
 			name: "mixed with excluded",
 			setup: func(t *testing.T, dir string) {
 				os.MkdirAll(filepath.Join(dir, ".anbanwriter"), 0755)
@@ -459,6 +471,69 @@ func TestCountMeaningfulFiles(t *testing.T) {
 			got := CountMeaningfulFiles(dir)
 			if got != tt.want {
 				t.Errorf("CountMeaningfulFiles = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecutionResultSerializesToolErrors(t *testing.T) {
+	result := &ExecutionResult{
+		Success:           true,
+		ToolUseCount:      3,
+		ToolErrorCount:    1,
+		LastToolErrorTool: "generate_images",
+		LastToolError:     "image provider rejected model",
+	}
+
+	raw, err := MarshalResultJSON(result)
+	if err != nil {
+		t.Fatalf("MarshalResultJSON: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got["tool_error_count"] != float64(1) {
+		t.Fatalf("tool_error_count = %v, want 1", got["tool_error_count"])
+	}
+	if got["last_tool_error_tool"] != "generate_images" {
+		t.Fatalf("last_tool_error_tool = %v, want generate_images", got["last_tool_error_tool"])
+	}
+	if got["last_tool_error"] != "image provider rejected model" {
+		t.Fatalf("last_tool_error = %v, want image provider rejected model", got["last_tool_error"])
+	}
+}
+
+func TestCompactToolResultContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content any
+		want    string
+	}{
+		{
+			name:    "string content",
+			content: "  generate image failed\nbecause model is invalid  ",
+			want:    "generate image failed because model is invalid",
+		},
+		{
+			name: "text content array",
+			content: []any{
+				map[string]any{"type": "text", "text": "batch generate: provider rejected model"},
+			},
+			want: "batch generate: provider rejected model",
+		},
+		{
+			name:    "nil content",
+			content: nil,
+			want:    "null",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compactToolResultContent(tt.content); got != tt.want {
+				t.Fatalf("compactToolResultContent() = %q, want %q", got, tt.want)
 			}
 		})
 	}
