@@ -150,15 +150,15 @@ func TestBuildNoOutputFilesErrorIncludesLastToolError(t *testing.T) {
 		NumTurns:          10,
 		ToolUseCount:      9,
 		ToolErrorCount:    1,
-		LastToolErrorTool: "generate_images",
-		LastToolError:     "batch generate: provider rejected model",
+		LastToolErrorTool: "generate_image",
+		LastToolError:     "provider rejected model",
 	}
 
 	msg := buildNoOutputFilesError(result)
 	if !strings.Contains(msg, "tool_errors=1") {
 		t.Fatalf("error = %q, want tool error count", msg)
 	}
-	if !strings.Contains(msg, "generate_images failed: batch generate: provider rejected model") {
+	if !strings.Contains(msg, "generate_image failed: provider rejected model") {
 		t.Fatalf("error = %q, want last MCP tool error", msg)
 	}
 	if strings.Contains(msg, "check user model config") {

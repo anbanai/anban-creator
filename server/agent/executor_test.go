@@ -481,7 +481,7 @@ func TestExecutionResultSerializesToolErrors(t *testing.T) {
 		Success:           true,
 		ToolUseCount:      3,
 		ToolErrorCount:    1,
-		LastToolErrorTool: "generate_images",
+		LastToolErrorTool: "generate_image",
 		LastToolError:     "image provider rejected model",
 	}
 
@@ -497,8 +497,8 @@ func TestExecutionResultSerializesToolErrors(t *testing.T) {
 	if got["tool_error_count"] != float64(1) {
 		t.Fatalf("tool_error_count = %v, want 1", got["tool_error_count"])
 	}
-	if got["last_tool_error_tool"] != "generate_images" {
-		t.Fatalf("last_tool_error_tool = %v, want generate_images", got["last_tool_error_tool"])
+	if got["last_tool_error_tool"] != "generate_image" {
+		t.Fatalf("last_tool_error_tool = %v, want generate_image", got["last_tool_error_tool"])
 	}
 	if got["last_tool_error"] != "image provider rejected model" {
 		t.Fatalf("last_tool_error = %v, want image provider rejected model", got["last_tool_error"])

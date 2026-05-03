@@ -75,7 +75,7 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		}
 
 		// Set platform-specific default sizes on the ImageAPI configs.
-		// These are used by generate_images (which reads apiCfg.Size).
+		// These are used by generate_image (which reads apiCfg.Size).
 		// Note: Size is set even when Cover/Content config is nil, so the default
 		// is available if the user configures provider/key later.
 		switch ch.Platform {
