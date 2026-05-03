@@ -40,31 +40,14 @@ func TestExtractImages_OnlineImages(t *testing.T) {
 	}
 }
 
-func TestExtractImages_AIImages(t *testing.T) {
-	markdown := "![cover](__generate:a beautiful sunset__)\ntext"
-	conv := NewConverter(nil).(*converter)
-	images := conv.ExtractImages(markdown)
-
-	if len(images) != 1 {
-		t.Fatalf("expected 1 image, got %d", len(images))
-	}
-	if images[0].Type != ImageTypeAI {
-		t.Errorf("images[0].Type = %q, want %q", images[0].Type, ImageTypeAI)
-	}
-	if images[0].AIPrompt != "a beautiful sunset" {
-		t.Errorf("images[0].AIPrompt = %q", images[0].AIPrompt)
-	}
-}
-
 func TestExtractImages_MixedTypes(t *testing.T) {
-	markdown := "![local](./a.jpg)\n![online](https://x.com/b.png)\n![ai](__generate:prompt__)"
+	markdown := "![local](./a.jpg)\n![online](https://x.com/b.png)"
 	conv := NewConverter(nil).(*converter)
 	images := conv.ExtractImages(markdown)
 
-	if len(images) != 3 {
-		t.Fatalf("expected 3 images, got %d", len(images))
+	if len(images) != 2 {
+		t.Fatalf("expected 2 images, got %d", len(images))
 	}
-	// Indices should be globally sequential
 	for i, img := range images {
 		if img.Index != i {
 			t.Errorf("images[%d].Index = %d, want %d", i, img.Index, i)
@@ -75,9 +58,6 @@ func TestExtractImages_MixedTypes(t *testing.T) {
 	}
 	if images[1].Type != ImageTypeOnline {
 		t.Errorf("images[1].Type = %q", images[1].Type)
-	}
-	if images[2].Type != ImageTypeAI {
-		t.Errorf("images[2].Type = %q", images[2].Type)
 	}
 }
 
@@ -155,11 +135,11 @@ func TestImageProcessor_CountImages(t *testing.T) {
 
 func TestImageProcessor_ParseImageSyntax(t *testing.T) {
 	p := NewImageProcessor()
-	markdown := "![local](./a.jpg)\n![online](https://x.com/b.png)\n![ai](__generate:prompt__)"
+	markdown := "![local](./a.jpg)\n![online](https://x.com/b.png)"
 
 	refs := p.ParseImageSyntax(markdown)
-	if len(refs) != 3 {
-		t.Fatalf("expected 3 refs, got %d", len(refs))
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 refs, got %d", len(refs))
 	}
 
 	if refs[0].Type != ImageTypeLocal {
@@ -167,8 +147,5 @@ func TestImageProcessor_ParseImageSyntax(t *testing.T) {
 	}
 	if refs[1].Type != ImageTypeOnline {
 		t.Errorf("refs[1].Type = %q", refs[1].Type)
-	}
-	if refs[2].Type != ImageTypeAI {
-		t.Errorf("refs[2].Type = %q", refs[2].Type)
 	}
 }

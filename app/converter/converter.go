@@ -16,7 +16,6 @@ type ImageType string
 const (
 	ImageTypeLocal  ImageType = "local"  // 本地图片
 	ImageTypeOnline ImageType = "online" // 在线图片
-	ImageTypeAI     ImageType = "ai"     // AI 生成图片
 )
 
 // ConvertRequest 转换请求
@@ -36,7 +35,6 @@ type ImageRef struct {
 	Placeholder string    // HTML 中的占位符 <!-- IMG:0 -->
 	WechatURL   string    // 上传后的 URL (处理完成后)
 	Type        ImageType // 图片类型
-	AIPrompt    string    // AI 图片的生成提示词
 }
 
 // ConvertResult 转换结果
@@ -134,20 +132,6 @@ func (c *converter) ExtractImages(markdown string) []ImageRef {
 		}
 	}
 
-	// 匹配 AI 生成图片: ![alt](__generate:prompt__)
-	aiPattern := regexp.MustCompile(`!\[([^\]]*)\]\(__generate:([^)]+)__\)`)
-	offset = len(images)
-	for i, match := range aiPattern.FindAllStringSubmatch(markdown, -1) {
-		if len(match) >= 3 {
-			images = append(images, ImageRef{
-				Index:       offset + i,
-				Original:    match[2],
-				Placeholder: "",
-				Type:        ImageTypeAI,
-				AIPrompt:    match[2],
-			})
-		}
-	}
 
 	return images
 }

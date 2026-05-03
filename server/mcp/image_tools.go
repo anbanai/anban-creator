@@ -68,23 +68,6 @@ func registerImageTools(server *mcp.Server) {
 			"required": []any{"channel_id", "url"},
 		},
 	}, downloadImageHandler)
-
-	server.AddTool(&mcp.Tool{
-		Name:        "generate_images_from_markdown",
-		Description: "Extract AI image placeholders (__generate:prompt__) from Markdown content, generate all images, and optionally upload them. Returns download URLs (remote CDN URLs or data URLs) and/or CDN URLs. Requires task_id for logging and credit tracking.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"channel_id":   map[string]any{"type": "string", "description": "Channel ID (determines image API config)"},
-				"markdown":     map[string]any{"type": "string", "description": "Markdown content containing AI image placeholders"},
-				"image_type":   map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use cover or content image API config", "default": "content"},
-				"style_prompt": map[string]any{"type": "string", "description": "Style prompt prepended to all image prompts (optional)"},
-				"upload":       map[string]any{"type": "boolean", "description": "Upload generated images to WeChat CDN", "default": false},
-				"task_id":      map[string]any{"type": "string", "description": "Task ID (required, for logging and credit tracking)"},
-			},
-			"required": []any{"channel_id", "markdown", "task_id"},
-		},
-	}, batchGenerateFromMarkdownHandler)
 }
 
 func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -200,44 +183,6 @@ func downloadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	result, err := svcs.ImageSvc.DownloadImage(ctx, userID, channelID, url, upload)
 	if err != nil {
 		return errorResult(fmt.Sprintf("download image: %v", err)), nil
-	}
-
-	return textResult(result)
-}
-
-func batchGenerateFromMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.ImageSvc == nil {
-		return errorResult("image service not available"), nil
-	}
-	userID := getUserID(ctx)
-	args := parseArgs(req.Params.Arguments)
-
-	channelID, _ := args["channel_id"].(string)
-	markdown, _ := args["markdown"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
-	}
-	if markdown == "" {
-		return errorResult("markdown is required"), nil
-	}
-
-	imageType, _ := args["image_type"].(string)
-	if imageType == "" {
-		imageType = "content"
-	}
-	stylePrompt, _ := args["style_prompt"].(string)
-	taskID, _ := args["task_id"].(string)
-	if taskID == "" {
-		return errorResult("task_id is required"), nil
-	}
-	upload := false
-	if v, ok := args["upload"].(bool); ok {
-		upload = v
-	}
-
-	result, err := svcs.ImageSvc.BatchGenerateFromMarkdown(ctx, userID, channelID, markdown, imageType, stylePrompt, upload, taskID)
-	if err != nil {
-		return errorResult(fmt.Sprintf("batch generate from markdown: %v", err)), nil
 	}
 
 	return textResult(result)

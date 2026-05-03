@@ -13,7 +13,7 @@ import (
 func registerWritingTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "write_article",
-		Description: "Generate an article using the channel's configured writing style and an LLM. The server assembles the writing prompt from the channel's style settings, calls the LLM, and returns the article text in Markdown format with optional image generation placeholders (__generate:prompt__).",
+		Description: "Generate an article using the channel's configured writing style and an LLM. The server assembles the writing prompt from the channel's style settings, calls the LLM, and returns the article text in Markdown format.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

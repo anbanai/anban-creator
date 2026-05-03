@@ -115,8 +115,6 @@ func (g *articleGenerator) buildPrompt(req *GenerateRequest) string {
 
 	// 添加配图要求
 	prompt.WriteString("\n\n## 配图要求\n")
-	prompt.WriteString("在文章的每个 ## 章节中，至少插入一个图片占位符，格式为：\n")
-	prompt.WriteString("![简短描述](__generate:从章节内容提炼的具体图片生成提示词__)\n\n")
 	prompt.WriteString("提示词要求：\n")
 	prompt.WriteString("- 必须与所在章节的具体内容强相关，包含 2-3 个章节关键词\n")
 	prompt.WriteString("- 格式：[核心主题] + [具体场景/物体] + [视觉风格]，长度 30-80 字\n")

@@ -43,13 +43,6 @@ func (d *Downloader) HandleToolResult(ctx context.Context, call trackedToolCall,
 	case "generate_image":
 		target := d.singleTargetPath(call, payloads[0])
 		return d.downloadToPath(ctx, payloads[0].DownloadURL, target)
-	case "generate_images_from_markdown":
-		for _, payload := range payloads {
-			target := d.batchTargetPath(call, payload)
-			if err := d.downloadToPath(ctx, payload.DownloadURL, target); err != nil {
-				return err
-			}
-		}
 	}
 
 	return nil
@@ -126,25 +119,6 @@ func (d *Downloader) singleTargetPath(call trackedToolCall, payload downloadPayl
 		}
 	}
 	return "generated.png"
-}
-
-func (d *Downloader) batchTargetPath(call trackedToolCall, payload downloadPayload) string {
-	outputDir, _ := call.Input["output_dir"].(string)
-	outputDir = strings.TrimSpace(outputDir)
-	fileName := filepath.Base(payload.FilePath)
-	if fileName == "." || fileName == "" || fileName == string(filepath.Separator) {
-		// 只在非 data URL 时从 URL 提取文件名
-		if !strings.HasPrefix(payload.DownloadURL, "data:") {
-			fileName = filepath.Base(payload.DownloadURL)
-		}
-	}
-	if fileName == "" || fileName == "." {
-		fileName = fmt.Sprintf("generated-%d.png", payload.Index)
-	}
-	if outputDir == "" {
-		return fileName
-	}
-	return filepath.Join(outputDir, fileName)
 }
 
 func (d *Downloader) resolveWorkspacePath(target string) (string, error) {

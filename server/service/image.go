@@ -14,7 +14,6 @@ import (
 	"github.com/rs/zerolog"
 
 	appconfig "github.com/royalrick/anbanwriter/app/config"
-	"github.com/royalrick/anbanwriter/app/converter"
 	"github.com/royalrick/anbanwriter/app/image"
 	"github.com/royalrick/anbanwriter/server/agent"
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
@@ -45,21 +44,6 @@ type DownloadImageResult struct {
 	URL       string `json:"url,omitempty"`
 	MediaID   string `json:"media_id,omitempty"`
 	WechatURL string `json:"wechat_url,omitempty"`
-}
-
-// BatchMarkdownImageItem is a single item in batch markdown image generation results.
-type BatchMarkdownImageItem struct {
-	Index       int    `json:"index"`
-	Prompt      string `json:"prompt"`
-	FilePath    string `json:"file_path,omitempty"`
-	DownloadURL string `json:"download_url,omitempty"`
-	URL         string `json:"url,omitempty"`
-}
-
-// BatchMarkdownResult is the response for batch image generation from markdown.
-type BatchMarkdownResult struct {
-	Count   int                      `json:"count"`
-	Results []BatchMarkdownImageItem `json:"results"`
 }
 
 // ImageService handles image generation, upload, and compression
@@ -411,114 +395,6 @@ func (s *ImageService) downloadAndUploadToStorage(ctx context.Context, imageURL 
 	return &DownloadImageResult{
 		URL: uploadResult.URL,
 	}, nil
-}
-
-// BatchGenerateFromMarkdown extracts AI image placeholders from Markdown content,
-// generates all images, and optionally uploads them.
-func (s *ImageService) BatchGenerateFromMarkdown(
-	ctx context.Context,
-	userID, channelID, markdown, imageType, stylePrompt string,
-	upload bool,
-	taskID string,
-) (*BatchMarkdownResult, error) {
-	if taskID == "" {
-		return nil, fmt.Errorf("task_id is required for batch markdown image generation")
-	}
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
-	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
-	}
-
-	processor, err := s.buildProcessor(ctx, ch, imageType)
-	if err != nil {
-		return nil, err
-	}
-
-	// Extract AI image references from markdown.
-	nopLog := zerolog.Nop()
-	conv := converter.NewConverter(&nopLog)
-	refs := conv.ExtractImages(markdown)
-
-	// Filter to AI-only images.
-	var aiRefs []converter.ImageRef
-	for _, ref := range refs {
-		if ref.Type == converter.ImageTypeAI {
-			aiRefs = append(aiRefs, ref)
-		}
-	}
-
-	if len(aiRefs) == 0 {
-		return &BatchMarkdownResult{
-			Count:   0,
-			Results: []BatchMarkdownImageItem{},
-		}, nil
-	}
-
-	results := make([]BatchMarkdownImageItem, 0, len(aiRefs))
-	for _, ref := range aiRefs {
-		prompt := ref.AIPrompt
-		if stylePrompt != "" {
-			prompt = stylePrompt + "\n\n" + prompt
-		}
-
-		rawResult, err := processor.GenerateRaw(prompt)
-		if err != nil {
-			s.logger.Warn().Err(err).
-				Int("index", ref.Index).
-				Str("prompt", prompt).
-				Msg("failed to generate image from markdown, skipping")
-			results = append(results, BatchMarkdownImageItem{
-				Index:  ref.Index,
-				Prompt: prompt,
-			})
-			continue
-		}
-
-		item := BatchMarkdownImageItem{
-			Index:       ref.Index,
-			Prompt:      prompt,
-			DownloadURL: rawResult.URL,
-		}
-
-		// Optionally upload the generated image to WeChat CDN.
-		if upload {
-			uploadResult, uploadErr := s.uploadFromRawURL(ctx, processor, rawResult.URL)
-			if uploadErr != nil {
-				s.logger.Warn().Err(uploadErr).
-					Int("index", ref.Index).
-					Str("url", rawResult.URL).
-					Msg("failed to upload generated image")
-			} else {
-				item.URL = uploadResult.WechatURL
-			}
-		}
-
-		results = append(results, item)
-	}
-
-	return &BatchMarkdownResult{
-		Count:   len(results),
-		Results: results,
-	}, nil
-}
-
-// uploadFromRawURL downloads an image from a remote URL or data URL to a temp file,
-// then uploads it to WeChat CDN via the processor.
-func (s *ImageService) uploadFromRawURL(ctx context.Context, processor *image.Processor, rawURL string) (*image.UploadResult, error) {
-	var localPath string
-	var err error
-
-	if strings.HasPrefix(rawURL, "data:") {
-		localPath, err = s.dataURLToTempFile(rawURL)
-	} else {
-		localPath, err = s.downloadURLToTempFile(rawURL)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("prepare image for upload: %w", err)
-	}
-	defer os.RemoveAll(filepath.Dir(localPath))
-
-	return processor.UploadLocalImage(localPath)
 }
 
 // dataURLToTempFile decodes a data URL and writes the content to a temp file.

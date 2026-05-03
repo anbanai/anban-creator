@@ -166,19 +166,5 @@ func (p *imageProcessor) ParseImageSyntax(markdown string) []ImageRef {
 		}
 	}
 
-	// 匹配 AI 生成图片: ![alt](__generate:prompt__)
-	aiPattern := regexp.MustCompile(`!\[([^\]]*)\]\(__generate:([^)]+)__\)`)
-	for _, match := range aiPattern.FindAllStringSubmatch(markdown, -1) {
-		if len(match) >= 3 {
-			images = append(images, ImageRef{
-				Index:    index,
-				Original: match[2],
-				Type:     ImageTypeAI,
-				AIPrompt: match[2],
-			})
-			index++
-		}
-	}
-
 	return images
 }

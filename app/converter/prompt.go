@@ -200,14 +200,6 @@ func (pb *PromptBuilder) BuildPromptFromTheme(theme *Theme, markdown string, var
 		prompt = strings.ReplaceAll(prompt, placeholder, value)
 	}
 
-	// 如果 Markdown 包含 AI 图片占位符，追加处理规则
-	if strings.Contains(markdown, "__generate:") {
-		prompt += "\n\n【重要】图片处理规则：\n" +
-			"Markdown 中形如 ![描述](__generate:提示词__) 的标记是图片占位符。\n" +
-			"转换 HTML 时，必须将每个这样的标记转换为 <!-- IMG:N --> 格式（N 从 0 开始按在文章中出现的顺序递增）。\n" +
-			"占位符应放在对应段落之后，保持原有的图文位置关系。不要删除任何图片标记。"
-	}
-
 	return prompt, nil
 }
 
