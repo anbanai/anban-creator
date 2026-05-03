@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/app/wechat"
@@ -105,19 +103,6 @@ func (p *Processor) buildPrompt(userPrompt string) string {
 	}
 
 	return prompt
-}
-
-func allStringsEqual(ss []string) bool {
-	if len(ss) <= 1 {
-		return true
-	}
-	first := ss[0]
-	for _, s := range ss[1:] {
-		if s != first {
-			return false
-		}
-	}
-	return true
 }
 
 // UploadResult 上传结果
@@ -227,13 +212,6 @@ type GenerateOnlyResult struct {
 	url      string // 原始 URL（远程）或 provider 临时路径，仅内部使用
 }
 
-// BatchImageResult 组图生成结果（单张）
-type BatchImageResult struct {
-	FilePath string `json:"file_path"`
-	Size     string `json:"size"`
-	Index    int    `json:"index"`
-}
-
 // GenerateRawResult 调用 AI provider 生成图片后返回原始结果。
 // URL 字段为 provider 直接返回的内容：远程 HTTPS URL、data URL 或本地临时文件路径（已转为 data URL）。
 type GenerateRawResult struct {
@@ -311,96 +289,6 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 		URL:  url,
 		Size: result.Size,
 	}, nil
-}
-// 不下载、不压缩、不写磁盘。
-// prompts 为每张图的独立 prompt，长度即生成数量。
-func (p *Processor) GenerateBatchRaw(prompts []string, size string) ([]*GenerateRawResult, error) {
-	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
-		return nil, err
-	}
-	if p.provider == nil {
-		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
-	}
-	count := len(prompts)
-	if count == 0 {
-		return nil, fmt.Errorf("prompts is empty")
-	}
-
-	// 如果指定了尺寸，创建带覆盖尺寸的临时 provider
-	activeProvider := p.provider
-	if size != "" {
-		apiCfgWithSize := *p.apiCfg
-		apiCfgWithSize.Size = size
-		var err error
-		activeProvider, err = NewProvider(&apiCfgWithSize, p.log)
-		if err != nil {
-			return nil, fmt.Errorf("create provider with size: %w", err)
-		}
-	}
-
-	ctx := context.Background()
-	opts := &GenerateOptions{
-		RefImagePath: p.refImagePath,
-		MaxImages:    count,
-	}
-
-	// 当 provider 支持原生批量且所有 prompt 相同时，走原生批量。
-	allSame := allStringsEqual(prompts)
-	var rawResults []*GenerateResult
-	if bp, ok := activeProvider.(BatchProvider); ok && allSame {
-		p.log.Info().Int("count", count).Str("provider", activeProvider.Name()).Str("size", size).Msg("using native batch generation (raw)")
-		builtPrompt := p.buildPrompt(prompts[0])
-		batchResult, err := bp.GenerateBatch(ctx, builtPrompt, opts)
-		if err != nil {
-			return nil, fmt.Errorf("batch generate images: %w", err)
-		}
-		rawResults = batchResult.Images
-	} else {
-		p.log.Info().Int("count", count).Str("provider", activeProvider.Name()).Str("size", size).Msg("using concurrent generation (raw)")
-		rawResults = make([]*GenerateResult, count)
-		var wg sync.WaitGroup
-		errChan := make(chan error, count)
-		sem := make(chan struct{}, 3)
-
-		for i := 0; i < count; i++ {
-			wg.Add(1)
-			go func(index int) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				builtPrompt := p.buildPrompt(prompts[index])
-				singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
-				result, err := activeProvider.Generate(ctx, builtPrompt, singleOpts)
-				if err != nil {
-					errChan <- fmt.Errorf("generate image %d: %w", index+1, err)
-					return
-				}
-				rawResults[index] = result
-			}(i)
-		}
-
-		wg.Wait()
-		close(errChan)
-		if err := <-errChan; err != nil {
-			return nil, err
-		}
-	}
-
-	results := make([]*GenerateRawResult, 0, len(rawResults))
-	for i, raw := range rawResults {
-		url, err := p.resolveRawURL(raw.URL)
-		if err != nil {
-			return nil, fmt.Errorf("resolve image %d URL: %w", i+1, err)
-		}
-		results = append(results, &GenerateRawResult{
-			URL:   url,
-			Size:  raw.Size,
-			Index: i + 1,
-		})
-	}
-
-	return results, nil
 }
 
 // resolveRawURL 统一处理 provider 返回的 URL：
@@ -530,122 +418,6 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 	p.log.Debug().Str("provider", result.Model).Str("size", result.Size).Msg("image generated")
 
 	return p.processRawResult(result, outputPath)
-}
-
-// GenerateBatchOnly 组图生成（不上传到微信），将所有图片保存到 outputDir。
-// count 为期望生成数量，outputDir 为已存在的输出目录。
-// 若 provider 实现了 BatchProvider，使用原生组图 API（一次调用）；否则使用并发生成。
-// 处理过程使用并发以提高效率。
-func (p *Processor) GenerateBatchOnly(prompt string, count int, outputDir string) ([]*BatchImageResult, error) {
-	if err := config.ValidateForImageGeneration(p.apiCfg); err != nil {
-		return nil, err
-	}
-	if p.provider == nil {
-		return nil, fmt.Errorf("图片生成服务未配置，请检查配置文件中的 image.provider 和 image.key")
-	}
-
-	builtPrompt := p.buildPrompt(prompt)
-	ctx := context.Background()
-	opts := &GenerateOptions{
-		RefImagePath: p.refImagePath,
-		MaxImages:    count,
-	}
-
-	var rawResults []*GenerateResult
-	if bp, ok := p.provider.(BatchProvider); ok {
-		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using native batch generation")
-		batchResult, err := bp.GenerateBatch(ctx, builtPrompt, opts)
-		if err != nil {
-			return nil, fmt.Errorf("batch generate images: %w", err)
-		}
-		rawResults = batchResult.Images
-	} else {
-		p.log.Info().Int("count", count).Str("provider", p.provider.Name()).Msg("using concurrent generation")
-		rawResults = make([]*GenerateResult, count)
-		var wg sync.WaitGroup
-		errChan := make(chan error, count)
-		sem := make(chan struct{}, 3)
-
-		for i := range count {
-			wg.Add(1)
-			go func(index int) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				singleOpts := &GenerateOptions{RefImagePath: p.refImagePath}
-				result, err := p.provider.Generate(ctx, builtPrompt, singleOpts)
-				if err != nil {
-					errChan <- fmt.Errorf("generate image %d: %w", index+1, err)
-					return
-				}
-				rawResults[index] = result
-			}(i)
-		}
-
-		wg.Wait()
-		close(errChan)
-		if err := <-errChan; err != nil {
-			return nil, err
-		}
-	}
-
-	// 并发处理生成的图片（下载、裁水印、压缩）
-	return p.processBatchConcurrent(rawResults, outputDir)
-}
-
-// processBatchConcurrent 并发处理批量图片生成结果
-func (p *Processor) processBatchConcurrent(rawResults []*GenerateResult, outputDir string) ([]*BatchImageResult, error) {
-	count := len(rawResults)
-	if count == 0 {
-		return nil, fmt.Errorf("no images to process")
-	}
-
-	// 使用 WaitGroup 等待所有处理完成
-	var wg sync.WaitGroup
-	results := make([]*BatchImageResult, count)
-	errorsChan := make(chan error, count)
-
-	// 限制并发数，避免过多 goroutine
-	sem := make(chan struct{}, 3)
-
-	for i, raw := range rawResults {
-		wg.Add(1)
-		go func(index int, rawResult *GenerateResult) {
-			defer wg.Done()
-
-			sem <- struct{}{}        // 获取信号量
-			defer func() { <-sem }() // 释放信号量
-
-			outputPath := filepath.Join(outputDir, fmt.Sprintf("image_%02d.png", index+1))
-			processed, err := p.processRawResult(rawResult, outputPath)
-			if err != nil {
-				errorsChan <- fmt.Errorf("process image %d: %w", index+1, err)
-				return
-			}
-
-			results[index] = &BatchImageResult{
-				FilePath: processed.FilePath,
-				Size:     processed.Size,
-				Index:    index + 1,
-			}
-			p.log.Debug().Int("index", index+1).Str("path", outputPath).Msg("batch image processed")
-		}(i, raw)
-	}
-
-	wg.Wait()
-	close(errorsChan)
-
-	// 检查是否有错误
-	var errs []error
-	for err := range errorsChan {
-		errs = append(errs, err)
-	}
-	if len(errs) > 0 {
-		return nil, errs[0] // 返回第一个错误
-	}
-
-	return results, nil
 }
 
 // GenerateOnly AI 生成图片到本地文件，不上传到微信

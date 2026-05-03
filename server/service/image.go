@@ -32,20 +32,6 @@ type ImageResult struct {
 	Height      int    `json:"height,omitempty"`
 }
 
-// BatchImageResultItem is a single item in batch image generation results.
-type BatchImageResultItem struct {
-	FilePath    string `json:"file_path"`
-	DownloadURL string `json:"download_url,omitempty"`
-	Size        string `json:"size"`
-	Index       int    `json:"index"`
-}
-
-// BatchImageResult is the response for batch image generation.
-type BatchImageResult struct {
-	Images []BatchImageResultItem `json:"images"`
-	Count  int                    `json:"count"`
-}
-
 // UploadImageResult is the response for image upload.
 type UploadImageResult struct {
 	URL       string `json:"url"`
@@ -226,74 +212,6 @@ func (s *ImageService) GenerateImage(
 	}
 
 	return result, nil
-}
-
-// GenerateBatch generates multiple images using the channel's image provider.
-// prompts is a per-image prompt array; its length determines the image count.
-// Returns an array of download URLs (remote CDN URLs or data URLs) for the agent to download.
-// If outputDir is provided, also saves each image to that directory and returns file_path for each.
-func (s *ImageService) GenerateBatch(
-	ctx context.Context,
-	userID, channelID, imageType string,
-	prompts []string,
-	outputDir, refPath, taskID, size string,
-) (*BatchImageResult, error) {
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
-	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
-	}
-
-	processor, err := s.buildProcessor(ctx, ch, imageType)
-	if err != nil {
-		return nil, err
-	}
-
-	if refPath != "" {
-		processor.SetRefImage(refPath)
-	}
-
-	rawResults, err := processor.GenerateBatchRaw(prompts, size)
-	if err != nil {
-		return nil, fmt.Errorf("batch generate: %w", err)
-	}
-
-	items := make([]BatchImageResultItem, 0, len(rawResults))
-	for _, r := range rawResults {
-		item := BatchImageResultItem{
-			DownloadURL: r.URL,
-			Size:        r.Size,
-			Index:       r.Index,
-		}
-
-		if outputDir != "" {
-			localPath, dlErr := s.resolveToLocalFile(r.URL)
-			if dlErr != nil {
-				return nil, fmt.Errorf("download batch image %d: %w", r.Index, dlErr)
-			}
-			defer os.RemoveAll(filepath.Dir(localPath))
-
-			if err := os.MkdirAll(outputDir, 0755); err != nil {
-				return nil, fmt.Errorf("create output directory: %w", err)
-			}
-
-			destPath := filepath.Join(outputDir, fmt.Sprintf("image_%02d.png", r.Index))
-			data, err := os.ReadFile(localPath)
-			if err != nil {
-				return nil, fmt.Errorf("read batch image %d: %w", r.Index, err)
-			}
-			if err := os.WriteFile(destPath, data, 0644); err != nil {
-				return nil, fmt.Errorf("save batch image %d: %w", r.Index, err)
-			}
-			item.FilePath = destPath
-		}
-
-		items = append(items, item)
-	}
-
-	return &BatchImageResult{
-		Images: items,
-		Count:  len(items),
-	}, nil
 }
 
 // UploadImage uploads a local image. For WeChat platforms (article/xls), uploads

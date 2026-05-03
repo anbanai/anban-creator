@@ -30,24 +30,6 @@ func registerImageTools(server *mcp.Server) {
 	}, generateImageHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "generate_images",
-		Description: "Generate multiple images at once using the channel's configured image provider. Each prompt in the prompts array generates one image with its own content. Returns an array of download URLs (remote CDN URLs or data URLs) for the generated images. If output_dir is provided, the server also saves each image to that directory and returns file_path for each.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"channel_id":     map[string]any{"type": "string", "description": "Channel ID"},
-				"prompts":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Per-image prompts. Each element generates one image. Array length determines the number of images (1-20)."},
-				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Cover or content image API config"},
-				"output_dir":     map[string]any{"type": "string", "description": "Directory to save generated images (optional, server will download and save)"},
-				"size":           map[string]any{"type": "string", "description": "Image size/aspect ratio for all images (e.g., '3:4', '16:9', '1:1'). Overrides channel default when provided."},
-				"ref_image_path": map[string]any{"type": "string", "description": "Path to reference image for style consistency (optional)"},
-				"task_id":        map[string]any{"type": "string", "description": "Task ID (for logging and credit tracking)"},
-			},
-			"required": []any{"channel_id", "prompts"},
-		},
-	}, generateBatchImagesHandler)
-
-	server.AddTool(&mcp.Tool{
 		Name:        "upload_image",
 		Description: "Upload a local image. For WeChat channels, uploads to WeChat CDN; for other platforms, uploads to configured storage. Returns the URL.",
 		InputSchema: map[string]any{
@@ -138,55 +120,6 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID, size)
 	if err != nil {
 		return billingError("generate image", err), nil
-	}
-
-	return textResult(result)
-}
-
-func generateBatchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.ImageSvc == nil {
-		return errorResult("image service not available"), nil
-	}
-	userID := getUserID(ctx)
-	args := parseArgs(req.Params.Arguments)
-
-	channelID, _ := args["channel_id"].(string)
-	promptsRaw, _ := args["prompts"].([]any)
-	outputDir, _ := args["output_dir"].(string)
-	imageType, _ := args["image_type"].(string)
-	size, _ := args["size"].(string)
-	refPath, _ := args["ref_image_path"].(string)
-	taskID, _ := args["task_id"].(string)
-
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
-	}
-	if len(promptsRaw) == 0 {
-		return errorResult("prompts is required and must be a non-empty array"), nil
-	}
-	if len(promptsRaw) > 20 {
-		return errorResult("prompts array must have at most 20 elements"), nil
-	}
-	prompts := make([]string, 0, len(promptsRaw))
-	for _, p := range promptsRaw {
-		s, _ := p.(string)
-		if s == "" {
-			return errorResult("each prompt in prompts array must be a non-empty string"), nil
-		}
-		prompts = append(prompts, s)
-	}
-	if imageType == "" {
-		imageType = "content"
-	}
-
-	provider, mdl := resolveImageModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, provider, mdl, len(prompts)); err != nil {
-		return billingError("batch generate images", err), nil
-	}
-
-	result, err := svcs.ImageSvc.GenerateBatch(ctx, userID, channelID, imageType, prompts, outputDir, refPath, taskID, size)
-	if err != nil {
-		return errorResult(fmt.Sprintf("batch generate: %v", err)), nil
 	}
 
 	return textResult(result)
