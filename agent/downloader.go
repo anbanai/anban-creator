@@ -43,7 +43,7 @@ func (d *Downloader) HandleToolResult(ctx context.Context, call trackedToolCall,
 	case "generate_image":
 		target := d.singleTargetPath(call, payloads[0])
 		return d.downloadToPath(ctx, payloads[0].DownloadURL, target)
-	case "generate_images", "generate_images_from_markdown":
+	case "generate_images_from_markdown":
 		for _, payload := range payloads {
 			target := d.batchTargetPath(call, payload)
 			if err := d.downloadToPath(ctx, payload.DownloadURL, target); err != nil {
