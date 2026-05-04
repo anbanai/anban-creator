@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/openai/openai-go/v3"
@@ -34,22 +35,29 @@ type LLMClient interface {
 
 // openaiLLMClient wraps the openai-go SDK for chat completions.
 type openaiLLMClient struct {
-	client openai.Client
-	model  string
+	client  openai.Client
+	model   string
+	timeout time.Duration
 }
 
 // NewOpenAILLMClient creates an LLMClient backed by an OpenAI-compatible API.
-func NewOpenAILLMClient(baseURL, apiKey, modelName string) LLMClient {
+func NewOpenAILLMClient(baseURL, apiKey, modelName string, timeout time.Duration) LLMClient {
 	client := openai.NewClient(
 		option.WithBaseURL(baseURL),
 		option.WithAPIKey(apiKey),
 	)
-	return &openaiLLMClient{client: client, model: modelName}
+	return &openaiLLMClient{client: client, model: modelName, timeout: timeout}
 }
 
 // Complete sends a system + user message to the configured model and returns the
 // assistant's text content.
 func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+
 	messages := []openai.ChatCompletionMessageParamUnion{}
 
 	if systemPrompt != "" {
@@ -70,10 +78,20 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 		},
 	})
 
-	resp, err := c.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+	params := openai.ChatCompletionNewParams{
 		Messages: messages,
 		Model:    shared.ChatModel(c.model),
-	})
+	}
+
+	// Kimi K2.6/K2.5 thinking models default to thinking:enabled which causes
+	// slow responses and 504 timeouts on non-reasoning tasks (e.g. HTML conversion).
+	if isKimiThinkingModel(c.model) {
+		params.SetExtraFields(map[string]any{
+			"thinking": map[string]string{"type": "disabled"},
+		})
+	}
+
+	resp, err := c.client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return "", fmt.Errorf("llm completion: %w", err)
 	}
@@ -86,6 +104,18 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 	return resp.Choices[0].Message.Content, nil
 }
 
+// isKimiThinkingModel returns true for Kimi K2.6/K2.5 models that default to
+// thinking:enabled. These models need thinking:disabled for fast, non-reasoning tasks.
+func isKimiThinkingModel(model string) bool {
+	switch model {
+	case "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo",
+		"kimi-k2-0905-preview", "kimi-k2-turbo-preview":
+		return true
+	default:
+		return false
+	}
+}
+
 // ---------------------------------------------------------------------------
 // WritingService
 // ---------------------------------------------------------------------------
@@ -95,16 +125,18 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 type WritingService struct {
 	repo           repository.Repository
 	llmClient      LLMClient
+	llmTimeout     time.Duration
 	modelConfigSvc *ModelConfigService
 	writersDir     string
 	logger         *zerolog.Logger
 }
 
 // NewWritingService creates a new WritingService.
-func NewWritingService(repo repository.Repository, llmClient LLMClient, writersDir string, logger *zerolog.Logger) *WritingService {
+func NewWritingService(repo repository.Repository, llmClient LLMClient, writersDir string, llmTimeout time.Duration, logger *zerolog.Logger) *WritingService {
 	return &WritingService{
 		repo:       repo,
 		llmClient:  llmClient,
+		llmTimeout: llmTimeout,
 		writersDir: writersDir,
 		logger:     logger,
 	}
@@ -124,7 +156,7 @@ func (s *WritingService) getLLMClient(ctx context.Context, userID string) LLMCli
 				Str("endpoint", baseURL).
 				Str("model", model).
 				Msg("using user custom model for writing")
-			return NewOpenAILLMClient(baseURL, key, model)
+			return NewOpenAILLMClient(baseURL, key, model, s.llmTimeout)
 		}
 	}
 	return s.llmClient

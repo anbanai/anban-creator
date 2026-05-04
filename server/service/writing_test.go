@@ -39,7 +39,7 @@ func setupTestWritingService(t *testing.T, llm *fakeWritingLLM) (*WritingService
 	if err != nil {
 		t.Fatalf("resolve writers dir: %v", err)
 	}
-	svc := NewWritingService(repo, llm, writersDir, &logger)
+	svc := NewWritingService(repo, llm, writersDir, 0, &logger)
 	return svc, repo
 }
 

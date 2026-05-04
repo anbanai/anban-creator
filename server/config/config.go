@@ -117,9 +117,10 @@ type ImageAPIConfig struct {
 // WritingConfig holds LLM API configuration for writing services
 // (article writing, humanization, topic research, SEO, outlines).
 type WritingConfig struct {
-	BaseURL string `yaml:"base_url"` // LLM API endpoint
-	Key     string `yaml:"key"`      // API key
-	Model   string `yaml:"model"`    // Model name
+	BaseURL string        `yaml:"base_url"` // LLM API endpoint
+	Key     string        `yaml:"key"`      // API key
+	Model   string        `yaml:"model"`    // Model name
+	Timeout time.Duration `yaml:"timeout"`  // LLM request timeout (default 5m)
 }
 
 // ClaudeConfig holds configuration for the Claude CLI subprocess.
@@ -578,6 +579,16 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "WRITING_MODEL"); v != "" {
 		c.Writing.Model = v
+	}
+	if c.Writing.Timeout == 0 {
+		c.Writing.Timeout = 5 * time.Minute
+	}
+	if v := os.Getenv(prefix + "WRITING_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Writing.Timeout = d
+		} else {
+			fmt.Fprintf(os.Stderr, "invalid %sWRITING_TIMEOUT=%q: %v, using default %v\n", prefix, v, err, c.Writing.Timeout)
+		}
 	}
 }
 

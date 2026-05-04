@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
@@ -23,6 +24,7 @@ type ChannelHandler struct {
 	service        *service.ChannelService
 	logger         *zerolog.Logger
 	llm            service.LLMClient
+	llmTimeout     time.Duration
 	modelConfigSvc *service.ModelConfigService
 }
 
@@ -32,8 +34,9 @@ func NewChannelHandler(svc *service.ChannelService, logger *zerolog.Logger) *Cha
 }
 
 // SetLLMClient injects an optional LLM client for profile analysis.
-func (h *ChannelHandler) SetLLMClient(llm service.LLMClient) {
+func (h *ChannelHandler) SetLLMClient(llm service.LLMClient, timeout time.Duration) {
 	h.llm = llm
+	h.llmTimeout = timeout
 }
 
 // SetModelConfigService injects per-user model overrides for profile analysis.
@@ -487,7 +490,7 @@ func (h *ChannelHandler) getLLMClient(ctx context.Context, userID string) servic
 				Str("endpoint", baseURL).
 				Str("model", modelName).
 				Msg("using user custom model for rednote profile analysis")
-			return service.NewOpenAILLMClient(baseURL, key, modelName)
+			return service.NewOpenAILLMClient(baseURL, key, modelName, h.llmTimeout)
 		}
 	}
 	return h.llm

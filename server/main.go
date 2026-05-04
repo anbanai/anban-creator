@@ -244,7 +244,7 @@ func main() {
 			}
 		}
 		if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
-			writingLLMClient = service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel)
+			writingLLMClient = service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel, cfg.Writing.Timeout)
 			if strings.Contains(llmBaseURL, "/anthropic") {
 				log.Warn().
 					Str("base_url", llmBaseURL).
@@ -288,7 +288,7 @@ func main() {
 			channelHandler.SetModelConfigService(modelConfigSvc)
 		}
 		if writingLLMClient != nil {
-			channelHandler.SetLLMClient(writingLLMClient)
+			channelHandler.SetLLMClient(writingLLMClient, cfg.Writing.Timeout)
 		}
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
@@ -326,7 +326,7 @@ func main() {
 				if cfg.Claude.PluginDir != "" {
 					writersDir = filepath.Join(cfg.Claude.PluginDir, "writers")
 				}
-				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, log)
+				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, cfg.Writing.Timeout, log)
 				if modelConfigSvc != nil {
 					writingSvc.SetModelConfigService(modelConfigSvc)
 				}

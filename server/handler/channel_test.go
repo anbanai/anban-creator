@@ -32,7 +32,7 @@ func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {
 		"content_summary": "围绕职场效率和日常习惯做可执行分享"
 	}`}
 	h := NewChannelHandler(nil, testChannelLogger(t))
-	h.SetLLMClient(llm)
+	h.SetLLMClient(llm, 0)
 	profile := &platform.PlatformProfile{
 		Name:        "测试账号",
 		Positioning: "原始简介",
@@ -69,7 +69,7 @@ func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {
 func TestChannelFetchProfileAIAnalysisFallbackOnInvalidJSON(t *testing.T) {
 	llm := &fakeChannelLLM{response: `not json`}
 	h := NewChannelHandler(nil, testChannelLogger(t))
-	h.SetLLMClient(llm)
+	h.SetLLMClient(llm, 0)
 	profile := &platform.PlatformProfile{
 		Name:        "测试账号",
 		Positioning: "原始简介",
