@@ -53,8 +53,12 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 
 	var resultText string
 	var toolUseCount int
+	var toolErrorCount int
+	var lastToolErrorTool string
+	var lastToolError string
 	var turnNum int
 	toolCalls := make(map[string]trackedToolCall)
+	toolUseSummary := make(map[string]int)
 
 	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
 		if err := client.Query(ctx, r.cfg.UserPrompt()); err != nil {
@@ -78,12 +82,18 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 						}
 					case *claudecode.ToolUseBlock:
 						toolUseCount++
+						toolUseSummary[b.Name]++
 						toolCalls[b.ToolUseID] = trackedToolCall{Name: b.Name, Input: b.Input}
 						_ = r.reporter.ReportProgress(ctx, "Using tool: "+b.Name)
 					case *claudecode.ToolResultBlock:
 						call, ok := toolCalls[b.ToolUseID]
 						if !ok {
 							continue
+						}
+						if b.IsError != nil && *b.IsError {
+							toolErrorCount++
+							lastToolErrorTool = call.Name
+							lastToolError = serveragent.CompactToolResultContent(b.Content)
 						}
 						if err := r.downloader.HandleToolResult(ctx, call, b.Content); err != nil {
 							return fmt.Errorf("handle tool result for %s: %w", call.Name, err)
@@ -97,6 +107,10 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				result.SessionID = m.SessionID
 				result.DurationMs = m.DurationMs
 				result.ToolUseCount = toolUseCount
+				result.ToolUseSummary = toolUseSummary
+				result.ToolErrorCount = toolErrorCount
+				result.LastToolErrorTool = lastToolErrorTool
+				result.LastToolError = lastToolError
 				if m.IsError {
 					if m.Result != nil {
 						result.Error = *m.Result
@@ -120,12 +134,20 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 			result.Error = err.Error()
 		}
 		result.LogText = resultText
+		result.ToolUseSummary = toolUseSummary
+		result.ToolErrorCount = toolErrorCount
+		result.LastToolErrorTool = lastToolErrorTool
+		result.LastToolError = lastToolError
 		return result, err
 	}
 
 	result.Success = true
 	result.LogText = resultText
 	result.ToolUseCount = toolUseCount
+	result.ToolUseSummary = toolUseSummary
+	result.ToolErrorCount = toolErrorCount
+	result.LastToolErrorTool = lastToolErrorTool
+	result.LastToolError = lastToolError
 	if turnNum <= 1 && toolUseCount == 0 {
 		result.AgentLikelyFailed = true
 	}

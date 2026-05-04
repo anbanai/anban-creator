@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -207,27 +208,42 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	// Log workspace contents for diagnostics when no output files are found.
 	if meaningfulFileCount == 0 && result.WorkDir != "" {
+		diagEvt := s.logger.Info().
+			Str("task_id", taskID).
+			Int("file_count", 0)
 		if files, listErr := agent.ListWorkDirFiles(result.WorkDir); listErr == nil {
-			s.logger.Info().
-				Str("task_id", taskID).
-				Int("file_count", len(files)).
-				Interface("files", files).
-				Msg("workspace contents on failure (no output files)")
+			diagEvt = diagEvt.Int("file_count", len(files)).Interface("files", files)
 		}
+		// When output/ exists but is empty, also scan workDir root for misplaced files.
+		if _, outErr := os.Stat(filepath.Join(result.WorkDir, "output")); outErr == nil {
+			if rootFiles, rootErr := agent.ListWorkDirFilesRoot(result.WorkDir); rootErr == nil {
+				if len(rootFiles) > 0 {
+					diagEvt = diagEvt.Int("root_file_count", len(rootFiles)).Interface("root_files", rootFiles)
+				}
+			}
+		}
+		toolSummaryStr := formatToolUseSummary(result.ToolUseSummary)
+		if toolSummaryStr != "" {
+			diagEvt = diagEvt.Str("tools_used", toolSummaryStr)
+		}
+		diagEvt.Msg("workspace contents on failure (no output files)")
 	}
 
 	// Treat as failure when the agent likely failed (standalone agent binary).
 	if result.AgentLikelyFailed {
 		if meaningfulFileCount == 0 && result.WorkDir != "" {
 			errMsg := buildNoOutputFilesError(result)
-			s.logger.Error().
+			errEvt := s.logger.Error().
 				Str("task_id", taskID).
 				Str("model", result.Model).
 				Str("user_id", userID).
 				Int("num_turns", result.NumTurns).
 				Int("tool_use_count", result.ToolUseCount).
-				Int("meaningful_files", meaningfulFileCount).
-				Msg(errMsg)
+				Int("meaningful_files", meaningfulFileCount)
+			if toolSummaryStr := formatToolUseSummary(result.ToolUseSummary); toolSummaryStr != "" {
+				errEvt = errEvt.Str("tools_used", toolSummaryStr)
+			}
+			errEvt.Msg(errMsg)
 			_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
 			return nil
 		}
@@ -245,14 +261,17 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	// (agent wrote to wrong directory or produced no output).
 	if meaningfulFileCount == 0 && result.WorkDir != "" {
 		errMsg := buildNoOutputFilesError(result)
-		s.logger.Error().
+		errEvt := s.logger.Error().
 			Str("task_id", taskID).
 			Str("model", result.Model).
 			Str("user_id", userID).
 			Int("num_turns", result.NumTurns).
 			Int("tool_use_count", result.ToolUseCount).
-			Int("meaningful_files", meaningfulFileCount).
-			Msg(errMsg)
+			Int("meaningful_files", meaningfulFileCount)
+		if toolSummaryStr := formatToolUseSummary(result.ToolUseSummary); toolSummaryStr != "" {
+			errEvt = errEvt.Str("tools_used", toolSummaryStr)
+		}
+		errEvt.Msg(errMsg)
 		_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
 		return nil
 	}
@@ -796,25 +815,59 @@ func extractXlsDraftFromWorkspace(workDir, title string) (*XlsPublishRequest, er
 	}, nil
 }
 
+// formatToolUseSummary returns a compact string like "generate_image(12), Bash(8)"
+// from a tool name -> count map, limited to the top 5 tools by count.
+func formatToolUseSummary(summary map[string]int) string {
+	if len(summary) == 0 {
+		return ""
+	}
+	type toolCount struct {
+		name  string
+		count int
+	}
+	var tc []toolCount
+	for name, count := range summary {
+		tc = append(tc, toolCount{name, count})
+	}
+	sort.Slice(tc, func(i, j int) bool { return tc[i].count > tc[j].count })
+	if len(tc) > 5 {
+		tc = tc[:5]
+	}
+	parts := make([]string, len(tc))
+	for i, t := range tc {
+		parts[i] = fmt.Sprintf("%s(%d)", t.name, t.count)
+	}
+	return strings.Join(parts, ", ")
+}
+
 // buildNoOutputFilesError returns a diagnostic error message when agent produces no output files.
 // Differentiates between "no tool uses" (model/agent issue) and "tool uses but no files" (MCP tool errors).
 func buildNoOutputFilesError(result *agent.ExecutionResult) string {
+	toolSummary := formatToolUseSummary(result.ToolUseSummary)
 	if result.ToolErrorCount > 0 && result.LastToolError != "" {
 		tool := result.LastToolErrorTool
 		if tool == "" {
 			tool = "unknown_tool"
 		}
+		extra := ""
+		if toolSummary != "" {
+			extra = fmt.Sprintf("; tools used: %s", toolSummary)
+		}
 		return fmt.Sprintf(
 			"agent execution produced no output files (model=%s, num_turns=%d, tool_uses=%d, tool_errors=%d, output_files=0); "+
-				"last MCP tool error: %s failed: %s",
-			result.Model, result.NumTurns, result.ToolUseCount, result.ToolErrorCount, tool, result.LastToolError,
+				"last MCP tool error: %s failed: %s%s",
+			result.Model, result.NumTurns, result.ToolUseCount, result.ToolErrorCount, tool, result.LastToolError, extra,
 		)
 	}
 	if result.ToolUseCount > 0 {
+		extra := ""
+		if toolSummary != "" {
+			extra = fmt.Sprintf("; tools used: %s", toolSummary)
+		}
 		return fmt.Sprintf(
 			"agent execution produced no output files (model=%s, num_turns=%d, tool_uses=%d, output_files=0); "+
-				"agent used tools but produced no output files; files may have been written to an unexpected location",
-			result.Model, result.NumTurns, result.ToolUseCount,
+				"agent used tools but produced no output files; files may have been written to an unexpected location%s",
+			result.Model, result.NumTurns, result.ToolUseCount, extra,
 		)
 	}
 	return fmt.Sprintf(

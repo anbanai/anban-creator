@@ -532,8 +532,8 @@ func TestCompactToolResultContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := compactToolResultContent(tt.content); got != tt.want {
-				t.Fatalf("compactToolResultContent() = %q, want %q", got, tt.want)
+			if got := CompactToolResultContent(tt.content); got != tt.want {
+				t.Fatalf("CompactToolResultContent() = %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -139,13 +139,14 @@ type ExecutionResult struct {
 	TokenUsage    *TokenUsage `json:"token_usage,omitempty"`
 
 	// Post-execution diagnostics.
-	NoOutputFiles     bool   `json:"no_output_files,omitempty"`
-	AgentLikelyFailed bool   `json:"agent_likely_failed,omitempty"`
-	ToolUseCount      int    `json:"tool_use_count,omitempty"`
-	ToolErrorCount    int    `json:"tool_error_count,omitempty"`
-	LastToolErrorTool string `json:"last_tool_error_tool,omitempty"`
-	LastToolError     string `json:"last_tool_error,omitempty"`
-	Model             string `json:"model,omitempty"` // Claude Code agent model (from config.yaml claude.model)
+	NoOutputFiles     bool           `json:"no_output_files,omitempty"`
+	AgentLikelyFailed bool           `json:"agent_likely_failed,omitempty"`
+	ToolUseCount      int            `json:"tool_use_count,omitempty"`
+	ToolUseSummary    map[string]int `json:"tool_use_summary,omitempty"`
+	ToolErrorCount    int            `json:"tool_error_count,omitempty"`
+	LastToolErrorTool string         `json:"last_tool_error_tool,omitempty"`
+	LastToolError     string         `json:"last_tool_error,omitempty"`
+	Model             string         `json:"model,omitempty"` // Claude Code agent model (from config.yaml claude.model)
 }
 
 // Execute runs the Claude Code agent for the given task.
@@ -365,6 +366,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	var lastToolErrorTool string
 	var lastToolError string
 	toolUseNames := make(map[string]string)
+	toolUseSummary := make(map[string]int)
 	var turnNum int
 	var resultMsg *claudecode.ResultMessage
 
@@ -411,6 +413,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 						}
 					case *claudecode.ToolUseBlock:
 						toolUseCount++
+						toolUseSummary[b.Name]++
 						if b.ToolUseID != "" {
 							toolUseNames[b.ToolUseID] = b.Name
 						}
@@ -440,7 +443,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 						if b.IsError != nil && *b.IsError {
 							toolErrorCount++
 							lastToolErrorTool = toolName
-							lastToolError = compactToolResultContent(b.Content)
+							lastToolError = CompactToolResultContent(b.Content)
 							errEvt := e.logger.Error().
 								Str("task_id", opts.Task.ID).
 								Str("tool_use_id", b.ToolUseID).
@@ -538,6 +541,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			Error:             err.Error(),
 			WorkDir:           workDir,
 			ToolUseCount:      toolUseCount,
+			ToolUseSummary:    toolUseSummary,
 			ToolErrorCount:    toolErrorCount,
 			LastToolErrorTool: lastToolErrorTool,
 			LastToolError:     lastToolError,
@@ -555,6 +559,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			WorkDir:           workDir,
 			LogText:           resultText,
 			ToolUseCount:      toolUseCount,
+			ToolUseSummary:    toolUseSummary,
 			ToolErrorCount:    toolErrorCount,
 			LastToolErrorTool: lastToolErrorTool,
 			LastToolError:     lastToolError,
@@ -583,6 +588,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		WorkDir:           workDir,
 		LogText:           resultText,
 		ToolUseCount:      toolUseCount,
+		ToolUseSummary:    toolUseSummary,
 		ToolErrorCount:    toolErrorCount,
 		LastToolErrorTool: lastToolErrorTool,
 		LastToolError:     lastToolError,
@@ -597,30 +603,71 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	return result, nil
 }
 
-// ListWorkDirFiles returns a summary of files in a task's work directory.
-// When an output/ subdirectory exists (created by the agent via mkdir -p), lists
-// its contents for meaningful diagnostics.
+// ListWorkDirFiles returns a recursive listing of files in workDir.
+// When an output/ subdirectory exists, it lists that instead.
+// Returns entries with "path" (relative), "size", and "is_dir", limited to 50 entries.
 func ListWorkDirFiles(workDir string) ([]map[string]any, error) {
 	listDir := workDir
 	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
 		listDir = filepath.Join(workDir, "output")
 	}
-	entries, err := os.ReadDir(listDir)
-	if err != nil {
-		return nil, err
-	}
+	const maxEntries = 50
 	var files []map[string]any
-	for _, e := range entries {
-		info, _ := e.Info()
+	filepath.WalkDir(listDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || len(files) >= maxEntries {
+			return nil
+		}
+		rel, _ := filepath.Rel(listDir, path)
+		if rel == "." {
+			return nil
+		}
+		info, _ := d.Info()
 		f := map[string]any{
-			"name":   e.Name(),
-			"is_dir": e.IsDir(),
+			"path":   rel,
+			"is_dir": d.IsDir(),
 		}
 		if info != nil {
 			f["size"] = info.Size()
 		}
 		files = append(files, f)
-	}
+		return nil
+	})
+	return files, nil
+}
+
+// ListWorkDirFilesRoot lists the workDir root (not output/) recursively.
+// Used to detect files the agent may have written to the wrong location.
+func ListWorkDirFilesRoot(workDir string) ([]map[string]any, error) {
+	const maxEntries = 50
+	var files []map[string]any
+	filepath.WalkDir(workDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || len(files) >= maxEntries {
+			return nil
+		}
+		rel, _ := filepath.Rel(workDir, path)
+		if rel == "." || rel == "output" {
+			if d.IsDir() && rel == "output" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, _ := d.Info()
+		f := map[string]any{
+			"path":   rel,
+			"is_dir": d.IsDir(),
+		}
+		if info != nil {
+			f["size"] = info.Size()
+		}
+		files = append(files, f)
+		return nil
+	})
 	return files, nil
 }
 
@@ -655,7 +702,7 @@ func CountMeaningfulFiles(workDir string) int {
 	return count
 }
 
-func compactToolResultContent(content any) string {
+func CompactToolResultContent(content any) string {
 	var text string
 	switch v := content.(type) {
 	case string:
