@@ -142,8 +142,8 @@ func TestPromptBuilder_GetVariable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetVariable: %v", err)
 	}
-	if v.DefaultValue != "default" {
-		t.Errorf("THEME_NAME default = %q, want %q", v.DefaultValue, "default")
+	if v.DefaultValue != "autumn-warm" {
+		t.Errorf("THEME_NAME default = %q, want %q", v.DefaultValue, "autumn-warm")
 	}
 }
 

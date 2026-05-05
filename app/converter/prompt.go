@@ -52,7 +52,7 @@ func (pb *PromptBuilder) initBuiltinVariables() {
 	pb.variables["{{THEME_NAME}}"] = &PromptVariable{
 		Name:         "THEME_NAME",
 		Description:  "主题名称",
-		DefaultValue: "default",
+		DefaultValue: "autumn-warm",
 		Required:     false,
 	}
 	pb.variables["{{TITLE}}"] = &PromptVariable{

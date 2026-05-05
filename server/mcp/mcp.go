@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"strings"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -31,33 +31,38 @@ func (w *statusWriter) WriteHeader(code int) {
 }
 
 // mcpLoggingMiddleware wraps an http.Handler to log all MCP requests.
-// For POST requests, it reads and logs the JSON-RPC tool call details.
+// For POST requests, it reads and logs the JSON-RPC method and tool call details.
 func mcpLoggingMiddleware(next http.Handler, zlog *zerolog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 
-		// Log tool call details from JSON-RPC request body.
+		// Log JSON-RPC method from POST request body.
 		if r.Method == http.MethodPost && r.Body != nil && zlog != nil {
 			body, err := io.ReadAll(io.LimitReader(r.Body, 100000))
 			if err == nil && len(body) > 0 {
 				r.Body = io.NopCloser(bytes.NewReader(body))
 				var msg map[string]any
 				if json.Unmarshal(body, &msg) == nil {
-					if method, _ := msg["method"].(string); method == "tools/call" {
-						if params, ok := msg["params"].(map[string]any); ok {
-							toolName, _ := params["name"].(string)
-							argsJSON, _ := json.Marshal(params["arguments"])
-							argsStr := string(argsJSON)
-							if len(argsStr) > 1000 {
-								argsStr = argsStr[:1000] + "...(truncated)"
+					if rpcMethod, _ := msg["method"].(string); rpcMethod != "" {
+						evt := zlog.Info().
+							Str("rpc_method", rpcMethod).
+							Str("remote_addr", r.RemoteAddr)
+						if rpcMethod == "tools/call" {
+							if params, ok := msg["params"].(map[string]any); ok {
+								toolName, _ := params["name"].(string)
+								argsJSON, _ := json.Marshal(params["arguments"])
+								argsStr := string(argsJSON)
+								if len(argsStr) > 1000 {
+									argsStr = argsStr[:1000] + "...(truncated)"
+								}
+								evt = evt.Str("tool", toolName).Str("args", argsStr)
 							}
-							zlog.Debug().
-								Str("tool", toolName).
-								Str("args", argsStr).
-								Str("remote_addr", r.RemoteAddr).
-								Msg("mcp tool call")
 						}
+						if id, ok := msg["id"]; ok {
+							evt = evt.Interface("id", id)
+						}
+						evt.Msg("mcp rpc request")
 					}
 				}
 			}
@@ -72,25 +77,25 @@ func mcpLoggingMiddleware(next http.Handler, zlog *zerolog.Logger) http.Handler 
 				Dur("duration", time.Since(start)).
 				Str("remote_addr", r.RemoteAddr)
 
-				// Log Authorization header for auth debugging (strips "Bearer " prefix).
-				if sw.status == 401 {
-					authHeader := r.Header.Get("Authorization")
-					var tokenPreview string
-					if len(authHeader) > 7 && strings.HasPrefix(authHeader, "Bearer ") {
-						token := strings.TrimPrefix(authHeader, "Bearer ")
-						if len(token) > 8 {
-							tokenPreview = token[:8] + "..."
-						} else {
-							tokenPreview = token
-						}
-					} else if len(authHeader) > 0 {
-						tokenPreview = "(non-bearer)"
+			// Log Authorization header for auth debugging (strips "Bearer " prefix).
+			if sw.status == 401 {
+				authHeader := r.Header.Get("Authorization")
+				var tokenPreview string
+				if len(authHeader) > 7 && strings.HasPrefix(authHeader, "Bearer ") {
+					token := strings.TrimPrefix(authHeader, "Bearer ")
+					if len(token) > 8 {
+						tokenPreview = token[:8] + "..."
 					} else {
-						tokenPreview = "(empty)"
+						tokenPreview = token
 					}
-					evt = evt.
-						Str("auth_token_preview", tokenPreview)
+				} else if len(authHeader) > 0 {
+					tokenPreview = "(non-bearer)"
+				} else {
+					tokenPreview = "(empty)"
 				}
+				evt = evt.
+					Str("auth_token_preview", tokenPreview)
+			}
 			evt.Msg("mcp request")
 		}
 	})

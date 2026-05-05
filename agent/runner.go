@@ -36,7 +36,6 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		claudecode.WithCwd(r.cfg.Workspace),
 		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
 		claudecode.WithSettingSources(claudecode.SettingSourceUser),
-		claudecode.WithLocalPlugin("/anbanai"),
 		claudecode.WithExtraArgs(map[string]*string{
 			"agent": &r.cfg.AgentFlag,
 		}),

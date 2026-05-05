@@ -337,8 +337,9 @@ func (s *WritingService) ConvertMarkdown(
 	if theme == "" {
 		theme = ch.Theme
 	}
+
 	if theme == "" {
-		theme = "default"
+		theme = "autumn-warm"
 	}
 
 	// Build the converter prompt via the writer package's converter.

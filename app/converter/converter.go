@@ -95,7 +95,7 @@ func (c *converter) validateRequest(req *ConvertRequest) error {
 	}
 
 	if req.Theme == "" {
-		req.Theme = "default"
+		req.Theme = "autumn-warm"
 	}
 
 	return nil

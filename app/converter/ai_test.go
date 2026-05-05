@@ -104,9 +104,8 @@ func TestConvertValidation_DefaultTheme(t *testing.T) {
 	nopLog := zerolog.Nop()
 	conv := NewConverter(&nopLog)
 	result := conv.Convert(&ConvertRequest{Markdown: "# Test", Theme: ""})
-	// Theme should be set to "default" even though we don't check further
-	// (the conversion will attempt AI mode which is expected)
-	if result.Theme != "default" {
-		t.Errorf("Theme = %q, want %q", result.Theme, "default")
+	// Empty theme resolves to "autumn-warm" as the built-in default.
+	if result.Theme != "autumn-warm" {
+		t.Errorf("Theme = %q, want %q", result.Theme, "autumn-warm")
 	}
 }
