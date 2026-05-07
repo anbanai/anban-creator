@@ -127,14 +127,15 @@ type WritingConfig struct {
 // The Env map is passed as environment variables to the CLI process,
 // supporting auth tokens, base URLs, model overrides, etc.
 type ClaudeConfig struct {
-	Model      string            `yaml:"model"`    // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
-	Executor   string            `yaml:"executor"` // "local" (default) or "docker"
-	Env        map[string]string `yaml:"env"`
-	PluginDir  string            `yaml:"plugin_dir"`   // Path to the abwriter plugin directory (contains agents/, skills/)
-	Sandbox    bool              `yaml:"sandbox"`      // Enable sandbox isolation for agent execution (recommended in k8s)
-	Docker     DockerConfig      `yaml:"docker"`       // Docker executor settings (used when executor=docker)
-	MaxTurns   map[string]int    `yaml:"max_turns"`    // Per-task-type max turns, e.g. {"article": 100, "xls": 50, "rednote": 60}
-	TaskLogDir string            `yaml:"task_log_dir"` // Directory for per-task agent execution logs. Empty = disabled.
+	Model          string            `yaml:"model"`            // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
+	Executor       string            `yaml:"executor"`         // "local" (default) or "docker"
+	Env            map[string]string `yaml:"env"`
+	PluginDir      string            `yaml:"plugin_dir"`       // Path to the abwriter plugin directory (contains agents/, skills/)
+	Sandbox        bool              `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
+	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
+	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 100, "xls": 50, "rednote": 60}
+	TaskLogDir     string            `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
+	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). Override with ANBAN_SERVER_CLAUDE_AGENT_SERVER_URL.
 }
 
 // DockerConfig holds Docker executor settings for container-based task execution.
@@ -344,9 +345,14 @@ func (c *Config) applyDefaults() {
 }
 
 // AgentServerURL returns the server URL as reachable from the agent's network
-// perspective. Docker agents resolve the host via host.docker.internal; local
+// perspective. If claude.agent_server_url is set, it takes precedence (useful
+// for k8s where the service URL differs from localhost/host.docker.internal).
+// Otherwise, Docker agents resolve the host via host.docker.internal; local
 // agents use localhost.
 func (c *Config) AgentServerURL() string {
+	if c.Claude.AgentServerURL != "" {
+		return strings.TrimRight(c.Claude.AgentServerURL, "/")
+	}
 	switch c.Claude.Executor {
 	case "docker":
 		return fmt.Sprintf("http://host.docker.internal:%d", c.Server.Port)
@@ -492,6 +498,9 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "CLAUDE_SANDBOX"); v != "" {
 		c.Claude.Sandbox = v == "true" || v == "1"
+	}
+	if v := os.Getenv(prefix + "CLAUDE_AGENT_SERVER_URL"); v != "" {
+		c.Claude.AgentServerURL = v
 	}
 	if v := os.Getenv(prefix + "CLAUDE_DOCKER_IMAGE"); v != "" {
 		c.Claude.Docker.Image = v
@@ -663,6 +672,13 @@ func (c *Config) Validate() error {
 
 	if c.Claude.Executor != "local" && c.Claude.Executor != "docker" {
 		errs = append(errs, fmt.Sprintf("claude.executor must be 'local' or 'docker', got %q", c.Claude.Executor))
+	}
+
+	if c.Claude.AgentServerURL != "" {
+		u := strings.TrimSpace(c.Claude.AgentServerURL)
+		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			errs = append(errs, fmt.Sprintf("claude.agent_server_url must start with http:// or https://, got %q", u))
+		}
 	}
 
 	if c.Credits.DailySignIn < 0 {

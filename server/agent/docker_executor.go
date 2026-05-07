@@ -268,6 +268,7 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	if opts.Channel != nil {
 		env = append(env, fmt.Sprintf("ANBANWRITER_DEFAULT_CHANNEL=%s", opts.Channel.ID))
 	}
+	env = append(env, fmt.Sprintf("ANBANWRITER_API_URL=%s", e.serverURL))
 	return env
 }
 
