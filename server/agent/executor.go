@@ -342,6 +342,28 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		Str("env_anthropic_model", e.claudeEnv["ANTHROPIC_MODEL"]).
 		Msg("MCP config snapshot for Claude Code subprocess")
 
+	// Inject MCP server config directly via SDK (--mcp-config), bypassing
+	// .mcp.json env var substitution. This ensures URL and API key are always
+	// correct regardless of how .mcp.json resolves ${ANBANWRITER_API_URL} and
+	// ${ANBANWRITER_API_KEY}.
+	if e.serverBaseURL != "" && mcpAPIKey != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithMcpServers(map[string]claudecode.McpServerConfig{
+			"anbanwriter": &claudecode.McpHTTPServerConfig{
+				Type: claudecode.McpServerTypeHTTP,
+				URL:  e.serverBaseURL + "/mcp",
+				Headers: map[string]string{
+					"Authorization": "Bearer " + mcpAPIKey,
+				},
+			},
+		}))
+		e.logger.Info().
+			Str("task_id", opts.Task.ID).
+			Str("mcp_url", e.serverBaseURL+"/mcp").
+			Bool("api_key_set", mcpAPIKey != "").
+			Str("api_key_prefix", truncateKey(mcpAPIKey)).
+			Msg("MCP server config injected via SDK")
+	}
+
 	// 7. Execute via SDK with streaming.
 	// Start heartbeat goroutine for stuck-task detection.
 	if opts.HeartbeatFunc != nil {

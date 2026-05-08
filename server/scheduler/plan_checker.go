@@ -178,6 +178,10 @@ func checkAndTriggerPlans(ctx context.Context, repo repository.Repository, taskS
 			continue
 		}
 
+		if task == nil {
+			continue
+		}
+
 		planLogger.Info().Str("task_id", task.ID).Msg("task created from plan")
 
 		// Advance next_run_at to the next cron occurrence.
