@@ -92,3 +92,149 @@ func TestWritingServiceWriteArticleKeepsMissingStyleError(t *testing.T) {
 		t.Fatalf("error = %q, want STYLE_NOT_FOUND", err.Error())
 	}
 }
+
+func TestExtractJSONArray(t *testing.T) {
+	t.Run("pure JSON array", func(t *testing.T) {
+		input := `[{"topic":"a","angle":"b"}]`
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != input {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("markdown fences", func(t *testing.T) {
+		input := "```json\n[{\"topic\":\"a\"}]\n```"
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `[{"topic":"a"}]` {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("preamble text", func(t *testing.T) {
+		input := "Here are the topics:\n[{\"topic\":\"a\"}]"
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `[{"topic":"a"}]` {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("Chinese preamble with å-like chars", func(t *testing.T) {
+		input := "好的，以下是为您生成的话题：\n[{\"topic\":\"测试话题\"}]"
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `[{"topic":"测试话题"}]` {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("UTF-8 BOM prefix", func(t *testing.T) {
+		input := "\xEF\xBB\xBF[{\"topic\":\"a\"}]"
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `[{"topic":"a"}]` {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("trailing commas", func(t *testing.T) {
+		input := `[{"topic":"a",},]`
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `[{"topic":"a"}]` {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("nested objects inside array", func(t *testing.T) {
+		input := `[{\"topic\":\"a\",\"keywords\":[\"k1\",\"k2\"]}]`
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != input {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("brackets inside strings are ignored", func(t *testing.T) {
+		input := `{"text":"[not an array]"}` + `[{"topic":"a"}]`
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `[{"topic":"a"}]` {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("no JSON array", func(t *testing.T) {
+		_, err := extractJSONArray("no array here")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("unmatched brackets", func(t *testing.T) {
+		_, err := extractJSONArray("[{\"topic\":\"a\"}")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestExtractJSONObject(t *testing.T) {
+	t.Run("pure JSON object", func(t *testing.T) {
+		input := `{"title":"a"}`
+		out, err := extractJSONObject(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != input {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("preamble text", func(t *testing.T) {
+		input := "Result:\n```json\n{\"title\":\"a\"}\n```"
+		out, err := extractJSONObject(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `{"title":"a"}` {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("nested objects", func(t *testing.T) {
+		input := "some text\n{\"outer\":{\"inner\":1}}"
+		out, err := extractJSONObject(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `{"outer":{"inner":1}}` {
+			t.Fatalf("got %q", out)
+		}
+	})
+
+	t.Run("no JSON object", func(t *testing.T) {
+		_, err := extractJSONObject("no object here")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}

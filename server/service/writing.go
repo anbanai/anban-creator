@@ -674,20 +674,116 @@ func (s *WritingService) buildSEOPrompt(title string, keywords []string, content
 // a common JSON syntax error in LLM output.
 var trailingCommaRe = regexp.MustCompile(`,\s*([\]})])`)
 
-// parseTopicsResponse parses the LLM response as a JSON array of topic objects.
-func (s *WritingService) parseTopicsResponse(raw string) ([]TopicSuggestion, error) {
-	// Strip markdown code fences if present.
+// extractJSONValue extracts a JSON value (array or object) from raw LLM output.
+// It handles UTF-8 BOM, markdown code fences, and preamble text before the JSON.
+// openBrace must be '[' or '{'. It returns the extracted JSON string.
+func extractJSONValue(raw string, openBrace byte) (string, error) {
+	closeBrace := byte(']')
+	if openBrace == '{' {
+		closeBrace = byte('}')
+	}
+
+	// Strip UTF-8 BOM
+	raw = strings.TrimPrefix(raw, "\xEF\xBB\xBF")
 	raw = strings.TrimSpace(raw)
+
+	// Strip markdown code fences
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 	raw = strings.TrimSpace(raw)
 
-	// Repair trailing commas (common LLM JSON issue).
-	raw = trailingCommaRe.ReplaceAllString(raw, "$1")
+	// Find the opening bracket, skipping brackets inside quoted strings
+	start := -1
+	inStr := false
+	esc := false
+	for i := 0; i < len(raw); i++ {
+		ch := raw[i]
+		if esc {
+			esc = false
+			continue
+		}
+		if ch == '\\' && inStr {
+			esc = true
+			continue
+		}
+		if ch == '"' {
+			inStr = !inStr
+			continue
+		}
+		if !inStr && ch == openBrace {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return "", fmt.Errorf("no JSON %c found in response", openBrace)
+	}
+
+	// Find matching closing bracket, respecting strings and nesting
+	depth := 0
+	end := -1
+	inString := false
+	escape := false
+	for i := start; i < len(raw); i++ {
+		ch := raw[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if ch == '\\' {
+			escape = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if ch == openBrace {
+			depth++
+		}
+		if ch == closeBrace {
+			depth--
+			if depth == 0 {
+				end = i + 1
+				break
+			}
+		}
+	}
+
+	if end == -1 {
+		return "", fmt.Errorf("unmatched JSON %c bracket", openBrace)
+	}
+
+	extracted := raw[start:end]
+	// Repair trailing commas (common LLM JSON issue)
+	extracted = trailingCommaRe.ReplaceAllString(extracted, "$1")
+	return extracted, nil
+}
+
+// extractJSONArray extracts a JSON array from raw LLM output.
+func extractJSONArray(raw string) (string, error) {
+	return extractJSONValue(raw, '[')
+}
+
+// extractJSONObject extracts a JSON object from raw LLM output.
+func extractJSONObject(raw string) (string, error) {
+	return extractJSONValue(raw, '{')
+}
+
+// parseTopicsResponse parses the LLM response as a JSON array of topic objects.
+func (s *WritingService) parseTopicsResponse(raw string) ([]TopicSuggestion, error) {
+	extracted, err := extractJSONArray(raw)
+	if err != nil {
+		s.logger.Warn().Str("raw", raw).Err(err).Msg("failed to extract topics JSON from LLM response")
+		return nil, fmt.Errorf("extract topics JSON: %w", err)
+	}
 
 	var topics []TopicSuggestion
-	if err := json.Unmarshal([]byte(raw), &topics); err != nil {
+	if err := json.Unmarshal([]byte(extracted), &topics); err != nil {
 		return nil, fmt.Errorf("unmarshal topics: %w", err)
 	}
 
@@ -696,16 +792,16 @@ func (s *WritingService) parseTopicsResponse(raw string) ([]TopicSuggestion, err
 
 // parseSEOResponse parses the LLM response as an SEO optimization JSON object.
 func (s *WritingService) parseSEOResponse(raw string) *OptimizeSEOResult {
-	// Strip markdown code fences if present.
-	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
+	extracted, err := extractJSONObject(raw)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("raw", raw).Msg("failed to extract SEO JSON from LLM response, returning raw as title")
+		result := OptimizeSEOResult{OptimizedTitle: raw}
+		return &result
+	}
 
 	var result OptimizeSEOResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		s.logger.Warn().Err(err).Str("raw", raw).Msg("failed to parse SEO response, returning raw as title")
+	if err := json.Unmarshal([]byte(extracted), &result); err != nil {
+		s.logger.Warn().Err(err).Str("extracted", extracted).Msg("failed to parse SEO JSON, returning raw as title")
 		result.OptimizedTitle = raw
 		return &result
 	}
@@ -759,15 +855,13 @@ func buildOutlinePrompt(topic, templateType, style string, keywords []string) st
 
 // parseOutlineResponse parses the LLM response as an outline JSON object.
 func parseOutlineResponse(raw string) (*OutlineResult, error) {
-	// Strip markdown code fences if present.
-	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
+	extracted, err := extractJSONObject(raw)
+	if err != nil {
+		return nil, fmt.Errorf("extract outline JSON: %w", err)
+	}
 
 	var result OutlineResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	if err := json.Unmarshal([]byte(extracted), &result); err != nil {
 		return nil, fmt.Errorf("unmarshal outline: %w", err)
 	}
 
