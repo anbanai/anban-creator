@@ -1,0 +1,89 @@
+/**
+ * Anbanwriter Mini Program Design Tokens
+ * All design variables in one place. Available in all .vue/.scss files without import.
+ */
+
+// --- Primary ---
+$ab-primary: #4F46E5;
+$ab-primary-light: #6366F1;
+$ab-primary-bg: #EEF2FF;
+
+// --- Semantic Colors ---
+$ab-success: #059669;
+$ab-success-bg: #ECFDF5;
+$ab-danger: #DC2626;
+$ab-danger-bg: #FEF2F2;
+$ab-warning: #D97706;
+$ab-warning-bg: #FFFBEB;
+$ab-info: #2563EB;
+$ab-info-bg: #EFF6FF;
+
+// --- Neutral ---
+$ab-text: #111827;
+$ab-text-secondary: #6B7280;
+$ab-text-tertiary: #9CA3AF;
+$ab-border: #E5E7EB;
+$ab-divider: #F3F4F6;
+$ab-surface: #FFFFFF;
+$ab-background: #F9FAFB;
+
+// --- Platform Colors ---
+$ab-platform-rednote: #FF2442;
+$ab-platform-wechat: #07C160;
+
+// --- Border Radius ---
+$ab-radius-sm: 8rpx;
+$ab-radius-md: 16rpx;
+$ab-radius-lg: 24rpx;
+$ab-radius-full: 999rpx;
+
+// --- Spacing ---
+$ab-space-xs: 8rpx;
+$ab-space-sm: 16rpx;
+$ab-space-md: 24rpx;
+$ab-space-lg: 32rpx;
+$ab-space-xl: 48rpx;
+
+// --- Font Size ---
+$ab-text-xs: 22rpx;
+$ab-text-sm: 26rpx;
+$ab-text-base: 28rpx;
+$ab-text-md: 30rpx;
+$ab-text-lg: 34rpx;
+$ab-text-xl: 40rpx;
+$ab-text-2xl: 52rpx;
+
+// --- Font Weight ---
+$ab-font-normal: 400;
+$ab-font-medium: 500;
+$ab-font-semibold: 600;
+$ab-font-bold: 700;
+
+// --- Shadows ---
+$ab-shadow-sm: 0 1rpx 2rpx rgba(0, 0, 0, 0.05);
+$ab-shadow-md: 0 4rpx 12rpx rgba(0, 0, 0, 0.08);
+$ab-shadow-lg: 0 8rpx 24rpx rgba(0, 0, 0, 0.12);
+
+// --- Override uni-app defaults ---
+$uni-color-primary: $ab-primary;
+$uni-color-success: $ab-success;
+$uni-color-warning: $ab-warning;
+$uni-color-error: $ab-danger;
+
+$uni-text-color: $ab-text;
+$uni-text-color-grey: $ab-text-secondary;
+$uni-text-color-placeholder: $ab-text-tertiary;
+
+$uni-bg-color: $ab-surface;
+$uni-bg-color-grey: $ab-background;
+
+$uni-border-color: $ab-border;
+
+$uni-border-radius-sm: $ab-radius-sm;
+$uni-border-radius-base: $ab-radius-md;
+$uni-border-radius-lg: $ab-radius-lg;
+$uni-border-radius-circle: $ab-radius-full;
+
+$uni-font-size-sm: $ab-text-sm;
+$uni-font-size-base: $ab-text-base;
+$uni-font-size-lg: $ab-text-lg;

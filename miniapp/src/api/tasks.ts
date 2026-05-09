@@ -1,0 +1,40 @@
+import { get, post, patch, del } from './index'
+import type {
+  Task,
+  TaskFile,
+  CreateTaskRequest,
+  PaginatedResponse,
+  RednoteAnalytics,
+} from '@/types'
+
+export const tasksApi = {
+  create: async (data: CreateTaskRequest): Promise<Task> => {
+    const result = await post<Task | Task[]>('/tasks', data)
+    return Array.isArray(result) ? result[0] : result
+  },
+
+  list: (params?: { status?: string; channel_id?: string; limit?: number; offset?: number }) =>
+    get<PaginatedResponse<Task>>('/tasks', params as Record<string, any>),
+
+  get: (id: string) =>
+    get<Task>(`/tasks/${id}`),
+
+  cancel: (id: string) =>
+    post<void>(`/tasks/${id}/cancel`),
+
+  delete: (id: string) =>
+    del<void>(`/tasks/${id}`),
+
+  markPublished: (id: string, published: boolean) =>
+    patch<void>(`/tasks/${id}/published`, { published }),
+
+  getFiles: (id: string) =>
+    get<TaskFile[]>(`/tasks/${id}/files`),
+
+  getRednoteAnalytics: (id: string) =>
+    get<RednoteAnalytics>(`/tasks/${id}/rednote-analytics`),
+
+  /** Request a zip download URL for multiple tasks */
+  downloadZip: (taskIds: string[]) =>
+    post<{ url: string }>('/tasks/files/zip', { task_ids: taskIds }),
+}
