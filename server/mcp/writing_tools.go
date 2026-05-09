@@ -49,7 +49,7 @@ func registerWritingTools(server *mcp.Server) {
 			"properties": map[string]any{
 				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
 				"content":    map[string]any{"type": "string", "description": "Article content to humanize"},
-				"intensity":  map[string]any{"type": "string", "enum": []any{"gentle", "medium", "aggressive"}, "description": "Humanization intensity (default: medium)"},
+				"intensity":  map[string]any{"type": "string", "enum": []any{"gentle", "medium", "aggressive", "authentic"}, "description": "Humanization intensity (default: medium). 'authentic' uses 6-dimension rules to rewrite like real human writing."},
 			},
 			"required": []any{"channel_id", "content"},
 		},

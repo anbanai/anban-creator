@@ -87,6 +87,10 @@
     --sidebar-accent-foreground: oklch(0.15 0.01 60);
     --sidebar-border: oklch(0.90 0.01 90);
     --sidebar-ring: oklch(0.67 0.17 60);
+    --success: oklch(0.62 0.19 160);
+    --danger: oklch(0.577 0.245 27.325);
+    --warning: oklch(0.72 0.17 75);
+    --info: oklch(0.65 0.15 235);
 }
 
 .dark {
@@ -121,6 +125,10 @@
     --sidebar-accent-foreground: oklch(0.97 0 0);
     --sidebar-border: oklch(0.18 0.01 60);
     --sidebar-ring: oklch(0.72 0.17 60);
+    --success: oklch(0.70 0.19 160);
+    --danger: oklch(0.704 0.191 22.216);
+    --warning: oklch(0.72 0.17 75);
+    --info: oklch(0.65 0.15 235);
 }
 
 @layer base {

@@ -396,7 +396,8 @@ func (s *WritingService) ConvertMarkdown(
 }
 
 // HumanizeArticle removes AI-generated writing traces from content.
-// Uses the full 24-pattern humanizer prompt system for comprehensive AI trace removal.
+// Uses the 24-pattern humanizer prompt system (gentle/medium/aggressive)
+// or the 6-dimension authentic rewrite rules depending on intensity.
 func (s *WritingService) HumanizeArticle(
 	ctx context.Context,
 	userID, channelID, content, intensity string,

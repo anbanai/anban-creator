@@ -3,7 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, Inbox, CalendarPlus, Clock, Copy } from 'lucide-react'
+import { Plus, Inbox, CalendarPlus, Clock, Copy } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import QueryErrorState from '@/components/QueryErrorState'
 import {
   LineChart,
   Line,
@@ -26,13 +28,14 @@ import Badge from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import PageHeader from '@/components/layout/PageHeader'
 import StatsCard from '@/components/StatsCard'
+import StatsCardSkeleton from '@/components/StatsCardSkeleton'
 import EmptyState from '@/components/EmptyState'
 
 const CHART_COLORS = [
-  'hsl(270, 60%, 55%)',
-  'hsl(170, 50%, 55%)',
-  'hsl(60, 60%, 55%)',
-  'hsl(330, 50%, 55%)',
+  'var(--chart-1)',
+  'var(--chart-2)',
+  'var(--chart-3)',
+  'var(--chart-4)',
 ]
 
 export default function DashboardPage() {
@@ -71,12 +74,12 @@ export default function DashboardPage() {
     },
   })
 
-  const { data: plansData, isLoading: plansLoading } = useQuery({
+  const { data: plansData, isLoading: plansLoading, isError: plansError, refetch: refetchPlans } = useQuery({
     queryKey: ['plans', 'dashboard'],
     queryFn: () => api.plans.list({ limit: 100 }),
   })
 
-  const { data: tasksData, isLoading: tasksLoading } = useQuery({
+  const { data: tasksData, isLoading: tasksLoading, isError: tasksError, refetch: refetchTasks } = useQuery({
     queryKey: ['tasks', 'dashboard'],
     queryFn: () => api.tasks.list({ limit: 100 }),
   })
@@ -153,6 +156,7 @@ export default function DashboardPage() {
   ], [activePlans, totalToday, completedToday, failedToday, successRate, tasks.length])
 
   const isLoading = plansLoading || tasksLoading
+  const hasError = plansError || tasksError
 
   return (
     <div className="space-y-6">
@@ -170,14 +174,22 @@ export default function DashboardPage() {
 
       {/* Stats cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => (
-          <StatsCard
-            key={stat.title}
-            title={stat.title}
-            value={stat.value}
-            description={stat.description}
-          />
-        ))}
+        {hasError ? (
+          <div className="col-span-full">
+            <QueryErrorState onRetry={() => { refetchPlans(); refetchTasks() }} />
+          </div>
+        ) : isLoading ? (
+          Array.from({ length: 4 }).map((_, i) => <StatsCardSkeleton key={i} />)
+        ) : (
+          stats.map((stat) => (
+            <StatsCard
+              key={stat.title}
+              title={stat.title}
+              value={stat.value}
+              description={stat.description}
+            />
+          ))
+        )}
       </div>
 
       {/* Credits card */}
@@ -358,8 +370,16 @@ export default function DashboardPage() {
         </CardHeader>
         <div className="divide-y divide-border">
           {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="divide-y divide-border">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between px-4 py-3">
+                  <div className="space-y-1.5 flex-1">
+                    <Skeleton className="h-4 w-2/3" />
+                    <Skeleton className="h-3 w-40" />
+                  </div>
+                  <Skeleton className="h-5 w-16" />
+                </div>
+              ))}
             </div>
           ) : recentTasks.length === 0 ? (
             <EmptyState

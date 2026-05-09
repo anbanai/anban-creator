@@ -4,7 +4,10 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Streamdown } from 'streamdown'
-import { ArrowLeft, Loader2, Download, Eye, Trash2, Copy, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
+import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import type { TaskFile } from '@/types'
@@ -53,7 +56,7 @@ export default function TaskDetailPage() {
     return next.length > MAX_SSE_LOGS ? next.slice(-MAX_SSE_LOGS) : next
   }
 
-  const { data: task, isLoading } = useQuery({
+  const { data: task, isLoading, isError, refetch } = useQuery({
     queryKey: ['task', id],
     queryFn: () => api.tasks.get(id!),
     refetchInterval: (query) => {
@@ -235,8 +238,39 @@ export default function TaskDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-6 w-64" />
+          <div className="flex gap-2 mt-2">
+            <Skeleton className="h-5 w-16" />
+            <Skeleton className="h-5 w-16" />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-border bg-card p-5 space-y-2">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-6 w-20" />
+            </div>
+          ))}
+        </div>
+        <Skeleton className="h-40 w-full rounded-lg" />
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => navigate('/tasks')}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          返回任务列表
+        </button>
+        <QueryErrorState onRetry={() => refetch()} />
       </div>
     )
   }
@@ -273,17 +307,28 @@ export default function TaskDetailPage() {
 
   return (
     <div className="space-y-6">
+      {/* Screen reader live region for status changes */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {task?.status === 'completed' && '任务已完成'}
+        {task?.status === 'failed' && '任务失败'}
+        {task?.status === 'cancelled' && '任务已取消'}
+      </div>
+
       {/* Header */}
       <div className="flex items-start justify-between">
-        <div>
-          <button
-            onClick={() => navigate('/tasks')}
-            className="mb-2 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            返回任务列表
-          </button>
-          <div className="flex items-center gap-3">
+        <div className="min-w-0">
+          <Breadcrumb className="mb-2">
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink render={<Link to="/tasks" />}>任务</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>{task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-xl font-bold text-foreground">{task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}</h1>
             <Badge variant="outline">
                 {renderPlatformIcon(task.type)}

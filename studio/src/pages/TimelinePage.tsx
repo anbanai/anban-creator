@@ -1,7 +1,9 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Calendar, Loader2, RefreshCw } from 'lucide-react'
+import { Calendar, RefreshCw } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import QueryErrorState from '@/components/QueryErrorState'
 import PageHeader from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
@@ -93,7 +95,7 @@ export default function TimelinePage() {
   }, [setSearchParams])
 
   // Data fetching with filters
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['timeline', dateRange.from, dateRange.to, itemType, contentType, status, channelId],
     queryFn: () =>
       api.timeline.get(dateRange.from, dateRange.to, {
@@ -281,9 +283,35 @@ export default function TimelinePage() {
       </Card>
 
       {/* Content */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      {isError ? (
+        <QueryErrorState onRetry={() => refetch()} />
+      ) : isLoading ? (
+        <div className="space-y-8">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={i}>
+              <div className="mb-4 flex items-center gap-3">
+                <Skeleton className="h-5 w-24" />
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <div className="relative ml-4 border-l border-border pl-6">
+                {Array.from({ length: 2 }).map((_, j) => (
+                  <div key={j} className="mb-6">
+                    <div className="mb-3 flex items-center gap-2">
+                      <div className="absolute -left-[5px] h-2.5 w-2.5 rounded-full border-2 border-muted bg-card" />
+                      <Skeleton className="h-4 w-20" />
+                    </div>
+                    <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-1.5">
+                      <div className="flex gap-1.5">
+                        <Skeleton className="h-5 w-12" />
+                        <Skeleton className="h-5 w-16" />
+                      </div>
+                      <Skeleton className="h-4 w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       ) : grouped.length === 0 ? (
         <EmptyState
@@ -408,7 +436,7 @@ export default function TimelinePage() {
 
       {/* Auto-refresh indicator */}
       {hasRunningItems && (
-        <div className="fixed bottom-4 right-4 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground shadow-lg">
+        <div className="fixed bottom-4 left-4 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground shadow-lg">
           <span className="h-2 w-2 animate-pulse-dot rounded-full bg-primary" />
           自动刷新中（运行中的任务）
         </div>

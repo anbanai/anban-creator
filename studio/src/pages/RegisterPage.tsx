@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { useAuth } from '@/contexts/AuthContext'
 import { registerSchema, type RegisterFormValues } from '@/lib/schemas'
 import { Input } from '@/components/ui/Input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Button } from '@/components/ui/Button'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import AuthLayout from '@/components/auth/AuthLayout'
@@ -17,6 +18,8 @@ const COUNTDOWN_SECONDS = 60
 export default function RegisterPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/'
   const [searchParams] = useSearchParams()
   const [countdown, setCountdown] = useState(0)
   const [sendingCode, setSendingCode] = useState(false)
@@ -55,7 +58,7 @@ export default function RegisterPage() {
     try {
       const response = await api.auth.register(values.email, values.password, values.code, values.invite_code, values.nickname || undefined)
       login(response.token, response.refresh_token, response.user)
-      navigate('/', { replace: true })
+      navigate(from, { replace: true })
     } catch (err) {
       toast.error(getApiErrorMessage(err, '注册失败，请重试。'))
     }
@@ -143,7 +146,7 @@ export default function RegisterPage() {
               <FormItem>
                 <FormLabel>密码</FormLabel>
                 <FormControl>
-                  <Input type="password" placeholder="至少 8 个字符" {...field} />
+                  <PasswordInput placeholder="至少 8 个字符" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>

@@ -3,10 +3,13 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Loader2, FileText } from 'lucide-react'
+import { Plus, FileText } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import type { Channel, Plan, PlanType, CreatePlanRequest } from '@/types'
 import { ChannelSelector } from '@/components/ChannelSelector'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -22,6 +25,7 @@ import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
+import { Pagination } from '@/components/ui/Pagination'
 import EmptyState from '@/components/EmptyState'
 
 function planToFormValues(plan: Plan): PlanFormValues {
@@ -36,6 +40,8 @@ function planToFormValues(plan: Plan): PlanFormValues {
 export default function PlansPage() {
   const queryClient = useQueryClient()
   const [channelFilter, setChannelFilter] = useState('')
+  const [searchFilter, setSearchFilter] = useState('')
+  const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
@@ -62,15 +68,25 @@ export default function PlansPage() {
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['plans', channelFilter],
+  useEffect(() => { setPage(1) }, [channelFilter, searchFilter])
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['plans', channelFilter, page],
     queryFn: () => api.plans.list({
-      limit: 100,
+      limit: 50,
+      offset: (page - 1) * 50,
       channel_id: channelFilter || undefined,
     }),
   })
 
   const plans = data?.items ?? []
+  const totalPlans = data?.total ?? 0
+  const totalPages = Math.ceil(totalPlans / 50)
+  const filteredPlans = useMemo(() => {
+    if (!searchFilter.trim()) return plans
+    const q = searchFilter.toLowerCase()
+    return plans.filter((p) => (p.prompt || '').toLowerCase().includes(q))
+  }, [plans, searchFilter])
 
   // Fetch channels for name/avatar display
   const { data: allChannels } = useQuery({
@@ -201,19 +217,44 @@ export default function PlansPage() {
         </Button>
       </PageHeader>
 
-      {/* Channel filter */}
-      <div className="w-full sm:w-48">
-        <ChannelSelector
-          value={channelFilter}
-          onChange={(id) => setChannelFilter(id)}
-        />
+      {/* Channel filter + Search */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="w-full sm:w-48">
+          <ChannelSelector
+            value={channelFilter}
+            onChange={(id) => setChannelFilter(id)}
+          />
+        </div>
+        <div className="w-full sm:w-48 sm:ml-auto">
+          <SearchInput
+            value={searchFilter}
+            onChange={setSearchFilter}
+            placeholder="搜索计划..."
+          />
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      {isError ? (
+        <QueryErrorState onRetry={() => refetch()} />
+      ) : isLoading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-border bg-card p-4 border-l-4 border-l-muted">
+              <div className="flex items-start gap-3">
+                <Skeleton className="h-8 w-8 rounded-full" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-3 w-1/4" />
+                  <div className="flex gap-2">
+                    <Skeleton className="h-5 w-14 rounded-full" />
+                    <Skeleton className="h-3 w-32" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
-      ) : plans.length === 0 ? (
+      ) : filteredPlans.length === 0 ? (
         <EmptyState
           icon={FileText}
           title="还没有计划"
@@ -221,8 +262,9 @@ export default function PlansPage() {
           action={{ label: '新建计划', onClick: openCreate }}
         />
       ) : (
+        <>
         <div className="space-y-3">
-          {plans.map((plan) => {
+          {filteredPlans.map((plan) => {
             const channel = channelMap[plan.channel_id]
             const borderColor = platformBorderColor[plan.type] || ''
             const hoverBorderColor = platformHoverBorderColor[plan.type] || ''
@@ -282,6 +324,17 @@ export default function PlansPage() {
             )
           })}
         </div>
+
+        {totalPages > 1 && (
+          <div className="mt-4 flex justify-center">
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+            />
+          </div>
+        )}
+        </>
       )}
 
       {/* Create/Edit Dialog */}

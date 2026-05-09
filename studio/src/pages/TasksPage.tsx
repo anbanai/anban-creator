@@ -5,10 +5,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Loader2, ClipboardList, Check, Film, Download, Square, CheckSquare } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -17,6 +20,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
+import { Pagination } from '@/components/ui/Pagination'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel } from '@/lib/labels'
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
@@ -60,6 +64,8 @@ export default function TasksPage() {
 
   const [statusFilter, setStatusFilter] = useState(initialStatus)
   const [channelFilter, setChannelFilter] = useState('')
+  const [searchFilter, setSearchFilter] = useState('')
+  const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
   const [quantity, setQuantity] = useState(1)
   const [generateVideo, setGenerateVideo] = useState(false)
@@ -67,6 +73,8 @@ export default function TasksPage() {
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const { submit } = useSubmitLock()
+
+  useEffect(() => { setPage(1) }, [statusFilter, channelFilter, searchFilter])
 
   const { data: channels = [], isLoading: channelsLoading } = useQuery({
     queryKey: ['channels', 'active'],
@@ -126,11 +134,12 @@ export default function TasksPage() {
     navigate('/channels')
   }, [channels.length, modalOpen, navigate])
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['tasks', statusFilter, channelFilter],
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['tasks', statusFilter, channelFilter, page],
     queryFn: () =>
       api.tasks.list({
         limit: 50,
+        offset: (page - 1) * 50,
         status: statusFilter === 'all' ? undefined : statusFilter,
         channel_id: channelFilter || undefined,
       }),
@@ -138,17 +147,24 @@ export default function TasksPage() {
   })
 
   const tasks = data?.items ?? []
+  const totalTasks = data?.total ?? 0
+  const totalPages = Math.ceil(totalTasks / 50)
+  const filteredTasks = useMemo(() => {
+    if (!searchFilter.trim()) return tasks
+    const q = searchFilter.toLowerCase()
+    return tasks.filter((t) => (t.title || '').toLowerCase().includes(q) || (t.prompt || '').toLowerCase().includes(q))
+  }, [tasks, searchFilter])
   const selectedTaskIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
   const selectedTasks = useMemo(
-    () => tasks.filter((task) => selectedTaskIdSet.has(task.id)),
-    [tasks, selectedTaskIdSet],
+    () => filteredTasks.filter((task) => selectedTaskIdSet.has(task.id)),
+    [filteredTasks, selectedTaskIdSet],
   )
   const selectedCompletedTasks = selectedTasks.filter((task) => task.status === 'completed')
-  const completedTasksOnPage = tasks.filter((task) => task.status === 'completed')
+  const completedTasksOnPage = filteredTasks.filter((task) => task.status === 'completed')
   const allCompletedSelected = completedTasksOnPage.length > 0 && completedTasksOnPage.every((task) => selectedTaskIdSet.has(task.id))
 
   useEffect(() => {
-    const visibleTaskIds = new Set(tasks.map((task) => task.id))
+    const visibleTaskIds = new Set(filteredTasks.map((task) => task.id))
     setSelectedTaskIds((prev) => {
       const next = prev.filter((id) => visibleTaskIds.has(id))
       return next.length === prev.length ? prev : next
@@ -199,7 +215,8 @@ export default function TasksPage() {
       navigate('/channels')
       return
     }
-    form.reset({ type: 'rednote', prompt: '', channel_id: '', image_ratio: '' })
+    const defaultType = (searchParams.get('type') || 'rednote') as TaskType
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
     setGenerateVideo(false)
     setChannelImageRatio('')
@@ -311,13 +328,39 @@ export default function TasksPage() {
             onChange={(id) => setChannelFilter(id)}
           />
         </div>
+
+        {/* Search */}
+        <div className="w-full sm:w-48 sm:ml-auto">
+          <SearchInput
+            value={searchFilter}
+            onChange={setSearchFilter}
+            placeholder="搜索任务..."
+          />
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      {isError ? (
+        <QueryErrorState onRetry={() => refetch()} />
+      ) : isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-border bg-card p-4 border-l-4 border-l-muted">
+              <div className="flex items-start gap-3">
+                <Skeleton className="h-4 w-4 mt-1" />
+                <Skeleton className="h-8 w-8 rounded-full" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-3/5" />
+                  <Skeleton className="h-3 w-1/3" />
+                  <div className="flex gap-2">
+                    <Skeleton className="h-5 w-12 rounded-full" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
-      ) : tasks.length === 0 ? (
+      ) : filteredTasks.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
           title={statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
@@ -337,6 +380,7 @@ export default function TasksPage() {
           }
         />
       ) : (
+        <>
         <div className="space-y-2">
           <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -368,7 +412,7 @@ export default function TasksPage() {
               </Button>
             </div>
           </div>
-          {tasks.map((task) => {
+          {filteredTasks.map((task) => {
             const channel = channelMap[task.channel_id]
             const borderColor = platformBorderColor[task.type] || ''
             const hoverBorderColor = platformHoverBorderColor[task.type] || ''
@@ -463,6 +507,17 @@ export default function TasksPage() {
             )
           })}
         </div>
+
+        {totalPages > 1 && (
+          <div className="mt-4 flex justify-center">
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+            />
+          </div>
+        )}
+        </>
       )}
 
       {/* Create Task Dialog */}

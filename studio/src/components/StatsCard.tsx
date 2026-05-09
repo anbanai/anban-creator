@@ -28,7 +28,7 @@ export default function StatsCard({ title, value, description, trend }: StatsCar
     : ''
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-5">
       <p className="text-sm font-medium text-muted-foreground">{title}</p>
       <div className="mt-2 flex items-end gap-2">
         <span className="text-3xl font-bold tracking-tight">{value}</span>

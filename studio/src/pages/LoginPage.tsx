@@ -1,12 +1,13 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { useAuth } from '@/contexts/AuthContext'
 import { loginSchema, type LoginFormValues } from '@/lib/schemas'
 import { Input } from '@/components/ui/Input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Button } from '@/components/ui/Button'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import AuthLayout from '@/components/auth/AuthLayout'
@@ -14,6 +15,8 @@ import AuthLayout from '@/components/auth/AuthLayout'
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/'
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: '', password: '' },
@@ -23,7 +26,7 @@ export default function LoginPage() {
     try {
       const response = await api.auth.login(values.email, values.password)
       login(response.token, response.refresh_token, response.user)
-      navigate('/', { replace: true })
+      navigate(from, { replace: true })
     } catch (err) {
       toast.error(getApiErrorMessage(err, '登录失败，请重试。'))
     }
@@ -59,7 +62,7 @@ export default function LoginPage() {
               <FormItem>
                 <FormLabel>密码</FormLabel>
                 <FormControl>
-                  <Input type="password" placeholder="请输入密码" {...field} />
+                  <PasswordInput placeholder="请输入密码" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>

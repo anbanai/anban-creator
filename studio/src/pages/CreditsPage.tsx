@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { toast } from 'sonner'
-import { Loader2, CreditCard } from 'lucide-react'
+import { CreditCard } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import type { CreditTransaction, CreditPricing } from '@/types'
 import { Card, CardBody } from '@/components/ui/Card'
@@ -55,7 +57,7 @@ export default function CreditsPage() {
     queryFn: () => api.credits.signInStatus(),
   })
 
-  const { data: transactionsData, isLoading: transactionsLoading } = useQuery({
+  const { data: transactionsData, isLoading: transactionsLoading, isError: transactionsError, refetch: refetchTransactions } = useQuery({
     queryKey: ['credits', 'transactions', page],
     queryFn: () => api.credits.transactions({ page, page_size: PAGE_SIZE }),
   })
@@ -168,9 +170,19 @@ export default function CreditsPage() {
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">交易记录</h2>
         </div>
-        {transactionsLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        {transactionsError ? (
+          <QueryErrorState onRetry={() => refetchTransactions()} />
+        ) : transactionsLoading ? (
+          <div className="divide-y divide-border">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 px-4 py-3">
+                <Skeleton className="h-5 w-16" />
+                <Skeleton className="h-4 w-12" />
+                <Skeleton className="h-4 w-12" />
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-4 w-20 ml-auto" />
+              </div>
+            ))}
           </div>
         ) : transactions.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">

@@ -92,6 +92,7 @@ function FilePreviewModalContent({
       }
     } catch (err) {
       console.error('Failed to fetch preview:', err)
+      toast.error('文件预览加载失败')
     } finally {
       setLoading(false)
     }
@@ -118,6 +119,7 @@ function FilePreviewModalContent({
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Failed to download file:', err)
+      toast.error('文件下载失败')
     }
   }
 
@@ -396,6 +398,7 @@ function FilePreviewInline({
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Failed to download file:', err)
+      toast.error('文件下载失败')
     }
   }
 

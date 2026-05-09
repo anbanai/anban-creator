@@ -4,7 +4,11 @@ import OpenClawGuide from '@/components/connect/OpenClawGuide'
 export default function OpenClawGuidePage() {
   return (
     <div className="space-y-6">
-      <PageHeader title="OpenClaw 接入指南" description="配置 OpenClaw 插件连接，开始自动化创作" />
+      <PageHeader
+        title="OpenClaw 接入指南"
+        description="配置 OpenClaw 插件连接，开始自动化创作"
+        breadcrumbs={[{ label: '设置', href: '/settings' }, { label: 'OpenClaw 接入指南' }]}
+      />
       <OpenClawGuide />
     </div>
   )

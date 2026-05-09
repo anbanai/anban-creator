@@ -84,7 +84,7 @@ export default function AuthLayout({
 
       {/* ICP footer */}
       <div className="absolute bottom-4 w-full text-center text-xs text-amber-600/70 dark:text-amber-400/50">
-        <p>© 2025 成都北冕星辰科技有限公司</p>
+        <p>© {new Date().getFullYear()} 成都北冕星辰科技有限公司</p>
         <a
           href="https://beian.miit.gov.cn/"
           target="_blank"

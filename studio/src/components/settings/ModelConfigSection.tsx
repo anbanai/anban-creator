@@ -81,7 +81,7 @@ function MaskedInput({
           className="shrink-0 text-xs"
           onClick={() => setShow(!show)}
         >
-          {show ? 'Hide' : 'Show'}
+          {show ? '隐藏' : '显示'}
         </Button>
       </div>
     </div>

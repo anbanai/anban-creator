@@ -89,4 +89,5 @@ export const SHORTCUT_LIST = [
   { keys: "g $", description: "前往积分" },
   { keys: "g s", description: "前往设置" },
   { keys: "?", description: "显示快捷键帮助" },
+  { keys: "⌘K", description: "打开命令面板" },
 ];

@@ -43,7 +43,7 @@ export default function FeedbackFab() {
   }
 
   return (
-    <div ref={containerRef} className="fixed bottom-6 right-6 z-50">
+    <div ref={containerRef} className="fixed bottom-20 right-6 z-40" aria-label="反馈">
       {/* Expandable panel */}
       {open && (
         <div className="absolute bottom-full right-0 mb-2 w-80 rounded-lg border border-border bg-card shadow-lg">

@@ -20,13 +20,13 @@ const badgeVariants = cva(
           "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         link: "text-primary underline-offset-4 hover:underline",
         success:
-          "bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20 [a]:hover:bg-emerald-500/20",
+          "bg-[oklch(var(--success)/0.1)] text-[oklch(var(--success))] ring-1 ring-[oklch(var(--success)/0.2)] [a]:hover:bg-[oklch(var(--success)/0.2)]",
         danger:
-          "bg-red-500/10 text-red-400 ring-1 ring-red-500/20 [a]:hover:bg-red-500/20",
+          "bg-[oklch(var(--danger)/0.1)] text-[oklch(var(--danger))] ring-1 ring-[oklch(var(--danger)/0.2)] [a]:hover:bg-[oklch(var(--danger)/0.2)]",
         warning:
-          "bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/20 [a]:hover:bg-amber-500/20",
+          "bg-[oklch(var(--warning)/0.1)] text-[oklch(var(--warning))] ring-1 ring-[oklch(var(--warning)/0.2)] [a]:hover:bg-[oklch(var(--warning)/0.2)]",
         info:
-          "bg-sky-500/10 text-sky-400 ring-1 ring-sky-500/20 [a]:hover:bg-sky-500/20",
+          "bg-[oklch(var(--info)/0.1)] text-[oklch(var(--info))] ring-1 ring-[oklch(var(--info)/0.2)] [a]:hover:bg-[oklch(var(--info)/0.2)]",
         neutral:
           "bg-muted text-muted-foreground [a]:hover:bg-muted/80",
       },

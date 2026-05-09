@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import StatsCardSkeleton from '@/components/StatsCardSkeleton'
+import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { contentTypeLabel } from '@/lib/labels'
@@ -61,17 +62,26 @@ export default function UsagePage() {
 
   const { from, to } = useMemo(() => getDateRange(dateRange), [dateRange])
 
-  const { data: stats, isLoading } = useQuery({
+  const { data: stats, isLoading, isError, refetch } = useQuery({
     queryKey: queryKeys.usage.stats({ from, to }),
     queryFn: () => api.usage.stats({ from, to }),
   })
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="用量统计" description="查看你的 LLM 资源消耗和费用。" />
+        <QueryErrorState onRetry={() => refetch()} />
+      </div>
+    )
+  }
 
   if (isLoading) {
     return (
       <div className="space-y-6">
         <PageHeader title="用量统计" description="查看你的 LLM 资源消耗和费用。" />
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => <StatsCardSkeleton key={i} />)}
         </div>
       </div>
     )

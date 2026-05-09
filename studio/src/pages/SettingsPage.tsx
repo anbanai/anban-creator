@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import Badge from '@/components/ui/Badge'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -36,7 +37,7 @@ export default function SettingsPage() {
     defaultValues: { old_password: '', new_password: '', confirm_password: '' },
   })
 
-  const { data: apiKeys = [], isLoading } = useQuery({
+  const { data: apiKeys = [], isLoading, isError, refetch } = useQuery({
     queryKey: queryKeys.apiKeys.all,
     queryFn: async () => {
       const data = await api.apiKeys.list()
@@ -167,7 +168,7 @@ export default function SettingsPage() {
                   <FormItem>
                     <FormLabel>当前密码</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="输入当前密码" {...field} />
+                      <PasswordInput placeholder="输入当前密码" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -180,7 +181,7 @@ export default function SettingsPage() {
                   <FormItem>
                     <FormLabel>新密码</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="输入新密码（至少 8 个字符）" {...field} />
+                      <PasswordInput placeholder="输入新密码（至少 8 个字符）" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -193,7 +194,7 @@ export default function SettingsPage() {
                   <FormItem>
                     <FormLabel>确认新密码</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="再次输入新密码" {...field} />
+                      <PasswordInput placeholder="再次输入新密码" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -275,6 +276,8 @@ export default function SettingsPage() {
           {/* Key list */}
           {isLoading ? (
             <p className="text-xs text-muted-foreground">加载中...</p>
+          ) : isError ? (
+            <p className="text-xs text-muted-foreground">加载密钥失败，<button onClick={() => refetch()} className="text-primary hover:underline">点击重试</button></p>
           ) : apiKeys.length === 0 ? (
             <p className="text-xs text-muted-foreground">暂无密钥。创建一个新密钥后，可以直接继续去完成 Claude Code 或 OpenClaw 的接入。</p>
           ) : (
