@@ -13,18 +13,18 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hibiken/asynq v0.26.0
-	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260506125841-18ecd7ae852e
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260508022336-3147144a7f1c
 	github.com/modelcontextprotocol/go-sdk v1.6.0
-	github.com/openai/openai-go/v3 v3.34.0
+	github.com/openai/openai-go/v3 v3.35.0
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.1
 	github.com/severity1/claude-agent-sdk-go v0.6.15
-	github.com/silenceper/wechat/v2 v2.1.12
-	github.com/volcengine/volcengine-go-sdk v1.2.26
+	github.com/silenceper/wechat/v2 v2.1.13
+	github.com/volcengine/volcengine-go-sdk v1.2.27
 	github.com/wneessen/go-mail v0.7.2
-	golang.org/x/crypto v0.50.0
-	golang.org/x/net v0.53.0
+	golang.org/x/crypto v0.51.0
+	golang.org/x/net v0.54.0
 	google.golang.org/genai v1.56.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0
@@ -85,14 +85,14 @@ require (
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
-	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/gjson v1.19.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.71.0 // indirect
-	github.com/volcengine/volc-sdk-golang v1.0.244 // indirect
+	github.com/volcengine/volc-sdk-golang v1.0.246 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 // indirect
@@ -101,10 +101,10 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	golang.org/x/image v0.39.0 // indirect
+	golang.org/x/image v0.40.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/api v0.278.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect

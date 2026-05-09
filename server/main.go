@@ -195,6 +195,9 @@ func main() {
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
 	var rednoteTrackingSvc *service.RednoteTrackingService
+	var templateSvc *service.TemplateService
+	var viralAnalysisSvc *service.ViralAnalysisService
+	var posterSvc *service.PosterService
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
 
@@ -204,6 +207,9 @@ func main() {
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
+			templateSvc = service.NewTemplateService(repo, log)
+			viralAnalysisSvc = service.NewViralAnalysisService(repo, log)
+			posterSvc = service.NewPosterService(repo, log)
 
 		// Create Asynq client if Redis is available.
 		if rdb != nil {
@@ -277,6 +283,9 @@ func main() {
 	var fileHandler *handler.FileHandler
 	var feedbackHandler *handler.FeedbackHandler
 	var modelConfigHandler *handler.ModelConfigHandler
+	var templateHandler *handler.TemplateHandler
+	var viralAnalysisHandler *handler.ViralAnalysisHandler
+	var posterHandler *handler.PosterHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -290,6 +299,9 @@ func main() {
 		if writingLLMClient != nil {
 			channelHandler.SetLLMClient(writingLLMClient, cfg.Writing.Timeout)
 		}
+		if templateSvc != nil {
+			channelHandler.SetTemplateService(templateSvc)
+		}
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
 			creditHandler = handler.NewCreditHandler(creditSvc, &cfg.Credits, cfg.Credits.AdminAPIKey, log)
@@ -302,6 +314,9 @@ func main() {
 			fileHandler = handler.NewFileHandler(store, log)
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
+		templateHandler = handler.NewTemplateHandler(templateSvc, log)
+		viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
+		posterHandler = handler.NewPosterHandler(posterSvc, log)
 	}
 	if modelConfigSvc != nil {
 		modelConfigHandler = handler.NewModelConfigHandler(modelConfigSvc, log)
@@ -344,6 +359,7 @@ func main() {
 			WritingSvc:    writingSvc,
 			PublishingSvc: publishingSvc,
 			WorkspaceSvc:  workspaceSvc,
+			TemplateSvc:   templateSvc,
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcp.SetLogger(log)
@@ -376,7 +392,7 @@ func main() {
 	if repo != nil && taskSvc != nil {
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		defer cleanupCancel()
-		go startPeriodicCleanup(cleanupCtx, taskSvc, log)
+		go startPeriodicCleanup(cleanupCtx, taskSvc, viralAnalysisSvc, posterSvc, log)
 	}
 
 	// 16. Build Services struct.
@@ -405,6 +421,9 @@ func main() {
 		FileHandler:             fileHandler,
 		FeedbackHandler:         feedbackHandler,
 		ModelConfigHandler:      modelConfigHandler,
+		TemplateHandler:         templateHandler,
+		ViralAnalysisHandler:    viralAnalysisHandler,
+		PosterHandler:           posterHandler,
 		MCPHandler:              mcpHandler,
 		StorageProvider:         store,
 	}
@@ -627,14 +646,28 @@ func parseLogLevel(level string) zerolog.Level {
 }
 
 // startPeriodicCleanup runs CleanupExpiredWorkspaces on a ticker until ctx is cancelled.
-func startPeriodicCleanup(ctx context.Context, taskSvc *service.TaskService, log *zerolog.Logger) {
+func startPeriodicCleanup(ctx context.Context, taskSvc *service.TaskService, viralSvc *service.ViralAnalysisService, posterSvc *service.PosterService, log *zerolog.Logger) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	// Run once at startup.
-	if err := taskSvc.CleanupExpiredWorkspaces(ctx); err != nil {
-		log.Error().Err(err).Msg("initial workspace cleanup failed")
+	cleanup := func() {
+		if err := taskSvc.CleanupExpiredWorkspaces(ctx); err != nil {
+			log.Error().Err(err).Msg("periodic cleanup failed")
+		}
+		if viralSvc != nil {
+			if err := viralSvc.CleanupOldCompleted(ctx); err != nil {
+				log.Error().Err(err).Msg("viral analysis cleanup failed")
+			}
+		}
+		if posterSvc != nil {
+			if err := posterSvc.CleanupOldCompleted(ctx); err != nil {
+				log.Error().Err(err).Msg("poster task cleanup failed")
+			}
+		}
 	}
+
+	// Run once at startup.
+	cleanup()
 
 	for {
 		select {
@@ -642,9 +675,7 @@ func startPeriodicCleanup(ctx context.Context, taskSvc *service.TaskService, log
 			log.Info().Msg("periodic cleanup stopped")
 			return
 		case <-ticker.C:
-			if err := taskSvc.CleanupExpiredWorkspaces(ctx); err != nil {
-				log.Error().Err(err).Msg("periodic workspace cleanup failed")
-			}
+			cleanup()
 		}
 	}
 }

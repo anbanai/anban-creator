@@ -2,24 +2,17 @@ import { NavLink } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import {
-  LayoutDashboard,
-  Rss,
-  CalendarRange,
-  ListChecks,
-  Clock,
   Settings,
   Sun,
   Moon,
   Monitor,
-  Coins,
   Menu,
   X,
-  Activity,
-  Terminal,
-  Puzzle,
   Workflow,
   PlugZap,
   BarChart3,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
 import {
@@ -29,24 +22,13 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const workflowItems = [
-  { to: "/", label: "仪表盘", icon: LayoutDashboard, end: true },
-  { to: "/channels", label: "账号", icon: Rss },
-  { to: "/plans", label: "计划", icon: CalendarRange },
-  { to: "/tasks", label: "任务", icon: ListChecks },
-  { to: "/timeline", label: "时间轴", icon: Clock },
-];
-
-const analyticsItems = [
-  { to: "/credits", label: "积分", icon: Coins },
-  { to: "/usage", label: "用量", icon: Activity },
-];
-
-const platformItems = [
-  { to: "/connect/claude-code", label: "Claude Code", icon: Terminal },
-  { to: "/connect/openclaw", label: "OpenClaw", icon: Puzzle },
-];
+import { Button } from "@/components/ui/Button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { workflowItems, analyticsItems, platformItems } from "@/lib/navigation";
 
 const themeOptions = [
   { value: "light", label: "亮色", icon: Sun },
@@ -109,8 +91,27 @@ function ThemeToggle() {
   );
 }
 
+function useCollapsedState() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sidebar-collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sidebar-collapsed', String(collapsed));
+    } catch {}
+  }, [collapsed]);
+
+  return [collapsed, setCollapsed] as const;
+}
+
 export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useCollapsedState();
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -157,21 +158,27 @@ export default function Sidebar() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed left-0 top-0 z-40 flex h-screen w-[220px] flex-col border-r border-sidebar-border bg-sidebar transition-transform duration-200 md:static md:translate-x-0 ${
+        className={`fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-sidebar-border bg-sidebar transition-all duration-200 md:static md:translate-x-0 ${
+          collapsed ? "w-16" : "w-[220px]"
+        } ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         {/* Logo */}
-        <div className="flex h-14 items-center px-5">
-          <span className="text-base font-bold tracking-tight text-sidebar-foreground">
-            Anban 智能创作助手
-          </span>
+        <div className={`flex h-14 items-center ${collapsed ? "justify-center px-0" : "px-5"}`}>
+          {collapsed ? (
+            <span className="text-sm font-bold text-sidebar-foreground">A</span>
+          ) : (
+            <span className="text-base font-bold tracking-tight text-sidebar-foreground">
+              Anban 智能创作助手
+            </span>
+          )}
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 pt-2">
-          <SidebarSection label="工作区" icon={Workflow} items={workflowItems} onSelect={() => setMobileOpen(false)} />
-          <SidebarSection label="经营数据" icon={BarChart3} items={analyticsItems} onSelect={() => setMobileOpen(false)} />
+        <nav className="flex-1 overflow-y-auto px-3 pt-2" aria-label="主导航">
+          <SidebarSection label="工作区" icon={Workflow} items={workflowItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="经营数据" icon={BarChart3} items={analyticsItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
         </nav>
 
         {/* Divider */}
@@ -179,46 +186,20 @@ export default function Sidebar() {
 
         {/* Bottom: Platform + Settings */}
         <div className="px-3 py-2 space-y-0.5">
-          <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
-            <span className="inline-flex items-center gap-2">
-              <PlugZap className="h-3.5 w-3.5" />
-              接入配置
-            </span>
-          </div>
-          {platformItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={() => setMobileOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                  isActive
-                    ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
-                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                }`
-              }
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {item.label}
-            </NavLink>
-          ))}
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                isActive
-                  ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
-                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-              }`
-            }
-          >
-            <Settings className="h-4 w-4 shrink-0" />
-            设置
-          </NavLink>
+          <SidebarBottomSection collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
         </div>
 
-        {/* Bottom: Notifications + User + Theme */}
+        {/* Bottom: Collapse toggle + User + Theme */}
         <div className="flex items-center gap-1 border-t border-sidebar-border px-3 py-3">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="hidden md:flex text-muted-foreground hover:text-sidebar-foreground"
+            onClick={() => setCollapsed(!collapsed)}
+            aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+          >
+            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          </Button>
           <UserAccountPopover />
           <ThemeToggle />
         </div>
@@ -231,13 +212,37 @@ function SidebarSection({
   label,
   icon: Icon,
   items,
+  collapsed,
   onSelect,
 }: {
   label: string
   icon: typeof Workflow
   items: Array<{ to: string; label: string; icon: typeof Workflow; end?: boolean }>
+  collapsed: boolean
   onSelect: () => void
 }) {
+  if (collapsed) {
+    return (
+      <div className="mb-4">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <div className="flex items-center justify-center py-2 cursor-pointer" />
+            }
+          >
+            <Icon className="h-4 w-4 text-muted-foreground/70" />
+          </TooltipTrigger>
+          <TooltipContent side="right">{label}</TooltipContent>
+        </Tooltip>
+        <div className="space-y-0.5">
+          {items.map((item) => (
+            <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mb-4">
       <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
@@ -248,24 +253,85 @@ function SidebarSection({
       </div>
       <div className="space-y-0.5">
         {items.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            onClick={onSelect}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                isActive
-                  ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
-                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-              }`
-            }
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            {item.label}
-          </NavLink>
+          <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
         ))}
       </div>
     </div>
-  )
+  );
+}
+
+function SidebarBottomSection({
+  collapsed,
+  onSelect,
+}: {
+  collapsed: boolean
+  onSelect: () => void
+}) {
+  const allItems = [
+    ...platformItems,
+    { to: "/settings", label: "设置", icon: Settings },
+  ];
+
+  if (collapsed) {
+    return (
+      <div className="space-y-0.5">
+        {allItems.map((item) => (
+          <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+        <span className="inline-flex items-center gap-2">
+          <PlugZap className="h-3.5 w-3.5" />
+          接入配置
+        </span>
+      </div>
+      {allItems.map((item) => (
+        <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
+      ))}
+    </>
+  );
+}
+
+function SidebarNavLink({
+  item,
+  collapsed,
+  onClick,
+}: {
+  item: { to: string; label: string; icon: typeof Workflow; end?: boolean }
+  collapsed: boolean
+  onClick: () => void
+}) {
+  const link = (
+    <NavLink
+      to={item.to}
+      end={item.end}
+      onClick={onClick}
+      className={({ isActive }) =>
+        `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+          isActive
+            ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
+            : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        } ${collapsed ? "justify-center px-0" : ""}`
+      }
+    >
+      <item.icon className="h-4 w-4 shrink-0" />
+      {!collapsed && item.label}
+    </NavLink>
+  );
+
+  if (collapsed) {
+    return (
+      <Tooltip>
+        <TooltipTrigger render={<span />}>{link}</TooltipTrigger>
+        <TooltipContent side="right">{item.label}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return link;
 }

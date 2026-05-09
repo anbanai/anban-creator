@@ -8,7 +8,9 @@ import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import AppLayout from '@/components/layout/AppLayout'
+import { NavigationProgress } from '@/components/NavigationProgress'
 import ShortcutHelp from '@/components/ShortcutHelp'
+import GlobalCommandPalette from '@/components/GlobalCommandPalette'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 
 // Lazy-loaded pages
@@ -23,6 +25,8 @@ const TaskDetailPage = React.lazy(() => import('@/pages/TaskDetailPage'))
 const CreditsPage = React.lazy(() => import('@/pages/CreditsPage'))
 const UsagePage = React.lazy(() => import('@/pages/UsagePage'))
 const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
+const TemplatesPage = React.lazy(() => import('@/pages/TemplatesPage'))
+const WorkshopPage = React.lazy(() => import('@/pages/WorkshopPage'))
 const ClaudeCodeGuidePage = React.lazy(() => import('@/pages/ConnectGuidePage'))
 const OpenClawGuidePage = React.lazy(() => import('@/pages/OpenClawGuidePage'))
 
@@ -120,7 +124,9 @@ function AppRoutes() {
         <Route
           element={
             <ProtectedRoute>
+              <NavigationProgress />
               <KeyboardShortcuts />
+              <GlobalCommandPalette />
               <AppLayout />
             </ProtectedRoute>
           }
@@ -131,6 +137,8 @@ function AppRoutes() {
           <Route path="plans" element={<LazyPage component={PlansPage} />} />
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />
+          <Route path="templates" element={<LazyPage component={TemplatesPage} />} />
+          <Route path="workshop" element={<LazyPage component={WorkshopPage} />} />
           <Route path="credits" element={<LazyPage component={CreditsPage} />} />
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />

@@ -9,6 +9,9 @@ import { usageApi } from './usage'
 import { feedbackApi } from './feedback'
 import { modelConfigApi } from './model-config'
 import { rednoteAnalyticsApi } from './rednote-analytics'
+import { templatesApi } from './templates'
+import { postersApi } from './posters'
+import { viralAnalysesApi } from './viral-analyses'
 
 export const api = {
   auth: authApi,
@@ -22,4 +25,7 @@ export const api = {
   feedback: feedbackApi,
   modelConfig: modelConfigApi,
   rednoteAnalytics: rednoteAnalyticsApi,
+  templates: templatesApi,
+  posters: postersApi,
+  viralAnalyses: viralAnalysesApi,
 }

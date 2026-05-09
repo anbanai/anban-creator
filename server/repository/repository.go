@@ -23,6 +23,9 @@ type Repository interface {
 	ModelConfigs() ModelConfigRepository
 	RednoteTrackings() RednoteTrackingRepository
 	RednoteMetricSnapshots() RednoteMetricSnapshotRepository
+	Templates() TemplateRepository
+	ViralAnalyses() ViralAnalysisRepository
+	PosterTasks() PosterTaskRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -159,6 +162,9 @@ type repository struct {
 	modelConfigs           ModelConfigRepository
 	rednoteTrackings       RednoteTrackingRepository
 	rednoteMetricSnapshots RednoteMetricSnapshotRepository
+	templates              TemplateRepository
+	viralAnalyses          ViralAnalysisRepository
+	posterTasks            PosterTaskRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -175,6 +181,9 @@ func New(db *gorm.DB) Repository {
 	modelConfigs := newModelConfigRepository(db)
 	rednoteTrackings := newRednoteTrackingRepository(db)
 	rednoteMetricSnapshots := newRednoteMetricSnapshotRepository(db)
+	templates := newTemplateRepository(db)
+	viralAnalyses := newViralAnalysisRepository(db)
+	posterTasks := newPosterTaskRepository(db)
 
 	return &repository{
 		db:                     db,
@@ -190,6 +199,9 @@ func New(db *gorm.DB) Repository {
 		modelConfigs:           modelConfigs,
 		rednoteTrackings:       rednoteTrackings,
 		rednoteMetricSnapshots: rednoteMetricSnapshots,
+		templates:              templates,
+		viralAnalyses:          viralAnalyses,
+		posterTasks:            posterTasks,
 	}
 }
 
@@ -207,6 +219,9 @@ func (r *repository) RednoteTrackings() RednoteTrackingRepository { return r.red
 func (r *repository) RednoteMetricSnapshots() RednoteMetricSnapshotRepository {
 	return r.rednoteMetricSnapshots
 }
+func (r *repository) Templates() TemplateRepository              { return r.templates }
+func (r *repository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
+func (r *repository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -245,6 +260,9 @@ type txRepository struct {
 	modelConfigs           ModelConfigRepository
 	rednoteTrackings       RednoteTrackingRepository
 	rednoteMetricSnapshots RednoteMetricSnapshotRepository
+	templates              TemplateRepository
+	viralAnalyses          ViralAnalysisRepository
+	posterTasks            PosterTaskRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -262,6 +280,9 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		modelConfigs:           newModelConfigRepository(tx),
 		rednoteTrackings:       newRednoteTrackingRepository(tx),
 		rednoteMetricSnapshots: newRednoteMetricSnapshotRepository(tx),
+		templates:              newTemplateRepository(tx),
+		viralAnalyses:          newViralAnalysisRepository(tx),
+		posterTasks:            newPosterTaskRepository(tx),
 	}
 }
 
@@ -279,6 +300,9 @@ func (r *txRepository) RednoteTrackings() RednoteTrackingRepository { return r.r
 func (r *txRepository) RednoteMetricSnapshots() RednoteMetricSnapshotRepository {
 	return r.rednoteMetricSnapshots
 }
+func (r *txRepository) Templates() TemplateRepository              { return r.templates }
+func (r *txRepository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
+func (r *txRepository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

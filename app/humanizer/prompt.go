@@ -6,6 +6,57 @@ import (
 	"strings"
 )
 
+// authenticSystemPrompt 是 authentic 模式的独立指令（六维写作质量规则）
+const authenticSystemPrompt = `# Authentic 模式：真实写作质量规则
+
+你不是在"去除 AI 痕迹"。你的任务是按照以下六个维度的具体规则，将文本重写为像真人写的中文。
+
+## 一、用词
+
+- 优先使用简单、直接、常见的中文表达
+- 避免"万能词"和"正确但无信息量"的词
+- 直接用"是"，不用"意味着""指的是"等替代
+- 禁止堆叠以下抽象名词：逻辑、路径、机制、维度、格局、图景、生态、范式、体系、叙事、赋能、协同、闭环
+
+## 二、句式
+
+- 避免 AI 公式化句式："不是……而是……""问题不在于……而在于……""真正的问题是……"
+- 不连续使用相同句式开头
+- 减少过多的排比（三段式、四段式）
+- 避免打断完整思路的短句断句
+- 不在句尾添加空洞的总结
+
+## 三、语气
+
+- 不假装深刻、犀利或启发性强
+- 避免"其实""说白了""更重要的是"制造"揭示本质"感
+- 不制造悬念或戏剧性："关键来了""问题就在这里""但事情没那么简单"
+- 避免居高临下的老师口吻
+- 不用"说实话""坦白讲""老实说"假装真诚
+
+## 四、内容表达
+
+- 具体优于抽象
+- 避免模糊归因："有人认为""业内普遍认为""专家指出"
+- 不凭空发明看似专业的新概念来替代论证
+- 不将普通观点拔高为宏大命题："时代转折""底层重构""重新定义一切"
+
+## 五、结构
+
+- 不反复总结前面说过的内容
+- 不用不同措辞重复同一个观点
+- 不强加类比、隐喻、历史案例或公司案例
+- 不通篇重复使用同一个隐喻或意象
+- 避免机械化结尾："总之""综上所述""总而言之"
+
+## 六、整体原则
+
+- 允许一些修辞，但不形成可识别的模式
+- 宁可略微朴素，也不过度流畅、完整、工整
+- 宁可像真人写的不太规整，也不要"标准答案"感
+- 信息量、真实性和具体性优先于风格
+`
+
 // humanizerSystemPrompt 是 humanizer-zh 的核心指令
 const humanizerSystemPrompt = `# Humanizer-zh: 去除 AI 写作痕迹
 
@@ -127,18 +178,25 @@ func getOutputFormatTemplate() string {
 func BuildPrompt(req *HumanizeRequest) string {
 	var prompt strings.Builder
 
-	// 基础指令
-	prompt.WriteString(humanizerSystemPrompt)
+	// authentic 模式使用独立的六维规则，不走 24 模式检测
+	if req.Intensity == IntensityAuthentic {
+		prompt.WriteString(authenticSystemPrompt)
+		prompt.WriteString("\n\n## 处理说明\n\n")
+		prompt.WriteString("**真实写作模式**：不检测 AI 痕迹，而是按照上述六维规则重写文本，让输出像真人写的中文。大幅改写是正常的。")
+	} else {
+		// 基础指令（gentle/medium/aggressive 共享）
+		prompt.WriteString(humanizerSystemPrompt)
 
-	// 添加处理强度说明
-	prompt.WriteString("\n\n## 处理强度\n\n")
-	switch req.Intensity {
-	case IntensityGentle:
-		prompt.WriteString("**温和模式**：只处理最明显、最确定的问题。保留大部分原文结构，只修改明显的 AI 痕迹如填充短语、过度强调的连接词等。适合已经比较自然的文本。")
-	case IntensityAggressive:
-		prompt.WriteString("**激进模式**：深度审查，最大化去除 AI 痕迹。大幅改写句式结构，注入更强的个性和观点。适合 AI 味很重的文本。")
-	default:
-		prompt.WriteString("**中等模式**（默认）：平衡处理。去除明显的 AI 痕迹，同时保留合理的表达。适合大多数场景。")
+		// 添加处理强度说明
+		prompt.WriteString("\n\n## 处理强度\n\n")
+		switch req.Intensity {
+		case IntensityGentle:
+			prompt.WriteString("**温和模式**：只处理最明显、最确定的问题。保留大部分原文结构，只修改明显的 AI 痕迹如填充短语、过度强调的连接词等。适合已经比较自然的文本。")
+		case IntensityAggressive:
+			prompt.WriteString("**激进模式**：深度审查，最大化去除 AI 痕迹。大幅改写句式结构，注入更强的个性和观点。适合 AI 味很重的文本。")
+		default:
+			prompt.WriteString("**中等模式**（默认）：平衡处理。去除明显的 AI 痕迹，同时保留合理的表达。适合大多数场景。")
+		}
 	}
 
 	// 添加风格保护规则（风格优先原则）
@@ -151,8 +209,8 @@ func BuildPrompt(req *HumanizeRequest) string {
 		prompt.WriteString("- 保持风格的一致性\n")
 	}
 
-	// 添加聚焦模式
-	if len(req.FocusOn) > 0 {
+	// 添加聚焦模式（authentic 模式不适用，它使用六维规则而非 24 模式分类）
+	if req.Intensity != IntensityAuthentic && len(req.FocusOn) > 0 {
 		prompt.WriteString("\n\n## 重点处理模式\n\n")
 		prompt.WriteString("请重点关注以下类型的模式：\n")
 		for _, p := range req.FocusOn {
@@ -216,6 +274,8 @@ func ParseIntensity(s string) HumanizeIntensity {
 		return IntensityGentle
 	case "aggressive", "heavy", "激进", "深度":
 		return IntensityAggressive
+	case "authentic", "natural", "真实", "自然":
+		return IntensityAuthentic
 	case "medium", "normal", "中等", "标准", "":
 		return IntensityMedium
 	default:

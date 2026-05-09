@@ -10,6 +10,7 @@ export type {
   ChannelStats,
   ChannelDetail,
   CreateChannelRequest,
+  CreateChannelResponse,
   PlatformFieldConfig,
   PlatformConfig,
   PlatformProfile,
@@ -68,3 +69,29 @@ export type { UsageStats, TypeStatEntry } from './usage'
 
 // Common
 export type { PaginatedResponse } from './common'
+
+// Template
+export type { TemplateType, Template } from './template'
+
+// Poster
+export type {
+  PosterTaskStatus,
+  PosterImage,
+  PosterTask,
+  CreatePosterRequest,
+} from './poster'
+
+// Viral Analysis
+export type {
+  ViralAnalysisStatus,
+  ViralAnalysisSourceType,
+  TitleAnalysis,
+  CoverAnalysis,
+  CopywritingAnalysis,
+  TagAnalysis,
+  InteractionAnalysis,
+  ViralFactors,
+  AnalysisResult,
+  ViralAnalysis,
+  CreateViralAnalysisRequest,
+} from './viral-analysis'

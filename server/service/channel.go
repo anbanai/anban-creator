@@ -27,13 +27,19 @@ var validPlatforms = map[string]bool{
 
 // ChannelService handles channel CRUD operations with ownership verification.
 type ChannelService struct {
-	repo   repository.Repository
-	logger *zerolog.Logger
+	repo        repository.Repository
+	logger      *zerolog.Logger
+	templateSvc *TemplateService
 }
 
 // NewChannelService creates a new ChannelService.
 func NewChannelService(repo repository.Repository, logger *zerolog.Logger) *ChannelService {
 	return &ChannelService{repo: repo, logger: logger}
+}
+
+// SetTemplateService injects an optional TemplateService for template recommendations.
+func (s *ChannelService) SetTemplateService(svc *TemplateService) {
+	s.templateSvc = svc
 }
 
 func defaultWritingStyleForPlatform(platform, style string) string {

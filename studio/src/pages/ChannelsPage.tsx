@@ -2,16 +2,22 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, Inbox, ChevronDown } from 'lucide-react'
+import { Plus, Inbox, ChevronDown } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig } from '@/types'
+import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig, Template } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
+import { TemplateRecommend } from '@/components/channels/TemplateRecommend'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/Input'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
 import { FileUpload } from '@/components/ui/FileUpload'
@@ -89,7 +95,9 @@ function channelToForm(ch: Channel): ChannelFormValues {
 
 export default function ChannelsPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState('all')
+  const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
@@ -97,6 +105,7 @@ export default function ChannelsPage() {
   const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const [recommendedTemplates, setRecommendedTemplates] = useState<Template[]>([])
   const { submit } = useSubmitLock()
 
   const form = useForm<ChannelFormValues>({
@@ -193,13 +202,20 @@ export default function ChannelsPage() {
     }
   }
 
-  const { data: channels, isLoading } = useQuery({
+  const { data: channels, isLoading, isError, refetch } = useQuery({
     queryKey: ['channels', statusFilter],
     queryFn: () =>
       api.channels.list({
         status: statusFilter === 'all' ? undefined : statusFilter,
       }),
   })
+
+  const filteredChannels = useMemo(() => {
+    if (!channels) return []
+    if (!searchFilter.trim()) return channels
+    const q = searchFilter.toLowerCase()
+    return channels.filter((ch) => ch.name.toLowerCase().includes(q))
+  }, [channels, searchFilter])
 
   const { data: channelStats = {} } = useQuery({
     queryKey: ['channel-stats', statusFilter, channels?.map((channel) => channel.id).join(',')],
@@ -212,11 +228,16 @@ export default function ChannelsPage() {
 
   const createMutation = useMutation({
     mutationFn: (data: CreateChannelRequest) => api.channels.create(data),
-    onSuccess: () => {
+    onSuccess: (result) => {
       toast.success('账号创建成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
+      // Show template recommendations for rednote channels
+      const channel = result.channel
+      if (channel.platform === 'rednote' && result.recommended_templates && result.recommended_templates.length > 0) {
+        setRecommendedTemplates(result.recommended_templates)
+      }
     },
     onError: (err) => {
       toast.error(getApiErrorMessage(err, '创建账号失败，请重试'))
@@ -369,21 +390,46 @@ export default function ChannelsPage() {
         ))}
       </ToggleGroup>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <SearchInput
+        value={searchFilter}
+        onChange={setSearchFilter}
+        placeholder="搜索账号名称..."
+        className="w-full max-w-xs"
+      />
+
+      {isError ? (
+        <QueryErrorState onRetry={() => refetch()} />
+      ) : isLoading ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border bg-card p-4 space-y-3">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-10 w-10 rounded-full" />
+                <div className="space-y-1.5 flex-1">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              </div>
+              <Skeleton className="h-3 w-full" />
+              <div className="flex gap-2">
+                <Skeleton className="h-5 w-12" />
+                <Skeleton className="h-5 w-12" />
+                <Skeleton className="h-5 w-12" />
+              </div>
+            </div>
+          ))}
         </div>
-      ) : !channels || channels.length === 0 ? (
+      ) : filteredChannels.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title={statusFilter === 'all' ? '还没有账号' : statusFilter === 'active' ? '没有活跃的账号' : '没有已归档的账号'}
-          description="创建你的第一个内容账号开始创作。"
-          action={{ label: '新建账号', onClick: openCreate }}
-          note="配置好账号后，任务和计划都会自动继承对应的平台参数。"
+          title={!channels?.length ? (statusFilter === 'all' ? '还没有账号' : statusFilter === 'active' ? '没有活跃的账号' : '没有已归档的账号') : '未找到匹配的账号'}
+          description={!channels?.length ? '创建你的第一个内容账号开始创作。' : '尝试其他搜索关键词'}
+          action={!channels?.length ? { label: '新建账号', onClick: openCreate } : undefined}
+          note={!channels?.length ? '配置好账号后，任务和计划都会自动继承对应的平台参数。' : undefined}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {channels.map((channel) => (
+          {filteredChannels.map((channel) => (
             <ChannelCard
               key={channel.id}
               channel={channel}
@@ -525,11 +571,9 @@ export default function ChannelsPage() {
                       <FormItem>
                         <div className="flex items-center gap-2">
                           <FormControl>
-                            <input
-                              type="checkbox"
+                            <Switch
                               checked={field.value}
-                              onChange={(e) => field.onChange(e.target.checked)}
-                              className="h-4 w-4 rounded border-input"
+                              onCheckedChange={field.onChange}
                             />
                           </FormControl>
                           <FormLabel className="!mt-0 font-normal cursor-pointer" onClick={() => field.onChange(!field.value)}>
@@ -727,6 +771,18 @@ export default function ChannelsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Template recommendation after rednote channel creation */}
+      {recommendedTemplates.length > 0 && (
+        <TemplateRecommend
+          templates={recommendedTemplates}
+          onClose={() => setRecommendedTemplates([])}
+          onUseTemplate={(template: Template) => {
+            setRecommendedTemplates([])
+            navigate(`/workshop?tab=clone&templateId=${template.id}`)
+          }}
+        />
+      )}
     </div>
   )
 }

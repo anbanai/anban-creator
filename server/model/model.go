@@ -17,6 +17,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&UserModelConfig{},
 		&RednotePostTracking{},
 		&RednoteMetricSnapshot{},
+		&Template{},
+		&ViralAnalysis{},
+		&PosterTask{},
 	)
 	if err != nil {
 		return err

@@ -135,4 +135,36 @@ const (
 	CreditTypeTopicResearch = "topic_research"
 	CreditTypeSEO           = "seo"
 	CreditTypeOutline       = "outline"
+	CreditTypePosterGeneration = "poster_generation"
+	CreditTypeViralAnalysis    = "viral_analysis"
+)
+
+// Viral analysis status constants.
+const (
+	ViralAnalysisStatusPending   = "pending"
+	ViralAnalysisStatusAnalyzing = "analyzing"
+	ViralAnalysisStatusCompleted = "completed"
+	ViralAnalysisStatusFailed    = "failed"
+)
+
+// Poster task status constants.
+const (
+	PosterTaskStatusDrafting   = "drafting"
+	PosterTaskStatusGenerating = "generating"
+	PosterTaskStatusCompleted  = "completed"
+	PosterTaskStatusFailed     = "failed"
+)
+
+// Template type constants.
+const (
+	TemplateTypePoster  = "poster"
+	TemplateTypeRednote = "rednote"
+	TemplateTypeArticle = "article"
+	TemplateTypeXLS     = "xls"
+)
+
+// Viral analysis source type constants.
+const (
+	ViralAnalysisSourceNote    = "note"
+	ViralAnalysisSourceProfile = "profile"
 )

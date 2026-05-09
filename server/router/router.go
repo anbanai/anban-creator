@@ -51,6 +51,9 @@ type Services struct {
 	FileHandler             *handler.FileHandler
 	FeedbackHandler         *handler.FeedbackHandler
 	ModelConfigHandler      *handler.ModelConfigHandler
+	TemplateHandler         *handler.TemplateHandler
+	ViralAnalysisHandler    *handler.ViralAnalysisHandler
+	PosterHandler           *handler.PosterHandler
 	MCPHandler              http.Handler
 	StorageProvider         storage.Provider
 }
@@ -311,6 +314,38 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/model-config", svc.ModelConfigHandler.Get)
 		apiV1.Put("/model-config", svc.ModelConfigHandler.Update)
 		apiV1.Delete("/model-config", svc.ModelConfigHandler.Delete)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Template endpoints
+	// ---------------------------------------------------------------------------
+
+	if svc.TemplateHandler != nil {
+		templates := apiV1.Group("/templates")
+		templates.Get("/", svc.TemplateHandler.List)
+		templates.Get("/:id", svc.TemplateHandler.GetByID)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Viral analysis endpoints
+	// ---------------------------------------------------------------------------
+
+	if svc.ViralAnalysisHandler != nil {
+		viralAnalyses := apiV1.Group("/viral-analyses")
+		viralAnalyses.Post("/", svc.ViralAnalysisHandler.Create)
+		viralAnalyses.Get("/", svc.ViralAnalysisHandler.List)
+		viralAnalyses.Get("/:id", svc.ViralAnalysisHandler.GetByID)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Poster endpoints
+	// ---------------------------------------------------------------------------
+
+	if svc.PosterHandler != nil {
+		posters := apiV1.Group("/posters")
+		posters.Post("/", svc.PosterHandler.Create)
+		posters.Get("/", svc.PosterHandler.List)
+		posters.Get("/:id", svc.PosterHandler.GetByID)
 	}
 
 	// MCP endpoint (API key auth, no JWT required).

@@ -26,6 +26,7 @@ type ChannelHandler struct {
 	llm            service.LLMClient
 	llmTimeout     time.Duration
 	modelConfigSvc *service.ModelConfigService
+	templateSvc    *service.TemplateService
 }
 
 // NewChannelHandler creates a new ChannelHandler.
@@ -42,6 +43,11 @@ func (h *ChannelHandler) SetLLMClient(llm service.LLMClient, timeout time.Durati
 // SetModelConfigService injects per-user model overrides for profile analysis.
 func (h *ChannelHandler) SetModelConfigService(svc *service.ModelConfigService) {
 	h.modelConfigSvc = svc
+}
+
+// SetTemplateService injects an optional TemplateService for template recommendations on channel creation.
+func (h *ChannelHandler) SetTemplateService(svc *service.TemplateService) {
+	h.templateSvc = svc
 }
 
 // channelRequest is the shared request body for creating and updating a channel.
@@ -203,6 +209,18 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 	}
 
 	service.SanitizeChannel(created)
+
+	// For Xiaohongshu channels with profile data, return recommended templates.
+	if created.Platform == model.PlatformRednote && h.templateSvc != nil {
+		recommended := h.getRecommendedTemplates(c.Context(), created)
+		if len(recommended) > 0 {
+			return Success(c, fiber.Map{
+				"channel":              created,
+				"recommended_templates": recommended,
+			})
+		}
+	}
+
 	return Success(c, created)
 }
 
@@ -558,6 +576,40 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string([]rune(s)[:max])
+}
+
+// getRecommendedTemplates returns templates recommended for a channel based on its profile keywords.
+func (h *ChannelHandler) getRecommendedTemplates(ctx context.Context, ch *model.Channel) []*model.Template {
+	if ch.Keywords == "" {
+		return nil
+	}
+
+	// Extract category from keywords (first keyword as category hint) and parse all tags.
+	tags := splitKeywords(ch.Keywords)
+	category := ""
+	if len(tags) > 0 {
+		category = tags[0]
+	}
+
+	templates, err := h.templateSvc.GetRecommended(ctx, category, tags, 5)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to get recommended templates")
+		return nil
+	}
+	return templates
+}
+
+// splitKeywords splits a comma-separated keywords string into individual non-empty tags.
+func splitKeywords(keywords string) []string {
+	parts := strings.Split(keywords, ",")
+	tags := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			tags = append(tags, p)
+		}
+	}
+	return tags
 }
 
 // getFieldValue returns the value of a field by key from the request.

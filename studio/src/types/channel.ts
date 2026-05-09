@@ -62,6 +62,11 @@ export interface CreateChannelRequest {
   enable_publishing?: boolean
 }
 
+export interface CreateChannelResponse {
+  channel: Channel
+  recommended_templates?: import('./template').Template[]
+}
+
 export interface PlatformFieldConfig {
   key: string
   label: string

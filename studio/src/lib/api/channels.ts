@@ -4,6 +4,7 @@ import type {
   ChannelDetail,
   ChannelStats,
   CreateChannelRequest,
+  CreateChannelResponse,
   PlatformConfig,
   PlatformProfile,
 } from '@/types'
@@ -23,7 +24,7 @@ export const channelsApi = {
     })),
 
   create: (data: CreateChannelRequest) =>
-    unwrap<Channel>(http.post('/channels', data)),
+    unwrap<CreateChannelResponse>(http.post('/channels', data)),
 
   update: (id: string, data: Partial<CreateChannelRequest>) =>
     unwrap<Channel>(http.put(`/channels/${id}`, data)),

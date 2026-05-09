@@ -21,6 +21,7 @@ type Services struct {
 	WritingSvc    *service.WritingService
 	PublishingSvc *service.PublishingService
 	WorkspaceSvc  *service.WorkspaceService
+	TemplateSvc   *service.TemplateService
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -34,6 +35,7 @@ func RegisterTools(server *mcp.Server) {
 	registerPublishingTools(server)
 	registerWorkspaceTools(server)
 	registerRednoteTools(server)
+	registerTemplateTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.
