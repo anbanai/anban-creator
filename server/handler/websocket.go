@@ -224,3 +224,59 @@ func isValidScene(scene string) bool {
 	matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9\-]+[a-z0-9]$`, scene)
 	return matched
 }
+
+// HandleLoginWebSocket returns a Fiber handler for unauthenticated WebSocket
+// connections used during QR code login. The scene must match a valid QR state.
+func (h *WebSocketHub) HandleLoginWebSocket(authHandler *AuthHandler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		scene := c.Query("scene")
+		if scene == "" || !isValidScene(scene) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "valid scene query parameter is required",
+			})
+		}
+
+		if authHandler == nil || !authHandler.HasValidQRScene(scene) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "invalid or expired QR code scene",
+			})
+		}
+
+		return adaptor.HTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			client := &WSClient{Scene: scene, Conn: conn}
+			h.Register(client)
+
+			done := make(chan struct{})
+			go func() {
+				ticker := time.NewTicker(30 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+						if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+							return
+						}
+					case <-done:
+						return
+					}
+				}
+			}()
+
+			defer func() {
+				close(done)
+				h.Unregister(client)
+			}()
+			for {
+				_, _, err := conn.ReadMessage()
+				if err != nil {
+					break
+				}
+			}
+		})(c)
+	}
+}

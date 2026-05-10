@@ -269,7 +269,7 @@ func main() {
 	}
 
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
-	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits)
+	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits)
 
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
@@ -286,6 +286,7 @@ func main() {
 	var templateHandler *handler.TemplateHandler
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
+		var resourceHandler *handler.ResourceHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -318,6 +319,7 @@ func main() {
 		viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
 	}
+	resourceHandler = handler.NewResourceHandler(log)
 	if modelConfigSvc != nil {
 		modelConfigHandler = handler.NewModelConfigHandler(modelConfigSvc, log)
 	}
@@ -424,6 +426,7 @@ func main() {
 		TemplateHandler:         templateHandler,
 		ViralAnalysisHandler:    viralAnalysisHandler,
 		PosterHandler:           posterHandler,
+		ResourceHandler:         resourceHandler,
 		MCPHandler:              mcpHandler,
 		StorageProvider:         store,
 	}

@@ -54,6 +54,7 @@ type Services struct {
 	TemplateHandler         *handler.TemplateHandler
 	ViralAnalysisHandler    *handler.ViralAnalysisHandler
 	PosterHandler           *handler.PosterHandler
+	ResourceHandler         *handler.ResourceHandler
 	MCPHandler              http.Handler
 	StorageProvider         storage.Provider
 }
@@ -145,6 +146,9 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.WSHub != nil {
 		app.Get("/ws", svc.WSHub.HandleWebSocket())
+		if svc.AuthHandler != nil {
+			app.Get("/ws/login", svc.WSHub.HandleLoginWebSocket(svc.AuthHandler))
+		}
 	}
 
 	// ---------------------------------------------------------------------------
@@ -163,6 +167,9 @@ func NewRouter(svc *Services) *fiber.App {
 		authPublic.Post("/refresh", svc.AuthHandler.Refresh)
 		authPublic.Post("/logout", svc.AuthHandler.Logout)
 		authPublic.Post("/wx-login", svc.AuthHandler.WXLogin)
+			authPublic.Post("/qrcode", svc.AuthHandler.GenerateQRCode)
+			authPublic.Post("/scanned", svc.AuthHandler.NotifyScanned)
+			authPublic.Post("/qr-callback", svc.AuthHandler.QRLoginCallback)
 	}
 
 	// ---------------------------------------------------------------------------
@@ -183,6 +190,12 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.ChannelHandler != nil {
 		app.Get("/api/v1/channels/platform-configs", svc.ChannelHandler.GetPlatformConfigs)
+	}
+
+	// Public resource catalog endpoint (no auth required).
+	if svc.ResourceHandler != nil {
+		app.Get("/api/v1/resources/:category", svc.ResourceHandler.List)
+		app.Get("/api/v1/resources/:category/:name", svc.ResourceHandler.Get)
 	}
 
 	// ---------------------------------------------------------------------------

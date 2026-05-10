@@ -74,8 +74,10 @@ type JWTConfig struct {
 }
 
 type WeChatConfig struct {
-	AppID     string `yaml:"app_id"`
-	AppSecret string `yaml:"app_secret"`
+	AppID      string `yaml:"app_id"`
+	AppSecret  string `yaml:"app_secret"`
+	QRCodePage string `yaml:"qrcode_page"` // mini program page for QR code scan, default "pages/login/index"
+	EnvVersion string `yaml:"env_version"` // "develop", "trial", or "release", default "develop"
 }
 
 // MCPConfig holds Model Context Protocol endpoint configuration.
@@ -456,6 +458,12 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv(prefix + "WECHAT_APP_SECRET"); v != "" {
 		c.WeChat.AppSecret = v
+	}
+	if v := os.Getenv(prefix + "WECHAT_QRCODE_PAGE"); v != "" {
+		c.WeChat.QRCodePage = v
+	}
+	if v := os.Getenv(prefix + "WECHAT_ENV_VERSION"); v != "" {
+		c.WeChat.EnvVersion = v
 	}
 
 	if v := os.Getenv(prefix + "MCP_API_KEY"); v != "" {

@@ -25,4 +25,10 @@ export const authApi = {
 
   changePassword: (oldPassword: string, newPassword: string) =>
     unwrap<null>(http.put('/auth/password', { old_password: oldPassword, new_password: newPassword })),
+
+  generateQRCode: (params: { width?: number; line_color?: { r: number; g: number; b: number }; is_hyaline?: boolean }) =>
+    unwrap<{ scene: string; qrcode_url: string; expires_at: number }>(http.post('/auth/qrcode', params)),
+
+  notifyScanned: (scene: string) =>
+    unwrap<{ message: string }>(http.post('/auth/scanned', { scene })),
 }
