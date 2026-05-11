@@ -4,7 +4,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Inbox, CalendarPlus, Clock, Copy } from 'lucide-react'
-import { Skeleton } from '@/components/ui/skeleton'
+import { Skeleton } from '@/components/ui/Skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import {
   LineChart,

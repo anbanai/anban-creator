@@ -8,7 +8,7 @@ import { getApiErrorMessage } from '@/lib/http-client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Skeleton } from '@/components/ui/skeleton'
+import { Skeleton } from '@/components/ui/Skeleton'
 import EmptyState from '@/components/EmptyState'
 
 export default function PosterTab() {
