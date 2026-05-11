@@ -6,10 +6,10 @@ import { api } from '@/lib/api'
 import type { CreateViralAnalysisRequest } from '@/types'
 import { formatDateTimeCN } from '@/lib/labels'
 import AnalysisReport from '@/components/workshop/AnalysisReport'
-import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import Badge from '@/components/ui/Badge'
+import { Badge } from '@/components/ui/badge'
 import EmptyState from '@/components/EmptyState'
 
 const statusVariantMap: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -84,13 +84,24 @@ export default function ViralAnalysisTab() {
     }, 300_000)
   }
 
+  function extractUrl(text: string): string | null {
+    const match = text.match(/https?:\/\/[^\s]+/)
+    if (!match) return null
+    return match[0].replace(/[.,，。！!？?;；:：]+$/, '')
+  }
+
   function handleAnalyze() {
     const trimmed = url.trim()
     if (!trimmed) {
       toast.error('请输入小红书笔记链接')
       return
     }
-    createMutation.mutate({ source_type: 'note', source_url: trimmed })
+    const extracted = extractUrl(trimmed)
+    if (!extracted) {
+      toast.error('未检测到有效链接，请粘贴小红书笔记链接或分享文本')
+      return
+    }
+    createMutation.mutate({ source_type: 'note', source_url: extracted })
   }
 
   return (
@@ -124,9 +135,15 @@ export default function ViralAnalysisTab() {
                 >
                   <div className="flex items-center justify-between gap-1">
                     <span className="truncate text-xs font-medium">
-                      {analysis.source_url
-                        ? new URL(analysis.source_url).pathname.split('/').filter(Boolean).pop() || '笔记'
-                        : '笔记'}
+                      {(() => {
+                        try {
+                          return analysis.source_url
+                            ? new URL(analysis.source_url).pathname.split('/').filter(Boolean).pop() || '笔记'
+                            : '笔记'
+                        } catch {
+                          return '笔记'
+                        }
+                      })()}
                     </span>
                     <Badge
                       variant={statusVariantMap[analysis.status] ?? 'outline'}
@@ -155,10 +172,10 @@ export default function ViralAnalysisTab() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleAnalyze()
             }}
-            placeholder="粘贴小红书笔记链接，例如 https://www.xiaohongshu.com/explore/..."
+            placeholder="粘贴笔记链接或分享文本，例如 http://xhslink.com/..."
             className="flex-1"
           />
-          <Button onClick={handleAnalyze} loading={createMutation.isPending}>
+          <Button onClick={handleAnalyze} disabled={createMutation.isPending}>
             <Search className="h-4 w-4" />
             分析
           </Button>

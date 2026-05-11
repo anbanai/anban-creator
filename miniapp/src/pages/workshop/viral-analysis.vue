@@ -2,11 +2,11 @@
   <view class="page viral-analysis">
     <!-- URL input section -->
     <view class="va-input-section">
-      <text class="field-label">粘贴小红书笔记链接</text>
+      <text class="field-label">粘贴笔记链接或分享文本</text>
       <view class="va-input-row">
         <AbInput
           v-model="url"
-          placeholder="https://xhslink.com/..."
+          placeholder="粘贴笔记链接或分享文本，例如 http://xhslink.com/..."
           :disabled="submitting"
         />
         <AbButton
@@ -329,17 +329,24 @@ function toggleDetail(key: string) {
 
 async function startAnalysis() {
   if (!url.value.trim()) return
+  const match = url.value.match(/https?:\/\/[^\s]+/)
+  const extracted = match ? match[0].replace(/[.,，。！!？?;；:：]+$/, '') : ''
+  if (!extracted) {
+    uni.showToast({ title: '未检测到有效链接，请粘贴小红书笔记链接或分享文本', icon: 'none' })
+    return
+  }
   submitting.value = true
   try {
     const analysis = await viralAnalysesApi.create({
       source_type: 'note',
-      source_url: url.value.trim(),
+      source_url: extracted,
     })
     currentAnalysis.value = analysis
     selectedId.value = analysis.id
     // Prepend to history
     historyList.value.unshift(analysis)
     startPolling(analysis)
+    url.value = ''
     uni.showToast({ title: '已提交分析', icon: 'success' })
   } catch (err: any) {
     const msg = err?.message || '提交失败'
