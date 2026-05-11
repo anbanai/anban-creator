@@ -9,7 +9,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
 import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig, Template } from '@/types'
+import type { ResourceEntry } from '@/types/resource'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
 import { TemplateRecommend } from '@/components/channels/TemplateRecommend'
@@ -43,20 +45,6 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已归档', value: 'archived' },
 ]
 
-const styleOptions = [
-  { value: '', label: '不设置' },
-  { value: 'casual-science', label: '轻松科普风格' },
-  { value: 'dan-koe', label: 'Dan Koe 风格' },
-  { value: 'cultural-depth', label: '深度文化风格' },
-]
-
-const themeOptions = [
-  { value: '', label: '不设置' },
-  { value: 'autumn-warm', label: '秋日暖光' },
-  { value: 'spring-fresh', label: '春日清新' },
-  { value: 'ocean-calm', label: '深海静谧' },
-]
-
 const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   platform: 'article',
   name: '',
@@ -71,6 +59,8 @@ const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   author: '',
   reference_image_url: '',
   image_ratio: '',
+  layout: '',
+  image_preset: '',
   enable_publishing: false,
 }
 
@@ -89,6 +79,8 @@ function channelToForm(ch: Channel): ChannelFormValues {
     author: ch.author || '',
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
+    layout: ch.layout || '',
+    image_preset: ch.image_preset || '',
     enable_publishing: ch.config?.enable_publishing ?? false,
   }
 }
@@ -116,6 +108,59 @@ export default function ChannelsPage() {
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
+
+  const { data: writerResources } = useQuery({
+    queryKey: queryKeys.resources.writers,
+    queryFn: () => api.resources.list('writers'),
+    staleTime: Infinity,
+  })
+  const { data: themeResources } = useQuery({
+    queryKey: queryKeys.resources.themes,
+    queryFn: () => api.resources.list('themes'),
+    staleTime: Infinity,
+  })
+  const { data: layoutResources } = useQuery({
+    queryKey: queryKeys.resources.layouts,
+    queryFn: () => api.resources.list('layouts'),
+    staleTime: Infinity,
+  })
+  const { data: presetResources } = useQuery({
+    queryKey: queryKeys.resources.imagePresets,
+    queryFn: () => api.resources.list('image_presets'),
+    staleTime: Infinity,
+  })
+
+  const styleOptions = useMemo(() => [
+    { value: '', label: '不设置' },
+    ...(writerResources?.items || []).map((w: ResourceEntry) => ({
+      value: w.english_name,
+      label: w.display_name || w.description || w.english_name,
+    })),
+  ], [writerResources])
+
+  const themeOptions = useMemo(() => [
+    { value: '', label: '不设置' },
+    ...(themeResources?.items || []).map((t: ResourceEntry) => ({
+      value: t.name,
+      label: t.description || t.name,
+    })),
+  ], [themeResources])
+
+  const layoutOptions = useMemo(() => [
+    { value: '', label: '不设置' },
+    ...(layoutResources?.items || []).map((l: ResourceEntry) => ({
+      value: l.name,
+      label: l.description || l.name,
+    })),
+  ], [layoutResources])
+
+  const presetOptions = useMemo(() => [
+    { value: '', label: '不设置' },
+    ...(presetResources?.items || []).map((p: ResourceEntry) => ({
+      value: p.name,
+      label: p.description || p.name,
+    })),
+  ], [presetResources])
 
   // Auto-focus profile_url field when dialog opens
   useEffect(() => {
@@ -284,6 +329,10 @@ export default function ChannelsPage() {
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       setDeleteTarget(null)
     },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '删除账号失败'))
+      setDeleteTarget(null)
+    },
   })
 
   function openCreate() {
@@ -333,6 +382,8 @@ export default function ChannelsPage() {
       author: values.author?.trim() || undefined,
       reference_image_url: values.reference_image_url?.trim() || undefined,
       image_ratio: values.image_ratio || undefined,
+      layout: values.layout?.trim() || undefined,
+      image_preset: values.image_preset?.trim() || undefined,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
       enable_publishing: values.enable_publishing || undefined,
@@ -703,7 +754,46 @@ export default function ChannelsPage() {
                       <FormDescription>选择内置转换主题模板</FormDescription>
                       <FormMessage />
                     </FormItem>
-                  )} />}
+                  )} />
+
+                  {!isRednote && (
+                    <FormField control={form.control} name="layout" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>默认布局</FormLabel>
+                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="选择默认布局" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {layoutOptions.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>文章默认使用的排版布局模块（仅 article 平台）</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  )}
+
+                  {!isRednote && (
+                    <FormField control={form.control} name="image_preset" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>图片预设</FormLabel>
+                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="选择图片预设" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {presetOptions.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>封面图和内容图的默认生成预设模板</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )} />}
 
                   <FormField control={form.control} name="author" render={({ field }) => (
                     <FormItem className="flex items-center gap-3 space-y-0">

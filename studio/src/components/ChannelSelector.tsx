@@ -18,7 +18,7 @@ export function ChannelSelector({ value, onChange, platform }: ChannelSelectorPr
 
   const options: ComboboxOption[] = channels.map((ch) => ({
     value: ch.id,
-    label: ch.name,
+    label: ch.name || `${platformLabels[ch.platform] || ch.platform} 账号`,
     group: platformLabels[ch.platform] || ch.platform,
   }))
 
