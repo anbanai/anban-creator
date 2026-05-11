@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -75,13 +74,6 @@ func setupConvertTest(t *testing.T, llm *diagnosticLLM) (*WritingService, reposi
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
 
-	// Point to project themes directory so converter can find YAML themes.
-	themesDir, err := filepath.Abs("../../claudecode")
-	if err != nil {
-		t.Fatalf("resolve themes dir: %v", err)
-	}
-	t.Setenv("CLAUDE_PLUGIN_ROOT", themesDir)
-	t.Logf("[SETUP] CLAUDE_PLUGIN_ROOT=%s", themesDir)
 
 	svc := NewWritingService(repo, llm, "", 0, &logger)
 	return svc, repo

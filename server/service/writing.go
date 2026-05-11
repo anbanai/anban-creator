@@ -17,6 +17,7 @@ import (
 	"github.com/royalrick/anbanwriter/app/converter"
 	"github.com/royalrick/anbanwriter/app/humanizer"
 	"github.com/royalrick/anbanwriter/app/writer"
+	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/repository"
 )
 
@@ -345,7 +346,7 @@ func (s *WritingService) ConvertMarkdown(
 	// Build the converter prompt via the writer package's converter.
 	// We use a no-op logger since we do our own logging via zerolog.
 	nopLog := zerolog.Nop()
-	cvt := converter.NewConverter(&nopLog)
+	cvt := converter.NewConverterWithThemes(&nopLog, resources.Manager().GetAllRaw(resources.CategoryTheme))
 
 	convReq := &converter.ConvertRequest{
 		Markdown: markdown,

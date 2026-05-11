@@ -25,7 +25,7 @@ COPY --from=builder /abwriter-server /app/abwriter-server
 
 # COPY server/config.yaml /app/conf/config.yaml
 
-# Copy plugin files (claudecode/ contains agents/, skills/, hooks/, themes/, writers/)
+# Copy plugin files (claudecode/ contains agents/, skills/, hooks/, writers/)
 COPY claudecode/ /anbanai/
 
 ENV CLAUDE_PLUGIN_ROOT=/anbanai

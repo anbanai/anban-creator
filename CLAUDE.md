@@ -198,8 +198,8 @@ All implement `Provider` interface (`app/image/provider.go`).
 
 ### Adding New Themes
 
-1. Create YAML file in `claudecode/themes/{name}.yaml`
-2. Theme system auto-loads with hot-reload support
+1. Create YAML file in `server/resources/themes/{name}.yaml`
+2. Themes are embedded at compile time via `go:embed` and served via MCP and REST API
 
 ### Server Wire Function Pattern
 

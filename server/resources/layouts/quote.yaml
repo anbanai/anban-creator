@@ -1,0 +1,61 @@
+name: quote
+category: memorability
+serves: [attention, memorability]
+description: 精选引用卡片，用于突出展示金句、核心观点或权威引用
+position: body
+when_to_use: |
+  需要强调一句核心观点、行业金句、权威引用或作者核心判断时使用。
+  适合访谈摘录、文章结论、有说服力的引用、品牌主张。
+  让读者一眼带走最核心的一个观点。
+when_not_to_use: |
+  需要大段引用原文时，直接用 Markdown 引用块（>）。
+  封面位置的引言用 hero 模块更合适。
+  引用内容超过 3 句话时，考虑拆分为正文段落。
+  没有明确来源的"伪金句"不要用此模块。
+pairs_well_with: [metrics, summary, author-card, callout]
+fields:
+  required:
+    - name: text
+      description: 引用正文内容，建议控制在两句话以内
+      example: "好的设计不是添加更多东西，而是不能减少任何东西。"
+  optional:
+    - name: source
+      description: 来源说明（作者名、书名或文章名）
+      example: "乔布斯"
+    - name: role
+      description: 来源身份（如职位、领域），增强引用权威性
+      example: "苹果公司创始人"
+    - name: label
+      description: 引用类型标签，定位引用的角色
+      example: "核心观点"
+example: |
+  > "好的设计不是添加更多东西，而是不能减少任何东西。"
+  > -- 乔布斯，苹果公司创始人
+
+  ---
+
+  也可以配合标签使用：
+
+  **核心观点**
+
+  > "模块化写作不是为了让页面更满，而是为了让读者更快找到判断、证据和下一步。"
+  > -- 《内容设计原则》
+
+  ---
+
+  **实际效果说明：**
+  - 标签（可选）用加粗显示在引用上方
+  - 引用内容用 Markdown 引用块语法（>）
+  - 来源用破折号（--）标注在引用末尾
+  - 用分隔线与正文隔开
+markdown_syntax: |
+  **标签**（可选）
+
+  > "引用正文内容"
+  > -- 来源，身份（可选）
+
+  ---
+
+  标签可选，用于说明引用的类型（如"核心观点"、"行业洞察"、"用户反馈"）。
+  引用正文建议控制在两句话以内，超过时考虑拆分。
+  来源格式：-- 姓名，身份/出处。

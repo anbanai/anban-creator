@@ -1,0 +1,69 @@
+name: author-card
+category: memorability
+serves: [memorability, conversion]
+description: 作者信息卡片，用于文章结尾展示作者身份和关注引导
+position: body
+when_to_use: |
+  文章结尾需要建立作者身份、引导读者关注时使用。
+  适合个人品牌类文章、系列文章、需要强化作者认知的内容。
+  让读者了解"谁写的"以及"为什么要关注"。
+when_not_to_use: |
+  纯数据报告或工具测评不需要作者卡。
+  企业官方账号的文章用品牌信息替代。
+  作者信息已通过公众号底部默认展示时无需重复。
+  团队多人贡献时，用团队介绍替代。
+pairs_well_with: [summary, cta, quote]
+fields:
+  required:
+    - name: name
+      description: 作者名称
+      example: "张三"
+    - name: bio
+      description: 作者简介，说明擅长领域和关注价值
+      example: "10 年产品经理，专注 AI 工具和内容系统"
+  optional:
+    - name: role
+      description: 作者身份标签
+      example: "独立开发者 / 内容产品"
+    - name: tags
+      description: 内容标签，说明常写哪些方向
+      example: "AI 工具 | 内容系统 | 产品增长"
+    - name: note
+      description: 底部行动引导文案
+      example: "关注我，每周分享 AI 工具实战经验"
+example: |
+  ---
+
+  **张三** | 独立开发者 / 内容产品
+
+  10 年产品经理，专注 AI 工具和内容系统。关注怎么把复杂工作流做成可复用资产，让你少走弯路。
+
+  *AI 工具 | 内容系统 | 产品增长*
+
+  关注我，每周分享 AI 工具实战经验。
+
+  ---
+
+  **实际效果说明：**
+  - 用分隔线与正文隔开
+  - 作者名称加粗，身份标签用竖线分隔
+  - 简介用正文段落，控制在两句话以内
+  - 内容标签用斜体
+  - 行动引导用普通文本
+  - 用分隔线收尾
+markdown_syntax: |
+  ---
+
+  **作者名** | 身份标签
+
+  作者简介，一句话说明你是谁、做什么。
+
+  *标签1 | 标签2 | 标签3*
+
+  行动引导文案。
+
+  ---
+
+  简介建议控制在两句话以内（50 字左右）。
+  标签不超过 3 个，用竖线分隔。
+  行动引导文案简洁有力，明确告诉读者"关注你能获得什么"。

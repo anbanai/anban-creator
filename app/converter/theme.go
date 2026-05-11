@@ -229,6 +229,30 @@ func (tm *ThemeManager) GetThemeColors(name string) (map[string]string, error) {
 	return theme.Colors, nil
 }
 
+// RegisterTheme adds a pre-parsed theme to the manager without filesystem access.
+func (tm *ThemeManager) RegisterTheme(theme Theme) {
+	if theme.Name == "" {
+		return
+	}
+	if theme.Description == "" {
+		theme.Description = theme.Name
+	}
+	tm.themes[theme.Name] = theme
+}
+
+// LoadFromBytes parses a theme from YAML bytes and registers it.
+func (tm *ThemeManager) LoadFromBytes(data []byte) error {
+	var theme Theme
+	if err := yaml.Unmarshal(data, &theme); err != nil {
+		return fmt.Errorf("parse yaml: %w", err)
+	}
+	if theme.Name == "" {
+		return fmt.Errorf("theme name is required")
+	}
+	tm.RegisterTheme(theme)
+	return nil
+}
+
 // ReloadThemes 重新加载所有主题
 func (tm *ThemeManager) ReloadThemes() error {
 	tm.themes = make(map[string]Theme)

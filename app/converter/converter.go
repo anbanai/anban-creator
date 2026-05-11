@@ -71,6 +71,21 @@ func NewConverter(log *zerolog.Logger) Converter {
 	}
 }
 
+// NewConverterWithThemes creates a Converter with pre-loaded theme data from raw YAML bytes.
+func NewConverterWithThemes(log *zerolog.Logger, themeData map[string][]byte) Converter {
+	tm := NewThemeManager()
+	for name, data := range themeData {
+		if err := tm.LoadFromBytes(data); err != nil {
+			(*log).Warn().Err(err).Str("theme", name).Msg("failed to load theme from bytes")
+		}
+	}
+	return &converter{
+		log:           log,
+		theme:         tm,
+		promptBuilder: NewPromptBuilder(),
+	}
+}
+
 // Convert 执行转换
 func (c *converter) Convert(req *ConvertRequest) *ConvertResult {
 	result := &ConvertResult{

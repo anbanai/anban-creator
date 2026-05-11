@@ -239,8 +239,8 @@ Quality scoring (5 dimensions, 10 points each):
 
 ### Adding New Themes
 
-1. Create YAML file in `claudecode/themes/{name}.yaml`
-2. Theme system auto-loads from YAML with hot-reload support
+1. Create YAML file in `server/resources/themes/{name}.yaml`
+2. Themes are embedded at compile time via `go:embed` and served via MCP and REST API
 3. Theme structure includes: core_traits, structure_patterns, language_usage, domain_knowledge
 
 ### Writing Tests

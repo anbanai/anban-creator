@@ -1,0 +1,58 @@
+name: hero
+category: attention
+serves: [attention, readability]
+description: 文章开篇首屏大标题区域，用于在 3 秒内抓住读者注意力，传达文章核心判断
+position: body
+when_to_use: |
+  文章开篇需要让读者快速判断"这篇值不值得读"时使用。
+  适合观点文、产品发布稿、深度分析、重大宣布类文章。
+  特别是公众号文章需要第一屏就亮出核心判断的场景。
+when_not_to_use: |
+  纯信息流类文章（日报、周报）不需要 hero。
+  纯教程类文章用目录导航更合适。
+  短文（500字以内）直接开头即可，无需 hero。
+pairs_well_with: [toc, summary, cta, author-card]
+fields:
+  required:
+    - name: title
+      description: 主标题，必须是一句判断或承诺，让读者产生阅读欲望
+      example: "公众号排版的最大误区不是不好看"
+  optional:
+    - name: eyebrow
+      description: 标签词，定位文章类别或属性
+      example: "深度观察"
+    - name: subtitle
+      description: 副标题，对主标题做进一步补充或转折
+      example: "是读者愿不愿意读完"
+    - name: cta_text
+      description: 开篇引导文案，提示阅读时间或核心收获
+      example: "3 分钟读完，给你一个清晰的判断"
+example: |
+  **深度观察**
+
+  # 公众号排版的最大误区不是不好看
+
+  ## 是读者愿不愿意读完
+
+  *3 分钟读完，给你一个清晰的判断*
+
+  ---
+
+  正文从这里开始...
+
+  **实际效果说明：**
+  - eyebrow（标签词）用加粗显示在顶部
+  - title（主标题）用一级标题，视觉最大
+  - subtitle（副标题）用二级标题
+  - cta_text（引导文案）用斜体 + 分隔线与正文隔开
+markdown_syntax: |
+  在文章最开头使用以下结构：
+
+  **标签词**
+  # 主标题
+  ## 副标题
+  *引导文案*
+  ---
+
+  注意：hero 应紧跟在文章开头，不超过第一屏。
+  如果配合封面图使用，hero 内容应在封面图之后。

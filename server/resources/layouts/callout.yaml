@@ -1,0 +1,46 @@
+name: callout
+category: attention
+serves: [attention, readability]
+description: 重要提示卡片，用于在正文中插入需要读者特别注意的信息，支持多种类型（提示、技巧、警告、成功、危险）
+position: body
+when_to_use: |
+  需要在正文中插入重要提示、警告说明、成功确认或危险操作提醒时使用。
+  适合教程中的注意事项、操作提醒、关键信息强调。
+  类型通过 Markdown 引用块前缀指定：> [!info]、> [!tip]、> [!warning]、> [!success]、> [!danger]。
+when_not_to_use: |
+  多条注意事项需要分组时，考虑用列表或小标题归类。
+  整段前提说明用正文段落更合适，不必包裹在 callout 中。
+  内容超过 3-4 行时应拆分为正文段落。
+pairs_well_with: [steps, checklist, toc, summary]
+fields:
+  required:
+    - name: type
+      description: 提示类型，决定卡片的视觉样式
+      example: "info"
+  optional:
+    - name: title
+      description: 卡片标题（可选，不填时使用类型默认名称）
+      example: "特别注意"
+example: |
+  > [!info]
+  > 这是一般说明类提示，适合补充背景信息或解释说明。
+
+  > [!tip]
+  > 这是技巧类提示，适合分享实用小窍门。
+  > 快捷键 `Ctrl+S` 可以快速保存当前编辑内容。
+
+  > [!warning]
+  > 这是警告类提示，适合提醒读者注意潜在风险。
+
+  > [!success]
+  > 这是成功确认类提示，适合表示操作已完成或结果正确。
+
+  > [!danger]
+  > 这是危险操作类提示，适合提醒不可逆的操作。请在执行前确认已备份数据。
+markdown_syntax: |
+  使用 Markdown 引用块语法 + 类型标注：
+  > [!类型]
+  > 提示内容
+
+  类型可选值：info（默认）、tip、warning、success、danger
+  支持在内容中使用行内 Markdown 语法（加粗、代码等）。
