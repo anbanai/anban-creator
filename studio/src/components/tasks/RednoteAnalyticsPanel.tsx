@@ -25,9 +25,9 @@ import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { formatFullDateTimeCN } from '@/lib/labels'
 import type { RednoteAnalytics, RednoteTrackingStatus } from '@/types'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import Badge from '@/components/ui/Badge'
+import { Badge } from '@/components/ui/badge'
 
 interface RednoteAnalyticsPanelProps {
   taskId: string
@@ -147,6 +147,16 @@ function RednoteAnalyticsContent({ analytics }: { analytics: RednoteAnalytics })
           <div className="space-y-3">
             <div>
               <p className="text-sm font-medium text-foreground">{tracking.note_title || '等待绑定公开笔记'}</p>
+              {tracking.note_url && (
+                <a
+                  href={tracking.note_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 block truncate text-xs text-blue-400 hover:text-blue-300 hover:underline"
+                >
+                  {tracking.note_url}
+                </a>
+              )}
               <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                 <span>最近采集：{formatDateTime(tracking.last_run_at)}</span>
                 <span>下次采集：{formatDateTime(tracking.next_run_at)}</span>
