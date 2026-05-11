@@ -5,10 +5,10 @@ import { Plus, Trash2, ImageIcon, SkipForward, Wand2, MessageCircle } from 'luci
 import { api } from '@/lib/api'
 import type { Template, CreatePosterRequest } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
-import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Skeleton } from '@/components/ui/Skeleton'
+import { Skeleton } from '@/components/ui/skeleton'
 import EmptyState from '@/components/EmptyState'
 
 export default function PosterTab() {
@@ -236,7 +236,7 @@ export default function PosterTab() {
               </div>
             )}
 
-            <Button onClick={handleGenerate} loading={createMutation.isPending} className="w-full">
+            <Button onClick={handleGenerate} disabled={createMutation.isPending} className="w-full">
               <Wand2 className="h-4 w-4" />
               生成海报
             </Button>

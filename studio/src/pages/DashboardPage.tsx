@@ -4,7 +4,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Inbox, CalendarPlus, Clock, Copy } from 'lucide-react'
-import { Skeleton } from '@/components/ui/Skeleton'
+import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import {
   LineChart,
@@ -24,8 +24,8 @@ import { queryKeys } from '@/lib/query-keys'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
-import Badge from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import PageHeader from '@/components/layout/PageHeader'
 import StatsCard from '@/components/StatsCard'
 import StatsCardSkeleton from '@/components/StatsCardSkeleton'
@@ -206,7 +206,6 @@ export default function DashboardPage() {
               size="sm"
               onClick={() => submit(async () => signInMutation.mutateAsync())}
               disabled={(signInStatus?.signed_in_today ?? false) || signInMutation.isPending}
-              loading={signInMutation.isPending}
             >
               {signInStatus?.signed_in_today ? '已签到' : `签到 +${dailySignInCredits}`}
             </Button>

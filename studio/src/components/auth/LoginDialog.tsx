@@ -6,7 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { authApi } from '@/lib/api/auth'
 import { useAuth } from '@/contexts/AuthContext'
 import { Loader2, QrCode, CheckCircle2, RefreshCw } from 'lucide-react'

@@ -3,16 +3,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { toast } from 'sonner'
 import { CreditCard } from 'lucide-react'
-import { Skeleton } from '@/components/ui/Skeleton'
+import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import type { CreditTransaction, CreditPricing } from '@/types'
-import { Card, CardBody } from '@/components/ui/Card'
-import { Button } from '@/components/ui/Button'
+import { Card, CardContent } from '@/components/ui/Card'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import Badge from '@/components/ui/Badge'
-import { Pagination } from '@/components/ui/Pagination'
-import { AccordionRoot, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
+import { Badge } from '@/components/ui/badge'
+import { SimplePagination } from '@/components/SimplePagination'
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
 import { formatFullDateTimeCN, transactionTypeLabel, operationLabel, taskTypeLabelCN } from '@/lib/labels'
 import PageHeader from '@/components/layout/PageHeader'
 import { useAuth } from '@/contexts/AuthContext'
@@ -20,10 +20,10 @@ import MembershipComparison from '@/components/credits/MembershipComparison'
 
 function transactionBadgeVariant(type: string) {
   switch (type) {
-    case 'sign_in': return 'success'
-    case 'task_deduct': return 'danger'
-    case 'task_refund': return 'warning'
-    case 'admin_grant': return 'info'
+    case 'sign_in': return 'secondary'
+    case 'task_deduct': return 'destructive'
+    case 'task_refund': return 'outline'
+    case 'admin_grant': return 'default'
     case 'image_gen':
     case 'image_upload':
     case 'article_write':
@@ -33,8 +33,8 @@ function transactionBadgeVariant(type: string) {
     case 'seo':
     case 'draft_publish':
     case 'outline':
-      return 'danger'
-    default: return 'neutral'
+      return 'destructive'
+    default: return 'secondary'
   }
 }
 
@@ -91,7 +91,7 @@ export default function CreditsPage() {
 
       {/* Balance card */}
       <Card>
-        <CardBody>
+        <CardContent>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">积分余额</p>
@@ -106,12 +106,11 @@ export default function CreditsPage() {
             <Button
               onClick={() => submit(async () => signInMutation.mutateAsync())}
               disabled={signedInToday || signInMutation.isPending}
-              loading={signInMutation.isPending}
             >
               {signedInToday ? '已签到' : `签到 +${dailySignInCredits}`}
             </Button>
           </div>
-        </CardBody>
+        </CardContent>
       </Card>
 
       {/* Membership comparison */}
@@ -119,7 +118,7 @@ export default function CreditsPage() {
 
       {/* Recharge */}
       <Card>
-        <CardBody>
+        <CardContent>
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-foreground">充值积分</h3>
             <Button variant="outline" size="sm" onClick={() => setRechargeOpen(true)}>
@@ -127,7 +126,7 @@ export default function CreditsPage() {
               充值
             </Button>
           </div>
-        </CardBody>
+        </CardContent>
       </Card>
 
       {/* Recharge dialog */}
@@ -232,7 +231,7 @@ export default function CreditsPage() {
                 <p className="text-xs text-muted-foreground">
                   共 {total} 条记录，第 {page}/{totalPages} 页
                 </p>
-                <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+                <SimplePagination page={page} totalPages={totalPages} onPageChange={setPage} />
               </div>
             )}
           </>
@@ -260,7 +259,7 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
       <div className="border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">计费说明</h2>
       </div>
-      <AccordionRoot>
+      <Accordion>
         {/* Task costs */}
         <AccordionItem>
           <AccordionTrigger>任务费（Web 端创建任务，包含所有操作）</AccordionTrigger>
@@ -330,7 +329,7 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
             </div>
           </AccordionContent>
         </AccordionItem>
-      </AccordionRoot>
+      </Accordion>
     </Card>
   )
 }

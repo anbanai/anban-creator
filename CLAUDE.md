@@ -268,3 +268,4 @@ Both plugins connect to the same `anbanwriter` MCP server and share themes/write
 - Two Cobra patterns coexist in app/: package-level var with `init()` (older) and factory functions returning `*cobra.Command` (preferred)
 - Docker Compose provides MySQL 8.0 + Redis 7 + agent + server containers
 - Server binary is `bin/abwriter-server` (not anbanwriter-server)
+- **Never modify base UI components in `studio/src/components/ui/`**. These are managed shadcn/ui primitives. If a base component update breaks business logic, fix the business component only — never patch the primitive.

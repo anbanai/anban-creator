@@ -5,22 +5,22 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Loader2, ClipboardList, Check, Film, Download, Square, CheckSquare } from 'lucide-react'
-import { Skeleton } from '@/components/ui/Skeleton'
+import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
-import { Button } from '@/components/ui/Button'
-import Badge from '@/components/ui/Badge'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
-import { Pagination } from '@/components/ui/Pagination'
+import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel } from '@/lib/labels'
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
@@ -404,8 +404,7 @@ export default function TasksPage() {
               <Button
                 size="sm"
                 onClick={handleBulkDownload}
-                loading={bulkDownloadMutation.isPending}
-                disabled={selectedCompletedTasks.length === 0}
+                disabled={selectedCompletedTasks.length === 0 || bulkDownloadMutation.isPending}
               >
                 <Download className="h-4 w-4" />
                 下载选中文件
@@ -483,7 +482,7 @@ export default function TasksPage() {
                           {contentTypeLabel[task.type] || task.type}
                         </Badge>
                         {task.status === 'running' && (task.progress ?? 0) > 0 && (
-                          <Badge variant="warning" className="text-[10px]">
+                          <Badge variant="outline" className="text-[10px]">
                             {task.progress ?? 0}%
                           </Badge>
                         )}
@@ -510,7 +509,7 @@ export default function TasksPage() {
 
         {totalPages > 1 && (
           <div className="mt-4 flex justify-center">
-            <Pagination
+            <SimplePagination
               page={page}
               totalPages={totalPages}
               onPageChange={setPage}
@@ -663,12 +662,11 @@ export default function TasksPage() {
             <Button
               type="submit"
               form="task-create-form"
-              loading={createMutation.isPending}
               disabled={(() => {
                 const cost = taskCostFor(watchedType)
                 const totalCost = cost * quantity
                 const balance = creditsBalance?.balance ?? 0
-                return balance - totalCost < 0
+                return balance - totalCost < 0 || createMutation.isPending
               })()}
             >
               创建

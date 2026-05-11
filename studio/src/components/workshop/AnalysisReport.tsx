@@ -9,16 +9,16 @@ import {
 } from 'recharts'
 import type { AnalysisResult } from '@/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import Badge from '@/components/ui/Badge'
+import { Badge } from '@/components/ui/badge'
 
 interface AnalysisReportProps {
   analysis: AnalysisResult
 }
 
-function scoreVariant(score: number): 'success' | 'warning' | 'danger' {
-  if (score > 80) return 'success'
-  if (score > 60) return 'warning'
-  return 'danger'
+function scoreVariant(score: number): 'secondary' | 'outline' | 'destructive' {
+  if (score > 80) return 'secondary'
+  if (score > 60) return 'outline'
+  return 'destructive'
 }
 
 const dimensionCards: Array<{

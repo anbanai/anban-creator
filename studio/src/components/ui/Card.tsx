@@ -79,8 +79,6 @@ function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-const CardBody = CardContent
-
 function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -100,7 +98,6 @@ export {
   CardFooter,
   CardTitle,
   CardAction,
-  CardBody,
   CardDescription,
   CardContent,
 }

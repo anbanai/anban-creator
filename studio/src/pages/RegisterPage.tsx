@@ -7,9 +7,9 @@ import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { useAuth } from '@/contexts/AuthContext'
 import { registerSchema, type RegisterFormValues } from '@/lib/schemas'
-import { Input } from '@/components/ui/Input'
+import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import AuthLayout from '@/components/auth/AuthLayout'
 
@@ -102,7 +102,6 @@ export default function RegisterPage() {
                     variant="outline"
                     size="default"
                     disabled={!emailValid || countdown > 0 || sendingCode}
-                    loading={sendingCode}
                     onClick={handleSendCode}
                     className="shrink-0 whitespace-nowrap"
                   >
@@ -152,7 +151,7 @@ export default function RegisterPage() {
               </FormItem>
             )}
           />
-          <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>
+          <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
             创建账号
           </Button>
         </form>

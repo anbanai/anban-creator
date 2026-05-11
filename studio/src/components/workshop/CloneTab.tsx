@@ -6,8 +6,8 @@ import { Copy, Link2, LayoutGrid, Zap, Droplets, Repeat2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { CreateTaskRequest } from '@/types'
 import { ChannelSelector } from '@/components/ChannelSelector'
-import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 
@@ -181,8 +181,7 @@ export default function CloneTab() {
       {/* Action */}
       <Button
         onClick={handleStartClone}
-        loading={createTaskMutation.isPending}
-        disabled={!channelId || (sourceMode === 'url' && !sourceUrl.trim())}
+        disabled={!channelId || (sourceMode === 'url' && !sourceUrl.trim()) || createTaskMutation.isPending}
         size="lg"
         className="w-full"
       >

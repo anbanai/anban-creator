@@ -254,23 +254,23 @@ export const timelineSortOptions = [
 
 // --- Badge Variants ---
 
-export type BadgeVariant = 'success' | 'danger' | 'warning' | 'info' | 'neutral'
+export type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'ghost' | 'link'
 
 export function getBadgeVariant(status: string, type?: 'task' | 'plan'): BadgeVariant {
   if (type === 'plan' || status === 'active' || status === 'paused') {
     switch (status) {
-      case 'active': return 'info'
-      case 'paused': return 'warning'
-      case 'completed': return 'success'
-      default: return 'neutral'
+      case 'active': return 'default'
+      case 'paused': return 'outline'
+      case 'completed': return 'secondary'
+      default: return 'secondary'
     }
   }
   switch (status) {
-    case 'completed': return 'success'
-    case 'failed': return 'danger'
-    case 'running': return 'warning'
-    case 'cancelled': return 'neutral'
-    default: return 'neutral'
+    case 'completed': return 'secondary'
+    case 'failed': return 'destructive'
+    case 'running': return 'outline'
+    case 'cancelled': return 'secondary'
+    default: return 'secondary'
   }
 }
 

@@ -1,5 +1,5 @@
-import { Badge } from '@/components/ui/Badge'
-import { Card, CardBody } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/Card'
 
 interface StepCardProps {
   step: number
@@ -16,11 +16,11 @@ export default function StepCard({ step, title, children, optional = false }: St
           {step}
         </span>
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        {optional && <Badge variant="neutral" className="text-[10px] px-1.5 py-0">可选</Badge>}
+        {optional && <Badge variant="secondary" className="text-[10px] px-1.5 py-0">可选</Badge>}
       </div>
-      <CardBody className="space-y-3">
+      <CardContent className="space-y-3">
         {children}
-      </CardBody>
+      </CardContent>
     </Card>
   )
 }

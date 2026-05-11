@@ -4,16 +4,16 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Plus, FileText } from 'lucide-react'
-import { Skeleton } from '@/components/ui/Skeleton'
+import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import type { Channel, Plan, PlanType, CreatePlanRequest } from '@/types'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
-import { Button } from '@/components/ui/Button'
-import Badge from '@/components/ui/Badge'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/Input'
+import { Input } from '@/components/ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import SchedulePicker from '@/components/SchedulePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
@@ -25,7 +25,7 @@ import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
-import { Pagination } from '@/components/ui/Pagination'
+import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 
 function planToFormValues(plan: Plan): PlanFormValues {
@@ -300,12 +300,12 @@ export default function PlansPage() {
                 </div>
                 <div className="mt-2 flex justify-end gap-1.5 border-t border-border pt-2">
                   {plan.status === 'active' && (
-                    <Button variant="ghost" size="xs" loading={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
+                    <Button variant="ghost" size="xs" disabled={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
                       暂停
                     </Button>
                   )}
                   {plan.status === 'paused' && (
-                    <Button variant="ghost" size="xs" loading={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
+                    <Button variant="ghost" size="xs" disabled={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
                       恢复
                     </Button>
                   )}
@@ -327,7 +327,7 @@ export default function PlansPage() {
 
         {totalPages > 1 && (
           <div className="mt-4 flex justify-center">
-            <Pagination
+            <SimplePagination
               page={page}
               totalPages={totalPages}
               onPageChange={setPage}
@@ -406,7 +406,7 @@ export default function PlansPage() {
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="plan-form" loading={isSubmitting}>
+            <Button type="submit" form="plan-form" disabled={isSubmitting}>
               {editingPlan ? '更新' : '创建'}
             </Button>
           </DialogFooter>
@@ -422,7 +422,7 @@ export default function PlansPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
+            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
               删除
             </AlertDialogAction>
           </AlertDialogFooter>

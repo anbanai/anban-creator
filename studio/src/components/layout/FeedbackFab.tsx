@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { feedbackApi } from '@/lib/api/feedback'
 
@@ -101,8 +101,7 @@ export default function FeedbackFab() {
               {/* Submit */}
               <Button
                 className="w-full"
-                loading={isSubmitting}
-                disabled={!content.trim()}
+                disabled={!content.trim() || isSubmitting}
                 onClick={handleSubmit}
               >
                 提交反馈

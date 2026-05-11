@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Calendar, RefreshCw } from 'lucide-react'
-import { Skeleton } from '@/components/ui/Skeleton'
+import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import PageHeader from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
@@ -24,13 +24,13 @@ import {
   getBadgeVariant,
 } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
-import Badge from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Card } from '@/components/ui/Card'
 import EmptyState from '@/components/EmptyState'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { CalendarRangePicker } from '@/components/ui/Calendar'
+import { CalendarRangePicker } from '@/components/CalendarRangePicker'
 import { ChannelSelector } from '@/components/ChannelSelector'
 
 // --- Helpers ---
@@ -370,7 +370,7 @@ export default function TimelinePage() {
                                       </Badge>
                                     )}
                                     {item.type === 'task' && item.status === 'running' && (
-                                      <Badge variant="warning" className="text-[10px]">
+                                      <Badge variant="outline" className="text-[10px]">
                                         {item.progress ?? 0}%
                                       </Badge>
                                     )}

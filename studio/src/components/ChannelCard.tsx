@@ -2,8 +2,8 @@ import type { Channel, ChannelStats } from '@/types'
 import { platformLabels } from '@/lib/labels'
 import { renderPlatformIcon, platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
-import Badge from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 
 interface ChannelCardProps {
   channel: Channel
@@ -18,7 +18,7 @@ interface ChannelCardProps {
 
 export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {
   const platformLabel = platformLabels[channel.platform] || channel.platform
-  const platformBadge = platformBadgeVariant[channel.platform] || ('neutral' as const)
+  const platformBadge = platformBadgeVariant[channel.platform] || ('secondary' as const)
   const borderColor = platformBorderColor[channel.platform] || ''
   const hoverBorderColor = platformHoverBorderColor[channel.platform] || ''
 
@@ -36,7 +36,7 @@ export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onAr
           </div>
         </div>
         {channel.status === 'archived' && (
-          <Badge variant="warning" className="text-[10px]">已归档</Badge>
+          <Badge variant="outline" className="text-[10px]">已归档</Badge>
         )}
       </div>
       {channel.positioning && (
@@ -56,12 +56,12 @@ export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onAr
           </Button>
         )}
         {channel.status === 'active' && onArchive && (
-          <Button variant="ghost" size="xs" disabled={archiving} loading={archiving} onClick={() => onArchive(channel.id)} aria-label="归档账号">
+          <Button variant="ghost" size="xs" disabled={archiving} onClick={() => onArchive(channel.id)} aria-label="归档账号">
             归档
           </Button>
         )}
         {channel.status === 'archived' && onRestore && (
-          <Button variant="ghost" size="xs" disabled={restoring} loading={restoring} onClick={() => onRestore(channel.id)} aria-label="恢复账号">
+          <Button variant="ghost" size="xs" disabled={restoring} onClick={() => onRestore(channel.id)} aria-label="恢复账号">
             恢复
           </Button>
         )}

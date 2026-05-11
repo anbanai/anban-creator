@@ -26,10 +26,10 @@ export const platformHoverBorderColor: Record<string, string> = {
   rednote: 'hover:border-l-[#FF2442]/50',
 }
 
-export const platformBadgeVariant: Record<string, 'success' | 'info' | 'danger' | 'neutral'> = {
-  article: 'success',
-  xls: 'info',
-  rednote: 'danger',
+export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+  article: 'secondary',
+  xls: 'default',
+  rednote: 'destructive',
 }
 
 export const platformBgColor: Record<string, string> = {

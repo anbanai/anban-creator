@@ -13,8 +13,6 @@ function Accordion({ className, ...props }: AccordionPrimitive.Root.Props) {
   )
 }
 
-const AccordionRoot = Accordion
-
 function AccordionItem({ className, ...props }: AccordionPrimitive.Item.Props) {
   return (
     <AccordionPrimitive.Item
@@ -71,4 +69,4 @@ function AccordionContent({
   )
 }
 
-export { Accordion, AccordionRoot, AccordionItem, AccordionTrigger, AccordionContent }
+export { Accordion, AccordionItem, AccordionTrigger, AccordionContent }

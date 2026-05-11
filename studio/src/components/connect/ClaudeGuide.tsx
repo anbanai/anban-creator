@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardBody } from '@/components/ui/Card'
+import { Card, CardContent } from '@/components/ui/Card'
 import CodeBlock from '@/components/connect/CodeBlock'
 import StepCard from '@/components/connect/StepCard'
 import McpConfigStep from '@/components/connect/McpConfigStep'
@@ -18,12 +18,12 @@ export default function ClaudeGuide() {
   return (
     <div className="space-y-4">
       <Card>
-        <CardBody className="space-y-2">
+        <CardContent className="space-y-2">
           <h2 className="text-sm font-semibold text-foreground">Anban 智能创作助手 Claude Code 插件</h2>
           <p className="text-xs leading-relaxed text-muted-foreground">
             通过 Claude Code 插件，你可以用自然语言直接驱动 AI 创作流程。推荐按「注册账号 → 创建 Key → 安装插件 → 配置 Key → /init → 重启 → 开始使用」这条路径完成接入，第一次配置会最顺。
           </p>
-        </CardBody>
+        </CardContent>
       </Card>
 
       <StepCard step={1} title="注册或登录 Anban 账号">

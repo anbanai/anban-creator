@@ -5,7 +5,7 @@ import {
   tierBenefits,
   type MembershipComparisonValue,
 } from '@/lib/labels'
-import Badge from '@/components/ui/Badge'
+import { Badge } from '@/components/ui/badge'
 
 function ComparisonValue({ value }: { value: MembershipComparisonValue }) {
   if (value === true) {
@@ -49,8 +49,8 @@ export default function MembershipComparison({ currentTier }: { currentTier: str
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-base font-semibold text-foreground">{tier.name}</span>
-                      {tier.recommended && <Badge variant="info">推荐</Badge>}
-                      {isCurrent && <Badge variant="success">当前</Badge>}
+                      {tier.recommended && <Badge variant="default">推荐</Badge>}
+                      {isCurrent && <Badge variant="secondary">当前</Badge>}
                     </div>
                     <p className="mt-1 text-xs font-normal text-muted-foreground">{tier.description}</p>
                   </th>

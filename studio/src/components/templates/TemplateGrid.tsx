@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import type { Template } from '@/types'
 import { TemplateCard } from './TemplateCard'
 import { TemplatePreview } from './TemplatePreview'
-import { Input } from '@/components/ui/Input'
+import { Input } from '@/components/ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import EmptyState from '@/components/EmptyState'
 

@@ -1,7 +1,7 @@
 import { CheckCircle2, Circle, AlertTriangle, Loader2 } from 'lucide-react'
 import type { WorkflowStatus } from '@/types'
 import { Card, CardContent } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
+import { Badge } from '@/components/ui/badge'
 
 interface TaskWorkflowPanelProps {
   workflow?: WorkflowStatus | string | null

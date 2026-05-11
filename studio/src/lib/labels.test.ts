@@ -2,27 +2,27 @@ import { describe, it, expect } from 'vitest'
 import { statusBadgeVariant } from './labels'
 
 describe('statusBadgeVariant', () => {
-  it('returns "warning" for running', () => {
-    expect(statusBadgeVariant('running')).toBe('warning')
+  it('returns "outline" for running', () => {
+    expect(statusBadgeVariant('running')).toBe('outline')
   })
 
-  it('returns "success" for completed', () => {
-    expect(statusBadgeVariant('completed')).toBe('success')
+  it('returns "secondary" for completed', () => {
+    expect(statusBadgeVariant('completed')).toBe('secondary')
   })
 
-  it('returns "danger" for failed', () => {
-    expect(statusBadgeVariant('failed')).toBe('danger')
+  it('returns "destructive" for failed', () => {
+    expect(statusBadgeVariant('failed')).toBe('destructive')
   })
 
-  it('returns "neutral" for pending', () => {
-    expect(statusBadgeVariant('pending')).toBe('neutral')
+  it('returns "secondary" for pending', () => {
+    expect(statusBadgeVariant('pending')).toBe('secondary')
   })
 
-  it('returns "neutral" for cancelled', () => {
-    expect(statusBadgeVariant('cancelled')).toBe('neutral')
+  it('returns "secondary" for cancelled', () => {
+    expect(statusBadgeVariant('cancelled')).toBe('secondary')
   })
 
-  it('returns "neutral" for unknown status', () => {
-    expect(statusBadgeVariant('unknown')).toBe('neutral')
+  it('returns "secondary" for unknown status', () => {
+    expect(statusBadgeVariant('unknown')).toBe('secondary')
   })
 })

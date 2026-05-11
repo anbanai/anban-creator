@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import type { Template, TemplateType } from '@/types'
-import { Badge } from '@/components/ui/Badge'
+import { Badge } from '@/components/ui/badge'
 import { ImageIcon } from 'lucide-react'
 
 const typeBadgeMap: Record<TemplateType, { label: string; className: string }> = {

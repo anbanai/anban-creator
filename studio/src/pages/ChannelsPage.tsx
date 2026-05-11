@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Inbox, ChevronDown } from 'lucide-react'
-import { Skeleton } from '@/components/ui/Skeleton'
+import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
@@ -16,9 +16,9 @@ import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
 import { TemplateRecommend } from '@/components/channels/TemplateRecommend'
 import { SearchInput } from '@/components/ui/SearchInput'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/Input'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
@@ -560,8 +560,7 @@ export default function ChannelsPage() {
                             type="button"
                             variant="secondary"
                             size="sm"
-                            loading={fetchingProfile}
-                            disabled={!field.value || !hasSupportedProfileUrl(field.value || '')}
+                            disabled={!field.value || !hasSupportedProfileUrl(field.value || '') || fetchingProfile}
                             onClick={() => void handleFetchProfile(field.value || '')}
                           >
                             获取
@@ -826,7 +825,7 @@ export default function ChannelsPage() {
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="channel-form" loading={isSubmitting}>
+            <Button type="submit" form="channel-form" disabled={isSubmitting}>
               {editingChannel ? '更新' : '创建'}
             </Button>
           </DialogFooter>
@@ -842,7 +841,7 @@ export default function ChannelsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
+            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
               删除
             </AlertDialogAction>
           </AlertDialogFooter>
