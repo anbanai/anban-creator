@@ -81,6 +81,9 @@ export type {
   CreatePosterRequest,
 } from './poster'
 
+// Resource
+export type { ResourceEntry, ResourceListResponse } from './resource'
+
 // Viral Analysis
 export type {
   ViralAnalysisStatus,

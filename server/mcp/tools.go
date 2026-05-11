@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
@@ -36,6 +37,7 @@ func RegisterTools(server *mcp.Server) {
 	registerWorkspaceTools(server)
 	registerRednoteTools(server)
 	registerTemplateTools(server)
+	registerResourceTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.
@@ -291,6 +293,34 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	case "flower":
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
+		}
+	}
+
+	// Add available resource options for the platform.
+	info["available_themes"] = resources.Manager().ListByPlatform(resources.CategoryTheme, ch.Platform)
+	info["available_writers"] = resources.Manager().ListByPlatform(resources.CategoryWriter, ch.Platform)
+	info["available_layouts"] = resources.Manager().ListByPlatform(resources.CategoryLayout, ch.Platform)
+	info["available_image_presets"] = resources.Manager().ListByPlatform(resources.CategoryImagePreset, ch.Platform)
+
+	// Add channel's selected resource descriptions.
+	if ch.Theme != "" {
+		if e := resources.Manager().Get(resources.CategoryTheme, ch.Theme); e != nil {
+			info["theme_description"] = e.Description
+		}
+	}
+	if ch.Style != "" {
+		if e := resources.Manager().Get(resources.CategoryWriter, ch.Style); e != nil {
+			info["style_description"] = e.Description
+		}
+	}
+	if ch.Layout != "" {
+		if e := resources.Manager().Get(resources.CategoryLayout, ch.Layout); e != nil {
+			info["layout_description"] = e.Description
+		}
+	}
+	if ch.ImagePreset != "" {
+		if e := resources.Manager().Get(resources.CategoryImagePreset, ch.ImagePreset); e != nil {
+			info["image_preset_description"] = e.Description
 		}
 	}
 

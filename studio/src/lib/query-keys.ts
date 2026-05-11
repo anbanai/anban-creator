@@ -37,6 +37,12 @@ export const queryKeys = {
   modelConfig: {
     all: ['model-config'] as const,
   },
+  resources: {
+    themes: ['resources', 'themes'] as const,
+    writers: ['resources', 'writers'] as const,
+    layouts: ['resources', 'layouts'] as const,
+    imagePresets: ['resources', 'image_presets'] as const,
+  },
   usage: {
     stats: (params?: { from?: string; to?: string; channel_id?: string }) =>
       ['usage', 'stats', params] as const,

@@ -105,6 +105,8 @@ export const mockChannels: Channel[] = [
     author: '作者',
     reference_image_url: '',
     image_ratio: '16:9',
+    layout: '',
+    image_preset: '',
     max_concurrent_tasks: 2,
     config: { wechat_app_id: 'wx123' },
     status: 'active',

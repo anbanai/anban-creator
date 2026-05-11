@@ -754,7 +754,7 @@ export default function ChannelsPage() {
                       <FormDescription>选择内置转换主题模板</FormDescription>
                       <FormMessage />
                     </FormItem>
-                  )} />
+                  )} />}
 
                   {!isRednote && (
                     <FormField control={form.control} name="layout" render={({ field }) => (
@@ -793,7 +793,8 @@ export default function ChannelsPage() {
                         <FormDescription>封面图和内容图的默认生成预设模板</FormDescription>
                         <FormMessage />
                       </FormItem>
-                    )} />}
+                    )} />
+                  )}
 
                   <FormField control={form.control} name="author" render={({ field }) => (
                     <FormItem className="flex items-center gap-3 space-y-0">

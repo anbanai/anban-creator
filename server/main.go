@@ -207,9 +207,9 @@ func main() {
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
-			templateSvc = service.NewTemplateService(repo, log)
-			viralAnalysisSvc = service.NewViralAnalysisService(repo, log)
-			posterSvc = service.NewPosterService(repo, log)
+		templateSvc = service.NewTemplateService(repo, log)
+		viralAnalysisSvc = service.NewViralAnalysisService(repo, log)
+		posterSvc = service.NewPosterService(repo, log)
 
 		// Create Asynq client if Redis is available.
 		if rdb != nil {
@@ -286,7 +286,7 @@ func main() {
 	var templateHandler *handler.TemplateHandler
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
-		var resourceHandler *handler.ResourceHandler
+	var resourceHandler *handler.ResourceHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)

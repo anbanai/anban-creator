@@ -12,6 +12,7 @@ import { rednoteAnalyticsApi } from './rednote-analytics'
 import { templatesApi } from './templates'
 import { postersApi } from './posters'
 import { viralAnalysesApi } from './viral-analyses'
+import { resourcesApi } from './resources'
 
 export const api = {
   auth: authApi,
@@ -28,4 +29,5 @@ export const api = {
   templates: templatesApi,
   posters: postersApi,
   viralAnalyses: viralAnalysesApi,
+  resources: resourcesApi,
 }

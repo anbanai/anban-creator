@@ -48,6 +48,8 @@ export const channelSchema = z.object({
   author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
   reference_image_url: z.string().url("请输入有效的图片 URL").or(z.literal("")).optional(),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).optional(),
+  layout: z.string().max(100).optional(),
+  image_preset: z.string().max(50).optional(),
 }).refine((data) => {
   if (data.enable_publishing) {
     return !!data.wechat_app_id?.trim()
