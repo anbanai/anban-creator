@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	appconfig "github.com/royalrick/anbanwriter/app/config"
@@ -534,6 +535,76 @@ func TestCompactToolResultContent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := CompactToolResultContent(tt.content); got != tt.want {
 				t.Fatalf("CompactToolResultContent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildUserPrompt(t *testing.T) {
+	tests := []struct {
+		name          string
+		taskType      string
+		topic         string
+		generateVideo bool
+		wantExact     string
+		wantContains  []string
+	}{
+		{
+			name:      "with topic returns topic as-is",
+			taskType:  "rednote",
+			topic:     "春季穿搭",
+			wantExact: "春季穿搭",
+		},
+		{
+			name:      "different task type still returns topic",
+			taskType:  "article",
+			topic:     "时间管理技巧",
+			wantExact: "时间管理技巧",
+		},
+		{
+			name:      "unknown task type returns topic",
+			taskType:  "other",
+			topic:     "随便写写",
+			wantExact: "随便写写",
+		},
+		{
+			name:         "no topic triggers autonomous mode",
+			taskType:     "rednote",
+			topic:        "",
+			wantContains: []string{"请根据频道定位", "自动研究", "创作流程"},
+		},
+		{
+			name:         "no topic with different task type",
+			taskType:     "article",
+			topic:        "",
+			wantContains: []string{"请根据频道定位", "自动研究", "创作流程"},
+		},
+		{
+			name:          "with topic and video flag",
+			taskType:      "rednote",
+			topic:         "旅行分享",
+			generateVideo: true,
+			wantContains:  []string{"旅行分享", "把生成好的图片合并成为视频"},
+		},
+		{
+			name:          "no topic with video flag",
+			taskType:      "xls",
+			topic:         "",
+			generateVideo: true,
+			wantContains:  []string{"自动研究", "把生成好的图片合并成为视频"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BuildUserPrompt(tt.taskType, tt.topic, tt.generateVideo)
+			if tt.wantExact != "" && got != tt.wantExact {
+				t.Errorf("BuildUserPrompt() = %q, want %q", got, tt.wantExact)
+			}
+			for _, sub := range tt.wantContains {
+				if !strings.Contains(got, sub) {
+					t.Errorf("BuildUserPrompt() = %q, want to contain %q", got, sub)
+				}
 			}
 		})
 	}

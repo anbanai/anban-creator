@@ -29,25 +29,16 @@ func filterAgentEnv(env map[string]string) map[string]string {
 	return filtered
 }
 
-// BuildUserPrompt constructs the user prompt with a command prefix based on task type.
-// This ensures the model receives an explicit command (e.g., "/rednote topic")
-// instead of a raw topic that could be misinterpreted as a Q&A question.
+// BuildUserPrompt constructs the user prompt for Claude Code agent execution.
+// The --agent flag already loads the agent definition as system prompt, so the user
+// message only needs to provide the topic or an autonomous execution instruction.
 // When generateVideo is true, appends a video generation hint to the prompt.
 func BuildUserPrompt(taskType, topic string, generateVideo bool) string {
 	var base string
 	if topic == "" {
-		base = fmt.Sprintf("/%s", taskType)
+		base = "请根据频道定位、关键词和历史选题，自动研究并选择最优主题后继续执行创作流程。"
 	} else {
-		switch taskType {
-		case "rednote":
-			base = fmt.Sprintf("/rednote %s", topic)
-		case "article":
-			base = fmt.Sprintf("/article %s", topic)
-		case "xls":
-			base = fmt.Sprintf("/xls %s", topic)
-		default:
-			base = topic
-		}
+		base = topic
 	}
 	if generateVideo {
 		base += "\n\n把生成好的图片合并成为视频"
