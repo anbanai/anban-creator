@@ -553,6 +553,211 @@ func selectTopRednotePosts(posts []RednotePost, limit int) []RednotePost {
 	return ranked
 }
 
+// RednoteNoteContent holds parsed content from a Xiaohongshu note page.
+type RednoteNoteContent struct {
+	NoteID        string `json:"note_id"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	Tags          string `json:"tags"`
+	CoverURL      string `json:"cover_url"`
+	Type          string `json:"type"` // "normal" (image) or "video"
+	LikeCount     int    `json:"like_count"`
+	CollectCount  int    `json:"collect_count"`
+	CommentCount  int    `json:"comment_count"`
+	ShareCount    int    `json:"share_count"`
+	AuthorName    string `json:"author_name,omitempty"`
+	AuthorID      string `json:"author_id,omitempty"`
+	InteractCount int    `json:"interact_count"`
+}
+
+// FetchNoteContent fetches and parses a Xiaohongshu note page, extracting
+// title, description, tags, cover image, and engagement metrics.
+func (p *RednoteProvider) FetchNoteContent(ctx context.Context, noteURL string) (*RednoteNoteContent, error) {
+	noteURL = strings.TrimSpace(noteURL)
+	if noteURL == "" {
+		return nil, fmt.Errorf("note URL is required")
+	}
+	fetchURL, err := p.resolveRednoteNoteURL(ctx, noteURL)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	setRednoteHeaders(req)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch note page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, rednoteMaxProfileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if len(body) > rednoteMaxProfileBytes {
+		return nil, fmt.Errorf("note page is too large")
+	}
+
+	html := string(body)
+	noteID := ExtractRednoteNoteID(fetchURL)
+
+	content := parseRednoteNoteContent(html)
+	content.NoteID = noteID
+	return content, nil
+}
+
+
+var (
+	rednoteInitialStatePattern = regexp.MustCompile(`(?s)window\.__INITIAL_STATE__\s*=\s*(\{.+?\})\s*</script>`)
+	rednoteJSONStringPattern    = regexp.MustCompile(`"(?:[^"\\]|\\.)*"`)
+	rednoteNoteTagPattern      = regexp.MustCompile(`#([^\s#]{2,20})`)
+)
+
+func parseRednoteNoteContent(html string) *RednoteNoteContent {
+	content := &RednoteNoteContent{}
+
+	// Try extracting from __INITIAL_STATE__ JSON first.
+	if match := rednoteInitialStatePattern.FindStringSubmatch(html); len(match) >= 2 {
+		extractNoteFromInitialState(content, match[1])
+	}
+
+	// Fallback: extract title from <title> tag or meta.
+	if content.Title == "" {
+		if title := extractBetween(html, "<title>", "</title>"); title != "" {
+			title = strings.TrimSpace(title)
+			if idx := strings.Index(title, " - 小红书"); idx > 0 {
+				title = strings.TrimSpace(title[:idx])
+			}
+			content.Title = title
+		}
+	}
+
+	// Extract tags from the page text (filter out hex colors).
+	if content.Tags == "" {
+		allTags := rednoteNoteTagPattern.FindAllStringSubmatch(html, 20)
+		tagParts := make([]string, 0, len(allTags))
+		seen := map[string]bool{}
+		for _, t := range allTags {
+			if len(t) >= 2 && !seen[t[1]] && !isHexColor(t[1]) {
+				seen[t[1]] = true
+				tagParts = append(tagParts, t[1])
+			}
+		}
+		if len(tagParts) > 0 {
+			content.Tags = strings.Join(tagParts, ", ")
+		}
+	}
+
+	// Fallback: extract description using JSON-aware extraction.
+	if content.Description == "" {
+		if desc := extractJSONStringAfter(html, `"desc":"`); desc != "" {
+			content.Description = unescapeJSONString(desc)
+		}
+	}
+
+	// Fallback: extract cover image.
+	if content.CoverURL == "" {
+		for _, m := range rednoteImgSrcPattern.FindAllStringSubmatch(html, 5) {
+			if len(m) >= 2 && strings.Contains(m[1], "xhscdn") {
+				content.CoverURL = strings.ReplaceAll(m[1], `/`, "/")
+				break
+			}
+		}
+	}
+
+	// Always try to extract metrics from the page.
+	metrics := parseRednotePostMetrics(html)
+	content.LikeCount = metrics.LikeCount
+	content.CollectCount = metrics.CollectCount
+	content.CommentCount = metrics.CommentCount
+	content.ShareCount = metrics.ShareCount
+	content.InteractCount = content.LikeCount + content.CollectCount + content.CommentCount + content.ShareCount
+
+	return content
+}
+
+// isHexColor returns true if the string looks like a CSS hex color code (#fff, #3b82f6).
+func isHexColor(s string) bool {
+	if len(s) != 4 && len(s) != 7 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func extractNoteFromInitialState(content *RednoteNoteContent, raw string) {
+	s := strings.ReplaceAll(raw, "undefined", "null")
+
+	if title := extractJSONStringAfter(s, `"title":"`); title != "" {
+		content.Title = unescapeJSONString(title)
+	}
+	if desc := extractJSONStringAfter(s, `"desc":"`); desc != "" {
+		content.Description = unescapeJSONString(desc)
+	}
+	if cover := extractJSONStringAfter(s, `"urlDefault":"`); cover != "" {
+		content.CoverURL = unescapeJSONString(cover)
+	}
+	if author := extractJSONStringAfter(s, `"nickname":"`); author != "" {
+		content.AuthorName = unescapeJSONString(author)
+	}
+	if authorID := extractJSONStringAfter(s, `"userId":"`); authorID != "" {
+		content.AuthorID = authorID
+	}
+
+	// Extract tags from the note data.
+	if tags := extractBetween(s, `"tagList":\[`, `]`); tags != "" {
+		tagNamePattern := regexp.MustCompile(`"name":"([^"]*)"`)
+		matches := tagNamePattern.FindAllStringSubmatch(tags, 20)
+		parts := make([]string, 0, len(matches))
+		for _, m := range matches {
+			if len(m) >= 2 {
+				parts = append(parts, unescapeJSONString(m[1]))
+			}
+		}
+		if len(parts) > 0 {
+			content.Tags = strings.Join(parts, ", ")
+		}
+	}
+}
+
+// extractJSONStringAfter finds key and extracts the complete JSON string value
+// that follows, handling escaped quotes via regex "(?:[^"\\]|\\.)*".
+func extractJSONStringAfter(s, key string) string {
+	_, after, found := strings.Cut(s, key)
+	if !found {
+		return ""
+	}
+	if m := rednoteJSONStringPattern.FindStringSubmatch(after); len(m) >= 1 {
+		val := m[0]
+		if len(val) >= 2 {
+			return val[1 : len(val)-1]
+		}
+	}
+	return ""
+}
+
+func unescapeJSONString(s string) string {
+	s = strings.ReplaceAll(s, `\/`, "/")
+	s = strings.ReplaceAll(s, `\\"`, `"`)
+	s = strings.ReplaceAll(s, `\\`, `\`)
+	s = strings.ReplaceAll(s, `\n`, "\n")
+	s = strings.ReplaceAll(s, `\t`, "\t")
+	return s
+}
+
+
 // extractBetween extracts the substring between two delimiters.
 func extractBetween(s, start, end string) string {
 	_, after, found := strings.Cut(s, start)

@@ -19,6 +19,7 @@ type ViralAnalysisRepository interface {
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
 	UpdateResult(ctx context.Context, id string, result json.RawMessage) error
+	UpdateSourceData(ctx context.Context, id string, data json.RawMessage) error
 	FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.ViralAnalysis, error)
 	Delete(ctx context.Context, id string) error
 	Update(ctx context.Context, analysis *model.ViralAnalysis) error
@@ -78,6 +79,10 @@ func (r *viralAnalysisRepository) UpdateStatusAndError(ctx context.Context, id, 
 
 func (r *viralAnalysisRepository) UpdateResult(ctx context.Context, id string, result json.RawMessage) error {
 	return r.db.WithContext(ctx).Model(&model.ViralAnalysis{}).Where("id = ?", id).Update("analysis_result", result).Error
+}
+
+func (r *viralAnalysisRepository) UpdateSourceData(ctx context.Context, id string, data json.RawMessage) error {
+	return r.db.WithContext(ctx).Model(&model.ViralAnalysis{}).Where("id = ?", id).Update("source_data", data).Error
 }
 
 func (r *viralAnalysisRepository) FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.ViralAnalysis, error) {

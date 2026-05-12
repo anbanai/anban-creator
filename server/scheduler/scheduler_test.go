@@ -25,6 +25,7 @@ func TestTaskProcessor_RednoteHandlers(t *testing.T) {
 			captured = append(captured, trackingID)
 			return nil
 		},
+		nil,
 		"127.0.0.1:6379",
 		"",
 		0,
@@ -56,6 +57,7 @@ func TestTaskProcessor_RednoteHandlerErrorsPropagate(t *testing.T) {
 		func(ctx context.Context) error { return nil },
 		func(ctx context.Context, trackingID string) error { return nil },
 		func(ctx context.Context, trackingID string) error { return wantErr },
+		nil,
 		"127.0.0.1:6379",
 		"",
 		0,
