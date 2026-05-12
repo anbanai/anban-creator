@@ -58,14 +58,11 @@ func TestRednoteFetchProfileResolvesShortLink(t *testing.T) {
 	if !shortLinkRequested || !profileRequested {
 		t.Fatalf("shortLinkRequested=%v profileRequested=%v, want both true", shortLinkRequested, profileRequested)
 	}
-	if profile.Name != "测试账号" {
-		t.Fatalf("profile.Name = %q, want 测试账号", profile.Name)
-	}
-	if profile.AvatarURL != "https://sns-avatar-qc.xhscdn.com/avatar/test.jpg" {
-		t.Fatalf("profile.AvatarURL = %q", profile.AvatarURL)
-	}
-	if profile.Positioning != "专注 AI 写作" {
-		t.Fatalf("profile.Positioning = %q, want 专注 AI 写作", profile.Positioning)
+	// Name/avatar/positioning are now extracted by AI, not by code.
+	// Verify that the initial_state JSON was captured for AI processing.
+	raw, ok := profile.RawData["initial_state"].(string)
+	if !ok || !strings.Contains(raw, "测试账号") {
+		t.Fatalf("RawData[initial_state] should contain 测试账号, got: %s", raw)
 	}
 }
 
@@ -79,63 +76,48 @@ func TestRednoteFetchProfileRejectsTextWithoutSupportedURL(t *testing.T) {
 	}
 }
 
-func TestRednoteParseProfileFromInitialState(t *testing.T) {
-	t.Run("user subtree in INITIAL_STATE", func(t *testing.T) {
+func TestRednoteParseProfileExtractsInitialState(t *testing.T) {
+	t.Run("extracts __INITIAL_STATE__ JSON", func(t *testing.T) {
 		html := `<html><head><title>小红书 - 用户主页</title></head><body>
 			<meta property="og:title" content="小红书 - 你的生活兴趣社区">
-			<script>window.__INITIAL_STATE__={"user":{"nickname":"旺财云","desc":"专业云计算服务商","image":"https://sns-avatar-qc.xhscdn.com/abc.jpg","userid":"68a58280000000001a023fcf"}}</script>
+			<script>window.__INITIAL_STATE__={"user":{"userPageData":{"basicInfo":{"nickname":"旺财云","desc":"专业云计算服务商","images":"https://sns-avatar-qc.xhscdn.com/abc.jpg"}}}}</script>
 		</body></html>`
 
 		profile := NewRednoteProvider().parseProfile(html)
-		if profile.Name != "旺财云" {
-			t.Fatalf("profile.Name = %q, want 旺财云", profile.Name)
+		raw, ok := profile.RawData["initial_state"].(string)
+		if !ok {
+			t.Fatalf("RawData[initial_state] not a string, got %T", profile.RawData["initial_state"])
 		}
-		if profile.Positioning != "专业云计算服务商" {
-			t.Fatalf("profile.Positioning = %q, want 专业云计算服务商", profile.Positioning)
+		if !strings.Contains(raw, "旺财云") {
+			t.Fatalf("initial_state should contain 旺财云, got: %s", raw)
 		}
-		if profile.AvatarURL != "https://sns-avatar-qc.xhscdn.com/abc.jpg" {
-			t.Fatalf("profile.AvatarURL = %q", profile.AvatarURL)
+		if !strings.Contains(raw, "专业云计算服务商") {
+			t.Fatalf("initial_state should contain 专业云计算服务商, got: %s", raw)
 		}
 	})
 
-	t.Run("does not return platform name when user subtree exists", func(t *testing.T) {
-		// The page has "小红书" as og:title and "你的生活兴趣社区" in meta,
-		// but the __INITIAL_STATE__ user subtree should take precedence.
-		html := `<html><head>
-			<title>小红书 - 你的生活兴趣社区</title>
-			<meta property="og:nickname" content="你的生活兴趣社区">
-			<script>window.__INITIAL_STATE__={"user":{"nickname":"旺财云","desc":"专业云计算服务商","image":"https://sns-avatar-qc.xhscdn.com/abc.jpg"}}</script>
-		</head><body></body></html>`
+	t.Run("no __INITIAL_STATE__ — initial_state is nil", func(t *testing.T) {
+		html := `<html><head><title>备用账号 - 小红书</title></head><body></body></html>`
 
 		profile := NewRednoteProvider().parseProfile(html)
-		if profile.Name != "旺财云" {
-			t.Fatalf("profile.Name = %q, want 旺财云 (user data, not platform data)", profile.Name)
-		}
-		if profile.Positioning != "专业云计算服务商" {
-			t.Fatalf("profile.Positioning = %q, want 专业云计算服务商", profile.Positioning)
+		if _, ok := profile.RawData["initial_state"]; ok {
+			t.Fatal("RawData[initial_state] should not exist when __INITIAL_STATE__ is absent")
 		}
 	})
 
-	t.Run("falls back to title tag when no INITIAL_STATE", func(t *testing.T) {
-		html := `<html><head><title>备用账号 - 小红书</title></head><body>
-			<div class="avatar"><img src="https://sns-avatar-qc.xhscdn.com/avatar/fallback.jpg"></div>
+	t.Run("handles undefined values in JSON", func(t *testing.T) {
+		html := `<html><body>
+			<script>window.__INITIAL_STATE__={"user":{"name":undefined,"value":"ok"}}</script>
 		</body></html>`
 
 		profile := NewRednoteProvider().parseProfile(html)
-		if profile.Name != "备用账号" {
-			t.Fatalf("profile.Name = %q, want 备用账号", profile.Name)
+		raw, ok := profile.RawData["initial_state"].(string)
+		if !ok {
+			t.Fatal("initial_state should be extracted")
 		}
-		if profile.AvatarURL != "https://sns-avatar-qc.xhscdn.com/avatar/fallback.jpg" {
-			t.Fatalf("profile.AvatarURL = %q", profile.AvatarURL)
-		}
-	})
-
-	t.Run("xiaohongshu prefix in title", func(t *testing.T) {
-		html := `<html><head><title>小红书 - 真实账号的主页</title></head></html>`
-
-		profile := NewRednoteProvider().parseProfile(html)
-		if profile.Name != "真实账号" {
-			t.Fatalf("profile.Name = %q, want 真实账号", profile.Name)
+		// undefined should be replaced with null for valid JSON.
+		if strings.Contains(raw, "undefined") {
+			t.Fatal("initial_state should not contain undefined")
 		}
 	})
 }

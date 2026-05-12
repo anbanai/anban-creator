@@ -484,6 +484,8 @@ func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
 }
 
 type rednoteProfileAnalysis struct {
+	Name           string   `json:"name"`
+	AvatarURL      string   `json:"avatar_url"`
 	Positioning    string   `json:"positioning"`
 	Keywords       []string `json:"keywords"`
 	Style          string   `json:"style"`
@@ -495,6 +497,41 @@ func (h *ChannelHandler) enrichRednoteProfileWithAI(ctx context.Context, userID 
 	if llm == nil || profile == nil {
 		return
 	}
+
+	// Prefer AI extraction from __INITIAL_STATE__ JSON when available.
+	if initialState, ok := profile.RawData["initial_state"].(string); ok && initialState != "" {
+		prompt := buildRednoteProfileExtractionPrompt(initialState, topPostsFromProfile(profile))
+		raw, err := llm.Complete(ctx, "", prompt)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("user_id", userID).Msg("rednote profile AI extraction failed")
+			return
+		}
+		analysis, err := parseRednoteProfileAnalysis(raw)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("user_id", userID).Msg("parse rednote profile AI extraction failed")
+			return
+		}
+		if analysis.Name != "" {
+			profile.Name = analysis.Name
+		}
+		if analysis.AvatarURL != "" {
+			profile.AvatarURL = analysis.AvatarURL
+		}
+		if analysis.Positioning != "" {
+			profile.Positioning = analysis.Positioning
+		}
+		profile.Keywords = cleanKeywords(analysis.Keywords)
+		if analysis.Style != "" {
+			profile.Style = analysis.Style
+		}
+		if profile.RawData == nil {
+			profile.RawData = map[string]any{}
+		}
+		profile.RawData["analysis"] = analysis
+		return
+	}
+
+	// Fallback: generate positioning/keywords/style from code-parsed fields.
 	prompt := buildRednoteProfileAnalysisPrompt(profile)
 	raw, err := llm.Complete(ctx, "", prompt)
 	if err != nil {
@@ -509,16 +546,7 @@ func (h *ChannelHandler) enrichRednoteProfileWithAI(ctx context.Context, userID 
 	if analysis.Positioning != "" {
 		profile.Positioning = analysis.Positioning
 	}
-	if len(analysis.Keywords) > 0 {
-		keywords := make([]string, 0, len(analysis.Keywords))
-		for _, kw := range analysis.Keywords {
-			kw = strings.TrimSpace(kw)
-			if kw != "" {
-				keywords = append(keywords, kw)
-			}
-		}
-		profile.Keywords = strings.Join(keywords, ", ")
-	}
+	profile.Keywords = cleanKeywords(analysis.Keywords)
 	if analysis.Style != "" {
 		profile.Style = analysis.Style
 	}
@@ -542,6 +570,17 @@ func (h *ChannelHandler) getLLMClient(ctx context.Context, userID string) servic
 	return h.llm
 }
 
+func cleanKeywords(keywords []string) string {
+	cleaned := make([]string, 0, len(keywords))
+	for _, kw := range keywords {
+		kw = strings.TrimSpace(kw)
+		if kw != "" {
+			cleaned = append(cleaned, kw)
+		}
+	}
+	return strings.Join(cleaned, ", ")
+}
+
 func buildRednoteProfileAnalysisPrompt(profile *platform.PlatformProfile) string {
 	var b strings.Builder
 	b.WriteString("你是小红书账号定位和视觉策略分析师。请基于账号主页信息和表现最好的可见作品，生成账号定位、关键词和视觉风格。\n\n")
@@ -563,6 +602,34 @@ func buildRednoteProfileAnalysisPrompt(profile *platform.PlatformProfile) string
 	b.WriteString("\n## 输出要求\n")
 	b.WriteString("只输出 JSON，不要 markdown 代码块，不要解释。格式如下：\n")
 	b.WriteString(`{"positioning":"80字以内账号定位","keywords":["关键词1","关键词2","关键词3"],"style":"120字以内视觉风格描述","content_summary":"120字以内内容方向摘要"}`)
+	return b.String()
+}
+
+func buildRednoteProfileExtractionPrompt(initialState string, topPosts []platform.RednotePost) string {
+	var b strings.Builder
+	b.WriteString("你是小红书账号分析专家。请从以下小红书页面数据中提取账号信息并生成分析。\n\n")
+	b.WriteString("## 页面数据\n")
+	b.WriteString(truncateRunes(initialState, 15000))
+	b.WriteString("\n\n")
+	if len(topPosts) > 0 {
+		b.WriteString("## 表现较好的可见作品\n")
+		for i, post := range topPosts {
+			b.WriteString(fmt.Sprintf("%d. 标题: %s；点赞: %d；收藏: %d；评论: %d；分享: %d\n",
+				i+1,
+				truncateRunes(post.Title, 120),
+				post.LikeCount,
+				post.CollectCount,
+				post.CommentCount,
+				post.ShareCount,
+			))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("## 提取要求\n")
+	b.WriteString("1. 从页面数据中找到用户信息（昵称、头像URL、简介）。注意区分用户数据与平台自身数据，用户信息通常在 user 节点下。\n")
+	b.WriteString("2. 基于简介和作品分析账号定位、关键词和视觉风格。\n")
+	b.WriteString("3. 只输出 JSON，不要 markdown 代码块，不要解释。\n\n")
+	b.WriteString(`{"name":"用户昵称","avatar_url":"头像URL","positioning":"80字以内账号定位","keywords":["关键词1","关键词2","关键词3"],"style":"120字以内视觉风格描述","content_summary":"120字以内内容方向摘要"}`)
 	return b.String()
 }
 

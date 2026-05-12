@@ -2,7 +2,6 @@ package platform
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,7 +39,6 @@ func NewRednoteProvider() *RednoteProvider {
 var rednoteURLPattern = regexp.MustCompile(`^https?://((m\.|www\.)?xiaohongshu\.com|xhslink\.com)/`)
 var rednoteURLInTextPattern = regexp.MustCompile(`https?://((m\.|www\.)?xiaohongshu\.com|xhslink\.com)/[^\s"'<>，。！？；、]+`)
 var xhslinkPattern = regexp.MustCompile(`^https?://xhslink\.com/`)
-var rednoteAvatarImgPattern = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["'][^>]*>`)
 var rednoteAnchorPattern = regexp.MustCompile(`(?is)<a[^>]+href=["']([^"']*(?:/explore/|/discovery/item/)[^"']*)["'][^>]*>(.*?)</a>`)
 var rednoteTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
 var rednoteImgSrcPattern = regexp.MustCompile(`(?is)<img[^>]+src=["']([^"']+)["']`)
@@ -254,73 +252,22 @@ func setRednoteHeaders(req *http.Request) {
 }
 
 
-// parseProfile extracts profile data from Xiaohongshu HTML.
-// Strategy: parse __INITIAL_STATE__ JSON first, then fall back to string matching.
+// parseProfile extracts the __INITIAL_STATE__ JSON and post data from Xiaohongshu HTML.
+// User identity fields (name, avatar, positioning) are extracted by AI downstream.
 func (p *RednoteProvider) parseProfile(html string) *PlatformProfile {
 	profile := &PlatformProfile{
 		RawData: make(map[string]any),
 	}
 
-	// Strategy 1: Parse __INITIAL_STATE__ JSON and navigate the user subtree.
-	hasInitialState := extractProfileFromInitialState(profile, html)
-
-	// Strategy 2: extractJSONStringAfter (handles escaped quotes properly).
-	// Skip if __INITIAL_STATE__ was found but user subtree was missing —
-	// flat matching on the full HTML would likely hit platform metadata.
-	if profile.Name == "" && !hasInitialState {
-		if name := extractJSONStringAfter(html, `"nickname":"`); name != "" {
-			profile.Name = unescapeJSONString(name)
+	// Extract __INITIAL_STATE__ JSON for AI parsing in the handler layer.
+	match := rednoteInitialStatePattern.FindStringSubmatch(html)
+	if len(match) >= 2 {
+		raw := match[1]
+		if idx := strings.Index(raw, ";"); idx > 0 {
+			raw = raw[:idx]
 		}
-	}
-
-	// Strategy 3: title tag fallback.
-	if profile.Name == "" {
-		if title := extractBetween(html, `<title>`, `</title>`); title != "" {
-			title = strings.TrimSpace(title)
-			if before, after, found := strings.Cut(title, " - "); found {
-				switch strings.TrimSpace(before) {
-				case "小红书":
-					profile.Name = strings.TrimSuffix(strings.TrimSpace(after), "的主页")
-				default:
-					profile.Name = strings.TrimSpace(before)
-				}
-				if profile.Name == "小红书" {
-					profile.Name = ""
-				}
-			} else if before, _, found := strings.Cut(title, "的主页"); found {
-				if strings.TrimSpace(before) != "小红书" {
-					profile.Name = strings.TrimSpace(before)
-				}
-			}
-		}
-	}
-
-	if profile.AvatarURL == "" {
-		if avatar := extractJSONStringAfter(html, `"image":"`); avatar != "" {
-			profile.AvatarURL = unescapeJSONString(avatar)
-		}
-	}
-	if profile.AvatarURL == "" {
-		if avatar := extractJSONStringAfter(html, `"avatar":"`); avatar != "" {
-			profile.AvatarURL = unescapeJSONString(avatar)
-		}
-	}
-	if profile.AvatarURL == "" {
-		for _, match := range rednoteAvatarImgPattern.FindAllStringSubmatch(html, -1) {
-			if len(match) < 2 {
-				continue
-			}
-			if strings.Contains(match[1], "sns-avatar") || strings.Contains(match[1], "avatar") {
-				profile.AvatarURL = strings.ReplaceAll(match[1], `/`, "/")
-				break
-			}
-		}
-	}
-
-	if profile.Positioning == "" {
-		if desc := extractJSONStringAfter(html, `"desc":"`); desc != "" {
-			profile.Positioning = unescapeJSONString(desc)
-		}
+		raw = strings.ReplaceAll(raw, "undefined", "null")
+		profile.RawData["initial_state"] = raw
 	}
 
 	posts := parseRednotePosts(html)
@@ -330,70 +277,6 @@ func (p *RednoteProvider) parseProfile(html string) *PlatformProfile {
 
 	return profile
 }
-
-// extractProfileFromInitialState parses __INITIAL_STATE__ JSON and extracts
-// user profile data from the user subtree.
-// Returns true if __INITIAL_STATE__ was found in the HTML (even if user subtree was missing).
-func extractProfileFromInitialState(profile *PlatformProfile, html string) bool {
-	match := rednoteInitialStatePattern.FindStringSubmatch(html)
-	if len(match) < 2 {
-		return false
-	}
-
-	raw := strings.ReplaceAll(match[1], "undefined", "null")
-
-	var state map[string]any
-	if err := json.Unmarshal([]byte(raw), &state); err != nil {
-		return true
-	}
-
-	user := navigateMap(state, "user")
-	if user == nil {
-		return true
-	}
-
-	if nickname := navigateStr(user, "nickname"); nickname != "" {
-		profile.Name = nickname
-	}
-	if desc := navigateStr(user, "desc"); desc != "" {
-		profile.Positioning = desc
-	}
-	if image := navigateStr(user, "image"); image != "" {
-		profile.AvatarURL = image
-	}
-	return true
-}
-
-// navigateMap traverses a nested map by key path segments.
-func navigateMap(m map[string]any, keys ...string) map[string]any {
-	current := m
-	for _, k := range keys {
-		v, ok := current[k]
-		if !ok {
-			return nil
-		}
-		sub, ok := v.(map[string]any)
-		if !ok {
-			return nil
-		}
-		current = sub
-	}
-	return current
-}
-
-// navigateStr extracts a string value from a nested map.
-func navigateStr(m map[string]any, key string) string {
-	v, ok := m[key]
-	if !ok {
-		return ""
-	}
-	s, ok := v.(string)
-	if !ok {
-		return ""
-	}
-	return s
-}
-
 
 func extractRednoteURLFromText(text string) (string, error) {
 	text = strings.TrimSpace(text)
