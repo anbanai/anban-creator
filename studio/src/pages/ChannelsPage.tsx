@@ -108,6 +108,7 @@ export default function ChannelsPage() {
   })
 
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
+  const isRednote = selectedPlatform === 'rednote'
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
@@ -444,7 +445,6 @@ export default function ChannelsPage() {
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
-  const isRednote = selectedPlatform === 'rednote'
 
   return (
     <div className="space-y-6">
