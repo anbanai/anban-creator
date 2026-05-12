@@ -44,6 +44,7 @@ export default function TaskDetailPage() {
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
+  const [sseProgress, setSseProgress] = useState<number | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const logContainerRef = useRef<HTMLDivElement | null>(null)
   const { submit } = useSubmitLock()
@@ -87,12 +88,19 @@ export default function TaskDetailPage() {
     .filter(Boolean) ?? [])
     .slice(-MAX_PERSISTED_LOGS)
   const displayLogs = sseLogs.length > 0 ? sseLogs : persistedLogs
-  const logMarkdown = displayLogs.join('\n')
+  const logMarkdown = displayLogs.join('\n\n')
   const showLogs = displayLogs.length > 0 || Boolean(sseError) || task?.status === 'running'
   const latestPersistedProgressMessage = [...persistedLogs].reverse()
     .map((line) => line.replace(/^\[\d+%]\s*/, '').trim())
     .find(Boolean)
-  const progressValue = Math.max(0, Math.min(100, task?.progress ?? 0))
+  const latestLogProgress = (() => {
+    for (let i = persistedLogs.length - 1; i >= 0; i--) {
+      const match = persistedLogs[i].match(/^\[(\d+)%\]/)
+      if (match) return Number(match[1])
+    }
+    return null
+  })()
+  const progressValue = Math.max(0, Math.min(100, sseProgress ?? latestLogProgress ?? task?.progress ?? 0))
   const progressMessage = currentProgressMessage || latestPersistedProgressMessage ||
     (task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...')
 
@@ -173,9 +181,12 @@ export default function TaskDetailPage() {
       case 'progress': {
         if (typeof parsed === 'string') {
           setSseLogs((prev) => appendLog(prev, parsed))
+          const match = parsed.match(/^\[(\d+)%\]/)
+          if (match) setSseProgress(Number(match[1]))
         } else {
           const data = parsed as { progress: number; message: string }
           if (data.progress != null) {
+            setSseProgress(data.progress)
             setSseLogs((prev) => appendLog(prev, `[${data.progress}%] ${data.message}`))
             setCurrentProgressMessage(data.message || null)
           }
@@ -221,6 +232,7 @@ export default function TaskDetailPage() {
       setSseLogs(persistedLogs)
       setSseError(null)
       setCurrentProgressMessage(null)
+      setSseProgress(null)
       connectSSE()
     }
     return () => {
