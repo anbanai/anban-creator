@@ -2,9 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -18,6 +21,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
 
 // ChannelHandler handles channel-related HTTP endpoints.
@@ -28,6 +32,7 @@ type ChannelHandler struct {
 	llmTimeout     time.Duration
 	modelConfigSvc *service.ModelConfigService
 	templateSvc    *service.TemplateService
+	store          storage.Provider
 }
 
 // NewChannelHandler creates a new ChannelHandler.
@@ -49,6 +54,11 @@ func (h *ChannelHandler) SetModelConfigService(svc *service.ModelConfigService) 
 // SetTemplateService injects an optional TemplateService for template recommendations on channel creation.
 func (h *ChannelHandler) SetTemplateService(svc *service.TemplateService) {
 	h.templateSvc = svc
+}
+
+// SetStore injects a storage provider for reading locally uploaded files.
+func (h *ChannelHandler) SetStore(s storage.Provider) {
+	h.store = s
 }
 
 // channelRequest is the shared request body for creating and updating a channel.
@@ -681,4 +691,95 @@ func (h *ChannelHandler) getTierMaxConcurrent(c fiber.Ctx) int {
 		tier = model.ResolveTier(user.Tier)
 	}
 	return model.GetTierMaxConcurrentTasks(tier)
+}
+
+// ---------------------------------------------------------------------------
+// Image style analysis
+// ---------------------------------------------------------------------------
+
+type analyzeImageRequest struct {
+	ImageURL string `json:"image_url"`
+}
+
+// AnalyzeImage handles POST /channels/analyze-image.
+// It sends the reference image to a vision LLM and returns a visual style description.
+func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	var req analyzeImageRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if req.ImageURL == "" {
+		return Error(c, fiber.StatusBadRequest, "image_url is required")
+	}
+
+	llm := h.getLLMClient(c.Context(), userID)
+	if llm == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "LLM service is not configured")
+	}
+
+	const maxAnalysisImageSize = 10 << 20 // 10 MB
+
+	var imageData []byte
+
+	// Always read the image server-side and convert to base64 to avoid SSRF.
+	if strings.HasPrefix(req.ImageURL, "/api/v1/files/") || strings.HasPrefix(req.ImageURL, "/files/") {
+		if h.store == nil {
+			return Error(c, fiber.StatusInternalServerError, "file storage is not available")
+		}
+		key := strings.TrimPrefix(req.ImageURL, "/api/v1/files/")
+		key = strings.TrimPrefix(key, "/files/")
+		var err error
+		imageData, err = h.store.Read(c.Context(), key)
+		if err != nil {
+			h.logger.Error().Err(err).Str("key", key).Msg("failed to read image for analysis")
+			return Error(c, fiber.StatusInternalServerError, "failed to read image file")
+		}
+	} else if strings.HasPrefix(req.ImageURL, "https://") {
+		resp, err := http.Get(req.ImageURL)
+		if err != nil {
+			h.logger.Error().Err(err).Str("url", req.ImageURL).Msg("failed to download external image")
+			return Error(c, fiber.StatusInternalServerError, "failed to download image")
+		}
+		defer resp.Body.Close()
+		imageData, err = io.ReadAll(io.LimitReader(resp.Body, maxAnalysisImageSize+1))
+		if err != nil {
+			return Error(c, fiber.StatusInternalServerError, "failed to read image")
+		}
+		if resp.StatusCode != http.StatusOK {
+			return Error(c, fiber.StatusBadRequest, "failed to download image")
+		}
+	} else {
+		return Error(c, fiber.StatusBadRequest, "image_url must start with /api/v1/files/ or https://")
+	}
+
+	if int64(len(imageData)) > maxAnalysisImageSize {
+		return Error(c, fiber.StatusBadRequest, "image is too large for analysis (max 10MB)")
+	}
+
+	mimeType := http.DetectContentType(imageData)
+	if !strings.HasPrefix(mimeType, "image/") {
+		return Error(c, fiber.StatusBadRequest, "the file is not an image")
+	}
+	imageURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(imageData))
+
+	systemPrompt := "你是一位专业的视觉风格分析师，专注于 AI 图片生成的风格描述。"
+	userPrompt := "请分析这张图片的视觉风格，输出一段简洁的中文描述（50-100字），涵盖：配色方案、整体氛围、构图特点、元素风格。描述将用于 AI 生成图片的风格提示，请直接输出描述文本，不要有标题或其他格式。"
+
+	result, err := llm.CompleteWithImage(c.Context(), systemPrompt, userPrompt, imageURL)
+	if err != nil {
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("image style analysis failed")
+		return Error(c, fiber.StatusInternalServerError, "image style analysis failed")
+	}
+
+	style := strings.TrimSpace(result)
+	if style == "" {
+		return Error(c, fiber.StatusInternalServerError, "failed to analyze image style")
+	}
+
+	return Success(c, fiber.Map{"style": style})
 }

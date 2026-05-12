@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -40,6 +41,10 @@ type fakeRednoteLLM struct {
 
 func (f *fakeRednoteLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	return f.response, f.err
+}
+
+func (f *fakeRednoteLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("not implemented")
 }
 
 type fakeTrackingEnqueuer struct {

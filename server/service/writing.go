@@ -28,6 +28,7 @@ import (
 // LLMClient abstracts the LLM API call for writing operations.
 type LLMClient interface {
 	Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+	CompleteWithImage(ctx context.Context, systemPrompt, userPrompt, imageURL string) (string, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,68 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 	resp, err := c.client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return "", fmt.Errorf("llm completion: %w", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)",
+			c.model, resp.ID, resp.Model)
+	}
+
+	return resp.Choices[0].Message.Content, nil
+}
+
+// CompleteWithImage sends a system + user message with an image to the configured
+// model and returns the assistant's text content. The imageURL can be an HTTP URL
+// or a base64 data URL (data:image/...;base64,...).
+func (c *openaiLLMClient) CompleteWithImage(ctx context.Context, systemPrompt, userPrompt, imageURL string) (string, error) {
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+
+	messages := []openai.ChatCompletionMessageParamUnion{}
+
+	if systemPrompt != "" {
+		messages = append(messages, openai.ChatCompletionMessageParamUnion{
+			OfSystem: &openai.ChatCompletionSystemMessageParam{
+				Content: openai.ChatCompletionSystemMessageParamContentUnion{
+					OfString: openai.String(systemPrompt),
+				},
+			},
+		})
+	}
+
+	messages = append(messages, openai.ChatCompletionMessageParamUnion{
+		OfUser: &openai.ChatCompletionUserMessageParam{
+			Content: openai.ChatCompletionUserMessageParamContentUnion{
+				OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
+					{
+						OfImageURL: &openai.ChatCompletionContentPartImageParam{
+							ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
+								URL:    imageURL,
+								Detail: "low",
+							},
+						},
+					},
+					{
+						OfText: &openai.ChatCompletionContentPartTextParam{
+							Text: userPrompt,
+						},
+					},
+				},
+			},
+		},
+	})
+
+	params := openai.ChatCompletionNewParams{
+		Messages: messages,
+		Model:    shared.ChatModel(c.model),
+	}
+
+	resp, err := c.client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		return "", fmt.Errorf("llm vision completion: %w", err)
 	}
 
 	if len(resp.Choices) == 0 {

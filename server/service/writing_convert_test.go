@@ -43,6 +43,10 @@ func (d *diagnosticLLM) Complete(ctx context.Context, systemPrompt, userPrompt s
 	return d.response, d.responseErr
 }
 
+func (d *diagnosticLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+
 func (d *diagnosticLLM) lastCall() *llmCall {
 	d.mu.Lock()
 	defer d.mu.Unlock()

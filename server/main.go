@@ -208,7 +208,6 @@ func main() {
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
 		templateSvc = service.NewTemplateService(repo, log)
-		viralAnalysisSvc = service.NewViralAnalysisService(repo, log)
 		posterSvc = service.NewPosterService(repo, log)
 
 		// Create Asynq client if Redis is available.
@@ -263,11 +262,13 @@ func main() {
 	if repo != nil {
 		rednoteTrackingSvc = service.NewRednoteTrackingService(repo, platform.NewRednoteProvider(), writingLLMClient, asynqClient, log)
 		if taskSvc != nil {
+		viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewRednoteProvider(), writingLLMClient, asynqClient, log)
 			taskSvc.SetRednoteTrackingService(rednoteTrackingSvc)
 		}
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("RedNote tracking service initialized")
 	}
 
+			log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("Viral analysis service initialized")
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
 	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits)
 
@@ -302,6 +303,9 @@ func main() {
 		}
 		if templateSvc != nil {
 			channelHandler.SetTemplateService(templateSvc)
+		}
+		if store != nil {
+			channelHandler.SetStore(store)
 		}
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
@@ -380,7 +384,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(taskSvc, rednoteTrackingSvc, cfg, log)
+		asynqServer = startAsynqServer(taskSvc, rednoteTrackingSvc, viralAnalysisSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -590,7 +594,7 @@ func connectRedis(ctx context.Context, cfg *config.Config, log *zerolog.Logger) 
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(taskSvc *service.TaskService, rednoteTrackingSvc *service.RednoteTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(taskSvc *service.TaskService, rednoteTrackingSvc *service.RednoteTrackingService, viralAnalysisSvc *service.ViralAnalysisService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var rednoteDiscoverHandler scheduler.RednoteTrackingHandler
 	var rednoteCaptureHandler scheduler.RednoteTrackingHandler
 	if rednoteTrackingSvc != nil {
@@ -599,6 +603,13 @@ func startAsynqServer(taskSvc *service.TaskService, rednoteTrackingSvc *service.
 		}
 		rednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
 			return rednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
+		}
+	}
+
+	var viralAnalysisHandler scheduler.ViralAnalysisHandler
+	if viralAnalysisSvc != nil {
+		viralAnalysisHandler = func(ctx context.Context, analysisID string) error {
+			return viralAnalysisSvc.ExecuteAnalysis(ctx, analysisID)
 		}
 	}
 
@@ -615,6 +626,7 @@ func startAsynqServer(taskSvc *service.TaskService, rednoteTrackingSvc *service.
 		},
 		rednoteDiscoverHandler,
 		rednoteCaptureHandler,
+		viralAnalysisHandler,
 		cfg.Redis.Addr,
 		cfg.Redis.Password,
 		cfg.Redis.DB,

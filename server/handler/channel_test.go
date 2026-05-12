@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,6 +23,10 @@ type fakeChannelLLM struct {
 func (f *fakeChannelLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	f.prompt = userPrompt
 	return f.response, f.err
+}
+
+func (f *fakeChannelLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("not implemented")
 }
 
 func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {

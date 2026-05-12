@@ -221,6 +221,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/channels/stats", svc.ChannelHandler.Stats)
 		apiV1.Post("/channels", svc.ChannelHandler.Create)
 		apiV1.Post("/channels/fetch-profile", svc.ChannelHandler.FetchProfile)
+		apiV1.Post("/channels/analyze-image", svc.ChannelHandler.AnalyzeImage)
 		apiV1.Get("/channels/:id", svc.ChannelHandler.Get)
 		apiV1.Put("/channels/:id", svc.ChannelHandler.Update)
 		apiV1.Patch("/channels/:id/archive", svc.ChannelHandler.Archive)

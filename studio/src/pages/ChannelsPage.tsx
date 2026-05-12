@@ -22,7 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
-import { FileUpload } from '@/components/ui/FileUpload'
+import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -98,6 +98,8 @@ export default function ChannelsPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [recommendedTemplates, setRecommendedTemplates] = useState<Template[]>([])
+  const [analyzingStyle, setAnalyzingStyle] = useState(false)
+  const styleManuallyEditedRef = useRef(false)
   const { submit } = useSubmitLock()
 
   const form = useForm<ChannelFormValues>({
@@ -108,6 +110,7 @@ export default function ChannelsPage() {
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
+  const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
 
   const { data: writerResources } = useQuery({
     queryKey: queryKeys.resources.writers,
@@ -215,6 +218,32 @@ export default function ChannelsPage() {
     }, 800)
     return () => clearTimeout(timer)
   }, [modalOpen, profileUrl, selectedPlatform, platformConfigMap])
+
+  // Auto-analyze reference image to fill visual style
+  useEffect(() => {
+    if (!modalOpen || !referenceImageUrl || !isRednote) return
+    if (styleManuallyEditedRef.current) return
+    const timer = setTimeout(async () => {
+      setAnalyzingStyle(true)
+      try {
+        const result = await api.channels.analyzeImage(referenceImageUrl)
+        if (result.style && !styleManuallyEditedRef.current) {
+          form.setValue('style', result.style)
+          styleManuallyEditedRef.current = false
+        }
+      } catch {
+        // Silent fail - user can still fill style manually
+      } finally {
+        setAnalyzingStyle(false)
+      }
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [modalOpen, referenceImageUrl, isRednote, form])
+
+  // Reset manual edit flag when style is cleared or dialog reopens
+  useEffect(() => {
+    styleManuallyEditedRef.current = false
+  }, [modalOpen])
 
   async function handleFetchProfile(url: string, options?: { silent?: boolean }) {
     if (!url || !selectedPlatform) return
@@ -546,12 +575,12 @@ export default function ChannelsPage() {
 
               {hasProfileField && <FormField control={form.control} name="profile_url" render={({ field }) => (
                 <FormItem>
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
                     <FormLabel className="shrink-0 w-20 text-right pt-2">账号主页</FormLabel>
                     <FormControl>
-                      <div className="flex gap-2 flex-1">
+                      <div className="flex gap-2 flex-1 min-w-0 overflow-hidden">
                         <Textarea
-                          className="flex-1 min-w-0"
+                          className="flex-1 min-w-0 break-all"
                           placeholder="粘贴小红书主页链接或分享文本..."
                           {...field}
                         />
@@ -711,10 +740,25 @@ export default function ChannelsPage() {
                       <FormLabel>{isRednote ? '视觉风格' : '写作风格'}</FormLabel>
                       {isRednote ? (
                         <FormControl>
-                          <Textarea
-                            placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
-                            {...field}
-                          />
+                          <div className="relative">
+                            <Textarea
+                              placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
+                              className={analyzingStyle ? 'pr-10' : ''}
+                              {...field}
+                              onChange={(e) => {
+                                styleManuallyEditedRef.current = true
+                                field.onChange(e)
+                              }}
+                            />
+                            {analyzingStyle && (
+                              <div className="absolute right-2 top-2">
+                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                              </div>
+                            )}
+                          </div>
+                          {analyzingStyle && (
+                            <p className="text-xs text-muted-foreground">正在分析参考图...</p>
+                          )}
                         </FormControl>
                       ) : (
                         <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
@@ -807,9 +851,9 @@ export default function ChannelsPage() {
 
                   <FormField control={form.control} name="reference_image_url" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>品牌视觉参考图</FormLabel>
+                      <FormLabel>视觉参考图</FormLabel>
                       <FormControl>
-                        <FileUpload
+                        <ReferenceImageUpload
                           value={field.value}
                           onChange={field.onChange}
                         />

@@ -48,4 +48,9 @@ export const channelsApi = {
       wechat_app_id: wechatAppId,
       wechat_secret: wechatSecret,
     }, { timeout: 120000 })),
+
+  analyzeImage: (imageUrl: string) =>
+    unwrap<{ style: string }>(http.post('/channels/analyze-image', {
+      image_url: imageUrl,
+    }, { timeout: 60000 })),
 }

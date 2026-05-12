@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,6 +23,10 @@ type fakeWritingLLM struct {
 func (f *fakeWritingLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	f.prompt = userPrompt
 	return f.response, nil
+}
+
+func (f *fakeWritingLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("not implemented")
 }
 
 func setupTestWritingService(t *testing.T, llm *fakeWritingLLM) (*WritingService, repository.Repository) {
