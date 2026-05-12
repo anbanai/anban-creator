@@ -46,7 +46,10 @@ export const channelSchema = z.object({
   style: z.string().max(1024, "风格描述不能超过 1024 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
   author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
-  reference_image_url: z.string().url("请输入有效的图片 URL").or(z.literal("")).optional(),
+  reference_image_url: z.string().refine(
+    (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
+    { message: "请输入有效的图片 URL" },
+  ).optional(),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).optional(),
   layout: z.string().max(100).optional(),
   image_preset: z.string().max(50).optional(),

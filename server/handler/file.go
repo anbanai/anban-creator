@@ -36,6 +36,23 @@ var allowedImageExtensions = map[string]bool{
 
 const maxUploadSize = 10 << 20 // 10 MB
 
+// contentTypes maps common file extensions to MIME types.
+var contentTypes = map[string]string{
+	".html": "text/html; charset=utf-8",
+	".htm":  "text/html; charset=utf-8",
+	".css":  "text/css; charset=utf-8",
+	".js":   "application/javascript",
+	".json": "application/json",
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+	".mp4":  "video/mp4",
+	".pdf":  "application/pdf",
+}
+
 // Upload handles POST /api/v1/files/upload.
 func (h *FileHandler) Upload(c fiber.Ctx) error {
 	userID := GetUserID(c)
@@ -92,9 +109,50 @@ func (h *FileHandler) Upload(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{
-		"url":  result.URL,
+		"url":  "/api/v1/files/" + result.Key,
 		"key":  result.Key,
 		"size": result.Size,
 		"type": result.MimeType,
 	})
+}
+
+// ServeFile handles GET /api/v1/files/* for non-local storage providers.
+// It reads the file from the storage backend, verifies ownership, and streams to the client.
+func (h *FileHandler) ServeFile(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	key := c.Params("*")
+	if key == "" {
+		return Error(c, fiber.StatusBadRequest, "file path is required")
+	}
+
+	cleanKey := filepath.Clean(key)
+	if strings.Contains(cleanKey, "..") {
+		return Error(c, fiber.StatusBadRequest, "invalid file path")
+	}
+
+	// Verify ownership: key format is uploads/channels/{userID}/...
+	if !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") {
+		return Forbidden(c, "you do not have access to this file")
+	}
+
+	data, err := h.store.Read(c.Context(), cleanKey)
+	if err != nil {
+		h.logger.Error().Err(err).Str("key", cleanKey).Msg("failed to read file from storage")
+		return Error(c, fiber.StatusNotFound, "file not found")
+	}
+
+	ext := filepath.Ext(cleanKey)
+	if ct, ok := contentTypes[strings.ToLower(ext)]; ok {
+		c.Set("Content-Type", ct)
+		if ext == ".svg" {
+			c.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+			c.Set("X-Content-Type-Options", "nosniff")
+		}
+	}
+
+	return c.Send(data)
 }

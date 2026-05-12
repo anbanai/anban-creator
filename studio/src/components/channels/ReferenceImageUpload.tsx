@@ -16,6 +16,17 @@ function isInternalUrl(url: string) {
   return url.startsWith('/api/v1/files/') || url.startsWith('/files/')
 }
 
+function normalizeUrl(url: string): string {
+  if (url.startsWith('/')) return url
+  try {
+    const u = new URL(url)
+    if (u.hostname.endsWith('.aliyuncs.com')) {
+      return '/api/v1/files/' + u.pathname.slice(1)
+    }
+  } catch {}
+  return url
+}
+
 export function ReferenceImageUpload({ value, onChange }: ReferenceImageUploadProps) {
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -33,8 +44,10 @@ export function ReferenceImageUpload({ value, onChange }: ReferenceImageUploadPr
     setPreviewLoading(true)
     setPreviewError(false)
 
-    if (isInternalUrl(value)) {
-      http.get(value, { responseType: 'blob' })
+    const normalized = normalizeUrl(value)
+
+    if (isInternalUrl(normalized)) {
+      http.get(normalized, { responseType: 'blob' })
         .then((res) => {
           if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
           blobUrlRef.current = URL.createObjectURL(res.data)

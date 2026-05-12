@@ -271,6 +271,11 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/files/*", svc.TaskHandler.ServeLocalFile)
 	}
 
+	// File serving for non-local storage (e.g. OSS).
+	if svc.FileHandler != nil && svc.StorageProvider != nil && svc.StorageProvider.Name() != "local" {
+		apiV1.Get("/files/*", svc.FileHandler.ServeFile)
+	}
+
 	// File upload endpoint.
 	if svc.FileHandler != nil {
 		apiV1.Post("/files/upload", svc.FileHandler.Upload)
