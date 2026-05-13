@@ -132,10 +132,13 @@ func main() {
 	var xhsClient *xhs.Client
 	{
 		xhsClient = xhs.NewClient(cfg.XHS.BaseURL, time.Duration(cfg.XHS.Timeout)*time.Second)
-		if err := xhsClient.HealthCheck(context.Background()); err != nil {
+		hcCtx, hcCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := xhsClient.HealthCheck(hcCtx); err != nil {
+			hcCancel()
 			log.Error().Err(err).Msg("XHS sidecar 不可用，小红书功能将不可用")
 			xhsClient = nil
 		} else {
+			hcCancel()
 			log.Info().Str("base_url", cfg.XHS.BaseURL).Msg("XHS sidecar client initialized")
 		}
 	}
@@ -274,14 +277,13 @@ func main() {
 
 	if repo != nil && xhsClient != nil {
 		rednoteTrackingSvc = service.NewRednoteTrackingService(repo, platform.NewRednoteProvider(xhsClient), writingLLMClient, asynqClient, log)
-		if taskSvc != nil {
-		viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewRednoteProvider(xhsClient), writingLLMClient, asynqClient, log)
-			taskSvc.SetRednoteTrackingService(rednoteTrackingSvc)
-		}
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("RedNote tracking service initialized")
-	}
-
+		if taskSvc != nil {
+			viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewRednoteProvider(xhsClient), writingLLMClient, asynqClient, log)
+			taskSvc.SetRednoteTrackingService(rednoteTrackingSvc)
 			log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("Viral analysis service initialized")
+		}
+	}
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
 	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits)
 
