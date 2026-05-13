@@ -32,6 +32,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { Badge } from '@/components/ui/badge'
 
 const platformOptions = [
   { value: 'rednote', label: '小红书' },
@@ -446,6 +447,13 @@ export default function ChannelsPage() {
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
 
+  const { data: xhsStatus } = useQuery({
+    queryKey: queryKeys.channels.xhsLoginStatus,
+    queryFn: () => api.channels.xhsLoginStatus(),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+
   return (
     <div className="space-y-6">
       <PageHeader title="账号" description="管理你的内容账号和发布配置。">
@@ -454,6 +462,13 @@ export default function ChannelsPage() {
           新建账号
         </Button>
       </PageHeader>
+
+      {/* XHS login status indicator */}
+      {xhsStatus && (
+        <Badge variant={xhsStatus.available && xhsStatus.logged_in ? 'default' : 'secondary'} className="text-xs">
+          小红书 {xhsStatus.available ? (xhsStatus.logged_in ? '已连接' : '未登录') : '未配置'}
+        </Badge>
+      )}
 
       {/* Status filter tabs */}
       <ToggleGroup

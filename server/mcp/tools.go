@@ -10,6 +10,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/royalrick/anbanwriter/server/xhs"
 )
 
 // Services holds the service instances needed by MCP tools.
@@ -23,6 +24,7 @@ type Services struct {
 	PublishingSvc *service.PublishingService
 	WorkspaceSvc  *service.WorkspaceService
 	TemplateSvc   *service.TemplateService
+	XHSClient     *xhs.Client
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -38,6 +40,7 @@ func RegisterTools(server *mcp.Server) {
 	registerRednoteTools(server)
 	registerTemplateTools(server)
 	registerResourceTools(server)
+	registerXHSTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.

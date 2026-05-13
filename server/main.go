@@ -30,6 +30,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/scheduler"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/royalrick/anbanwriter/server/xhs"
 )
 
 // defaultConfigPaths lists config file locations to try when -config is not set.
@@ -125,6 +126,18 @@ func main() {
 	if cfg.WeChat.AppID != "" && cfg.WeChat.AppSecret != "" {
 		wechatSvc = auth.NewWeChatService(cfg.WeChat.AppID, cfg.WeChat.AppSecret, log)
 		log.Info().Msg("WeChat service initialized")
+	}
+
+	// 9.1 Create XHS (小红书) sidecar client.
+	var xhsClient *xhs.Client
+	{
+		xhsClient = xhs.NewClient(cfg.XHS.BaseURL, time.Duration(cfg.XHS.Timeout)*time.Second)
+		if err := xhsClient.HealthCheck(context.Background()); err != nil {
+			log.Error().Err(err).Msg("XHS sidecar 不可用，小红书功能将不可用")
+			xhsClient = nil
+		} else {
+			log.Info().Str("base_url", cfg.XHS.BaseURL).Msg("XHS sidecar client initialized")
+		}
 	}
 
 	// 10. Create WebSocket hub.
@@ -259,10 +272,10 @@ func main() {
 		}
 	}
 
-	if repo != nil {
-		rednoteTrackingSvc = service.NewRednoteTrackingService(repo, platform.NewRednoteProvider(), writingLLMClient, asynqClient, log)
+	if repo != nil && xhsClient != nil {
+		rednoteTrackingSvc = service.NewRednoteTrackingService(repo, platform.NewRednoteProvider(xhsClient), writingLLMClient, asynqClient, log)
 		if taskSvc != nil {
-		viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewRednoteProvider(), writingLLMClient, asynqClient, log)
+		viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewRednoteProvider(xhsClient), writingLLMClient, asynqClient, log)
 			taskSvc.SetRednoteTrackingService(rednoteTrackingSvc)
 		}
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("RedNote tracking service initialized")
@@ -306,6 +319,9 @@ func main() {
 		}
 		if store != nil {
 			channelHandler.SetStore(store)
+		}
+		if xhsClient != nil {
+			channelHandler.SetXHSClient(xhsClient)
 		}
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
@@ -366,6 +382,7 @@ func main() {
 			PublishingSvc: publishingSvc,
 			WorkspaceSvc:  workspaceSvc,
 			TemplateSvc:   templateSvc,
+			XHSClient:     xhsClient,
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcp.SetLogger(log)

@@ -38,6 +38,25 @@ services:
       timeout: 5s
       retries: 5
 
+  xhs:
+    image: xpzouying/xiaohongshu-mcp
+    container_name: abwriter-xhs
+    restart: unless-stopped
+    ports:
+      - "18060:18060"
+    volumes:
+      - ./data/xhs:/app/data
+    environment:
+      ROD_BROWSER_BIN: /usr/bin/google-chrome
+      COOKIES_PATH: /app/data/cookies.json
+    networks:
+      - abwriter-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:18060/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # NOTE: agent service disabled — server now uses local executor (Claude CLI subprocess).
   # Uncomment only if you need Docker executor mode (separate agent containers).
   # agent:

@@ -2,152 +2,24 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/royalrick/anbanwriter/server/xhs"
 )
 
-func TestRednoteFetchProfileResolvesShortLink(t *testing.T) {
-	var shortLinkRequested bool
-	var profileRequested bool
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Host == "xhslink.com" && r.URL.Path == "/m/share":
-			shortLinkRequested = true
-			if r.Method != http.MethodGet {
-				t.Fatalf("short link request method = %s, want GET", r.Method)
-			}
-			http.Redirect(w, r, "https://www.xiaohongshu.com/user/profile/abc123?xsec_token=test", http.StatusFound)
-		case r.Host == "www.xiaohongshu.com" && strings.HasPrefix(r.URL.Path, "/user/profile/"):
-			profileRequested = true
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write([]byte(`<html><head><title>小红书 - 用户主页</title></head><body>
-				<script>window.__INITIAL_STATE__={"user":{"nickname":"测试账号","desc":"专注 AI 写作","image":"https://sns-avatar-qc.xhscdn.com/avatar/test.jpg","userid":"abc123"}}</script>
-			</body></html>`))
-		default:
-			t.Fatalf("unexpected request: host=%s path=%s", r.Host, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	baseURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	transport := rewriteHostTransport{baseURL: baseURL, rt: http.DefaultTransport}
-	provider := &RednoteProvider{
-		client: &http.Client{
-			Timeout:   5 * time.Second,
-			Transport: transport,
-		},
-		noRedirect: &http.Client{
-			Timeout:       5 * time.Second,
-			Transport:     transport,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
-		},
-	}
-
-	profile, err := provider.FetchProfile(context.Background(), "快来看这个账号 https://xhslink.com/m/share 真的很会写")
-	if err != nil {
-		t.Fatalf("FetchProfile() error = %v", err)
-	}
-	if !shortLinkRequested || !profileRequested {
-		t.Fatalf("shortLinkRequested=%v profileRequested=%v, want both true", shortLinkRequested, profileRequested)
-	}
-	// Name/avatar/positioning are now extracted by AI, not by code.
-	// Verify that the initial_state JSON was captured for AI processing.
-	raw, ok := profile.RawData["initial_state"].(string)
-	if !ok || !strings.Contains(raw, "测试账号") {
-		t.Fatalf("RawData[initial_state] should contain 测试账号, got: %s", raw)
-	}
-}
+// NOTE: TestExtractRednoteNoteID and TestNormalizeRednoteMetricCount are in rednote_metrics_test.go.
 
 func TestRednoteFetchProfileRejectsTextWithoutSupportedURL(t *testing.T) {
-	_, err := NewRednoteProvider().FetchProfile(context.Background(), "这里只是一段没有链接的分享文案")
+	_, err := NewRednoteProvider(nil).FetchProfile(context.Background(), "这里只是一段没有链接的分享文案")
 	if err == nil {
 		t.Fatal("FetchProfile() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "supported xiaohongshu URL") {
+	if err.Error() != "profile text must contain a supported xiaohongshu URL" {
 		t.Fatalf("FetchProfile() error = %q, want supported URL hint", err.Error())
-	}
-}
-
-func TestRednoteParseProfileExtractsInitialState(t *testing.T) {
-	t.Run("extracts __INITIAL_STATE__ JSON", func(t *testing.T) {
-		html := `<html><head><title>小红书 - 用户主页</title></head><body>
-			<meta property="og:title" content="小红书 - 你的生活兴趣社区">
-			<script>window.__INITIAL_STATE__={"user":{"userPageData":{"basicInfo":{"nickname":"旺财云","desc":"专业云计算服务商","images":"https://sns-avatar-qc.xhscdn.com/abc.jpg"}}}}</script>
-		</body></html>`
-
-		profile := NewRednoteProvider().parseProfile(html)
-		raw, ok := profile.RawData["initial_state"].(string)
-		if !ok {
-			t.Fatalf("RawData[initial_state] not a string, got %T", profile.RawData["initial_state"])
-		}
-		if !strings.Contains(raw, "旺财云") {
-			t.Fatalf("initial_state should contain 旺财云, got: %s", raw)
-		}
-		if !strings.Contains(raw, "专业云计算服务商") {
-			t.Fatalf("initial_state should contain 专业云计算服务商, got: %s", raw)
-		}
-	})
-
-	t.Run("no __INITIAL_STATE__ — initial_state is nil", func(t *testing.T) {
-		html := `<html><head><title>备用账号 - 小红书</title></head><body></body></html>`
-
-		profile := NewRednoteProvider().parseProfile(html)
-		if _, ok := profile.RawData["initial_state"]; ok {
-			t.Fatal("RawData[initial_state] should not exist when __INITIAL_STATE__ is absent")
-		}
-	})
-
-	t.Run("handles undefined values in JSON", func(t *testing.T) {
-		html := `<html><body>
-			<script>window.__INITIAL_STATE__={"user":{"name":undefined,"value":"ok"}}</script>
-		</body></html>`
-
-		profile := NewRednoteProvider().parseProfile(html)
-		raw, ok := profile.RawData["initial_state"].(string)
-		if !ok {
-			t.Fatal("initial_state should be extracted")
-		}
-		// undefined should be replaced with null for valid JSON.
-		if strings.Contains(raw, "undefined") {
-			t.Fatal("initial_state should not contain undefined")
-		}
-	})
-}
-
-func TestRednoteParseProfileIncludesRankedTopPosts(t *testing.T) {
-	html := `<html><head><title>小红书 - 用户主页</title></head><body>
-			<script>window.__INITIAL_STATE__={"user":{"nickname":"测试账号","desc":"专注 AI 写作"}}</script>
-			<section>
-				<a href="/explore/one"><span>普通标题</span><span>点赞 10</span></a>
-				<a href="/explore/two"><span>爆款标题</span><span>点赞 1.2万</span><span>评论 300</span></a>
-				<a href="/explore/three"><span>中等标题</span><span>收藏 800</span></a>
-			</section>
-		</body></html>`
-
-	profile := NewRednoteProvider().parseProfile(html)
-	rawPosts, ok := profile.RawData["top_posts"].([]RednotePost)
-	if !ok {
-		t.Fatalf("RawData[top_posts] type = %T, want []RednotePost", profile.RawData["top_posts"])
-	}
-	if len(rawPosts) < 2 {
-		t.Fatalf("len(top_posts) = %d, want at least 2", len(rawPosts))
-	}
-	if rawPosts[0].Title != "爆款标题" {
-		t.Fatalf("top post title = %q, want 爆款标题", rawPosts[0].Title)
-	}
-}
-
-func TestRednoteURLPatternAllowsMobileProfile(t *testing.T) {
-	if !rednoteURLPattern.MatchString("https://m.xiaohongshu.com/user/profile/abc") {
-		t.Fatal("rednoteURLPattern should allow m.xiaohongshu.com profile URLs")
 	}
 }
 
@@ -171,36 +43,12 @@ func TestExtractRednoteURLFromTextStartingWithURL(t *testing.T) {
 	}
 }
 
-func TestParseRednoteCount(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want int
-	}{
-		{name: "plain", in: "123", want: 123},
-		{name: "comma", in: "1,234", want: 1234},
-		{name: "wan", in: "1.2万", want: 12000},
-		{name: "qian", in: "3千", want: 3000},
-		{name: "noise", in: "点赞 8.5万", want: 85000},
-		{name: "empty", in: "", want: 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := parseRednoteCount(tt.in); got != tt.want {
-				t.Fatalf("parseRednoteCount(%q) = %d, want %d", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSelectTopRednotePostsRanksByEngagement(t *testing.T) {
 	posts := []RednotePost{
-		{Title: "first", LikeCount: 10},
-		{Title: "best", LikeCount: 20, CollectCount: 3, CommentCount: 2},
-		{Title: "middle", LikeCount: 12},
+		{Title: "first", LikeCount: 10, EngagementScore: 10},
+		{Title: "best", LikeCount: 20, CollectCount: 3, CommentCount: 2, EngagementScore: 25},
+		{Title: "middle", LikeCount: 12, EngagementScore: 12},
 	}
-
 	got := selectTopRednotePosts(posts, 2)
 	if len(got) != 2 {
 		t.Fatalf("len(top posts) = %d, want 2", len(got))
@@ -213,16 +61,215 @@ func TestSelectTopRednotePostsRanksByEngagement(t *testing.T) {
 	}
 }
 
-type rewriteHostTransport struct {
-	baseURL *url.URL
-	rt      http.RoundTripper
+// --- Integration tests with mock XHS sidecar ---
+
+func setupMockXHSServer() (*httptest.Server, *xhs.Client) {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mux.HandleFunc("/api/v1/user/profile", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(xhs.APIResponse[xhs.UserProfile]{
+			Success: true,
+			Data: xhs.UserProfile{
+				UserBasicInfo: xhs.UserBasicInfo{
+					Nickname: "测试用户",
+					RedID:    "red_test_123",
+					Desc:     "专注 AI 创作领域",
+					Avatar:   "https://example.com/avatar.jpg",
+				},
+				Interactions: []xhs.UserInteractions{
+					{Type: "follows", Name: "关注", Count: "100"},
+					{Type: "fans", Name: "粉丝", Count: "5000"},
+					{Type: "interaction", Name: "获赞与收藏", Count: "1.2万"},
+				},
+				Feeds: []xhs.Feed{
+					{
+						ID: "feed1", XsecToken: "token1",
+						NoteCard: xhs.NoteCard{
+							DisplayTitle: "爆款笔记",
+							User:         xhs.User{UserID: "u1", Nickname: "author1"},
+							InteractInfo: xhs.InteractInfo{LikedCount: "1.5万", CollectedCount: "8000", CommentCount: "500"},
+						},
+					},
+					{
+						ID: "feed2", XsecToken: "token2",
+						NoteCard: xhs.NoteCard{
+							DisplayTitle: "普通笔记",
+							User:         xhs.User{UserID: "u2", Nickname: "author2"},
+							InteractInfo: xhs.InteractInfo{LikedCount: "100", CollectedCount: "50", CommentCount: "10"},
+						},
+					},
+				},
+			},
+		})
+	})
+
+	mux.HandleFunc("/api/v1/feeds/detail", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(xhs.APIResponse[xhs.FeedDetail]{
+			Success: true,
+			Data: xhs.FeedDetail{
+				Note: xhs.FeedNote{
+					NoteID: "note123",
+					Title:  "测试笔记标题",
+					Desc:   "这是一篇关于 #AI写作 的笔记内容",
+					Type:   "normal",
+					User:   xhs.User{UserID: "u1", Nickname: "测试作者"},
+					InteractInfo: xhs.InteractInfo{LikedCount: "500", CollectedCount: "200", CommentCount: "50", SharedCount: "30"},
+					ImageList: []xhs.DetailImage{
+						{Width: 1080, Height: 1440, URLDefault: "https://example.com/img1.jpg"},
+					},
+				},
+				Comments: xhs.CommentList{
+					List:    []xhs.Comment{},
+					HasMore: false,
+				},
+			},
+		})
+	})
+
+	mux.HandleFunc("/api/v1/login/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(xhs.LoginStatusResponse{Success: true, LoggedIn: true})
+	})
+
+	server := httptest.NewServer(mux)
+	client := xhs.NewClient(server.URL, 0)
+	return server, client
 }
 
-func (t rewriteHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	clone := req.Clone(req.Context())
-	clone.URL = clone.URL.ResolveReference(&url.URL{})
-	clone.URL.Scheme = t.baseURL.Scheme
-	clone.URL.Host = t.baseURL.Host
-	clone.Host = req.URL.Host
-	return t.rt.RoundTrip(clone)
+func TestFetchProfileViaSDK(t *testing.T) {
+	_, client := setupMockXHSServer()
+	provider := NewRednoteProvider(client)
+
+	profile, err := provider.FetchProfile(context.Background(), "https://www.xiaohongshu.com/user/profile/test_user?xsec_token=abc")
+	if err != nil {
+		t.Fatalf("FetchProfile() error = %v", err)
+	}
+
+	if profile.Name != "测试用户" {
+		t.Fatalf("Name = %q, want 测试用户", profile.Name)
+	}
+	if profile.AvatarURL != "https://example.com/avatar.jpg" {
+		t.Fatalf("AvatarURL = %q, want https://example.com/avatar.jpg", profile.AvatarURL)
+	}
+
+	fans, ok := profile.RawData["fans"].(string)
+	if !ok || fans != "5000" {
+		t.Fatalf("RawData[fans] = %v, want 5000", profile.RawData["fans"])
+	}
+
+	posts, ok := profile.RawData["posts"].([]RednotePost)
+	if !ok || len(posts) != 2 {
+		t.Fatalf("len(posts) = %d, want 2", len(posts))
+	}
+	if posts[0].Title != "爆款笔记" {
+		t.Fatalf("first post title = %q, want 爆款笔记", posts[0].Title)
+	}
+}
+
+func TestFetchProfilePostsViaSDK(t *testing.T) {
+	_, client := setupMockXHSServer()
+	provider := NewRednoteProvider(client)
+
+	posts, err := provider.FetchProfilePosts(context.Background(), "https://www.xiaohongshu.com/user/profile/test_user?xsec_token=abc")
+	if err != nil {
+		t.Fatalf("FetchProfilePosts() error = %v", err)
+	}
+	if len(posts) != 2 {
+		t.Fatalf("len(posts) = %d, want 2", len(posts))
+	}
+	if posts[0].NoteID != "feed1" {
+		t.Fatalf("first post NoteID = %q, want feed1", posts[0].NoteID)
+	}
+	if posts[0].LikeCount != 15000 {
+		t.Fatalf("first post LikeCount = %d, want 15000", posts[0].LikeCount)
+	}
+}
+
+func TestFetchNoteContentViaSDK(t *testing.T) {
+	_, client := setupMockXHSServer()
+	provider := NewRednoteProvider(client)
+
+	content, err := provider.FetchNoteContent(context.Background(), "https://www.xiaohongshu.com/explore/note123?xsec_token=abc")
+	if err != nil {
+		t.Fatalf("FetchNoteContent() error = %v", err)
+	}
+	if content.Title != "测试笔记标题" {
+		t.Fatalf("Title = %q, want 测试笔记标题", content.Title)
+	}
+	if content.AuthorName != "测试作者" {
+		t.Fatalf("AuthorName = %q, want 测试作者", content.AuthorName)
+	}
+	if content.Tags == "" {
+		t.Fatal("Tags should not be empty")
+	}
+	if !contains(content.Tags, "AI写作") {
+		t.Fatalf("Tags should contain AI写作, got %q", content.Tags)
+	}
+}
+
+func TestFetchPostMetricsViaSDK(t *testing.T) {
+	_, client := setupMockXHSServer()
+	provider := NewRednoteProvider(client)
+
+	metrics, err := provider.FetchPostMetrics(context.Background(), "https://www.xiaohongshu.com/explore/note123?xsec_token=abc")
+	if err != nil {
+		t.Fatalf("FetchPostMetrics() error = %v", err)
+	}
+	if metrics.LikeCount != 500 {
+		t.Fatalf("LikeCount = %d, want 500", metrics.LikeCount)
+	}
+	if metrics.CollectCount != 200 {
+		t.Fatalf("CollectCount = %d, want 200", metrics.CollectCount)
+	}
+	if metrics.CommentCount != 50 {
+		t.Fatalf("CommentCount = %d, want 50", metrics.CommentCount)
+	}
+	if metrics.ShareCount != 30 {
+		t.Fatalf("ShareCount = %d, want 30", metrics.ShareCount)
+	}
+}
+
+func TestResolveProfileURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		url        string
+		wantUserID string
+		wantToken  string
+		wantErr    bool
+	}{
+		{name: "standard", url: "https://www.xiaohongshu.com/user/profile/abc123?xsec_token=token", wantUserID: "abc123", wantToken: "token"},
+		{name: "no token", url: "https://www.xiaohongshu.com/user/profile/abc123", wantUserID: "abc123", wantToken: ""},
+	{name: "no user segment", url: "https://example.com/", wantErr: true},
+		{name: "empty", url: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userID, token, err := xhs.ResolveProfileURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if userID != tt.wantUserID {
+				t.Fatalf("userID = %q, want %q", userID, tt.wantUserID)
+			}
+			if token != tt.wantToken {
+				t.Fatalf("token = %q, want %q", token, tt.wantToken)
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

@@ -31,6 +31,13 @@ type Config struct {
 	Asynq      AsynqConfig      `yaml:"asynq"`
 	Email      EmailConfig      `yaml:"email"`
 	Invitation InvitationConfig `yaml:"invitation"`
+	XHS        XHSConfig        `yaml:"xhs"`
+}
+
+// XHSConfig holds Xiaohongshu (小红书) sidecar configuration.
+type XHSConfig struct {
+	BaseURL string `yaml:"base_url"` // default "http://localhost:18060"
+	Timeout int    `yaml:"timeout"`  // default 30 (seconds)
 }
 
 // EmailConfig holds email/verification code configuration.
@@ -315,6 +322,14 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Email.SMTPPort == 0 {
 		c.Email.SMTPPort = 587
+	}
+
+	// XHS sidecar defaults.
+	if c.XHS.BaseURL == "" {
+		c.XHS.BaseURL = "http://localhost:18060"
+	}
+	if c.XHS.Timeout == 0 {
+		c.XHS.Timeout = 30
 	}
 
 	// Claude executor defaults.
@@ -605,6 +620,15 @@ func (c *Config) applyEnvOverrides() {
 			c.Writing.Timeout = d
 		} else {
 			fmt.Fprintf(os.Stderr, "invalid %sWRITING_TIMEOUT=%q: %v, using default %v\n", prefix, v, err, c.Writing.Timeout)
+		}
+	}
+
+	if v := os.Getenv(prefix + "XHS_BASE_URL"); v != "" {
+		c.XHS.BaseURL = v
+	}
+	if v := os.Getenv(prefix + "XHS_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.XHS.Timeout = n
 		}
 	}
 }

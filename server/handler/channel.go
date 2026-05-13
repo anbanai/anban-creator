@@ -22,6 +22,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/royalrick/anbanwriter/server/xhs"
 )
 
 // ChannelHandler handles channel-related HTTP endpoints.
@@ -33,6 +34,7 @@ type ChannelHandler struct {
 	modelConfigSvc *service.ModelConfigService
 	templateSvc    *service.TemplateService
 	store          storage.Provider
+	xhsClient      *xhs.Client
 }
 
 // NewChannelHandler creates a new ChannelHandler.
@@ -59,6 +61,11 @@ func (h *ChannelHandler) SetTemplateService(svc *service.TemplateService) {
 // SetStore injects a storage provider for reading locally uploaded files.
 func (h *ChannelHandler) SetStore(s storage.Provider) {
 	h.store = s
+}
+
+// SetXHSClient injects the Xiaohongshu SDK client.
+func (h *ChannelHandler) SetXHSClient(client *xhs.Client) {
+	h.xhsClient = client
 }
 
 // channelRequest is the shared request body for creating and updating a channel.
@@ -465,7 +472,7 @@ func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
 		secret = req.WechatSecret
 	}
 
-	provider := platform.NewProvider(req.Platform, appID, secret)
+	provider := platform.NewProvider(req.Platform, appID, secret, h.xhsClient)
 	if provider == nil {
 		return Error(c, fiber.StatusBadRequest, "unsupported platform: "+req.Platform)
 	}
@@ -766,6 +773,41 @@ func (h *ChannelHandler) getTierMaxConcurrent(c fiber.Ctx) int {
 
 type analyzeImageRequest struct {
 	ImageURL string `json:"image_url"`
+}
+
+// XHSLoginStatus handles GET /xhs/login-status.
+func (h *ChannelHandler) XHSLoginStatus(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	if h.xhsClient == nil {
+		return Success(c, fiber.Map{
+			"available": false,
+			"logged_in": false,
+			"message":   "XHS sidecar 未配置",
+		})
+	}
+
+	loggedIn, err := h.xhsClient.CheckLoginStatus(c.Context())
+	if err != nil {
+		return Success(c, fiber.Map{
+			"available": true,
+			"logged_in": false,
+			"message":   err.Error(),
+		})
+	}
+
+	msg := "已登录"
+	if !loggedIn {
+		msg = "未登录，请使用 get_xhs_login_qrcode 获取二维码扫描登录"
+	}
+	return Success(c, fiber.Map{
+		"available": true,
+		"logged_in": loggedIn,
+		"message":   msg,
+	})
 }
 
 // AnalyzeImage handles POST /channels/analyze-image.

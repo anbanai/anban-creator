@@ -53,4 +53,9 @@ export const channelsApi = {
     unwrap<{ style: string }>(http.post('/channels/analyze-image', {
       image_url: imageUrl,
     }, { timeout: 60000 })),
+
+  xhsLoginStatus: () =>
+    unwrap<{ available: boolean; logged_in: boolean; message: string }>(
+      http.get('/xhs/login-status'),
+    ),
 }

@@ -8,6 +8,7 @@ export const queryKeys = {
     details: (filter?: string) => ['channel-details', filter] as const,
     detail: (id: string) => ['channel', id] as const,
     platformConfigs: ['platform-configs'] as const,
+    xhsLoginStatus: ['xhs', 'login-status'] as const,
   },
   plans: {
     all: ['plans'] as const,

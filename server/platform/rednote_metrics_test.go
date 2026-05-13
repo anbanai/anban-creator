@@ -2,12 +2,10 @@ package platform
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
-	"strings"
+	"fmt"
 	"testing"
-	"time"
+
+	"github.com/royalrick/anbanwriter/server/xhs"
 )
 
 func TestExtractRednoteNoteID(t *testing.T) {
@@ -54,129 +52,182 @@ func TestNormalizeRednoteMetricCount(t *testing.T) {
 	}
 }
 
-func TestParseRednotePostsIncludesNoteIDAndMetrics(t *testing.T) {
-	html := `
-	<a href="/explore/65f123abc456">
-		<img src="https://img.example/cover.jpg">
-		<span>早起效率翻倍的方法</span>
-		<span>点赞 1.2万</span>
-		<span>收藏 300</span>
-		<span>评论 45</span>
-		<span>分享 6</span>
-	</a>`
-
-	posts := parseRednotePosts(html)
-	if len(posts) != 1 {
-		t.Fatalf("len(posts) = %d, want 1", len(posts))
+func TestParseCountString(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want int
+	}{
+		{"plain number", "500", 500},
+		{"wan", "1.5万", 15000},
+		{"qian", "3千", 3000},
+		{"empty", "", 0},
 	}
-	post := posts[0]
-	if post.NoteID != "65f123abc456" {
-		t.Fatalf("NoteID = %q, want 65f123abc456", post.NoteID)
-	}
-	if post.URL != "https://www.xiaohongshu.com/explore/65f123abc456" {
-		t.Fatalf("URL = %q", post.URL)
-	}
-	if post.LikeCount != 12000 || post.CollectCount != 300 || post.CommentCount != 45 || post.ShareCount != 6 {
-		t.Fatalf("metrics = %+v", post)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseCountString(tt.in); got != tt.want {
+				t.Fatalf("parseCountString(%q) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestParseRednotePostMetrics(t *testing.T) {
-	html := `
-	<html>
-		<body>
-			<div>点赞 123</div>
-			<div>收藏 45</div>
-			<div>评论 6</div>
-			<div>分享 2</div>
-		</body>
-	</html>`
-
-	metrics := parseRednotePostMetrics(html)
-	if metrics.LikeCount != 123 || metrics.CollectCount != 45 || metrics.CommentCount != 6 || metrics.ShareCount != 2 {
-		t.Fatalf("metrics = %+v", metrics)
+func TestMapFeedsToPosts(t *testing.T) {
+	feeds := []xhs.Feed{
+		{
+			ID: "f1", XsecToken: "t1",
+			NoteCard: xhs.NoteCard{
+				DisplayTitle: "爆款标题",
+				User:         xhs.User{UserID: "u1", Nickname: "author1"},
+				InteractInfo: xhs.InteractInfo{LikedCount: "1.2万", CollectedCount: "3000", CommentCount: "500", SharedCount: "100"},
+				Cover:        xhs.Cover{URLDefault: "https://example.com/cover.jpg"},
+			},
+		},
+		{
+			ID: "f2", XsecToken: "",
+			NoteCard: xhs.NoteCard{
+				DisplayTitle: "普通标题",
+				User:         xhs.User{UserID: "u2", Nickname: "author2"},
+				InteractInfo: xhs.InteractInfo{LikedCount: "50", CollectedCount: "10", CommentCount: "5", SharedCount: "1"},
+			},
+		},
 	}
-	if metrics.ViewCount != nil {
-		t.Fatalf("ViewCount = %v, want nil", *metrics.ViewCount)
+
+	posts := mapFeedsToPosts(feeds)
+	if len(posts) != 2 {
+		t.Fatalf("len(posts) = %d, want 2", len(posts))
+	}
+
+	// First feed should have full URL with token.
+	if posts[0].NoteID != "f1" {
+		t.Fatalf("posts[0].NoteID = %q, want f1", posts[0].NoteID)
+	}
+	expectedURL := fmt.Sprintf("https://www.xiaohongshu.com/explore/f1?xsec_token=t1")
+	if posts[0].URL != expectedURL {
+		t.Fatalf("posts[0].URL = %q, want %q", posts[0].URL, expectedURL)
+	}
+	if posts[0].LikeCount != 12000 {
+		t.Fatalf("posts[0].LikeCount = %d, want 12000", posts[0].LikeCount)
+	}
+
+	// Second feed without token should have URL without token.
+	if posts[1].URL != "https://www.xiaohongshu.com/explore/f2" {
+		t.Fatalf("posts[1].URL = %q, want URL without token", posts[1].URL)
 	}
 }
 
-func TestParseRednotePostMetricsPrefersMetricFragmentOverBodyText(t *testing.T) {
-	html := `
-	<html>
-		<body>
-			<h1>点赞 100 次的方法</h1>
-			<p>正文里也可能出现收藏 99 评论 88 分享 77 这类教学文案。</p>
-			<div class="interactions">点赞 123 收藏 45 评论 6 分享 2</div>
-		</body>
-	</html>`
+func TestMapUserProfile(t *testing.T) {
+	profile := &xhs.UserProfile{
+		UserBasicInfo: xhs.UserBasicInfo{
+			Nickname: "小红书用户",
+			RedID:    "red123",
+			Desc:     "AI 内容创作者",
+			Avatar:   "https://example.com/avatar.jpg",
+		},
+		Interactions: []xhs.UserInteractions{
+			{Type: "follows", Name: "关注", Count: "200"},
+			{Type: "fans", Name: "粉丝", Count: "10000"},
+			{Type: "interaction", Name: "获赞与收藏", Count: "5万"},
+		},
+		Feeds: []xhs.Feed{
+			{
+				ID: "f1", XsecToken: "t1",
+				NoteCard: xhs.NoteCard{
+					DisplayTitle: "笔记1",
+					User:         xhs.User{UserID: "u1", Nickname: "a1"},
+					InteractInfo: xhs.InteractInfo{LikedCount: "1000", CollectedCount: "500", CommentCount: "200"},
+				},
+			},
+		},
+	}
 
-	metrics := parseRednotePostMetrics(html)
-	if metrics.LikeCount != 123 || metrics.CollectCount != 45 || metrics.CommentCount != 6 || metrics.ShareCount != 2 {
-		t.Fatalf("metrics = %+v, want 123/45/6/2", metrics)
+	result := mapUserProfile(profile, "https://www.xiaohongshu.com/user/profile/test")
+	if result.Name != "小红书用户" {
+		t.Fatalf("Name = %q, want 小红书用户", result.Name)
+	}
+	if result.AvatarURL != "https://example.com/avatar.jpg" {
+		t.Fatalf("AvatarURL = %q, want https://example.com/avatar.jpg", result.AvatarURL)
+	}
+	if result.RawData["red_id"] != "red123" {
+		t.Fatalf("RawData[red_id] = %v, want red123", result.RawData["red_id"])
+	}
+	if result.RawData["fans"] != "10000" {
+		t.Fatalf("RawData[fans] = %v, want 10000", result.RawData["fans"])
+	}
+
+	posts, ok := result.RawData["posts"].([]RednotePost)
+	if !ok || len(posts) != 1 {
+		t.Fatalf("len(posts) = %v, want 1", len(posts))
+	}
+	if posts[0].Title != "笔记1" {
+		t.Fatalf("post title = %q, want 笔记1", posts[0].Title)
 	}
 }
 
-func TestFetchPostMetricsRejectsNonRednoteURLWithoutRequest(t *testing.T) {
-	var requested bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requested = true
-		_, _ = w.Write([]byte(`<div>点赞 123 收藏 45 评论 6 分享 2</div>`))
-	}))
-	defer server.Close()
-
-	provider := &RednoteProvider{
-		client:     server.Client(),
-		noRedirect: server.Client(),
+func TestResolveNoteURL(t *testing.T) {
+	// Valid explore URL with token
+	feedID, token, err := resolveNoteURL("https://www.xiaohongshu.com/explore/abc123?xsec_token=xyz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if feedID != "abc123" {
+		t.Fatalf("feedID = %q, want abc123", feedID)
+	}
+	if token != "xyz" {
+		t.Fatalf("xsecToken = %q, want xyz", token)
 	}
 
-	_, err := provider.FetchPostMetrics(context.Background(), server.URL+"/explore/65f123abc456")
+	// Valid explore URL without token
+	feedID, token, err = resolveNoteURL("https://www.xiaohongshu.com/explore/abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if feedID != "abc123" {
+		t.Fatalf("feedID = %q, want abc123", feedID)
+	}
+	if token != "" {
+		t.Fatalf("xsecToken = %q, want empty", token)
+	}
+
+	// Invalid URL
+	_, _, err = resolveNoteURL("https://example.com/other")
 	if err == nil {
-		t.Fatal("FetchPostMetrics() error = nil, want unsupported URL error")
-	}
-	if !strings.Contains(err.Error(), "unsupported Rednote note URL") {
-		t.Fatalf("FetchPostMetrics() error = %q, want unsupported Rednote note URL", err.Error())
-	}
-	if requested {
-		t.Fatal("FetchPostMetrics() requested non-Rednote URL before rejecting it")
+		t.Fatal("expected error for non-xhs URL")
 	}
 }
 
-func TestFetchPostMetricsTrimsValidNoteURL(t *testing.T) {
-	var noteRequested bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != "www.xiaohongshu.com" || r.URL.Path != "/explore/65f123abc456" {
-			t.Fatalf("unexpected request: host=%s path=%s", r.Host, r.URL.Path)
-		}
-		noteRequested = true
-		_, _ = w.Write([]byte(`<div class="interactions">点赞 123 收藏 45 评论 6 分享 2</div>`))
-	}))
-	defer server.Close()
+func TestFetchProfileEmptyURL(t *testing.T) {
+	_, err := NewRednoteProvider(nil).FetchProfile(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty URL")
+	}
+}
 
-	baseURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatal(err)
+func TestFetchProfilePostsEmptyURL(t *testing.T) {
+	_, err := NewRednoteProvider(nil).FetchProfilePosts(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty URL")
 	}
-	provider := &RednoteProvider{
-		client: &http.Client{
-			Timeout:   5 * time.Second,
-			Transport: rewriteHostTransport{baseURL: baseURL, rt: http.DefaultTransport},
-		},
-		noRedirect: &http.Client{
-			Timeout:       5 * time.Second,
-			Transport:     rewriteHostTransport{baseURL: baseURL, rt: http.DefaultTransport},
-			CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
-		},
-	}
+}
 
-	metrics, err := provider.FetchPostMetrics(context.Background(), " https://www.xiaohongshu.com/explore/65f123abc456?xsec_token=abc ")
-	if err != nil {
-		t.Fatalf("FetchPostMetrics() error = %v", err)
+func TestFetchNoteContentEmptyURL(t *testing.T) {
+	_, err := NewRednoteProvider(nil).FetchNoteContent(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty URL")
 	}
-	if !noteRequested {
-		t.Fatal("FetchPostMetrics() did not request trimmed note URL")
+}
+
+func TestFetchPostMetricsEmptyURL(t *testing.T) {
+	_, err := NewRednoteProvider(nil).FetchPostMetrics(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty URL")
 	}
-	if metrics.LikeCount != 123 || metrics.CollectCount != 45 || metrics.CommentCount != 6 || metrics.ShareCount != 2 {
-		t.Fatalf("metrics = %+v", metrics)
+}
+
+func TestFetchPostMetricsInvalidNoteURL(t *testing.T) {
+	provider := NewRednoteProvider(nil)
+	_, err := provider.FetchPostMetrics(context.Background(), "https://example.com/other")
+	if err == nil {
+		t.Fatal("expected error for non-xhs URL")
 	}
 }
