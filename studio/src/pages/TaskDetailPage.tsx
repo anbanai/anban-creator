@@ -85,10 +85,12 @@ export default function TaskDetailPage() {
   const persistedLogs = (task?.progress_log
     ?.split('\n')
     .map((line) => line.trimEnd())
-    .filter(Boolean) ?? [])
+    ?? [])
     .slice(-MAX_PERSISTED_LOGS)
   const displayLogs = sseLogs.length > 0 ? sseLogs : persistedLogs
-  const logMarkdown = displayLogs.join('\n\n')
+  // Single newline preserves markdown block structures (tables, lists, code fences)
+  // that would break with double-newline paragraph separation.
+  const logMarkdown = displayLogs.join('\n')
   const showLogs = displayLogs.length > 0 || Boolean(sseError) || task?.status === 'running'
   const latestPersistedProgressMessage = [...persistedLogs].reverse()
     .map((line) => line.replace(/^\[\d+%]\s*/, '').trim())
