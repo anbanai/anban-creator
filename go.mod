@@ -19,13 +19,13 @@ require (
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.1
-	github.com/severity1/claude-agent-sdk-go v0.6.17
+	github.com/severity1/claude-agent-sdk-go v0.6.18
 	github.com/silenceper/wechat/v2 v2.1.13
 	github.com/volcengine/volcengine-go-sdk v1.2.27
-	github.com/wneessen/go-mail v0.7.2
+	github.com/wneessen/go-mail v0.7.3
 	golang.org/x/crypto v0.51.0
 	golang.org/x/net v0.54.0
-	google.golang.org/genai v1.56.0
+	google.golang.org/genai v1.57.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/sqlite v1.6.0
@@ -106,7 +106,7 @@ require (
 	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/api v0.278.0 // indirect
+	google.golang.org/api v0.279.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260511170946-3700d4141b60 // indirect
 	google.golang.org/grpc v1.81.0 // indirect

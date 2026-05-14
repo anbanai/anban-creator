@@ -550,19 +550,19 @@ func TestBuildUserPrompt(t *testing.T) {
 		wantContains  []string
 	}{
 		{
-			name:      "with topic returns topic as-is",
+			name:      "rednote with topic returns topic as-is",
 			taskType:  "rednote",
 			topic:     "春季穿搭",
 			wantExact: "春季穿搭",
 		},
 		{
-			name:      "different task type still returns topic",
+			name:      "article with topic returns topic as-is",
 			taskType:  "article",
 			topic:     "时间管理技巧",
 			wantExact: "时间管理技巧",
 		},
 		{
-			name:      "unknown task type returns topic",
+			name:      "unknown task type returns topic as-is",
 			taskType:  "other",
 			topic:     "随便写写",
 			wantExact: "随便写写",
@@ -570,12 +570,6 @@ func TestBuildUserPrompt(t *testing.T) {
 		{
 			name:         "no topic triggers autonomous mode",
 			taskType:     "rednote",
-			topic:        "",
-			wantContains: []string{"请根据频道定位", "自动研究", "创作流程"},
-		},
-		{
-			name:         "no topic with different task type",
-			taskType:     "article",
 			topic:        "",
 			wantContains: []string{"请根据频道定位", "自动研究", "创作流程"},
 		},
@@ -608,4 +602,115 @@ func TestBuildUserPrompt(t *testing.T) {
 			}
 		})
 	}
+}
+
+
+func TestLoadAgentDefinition(t *testing.T) {
+	t.Run("valid agent file", func(t *testing.T) {
+		dir := t.TempDir()
+		agentsDir := filepath.Join(dir, "agents")
+		if err := os.MkdirAll(agentsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		agentFile := "---\nname: testagent\ndescription: Test agent for unit testing\ntools:\n  - Read\n  - Write\n  - Bash\nmodel: inherit\n---\n\n# Test Agent\n\nYou are a test agent.\n"
+		if err := os.WriteFile(filepath.Join(agentsDir, "testagent.md"), []byte(agentFile), 0644); err != nil {
+			t.Fatal(err)
+		}
+		def, err := loadAgentDefinition(dir, "testagent")
+		if err != nil {
+			t.Fatalf("loadAgentDefinition() error = %v", err)
+		}
+		if def.Description != "Test agent for unit testing" {
+			t.Errorf("Description = %q, want %q", def.Description, "Test agent for unit testing")
+		}
+		if len(def.Tools) != 3 {
+			t.Errorf("Tools count = %d, want 3", len(def.Tools))
+		}
+		if string(def.Model) != "inherit" {
+			t.Errorf("Model = %q, want %q", def.Model, "inherit")
+		}
+		if !strings.Contains(def.Prompt, "You are a test agent") {
+			t.Errorf("Prompt does not contain expected content")
+		}
+	})
+
+	t.Run("model mapping", func(t *testing.T) {
+		tests := []struct {
+			modelYAML string
+			want      string
+		}{
+			{"sonnet", "sonnet"},
+			{"haiku", "haiku"},
+			{"opus", "opus"},
+			{"inherit", "inherit"},
+			{"", "inherit"},
+			{"custom-model", "inherit"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.modelYAML, func(t *testing.T) {
+				dir := t.TempDir()
+				agentsDir := filepath.Join(dir, "agents")
+				os.MkdirAll(agentsDir, 0755)
+				yaml := "---\nname: m\ndescription: d\ntools: []\nmodel: " + tt.modelYAML + "\n---\n\n# P\n"
+				if err := os.WriteFile(filepath.Join(agentsDir, "m.md"), []byte(yaml), 0644); err != nil {
+					t.Fatal(err)
+				}
+				def, err := loadAgentDefinition(dir, "m")
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if string(def.Model) != tt.want {
+					t.Errorf("Model = %q, want %q", def.Model, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		_, err := loadAgentDefinition("/nonexistent", "missing")
+		if err == nil {
+			t.Fatal("expected error for missing file")
+		}
+	})
+
+	t.Run("missing frontmatter", func(t *testing.T) {
+		dir := t.TempDir()
+		agentsDir := filepath.Join(dir, "agents")
+		os.MkdirAll(agentsDir, 0755)
+		os.WriteFile(filepath.Join(agentsDir, "bad.md"), []byte("no frontmatter"), 0644)
+		_, err := loadAgentDefinition(dir, "bad")
+		if err == nil {
+			t.Fatal("expected error for missing frontmatter")
+		}
+	})
+
+	t.Run("real agent files load", func(t *testing.T) {
+		pluginDir := filepath.Join("..", "..", "claudecode")
+		entries, err := os.ReadDir(filepath.Join(pluginDir, "agents"))
+		if err != nil {
+			t.Skip("claudecode submodule not available")
+		}
+		for _, a := range entries {
+			name := a.Name()
+			if !strings.HasSuffix(name, ".md") {
+				continue
+			}
+			agentName := strings.TrimSuffix(name, ".md")
+			t.Run(agentName, func(t *testing.T) {
+				def, err := loadAgentDefinition(pluginDir, agentName)
+				if err != nil {
+					t.Fatalf("load %s: %v", agentName, err)
+				}
+				if def.Description == "" {
+					t.Error("description is empty")
+				}
+				if def.Prompt == "" {
+					t.Error("prompt is empty")
+				}
+				if len(def.Tools) == 0 {
+					t.Error("no tools specified")
+				}
+			})
+		}
+	})
 }

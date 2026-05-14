@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"gopkg.in/yaml.v3"
 
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
@@ -30,7 +31,7 @@ func filterAgentEnv(env map[string]string) map[string]string {
 }
 
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
-// The --agent flag already loads the agent definition as system prompt, so the user
+// The agent definition is loaded via WithAgent() (system prompt), so the user
 // message only needs to provide the topic or an autonomous execution instruction.
 // When generateVideo is true, appends a video generation hint to the prompt.
 func BuildUserPrompt(taskType, topic string, generateVideo bool) string {
@@ -52,6 +53,55 @@ func truncateKey(key string) string {
 		return key
 	}
 	return key[:8] + "..."
+}
+
+// loadAgentDefinition reads an agent markdown file from the plugin directory,
+// parses its YAML frontmatter, and returns an SDK AgentDefinition.
+func loadAgentDefinition(pluginDir, agentName string) (*claudecode.AgentDefinition, error) {
+	path := filepath.Join(pluginDir, "agents", agentName+".md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read agent file %s: %w", path, err)
+	}
+
+	content := string(data)
+	if !strings.HasPrefix(content, "---") {
+		return nil, fmt.Errorf("agent file %s missing frontmatter delimiter", path)
+	}
+	end := strings.Index(content[3:], "---")
+	if end < 0 {
+		return nil, fmt.Errorf("agent file %s missing closing frontmatter delimiter", path)
+	}
+	fm := content[3 : 3+end]
+	prompt := strings.TrimSpace(content[3+end+6:])
+
+	var frontmatter struct {
+		Description string   `yaml:"description"`
+		Tools       []string `yaml:"tools"`
+		Model       string   `yaml:"model"`
+	}
+	if err := yaml.Unmarshal([]byte(fm), &frontmatter); err != nil {
+		return nil, fmt.Errorf("parse frontmatter in %s: %w", path, err)
+	}
+
+	var model claudecode.AgentModel
+	switch frontmatter.Model {
+	case "sonnet":
+		model = claudecode.AgentModelSonnet
+	case "haiku":
+		model = claudecode.AgentModelHaiku
+	case "opus":
+		model = claudecode.AgentModelOpus
+	default:
+		model = claudecode.AgentModelInherit
+	}
+
+	return &claudecode.AgentDefinition{
+		Description: frontmatter.Description,
+		Prompt:      prompt,
+		Tools:       frontmatter.Tools,
+		Model:       model,
+	}, nil
 }
 
 // DefaultMaxTurns returns the max turns for a given task type from the config map.
@@ -146,8 +196,12 @@ type ExecutionResult struct {
 // .anbanwriter/settings.json, loads the abwriter plugin with the matching
 // agent definition, and launches execution via the claude-agent-sdk-go SDK.
 func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
-	// 1. Resolve defaults. Claude Code agent model comes only from config.yaml.
-	model := e.defaultModel
+	// 1. Resolve defaults. Agent model comes from config.yaml,
+	// with fallback to ANTHROPIC_MODEL env var for diagnostics.
+	agentModel := e.defaultModel
+	if agentModel == "" {
+		agentModel = e.claudeEnv["ANTHROPIC_MODEL"]
+	}
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = DefaultMaxTurns(opts.Task.Type, e.maxTurnsOverrides)
@@ -182,20 +236,20 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		Str("work_dir", workDir).
 		Str("plugin_dir", e.pluginDir).
 		Bool("sandbox", e.sandbox)
-	if model != "" {
-		logEvt = logEvt.Str("model", model)
+	if agentModel != "" {
+		logEvt = logEvt.Str("model", agentModel)
 	}
 	logEvt.Msg("starting agent execution")
 
 	if e.pluginDir == "" {
 		e.logger.Warn().
 			Str("task_id", opts.Task.ID).
-			Msg("plugin directory not found; --agent flag may not resolve")
+			Msg("plugin directory not configured; agent definition loading will fail")
 	}
 
 	// 2.5 Write task log header.
 	if opts.LogWriter != nil {
-		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Prompt, model, maxTurns)
+		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Prompt, agentModel, maxTurns)
 	}
 
 	// 3. Write channel config to workspace settings.json.
@@ -261,12 +315,18 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		return nil, fmt.Errorf("MCP API key resolution failed for task %q (task_id=%s): no API key available. Check apiKeySvc initialization and api_keys table", opts.Task.Type, opts.Task.ID)
 	}
 
-	// 4. Build user prompt from task topic with command prefix.
+	// 4. Build user prompt from task topic.
 	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, opts.Task.GenerateVideo)
 
-	// 5. Map task type to agent name and build --agent flag.
+	// 5. Map task type to agent name and load agent definition.
 	agentName := TaskTypeToAgent(opts.Task.Type)
-	agentFlag := "anbanwriter:" + agentName
+
+	// Load agent definition from plugin directory and pass via WithAgent()
+	// (SDK programmatic subagents) instead of --agent CLI flag lookup.
+	agentDef, agentErr := loadAgentDefinition(e.pluginDir, agentName)
+	if agentErr != nil {
+		return nil, fmt.Errorf("load agent definition %q: %w", agentName, agentErr)
+	}
 
 	// 6. Build SDK options.
 	sdkOpts := []claudecode.Option{
@@ -274,9 +334,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		claudecode.WithCwd(workDir),
 		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
 		claudecode.WithSettingSources(claudecode.SettingSourceUser),
-		claudecode.WithExtraArgs(map[string]*string{
-			"agent": &agentFlag,
-		}),
+		claudecode.WithAgent(agentName, *agentDef),
 	}
 
 	if e.pluginDir != "" {
@@ -284,8 +342,8 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// Only set model if explicitly configured; otherwise let Claude CLI use env vars.
-	if model != "" {
-		sdkOpts = append(sdkOpts, claudecode.WithModel(model))
+	if agentModel != "" {
+		sdkOpts = append(sdkOpts, claudecode.WithModel(agentModel))
 	}
 
 	// Sandbox isolation (recommended in k8s).
@@ -295,9 +353,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// Environment variables (auth tokens, API keys, etc.).
-	for k, v := range e.claudeEnv {
-		sdkOpts = append(sdkOpts, claudecode.WithEnvVar(k, v))
-	}
+	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
 	// ${ANBANWRITER_API_KEY} for the anbanwriter MCP server.
@@ -398,6 +454,13 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		for msg := range client.ReceiveMessages(ctx) {
 			switch m := msg.(type) {
 			case *claudecode.AssistantMessage:
+				if m.HasError() {
+					e.logger.Error().
+						Str("task_id", opts.Task.ID).
+						Bool("rate_limited", m.IsRateLimited()).
+						Str("error", string(m.GetError())).
+						Msg("assistant message error")
+				}
 				turnNum++
 				for _, block := range m.Content {
 					switch b := block.(type) {
@@ -554,7 +617,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			ToolErrorCount:    toolErrorCount,
 			LastToolErrorTool: lastToolErrorTool,
 			LastToolError:     lastToolError,
-			Model:             model,
+			Model:             agentModel,
 		}, nil
 	}
 
@@ -572,7 +635,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			ToolErrorCount:    toolErrorCount,
 			LastToolErrorTool: lastToolErrorTool,
 			LastToolError:     lastToolError,
-			Model:             model,
+			Model:             agentModel,
 		}
 		if resultMsg != nil {
 			result.NumTurns = resultMsg.NumTurns
@@ -601,7 +664,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		ToolErrorCount:    toolErrorCount,
 		LastToolErrorTool: lastToolErrorTool,
 		LastToolError:     lastToolError,
-		Model:             model,
+		Model:             agentModel,
 	}
 	if resultMsg != nil {
 		result.NumTurns = resultMsg.NumTurns
