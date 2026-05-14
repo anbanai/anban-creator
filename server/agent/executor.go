@@ -35,6 +35,7 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // message only needs to provide the topic or an autonomous execution instruction.
 // When generateVideo is true, appends a video generation hint to the prompt.
 func BuildUserPrompt(taskType, topic, agentName string, generateVideo bool) string {
+	_ = taskType // reserved for future platform-specific prompt variations
 	var base string
 	if topic == "" {
 		base = fmt.Sprintf(

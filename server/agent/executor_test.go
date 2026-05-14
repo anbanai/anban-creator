@@ -592,6 +592,12 @@ func TestBuildUserPrompt(t *testing.T) {
 			agentName:     "wechatxls",
 			generateVideo: true,
 			wantContains:  []string{"Use the wechatxls agent", "Merge the generated images"},
+		},		{
+			name:         "empty agent name still produces prompt",
+			taskType:     "rednote",
+			topic:        "test topic",
+			agentName:    "",
+			wantContains:  []string{"Use the  agent", "test topic"},
 		},
 	}
 
