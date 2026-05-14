@@ -34,15 +34,19 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // The agent definition is loaded via WithAgent() (system prompt), so the user
 // message only needs to provide the topic or an autonomous execution instruction.
 // When generateVideo is true, appends a video generation hint to the prompt.
-func BuildUserPrompt(taskType, topic string, generateVideo bool) string {
+func BuildUserPrompt(taskType, topic, agentName string, generateVideo bool) string {
 	var base string
 	if topic == "" {
-		base = "请根据频道定位、关键词和历史选题，自动研究并选择最优主题后继续执行创作流程。"
+		base = fmt.Sprintf(
+			"Use the %s agent to research and create content. "+
+				"Analyze the channel profile, keywords, and historical topics "+
+				"to choose the optimal theme, then execute the full creation workflow.",
+			agentName)
 	} else {
-		base = topic
+		base = fmt.Sprintf("Use the %s agent to create content about: %s", agentName, topic)
 	}
 	if generateVideo {
-		base += "\n\n把生成好的图片合并成为视频"
+		base += "\n\nMerge the generated images into a video."
 	}
 	return base
 }
@@ -315,11 +319,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		return nil, fmt.Errorf("MCP API key resolution failed for task %q (task_id=%s): no API key available. Check apiKeySvc initialization and api_keys table", opts.Task.Type, opts.Task.ID)
 	}
 
-	// 4. Build user prompt from task topic.
-	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, opts.Task.GenerateVideo)
-
-	// 5. Map task type to agent name and load agent definition.
+	// 4. Map task type to agent name.
 	agentName := TaskTypeToAgent(opts.Task.Type)
+
+	// 5. Build user prompt that references the agent by name.
+	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.GenerateVideo)
 
 	// Load agent definition from plugin directory and pass via WithAgent()
 	// (SDK programmatic subagents) instead of --agent CLI flag lookup.

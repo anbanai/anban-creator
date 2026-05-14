@@ -545,56 +545,59 @@ func TestBuildUserPrompt(t *testing.T) {
 		name          string
 		taskType      string
 		topic         string
+		agentName     string
 		generateVideo bool
-		wantExact     string
 		wantContains  []string
 	}{
 		{
-			name:      "rednote with topic returns topic as-is",
-			taskType:  "rednote",
-			topic:     "春季穿搭",
-			wantExact: "春季穿搭",
+			name:         "rednote with topic references agent",
+			taskType:     "rednote",
+			topic:        "春季穿搭",
+			agentName:    "rednote",
+			wantContains: []string{"Use the rednote agent", "春季穿搭"},
 		},
 		{
-			name:      "article with topic returns topic as-is",
-			taskType:  "article",
-			topic:     "时间管理技巧",
-			wantExact: "时间管理技巧",
+			name:         "article with topic references agent",
+			taskType:     "article",
+			topic:        "时间管理技巧",
+			agentName:    "wechatarticle",
+			wantContains: []string{"Use the wechatarticle agent", "时间管理技巧"},
 		},
 		{
-			name:      "unknown task type returns topic as-is",
-			taskType:  "other",
-			topic:     "随便写写",
-			wantExact: "随便写写",
+			name:         "unknown task type defaults to rednote agent",
+			taskType:     "other",
+			topic:        "随便写写",
+			agentName:    "rednote",
+			wantContains: []string{"Use the rednote agent", "随便写写"},
 		},
 		{
 			name:         "no topic triggers autonomous mode",
 			taskType:     "rednote",
 			topic:        "",
-			wantContains: []string{"请根据频道定位", "自动研究", "创作流程"},
+			agentName:    "rednote",
+			wantContains: []string{"Use the rednote agent", "research and create content"},
 		},
 		{
 			name:          "with topic and video flag",
 			taskType:      "rednote",
 			topic:         "旅行分享",
+			agentName:     "rednote",
 			generateVideo: true,
-			wantContains:  []string{"旅行分享", "把生成好的图片合并成为视频"},
+			wantContains:  []string{"Use the rednote agent", "旅行分享", "Merge the generated images"},
 		},
 		{
 			name:          "no topic with video flag",
 			taskType:      "xls",
 			topic:         "",
+			agentName:     "wechatxls",
 			generateVideo: true,
-			wantContains:  []string{"自动研究", "把生成好的图片合并成为视频"},
+			wantContains:  []string{"Use the wechatxls agent", "Merge the generated images"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildUserPrompt(tt.taskType, tt.topic, tt.generateVideo)
-			if tt.wantExact != "" && got != tt.wantExact {
-				t.Errorf("BuildUserPrompt() = %q, want %q", got, tt.wantExact)
-			}
+			got := BuildUserPrompt(tt.taskType, tt.topic, tt.agentName, tt.generateVideo)
 			for _, sub := range tt.wantContains {
 				if !strings.Contains(got, sub) {
 					t.Errorf("BuildUserPrompt() = %q, want to contain %q", got, sub)
