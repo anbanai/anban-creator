@@ -669,7 +669,7 @@ func TestMergeImageAPI(t *testing.T) {
 }
 
 func TestResolvedXlsContentImage(t *testing.T) {
-	t.Run("no rednote config returns wechat.xls", func(t *testing.T) {
+	t.Run("no seednote config returns wechat.xls", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Xls.Content.Image.Key = "xls-key"
 		cfg.Wechat.Xls.Content.Image.Provider = "openai"
@@ -682,37 +682,37 @@ func TestResolvedXlsContentImage(t *testing.T) {
 		}
 	})
 
-	t.Run("rednote fills missing wechat.xls fields", func(t *testing.T) {
+	t.Run("seednote fills missing wechat.xls fields", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Xls.Content.Image = ImageAPI{} // empty
-		cfg.Rednote = &RednoteConfig{}
-		cfg.Rednote.Content.Image = ImageAPI{
-			Key:      "rednote-key",
+		cfg.Seednote = &SeednoteConfig{}
+		cfg.Seednote.Content.Image = ImageAPI{
+			Key:      "seednote-key",
 			Provider: "gemini",
 			Size:     "3:4:1K",
 		}
 		result := cfg.ResolvedXlsContentImage()
-		if result.Key != "rednote-key" {
-			t.Errorf("Key = %q, want rednote-key (from rednote)", result.Key)
+		if result.Key != "seednote-key" {
+			t.Errorf("Key = %q, want seednote-key (from seednote)", result.Key)
 		}
 		if result.Provider != "gemini" {
-			t.Errorf("Provider = %q, want gemini (from rednote)", result.Provider)
+			t.Errorf("Provider = %q, want gemini (from seednote)", result.Provider)
 		}
 		if result.Size != "3:4:1K" {
-			t.Errorf("Size = %q, want 3:4:1K (from rednote)", result.Size)
+			t.Errorf("Size = %q, want 3:4:1K (from seednote)", result.Size)
 		}
 	})
 
-	t.Run("wechat.xls takes priority over rednote", func(t *testing.T) {
+	t.Run("wechat.xls takes priority over seednote", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Xls.Content.Image = ImageAPI{
 			Key:      "xls-key",
 			Provider: "volcengine",
 			Size:     "16:9",
 		}
-		cfg.Rednote = &RednoteConfig{}
-		cfg.Rednote.Content.Image = ImageAPI{
-			Key:      "rednote-key",
+		cfg.Seednote = &SeednoteConfig{}
+		cfg.Seednote.Content.Image = ImageAPI{
+			Key:      "seednote-key",
 			Provider: "gemini",
 			Size:     "3:4:1K",
 		}
@@ -730,17 +730,17 @@ func TestResolvedXlsContentImage(t *testing.T) {
 }
 
 func TestResolvedXlsCoverImage(t *testing.T) {
-	t.Run("rednote cover fills missing wechat.xls.cover", func(t *testing.T) {
+	t.Run("seednote cover fills missing wechat.xls.cover", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.Rednote = &RednoteConfig{}
-		cfg.Rednote.Cover.Image = ImageAPI{
-			Key:      "rednote-cover-key",
+		cfg.Seednote = &SeednoteConfig{}
+		cfg.Seednote.Cover.Image = ImageAPI{
+			Key:      "seednote-cover-key",
 			Provider: "volcengine",
 			Size:     "3:4",
 		}
 		result := cfg.ResolvedXlsCoverImage()
-		if result.Key != "rednote-cover-key" {
-			t.Errorf("Key = %q, want rednote-cover-key", result.Key)
+		if result.Key != "seednote-cover-key" {
+			t.Errorf("Key = %q, want seednote-cover-key", result.Key)
 		}
 		if result.Provider != "volcengine" {
 			t.Errorf("Provider = %q, want volcengine", result.Provider)
@@ -748,17 +748,17 @@ func TestResolvedXlsCoverImage(t *testing.T) {
 	})
 }
 
-func TestXlsImageSize_RednoteFallback(t *testing.T) {
+func TestXlsImageSize_SeednoteFallback(t *testing.T) {
 	tests := []struct {
 		name        string
 		xlsSize     string
-		rednoteSize string
-		hasXhs      bool
+		seednoteSize string
+		hasSeednote      bool
 		wantSize    string
 	}{
 		{"wechat.xls has size", "3:4", "3:4:1K", true, "3:4"},
-		{"fallback to rednote", "", "3:4:1K", true, "3:4:1K"},
-		{"no rednote", "", "", false, DefaultXlsImageSize},
+		{"fallback to seednote", "", "3:4:1K", true, "3:4:1K"},
+		{"no seednote", "", "", false, DefaultXlsImageSize},
 		{"both empty", "", "", true, DefaultXlsImageSize},
 	}
 
@@ -766,9 +766,9 @@ func TestXlsImageSize_RednoteFallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{}
 			cfg.Wechat.Xls.Content.Image.Size = tt.xlsSize
-			if tt.hasXhs {
-				cfg.Rednote = &RednoteConfig{}
-				cfg.Rednote.Content.Image.Size = tt.rednoteSize
+			if tt.hasSeednote {
+				cfg.Seednote = &SeednoteConfig{}
+				cfg.Seednote.Content.Image.Size = tt.seednoteSize
 			}
 			if got := cfg.XlsImageSize(); got != tt.wantSize {
 				t.Errorf("XlsImageSize() = %q, want %q", got, tt.wantSize)
@@ -777,17 +777,17 @@ func TestXlsImageSize_RednoteFallback(t *testing.T) {
 	}
 }
 
-func TestXlsImageCount_RednoteFallback(t *testing.T) {
+func TestXlsImageCount_SeednoteFallback(t *testing.T) {
 	tests := []struct {
 		name         string
 		xlsCount     int
-		rednoteCount int
-		hasXhs       bool
+		seednoteCount int
+		hasSeednote       bool
 		wantCount    int
 	}{
 		{"wechat.xls has count", 4, 6, true, 4},
-		{"fallback to rednote", 0, 6, true, 6},
-		{"no rednote", 0, 0, false, DefaultXlsImageCount},
+		{"fallback to seednote", 0, 6, true, 6},
+		{"no seednote", 0, 0, false, DefaultXlsImageCount},
 		{"both zero", 0, 0, true, DefaultXlsImageCount},
 	}
 
@@ -795,9 +795,9 @@ func TestXlsImageCount_RednoteFallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{}
 			cfg.Wechat.Xls.Content.Count = tt.xlsCount
-			if tt.hasXhs {
-				cfg.Rednote = &RednoteConfig{}
-				cfg.Rednote.Content.Count = tt.rednoteCount
+			if tt.hasSeednote {
+				cfg.Seednote = &SeednoteConfig{}
+				cfg.Seednote.Content.Count = tt.seednoteCount
 			}
 			if got := cfg.XlsImageCount(); got != tt.wantCount {
 				t.Errorf("XlsImageCount() = %d, want %d", got, tt.wantCount)
@@ -806,66 +806,66 @@ func TestXlsImageCount_RednoteFallback(t *testing.T) {
 	}
 }
 
-func TestRednoteImageSize(t *testing.T) {
+func TestSeednoteImageSize(t *testing.T) {
 	tests := []struct {
 		name        string
-		hasRednote  bool
-		rednoteSize string
+		hasSeednote  bool
+		seednoteSize string
 		want        string
 	}{
-		{"nil rednote returns default", false, "", DefaultRednoteImageSize},
-		{"rednote with size returns it", true, "3:4:2K", "3:4:2K"},
-		{"rednote with empty size returns default", true, "", DefaultRednoteImageSize},
-		{"rednote with 1K size", true, "3:4:1K", "3:4:1K"},
+		{"nil seednote returns default", false, "", DefaultSeednoteImageSize},
+		{"seednote with size returns it", true, "3:4:2K", "3:4:2K"},
+		{"seednote with empty size returns default", true, "", DefaultSeednoteImageSize},
+		{"seednote with 1K size", true, "3:4:1K", "3:4:1K"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{}
-			if tt.hasRednote {
-				cfg.Rednote = &RednoteConfig{}
-				cfg.Rednote.Content.Image.Size = tt.rednoteSize
+			if tt.hasSeednote {
+				cfg.Seednote = &SeednoteConfig{}
+				cfg.Seednote.Content.Image.Size = tt.seednoteSize
 			}
-			if got := cfg.RednoteImageSize(); got != tt.want {
-				t.Errorf("RednoteImageSize() = %q, want %q", got, tt.want)
+			if got := cfg.SeednoteImageSize(); got != tt.want {
+				t.Errorf("SeednoteImageSize() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestRednoteImageCount(t *testing.T) {
+func TestSeednoteImageCount(t *testing.T) {
 	tests := []struct {
 		name         string
-		hasRednote   bool
-		rednoteCount int
+		hasSeednote   bool
+		seednoteCount int
 		want         int
 	}{
-		{"nil rednote returns default", false, 0, DefaultRednoteImageCount},
-		{"rednote with count returns it", true, 8, 8},
-		{"rednote with zero count returns default", true, 0, DefaultRednoteImageCount},
-		{"rednote with 1 count", true, 1, 1},
+		{"nil seednote returns default", false, 0, DefaultSeednoteImageCount},
+		{"seednote with count returns it", true, 8, 8},
+		{"seednote with zero count returns default", true, 0, DefaultSeednoteImageCount},
+		{"seednote with 1 count", true, 1, 1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{}
-			if tt.hasRednote {
-				cfg.Rednote = &RednoteConfig{}
-				cfg.Rednote.Content.Count = tt.rednoteCount
+			if tt.hasSeednote {
+				cfg.Seednote = &SeednoteConfig{}
+				cfg.Seednote.Content.Count = tt.seednoteCount
 			}
-			if got := cfg.RednoteImageCount(); got != tt.want {
-				t.Errorf("RednoteImageCount() = %d, want %d", got, tt.want)
+			if got := cfg.SeednoteImageCount(); got != tt.want {
+				t.Errorf("SeednoteImageCount() = %d, want %d", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestResolvedRednoteContentImage(t *testing.T) {
-	t.Run("nil rednote returns wechat.xls", func(t *testing.T) {
+func TestResolvedSeednoteContentImage(t *testing.T) {
+	t.Run("nil seednote returns wechat.xls", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Xls.Content.Image.Key = "xls-key"
 		cfg.Wechat.Xls.Content.Image.Provider = "openai"
-		result := cfg.ResolvedRednoteContentImage()
+		result := cfg.ResolvedSeednoteContentImage()
 		if result.Key != "xls-key" {
 			t.Errorf("Key = %q, want xls-key", result.Key)
 		}
@@ -874,31 +874,31 @@ func TestResolvedRednoteContentImage(t *testing.T) {
 		}
 	})
 
-	t.Run("rednote primary over wechat.xls", func(t *testing.T) {
+	t.Run("seednote primary over wechat.xls", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Xls.Content.Image = ImageAPI{Key: "xls-key", Provider: "openai", Size: "3:4"}
-		cfg.Rednote = &RednoteConfig{}
-		cfg.Rednote.Content.Image = ImageAPI{Key: "rednote-key", Provider: "gemini", Size: "3:4:1K"}
-		result := cfg.ResolvedRednoteContentImage()
-		if result.Key != "rednote-key" {
-			t.Errorf("Key = %q, want rednote-key (rednote primary)", result.Key)
+		cfg.Seednote = &SeednoteConfig{}
+		cfg.Seednote.Content.Image = ImageAPI{Key: "seednote-key", Provider: "gemini", Size: "3:4:1K"}
+		result := cfg.ResolvedSeednoteContentImage()
+		if result.Key != "seednote-key" {
+			t.Errorf("Key = %q, want seednote-key (seednote primary)", result.Key)
 		}
 		if result.Provider != "gemini" {
-			t.Errorf("Provider = %q, want gemini (rednote primary)", result.Provider)
+			t.Errorf("Provider = %q, want gemini (seednote primary)", result.Provider)
 		}
 		if result.Size != "3:4:1K" {
-			t.Errorf("Size = %q, want 3:4:1K (rednote primary)", result.Size)
+			t.Errorf("Size = %q, want 3:4:1K (seednote primary)", result.Size)
 		}
 	})
 
-	t.Run("wechat.xls fills missing rednote fields", func(t *testing.T) {
+	t.Run("wechat.xls fills missing seednote fields", func(t *testing.T) {
 		cfg := &Config{}
 		cfg.Wechat.Xls.Content.Image = ImageAPI{Key: "xls-key", MaxWidth: 1920, MaxSizeMB: 5}
-		cfg.Rednote = &RednoteConfig{}
-		cfg.Rednote.Content.Image = ImageAPI{Provider: "volcengine", Size: "3:4:1K"}
-		result := cfg.ResolvedRednoteContentImage()
+		cfg.Seednote = &SeednoteConfig{}
+		cfg.Seednote.Content.Image = ImageAPI{Provider: "volcengine", Size: "3:4:1K"}
+		result := cfg.ResolvedSeednoteContentImage()
 		if result.Provider != "volcengine" {
-			t.Errorf("Provider = %q, want volcengine (rednote primary)", result.Provider)
+			t.Errorf("Provider = %q, want volcengine (seednote primary)", result.Provider)
 		}
 		if result.Key != "xls-key" {
 			t.Errorf("Key = %q, want xls-key (from wechat.xls fallback)", result.Key)
@@ -908,10 +908,10 @@ func TestResolvedRednoteContentImage(t *testing.T) {
 		}
 	})
 
-	t.Run("both empty rednote config", func(t *testing.T) {
+	t.Run("both empty seednote config", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.Rednote = &RednoteConfig{}
-		result := cfg.ResolvedRednoteContentImage()
+		cfg.Seednote = &SeednoteConfig{}
+		result := cfg.ResolvedSeednoteContentImage()
 		if result.Key != "" {
 			t.Errorf("Key = %q, want empty", result.Key)
 		}

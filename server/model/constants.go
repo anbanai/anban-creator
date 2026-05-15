@@ -27,7 +27,7 @@ const (
 const (
 	ScopeArticle = "article"
 	ScopeXls     = "xls"
-	ScopeRednote = "rednote"
+	ScopeSeednote = "seednote"
 )
 
 // File role constants.
@@ -57,7 +57,7 @@ const (
 const (
 	PlatformArticle = "article"
 	PlatformXLS     = "xls"
-	PlatformRednote = "rednote"
+	PlatformSeednote = "seednote"
 )
 
 // ValidImageRatios is the set of allowed image aspect ratios.
@@ -158,7 +158,7 @@ const (
 // Template type constants.
 const (
 	TemplateTypePoster  = "poster"
-	TemplateTypeRednote = "rednote"
+	TemplateTypeSeednote = "seednote"
 	TemplateTypeArticle = "article"
 	TemplateTypeXLS     = "xls"
 )

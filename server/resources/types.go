@@ -51,7 +51,7 @@ func (c Category) IsPlatformRelevant(platform string) bool {
 	case CategoryLayout:
 		return platform == "article"
 	case CategoryImagePreset:
-		return platform == "article" || platform == "xls" || platform == "rednote"
+		return platform == "article" || platform == "xls" || platform == "seednote"
 	}
 	return false
 }

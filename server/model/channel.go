@@ -9,17 +9,17 @@ type ChannelConfig struct {
 	EnablePublishing bool   `json:"enable_publishing"`
 }
 
-// Channel represents a user's platform account (e.g., a WeChat public account or Xiaohongshu account).
+// Channel represents a user's platform account (e.g., a WeChat public account or Seednote account).
 type Channel struct {
 	ID          string        `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID      string        `gorm:"type:char(36);index;not null" json:"user_id"`
-	Platform    string        `gorm:"type:varchar(20);not null" json:"platform"` // article, xls, rednote
+	Platform    string        `gorm:"type:varchar(20);not null" json:"platform"` // article, xls, seednote
 	Name        string        `gorm:"type:varchar(100);not null" json:"name"`
 	AvatarURL   string        `gorm:"type:varchar(500)" json:"avatar_url"`
 	ProfileURL  string        `gorm:"type:varchar(500)" json:"profile_url"`    // 平台主页链接
 	Positioning string        `gorm:"type:text" json:"positioning"`            // 账号定位
 	Keywords    string        `gorm:"type:text" json:"keywords"`               // 关键词
-	Style       string        `gorm:"type:text" json:"style"`                    // 写作风格 / 视觉风格（小红书用）
+	Style       string        `gorm:"type:text" json:"style"`                    // 写作风格 / 视觉风格（种草笔记用）
 	Theme       string        `gorm:"type:varchar(50)" json:"theme"`           // 主题
 	Author             string        `gorm:"type:varchar(50)" json:"author"`               // 作者名
 	ReferenceImageURL  string        `gorm:"type:varchar(500)" json:"reference_image_url"` // 品牌视觉参考图 URL

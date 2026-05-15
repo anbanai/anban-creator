@@ -93,12 +93,12 @@ export default function ViralAnalysisTab() {
   function handleAnalyze() {
     const trimmed = url.trim()
     if (!trimmed) {
-      toast.error('请输入小红书笔记链接')
+      toast.error('请输入种草笔记链接')
       return
     }
     const extracted = extractUrl(trimmed)
     if (!extracted) {
-      toast.error('未检测到有效链接，请粘贴小红书笔记链接或分享文本')
+      toast.error('未检测到有效链接，请粘贴种草笔记链接或分享文本')
       return
     }
     createMutation.mutate({ source_type: 'note', source_url: extracted })
@@ -186,7 +186,7 @@ export default function ViralAnalysisTab() {
           <EmptyState
             icon={FlaskConical}
             title="爆文拆解"
-            description="粘贴一篇小红书爆款笔记链接，AI 将从标题、封面、文案、标签、互动五个维度进行深度拆解，帮你掌握爆文规律。"
+            description="粘贴一篇种草笔记爆款笔记链接，AI 将从标题、封面、文案、标签、互动五个维度进行深度拆解，帮你掌握爆文规律。"
           />
         ) : selected.status === 'pending' || selected.status === 'analyzing' ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16">

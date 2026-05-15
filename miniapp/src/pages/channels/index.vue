@@ -155,7 +155,7 @@ import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
 
 const platformTabs = [
   { key: '', label: '全部' },
-  { key: 'rednote', label: '小红书' },
+  { key: 'seednote', label: '种草笔记' },
   { key: 'article', label: '公众号' },
   { key: 'xls', label: '小绿书' },
 ]
@@ -186,7 +186,7 @@ function platformLabel(platform: string): string {
 
 function platformColor(platform: string): string {
   const map: Record<string, string> = {
-    rednote: '#FF2442',
+    seednote: '#FF2442',
     article: '#07C160',
     xls: '#07C160',
   }

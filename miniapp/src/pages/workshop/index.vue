@@ -6,7 +6,7 @@
         <view class="feature-card__icon">🔬</view>
         <view class="feature-card__body">
           <text class="feature-card__title">爆文拆解</text>
-          <text class="feature-card__desc">分析小红书爆款笔记，获取创作灵感</text>
+          <text class="feature-card__desc">分析种草笔记爆款笔记，获取创作灵感</text>
         </view>
         <text class="feature-card__arrow">›</text>
       </view>
@@ -110,7 +110,7 @@ function extractTitle(analysis: ViralAnalysis): string {
     return analysis.analysis_result.title_analysis.technique
   }
   if (analysis.source_url) {
-    return analysis.source_url.replace(/https?:\/\/[^/]+\/.*/, '小红书笔记')
+    return analysis.source_url.replace(/https?:\/\/[^/]+\/.*/, '种草笔记')
   }
   return '分析记录'
 }

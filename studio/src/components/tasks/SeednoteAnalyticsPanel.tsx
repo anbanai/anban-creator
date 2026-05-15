@@ -24,23 +24,23 @@ import {
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { formatFullDateTimeCN } from '@/lib/labels'
-import type { RednoteAnalytics, RednoteTrackingStatus } from '@/types'
+import type { SeednoteAnalytics, SeednoteTrackingStatus } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/badge'
 
-interface RednoteAnalyticsPanelProps {
+interface SeednoteAnalyticsPanelProps {
   taskId: string
 }
 
-const statusCopy: Record<RednoteTrackingStatus, string> = {
+const statusCopy: Record<SeednoteTrackingStatus, string> = {
   waiting_discovery: '明天将从账号主页自动识别这篇笔记',
   tracking: '正在每日采集公开数据',
   stopped: '数据变化已趋缓，已停止自动采集',
   failed: '暂时无法识别或采集这篇笔记',
 }
 
-const statusVariant: Record<RednoteTrackingStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+const statusVariant: Record<SeednoteTrackingStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   waiting_discovery: 'outline',
   tracking: 'default',
   stopped: 'secondary',
@@ -62,10 +62,10 @@ const chartColors = {
   share_count: '#22c55e',
 }
 
-export default function RednoteAnalyticsPanel({ taskId }: RednoteAnalyticsPanelProps) {
+export default function SeednoteAnalyticsPanel({ taskId }: SeednoteAnalyticsPanelProps) {
   const { data, isLoading, isError } = useQuery({
-    queryKey: queryKeys.tasks.rednoteAnalytics(taskId),
-    queryFn: () => api.rednoteAnalytics.getByTask(taskId),
+    queryKey: queryKeys.tasks.seednoteAnalytics(taskId),
+    queryFn: () => api.seednoteAnalytics.getByTask(taskId),
     enabled: Boolean(taskId),
   })
 
@@ -74,7 +74,7 @@ export default function RednoteAnalyticsPanel({ taskId }: RednoteAnalyticsPanelP
       <Card>
         <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          小红书公开数据加载中
+          种草笔记公开数据加载中
         </CardContent>
       </Card>
     )
@@ -85,7 +85,7 @@ export default function RednoteAnalyticsPanel({ taskId }: RednoteAnalyticsPanelP
       <Card>
         <CardContent className="flex items-center gap-2 text-sm text-amber-400">
           <AlertCircle className="h-4 w-4" />
-          暂时无法加载小红书数据
+          暂时无法加载种草笔记数据
         </CardContent>
       </Card>
     )
@@ -95,7 +95,7 @@ export default function RednoteAnalyticsPanel({ taskId }: RednoteAnalyticsPanelP
     return (
       <Card>
         <CardHeader>
-          <CardTitle>小红书数据</CardTitle>
+          <CardTitle>种草笔记数据</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
           追踪任务正在准备中
@@ -104,13 +104,13 @@ export default function RednoteAnalyticsPanel({ taskId }: RednoteAnalyticsPanelP
     )
   }
 
-  return <RednoteAnalyticsContent analytics={data} />
+  return <SeednoteAnalyticsContent analytics={data} />
 }
 
-function RednoteAnalyticsContent({ analytics }: { analytics: RednoteAnalytics }) {
+function SeednoteAnalyticsContent({ analytics }: { analytics: SeednoteAnalytics }) {
   const tracking = analytics.tracking!
 
-  const status = tracking.status as RednoteTrackingStatus
+  const status = tracking.status as SeednoteTrackingStatus
   const statusText = statusCopy[status] ?? tracking.status
   const variant = statusVariant[status] ?? 'outline'
   const chartData = useMemo(() => analytics.series.map((item) => ({
@@ -125,7 +125,7 @@ function RednoteAnalyticsContent({ analytics }: { analytics: RednoteAnalytics })
     <Card>
       <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <CardTitle>小红书数据</CardTitle>
+          <CardTitle>种草笔记数据</CardTitle>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge variant={variant}>{statusText}</Badge>
             {tracking.stop_reason && (

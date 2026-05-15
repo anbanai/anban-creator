@@ -39,11 +39,11 @@ func DefaultConfigPath() string {
 	return filepath.Join(ConfigDir, ConfigFileName)
 }
 
-// DefaultRednoteImageSize 默认小红书图片尺寸（3:4 竖版 1K）
-const DefaultRednoteImageSize = "3:4:1K"
+// DefaultSeednoteImageSize 默认种草笔记图片尺寸（3:4 竖版 1K）
+const DefaultSeednoteImageSize = "3:4:1K"
 
-// DefaultRednoteImageCount 默认小红书图片数量
-const DefaultRednoteImageCount = 6
+// DefaultSeednoteImageCount 默认种草笔记图片数量
+const DefaultSeednoteImageCount = 6
 
 // DefaultFlowerImageSize 默认花卉图片尺寸（9:16 竖版 2K）
 const DefaultFlowerImageSize = "9:16"
@@ -134,8 +134,8 @@ type WechatConfig struct {
 	Xls     WechatXlsConfig `json:"xls,omitempty" yaml:"xls,omitempty"`
 }
 
-// RednoteConfig 小红书配置
-type RednoteConfig struct {
+// SeednoteConfig 种草笔记配置
+type SeednoteConfig struct {
 	// Style 视觉风格描述，用于图片生成时的风格提示
 	Style   string            `json:"style,omitempty" yaml:"style,omitempty"`
 	Cover   ImageSection      `json:"cover,omitempty" yaml:"cover,omitempty"`
@@ -160,7 +160,7 @@ type Config struct {
 	Positioning string   `json:"positioning,omitempty" yaml:"positioning,omitempty"`
 
 	Wechat  WechatConfig   `json:"wechat,omitempty" yaml:"wechat,omitempty"`
-	Rednote *RednoteConfig `json:"rednote,omitempty" yaml:"rednote,omitempty"`
+	Seednote *SeednoteConfig `json:"seednote,omitempty" yaml:"seednote,omitempty"`
 	Flower  *FlowerConfig  `json:"flower,omitempty" yaml:"flower,omitempty"`
 
 	configPath string
@@ -336,7 +336,7 @@ func ValidateForImageGeneration(apiCfg *ImageAPI) error {
 		return &ConfigError{
 			Field:   "ImageAPIKey",
 			Message: "图片生成需要配置 API Key",
-			HintMsg: "在配置文件中设置 wechat.article.content.image.key、wechat.xls.content.image.key 或 rednote.content.image.key",
+			HintMsg: "在配置文件中设置 wechat.article.content.image.key、wechat.xls.content.image.key 或 seednote.content.image.key",
 		}
 	}
 	return nil
@@ -348,25 +348,25 @@ func (c *Config) GetConfigFile() string {
 }
 
 // XlsImageSize 返回小绿书图片尺寸，默认 3:4 竖版
-// 优先级: wechat.xls.content.image.size > rednote.content.image.size > 默认值
+// 优先级: wechat.xls.content.image.size > seednote.content.image.size > 默认值
 func (c *Config) XlsImageSize() string {
 	if c.Wechat.Xls.Content.Image.Size != "" {
 		return c.Wechat.Xls.Content.Image.Size
 	}
-	if c.Rednote != nil && c.Rednote.Content.Image.Size != "" {
-		return c.Rednote.Content.Image.Size
+	if c.Seednote != nil && c.Seednote.Content.Image.Size != "" {
+		return c.Seednote.Content.Image.Size
 	}
 	return DefaultXlsImageSize
 }
 
 // XlsImageCount 返回小绿书图片数量，默认 4 张
-// 优先级: wechat.xls.content.count > rednote.content.count > 默认值
+// 优先级: wechat.xls.content.count > seednote.content.count > 默认值
 func (c *Config) XlsImageCount() int {
 	if c.Wechat.Xls.Content.Count > 0 {
 		return c.Wechat.Xls.Content.Count
 	}
-	if c.Rednote != nil && c.Rednote.Content.Count > 0 {
-		return c.Rednote.Content.Count
+	if c.Seednote != nil && c.Seednote.Content.Count > 0 {
+		return c.Seednote.Content.Count
 	}
 	return DefaultXlsImageCount
 }
@@ -408,23 +408,23 @@ func mergeImageAPI(base, fallback ImageAPI) ImageAPI {
 }
 
 // ResolvedXlsContentImage 返回合并后的小绿书内容图配置
-// wechat.xls.content.image 字段优先，rednote.content.image 作为 fallback
+// wechat.xls.content.image 字段优先，seednote.content.image 作为 fallback
 func (c *Config) ResolvedXlsContentImage() ImageAPI {
 	base := c.Wechat.Xls.Content.Image
-	if c.Rednote == nil {
+	if c.Seednote == nil {
 		return base
 	}
-	return mergeImageAPI(base, c.Rednote.Content.Image)
+	return mergeImageAPI(base, c.Seednote.Content.Image)
 }
 
 // ResolvedXlsCoverImage 返回合并后的小绿书封面图配置
-// wechat.xls.cover.image 字段优先，rednote.cover.image 作为 fallback
+// wechat.xls.cover.image 字段优先，seednote.cover.image 作为 fallback
 func (c *Config) ResolvedXlsCoverImage() ImageAPI {
 	base := c.Wechat.Xls.Cover.Image
-	if c.Rednote == nil {
+	if c.Seednote == nil {
 		return base
 	}
-	return mergeImageAPI(base, c.Rednote.Cover.Image)
+	return mergeImageAPI(base, c.Seednote.Cover.Image)
 }
 
 // ArticleImageSize 返回图文文章图片尺寸，默认 2560x1440（16:9 横版 2K）
@@ -435,40 +435,40 @@ func (c *Config) ArticleImageSize() string {
 	return DefaultArticleImageSize
 }
 
-// RednoteImageSize 返回小红书图片尺寸，默认 3:4:1K 竖版 1K
-// 优先级: rednote.content.image.size > 默认值
-func (c *Config) RednoteImageSize() string {
-	if c.Rednote != nil && c.Rednote.Content.Image.Size != "" {
-		return c.Rednote.Content.Image.Size
+// SeednoteImageSize 返回种草笔记图片尺寸，默认 3:4:1K 竖版 1K
+// 优先级: seednote.content.image.size > 默认值
+func (c *Config) SeednoteImageSize() string {
+	if c.Seednote != nil && c.Seednote.Content.Image.Size != "" {
+		return c.Seednote.Content.Image.Size
 	}
-	return DefaultRednoteImageSize
+	return DefaultSeednoteImageSize
 }
 
-// RednoteImageCount 返回小红书图片数量，默认 6 张
-// 优先级: rednote.content.count > 默认值
-func (c *Config) RednoteImageCount() int {
-	if c.Rednote != nil && c.Rednote.Content.Count > 0 {
-		return c.Rednote.Content.Count
+// SeednoteImageCount 返回种草笔记图片数量，默认 6 张
+// 优先级: seednote.content.count > 默认值
+func (c *Config) SeednoteImageCount() int {
+	if c.Seednote != nil && c.Seednote.Content.Count > 0 {
+		return c.Seednote.Content.Count
 	}
-	return DefaultRednoteImageCount
+	return DefaultSeednoteImageCount
 }
 
-// ResolvedRednoteContentImage 返回合并后的小红书内容图配置
-// rednote.content.image 字段优先，wechat.xls.content.image 作为 fallback
-func (c *Config) ResolvedRednoteContentImage() ImageAPI {
-	if c.Rednote == nil {
+// ResolvedSeednoteContentImage 返回合并后的种草笔记内容图配置
+// seednote.content.image 字段优先，wechat.xls.content.image 作为 fallback
+func (c *Config) ResolvedSeednoteContentImage() ImageAPI {
+	if c.Seednote == nil {
 		return c.Wechat.Xls.Content.Image
 	}
-	return mergeImageAPI(c.Rednote.Content.Image, c.Wechat.Xls.Content.Image)
+	return mergeImageAPI(c.Seednote.Content.Image, c.Wechat.Xls.Content.Image)
 }
 
-// ResolvedRednoteCoverImage 返回合并后的小红书封面图配置
-// rednote.cover.image 字段优先，wechat.xls.cover.image 作为 fallback
-func (c *Config) ResolvedRednoteCoverImage() ImageAPI {
-	if c.Rednote == nil {
+// ResolvedSeednoteCoverImage 返回合并后的种草笔记封面图配置
+// seednote.cover.image 字段优先，wechat.xls.cover.image 作为 fallback
+func (c *Config) ResolvedSeednoteCoverImage() ImageAPI {
+	if c.Seednote == nil {
 		return c.Wechat.Xls.Cover.Image
 	}
-	return mergeImageAPI(c.Rednote.Cover.Image, c.Wechat.Xls.Cover.Image)
+	return mergeImageAPI(c.Seednote.Cover.Image, c.Wechat.Xls.Cover.Image)
 }
 
 // FlowerImageSize 返回花卉图片尺寸，默认 9:16 竖版
@@ -488,16 +488,16 @@ func (c *Config) FlowerImageCount() int {
 }
 
 // ResolvedFlowerImage 返回花卉图片生成配置
-// flower.content.image 字段优先，rednote.content.image 作为 fallback
+// flower.content.image 字段优先，seednote.content.image 作为 fallback
 func (c *Config) ResolvedFlowerImage() ImageAPI {
 	if c.Flower == nil {
-		if c.Rednote != nil {
-			return c.Rednote.Content.Image
+		if c.Seednote != nil {
+			return c.Seednote.Content.Image
 		}
 		return c.Wechat.Xls.Content.Image
 	}
-	if c.Rednote != nil {
-		return mergeImageAPI(c.Flower.Content.Image, c.Rednote.Content.Image)
+	if c.Seednote != nil {
+		return mergeImageAPI(c.Flower.Content.Image, c.Seednote.Content.Image)
 	}
 	return mergeImageAPI(c.Flower.Content.Image, c.Wechat.Xls.Content.Image)
 }

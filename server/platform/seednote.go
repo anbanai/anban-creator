@@ -9,27 +9,27 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/royalrick/anbanwriter/server/xhs"
+	"github.com/royalrick/anbanwriter/server/seednote"
 )
 
-// RednoteProvider fetches Xiaohongshu data via the xiaohongshu-mcp Docker sidecar.
-type RednoteProvider struct {
-	xhs *xhs.Client
+// SeednoteProvider fetches Seednote data via the xiaohongshu-mcp Docker sidecar.
+type SeednoteProvider struct {
+	client *seednote.Client
 }
 
-// NewRednoteProvider creates a new Xiaohongshu platform provider backed by the XHS SDK client.
-func NewRednoteProvider(xhsClient *xhs.Client) *RednoteProvider {
-	return &RednoteProvider{xhs: xhsClient}
+// NewSeednoteProvider creates a new Seednote platform provider backed by the Seednote SDK client.
+func NewSeednoteProvider(seednoteClient *seednote.Client) *SeednoteProvider {
+	return &SeednoteProvider{client: seednoteClient}
 }
 
 // FetchProfile fetches a user's profile from their public profile page URL.
 // Accepts a profile URL or share text containing a profile URL.
-func (p *RednoteProvider) FetchProfile(ctx context.Context, profileURL string) (*PlatformProfile, error) {
+func (p *SeednoteProvider) FetchProfile(ctx context.Context, profileURL string) (*PlatformProfile, error) {
 	if profileURL == "" {
 		return nil, fmt.Errorf("profile URL is required")
 	}
 
-	extractedURL, err := extractRednoteURLFromText(profileURL)
+	extractedURL, err := extractSeednoteURLFromText(profileURL)
 	if err != nil {
 		return nil, err
 	}
@@ -39,11 +39,11 @@ func (p *RednoteProvider) FetchProfile(ctx context.Context, profileURL string) (
 		return nil, err
 	}
 
-	if p.xhs == nil {
-		return nil, fmt.Errorf("XHS sidecar is not configured")
+	if p.client == nil {
+		return nil, fmt.Errorf("Seednote sidecar is not configured")
 	}
 
-	profile, err := p.xhs.GetUserProfile(ctx, userID, xsecToken)
+	profile, err := p.client.GetUserProfile(ctx, userID, xsecToken)
 	if err != nil {
 		return nil, fmt.Errorf("fetch user profile: %w", err)
 	}
@@ -51,13 +51,13 @@ func (p *RednoteProvider) FetchProfile(ctx context.Context, profileURL string) (
 	return mapUserProfile(profile, extractedURL), nil
 }
 
-// FetchProfilePosts fetches visible public posts from a Xiaohongshu profile.
-func (p *RednoteProvider) FetchProfilePosts(ctx context.Context, profileURL string) ([]RednotePost, error) {
+// FetchProfilePosts fetches visible public posts from a Seednote profile.
+func (p *SeednoteProvider) FetchProfilePosts(ctx context.Context, profileURL string) ([]SeednotePost, error) {
 	if profileURL == "" {
 		return nil, fmt.Errorf("profile URL is required")
 	}
 
-	extractedURL, err := extractRednoteURLFromText(profileURL)
+	extractedURL, err := extractSeednoteURLFromText(profileURL)
 	if err != nil {
 		return nil, err
 	}
@@ -67,11 +67,11 @@ func (p *RednoteProvider) FetchProfilePosts(ctx context.Context, profileURL stri
 		return nil, err
 	}
 
-	if p.xhs == nil {
-		return nil, fmt.Errorf("XHS sidecar is not configured")
+	if p.client == nil {
+		return nil, fmt.Errorf("Seednote sidecar is not configured")
 	}
 
-	profile, err := p.xhs.GetUserProfile(ctx, userID, xsecToken)
+	profile, err := p.client.GetUserProfile(ctx, userID, xsecToken)
 	if err != nil {
 		return nil, fmt.Errorf("fetch profile posts: %w", err)
 	}
@@ -79,8 +79,8 @@ func (p *RednoteProvider) FetchProfilePosts(ctx context.Context, profileURL stri
 	return mapFeedsToPosts(profile.Feeds), nil
 }
 
-// FetchPostMetrics fetches public metrics from a Xiaohongshu note page.
-func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) (*RednotePostMetrics, error) {
+// FetchPostMetrics fetches public metrics from a Seednote note page.
+func (p *SeednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) (*SeednotePostMetrics, error) {
 	noteURL = strings.TrimSpace(noteURL)
 	if noteURL == "" {
 		return nil, fmt.Errorf("note URL is required")
@@ -91,11 +91,11 @@ func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) 
 		return nil, err
 	}
 
-	if p.xhs == nil {
-		return nil, fmt.Errorf("XHS sidecar is not configured")
+	if p.client == nil {
+		return nil, fmt.Errorf("Seednote sidecar is not configured")
 	}
 
-	detail, err := p.xhs.GetFeedDetail(ctx, &xhs.FeedDetailRequest{
+	detail, err := p.client.GetFeedDetail(ctx, &seednote.FeedDetailRequest{
 		FeedID:    feedID,
 		XsecToken: xsecToken,
 	})
@@ -103,7 +103,7 @@ func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) 
 		return nil, fmt.Errorf("fetch post metrics: %w", err)
 	}
 
-	return &RednotePostMetrics{
+	return &SeednotePostMetrics{
 		LikeCount:    parseCountString(detail.Note.InteractInfo.LikedCount),
 		CollectCount: parseCountString(detail.Note.InteractInfo.CollectedCount),
 		CommentCount: parseCountString(detail.Note.InteractInfo.CommentCount),
@@ -111,8 +111,8 @@ func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) 
 	}, nil
 }
 
-// FetchNoteContent fetches and parses a Xiaohongshu note page.
-func (p *RednoteProvider) FetchNoteContent(ctx context.Context, noteURL string) (*RednoteNoteContent, error) {
+// FetchNoteContent fetches and parses a Seednote note page.
+func (p *SeednoteProvider) FetchNoteContent(ctx context.Context, noteURL string) (*SeednoteNoteContent, error) {
 	noteURL = strings.TrimSpace(noteURL)
 	if noteURL == "" {
 		return nil, fmt.Errorf("note URL is required")
@@ -123,11 +123,11 @@ func (p *RednoteProvider) FetchNoteContent(ctx context.Context, noteURL string) 
 		return nil, err
 	}
 
-	if p.xhs == nil {
-		return nil, fmt.Errorf("XHS sidecar is not configured")
+	if p.client == nil {
+		return nil, fmt.Errorf("Seednote sidecar is not configured")
 	}
 
-	detail, err := p.xhs.GetFeedDetail(ctx, &xhs.FeedDetailRequest{
+	detail, err := p.client.GetFeedDetail(ctx, &seednote.FeedDetailRequest{
 		FeedID:    feedID,
 		XsecToken: xsecToken,
 	})
@@ -135,7 +135,7 @@ func (p *RednoteProvider) FetchNoteContent(ctx context.Context, noteURL string) 
 		return nil, fmt.Errorf("fetch note content: %w", err)
 	}
 
-	content := &RednoteNoteContent{
+	content := &SeednoteNoteContent{
 		NoteID:       detail.Note.NoteID,
 		Title:        detail.Note.Title,
 		Description:  detail.Note.Desc,
@@ -172,13 +172,13 @@ func (p *RednoteProvider) FetchNoteContent(ctx context.Context, noteURL string) 
 // --- URL resolution helpers ---
 
 func resolveProfileURLToUser(rawURL string) (userID, xsecToken string, err error) {
-	return xhs.ResolveProfileURL(rawURL)
+	return seednote.ResolveProfileURL(rawURL)
 }
 
 func resolveNoteURL(rawURL string) (feedID, xsecToken string, err error) {
-	feedID = ExtractRednoteNoteID(rawURL)
+	feedID = ExtractSeednoteNoteID(rawURL)
 	if feedID == "" {
-		return "", "", fmt.Errorf("unsupported Rednote note URL: %s", rawURL)
+		return "", "", fmt.Errorf("unsupported Seednote note URL: %s", rawURL)
 	}
 	parsed, parseErr := url.Parse(rawURL)
 	if parseErr != nil {
@@ -188,22 +188,22 @@ func resolveNoteURL(rawURL string) (feedID, xsecToken string, err error) {
 	return feedID, xsecToken, nil
 }
 
-func extractRednoteURLFromText(text string) (string, error) {
+func extractSeednoteURLFromText(text string) (string, error) {
 	text = strings.TrimSpace(text)
-	match := rednoteURLInTextPattern.FindString(text)
+	match := seednoteURLInTextPattern.FindString(text)
 	if match == "" {
-		return "", fmt.Errorf("profile text must contain a supported xiaohongshu URL")
+		return "", fmt.Errorf("profile text must contain a supported seednote URL")
 	}
-	return sanitizeExtractedRednoteURL(match), nil
+	return sanitizeExtractedSeednoteURL(match), nil
 }
 
-func sanitizeExtractedRednoteURL(raw string) string {
+func sanitizeExtractedSeednoteURL(raw string) string {
 	return strings.TrimRight(strings.TrimSpace(raw), ".,;:!?)]}）】。！？；，、")
 }
 
 // --- Data mapping helpers ---
 
-func mapUserProfile(profile *xhs.UserProfile, sourceURL string) *PlatformProfile {
+func mapUserProfile(profile *seednote.UserProfile, sourceURL string) *PlatformProfile {
 	result := &PlatformProfile{
 		Name:      profile.UserBasicInfo.Nickname,
 		AvatarURL: profile.UserBasicInfo.Avatar,
@@ -229,15 +229,15 @@ func mapUserProfile(profile *xhs.UserProfile, sourceURL string) *PlatformProfile
 	// Map top posts.
 	posts := mapFeedsToPosts(profile.Feeds)
 	result.RawData["posts"] = posts
-	result.RawData["top_posts"] = selectTopRednotePosts(posts, rednoteTopPostLimit)
+	result.RawData["top_posts"] = selectTopSeednotePosts(posts, seednoteTopPostLimit)
 
 	return result
 }
 
-func mapFeedsToPosts(feeds []xhs.Feed) []RednotePost {
-	posts := make([]RednotePost, 0, len(feeds))
+func mapFeedsToPosts(feeds []seednote.Feed) []SeednotePost {
+	posts := make([]SeednotePost, 0, len(feeds))
 	for _, f := range feeds {
-		post := RednotePost{
+		post := SeednotePost{
 			Title:        f.NoteCard.DisplayTitle,
 			NoteID:       f.ID,
 			CoverURL:     f.NoteCard.Cover.URLDefault,
@@ -264,7 +264,7 @@ func parseCountString(s string) int {
 	}
 	n, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return NormalizeRednoteMetricCount(s)
+		return NormalizeSeednoteMetricCount(s)
 	}
 	switch {
 	case strings.Contains(s, "万"):
@@ -288,21 +288,21 @@ func extractHashtags(text string) []string {
 // --- Shared patterns and utilities ---
 
 var (
-	rednoteURLInTextPattern = regexp.MustCompile(`https?://((m\.|www\.)?xiaohongshu\.com|xhslink\.com)/[^\s"'<>，。！？；、]+`)
-	rednoteNoteIDPatterns   = []*regexp.Regexp{
+	seednoteURLInTextPattern = regexp.MustCompile(`https?://((m\.|www\.)?xiaohongshu\.com|xhslink\.com)/[^\s"'<>，。！？；、]+`)
+	seednoteNoteIDPatterns   = []*regexp.Regexp{
 		regexp.MustCompile(`/explore/([^/?#]+)`),
 		regexp.MustCompile(`/discovery/item/([^/?#]+)`),
 	}
 	hashtagPattern = regexp.MustCompile(`#([^\s#]{2,20})`)
 )
 
-const rednoteTopPostLimit = 5
+const seednoteTopPostLimit = 5
 
-func selectTopRednotePosts(posts []RednotePost, limit int) []RednotePost {
+func selectTopSeednotePosts(posts []SeednotePost, limit int) []SeednotePost {
 	if limit <= 0 || len(posts) == 0 {
 		return nil
 	}
-	ranked := make([]RednotePost, len(posts))
+	ranked := make([]SeednotePost, len(posts))
 	copy(ranked, posts)
 	sort.SliceStable(ranked, func(i, j int) bool {
 		return ranked[i].EngagementScore > ranked[j].EngagementScore
@@ -313,11 +313,11 @@ func selectTopRednotePosts(posts []RednotePost, limit int) []RednotePost {
 	return ranked
 }
 
-// ExtractRednoteNoteID extracts a Xiaohongshu note ID from URLs.
-func ExtractRednoteNoteID(raw string) string {
+// ExtractSeednoteNoteID extracts a Seednote note ID from URLs.
+func ExtractSeednoteNoteID(raw string) string {
 	raw = strings.ReplaceAll(raw, `/`, "/")
 	raw = strings.ReplaceAll(raw, `\/`, "/")
-	for _, pattern := range rednoteNoteIDPatterns {
+	for _, pattern := range seednoteNoteIDPatterns {
 		match := pattern.FindStringSubmatch(raw)
 		if len(match) >= 2 {
 			return strings.TrimSpace(match[1])
@@ -326,13 +326,13 @@ func ExtractRednoteNoteID(raw string) string {
 	return ""
 }
 
-// NormalizeRednoteMetricCount converts public Xiaohongshu metric text into an integer count.
-func NormalizeRednoteMetricCount(text string) int {
+// NormalizeSeednoteMetricCount converts public Seednote metric text into an integer count.
+func NormalizeSeednoteMetricCount(text string) int {
 	text = strings.ReplaceAll(strings.TrimSpace(text), ",", "")
 	if text == "" {
 		return 0
 	}
-	match := rednoteNumberPattern.FindString(text)
+	match := seednoteNumberPattern.FindString(text)
 	if match == "" {
 		return 0
 	}
@@ -349,12 +349,12 @@ func NormalizeRednoteMetricCount(text string) int {
 	return int(value)
 }
 
-var rednoteNumberPattern = regexp.MustCompile(`\d+(?:,\d{3})*(?:\.\d+)?`)
+var seednoteNumberPattern = regexp.MustCompile(`\d+(?:,\d{3})*(?:\.\d+)?`)
 
 // --- Types (kept for interface compatibility) ---
 
-// RednotePostMetrics holds public engagement counters.
-type RednotePostMetrics struct {
+// SeednotePostMetrics holds public engagement counters.
+type SeednotePostMetrics struct {
 	LikeCount    int  `json:"like_count"`
 	CollectCount int  `json:"collect_count"`
 	CommentCount int  `json:"comment_count"`
@@ -362,8 +362,8 @@ type RednotePostMetrics struct {
 	ViewCount    *int `json:"view_count,omitempty"`
 }
 
-// RednoteNoteContent holds parsed content from a note.
-type RednoteNoteContent struct {
+// SeednoteNoteContent holds parsed content from a note.
+type SeednoteNoteContent struct {
 	NoteID        string `json:"note_id"`
 	Title         string `json:"title"`
 	Description   string `json:"description"`

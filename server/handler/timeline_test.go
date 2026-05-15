@@ -56,7 +56,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	task1 := &model.Task{
 		ID:        "task-1",
 		UserID:    userID,
-		Type:      model.ScopeRednote,
+		Type:      model.ScopeSeednote,
 		Status:    model.TaskStatusCompleted,
 		Prompt:     "Test topic 1",
 		CreatedAt: time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC),
@@ -76,7 +76,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	task3 := &model.Task{
 		ID:        "task-3",
 		UserID:    "other-user",
-		Type:      model.ScopeRednote,
+		Type:      model.ScopeSeednote,
 		Status:    model.TaskStatusCompleted,
 		Prompt:     "Other user task",
 		CreatedAt: time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC),
@@ -93,7 +93,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	plan1 := &model.Plan{
 		ID:          "plan-1",
 		UserID:      userID,
-		Type:        model.ScopeRednote,
+		Type:        model.ScopeSeednote,
 		Title:       "Scheduled Plan",
 		Description: "A scheduled plan",
 		CronExpr:    "0 9 * * 1-5",

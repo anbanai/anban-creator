@@ -67,7 +67,7 @@ func TestPlanService_Create(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test channels for the user.
-	chID1 := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	chID1 := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
 	chID2 := createTestChannel(t, repo, "user-1", model.PlatformArticle)
 
 	tests := []struct {
@@ -158,7 +158,7 @@ func TestPlanService_GetByID(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a test channel and plan.
-	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
 	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -185,7 +185,7 @@ func TestPlanService_List(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a test channel for the user.
-	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
 	// Create a different channel for user-2.
 	chID2 := createTestChannel(t, repo, "user-2", model.PlatformArticle)
 
@@ -238,7 +238,7 @@ func TestPlanService_Update(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
 	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "old hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -280,7 +280,7 @@ func TestPlanService_Pause_Resume(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
 	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -323,7 +323,7 @@ func TestPlanService_Delete(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	chID := createTestChannel(t, repo, "user-1", model.PlatformRednote)
+	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
 	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
 	if err != nil {
 		t.Fatalf("create plan: %v", err)

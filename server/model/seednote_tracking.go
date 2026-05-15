@@ -3,29 +3,29 @@ package model
 import "time"
 
 const (
-	RednoteTrackingStatusWaitingDiscovery = "waiting_discovery"
-	RednoteTrackingStatusTracking         = "tracking"
-	RednoteTrackingStatusStopped          = "stopped"
-	RednoteTrackingStatusFailed           = "failed"
+	SeednoteTrackingStatusWaitingDiscovery = "waiting_discovery"
+	SeednoteTrackingStatusTracking         = "tracking"
+	SeednoteTrackingStatusStopped          = "stopped"
+	SeednoteTrackingStatusFailed           = "failed"
 )
 
 const (
-	RednoteStopReasonMaxDurationReached = "max_duration_reached"
-	RednoteStopReasonLowGrowth          = "low_growth"
-	RednoteStopReasonDiscoveryTimeout   = "discovery_timeout"
-	RednoteStopReasonTooManyFailures    = "too_many_failures"
-	RednoteStopReasonManualStop         = "manual_stop"
+	SeednoteStopReasonMaxDurationReached = "max_duration_reached"
+	SeednoteStopReasonLowGrowth          = "low_growth"
+	SeednoteStopReasonDiscoveryTimeout   = "discovery_timeout"
+	SeednoteStopReasonTooManyFailures    = "too_many_failures"
+	SeednoteStopReasonManualStop         = "manual_stop"
 )
 
 const (
-	RednoteTrackingMaxDays              = 14
-	RednoteDiscoveryMaxAttempts         = 7
-	RednoteTrackingMaxFailures          = 5
-	RednoteLowGrowthThreshold           = 3
-	RednoteLowGrowthConsecutiveCaptures = 3
+	SeednoteTrackingMaxDays              = 14
+	SeednoteDiscoveryMaxAttempts         = 7
+	SeednoteTrackingMaxFailures          = 5
+	SeednoteLowGrowthThreshold           = 3
+	SeednoteLowGrowthConsecutiveCaptures = 3
 )
 
-type RednotePostTracking struct {
+type SeednotePostTracking struct {
 	ID                        string     `gorm:"type:char(36);primaryKey" json:"id"`
 	TaskID                    string     `gorm:"type:char(36);uniqueIndex;not null" json:"task_id"`
 	UserID                    string     `gorm:"type:char(36);index;not null" json:"user_id"`
@@ -54,14 +54,14 @@ type RednotePostTracking struct {
 	UpdatedAt                 time.Time  `json:"updated_at"`
 }
 
-func (RednotePostTracking) TableName() string { return "rednote_post_trackings" }
+func (SeednotePostTracking) TableName() string { return "seednote_post_trackings" }
 
-type RednoteMetricSnapshot struct {
+type SeednoteMetricSnapshot struct {
 	ID           string    `gorm:"type:char(36);primaryKey" json:"id"`
-	TrackingID   string    `gorm:"type:char(36);uniqueIndex:idx_rednote_tracking_date,priority:1;index;not null" json:"tracking_id"`
+	TrackingID   string    `gorm:"type:char(36);uniqueIndex:idx_seednote_tracking_date,priority:1;index;not null" json:"tracking_id"`
 	TaskID       string    `gorm:"type:char(36);index;not null" json:"task_id"`
 	CapturedAt   time.Time `gorm:"index" json:"captured_at"`
-	CapturedDate string    `gorm:"type:char(10);uniqueIndex:idx_rednote_tracking_date,priority:2;not null" json:"captured_date"`
+	CapturedDate string    `gorm:"type:char(10);uniqueIndex:idx_seednote_tracking_date,priority:2;not null" json:"captured_date"`
 	LikeCount    int       `json:"like_count"`
 	CollectCount int       `json:"collect_count"`
 	CommentCount int       `json:"comment_count"`
@@ -71,8 +71,8 @@ type RednoteMetricSnapshot struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-func (RednoteMetricSnapshot) TableName() string { return "rednote_metric_snapshots" }
+func (SeednoteMetricSnapshot) TableName() string { return "seednote_metric_snapshots" }
 
-func RednoteCapturedDate(t time.Time) string {
+func SeednoteCapturedDate(t time.Time) string {
 	return t.Format("2006-01-02")
 }

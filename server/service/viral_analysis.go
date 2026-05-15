@@ -17,9 +17,9 @@ import (
 
 const ViralAnalysisTaskType = "viral:analyze"
 
-// ViralNoteFetcher abstracts fetching Xiaohongshu note content.
+// ViralNoteFetcher abstracts fetching Seednote note content.
 type ViralNoteFetcher interface {
-	FetchNoteContent(ctx context.Context, noteURL string) (*platform.RednoteNoteContent, error)
+	FetchNoteContent(ctx context.Context, noteURL string) (*platform.SeednoteNoteContent, error)
 }
 
 // ViralAnalysisService handles viral content analysis business logic.
@@ -172,13 +172,13 @@ func (s *ViralAnalysisService) ExecuteAnalysis(ctx context.Context, analysisID s
 	return s.CompleteAnalysis(ctx, analysisID, resultJSON)
 }
 
-func (s *ViralAnalysisService) analyzeWithLLM(ctx context.Context, content *platform.RednoteNoteContent) (json.RawMessage, error) {
+func (s *ViralAnalysisService) analyzeWithLLM(ctx context.Context, content *platform.SeednoteNoteContent) (json.RawMessage, error) {
 	noteData, err := json.Marshal(content)
 	if err != nil {
 		return nil, fmt.Errorf("marshal note content: %w", err)
 	}
 
-	systemPrompt := `你是小红书爆款内容分析专家。请从标题、封面、文案、标签、互动五个维度深度分析这篇笔记，返回严格的 JSON 格式。
+	systemPrompt := `你是种草笔记爆款内容分析专家。请从标题、封面、文案、标签、互动五个维度深度分析这篇笔记，返回严格的 JSON 格式。
 
 分析要求：
 1. 每个维度的 score 为 0-100 的整数

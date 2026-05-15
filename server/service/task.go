@@ -44,7 +44,7 @@ type TaskService struct {
 	pubsub             *RedisPubSub
 	pubsubCancel       context.CancelFunc // stops the listenCancelEvents goroutine
 	cancelFuncs        sync.Map           // taskID → context.CancelFunc
-	rednoteTrackingSvc PublishedTrackingService
+	seednoteTrackingSvc PublishedTrackingService
 }
 
 // NewTaskService creates a new TaskService.
@@ -94,8 +94,8 @@ func (s *TaskService) Close() {
 	}
 }
 
-func (s *TaskService) SetRednoteTrackingService(trackingSvc PublishedTrackingService) {
-	s.rednoteTrackingSvc = trackingSvc
+func (s *TaskService) SetSeednoteTrackingService(trackingSvc PublishedTrackingService) {
+	s.seednoteTrackingSvc = trackingSvc
 }
 
 // listenCancelEvents subscribes to Redis cancel events and triggers local
@@ -718,11 +718,11 @@ func (s *TaskService) setPublishedAndMaybeTrack(ctx context.Context, userID stri
 	if err := s.repo.Tasks().SetPublished(ctx, task.ID, published); err != nil {
 		return err
 	}
-	if !published || task.Type != model.PlatformRednote || s.rednoteTrackingSvc == nil {
+	if !published || task.Type != model.PlatformSeednote || s.seednoteTrackingSvc == nil {
 		return nil
 	}
-	if err := s.rednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, task.ID); err != nil {
-		return fmt.Errorf("ensure rednote tracking: %w", err)
+	if err := s.seednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, task.ID); err != nil {
+		return fmt.Errorf("ensure seednote tracking: %w", err)
 	}
 	return nil
 }

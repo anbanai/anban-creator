@@ -17,8 +17,8 @@ const (
 	TypeContentGenerate       = "content:generate"
 	TypePlanTrigger           = "plan:trigger"
 	TypeTaskCleanup           = "task:cleanup"
-	TypeRednoteDiscover       = "rednote:discover"
-	TypeRednoteCaptureMetrics = "rednote:capture_metrics"
+	TypeSeednoteDiscover       = "seednote:discover"
+	TypeSeednoteCaptureMetrics = "seednote:capture_metrics"
 	TypeViralAnalysis         = "viral:analyze"
 )
 
@@ -84,8 +84,8 @@ type PlanTriggerHandler func(ctx context.Context, planID string) error
 // TaskCleanupHandler is the function signature for handling task cleanup tasks.
 type TaskCleanupHandler func(ctx context.Context) error
 
-// RednoteTrackingHandler is the function signature for RedNote tracking jobs.
-type RednoteTrackingHandler func(ctx context.Context, trackingID string) error
+// SeednoteTrackingHandler is the function signature for SeedNote tracking jobs.
+type SeednoteTrackingHandler func(ctx context.Context, trackingID string) error
 
 // ViralAnalysisHandler is the function signature for viral analysis jobs.
 type ViralAnalysisHandler func(ctx context.Context, analysisID string) error
@@ -95,8 +95,8 @@ func NewTaskProcessor(
 	contentHandler ContentGenerateHandler,
 	planHandler PlanTriggerHandler,
 	cleanupHandler TaskCleanupHandler,
-	rednoteDiscoverHandler RednoteTrackingHandler,
-	rednoteCaptureHandler RednoteTrackingHandler,
+	seednoteDiscoverHandler SeednoteTrackingHandler,
+	seednoteCaptureHandler SeednoteTrackingHandler,
 	viralAnalysisHandler ViralAnalysisHandler,
 	redisAddr, redisPassword string,
 	redisDB int,
@@ -138,30 +138,30 @@ func NewTaskProcessor(
 		return cleanupHandler(ctx)
 	})
 
-	mux.HandleFunc(TypeRednoteDiscover, func(ctx context.Context, t *asynq.Task) error {
-		trackingID, err := parseRednoteTrackingPayload(t.Payload())
+	mux.HandleFunc(TypeSeednoteDiscover, func(ctx context.Context, t *asynq.Task) error {
+		trackingID, err := parseSeednoteTrackingPayload(t.Payload())
 		if err != nil {
-			logger.Error().Err(err).Msg("failed to unmarshal rednote discover payload")
+			logger.Error().Err(err).Msg("failed to unmarshal seednote discover payload")
 			return err
 		}
-		logger.Info().Str("tracking_id", trackingID).Msg("processing rednote discover task")
-		if rednoteDiscoverHandler == nil {
-			return fmt.Errorf("rednote discover handler unavailable")
+		logger.Info().Str("tracking_id", trackingID).Msg("processing seednote discover task")
+		if seednoteDiscoverHandler == nil {
+			return fmt.Errorf("seednote discover handler unavailable")
 		}
-		return rednoteDiscoverHandler(ctx, trackingID)
+		return seednoteDiscoverHandler(ctx, trackingID)
 	})
 
-	mux.HandleFunc(TypeRednoteCaptureMetrics, func(ctx context.Context, t *asynq.Task) error {
-		trackingID, err := parseRednoteTrackingPayload(t.Payload())
+	mux.HandleFunc(TypeSeednoteCaptureMetrics, func(ctx context.Context, t *asynq.Task) error {
+		trackingID, err := parseSeednoteTrackingPayload(t.Payload())
 		if err != nil {
-			logger.Error().Err(err).Msg("failed to unmarshal rednote capture payload")
+			logger.Error().Err(err).Msg("failed to unmarshal seednote capture payload")
 			return err
 		}
-		logger.Info().Str("tracking_id", trackingID).Msg("processing rednote capture metrics task")
-		if rednoteCaptureHandler == nil {
-			return fmt.Errorf("rednote capture handler unavailable")
+		logger.Info().Str("tracking_id", trackingID).Msg("processing seednote capture metrics task")
+		if seednoteCaptureHandler == nil {
+			return fmt.Errorf("seednote capture handler unavailable")
 		}
-		return rednoteCaptureHandler(ctx, trackingID)
+		return seednoteCaptureHandler(ctx, trackingID)
 	})
 
 	mux.HandleFunc(TypeViralAnalysis, func(ctx context.Context, t *asynq.Task) error {
@@ -212,7 +212,7 @@ func NewTaskProcessor(
 	return &TaskProcessor{server: srv, mux: mux}
 }
 
-func parseRednoteTrackingPayload(payloadBytes []byte) (string, error) {
+func parseSeednoteTrackingPayload(payloadBytes []byte) (string, error) {
 	var payload struct {
 		TrackingID string `json:"tracking_id"`
 	}
@@ -236,7 +236,7 @@ func (tp *TaskProcessor) Shutdown() {
 }
 
 // validPlanTypes defines the allowed content types for plans and tasks.
-var validPlanTypes = []string{model.ScopeArticle, model.ScopeXls, model.ScopeRednote}
+var validPlanTypes = []string{model.ScopeArticle, model.ScopeXls, model.ScopeSeednote}
 
 // IsValidType checks if a content type is valid.
 func IsValidType(t string) bool {

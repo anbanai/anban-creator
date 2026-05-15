@@ -35,7 +35,7 @@ import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { Badge } from '@/components/ui/badge'
 
 const platformOptions = [
-  { value: 'rednote', label: '小红书' },
+  { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
   { value: 'xls', label: '小绿书' },
 ]
@@ -109,7 +109,7 @@ export default function ChannelsPage() {
   })
 
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
-  const isRednote = selectedPlatform === 'rednote'
+  const isSeednote = selectedPlatform === 'seednote'
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
@@ -223,7 +223,7 @@ export default function ChannelsPage() {
 
   // Auto-analyze reference image to fill visual style
   useEffect(() => {
-    if (!modalOpen || !referenceImageUrl || !isRednote) return
+    if (!modalOpen || !referenceImageUrl || !isSeednote) return
     if (styleManuallyEditedRef.current) return
     const timer = setTimeout(async () => {
       setAnalyzingStyle(true)
@@ -240,7 +240,7 @@ export default function ChannelsPage() {
       }
     }, 1000)
     return () => clearTimeout(timer)
-  }, [modalOpen, referenceImageUrl, isRednote, form])
+  }, [modalOpen, referenceImageUrl, isSeednote, form])
 
   // Reset manual edit flag when style is cleared or dialog reopens
   useEffect(() => {
@@ -250,7 +250,7 @@ export default function ChannelsPage() {
   async function handleFetchProfile(url: string, options?: { silent?: boolean }) {
     if (!url || !selectedPlatform) return
     if (!hasSupportedProfileUrl(url)) {
-      setProfileFetchHint('请先输入包含小红书链接的主页链接或分享文本')
+      setProfileFetchHint('请先输入包含种草笔记链接的主页链接或分享文本')
       return
     }
     setFetchingProfile(true)
@@ -309,9 +309,9 @@ export default function ChannelsPage() {
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
-      // Show template recommendations for rednote channels
+      // Show template recommendations for seednote channels
       const channel = result.channel
-      if (channel.platform === 'rednote' && result.recommended_templates && result.recommended_templates.length > 0) {
+      if (channel.platform === 'seednote' && result.recommended_templates && result.recommended_templates.length > 0) {
         setRecommendedTemplates(result.recommended_templates)
       }
     },
@@ -424,7 +424,7 @@ export default function ChannelsPage() {
     if (!payload.image_ratio) {
       if (payload.platform === 'article') {
         payload.image_ratio = '16:9'
-      } else if (payload.platform === 'rednote' || payload.platform === 'xls') {
+      } else if (payload.platform === 'seednote' || payload.platform === 'xls') {
         payload.image_ratio = '3:4'
       }
     }
@@ -447,9 +447,9 @@ export default function ChannelsPage() {
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
 
-  const { data: xhsStatus } = useQuery({
-    queryKey: queryKeys.channels.xhsLoginStatus,
-    queryFn: () => api.channels.xhsLoginStatus(),
+  const { data: seednoteStatus } = useQuery({
+    queryKey: queryKeys.channels.seednoteLoginStatus,
+    queryFn: () => api.channels.seednoteLoginStatus(),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   })
@@ -463,10 +463,10 @@ export default function ChannelsPage() {
         </Button>
       </PageHeader>
 
-      {/* XHS login status indicator */}
-      {xhsStatus && (
-        <Badge variant={xhsStatus.available && xhsStatus.logged_in ? 'default' : 'secondary'} className="text-xs">
-          小红书 {xhsStatus.available ? (xhsStatus.logged_in ? '已连接' : '未登录') : '未配置'}
+      {/* Seednote login status indicator */}
+      {seednoteStatus && (
+        <Badge variant={seednoteStatus.available && seednoteStatus.logged_in ? 'default' : 'secondary'} className="text-xs">
+          种草笔记 {seednoteStatus.available ? (seednoteStatus.logged_in ? '已连接' : '未登录') : '未配置'}
         </Badge>
       )}
 
@@ -596,7 +596,7 @@ export default function ChannelsPage() {
                       <div className="flex gap-2 flex-1 min-w-0 overflow-hidden">
                         <Textarea
                           className="flex-1 min-w-0 break-all"
-                          placeholder="粘贴小红书主页链接或分享文本..."
+                          placeholder="粘贴种草笔记主页链接或分享文本..."
                           {...field}
                         />
                         {currentPlatformConfig?.supports_auto_fetch && (
@@ -615,7 +615,7 @@ export default function ChannelsPage() {
                   </div>
                   {currentPlatformConfig?.supports_auto_fetch && (
                     <FormDescription>
-                      {profileFetchHint || '粘贴小红书分享文本后会自动提取链接、分析账号和代表作品。'}
+                      {profileFetchHint || '粘贴种草笔记分享文本后会自动提取链接、分析账号和代表作品。'}
                     </FormDescription>
                   )}
                   <FormMessage />
@@ -752,8 +752,8 @@ export default function ChannelsPage() {
 
                   <FormField control={form.control} name="style" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{isRednote ? '视觉风格' : '写作风格'}</FormLabel>
-                      {isRednote ? (
+                      <FormLabel>{isSeednote ? '视觉风格' : '写作风格'}</FormLabel>
+                      {isSeednote ? (
                         <FormControl>
                           <div className="relative">
                             <Textarea
@@ -789,12 +789,12 @@ export default function ChannelsPage() {
                           </SelectContent>
                         </Select>
                       )}
-                      <FormDescription>{isRednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
+                      <FormDescription>{isSeednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />
 
-                  {!isRednote && <FormField control={form.control} name="theme" render={({ field }) => (
+                  {!isSeednote && <FormField control={form.control} name="theme" render={({ field }) => (
                     <FormItem>
                       <FormLabel>主题</FormLabel>
                       <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
@@ -814,7 +814,7 @@ export default function ChannelsPage() {
                     </FormItem>
                   )} />}
 
-                  {!isRednote && (
+                  {!isSeednote && (
                     <FormField control={form.control} name="layout" render={({ field }) => (
                       <FormItem>
                         <FormLabel>默认布局</FormLabel>
@@ -834,7 +834,7 @@ export default function ChannelsPage() {
                     )} />
                   )}
 
-                  {!isRednote && (
+                  {!isSeednote && (
                     <FormField control={form.control} name="image_preset" render={({ field }) => (
                       <FormItem>
                         <FormLabel>图片预设</FormLabel>
@@ -921,7 +921,7 @@ export default function ChannelsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Template recommendation after rednote channel creation */}
+      {/* Template recommendation after seednote channel creation */}
       {recommendedTemplates.length > 0 && (
         <TemplateRecommend
           templates={recommendedTemplates}

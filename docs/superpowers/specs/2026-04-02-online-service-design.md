@@ -5,7 +5,7 @@
 
 ## Problem
 
-Anban 智能创作助手's content generation capabilities (小红书, 公众号图文, 小绿书) are only accessible via CLI within Claude Code. This limits usage to developers with local setup. The goal is to make these capabilities available as a multi-user SaaS web service.
+Anban 智能创作助手's content generation capabilities (种草笔记, 公众号图文, 小绿书) are only accessible via CLI within Claude Code. This limits usage to developers with local setup. The goal is to make these capabilities available as a multi-user SaaS web service.
 
 ## Design Decisions
 

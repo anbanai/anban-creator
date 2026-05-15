@@ -1,15 +1,15 @@
-# 小红书尾图独立规范设计
+# 种草笔记尾图独立规范设计
 
 ## 背景
 
-当前 `skills/rednote-visual-design/references/content.md` 中，尾图（尾页）规范与内容图规范混在一起（第 52-67 行）。尾图与内容图的职责完全不同：内容图服务完读率，尾图服务互动率。尾图需要根据不同运营目的（关注/评论/引流）采用不同的设计策略，因此需要拆分为独立规范。
+当前 `skills/seednote-visual-design/references/content.md` 中，尾图（尾页）规范与内容图规范混在一起（第 52-67 行）。尾图与内容图的职责完全不同：内容图服务完读率，尾图服务互动率。尾图需要根据不同运营目的（关注/评论/引流）采用不同的设计策略，因此需要拆分为独立规范。
 
 ## 设计决策
 
 | 决策 | 结论 | 理由 |
 |------|------|------|
 | 文件结构 | 新建 `references/tail.md` | 与 cover.md/content.md 三者对称，职责清晰 |
-| 尾图类型 | 3 种：关注、评论、引流 | 覆盖小红书核心运营场景 |
+| 尾图类型 | 3 种：关注、评论、引流 | 覆盖种草笔记核心运营场景 |
 | 类型选择 | 根据内容主题自动匹配 | 减少用户干预，agent 自动决策 |
 | 引流范围 | 站内 + 私域，两种都支持 | 根据账号配置决定具体方向 |
 | 文件命名 | `tail.png`（单独生成） | 与 `cover.png` 对称，语义清晰 |
@@ -19,13 +19,13 @@
 
 ### 新增文件
 
-- `skills/rednote-visual-design/references/tail.md` — 尾图设计规范
+- `skills/seednote-visual-design/references/tail.md` — 尾图设计规范
 
 ### 修改文件
 
-- `skills/rednote-visual-design/SKILL.md` — 新增"尾图设计规范"指向 tail.md，更新 CLI 命令部分
-- `skills/rednote-visual-design/references/content.md` — 删除尾页设计规范（第 52-67 行），更新 `--count` 为 N-2，更新 image-plan.md 模板中尾图部分改为引用 tail.md
-- `agents/rednote.md` — 更新图片检查逻辑：`image_0{N-1}.png` 改为 `tail.png`，`--count N-1` 改为 `--count N-2`
+- `skills/seednote-visual-design/SKILL.md` — 新增"尾图设计规范"指向 tail.md，更新 CLI 命令部分
+- `skills/seednote-visual-design/references/content.md` — 删除尾页设计规范（第 52-67 行），更新 `--count` 为 N-2，更新 image-plan.md 模板中尾图部分改为引用 tail.md
+- `agents/seednote.md` — 更新图片检查逻辑：`image_0{N-1}.png` 改为 `tail.png`，`--count N-1` 改为 `--count N-2`
 
 ## 自动匹配规则
 
@@ -93,7 +93,7 @@ Agent 在 image-plan 阶段根据内容主题自动判断，无需用户指定�
 尾图单独生成，使用类型专属的 prompt 结构：
 
 ```
-页面类型：尾图（{tail_type}），小红书信息流最后一页
+页面类型：尾图（{tail_type}），种草笔记信息流最后一页
 风格延续：{style}（与封面保持一致）
 
 平台规范：

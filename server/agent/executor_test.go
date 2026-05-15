@@ -76,16 +76,16 @@ func TestBuildAppConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "rednote config with image API",
+			name: "seednote config with image API",
 			ch: &model.Channel{
-				Platform: model.ScopeRednote,
-				Name:     "RedNote Account",
+				Platform: model.ScopeSeednote,
+				Name:     "SeedNote Account",
 				Style:    "cute-doodle",
 			},
 			wantErr: false,
 			check: func(t *testing.T, cfg map[string]any) {
-				if cfg["name"] != "RedNote Account" {
-					t.Errorf("name = %v, want RedNote Account", cfg["name"])
+				if cfg["name"] != "SeedNote Account" {
+					t.Errorf("name = %v, want SeedNote Account", cfg["name"])
 				}
 			},
 		},
@@ -167,12 +167,12 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 			wantContentSize: "3:4",
 		},
 		{
-			name:     "rednote defaults",
-			platform: model.ScopeRednote,
+			name:     "seednote defaults",
+			platform: model.ScopeSeednote,
 			imageAPICfg: &srvconfig.ImageAPIConfig{
 				Sizes: srvconfig.SizesConfig{
-					RednoteCover:   "3:4",
-					RednoteContent: "3:4",
+					SeednoteCover:   "3:4",
+					SeednoteContent: "3:4",
 				},
 			},
 			wantCoverSize:   "3:4",
@@ -233,9 +233,9 @@ func getPlatformSizes(cfg *appconfig.Config, platform string) (cover, content st
 		return cfg.Wechat.Article.Cover.Image.Size, cfg.Wechat.Article.Content.Image.Size
 	case model.ScopeXls:
 		return cfg.Wechat.Xls.Cover.Image.Size, cfg.Wechat.Xls.Content.Image.Size
-	case model.ScopeRednote:
-		if cfg.Rednote != nil {
-			return cfg.Rednote.Cover.Image.Size, cfg.Rednote.Content.Image.Size
+	case model.ScopeSeednote:
+		if cfg.Seednote != nil {
+			return cfg.Seednote.Cover.Image.Size, cfg.Seednote.Content.Image.Size
 		}
 	}
 	return "", ""
@@ -246,8 +246,8 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 		Sizes: srvconfig.SizesConfig{
 			ArticleCover:   "16:9",
 			ArticleContent: "16:9",
-			RednoteCover:   "3:4",
-			RednoteContent: "3:4",
+			SeednoteCover:   "3:4",
+			SeednoteContent: "3:4",
 		},
 	}
 
@@ -298,7 +298,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 		{
 			name: "task ratio without channel ratio overrides YAML",
 			channel: &model.Channel{
-				Platform:   model.ScopeRednote,
+				Platform:   model.ScopeSeednote,
 				Name:       "Test",
 				ImageRatio: "",
 			},
@@ -334,8 +334,8 @@ func TestTaskTypeToAgent(t *testing.T) {
 	}{
 		{model.ScopeArticle, "wechatarticle"},
 		{model.ScopeXls, "wechatxls"},
-		{model.ScopeRednote, "rednote"},
-		{"unknown", "rednote"},
+		{model.ScopeSeednote, "seednote"},
+		{"unknown", "seednote"},
 	}
 
 	for _, tt := range tests {
@@ -352,7 +352,7 @@ func TestDefaultMaxTurns(t *testing.T) {
 	maxTurns := map[string]int{
 		"article": 100,
 		"xls":     50,
-		"rednote": 60,
+		"seednote": 60,
 	}
 	tests := []struct {
 		taskType string
@@ -360,7 +360,7 @@ func TestDefaultMaxTurns(t *testing.T) {
 	}{
 		{model.ScopeArticle, 100},
 		{model.ScopeXls, 50},
-		{model.ScopeRednote, 60},
+		{model.ScopeSeednote, 60},
 		{"unknown", 40},
 	}
 
@@ -442,9 +442,9 @@ func TestCountMeaningfulFiles(t *testing.T) {
 			want: 2,
 		},
 		{
-			name: "rednote archived files",
+			name: "seednote archived files",
 			setup: func(t *testing.T, dir string) {
-				archiveDir := filepath.Join(dir, "output", "rednote", "测试标题")
+				archiveDir := filepath.Join(dir, "output", "seednote", "测试标题")
 				os.MkdirAll(archiveDir, 0755)
 				os.WriteFile(filepath.Join(archiveDir, "content.md"), []byte("# 测试标题"), 0644)
 				os.WriteFile(filepath.Join(archiveDir, "image-plan.md"), []byte("# 图片内容规划"), 0644)
@@ -550,11 +550,11 @@ func TestBuildUserPrompt(t *testing.T) {
 		wantContains  []string
 	}{
 		{
-			name:         "rednote with topic references agent",
-			taskType:     "rednote",
+			name:         "seednote with topic references agent",
+			taskType:     "seednote",
 			topic:        "春季穿搭",
-			agentName:    "rednote",
-			wantContains: []string{"Use the rednote agent", "春季穿搭"},
+			agentName:    "seednote",
+			wantContains: []string{"Use the seednote agent", "春季穿搭"},
 		},
 		{
 			name:         "article with topic references agent",
@@ -564,26 +564,26 @@ func TestBuildUserPrompt(t *testing.T) {
 			wantContains: []string{"Use the wechatarticle agent", "时间管理技巧"},
 		},
 		{
-			name:         "unknown task type defaults to rednote agent",
+			name:         "unknown task type defaults to seednote agent",
 			taskType:     "other",
 			topic:        "随便写写",
-			agentName:    "rednote",
-			wantContains: []string{"Use the rednote agent", "随便写写"},
+			agentName:    "seednote",
+			wantContains: []string{"Use the seednote agent", "随便写写"},
 		},
 		{
 			name:         "no topic triggers autonomous mode",
-			taskType:     "rednote",
+			taskType:     "seednote",
 			topic:        "",
-			agentName:    "rednote",
-			wantContains: []string{"Use the rednote agent", "research and create content"},
+			agentName:    "seednote",
+			wantContains: []string{"Use the seednote agent", "research and create content"},
 		},
 		{
 			name:          "with topic and video flag",
-			taskType:      "rednote",
+			taskType:      "seednote",
 			topic:         "旅行分享",
-			agentName:     "rednote",
+			agentName:     "seednote",
 			generateVideo: true,
-			wantContains:  []string{"Use the rednote agent", "旅行分享", "Merge the generated images"},
+			wantContains:  []string{"Use the seednote agent", "旅行分享", "Merge the generated images"},
 		},
 		{
 			name:          "no topic with video flag",
@@ -594,7 +594,7 @@ func TestBuildUserPrompt(t *testing.T) {
 			wantContains:  []string{"Use the wechatxls agent", "Merge the generated images"},
 		},		{
 			name:         "empty agent name still produces prompt",
-			taskType:     "rednote",
+			taskType:     "seednote",
 			topic:        "test topic",
 			agentName:    "",
 			wantContains:  []string{"Use the  agent", "test topic"},

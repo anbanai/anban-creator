@@ -42,7 +42,7 @@ type Services struct {
 	CreditService           *service.CreditService
 	PlanHandler             *handler.PlanHandler
 	TaskHandler             *handler.TaskHandler
-	RednoteAnalyticsHandler *handler.RednoteAnalyticsHandler
+	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	AgentHandler            *handler.AgentHandler
 	CreditHandler           *handler.CreditHandler
 	ChannelHandler          *handler.ChannelHandler
@@ -213,11 +213,11 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	// ---------------------------------------------------------------------------
-	// XHS login status
+	// Seednote login status
 	// ---------------------------------------------------------------------------
 
 	if svc.ChannelHandler != nil {
-		apiV1.Get("/xhs/login-status", svc.ChannelHandler.XHSLoginStatus)
+		apiV1.Get("/seednote/login-status", svc.ChannelHandler.SeednoteLoginStatus)
 	}
 
 	// ---------------------------------------------------------------------------
@@ -260,8 +260,8 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks", svc.TaskHandler.List)
 		apiV1.Post("/tasks/files/zip", svc.TaskHandler.DownloadTasksZip)
 		apiV1.Get("/tasks/:id", svc.TaskHandler.GetByID)
-		if svc.RednoteAnalyticsHandler != nil {
-			apiV1.Get("/tasks/:id/rednote-analytics", svc.RednoteAnalyticsHandler.GetTaskAnalytics)
+		if svc.SeednoteAnalyticsHandler != nil {
+			apiV1.Get("/tasks/:id/seednote-analytics", svc.SeednoteAnalyticsHandler.GetTaskAnalytics)
 		}
 		apiV1.Delete("/tasks/:id", svc.TaskHandler.Delete)
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)

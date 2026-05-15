@@ -22,7 +22,7 @@ var (
 var validPlatforms = map[string]bool{
 	model.PlatformArticle: true,
 	model.PlatformXLS:     true,
-	model.PlatformRednote: true,
+	model.PlatformSeednote: true,
 }
 
 // ChannelService handles channel CRUD operations with ownership verification.

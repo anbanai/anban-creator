@@ -12,7 +12,7 @@ import EmptyState from '@/components/EmptyState'
 const typeOptions: { value: string; label: string }[] = [
   { value: '', label: '全部类型' },
   { value: 'poster', label: '海报' },
-  { value: 'rednote', label: '小红书' },
+  { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
   { value: 'xls', label: '小绿书' },
 ]

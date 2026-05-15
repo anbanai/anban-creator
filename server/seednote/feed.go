@@ -1,4 +1,4 @@
-package xhs
+package seednote
 
 import (
 	"context"
@@ -34,7 +34,7 @@ func (c *Client) ListFeeds(ctx context.Context) ([]Feed, error) {
 	return result.Data, nil
 }
 
-// SearchFeeds searches XHS by keyword. Requires an active login session.
+// SearchFeeds searches Seednote by keyword. Requires an active login session.
 func (c *Client) SearchFeeds(ctx context.Context, req *SearchRequest) ([]Feed, error) {
 	if req.Keyword == "" {
 		return nil, fmt.Errorf("keyword is required")

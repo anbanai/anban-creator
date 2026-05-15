@@ -8,7 +8,7 @@ export const queryKeys = {
     details: (filter?: string) => ['channel-details', filter] as const,
     detail: (id: string) => ['channel', id] as const,
     platformConfigs: ['platform-configs'] as const,
-    xhsLoginStatus: ['xhs', 'login-status'] as const,
+    seednoteLoginStatus: ['seednote', 'login-status'] as const,
   },
   plans: {
     all: ['plans'] as const,
@@ -20,7 +20,7 @@ export const queryKeys = {
     list: (filters?: { status?: string; channel_id?: string }) => ['tasks', filters] as const,
     detail: (id: string) => ['task', id] as const,
     files: (id: string) => ['task-files', id] as const,
-    rednoteAnalytics: (id: string) => ['task', id, 'rednote-analytics'] as const,
+    seednoteAnalytics: (id: string) => ['task', id, 'seednote-analytics'] as const,
   },
   timeline: {
     range: (from: string, to: string, filters?: Record<string, string>) =>

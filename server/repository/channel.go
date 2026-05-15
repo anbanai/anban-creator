@@ -22,7 +22,7 @@ type ChannelStats struct {
 // ChannelListOptions for filtering channel list queries.
 type ChannelListOptions struct {
 	Status   string // filter by status (active, archived)
-	Platform string // filter by platform (article, xls, rednote)
+	Platform string // filter by platform (article, xls, seednote)
 }
 
 // ChannelRepository defines the interface for channel data access.

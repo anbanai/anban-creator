@@ -8,48 +8,48 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/royalrick/anbanwriter/server/xhs"
+	"github.com/royalrick/anbanwriter/server/seednote"
 )
 
-// NOTE: TestExtractRednoteNoteID and TestNormalizeRednoteMetricCount are in rednote_metrics_test.go.
+// NOTE: TestExtractSeednoteNoteID and TestNormalizeSeednoteMetricCount are in seednote_metrics_test.go.
 
-func TestRednoteFetchProfileRejectsTextWithoutSupportedURL(t *testing.T) {
-	_, err := NewRednoteProvider(nil).FetchProfile(context.Background(), "这里只是一段没有链接的分享文案")
+func TestSeednoteFetchProfileRejectsTextWithoutSupportedURL(t *testing.T) {
+	_, err := NewSeednoteProvider(nil).FetchProfile(context.Background(), "这里只是一段没有链接的分享文案")
 	if err == nil {
 		t.Fatal("FetchProfile() error = nil, want error")
 	}
-	if err.Error() != "profile text must contain a supported xiaohongshu URL" {
+	if err.Error() != "profile text must contain a supported seednote URL" {
 		t.Fatalf("FetchProfile() error = %q, want supported URL hint", err.Error())
 	}
 }
 
-func TestExtractRednoteURLFromShareText(t *testing.T) {
-	got, err := extractRednoteURLFromText("12 分享给你一个账号 https://xhslink.com/a/b?token=1，复制打开看看")
+func TestExtractSeednoteURLFromShareText(t *testing.T) {
+	got, err := extractSeednoteURLFromText("12 分享给你一个账号 https://xhslink.com/a/b?token=1，复制打开看看")
 	if err != nil {
-		t.Fatalf("extractRednoteURLFromText() error = %v", err)
+		t.Fatalf("extractSeednoteURLFromText() error = %v", err)
 	}
 	if got != "https://xhslink.com/a/b?token=1" {
-		t.Fatalf("extractRednoteURLFromText() = %q", got)
+		t.Fatalf("extractSeednoteURLFromText() = %q", got)
 	}
 }
 
-func TestExtractRednoteURLFromTextStartingWithURL(t *testing.T) {
-	got, err := extractRednoteURLFromText("https://www.xiaohongshu.com/user/profile/abc?xsec_token=test 这个账号很适合参考")
+func TestExtractSeednoteURLFromTextStartingWithURL(t *testing.T) {
+	got, err := extractSeednoteURLFromText("https://www.xiaohongshu.com/user/profile/abc?xsec_token=test 这个账号很适合参考")
 	if err != nil {
-		t.Fatalf("extractRednoteURLFromText() error = %v", err)
+		t.Fatalf("extractSeednoteURLFromText() error = %v", err)
 	}
 	if got != "https://www.xiaohongshu.com/user/profile/abc?xsec_token=test" {
-		t.Fatalf("extractRednoteURLFromText() = %q", got)
+		t.Fatalf("extractSeednoteURLFromText() = %q", got)
 	}
 }
 
-func TestSelectTopRednotePostsRanksByEngagement(t *testing.T) {
-	posts := []RednotePost{
+func TestSelectTopSeednotePostsRanksByEngagement(t *testing.T) {
+	posts := []SeednotePost{
 		{Title: "first", LikeCount: 10, EngagementScore: 10},
 		{Title: "best", LikeCount: 20, CollectCount: 3, CommentCount: 2, EngagementScore: 25},
 		{Title: "middle", LikeCount: 12, EngagementScore: 12},
 	}
-	got := selectTopRednotePosts(posts, 2)
+	got := selectTopSeednotePosts(posts, 2)
 	if len(got) != 2 {
 		t.Fatalf("len(top posts) = %d, want 2", len(got))
 	}
@@ -61,9 +61,9 @@ func TestSelectTopRednotePostsRanksByEngagement(t *testing.T) {
 	}
 }
 
-// --- Integration tests with mock XHS sidecar ---
+// --- Integration tests with mock Seednote sidecar ---
 
-func setupMockXHSServer() (*httptest.Server, *xhs.Client) {
+func setupMockSeednoteServer() (*httptest.Server, *seednote.Client) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -72,35 +72,35 @@ func setupMockXHSServer() (*httptest.Server, *xhs.Client) {
 
 	mux.HandleFunc("/api/v1/user/profile", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(xhs.APIResponse[xhs.UserProfile]{
+		json.NewEncoder(w).Encode(seednote.APIResponse[seednote.UserProfile]{
 			Success: true,
-			Data: xhs.UserProfile{
-				UserBasicInfo: xhs.UserBasicInfo{
+			Data: seednote.UserProfile{
+				UserBasicInfo: seednote.UserBasicInfo{
 					Nickname: "测试用户",
 					RedID:    "red_test_123",
 					Desc:     "专注 AI 创作领域",
 					Avatar:   "https://example.com/avatar.jpg",
 				},
-				Interactions: []xhs.UserInteractions{
+				Interactions: []seednote.UserInteractions{
 					{Type: "follows", Name: "关注", Count: "100"},
 					{Type: "fans", Name: "粉丝", Count: "5000"},
 					{Type: "interaction", Name: "获赞与收藏", Count: "1.2万"},
 				},
-				Feeds: []xhs.Feed{
+				Feeds: []seednote.Feed{
 					{
 						ID: "feed1", XsecToken: "token1",
-						NoteCard: xhs.NoteCard{
+						NoteCard: seednote.NoteCard{
 							DisplayTitle: "爆款笔记",
-							User:         xhs.User{UserID: "u1", Nickname: "author1"},
-							InteractInfo: xhs.InteractInfo{LikedCount: "1.5万", CollectedCount: "8000", CommentCount: "500"},
+							User:         seednote.User{UserID: "u1", Nickname: "author1"},
+							InteractInfo: seednote.InteractInfo{LikedCount: "1.5万", CollectedCount: "8000", CommentCount: "500"},
 						},
 					},
 					{
 						ID: "feed2", XsecToken: "token2",
-						NoteCard: xhs.NoteCard{
+						NoteCard: seednote.NoteCard{
 							DisplayTitle: "普通笔记",
-							User:         xhs.User{UserID: "u2", Nickname: "author2"},
-							InteractInfo: xhs.InteractInfo{LikedCount: "100", CollectedCount: "50", CommentCount: "10"},
+							User:         seednote.User{UserID: "u2", Nickname: "author2"},
+							InteractInfo: seednote.InteractInfo{LikedCount: "100", CollectedCount: "50", CommentCount: "10"},
 						},
 					},
 				},
@@ -110,22 +110,22 @@ func setupMockXHSServer() (*httptest.Server, *xhs.Client) {
 
 	mux.HandleFunc("/api/v1/feeds/detail", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(xhs.APIResponse[xhs.FeedDetail]{
+		json.NewEncoder(w).Encode(seednote.APIResponse[seednote.FeedDetail]{
 			Success: true,
-			Data: xhs.FeedDetail{
-				Note: xhs.FeedNote{
+			Data: seednote.FeedDetail{
+				Note: seednote.FeedNote{
 					NoteID: "note123",
 					Title:  "测试笔记标题",
 					Desc:   "这是一篇关于 #AI写作 的笔记内容",
 					Type:   "normal",
-					User:   xhs.User{UserID: "u1", Nickname: "测试作者"},
-					InteractInfo: xhs.InteractInfo{LikedCount: "500", CollectedCount: "200", CommentCount: "50", SharedCount: "30"},
-					ImageList: []xhs.DetailImage{
+					User:   seednote.User{UserID: "u1", Nickname: "测试作者"},
+					InteractInfo: seednote.InteractInfo{LikedCount: "500", CollectedCount: "200", CommentCount: "50", SharedCount: "30"},
+					ImageList: []seednote.DetailImage{
 						{Width: 1080, Height: 1440, URLDefault: "https://example.com/img1.jpg"},
 					},
 				},
-				Comments: xhs.CommentList{
-					List:    []xhs.Comment{},
+				Comments: seednote.CommentList{
+					List:    []seednote.Comment{},
 					HasMore: false,
 				},
 			},
@@ -134,17 +134,17 @@ func setupMockXHSServer() (*httptest.Server, *xhs.Client) {
 
 	mux.HandleFunc("/api/v1/login/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(xhs.LoginStatusResponse{Success: true, LoggedIn: true})
+		json.NewEncoder(w).Encode(seednote.LoginStatusResponse{Success: true, LoggedIn: true})
 	})
 
 	server := httptest.NewServer(mux)
-	client := xhs.NewClient(server.URL, 0)
+	client := seednote.NewClient(server.URL, 0)
 	return server, client
 }
 
 func TestFetchProfileViaSDK(t *testing.T) {
-	_, client := setupMockXHSServer()
-	provider := NewRednoteProvider(client)
+	_, client := setupMockSeednoteServer()
+	provider := NewSeednoteProvider(client)
 
 	profile, err := provider.FetchProfile(context.Background(), "https://www.xiaohongshu.com/user/profile/test_user?xsec_token=abc")
 	if err != nil {
@@ -163,7 +163,7 @@ func TestFetchProfileViaSDK(t *testing.T) {
 		t.Fatalf("RawData[fans] = %v, want 5000", profile.RawData["fans"])
 	}
 
-	posts, ok := profile.RawData["posts"].([]RednotePost)
+	posts, ok := profile.RawData["posts"].([]SeednotePost)
 	if !ok || len(posts) != 2 {
 		t.Fatalf("len(posts) = %d, want 2", len(posts))
 	}
@@ -173,8 +173,8 @@ func TestFetchProfileViaSDK(t *testing.T) {
 }
 
 func TestFetchProfilePostsViaSDK(t *testing.T) {
-	_, client := setupMockXHSServer()
-	provider := NewRednoteProvider(client)
+	_, client := setupMockSeednoteServer()
+	provider := NewSeednoteProvider(client)
 
 	posts, err := provider.FetchProfilePosts(context.Background(), "https://www.xiaohongshu.com/user/profile/test_user?xsec_token=abc")
 	if err != nil {
@@ -192,8 +192,8 @@ func TestFetchProfilePostsViaSDK(t *testing.T) {
 }
 
 func TestFetchNoteContentViaSDK(t *testing.T) {
-	_, client := setupMockXHSServer()
-	provider := NewRednoteProvider(client)
+	_, client := setupMockSeednoteServer()
+	provider := NewSeednoteProvider(client)
 
 	content, err := provider.FetchNoteContent(context.Background(), "https://www.xiaohongshu.com/explore/note123?xsec_token=abc")
 	if err != nil {
@@ -214,8 +214,8 @@ func TestFetchNoteContentViaSDK(t *testing.T) {
 }
 
 func TestFetchPostMetricsViaSDK(t *testing.T) {
-	_, client := setupMockXHSServer()
-	provider := NewRednoteProvider(client)
+	_, client := setupMockSeednoteServer()
+	provider := NewSeednoteProvider(client)
 
 	metrics, err := provider.FetchPostMetrics(context.Background(), "https://www.xiaohongshu.com/explore/note123?xsec_token=abc")
 	if err != nil {
@@ -250,7 +250,7 @@ func TestResolveProfileURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			userID, token, err := xhs.ResolveProfileURL(tt.url)
+			userID, token, err := seednote.ResolveProfileURL(tt.url)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")

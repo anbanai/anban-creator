@@ -80,7 +80,7 @@ export default function CloneTab() {
     promptParts.push(`复刻深度: ${cloneDepth}`)
 
     createTaskMutation.mutate({
-      type: (channelPlatform as 'rednote' | 'article' | 'xls') || 'rednote',
+      type: (channelPlatform as 'seednote' | 'article' | 'xls') || 'seednote',
       channel_id: channelId,
       prompt: promptParts.join('\n'),
     })
@@ -117,7 +117,7 @@ export default function CloneTab() {
             <Input
               value={sourceUrl}
               onChange={(e) => setSourceUrl(e.target.value)}
-              placeholder="粘贴小红书笔记链接"
+              placeholder="粘贴种草笔记链接"
             />
           ) : (
             <Button

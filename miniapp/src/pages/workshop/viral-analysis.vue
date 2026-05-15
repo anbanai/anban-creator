@@ -239,7 +239,7 @@
     <AbEmpty
       v-if="!loading && historyList.length === 0 && !currentAnalysis"
       title="还没有分析记录"
-      description="粘贴小红书笔记链接，开始分析爆款"
+      description="粘贴种草笔记链接，开始分析爆款"
     />
   </view>
 </template>
@@ -291,7 +291,7 @@ function extractTitle(analysis: ViralAnalysis): string {
     return analysis.analysis_result.title_analysis.technique.slice(0, 30)
   }
   if (analysis.source_url) {
-    return '小红书笔记'
+    return '种草笔记'
   }
   return '分析记录'
 }
@@ -332,7 +332,7 @@ async function startAnalysis() {
   const match = url.value.match(/https?:\/\/[^\s]+/)
   const extracted = match ? match[0].replace(/[.,，。！!？?;；:：]+$/, '') : ''
   if (!extracted) {
-    uni.showToast({ title: '未检测到有效链接，请粘贴小红书笔记链接或分享文本', icon: 'none' })
+    uni.showToast({ title: '未检测到有效链接，请粘贴种草笔记链接或分享文本', icon: 'none' })
     return
   }
   submitting.value = true

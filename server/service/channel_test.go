@@ -43,11 +43,11 @@ func TestChannelServiceDefaultsArticleAndXLSStyle(t *testing.T) {
 	}
 }
 
-func TestChannelServiceDoesNotDefaultRednoteStyle(t *testing.T) {
+func TestChannelServiceDoesNotDefaultSeednoteStyle(t *testing.T) {
 	svc, _ := setupTestChannelService(t)
 	ch, err := svc.Create(context.Background(), "user-1", &model.Channel{
-		Platform: model.PlatformRednote,
-		Name:     "Rednote Channel",
+		Platform: model.PlatformSeednote,
+		Name:     "Seednote Channel",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

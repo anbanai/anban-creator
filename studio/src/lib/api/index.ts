@@ -8,7 +8,7 @@ import { apiKeysApi } from './api-keys'
 import { usageApi } from './usage'
 import { feedbackApi } from './feedback'
 import { modelConfigApi } from './model-config'
-import { rednoteAnalyticsApi } from './rednote-analytics'
+import { seednoteAnalyticsApi } from './seednote-analytics'
 import { templatesApi } from './templates'
 import { postersApi } from './posters'
 import { viralAnalysesApi } from './viral-analyses'
@@ -25,7 +25,7 @@ export const api = {
   usage: usageApi,
   feedback: feedbackApi,
   modelConfig: modelConfigApi,
-  rednoteAnalytics: rednoteAnalyticsApi,
+  seednoteAnalytics: seednoteAnalyticsApi,
   templates: templatesApi,
   posters: postersApi,
   viralAnalyses: viralAnalysesApi,

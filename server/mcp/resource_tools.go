@@ -23,7 +23,7 @@ func registerResourceTools(server *mcp.Server) {
 				},
 				"platform": map[string]any{
 					"type":        "string",
-					"description": "Filter by platform: article, xls, or rednote (optional)",
+					"description": "Filter by platform: article, xls, or seednote (optional)",
 				},
 			},
 			"required": []any{"category"},

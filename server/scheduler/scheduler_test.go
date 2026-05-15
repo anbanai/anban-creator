@@ -9,7 +9,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func TestTaskProcessor_RednoteHandlers(t *testing.T) {
+func TestTaskProcessor_SeednoteHandlers(t *testing.T) {
 	logger := zerolog.Nop()
 	var discovered []string
 	var captured []string
@@ -33,10 +33,10 @@ func TestTaskProcessor_RednoteHandlers(t *testing.T) {
 		&logger,
 	)
 
-	if err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeRednoteDiscover, []byte(`{"tracking_id":"tracking-1"}`))); err != nil {
+	if err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeSeednoteDiscover, []byte(`{"tracking_id":"tracking-1"}`))); err != nil {
 		t.Fatalf("process discover: %v", err)
 	}
-	if err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeRednoteCaptureMetrics, []byte(`{"tracking_id":"tracking-2"}`))); err != nil {
+	if err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeSeednoteCaptureMetrics, []byte(`{"tracking_id":"tracking-2"}`))); err != nil {
 		t.Fatalf("process capture: %v", err)
 	}
 
@@ -48,7 +48,7 @@ func TestTaskProcessor_RednoteHandlers(t *testing.T) {
 	}
 }
 
-func TestTaskProcessor_RednoteHandlerErrorsPropagate(t *testing.T) {
+func TestTaskProcessor_SeednoteHandlerErrorsPropagate(t *testing.T) {
 	logger := zerolog.Nop()
 	wantErr := errors.New("capture failed")
 	processor := NewTaskProcessor(
@@ -65,7 +65,7 @@ func TestTaskProcessor_RednoteHandlerErrorsPropagate(t *testing.T) {
 		&logger,
 	)
 
-	err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeRednoteCaptureMetrics, []byte(`{"tracking_id":"tracking-2"}`)))
+	err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypeSeednoteCaptureMetrics, []byte(`{"tracking_id":"tracking-2"}`)))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}

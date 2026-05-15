@@ -11,11 +11,11 @@ import (
 func registerWorkspaceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_workspace",
-		Description: "Returns the canonical working directory path for the given content type and task. Does NOT create directories — the agent must run mkdir -p locally. When task_id is provided, returns 'output' (relative to the task workspace root). Otherwise, returns the base output directory for the content type (e.g. 'output/rednote').",
+		Description: "Returns the canonical working directory path for the given content type and task. Does NOT create directories — the agent must run mkdir -p locally. When task_id is provided, returns 'output' (relative to the task workspace root). Otherwise, returns the base output directory for the content type (e.g. 'output/seednote').",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"content_type": map[string]any{"type": "string", "description": "Content type (articles, xls, rednote, flower)"},
+				"content_type": map[string]any{"type": "string", "description": "Content type (articles, xls, seednote, flower)"},
 				"task_id":      map[string]any{"type": "string", "description": "Task ID — when provided, returns 'output' relative to task workspace"},
 			},
 			"required": []any{"content_type"},

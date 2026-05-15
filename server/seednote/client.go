@@ -1,4 +1,4 @@
-package xhs
+package seednote
 
 import (
 	"context"
@@ -16,7 +16,7 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient creates a new XHS sidecar client.
+// NewClient creates a new Seednote sidecar client.
 func NewClient(baseURL string, timeout time.Duration) *Client {
 	return &Client{
 		baseURL: baseURL,
@@ -43,7 +43,7 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-// CheckLoginStatus returns whether the XHS sidecar has an active login session.
+// CheckLoginStatus returns whether the Seednote sidecar has an active login session.
 func (c *Client) CheckLoginStatus(ctx context.Context) (bool, error) {
 	var result LoginStatusResponse
 	if err := c.get(ctx, "/api/v1/login/status", &result); err != nil {
@@ -55,7 +55,7 @@ func (c *Client) CheckLoginStatus(ctx context.Context) (bool, error) {
 	return result.LoggedIn, nil
 }
 
-// GetLoginQRCode returns a base64-encoded PNG QR code image for XHS login.
+// GetLoginQRCode returns a base64-encoded PNG QR code image for Seednote login.
 func (c *Client) GetLoginQRCode(ctx context.Context) (string, error) {
 	var result QRCodeResponse
 	if err := c.get(ctx, "/api/v1/login/qrcode", &result); err != nil {
@@ -67,7 +67,7 @@ func (c *Client) GetLoginQRCode(ctx context.Context) (string, error) {
 	return result.Data.QRCodeImage, nil
 }
 
-// DeleteCookies clears the XHS login session.
+// DeleteCookies clears the Seednote login session.
 func (c *Client) DeleteCookies(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/api/v1/login/cookies", nil)
 	if err != nil {

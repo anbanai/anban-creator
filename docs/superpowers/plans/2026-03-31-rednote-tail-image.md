@@ -1,8 +1,8 @@
-# 小红书尾图独立规范实现计划
+# 种草笔记尾图独立规范实现计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将小红书尾图从内容图规范中拆分为独立文件 `references/tail.md`，支持三种尾图类型（关注/评论/引流），尾图单独生成为 `tail.png`。
+**Goal:** 将种草笔记尾图从内容图规范中拆分为独立文件 `references/tail.md`，支持三种尾图类型（关注/评论/引流），尾图单独生成为 `tail.png`。
 
 **Architecture:** 新建 `tail.md` 与 `cover.md`/`content.md` 三者对称。尾图从 `--count` 批量生成中分离，改为单独一次调用输出 `tail.png`。Agent 在 image-plan 阶段根据内容主题自动匹配尾图类型。
 
@@ -14,17 +14,17 @@
 
 | 文件 | 操作 | 职责 |
 |------|------|------|
-| `skills/rednote-visual-design/references/tail.md` | **新建** | 尾图设计规范（三种类型 + 匹配规则 + prompt 模板） |
-| `skills/rednote-visual-design/SKILL.md` | 修改 | 新增尾图规范引用，更新 CLI 命令 |
-| `skills/rednote-visual-design/references/content.md` | 修改 | 删除尾图规范，更新 `--count` 和 image-plan 模板 |
-| `agents/rednote.md` | 修改 | 更新图片检查逻辑和命名 |
+| `skills/seednote-visual-design/references/tail.md` | **新建** | 尾图设计规范（三种类型 + 匹配规则 + prompt 模板） |
+| `skills/seednote-visual-design/SKILL.md` | 修改 | 新增尾图规范引用，更新 CLI 命令 |
+| `skills/seednote-visual-design/references/content.md` | 修改 | 删除尾图规范，更新 `--count` 和 image-plan 模板 |
+| `agents/seednote.md` | 修改 | 更新图片检查逻辑和命名 |
 
 ---
 
 ### Task 1: 新建尾图规范文件 tail.md
 
 **Files:**
-- Create: `skills/rednote-visual-design/references/tail.md`
+- Create: `skills/seednote-visual-design/references/tail.md`
 
 - [ ] **Step 1: 创建 tail.md，包含完整的尾图设计规范**
 
@@ -36,7 +36,7 @@
 5. image-plan.md 中的尾图规划模板
 
 ```markdown
-# 小红书尾图设计规范
+# 种草笔记尾图设计规范
 
 ## 尾图的唯一使命
 
@@ -116,7 +116,7 @@ Agent 在 image-plan 阶段根据内容主题自动判断，无需用户指定�
 尾图单独生成，根据匹配类型使用对应的 prompt 结构：
 
 ```
-页面类型：尾图（{tail_type}），小红书信息流最后一页
+页面类型：尾图（{tail_type}），种草笔记信息流最后一页
 风格延续：{style}（与封面保持一致）
 
 平台规范：
@@ -187,14 +187,14 @@ anbanwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tai
 
 - [ ] **Step 2: 验证文件存在且内容完整**
 
-Run: `cat skills/rednote-visual-design/references/tail.md | head -5`
-Expected: 文件以 `# 小红书尾图设计规范` 开头
+Run: `cat skills/seednote-visual-design/references/tail.md | head -5`
+Expected: 文件以 `# 种草笔记尾图设计规范` 开头
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add skills/rednote-visual-design/references/tail.md
-git commit -m "feat(rednote): add tail image design spec with follow/comment/traffic types"
+git add skills/seednote-visual-design/references/tail.md
+git commit -m "feat(seednote): add tail image design spec with follow/comment/traffic types"
 ```
 
 ---
@@ -202,7 +202,7 @@ git commit -m "feat(rednote): add tail image design spec with follow/comment/tra
 ### Task 2: 修改 content.md — 删除尾图规范，更新引用
 
 **Files:**
-- Modify: `skills/rednote-visual-design/references/content.md`
+- Modify: `skills/seednote-visual-design/references/content.md`
 
 - [ ] **Step 1: 删除三阶段目标表中的尾页行和尾页设计规范章节**
 
@@ -272,14 +272,14 @@ anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover
 
 - [ ] **Step 4: 验证修改结果**
 
-Run: `grep -c "尾页" skills/rednote-visual-design/references/content.md`
+Run: `grep -c "尾页" skills/seednote-visual-design/references/content.md`
 Expected: `0`（所有"尾页"相关内容已删除）
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/rednote-visual-design/references/content.md
-git commit -m "refactor(rednote): extract tail image spec from content.md to tail.md"
+git add skills/seednote-visual-design/references/content.md
+git commit -m "refactor(seednote): extract tail image spec from content.md to tail.md"
 ```
 
 ---
@@ -287,7 +287,7 @@ git commit -m "refactor(rednote): extract tail image spec from content.md to tai
 ### Task 3: 修改 SKILL.md — 新增尾图规范引用，更新 CLI 命令
 
 **Files:**
-- Modify: `skills/rednote-visual-design/SKILL.md`
+- Modify: `skills/seednote-visual-design/SKILL.md`
 
 - [ ] **Step 1: 在内容图设计规范下方新增尾图设计规范引用**
 
@@ -341,22 +341,22 @@ anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover
 
 - [ ] **Step 4: 验证修改结果**
 
-Run: `grep -c "tail" skills/rednote-visual-design/SKILL.md`
+Run: `grep -c "tail" skills/seednote-visual-design/SKILL.md`
 Expected: 至少 3 处引用（尾图规范链接 + CLI 命令 + 关键规则）
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/rednote-visual-design/SKILL.md
-git commit -m "refactor(rednote): add tail image reference and update CLI commands in SKILL.md"
+git add skills/seednote-visual-design/SKILL.md
+git commit -m "refactor(seednote): add tail image reference and update CLI commands in SKILL.md"
 ```
 
 ---
 
-### Task 4: 修改 agents/rednote.md — 更新图片检查逻辑和命名
+### Task 4: 修改 agents/seednote.md — 更新图片检查逻辑和命名
 
 **Files:**
-- Modify: `agents/rednote.md`
+- Modify: `agents/seednote.md`
 
 - [ ] **Step 1: 更新原创模式步骤 5 的图片检查说明**
 
@@ -397,12 +397,12 @@ git commit -m "refactor(rednote): add tail image reference and update CLI comman
 
 - [ ] **Step 4: 验证修改结果**
 
-Run: `grep "image_0{N-1}" agents/rednote.md`
+Run: `grep "image_0{N-1}" agents/seednote.md`
 Expected: 无匹配（所有 `image_0{N-1}` 已替换为 `tail.png` 和 `image_0{N-2}`）
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agents/rednote.md
-git commit -m "refactor(rednote): update image naming and checks for separated tail.png"
+git add agents/seednote.md
+git commit -m "refactor(seednote): update image naming and checks for separated tail.png"
 ```

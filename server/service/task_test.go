@@ -337,19 +337,19 @@ func TestTaskService_GetFiles(t *testing.T) {
 	}
 }
 
-func TestTaskService_SetPublishedCreatesRednoteTracking(t *testing.T) {
+func TestTaskService_SetPublishedCreatesSeednoteTracking(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	trackingSvc := &fakePublishedTrackingService{}
-	svc.SetRednoteTrackingService(trackingSvc)
+	svc.SetSeednoteTrackingService(trackingSvc)
 
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformRednote)
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ChannelID: channelID,
-		Type:      model.PlatformRednote,
+		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
@@ -368,10 +368,10 @@ func TestTaskService_SetPublishedCreatesRednoteTracking(t *testing.T) {
 	}
 }
 
-func TestTaskService_SetPublishedSkipsTrackingForNonRednoteOrUnpublish(t *testing.T) {
+func TestTaskService_SetPublishedSkipsTrackingForNonSeednoteOrUnpublish(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	trackingSvc := &fakePublishedTrackingService{}
-	svc.SetRednoteTrackingService(trackingSvc)
+	svc.SetSeednoteTrackingService(trackingSvc)
 
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -409,14 +409,14 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	otherUserID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformRednote)
-	otherChannelID := createTestChannel(t, repo, otherUserID, model.PlatformRednote)
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	otherChannelID := createTestChannel(t, repo, otherUserID, model.PlatformSeednote)
 
 	completed := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ChannelID: channelID,
-		Type:      model.PlatformRednote,
+		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "A finished task",
 		Title:     "Finished",
@@ -425,7 +425,7 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ChannelID: channelID,
-		Type:      model.PlatformRednote,
+		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusPending,
 		Prompt:    "A pending task",
 	}
@@ -433,7 +433,7 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    otherUserID,
 		ChannelID: otherChannelID,
-		Type:      model.PlatformRednote,
+		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "Foreign task",
 	}

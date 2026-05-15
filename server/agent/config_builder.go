@@ -46,9 +46,9 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		cfg.Wechat.Article.Theme = ch.Theme
 	case model.ScopeXls:
 		cfg.Wechat.Xls.Style = ch.Style
-	case model.ScopeRednote:
-		cfg.Rednote = &appconfig.RednoteConfig{}
-		cfg.Rednote.Style = ch.Style
+	case model.ScopeSeednote:
+		cfg.Seednote = &appconfig.SeednoteConfig{}
+		cfg.Seednote.Style = ch.Style
 	}
 
 	// Apply global image API config from server config.
@@ -59,8 +59,8 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 				cfg.Wechat.Article.Cover.Image = *imageAPICfg.Cover
 			case model.ScopeXls:
 				cfg.Wechat.Xls.Cover.Image = *imageAPICfg.Cover
-			case model.ScopeRednote:
-				cfg.Rednote.Cover.Image = *imageAPICfg.Cover
+			case model.ScopeSeednote:
+				cfg.Seednote.Cover.Image = *imageAPICfg.Cover
 			}
 		}
 		if imageAPICfg.Content != nil {
@@ -69,8 +69,8 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 				cfg.Wechat.Article.Content.Image = *imageAPICfg.Content
 			case model.ScopeXls:
 				cfg.Wechat.Xls.Content.Image = *imageAPICfg.Content
-			case model.ScopeRednote:
-				cfg.Rednote.Content.Image = *imageAPICfg.Content
+			case model.ScopeSeednote:
+				cfg.Seednote.Content.Image = *imageAPICfg.Content
 			}
 		}
 
@@ -93,12 +93,12 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 			if cfg.Wechat.Xls.Content.Image.Size == "" {
 				cfg.Wechat.Xls.Content.Image.Size = imageAPICfg.Sizes.XlsContent
 			}
-		case model.ScopeRednote:
-			if cfg.Rednote.Cover.Image.Size == "" {
-				cfg.Rednote.Cover.Image.Size = imageAPICfg.Sizes.RednoteCover
+		case model.ScopeSeednote:
+			if cfg.Seednote.Cover.Image.Size == "" {
+				cfg.Seednote.Cover.Image.Size = imageAPICfg.Sizes.SeednoteCover
 			}
-			if cfg.Rednote.Content.Image.Size == "" {
-				cfg.Rednote.Content.Image.Size = imageAPICfg.Sizes.RednoteContent
+			if cfg.Seednote.Content.Image.Size == "" {
+				cfg.Seednote.Content.Image.Size = imageAPICfg.Sizes.SeednoteContent
 			}
 		}
 	}
@@ -116,9 +116,9 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		case model.ScopeXls:
 			cfg.Wechat.Xls.Cover.Image.Size = effectiveRatio
 			cfg.Wechat.Xls.Content.Image.Size = effectiveRatio
-		case model.ScopeRednote:
-			cfg.Rednote.Cover.Image.Size = effectiveRatio
-			cfg.Rednote.Content.Image.Size = effectiveRatio
+		case model.ScopeSeednote:
+			cfg.Seednote.Cover.Image.Size = effectiveRatio
+			cfg.Seednote.Content.Image.Size = effectiveRatio
 		}
 	}
 
@@ -132,9 +132,9 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		case model.ScopeXls:
 			cfg.Wechat.Xls.Cover.Image.Refer = referPath
 			cfg.Wechat.Xls.Content.Image.Refer = referPath
-		case model.ScopeRednote:
-			cfg.Rednote.Cover.Image.Refer = referPath
-			cfg.Rednote.Content.Image.Refer = referPath
+		case model.ScopeSeednote:
+			cfg.Seednote.Cover.Image.Refer = referPath
+			cfg.Seednote.Content.Image.Refer = referPath
 		}
 	}
 
@@ -159,10 +159,10 @@ func TaskTypeToAgent(taskType string) string {
 		return "wechatarticle"
 	case model.ScopeXls:
 		return "wechatxls"
-	case model.ScopeRednote:
-		return "rednote"
+	case model.ScopeSeednote:
+		return "seednote"
 	default:
-		return "rednote"
+		return "seednote"
 	}
 }
 

@@ -40,13 +40,13 @@ export type {
 } from './task'
 
 export type {
-  RednoteAnalytics,
-  RednoteMetricDelta,
-  RednoteMetricInfo,
-  RednoteMetricSeriesItem,
-  RednoteTrackingInfo,
-  RednoteTrackingStatus,
-} from './rednote-analytics'
+  SeednoteAnalytics,
+  SeednoteMetricDelta,
+  SeednoteMetricInfo,
+  SeednoteMetricSeriesItem,
+  SeednoteTrackingInfo,
+  SeednoteTrackingStatus,
+} from './seednote-analytics'
 
 // Timeline
 export type { TimelineItemType, TimelineItem, TimelineResponse } from './timeline'

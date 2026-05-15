@@ -1,4 +1,4 @@
-package xhs
+package seednote
 
 // APIResponse is the generic response wrapper from the xiaohongshu-mcp REST API.
 type APIResponse[T any] struct {

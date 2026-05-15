@@ -53,13 +53,13 @@
         </view>
 
         <view v-if="isNew || sections.basic" class="channel-detail__fields">
-          <!-- Profile URL (rednote only) -->
-          <view v-if="isRednote" class="field-group">
+          <!-- Profile URL (seednote only) -->
+          <view v-if="isSeednote" class="field-group">
             <text class="field-label">账号链接</text>
             <view class="field-row">
               <AbInput
                 v-model="form.profile_url"
-                placeholder="粘贴小红书主页链接"
+                placeholder="粘贴种草笔记主页链接"
                 :error="errors.profile_url"
               />
               <AbButton
@@ -134,7 +134,7 @@
 
       <!-- Step 3: Publishing config (only for article/xls) -->
       <view v-if="isNew ? currentStep === 2 : true">
-        <template v-if="!isRednote">
+        <template v-if="!isSeednote">
           <view v-if="isNew" class="channel-detail__section-title">发布配置</view>
           <view v-else class="channel-detail__collapsible-header" @tap="sections.publishing = !sections.publishing">
             <text class="channel-detail__collapsible-title">发布配置</text>
@@ -288,7 +288,7 @@ import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
 import TagInput from '@/components/business/TagInput.vue'
 
 const platformOptions = [
-  { value: 'rednote', label: '小红书', description: '社交种草，图文笔记' },
+  { value: 'seednote', label: '种草笔记', description: '社交种草，图文笔记' },
   { value: 'article', label: '公众号', description: '长图文深度文章' },
   { value: 'xls', label: '小绿书', description: '图片帖，轻量分享' },
 ]
@@ -329,10 +329,10 @@ const sections = reactive({
   advanced: false,
 })
 
-const isRednote = computed(() => form.platform === 'rednote')
+const isSeednote = computed(() => form.platform === 'seednote')
 const maxStep = computed(() => {
-  // Skip step 3 (publishing) for rednote
-  return isRednote.value ? 2 : 3
+  // Skip step 3 (publishing) for seednote
+  return isSeednote.value ? 2 : 3
 })
 
 const canNext = computed(() => {
@@ -348,7 +348,7 @@ watch(form.platform, (val) => {
   // Reset image ratio to platform default when platform changes
   const defaults: Record<string, string> = {
     article: '16:9',
-    rednote: '3:4',
+    seednote: '3:4',
     xls: '3:4',
   }
   if (defaults[val]) {
@@ -472,8 +472,8 @@ function nextStep() {
     uni.showToast({ title: '请选择平台', icon: 'none' })
     return
   }
-  // Skip step 2 (publishing) for rednote
-  if (currentStep.value === 1 && isRednote.value) {
+  // Skip step 2 (publishing) for seednote
+  if (currentStep.value === 1 && isSeednote.value) {
     currentStep.value = 3
     return
   }
@@ -483,8 +483,8 @@ function nextStep() {
 }
 
 function prevStep() {
-  // Skip step 2 (publishing) for rednote going back
-  if (currentStep.value === 3 && isRednote.value) {
+  // Skip step 2 (publishing) for seednote going back
+  if (currentStep.value === 3 && isSeednote.value) {
     currentStep.value = 1
     return
   }

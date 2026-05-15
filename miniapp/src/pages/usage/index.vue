@@ -188,7 +188,7 @@ const typeEntries = computed<TypeEntry[]>(() => {
   const maxCost = Math.max(...entries.map(([, d]) => d.cost_usd), 0.01)
 
   const barColors: Record<string, string> = {
-    rednote: 'danger',
+    seednote: 'danger',
     article: 'success',
     xls: 'info',
   }
@@ -432,7 +432,7 @@ onMounted(() => {
     transition: width 0.5s ease;
 
     &--danger {
-      background-color: $ab-platform-rednote;
+      background-color: $ab-platform-seednote;
     }
 
     &--success {

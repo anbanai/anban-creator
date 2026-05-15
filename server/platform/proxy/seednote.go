@@ -12,14 +12,14 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// XiaohongshuPlugin intercepts responses from xiaohongshu.com and extracts
+// SeednotePlugin intercepts responses from xiaohongshu.com and extracts
 // user profile data embedded in the HTML. It is meant to be registered with
 // a proxy.Server via RegisterPlugin.
 //
 // When a profile page is detected, the extracted data is delivered through
 // the OnProfile callback. The caller can also use CollectProfile to
 // retrieve the most recently extracted profile synchronously.
-type XiaohongshuPlugin struct {
+type SeednotePlugin struct {
 	logger    zerolog.Logger
 	callbacks []ProfileCallback
 
@@ -29,10 +29,10 @@ type XiaohongshuPlugin struct {
 	initialStatePattern *regexp.Regexp
 }
 
-// NewXiaohongshuPlugin creates a new plugin for intercepting xiaohongshu.com.
-func NewXiaohongshuPlugin(logger zerolog.Logger, callbacks ...ProfileCallback) *XiaohongshuPlugin {
-	return &XiaohongshuPlugin{
-		logger:              logger.With().Str("plugin", "xiaohongshu").Logger(),
+// NewSeednotePlugin creates a new plugin for intercepting xiaohongshu.com.
+func NewSeednotePlugin(logger zerolog.Logger, callbacks ...ProfileCallback) *SeednotePlugin {
+	return &SeednotePlugin{
+		logger:              logger.With().Str("plugin", "seednote").Logger(),
 		callbacks:           callbacks,
 		userIDPattern:       regexp.MustCompile(`/user/profile/([a-f0-9]+)`),
 		initialStatePattern: regexp.MustCompile(`window\.__INITIAL_STATE__\s*=\s*({.+?})\s*</script>`),
@@ -40,19 +40,19 @@ func NewXiaohongshuPlugin(logger zerolog.Logger, callbacks ...ProfileCallback) *
 }
 
 // Domains returns the domains this plugin handles.
-func (p *XiaohongshuPlugin) Domains() []string {
+func (p *SeednotePlugin) Domains() []string {
 	return []string{"xiaohongshu.com"}
 }
 
 // OnRequest is a no-op for this plugin; all logic is in OnResponse.
-func (p *XiaohongshuPlugin) OnRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+func (p *SeednotePlugin) OnRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	return req, nil
 }
 
 // OnResponse inspects responses from xiaohongshu.com. If the response is a
 // user profile page (HTML containing __INITIAL_STATE__), it extracts profile
 // data and fires registered callbacks.
-func (p *XiaohongshuPlugin) OnResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+func (p *SeednotePlugin) OnResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 	if resp == nil || resp.Request == nil {
 		return resp
 	}
@@ -101,7 +101,7 @@ func (p *XiaohongshuPlugin) OnResponse(resp *http.Response, ctx *goproxy.ProxyCt
 
 // extractProfile parses the HTML body for __INITIAL_STATE__ JSON and returns
 // a map of profile fields. Returns nil if nothing could be extracted.
-func (p *XiaohongshuPlugin) extractProfile(html string) map[string]any {
+func (p *SeednotePlugin) extractProfile(html string) map[string]any {
 	// Try __INITIAL_STATE__ first (most reliable).
 	matches := p.initialStatePattern.FindStringSubmatch(html)
 	if len(matches) < 2 {
@@ -149,7 +149,7 @@ func (p *XiaohongshuPlugin) extractProfile(html string) map[string]any {
 }
 
 // extractProfileFallback uses simple string matching when JSON parsing fails.
-func (p *XiaohongshuPlugin) extractProfileFallback(html string) map[string]any {
+func (p *SeednotePlugin) extractProfileFallback(html string) map[string]any {
 	result := make(map[string]any)
 	result["_source"] = "html_fallback"
 

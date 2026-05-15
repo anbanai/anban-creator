@@ -1,4 +1,4 @@
-package xhs
+package seednote
 
 import (
 	"context"

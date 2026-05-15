@@ -110,7 +110,7 @@ describe('createTaskSchema', () => {
   })
 
   it('accepts all valid content types', () => {
-    for (const type of ['rednote', 'article', 'xls'] as const) {
+    for (const type of ['seednote', 'article', 'xls'] as const) {
       expect(createTaskSchema.safeParse({
         channel_id: 'ch-1',
         type,
@@ -157,7 +157,7 @@ describe('planSchema', () => {
 
   it('accepts optional fields', () => {
     const result = planSchema.safeParse({
-      type: 'rednote',
+      type: 'seednote',
       cron_expr: '0 9 * * 1',
       prompt: '主题方向',
       channel_id: 'ch-1',
@@ -190,9 +190,9 @@ describe('channelSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('accepts rednote platform without wechat_app_id', () => {
+  it('accepts seednote platform without wechat_app_id', () => {
     expect(channelSchema.safeParse({
-      platform: 'rednote',
+      platform: 'seednote',
     }).success).toBe(true)
   })
 

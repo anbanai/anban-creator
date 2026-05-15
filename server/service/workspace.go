@@ -39,7 +39,7 @@ func NewWorkspaceService(baseDir, workspaceDir string) *WorkspaceService {
 
 // Prepare returns the canonical working directory path without touching the filesystem.
 // When taskID is provided, returns "output" (relative to the task workspace root).
-// Otherwise, returns baseDir/<contentType> (e.g. "output/rednote").
+// Otherwise, returns baseDir/<contentType> (e.g. "output/seednote").
 func (s *WorkspaceService) Prepare(contentType, taskID string) (*PrepareResult, error) {
 	if contentType == "" {
 		return nil, fmt.Errorf("content_type is required")

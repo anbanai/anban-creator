@@ -42,13 +42,13 @@ func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {
 		Name:        "测试账号",
 		Positioning: "原始简介",
 		RawData: map[string]any{
-			"top_posts": []platform.RednotePost{
+			"top_posts": []platform.SeednotePost{
 				{Title: "爆款选题", LikeCount: 12000, CommentCount: 200, EngagementScore: 12200},
 			},
 		},
 	}
 
-	h.enrichRednoteProfileWithAI(context.Background(), "user-1", profile)
+	h.enrichSeednoteProfileWithAI(context.Background(), "user-1", profile)
 
 	if profile.Positioning != "面向职场人的高效生活方式账号" {
 		t.Fatalf("Positioning = %q", profile.Positioning)
@@ -62,7 +62,7 @@ func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {
 	if llm.prompt == "" || !containsAll(llm.prompt, "爆款选题", "原始简介") {
 		t.Fatalf("prompt missing profile/post context: %q", llm.prompt)
 	}
-	analysis, ok := profile.RawData["analysis"].(rednoteProfileAnalysis)
+	analysis, ok := profile.RawData["analysis"].(seednoteProfileAnalysis)
 	if !ok {
 		t.Fatalf("RawData[analysis] type = %T", profile.RawData["analysis"])
 	}
@@ -81,7 +81,7 @@ func TestChannelFetchProfileAIAnalysisFallbackOnInvalidJSON(t *testing.T) {
 		RawData:     map[string]any{},
 	}
 
-	h.enrichRednoteProfileWithAI(context.Background(), "user-1", profile)
+	h.enrichSeednoteProfileWithAI(context.Background(), "user-1", profile)
 
 	if profile.Positioning != "原始简介" {
 		t.Fatalf("Positioning = %q, want 原始简介", profile.Positioning)
@@ -91,7 +91,7 @@ func TestChannelFetchProfileAIAnalysisFallbackOnInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestChannelFetchProfileRejectsNonRednoteAutoFetch(t *testing.T) {
+func TestChannelFetchProfileRejectsNonSeednoteAutoFetch(t *testing.T) {
 	h := NewChannelHandler(nil, testChannelLogger(t))
 	app := fiber.New()
 	app.Post("/fetch", func(c fiber.Ctx) error {

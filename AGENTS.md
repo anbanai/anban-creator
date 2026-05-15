@@ -352,8 +352,8 @@ The project includes Claude Code skills in `claudecode/skills/` directory:
 - `article-publishing` - Article draft publishing workflows
 - `xls-publishing` - Image post (小绿书) publishing workflows
 - `content-analysis` - Content quality analysis
-- `rednote-research` - 小红书热门内容研究与评分
-- `rednote-writing` - 小红书文案写作、标题优化、爆款改写
+- `seednote-research` - 种草笔记热门内容研究与评分
+- `seednote-writing` - 种草笔记文案写作、标题优化、爆款改写
 
 Skills are auto-loaded via the [anbanwriter-plugins](https://github.com/anbanai/anbanwriter-plugins) submodule or marketplace.
 

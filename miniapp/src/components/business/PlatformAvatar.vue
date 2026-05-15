@@ -14,13 +14,13 @@ const props = defineProps<{
 }>()
 
 const labelMap: Record<string, string> = {
-  rednote: '小',
+  seednote: '种',
   article: '公',
   xls: '绿',
 }
 
 const colorMap: Record<string, string> = {
-  rednote: '#FF2442',
+  seednote: '#FF2442',
   article: '#07C160',
   xls: '#07C160',
 }

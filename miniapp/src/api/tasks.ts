@@ -4,7 +4,7 @@ import type {
   TaskFile,
   CreateTaskRequest,
   PaginatedResponse,
-  RednoteAnalytics,
+  SeednoteAnalytics,
 } from '@/types'
 
 export const tasksApi = {
@@ -31,8 +31,8 @@ export const tasksApi = {
   getFiles: (id: string) =>
     get<TaskFile[]>(`/tasks/${id}/files`),
 
-  getRednoteAnalytics: (id: string) =>
-    get<RednoteAnalytics>(`/tasks/${id}/rednote-analytics`),
+  getSeednoteAnalytics: (id: string) =>
+    get<SeednoteAnalytics>(`/tasks/${id}/seednote-analytics`),
 
   /** Request a zip download URL for multiple tasks */
   downloadZip: (taskIds: string[]) =>

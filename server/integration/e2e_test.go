@@ -182,10 +182,10 @@ func TestE2E_FullUserFlow(t *testing.T) {
 
 	// Step 1.5: Create a test channel for the user.
 	testChannel := &model.Channel{
-		ID:       "test-channel-rednote-1",
+		ID:       "test-channel-seednote-1",
 		UserID:   userID1,
-		Platform: model.ScopeRednote,
-		Name:     "Test Rednote Channel",
+		Platform: model.ScopeSeednote,
+		Name:     "Test Seednote Channel",
 		Status:   model.ChannelStatusActive,
 	}
 	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
@@ -213,8 +213,8 @@ func TestE2E_FullUserFlow(t *testing.T) {
 	taskData := taskResult["data"].(map[string]interface{})
 	taskID := taskData["id"].(string)
 
-	if taskData["type"].(string) != "rednote" {
-		t.Errorf("expected task type 'rednote', got %s", taskData["type"])
+	if taskData["type"].(string) != "seednote" {
+		t.Errorf("expected task type 'seednote', got %s", taskData["type"])
 	}
 	if taskData["user_id"].(string) != userID1 {
 		t.Errorf("expected task user_id %s, got %s", userID1, taskData["user_id"])
@@ -313,7 +313,7 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 	testChannel := &model.Channel{
 		ID:       "plan-lifecycle-channel",
 		UserID:   userID,
-		Platform: model.PlatformRednote,
+		Platform: model.PlatformSeednote,
 		Name:     "Plan Lifecycle Channel",
 		Status:   model.ChannelStatusActive,
 	}
@@ -798,8 +798,8 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	testChannel := &model.Channel{
 		ID:       "test-channel-leak-1",
 		UserID:   userID1,
-		Platform: model.ScopeRednote,
-		Name:     "Runner1 Rednote Channel",
+		Platform: model.ScopeSeednote,
+		Name:     "Runner1 Seednote Channel",
 		Status:   model.ChannelStatusActive,
 	}
 	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {

@@ -29,7 +29,7 @@ Creation Workflow v1 should make a task feel like a managed editorial process:
 - The final output includes a review report, not just article/images.
 - The platform can later learn from stage outputs and publishing results.
 
-The first release should target creators publishing to WeChat article and Xiaolvshu/XLS. Rednote can reuse parts of the flow later, but v1 should avoid expanding scope into direct Rednote publishing.
+The first release should target creators publishing to WeChat article and Xiaolvshu/XLS. Seednote can reuse parts of the flow later, but v1 should avoid expanding scope into direct Seednote publishing.
 
 ## Scope
 
@@ -46,7 +46,7 @@ In scope:
 Out of scope for v1:
 
 - Full collaborative editor.
-- Direct Rednote publishing.
+- Direct Seednote publishing.
 - Automatic collection of post-publish analytics.
 - New billing products.
 - A complete replacement for existing agent definitions.

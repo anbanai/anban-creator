@@ -19,7 +19,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
-func setupRednoteAnalyticsHandlerTest(t *testing.T) (*fiber.App, repository.Repository) {
+func setupSeednoteAnalyticsHandlerTest(t *testing.T) (*fiber.App, repository.Repository) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -36,18 +36,18 @@ func setupRednoteAnalyticsHandlerTest(t *testing.T) (*fiber.App, repository.Repo
 	}
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	trackingSvc := service.NewRednoteTrackingService(repo, nil, nil, nil, &logger)
-	handler := NewRednoteAnalyticsHandler(trackingSvc, &logger)
+	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, &logger)
+	handler := NewSeednoteAnalyticsHandler(trackingSvc, &logger)
 	app := fiber.New()
-	app.Get("/tasks/:id/rednote-analytics", func(c fiber.Ctx) error {
+	app.Get("/tasks/:id/seednote-analytics", func(c fiber.Ctx) error {
 		c.Locals("user_id", c.Get("X-User-ID"))
 		return handler.GetTaskAnalytics(c)
 	})
 	return app, repo
 }
 
-func TestRednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
-	app, repo := setupRednoteAnalyticsHandlerTest(t)
+func TestSeednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
+	app, repo := setupSeednoteAnalyticsHandlerTest(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
 	taskID := uuid.New().String()
@@ -59,18 +59,18 @@ func TestRednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "owner@example.com", Nickname: "Owner", Password: "hashed", InviteCode: "owner1"}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{ID: channelID, UserID: userID, Platform: model.PlatformRednote, Name: "RedNote", Status: model.ChannelStatusActive}); err != nil {
+	if err := repo.Channels().Create(ctx, &model.Channel{ID: channelID, UserID: userID, Platform: model.PlatformSeednote, Name: "SeedNote", Status: model.ChannelStatusActive}); err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ChannelID: channelID, Type: model.PlatformRednote, Status: model.TaskStatusCompleted, Published: true}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ChannelID: channelID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, Published: true}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
 		ChannelID:         channelID,
-		Status:            model.RednoteTrackingStatusTracking,
+		Status:            model.SeednoteTrackingStatusTracking,
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
 		NoteTitle:         "早起效率翻倍的方法",
 		NoteCoverURL:      "https://img.example/cover.jpg",
@@ -80,17 +80,17 @@ func TestRednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 		DiscoveredAt:      &now,
 		PublishedMarkedAt: now.Add(-48 * time.Hour),
 	}
-	if err := repo.RednoteTrackings().Create(ctx, tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(ctx, tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
 	}
 	for i, likes := range []int{10, 18} {
 		capturedAt := now.Add(time.Duration(i-1) * 24 * time.Hour)
-		if err := repo.RednoteMetricSnapshots().Create(ctx, &model.RednoteMetricSnapshot{
+		if err := repo.SeednoteMetricSnapshots().Create(ctx, &model.SeednoteMetricSnapshot{
 			ID:           uuid.New().String(),
 			TrackingID:   tracking.ID,
 			TaskID:       taskID,
 			CapturedAt:   capturedAt,
-			CapturedDate: model.RednoteCapturedDate(capturedAt),
+			CapturedDate: model.SeednoteCapturedDate(capturedAt),
 			LikeCount:    likes,
 			CollectCount: 3 + i,
 			CommentCount: 1,
@@ -101,7 +101,7 @@ func TestRednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 		}
 	}
 
-	req := httptest.NewRequest("GET", "/tasks/"+taskID+"/rednote-analytics", nil)
+	req := httptest.NewRequest("GET", "/tasks/"+taskID+"/seednote-analytics", nil)
 	req.Header.Set("X-User-ID", userID)
 	resp, err := app.Test(req)
 	if err != nil {
@@ -120,11 +120,11 @@ func TestRednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal data: %v", err)
 	}
-	var analytics service.RednoteAnalytics
+	var analytics service.SeednoteAnalytics
 	if err := json.Unmarshal(raw, &analytics); err != nil {
 		t.Fatalf("decode analytics: %v", err)
 	}
-	if analytics.Tracking == nil || analytics.Tracking.Status != model.RednoteTrackingStatusTracking {
+	if analytics.Tracking == nil || analytics.Tracking.Status != model.SeednoteTrackingStatusTracking {
 		t.Fatalf("tracking = %+v", analytics.Tracking)
 	}
 	if analytics.Latest == nil || analytics.Latest.LikeCount != 18 || analytics.Latest.ViewCount == nil {
@@ -138,8 +138,8 @@ func TestRednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 	}
 }
 
-func TestRednoteAnalyticsHandler_RejectsNonOwner(t *testing.T) {
-	app, repo := setupRednoteAnalyticsHandlerTest(t)
+func TestSeednoteAnalyticsHandler_RejectsNonOwner(t *testing.T) {
+	app, repo := setupSeednoteAnalyticsHandlerTest(t)
 	ctx := context.Background()
 	ownerID := uuid.New().String()
 	otherID := uuid.New().String()
@@ -152,14 +152,14 @@ func TestRednoteAnalyticsHandler_RejectsNonOwner(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: otherID, Email: "other@example.com", Nickname: "Other", Password: "hashed", InviteCode: "other2"}); err != nil {
 		t.Fatalf("create other: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{ID: channelID, UserID: ownerID, Platform: model.PlatformRednote, Name: "RedNote", Status: model.ChannelStatusActive}); err != nil {
+	if err := repo.Channels().Create(ctx, &model.Channel{ID: channelID, UserID: ownerID, Platform: model.PlatformSeednote, Name: "SeedNote", Status: model.ChannelStatusActive}); err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: ownerID, ChannelID: channelID, Type: model.PlatformRednote, Status: model.TaskStatusCompleted, Published: true}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: ownerID, ChannelID: channelID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, Published: true}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/tasks/"+taskID+"/rednote-analytics", nil)
+	req := httptest.NewRequest("GET", "/tasks/"+taskID+"/seednote-analytics", nil)
 	req.Header.Set("X-User-ID", otherID)
 	resp, err := app.Test(req)
 	if err != nil {

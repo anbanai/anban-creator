@@ -140,7 +140,7 @@ import AbBadge from '@/components/common/AbBadge.vue'
 const typeTabs = [
   { key: '', label: '全部' },
   { key: 'poster', label: '海报' },
-  { key: 'rednote', label: '小红书' },
+  { key: 'seednote', label: '种草笔记' },
   { key: 'article', label: '公众号' },
   { key: 'xls', label: '小绿书' },
 ]
@@ -207,7 +207,7 @@ function getTypeLabel(type: TemplateType): string {
 }
 
 function getTypeBadgeVariant(type: TemplateType): 'success' | 'danger' | 'warning' | 'info' | 'neutral' {
-  if (type === 'rednote') return 'danger'
+  if (type === 'seednote') return 'danger'
   if (type === 'article' || type === 'xls') return 'success'
   return 'neutral'
 }

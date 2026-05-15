@@ -14,7 +14,7 @@ import (
 // validTemplateTypes defines the allowed template type values.
 var validTemplateTypes = map[string]bool{
 	"poster":  true,
-	"rednote": true,
+	"seednote": true,
 	"article": true,
 	"xls":     true,
 }
@@ -26,7 +26,7 @@ func registerTemplateTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"type":            map[string]any{"type": "string", "description": "Template type: poster, rednote, article, or xls"},
+				"type":            map[string]any{"type": "string", "description": "Template type: poster, seednote, article, or xls"},
 				"name":            map[string]any{"type": "string", "description": "Template name"},
 				"category":        map[string]any{"type": "string", "description": "Industry/category tag (optional)"},
 				"structure":       map[string]any{"type": "string", "description": "JSON string of template structure (required)"},
@@ -83,7 +83,7 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		return errorResult("type is required"), nil
 	}
 	if !validTemplateTypes[tmplType] {
-		return errorResult(fmt.Sprintf("invalid type: %s (must be one of: poster, rednote, article, xls)", tmplType)), nil
+		return errorResult(fmt.Sprintf("invalid type: %s (must be one of: poster, seednote, article, xls)", tmplType)), nil
 	}
 	if name == "" {
 		return errorResult("name is required"), nil

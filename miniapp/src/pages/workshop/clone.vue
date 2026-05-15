@@ -25,7 +25,7 @@
 
     <!-- URL input (shown when sourceType === 'url') -->
     <view v-if="sourceType === 'url'" class="cp-section">
-      <text class="field-label">粘贴小红书链接</text>
+      <text class="field-label">粘贴种草笔记链接</text>
       <AbInput
         v-model="sourceUrl"
         placeholder="https://xhslink.com/..."
@@ -186,7 +186,7 @@ function validate(): boolean {
   Object.keys(errors).forEach(k => delete errors[k])
 
   if (sourceType.value === 'url' && !sourceUrl.value.trim()) {
-    errors.sourceUrl = '请输入小红书链接'
+    errors.sourceUrl = '请输入种草笔记链接'
     return false
   }
 

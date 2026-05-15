@@ -6,7 +6,7 @@
 
 ## Context
 
-Anban 智能创作助手 Online Service currently uses `UserConfig` with a unique constraint on `(user_id, scope)` to store platform credentials and content style settings. This limits users to one configuration per content type (article/xls/rednote). In practice, a user may manage multiple WeChat public accounts (e.g., a food blog and a tech blog) or multiple Xiaohongshu accounts.
+Anban 智能创作助手 Online Service currently uses `UserConfig` with a unique constraint on `(user_id, scope)` to store platform credentials and content style settings. This limits users to one configuration per content type (article/xls/seednote). In practice, a user may manage multiple WeChat public accounts (e.g., a food blog and a tech blog) or multiple Seednote accounts.
 
 This redesign introduces **Channel** — a first-class entity representing a single platform account. All tasks and plans belong to a Channel, providing clear ownership, filtering, and statistics per account.
 
@@ -15,7 +15,7 @@ This redesign introduces **Channel** — a first-class entity representing a sin
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Entity name | `Channel` | No ambiguity with User (login account). Code-clean: `ChannelID`, `ListChannels`. Frontend displays as "频道管理" or "我的账号". |
-| Channel scope | Single platform per channel | One Channel = one platform (WeChat public account / Xiaohongshu account / WeChat newspic account). Simple isolation. |
+| Channel scope | Single platform per channel | One Channel = one platform (WeChat public account / Seednote account / WeChat newspic account). Simple isolation. |
 | Credential changes | No impact on history | Changing Channel credentials does not affect completed tasks or running plans. Next execution uses new credentials. |
 | Statistics | Computed at query time | No denormalized counters. Query tasks by channel_id for counts, success rate, last activity. |
 
@@ -27,7 +27,7 @@ This redesign introduces **Channel** — a first-class entity representing a sin
 channels
 ├── id              char(36)     PK, UUID
 ├── user_id         char(36)     FK → users.id, indexed
-├── platform        varchar(20)  "article" / "xls" / "rednote"
+├── platform        varchar(20)  "article" / "xls" / "seednote"
 ├── name            varchar(100) "美食公众号"
 ├── avatar_url      varchar(500) nullable
 ├── description     text         nullable, 频道简介
@@ -100,7 +100,7 @@ const (
 const (
     PlatformArticle = "article"
     PlatformXLS     = "xls"
-    PlatformRednote = "rednote"
+    PlatformSeednote = "seednote"
 )
 ```
 
@@ -271,7 +271,7 @@ Currently loads configs via `UserConfigs().ListByUserID`. Changes to `Channels()
 
 ### Updated: CreateTaskModal / CreatePlanModal
 
-- First field: Channel selector (grouped by platform: 公众号 / 小红书 / 小绿书)
+- First field: Channel selector (grouped by platform: 公众号 / 种草笔记 / 小绿书)
 - Selecting a channel auto-sets the type/platform
 - Shows channel name and avatar in the selector
 

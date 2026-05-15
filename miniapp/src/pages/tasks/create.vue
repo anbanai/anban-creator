@@ -79,7 +79,7 @@
         <text class="collapsible-arrow">{{ showAdvanced ? '收起' : '展开' }}</text>
       </view>
       <view v-if="showAdvanced" class="advanced-options">
-        <!-- Generate video (rednote/xls only) -->
+        <!-- Generate video (seednote/xls only) -->
         <view v-if="isImagePlatform" class="switch-row">
           <text class="field-label" style="margin-bottom: 0;">生成视频</text>
           <AbSwitch v-model="form.generate_video" />
@@ -165,7 +165,7 @@ const currentInspiration = computed(() => inspirations[inspirationIndex.value % 
 
 const isImagePlatform = computed(() => {
   if (!selectedChannel.value) return false
-  return ['rednote', 'xls'].includes(selectedChannel.value.platform)
+  return ['seednote', 'xls'].includes(selectedChannel.value.platform)
 })
 
 const estimatedCost = computed(() => {
@@ -188,7 +188,7 @@ function onChannelChange(channel: Channel) {
   } else {
     const defaults: Record<string, string> = {
       article: '16:9',
-      rednote: '3:4',
+      seednote: '3:4',
       xls: '3:4',
     }
     form.image_ratio = defaults[channel.platform] || '3:4'

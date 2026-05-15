@@ -1,8 +1,8 @@
-# Rednote Post Tracking Design
+# Seednote Post Tracking Design
 
 ## Goal
 
-After a user marks a Xiaohongshu/RedNote task as published, the system should automatically discover the published note from the account homepage, bind it to the local task, collect public engagement metrics once per day, and show the metrics and trends inside the task detail page.
+After a user marks a Seednote/SeedNote task as published, the system should automatically discover the published note from the account homepage, bind it to the local task, collect public engagement metrics once per day, and show the metrics and trends inside the task detail page.
 
 The first release focuses on a minimal automatic loop:
 
@@ -16,7 +16,7 @@ The first release focuses on a minimal automatic loop:
 
 In scope:
 
-- Xiaohongshu/RedNote tasks only.
+- Seednote/SeedNote tasks only.
 - Public homepage discovery after a task is marked as published.
 - AI-based note matching using local task data and public homepage candidates.
 - Binding the matched note URL and note ID to the local task tracking record.
@@ -31,7 +31,7 @@ Out of scope:
 - Logged-in creator dashboard scraping.
 - User confirmation UI for note binding.
 - Account-level analytics dashboard.
-- Historical bulk import of old RedNote notes.
+- Historical bulk import of old SeedNote notes.
 - Manual note URL entry as the primary first-release flow.
 
 ## Public Metrics
@@ -47,7 +47,7 @@ The first release collects public metrics that can be parsed from the homepage o
 
 ## Tracking Lifecycle
 
-Each published RedNote task has at most one tracking record.
+Each published SeedNote task has at most one tracking record.
 
 Statuses:
 
@@ -58,7 +58,7 @@ Statuses:
 
 Flow:
 
-1. User marks a completed RedNote task as published.
+1. User marks a completed SeedNote task as published.
 2. Backend creates or resumes a tracking record.
 3. Backend schedules a discovery job 24 hours later.
 4. Discovery fetches the channel profile page and extracts public note candidates.
@@ -70,9 +70,9 @@ Flow:
 
 ## Data Model
 
-### `rednote_post_trackings`
+### `seednote_post_trackings`
 
-Tracks the relationship between a local task and a public RedNote note.
+Tracks the relationship between a local task and a public SeedNote note.
 
 Fields:
 
@@ -111,7 +111,7 @@ Indexes and constraints:
 - Index on `status`.
 - Index on `next_run_at`.
 
-### `rednote_metric_snapshots`
+### `seednote_metric_snapshots`
 
 Stores one public metric snapshot per tracked note per day.
 
@@ -142,8 +142,8 @@ Indexes and constraints:
 
 Add repository interfaces following the existing repository package style:
 
-- `RednoteTrackingRepository`
-- `RednoteMetricRepository`
+- `SeednoteTrackingRepository`
+- `SeednoteMetricRepository`
 
 Core tracking repository methods:
 
@@ -164,7 +164,7 @@ Core metric repository methods:
 
 ## Service Layer
 
-Add `RednoteTrackingService` for orchestration. Platform parsing and HTTP fetching stay outside this service.
+Add `SeednoteTrackingService` for orchestration. Platform parsing and HTTP fetching stay outside this service.
 
 Methods:
 
@@ -177,7 +177,7 @@ Methods:
 
 Behavior:
 
-- `EnsureTrackingForPublishedTask` is called when a RedNote task is marked as published.
+- `EnsureTrackingForPublishedTask` is called when a SeedNote task is marked as published.
 - Existing tracking is reused instead of duplicated.
 - Discovery only considers tasks owned by the current user.
 - Captures are idempotent by `(tracking_id, captured_date)`.
@@ -185,12 +185,12 @@ Behavior:
 
 ## Platform Layer
 
-Extend `server/platform/rednote.go` with RedNote-specific public parsing capabilities:
+Extend `server/platform/seednote.go` with SeedNote-specific public parsing capabilities:
 
 - `FetchProfilePosts(ctx, profileURL)`
 - `FetchPostMetrics(ctx, noteURL)`
 - `ExtractNoteID(url)`
-- `NormalizeRednoteMetricCount(text)`
+- `NormalizeSeednoteMetricCount(text)`
 
 The platform layer owns:
 
@@ -211,12 +211,12 @@ The platform layer does not own:
 
 Add Asynq task types:
 
-- `rednote:discover`
-- `rednote:capture_metrics`
+- `seednote:discover`
+- `seednote:capture_metrics`
 
 Scheduling rules:
 
-- When a RedNote task is marked as published, enqueue `rednote:discover` with a 24-hour delay.
+- When a SeedNote task is marked as published, enqueue `seednote:discover` with a 24-hour delay.
 - If discovery succeeds, enqueue metric capture immediately.
 - After each successful capture, enqueue the next capture with a 24-hour delay unless tracking should stop.
 - If discovery cannot confidently match a note, keep status `waiting_discovery` and retry the next day.
@@ -287,7 +287,7 @@ These constants should be represented in the model layer so backend and frontend
 
 Add:
 
-`GET /api/v1/tasks/:id/rednote-analytics`
+`GET /api/v1/tasks/:id/seednote-analytics`
 
 Returns analytics for the task owner.
 
@@ -335,23 +335,23 @@ Response shape:
 
 Optional follow-up endpoints:
 
-- `POST /api/v1/tasks/:id/rednote-analytics/retry-discovery`
-- `POST /api/v1/tasks/:id/rednote-analytics/stop`
+- `POST /api/v1/tasks/:id/seednote-analytics/retry-discovery`
+- `POST /api/v1/tasks/:id/seednote-analytics/stop`
 
 The first release can omit the frontend controls for these endpoints if schedule-driven tracking is enough.
 
 ## Frontend
 
-Show a RedNote analytics panel only when:
+Show a SeedNote analytics panel only when:
 
-- `task.type === 'rednote'`
+- `task.type === 'seednote'`
 - `task.published === true`
 
 Add:
 
-- `studio/src/types/rednote-analytics.ts`
-- `studio/src/lib/api/rednote-analytics.ts` or equivalent method on `tasksApi`
-- `studio/src/components/tasks/RednoteAnalyticsPanel.tsx`
+- `studio/src/types/seednote-analytics.ts`
+- `studio/src/lib/api/seednote-analytics.ts` or equivalent method on `tasksApi`
+- `studio/src/components/tasks/SeednoteAnalyticsPanel.tsx`
 
 `TaskDetailPage.tsx` should only load and embed the panel to avoid growing the page further.
 
@@ -375,7 +375,7 @@ UX rules:
 
 - Do not render an empty chart when no snapshots exist.
 - Display `view_count=null` as "暂无公开数据".
-- Open the RedNote note link in a new tab.
+- Open the SeedNote note link in a new tab.
 - Show a user-friendly error summary without exposing internal parser details.
 
 ## Error Handling
@@ -410,7 +410,7 @@ Backend tests:
 
 Frontend tests or build checks:
 
-- Non-RedNote or unpublished tasks do not show the analytics panel.
+- Non-SeedNote or unpublished tasks do not show the analytics panel.
 - Each tracking status displays the correct copy.
 - Empty snapshots do not render an empty chart.
 - `view_count=null` displays "暂无公开数据".
@@ -420,7 +420,7 @@ Frontend tests or build checks:
 
 Public scraping is brittle by nature. Treat page structure changes as expected:
 
-- Keep parsing logic centralized in the RedNote platform provider.
+- Keep parsing logic centralized in the SeedNote platform provider.
 - Store normalized parse details in `raw_data`.
 - Do not fail an entire capture when one metric is missing.
 - Add structured logs with `tracking_id`, `task_id`, `channel_id`, and `note_id`.
@@ -429,7 +429,7 @@ Public scraping is brittle by nature. Treat page structure changes as expected:
 Rate and scope controls:
 
 - One capture per tracked task per day.
-- RedNote tasks only.
+- SeedNote tasks only.
 - Maximum 14-day tracking window.
 - Five consecutive business-level failures before failing a tracking record.
 - Future work can add channel-level concurrency and per-domain throttling.
@@ -438,10 +438,10 @@ Rate and scope controls:
 
 1. Add models and AutoMigrate entries.
 2. Add repositories and repository tests.
-3. Extend RedNote platform parsing and tests.
+3. Extend SeedNote platform parsing and tests.
 4. Add tracking service with fake platform and fake AI tests.
 5. Add Asynq task types and handlers.
-6. Hook RedNote published marking into tracking creation.
+6. Hook SeedNote published marking into tracking creation.
 7. Add analytics API endpoint and handler tests.
 8. Add frontend types, API client, analytics panel, and TaskDetail integration.
 9. Run backend and frontend verification.

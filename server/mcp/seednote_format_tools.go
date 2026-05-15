@@ -8,11 +8,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerRednoteTools registers rednote content formatting tools.
-func registerRednoteTools(server *mcp.Server) {
+// registerSeednoteFormatTools registers seednote content formatting tools.
+func registerSeednoteFormatTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
-		Name:        "export_rednote",
-		Description: "Format content for Xiaohongshu (Little Red Book) publishing. Parses Markdown or accepts direct parameters, extracts tags, cleans formatting, and returns structured content ready for publishing.",
+		Name:        "export_seednote",
+		Description: "Format content for Seednote publishing. Parses Markdown or accepts direct parameters, extracts tags, cleans formatting, and returns structured content ready for publishing.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -23,10 +23,10 @@ func registerRednoteTools(server *mcp.Server) {
 				"format":   map[string]any{"type": "string", "enum": []any{"json", "markdown"}, "description": "Output format (default: json)"},
 			},
 		},
-	}, exportRednoteHandler)
+	}, exportSeednoteHandler)
 }
 
-func exportRednoteHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func exportSeednoteHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := parseArgs(req.Params.Arguments)
 
 	markdown, _ := args["markdown"].(string)
@@ -37,16 +37,16 @@ func exportRednoteHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		format = "json"
 	}
 
-	var result *RednoteExportResult
+	var result *SeednoteExportResult
 
 	if markdown != "" {
 		// Parse from Markdown.
-		result = parseRednoteContent(markdown)
+		result = parseSeednoteContent(markdown)
 	} else if title != "" && content != "" {
 		// Direct parameters.
-		result = &RednoteExportResult{
+		result = &SeednoteExportResult{
 			Title:   title,
-			Content: cleanRednoteContent(content),
+			Content: cleanSeednoteContent(content),
 			Tags:    []string{},
 		}
 		// Extract tags from arguments.
@@ -63,44 +63,44 @@ func exportRednoteHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 
 	switch format {
 	case "markdown":
-		return textResult(formatRednoteMarkdown(result))
+		return textResult(formatSeednoteMarkdown(result))
 	default:
 		return textResult(result)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Rednote content types
+// Seednote content types
 // ---------------------------------------------------------------------------
 
-// RednoteExportResult contains formatted rednote publishing content.
-type RednoteExportResult struct {
+// SeednoteExportResult contains formatted seednote publishing content.
+type SeednoteExportResult struct {
 	Title   string   `json:"title"`
 	Content string   `json:"content"`
 	Tags    []string `json:"tags"`
 }
 
 // ---------------------------------------------------------------------------
-// Rednote parsing helpers (adapted from app/rednote.go)
+// Seednote parsing helpers (adapted from app/seednote.go)
 // ---------------------------------------------------------------------------
 
-// Pre-compiled regexps for rednote content processing.
+// Pre-compiled regexps for seednote content processing.
 var (
-	reRednoteTag          = regexp.MustCompile(`#([^#\s][^\s#]*)`)
-	reRednoteImage        = regexp.MustCompile(`!\[([^\]]*)\]\([^\)]+\)`)
-	reRednoteLink         = regexp.MustCompile(`\[([^\]]+)\]\([^\)]+\)`)
-	reRednoteBold         = regexp.MustCompile(`\*\*([^\*]+)\*\*|__([^_]+)__`)
-	reRednoteItalic       = regexp.MustCompile(`\*([^\*]+)\*|_([^_]+)_`)
-	reRednoteCode         = regexp.MustCompile("`([^`]+)`")
-	reRednoteStrike       = regexp.MustCompile(`~~([^~]+)~~`)
-	reRednoteList         = regexp.MustCompile(`^[\s]*[-\*\d]+[\.\)]?\s*`)
-	reRednoteMultiSpace   = regexp.MustCompile(`\s+`)
-	reRednoteMultiNewline = regexp.MustCompile(`\n{3,}`)
+	reSeednoteTag          = regexp.MustCompile(`#([^#\s][^\s#]*)`)
+	reSeednoteImage        = regexp.MustCompile(`!\[([^\]]*)\]\([^\)]+\)`)
+	reSeednoteLink         = regexp.MustCompile(`\[([^\]]+)\]\([^\)]+\)`)
+	reSeednoteBold         = regexp.MustCompile(`\*\*([^\*]+)\*\*|__([^_]+)__`)
+	reSeednoteItalic       = regexp.MustCompile(`\*([^\*]+)\*|_([^_]+)_`)
+	reSeednoteCode         = regexp.MustCompile("`([^`]+)`")
+	reSeednoteStrike       = regexp.MustCompile(`~~([^~]+)~~`)
+	reSeednoteList         = regexp.MustCompile(`^[\s]*[-\*\d]+[\.\)]?\s*`)
+	reSeednoteMultiSpace   = regexp.MustCompile(`\s+`)
+	reSeednoteMultiNewline = regexp.MustCompile(`\n{3,}`)
 )
 
-// parseRednoteContent parses Markdown content into structured rednote publishing data.
-func parseRednoteContent(markdown string) *RednoteExportResult {
-	result := &RednoteExportResult{
+// parseSeednoteContent parses Markdown content into structured seednote publishing data.
+func parseSeednoteContent(markdown string) *SeednoteExportResult {
+	result := &SeednoteExportResult{
 		Tags: []string{},
 	}
 
@@ -123,7 +123,7 @@ func parseRednoteContent(markdown string) *RednoteExportResult {
 		// Extract title (first # heading).
 		if result.Title == "" && strings.HasPrefix(trimmed, "# ") {
 			result.Title = strings.TrimSpace(strings.TrimPrefix(trimmed, "# "))
-			// Limit title length (rednote titles are typically <= 20 chars).
+			// Limit title length (seednote titles are typically <= 20 chars).
 			if len([]rune(result.Title)) > 20 {
 				runes := []rune(result.Title)
 				result.Title = string(runes[:20])
@@ -140,13 +140,13 @@ func parseRednoteContent(markdown string) *RednoteExportResult {
 
 		// Extract # tags.
 		if !inCodeBlock {
-			tags := extractRednoteTags(trimmed)
+			tags := extractSeednoteTags(trimmed)
 			result.Tags = append(result.Tags, tags...)
-			trimmed = removeRednoteTags(trimmed)
+			trimmed = removeSeednoteTags(trimmed)
 		}
 
 		// Convert Markdown to plain text.
-		trimmed = rednoteMarkdownToPlain(trimmed)
+		trimmed = seednoteMarkdownToPlain(trimmed)
 
 		// Skip empty lines but preserve paragraph spacing.
 		if trimmed == "" {
@@ -164,16 +164,16 @@ func parseRednoteContent(markdown string) *RednoteExportResult {
 		}
 	}
 
-	result.Content = cleanRednoteContent(strings.Join(contentLines, "\n"))
+	result.Content = cleanSeednoteContent(strings.Join(contentLines, "\n"))
 	result.Tags = uniqueStrings(result.Tags)
 
 	return result
 }
 
-// extractRednoteTags extracts # tags from text.
-func extractRednoteTags(text string) []string {
+// extractSeednoteTags extracts # tags from text.
+func extractSeednoteTags(text string) []string {
 	var tags []string
-	matches := reRednoteTag.FindAllStringSubmatch(text, -1)
+	matches := reSeednoteTag.FindAllStringSubmatch(text, -1)
 	for _, match := range matches {
 		if len(match) > 1 {
 			tag := strings.TrimSpace(match[1])
@@ -185,27 +185,27 @@ func extractRednoteTags(text string) []string {
 	return tags
 }
 
-// removeRednoteTags removes # tags from text.
-func removeRednoteTags(text string) string {
-	return strings.TrimSpace(reRednoteTag.ReplaceAllString(text, ""))
+// removeSeednoteTags removes # tags from text.
+func removeSeednoteTags(text string) string {
+	return strings.TrimSpace(reSeednoteTag.ReplaceAllString(text, ""))
 }
 
-// rednoteMarkdownToPlain converts Markdown formatting to plain text.
-func rednoteMarkdownToPlain(text string) string {
-	text = reRednoteImage.ReplaceAllString(text, "")
-	text = reRednoteLink.ReplaceAllString(text, "$1")
-	text = reRednoteBold.ReplaceAllString(text, "$1$2")
-	text = reRednoteItalic.ReplaceAllString(text, "$1$2")
-	text = reRednoteCode.ReplaceAllString(text, "$1")
-	text = reRednoteStrike.ReplaceAllString(text, "$1")
-	text = reRednoteList.ReplaceAllString(text, "")
-	text = reRednoteMultiSpace.ReplaceAllString(text, " ")
+// seednoteMarkdownToPlain converts Markdown formatting to plain text.
+func seednoteMarkdownToPlain(text string) string {
+	text = reSeednoteImage.ReplaceAllString(text, "")
+	text = reSeednoteLink.ReplaceAllString(text, "$1")
+	text = reSeednoteBold.ReplaceAllString(text, "$1$2")
+	text = reSeednoteItalic.ReplaceAllString(text, "$1$2")
+	text = reSeednoteCode.ReplaceAllString(text, "$1")
+	text = reSeednoteStrike.ReplaceAllString(text, "$1")
+	text = reSeednoteList.ReplaceAllString(text, "")
+	text = reSeednoteMultiSpace.ReplaceAllString(text, " ")
 	return strings.TrimSpace(text)
 }
 
-// cleanRednoteContent cleans content formatting (collapse whitespace, trim length).
-func cleanRednoteContent(content string) string {
-	content = reRednoteMultiNewline.ReplaceAllString(content, "\n\n")
+// cleanSeednoteContent cleans content formatting (collapse whitespace, trim length).
+func cleanSeednoteContent(content string) string {
+	content = reSeednoteMultiNewline.ReplaceAllString(content, "\n\n")
 
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
@@ -213,7 +213,7 @@ func cleanRednoteContent(content string) string {
 	}
 	content = strings.Join(lines, "\n")
 
-	// Limit content length (rednote recommends 300-800 chars).
+	// Limit content length (seednote recommends 300-800 chars).
 	runes := []rune(content)
 	if len(runes) > 1000 {
 		content = string(runes[:1000]) + "..."
@@ -236,11 +236,11 @@ func uniqueStrings(slice []string) []string {
 	return result
 }
 
-// formatRednoteMarkdown formats a RednoteExportResult as a Markdown string.
-func formatRednoteMarkdown(r *RednoteExportResult) map[string]any {
+// formatSeednoteMarkdown formats a SeednoteExportResult as a Markdown string.
+func formatSeednoteMarkdown(r *SeednoteExportResult) map[string]any {
 	var sb strings.Builder
 
-	sb.WriteString("# Xiaohongshu Publishing Content\n\n")
+	sb.WriteString("# Seednote Publishing Content\n\n")
 	sb.WriteString("## Title\n\n")
 	sb.WriteString(r.Title)
 	sb.WriteString("\n\n## Body\n\n")

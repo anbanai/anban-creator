@@ -2,7 +2,7 @@ package model
 
 import "time"
 
-// Template represents a reusable content template (poster, rednote, article, xls).
+// Template represents a reusable content template (poster, seednote, article, xls).
 type Template struct {
 	ID             string         `gorm:"type:char(36);primaryKey" json:"id"`
 	Type           string         `gorm:"type:varchar(20);not null;index" json:"type"`

@@ -1,8 +1,8 @@
-# Rednote Profile Analysis Design
+# Seednote Profile Analysis Design
 
 ## Goal
 
-When a user creates a Xiaohongshu account in Studio, the account homepage field accepts either a clean URL or copied share text. The backend extracts the Xiaohongshu URL, fetches the public profile, selects the best-performing visible posts, and uses AI to generate useful account metadata: positioning, keywords, and visual style.
+When a user creates a Seednote account in Studio, the account homepage field accepts either a clean URL or copied share text. The backend extracts the Seednote URL, fetches the public profile, selects the best-performing visible posts, and uses AI to generate useful account metadata: positioning, keywords, and visual style.
 
 For WeChat article and WeChat Xiaolvshu accounts, the account homepage option is disabled for now.
 
@@ -10,7 +10,7 @@ For WeChat article and WeChat Xiaolvshu accounts, the account homepage option is
 
 In scope:
 
-- Xiaohongshu only.
+- Seednote only.
 - Accept share text containing `xhslink.com`, `xiaohongshu.com`, `www.xiaohongshu.com`, or `m.xiaohongshu.com` URLs.
 - Resolve short links safely.
 - Fetch visible public profile data and visible post metadata.
@@ -24,25 +24,25 @@ Out of scope:
 - Persisting sampled posts in the database.
 - Adding database columns.
 - Supporting WeChat profile scraping.
-- Deep crawling individual Xiaohongshu posts beyond data available from the profile page.
+- Deep crawling individual Seednote posts beyond data available from the profile page.
 - Blocking account creation when AI analysis fails.
 
 ## Architecture
 
-The feature uses the existing `POST /api/v1/channels/fetch-profile` endpoint and extends the Xiaohongshu provider.
+The feature uses the existing `POST /api/v1/channels/fetch-profile` endpoint and extends the Seednote provider.
 
-`server/platform/rednote.go` remains responsible for URL extraction, redirect resolution, HTTP fetch, and HTML/embedded-data parsing. Its returned `PlatformProfile.RawData` includes normalized fields for the resolved profile URL, source text, visible post samples, and selected top posts.
+`server/platform/seednote.go` remains responsible for URL extraction, redirect resolution, HTTP fetch, and HTML/embedded-data parsing. Its returned `PlatformProfile.RawData` includes normalized fields for the resolved profile URL, source text, visible post samples, and selected top posts.
 
-The handler enriches Xiaohongshu profiles by calling the existing OpenAI-compatible `service.LLMClient` path when available. The AI response is parsed as strict JSON and merged into the profile response. If the call fails, the handler logs a warning and returns the scraped data.
+The handler enriches Seednote profiles by calling the existing OpenAI-compatible `service.LLMClient` path when available. The AI response is parsed as strict JSON and merged into the profile response. If the call fails, the handler logs a warning and returns the scraped data.
 
-Studio uses platform config to render only the fields that apply. Since article and xls no longer expose `profile_url`, their account homepage input is hidden. Xiaohongshu keeps it and lets users paste either a URL or share text.
+Studio uses platform config to render only the fields that apply. Since article and xls no longer expose `profile_url`, their account homepage input is hidden. Seednote keeps it and lets users paste either a URL or share text.
 
 ## Data Flow
 
-1. User selects 小红书 and pastes share text into the account homepage field.
+1. User selects 种草笔记 and pastes share text into the account homepage field.
 2. Frontend calls `fetchProfile(platform, inputText, ...)`.
 3. Backend validates the platform.
-4. For Xiaohongshu, backend extracts the first supported URL from arbitrary text.
+4. For Seednote, backend extracts the first supported URL from arbitrary text.
 5. Provider resolves short links and fetches the resulting profile page.
 6. Provider parses:
    - nickname
@@ -92,9 +92,9 @@ The backend validates and normalizes:
 
 - Missing supported URL in share text: `400` with a clear message.
 - Unsupported platform auto-fetch: no profile URL field is shown in Studio, but backend still returns a validation error if called.
-- Xiaohongshu fetch failure: `500` with existing error shape.
+- Seednote fetch failure: `500` with existing error shape.
 - AI unavailable or invalid JSON: logged as warning; response still succeeds with scraped profile fields.
-- Redirect targets are restricted to Xiaohongshu allowed hosts.
+- Redirect targets are restricted to Seednote allowed hosts.
 
 ## Testing
 
@@ -111,6 +111,6 @@ Backend tests cover:
 Frontend tests or type-safe build cover:
 
 - Article and xls platform configs no longer expose `profile_url`.
-- Xiaohongshu profile input accepts arbitrary text and fetch button enables when a supported URL exists inside it.
+- Seednote profile input accepts arbitrary text and fetch button enables when a supported URL exists inside it.
 - Auto-fill applies keywords and style when returned.
 

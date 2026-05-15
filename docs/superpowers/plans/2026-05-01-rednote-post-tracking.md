@@ -1,10 +1,10 @@
-# Rednote Post Tracking Implementation Plan
+# Seednote Post Tracking Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build automatic post-publication RedNote tracking: discover a newly published note from the account homepage, bind it to the local task, collect public metrics daily, and show trends on the task detail page.
+**Goal:** Build automatic post-publication SeedNote tracking: discover a newly published note from the account homepage, bind it to the local task, collect public metrics daily, and show trends on the task detail page.
 
-**Architecture:** Add a focused tracking subsystem beside the existing task/channel flow. Backend state lives in dedicated GORM models and repositories; `RednoteTrackingService` orchestrates discovery, AI matching, metric capture, stop rules, and scheduling. Studio reads analytics through a task-scoped endpoint and renders a compact panel inside `TaskDetailPage`.
+**Architecture:** Add a focused tracking subsystem beside the existing task/channel flow. Backend state lives in dedicated GORM models and repositories; `SeednoteTrackingService` orchestrates discovery, AI matching, metric capture, stop rules, and scheduling. Studio reads analytics through a task-scoped endpoint and renders a compact panel inside `TaskDetailPage`.
 
 **Tech Stack:** Go, Fiber v3, GORM, Asynq, zerolog, existing OpenAI-compatible `service.LLMClient`, React, TanStack Query, Recharts, Vitest.
 
@@ -14,30 +14,30 @@
 
 Create:
 
-- `server/model/rednote_tracking.go`: tracking and metric snapshot models, statuses, stop reasons.
-- `server/repository/rednote_tracking.go`: GORM repository implementations for tracking records and snapshots.
-- `server/platform/rednote_metrics_test.go`: public RedNote note ID, metric parsing, profile candidate parsing, note metrics parsing tests.
-- `server/service/rednote_tracking.go`: orchestration service, AI match parsing, stop evaluation, analytics DTOs.
-- `server/service/rednote_tracking_test.go`: service tests using fake repository data, fake platform, fake AI, and fake enqueuer.
-- `server/handler/rednote_analytics.go`: task-scoped analytics handler method.
-- `server/handler/rednote_analytics_test.go`: endpoint ownership and response tests.
-- `studio/src/types/rednote-analytics.ts`: frontend analytics response types.
-- `studio/src/lib/api/rednote-analytics.ts`: API client for task analytics.
-- `studio/src/components/tasks/RednoteAnalyticsPanel.tsx`: RedNote task analytics UI.
+- `server/model/seednote_tracking.go`: tracking and metric snapshot models, statuses, stop reasons.
+- `server/repository/seednote_tracking.go`: GORM repository implementations for tracking records and snapshots.
+- `server/platform/seednote_metrics_test.go`: public SeedNote note ID, metric parsing, profile candidate parsing, note metrics parsing tests.
+- `server/service/seednote_tracking.go`: orchestration service, AI match parsing, stop evaluation, analytics DTOs.
+- `server/service/seednote_tracking_test.go`: service tests using fake repository data, fake platform, fake AI, and fake enqueuer.
+- `server/handler/seednote_analytics.go`: task-scoped analytics handler method.
+- `server/handler/seednote_analytics_test.go`: endpoint ownership and response tests.
+- `studio/src/types/seednote-analytics.ts`: frontend analytics response types.
+- `studio/src/lib/api/seednote-analytics.ts`: API client for task analytics.
+- `studio/src/components/tasks/SeednoteAnalyticsPanel.tsx`: SeedNote task analytics UI.
 
 Modify:
 
 - `server/model/model.go`: migrate new models.
 - `server/repository/repository.go`: expose new repositories.
 - `server/repository/repository_test.go`: assert new repositories are wired.
-- `server/platform/rednote.go`: add public profile post and note metric parsing APIs.
-- `server/scheduler/scheduler.go`: add `rednote:discover` and `rednote:capture_metrics` task types and handlers.
+- `server/platform/seednote.go`: add public profile post and note metric parsing APIs.
+- `server/scheduler/scheduler.go`: add `seednote:discover` and `seednote:capture_metrics` task types and handlers.
 - `server/main.go`: instantiate tracking service, wire Asynq handlers, pass handler dependencies.
 - `server/router/router.go`: add analytics endpoint and service fields.
-- `server/service/task.go`: call tracking service from `SetPublished` for RedNote published tasks.
-- `server/service/task_test.go`: verify RedNote publish creates tracking and non-RedNote publish does not.
-- `studio/src/lib/api/index.ts`: export rednote analytics API.
-- `studio/src/pages/TaskDetailPage.tsx`: embed analytics panel only for published RedNote tasks.
+- `server/service/task.go`: call tracking service from `SetPublished` for SeedNote published tasks.
+- `server/service/task_test.go`: verify SeedNote publish creates tracking and non-SeedNote publish does not.
+- `studio/src/lib/api/index.ts`: export seednote analytics API.
+- `studio/src/pages/TaskDetailPage.tsx`: embed analytics panel only for published SeedNote tasks.
 - `studio/src/lib/query-keys.ts`: add stable analytics query key.
 
 ---
@@ -46,7 +46,7 @@ Modify:
 
 **Files:**
 
-- Create: `server/model/rednote_tracking.go`
+- Create: `server/model/seednote_tracking.go`
 - Modify: `server/model/model.go`
 - Test: `server/repository/repository_test.go`
 
@@ -55,15 +55,15 @@ Modify:
 Add this test to `server/repository/repository_test.go`:
 
 ```go
-func TestNew_RednoteTrackingRepositories(t *testing.T) {
+func TestNew_SeednoteTrackingRepositories(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)
 
-	if repo.RednoteTrackings() == nil {
-		t.Fatal("RednoteTrackings() should not be nil")
+	if repo.SeednoteTrackings() == nil {
+		t.Fatal("SeednoteTrackings() should not be nil")
 	}
-	if repo.RednoteMetricSnapshots() == nil {
-		t.Fatal("RednoteMetricSnapshots() should not be nil")
+	if repo.SeednoteMetricSnapshots() == nil {
+		t.Fatal("SeednoteMetricSnapshots() should not be nil")
 	}
 }
 ```
@@ -73,14 +73,14 @@ func TestNew_RednoteTrackingRepositories(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/repository -run TestNew_RednoteTrackingRepositories -count=1
+go test ./server/repository -run TestNew_SeednoteTrackingRepositories -count=1
 ```
 
-Expected: compile failure because `Repository` does not define `RednoteTrackings` or `RednoteMetricSnapshots`.
+Expected: compile failure because `Repository` does not define `SeednoteTrackings` or `SeednoteMetricSnapshots`.
 
 - [ ] **Step 3: Add tracking models and constants**
 
-Create `server/model/rednote_tracking.go`:
+Create `server/model/seednote_tracking.go`:
 
 ```go
 package model
@@ -88,29 +88,29 @@ package model
 import "time"
 
 const (
-	RednoteTrackingStatusWaitingDiscovery = "waiting_discovery"
-	RednoteTrackingStatusTracking         = "tracking"
-	RednoteTrackingStatusStopped          = "stopped"
-	RednoteTrackingStatusFailed           = "failed"
+	SeednoteTrackingStatusWaitingDiscovery = "waiting_discovery"
+	SeednoteTrackingStatusTracking         = "tracking"
+	SeednoteTrackingStatusStopped          = "stopped"
+	SeednoteTrackingStatusFailed           = "failed"
 )
 
 const (
-	RednoteStopReasonMaxDurationReached = "max_duration_reached"
-	RednoteStopReasonLowGrowth          = "low_growth"
-	RednoteStopReasonDiscoveryTimeout   = "discovery_timeout"
-	RednoteStopReasonTooManyFailures    = "too_many_failures"
-	RednoteStopReasonManualStop         = "manual_stop"
+	SeednoteStopReasonMaxDurationReached = "max_duration_reached"
+	SeednoteStopReasonLowGrowth          = "low_growth"
+	SeednoteStopReasonDiscoveryTimeout   = "discovery_timeout"
+	SeednoteStopReasonTooManyFailures    = "too_many_failures"
+	SeednoteStopReasonManualStop         = "manual_stop"
 )
 
 const (
-	RednoteTrackingMaxDays              = 14
-	RednoteDiscoveryMaxAttempts         = 7
-	RednoteTrackingMaxFailures          = 5
-	RednoteLowGrowthThreshold           = 3
-	RednoteLowGrowthConsecutiveCaptures = 3
+	SeednoteTrackingMaxDays              = 14
+	SeednoteDiscoveryMaxAttempts         = 7
+	SeednoteTrackingMaxFailures          = 5
+	SeednoteLowGrowthThreshold           = 3
+	SeednoteLowGrowthConsecutiveCaptures = 3
 )
 
-type RednotePostTracking struct {
+type SeednotePostTracking struct {
 	ID                        string     `gorm:"type:char(36);primaryKey" json:"id"`
 	TaskID                    string     `gorm:"type:char(36);uniqueIndex;not null" json:"task_id"`
 	UserID                    string     `gorm:"type:char(36);index;not null" json:"user_id"`
@@ -139,14 +139,14 @@ type RednotePostTracking struct {
 	UpdatedAt                 time.Time  `json:"updated_at"`
 }
 
-func (RednotePostTracking) TableName() string { return "rednote_post_trackings" }
+func (SeednotePostTracking) TableName() string { return "seednote_post_trackings" }
 
-type RednoteMetricSnapshot struct {
+type SeednoteMetricSnapshot struct {
 	ID           string     `gorm:"type:char(36);primaryKey" json:"id"`
-	TrackingID   string     `gorm:"type:char(36);uniqueIndex:idx_rednote_tracking_date,priority:1;index;not null" json:"tracking_id"`
+	TrackingID   string     `gorm:"type:char(36);uniqueIndex:idx_seednote_tracking_date,priority:1;index;not null" json:"tracking_id"`
 	TaskID       string     `gorm:"type:char(36);index;not null" json:"task_id"`
 	CapturedAt   time.Time  `gorm:"index" json:"captured_at"`
-	CapturedDate string     `gorm:"type:char(10);uniqueIndex:idx_rednote_tracking_date,priority:2;not null" json:"captured_date"`
+	CapturedDate string     `gorm:"type:char(10);uniqueIndex:idx_seednote_tracking_date,priority:2;not null" json:"captured_date"`
 	LikeCount    int        `json:"like_count"`
 	CollectCount int        `json:"collect_count"`
 	CommentCount int        `json:"comment_count"`
@@ -156,9 +156,9 @@ type RednoteMetricSnapshot struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
-func (RednoteMetricSnapshot) TableName() string { return "rednote_metric_snapshots" }
+func (SeednoteMetricSnapshot) TableName() string { return "seednote_metric_snapshots" }
 
-func RednoteCapturedDate(t time.Time) string {
+func SeednoteCapturedDate(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 ```
@@ -180,8 +180,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&APIKey{},
 		&Feedback{},
 		&UserModelConfig{},
-		&RednotePostTracking{},
-		&RednoteMetricSnapshot{},
+		&SeednotePostTracking{},
+		&SeednoteMetricSnapshot{},
 	)
 	if err != nil {
 		return err
@@ -204,8 +204,8 @@ Expected: pass or report no test files.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/model/rednote_tracking.go server/model/model.go server/repository/repository_test.go
-git commit -m "feat: add rednote tracking models"
+git add server/model/seednote_tracking.go server/model/model.go server/repository/repository_test.go
+git commit -m "feat: add seednote tracking models"
 ```
 
 ---
@@ -214,7 +214,7 @@ git commit -m "feat: add rednote tracking models"
 
 **Files:**
 
-- Create: `server/repository/rednote_tracking.go`
+- Create: `server/repository/seednote_tracking.go`
 - Modify: `server/repository/repository.go`
 - Test: `server/repository/repository_test.go`
 
@@ -223,29 +223,29 @@ git commit -m "feat: add rednote tracking models"
 Add these tests to `server/repository/repository_test.go`:
 
 ```go
-func TestRednoteTrackingRepository_CRUD(t *testing.T) {
+func TestSeednoteTrackingRepository_CRUD(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)
 	ctx := context.Background()
 	now := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	nextRun := now.Add(24 * time.Hour)
 
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                "tracking-1",
 		TaskID:            "task-1",
 		UserID:            "user-1",
 		ChannelID:         "channel-1",
-		Status:            model.RednoteTrackingStatusWaitingDiscovery,
+		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/abc",
 		PublishedMarkedAt: now,
 		NextRunAt:         &nextRun,
 	}
 
-	if err := repo.RednoteTrackings().Create(ctx, tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(ctx, tracking); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	found, err := repo.RednoteTrackings().FindByTaskID(ctx, "task-1")
+	found, err := repo.SeednoteTrackings().FindByTaskID(ctx, "task-1")
 	if err != nil {
 		t.Fatalf("FindByTaskID: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestRednoteTrackingRepository_CRUD(t *testing.T) {
 		t.Fatalf("ID = %q, want tracking-1", found.ID)
 	}
 
-	due, err := repo.RednoteTrackings().FindDue(ctx, nextRun.Add(time.Second), 10)
+	due, err := repo.SeednoteTrackings().FindDue(ctx, nextRun.Add(time.Second), 10)
 	if err != nil {
 		t.Fatalf("FindDue: %v", err)
 	}
@@ -261,50 +261,50 @@ func TestRednoteTrackingRepository_CRUD(t *testing.T) {
 		t.Fatalf("due length = %d, want 1", len(due))
 	}
 
-	found.Status = model.RednoteTrackingStatusTracking
+	found.Status = model.SeednoteTrackingStatusTracking
 	found.NoteID = "note-1"
-	if err := repo.RednoteTrackings().Update(ctx, found); err != nil {
+	if err := repo.SeednoteTrackings().Update(ctx, found); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 
-	updated, err := repo.RednoteTrackings().FindByID(ctx, "tracking-1")
+	updated, err := repo.SeednoteTrackings().FindByID(ctx, "tracking-1")
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if updated.Status != model.RednoteTrackingStatusTracking || updated.NoteID != "note-1" {
+	if updated.Status != model.SeednoteTrackingStatusTracking || updated.NoteID != "note-1" {
 		t.Fatalf("updated tracking = %+v", updated)
 	}
 }
 
-func TestRednoteMetricSnapshotRepository_UpsertAndSeries(t *testing.T) {
+func TestSeednoteMetricSnapshotRepository_UpsertAndSeries(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)
 	ctx := context.Background()
 	captured := time.Date(2026, 5, 2, 8, 0, 0, 0, time.UTC)
 
-	first := &model.RednoteMetricSnapshot{
+	first := &model.SeednoteMetricSnapshot{
 		ID:           "snapshot-1",
 		TrackingID:   "tracking-1",
 		TaskID:       "task-1",
 		CapturedAt:   captured,
-		CapturedDate: model.RednoteCapturedDate(captured),
+		CapturedDate: model.SeednoteCapturedDate(captured),
 		LikeCount:    10,
 		CollectCount: 2,
 		CommentCount: 1,
 		ShareCount:   0,
 	}
-	if err := repo.RednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, first); err != nil {
+	if err := repo.SeednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, first); err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
 
 	second := *first
 	second.ID = "snapshot-2"
 	second.LikeCount = 15
-	if err := repo.RednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, &second); err != nil {
+	if err := repo.SeednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, &second); err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
 
-	series, err := repo.RednoteMetricSnapshots().FindByTaskID(ctx, "task-1")
+	series, err := repo.SeednoteMetricSnapshots().FindByTaskID(ctx, "task-1")
 	if err != nil {
 		t.Fatalf("FindByTaskID: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestRednoteMetricSnapshotRepository_UpsertAndSeries(t *testing.T) {
 		t.Fatalf("LikeCount = %d, want 15", series[0].LikeCount)
 	}
 
-	latest, err := repo.RednoteMetricSnapshots().FindLatestByTrackingID(ctx, "tracking-1")
+	latest, err := repo.SeednoteMetricSnapshots().FindLatestByTrackingID(ctx, "tracking-1")
 	if err != nil {
 		t.Fatalf("FindLatestByTrackingID: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestRednoteMetricSnapshotRepository_UpsertAndSeries(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/repository -run 'TestNew_RednoteTrackingRepositories|TestRednoteTrackingRepository|TestRednoteMetricSnapshotRepository' -count=1
+go test ./server/repository -run 'TestNew_SeednoteTrackingRepositories|TestSeednoteTrackingRepository|TestSeednoteMetricSnapshotRepository' -count=1
 ```
 
 Expected: compile failure because repository interfaces and methods are missing.
@@ -351,53 +351,53 @@ type Repository interface {
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
 	ModelConfigs() ModelConfigRepository
-	RednoteTrackings() RednoteTrackingRepository
-	RednoteMetricSnapshots() RednoteMetricSnapshotRepository
+	SeednoteTrackings() SeednoteTrackingRepository
+	SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
 
-type RednoteTrackingRepository interface {
-	Create(ctx context.Context, tracking *model.RednotePostTracking) error
-	FindByTaskID(ctx context.Context, taskID string) (*model.RednotePostTracking, error)
-	FindByID(ctx context.Context, id string) (*model.RednotePostTracking, error)
-	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.RednotePostTracking, error)
-	Update(ctx context.Context, tracking *model.RednotePostTracking) error
+type SeednoteTrackingRepository interface {
+	Create(ctx context.Context, tracking *model.SeednotePostTracking) error
+	FindByTaskID(ctx context.Context, taskID string) (*model.SeednotePostTracking, error)
+	FindByID(ctx context.Context, id string) (*model.SeednotePostTracking, error)
+	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.SeednotePostTracking, error)
+	Update(ctx context.Context, tracking *model.SeednotePostTracking) error
 	UpdateStatus(ctx context.Context, id, status string) error
 }
 
-type RednoteMetricSnapshotRepository interface {
-	Create(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error
-	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error
-	FindByTaskID(ctx context.Context, taskID string) ([]*model.RednoteMetricSnapshot, error)
-	FindLatestByTrackingID(ctx context.Context, trackingID string) (*model.RednoteMetricSnapshot, error)
-	FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.RednoteMetricSnapshot, error)
+type SeednoteMetricSnapshotRepository interface {
+	Create(ctx context.Context, snapshot *model.SeednoteMetricSnapshot) error
+	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.SeednoteMetricSnapshot) error
+	FindByTaskID(ctx context.Context, taskID string) ([]*model.SeednoteMetricSnapshot, error)
+	FindLatestByTrackingID(ctx context.Context, trackingID string) (*model.SeednoteMetricSnapshot, error)
+	FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.SeednoteMetricSnapshot, error)
 }
 ```
 
 Add fields to both `repository` and `txRepository`, initialize them in `New` and `newTxRepository`, and add accessors:
 
 ```go
-func (r *repository) RednoteTrackings() RednoteTrackingRepository {
-	return r.rednoteTrackings
+func (r *repository) SeednoteTrackings() SeednoteTrackingRepository {
+	return r.seednoteTrackings
 }
 
-func (r *repository) RednoteMetricSnapshots() RednoteMetricSnapshotRepository {
-	return r.rednoteMetricSnapshots
+func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
+	return r.seednoteMetricSnapshots
 }
 
-func (r *txRepository) RednoteTrackings() RednoteTrackingRepository {
-	return r.rednoteTrackings
+func (r *txRepository) SeednoteTrackings() SeednoteTrackingRepository {
+	return r.seednoteTrackings
 }
 
-func (r *txRepository) RednoteMetricSnapshots() RednoteMetricSnapshotRepository {
-	return r.rednoteMetricSnapshots
+func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
+	return r.seednoteMetricSnapshots
 }
 ```
 
 - [ ] **Step 4: Implement repositories**
 
-Create `server/repository/rednote_tracking.go`:
+Create `server/repository/seednote_tracking.go`:
 
 ```go
 package repository
@@ -411,41 +411,41 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type rednoteTrackingRepository struct {
+type seednoteTrackingRepository struct {
 	db *gorm.DB
 }
 
-func newRednoteTrackingRepository(db *gorm.DB) RednoteTrackingRepository {
-	return &rednoteTrackingRepository{db: db}
+func newSeednoteTrackingRepository(db *gorm.DB) SeednoteTrackingRepository {
+	return &seednoteTrackingRepository{db: db}
 }
 
-func (r *rednoteTrackingRepository) Create(ctx context.Context, tracking *model.RednotePostTracking) error {
+func (r *seednoteTrackingRepository) Create(ctx context.Context, tracking *model.SeednotePostTracking) error {
 	return r.db.WithContext(ctx).Create(tracking).Error
 }
 
-func (r *rednoteTrackingRepository) FindByTaskID(ctx context.Context, taskID string) (*model.RednotePostTracking, error) {
-	var tracking model.RednotePostTracking
+func (r *seednoteTrackingRepository) FindByTaskID(ctx context.Context, taskID string) (*model.SeednotePostTracking, error) {
+	var tracking model.SeednotePostTracking
 	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).First(&tracking).Error; err != nil {
 		return nil, err
 	}
 	return &tracking, nil
 }
 
-func (r *rednoteTrackingRepository) FindByID(ctx context.Context, id string) (*model.RednotePostTracking, error) {
-	var tracking model.RednotePostTracking
+func (r *seednoteTrackingRepository) FindByID(ctx context.Context, id string) (*model.SeednotePostTracking, error) {
+	var tracking model.SeednotePostTracking
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&tracking).Error; err != nil {
 		return nil, err
 	}
 	return &tracking, nil
 }
 
-func (r *rednoteTrackingRepository) FindDue(ctx context.Context, now time.Time, limit int) ([]*model.RednotePostTracking, error) {
-	var trackings []*model.RednotePostTracking
+func (r *seednoteTrackingRepository) FindDue(ctx context.Context, now time.Time, limit int) ([]*model.SeednotePostTracking, error) {
+	var trackings []*model.SeednotePostTracking
 	q := r.db.WithContext(ctx).
 		Where("next_run_at IS NOT NULL AND next_run_at <= ?", now).
 		Where("status IN ?", []string{
-			model.RednoteTrackingStatusWaitingDiscovery,
-			model.RednoteTrackingStatusTracking,
+			model.SeednoteTrackingStatusWaitingDiscovery,
+			model.SeednoteTrackingStatusTracking,
 		}).
 		Order("next_run_at ASC")
 	if limit > 0 {
@@ -457,30 +457,30 @@ func (r *rednoteTrackingRepository) FindDue(ctx context.Context, now time.Time, 
 	return trackings, nil
 }
 
-func (r *rednoteTrackingRepository) Update(ctx context.Context, tracking *model.RednotePostTracking) error {
+func (r *seednoteTrackingRepository) Update(ctx context.Context, tracking *model.SeednotePostTracking) error {
 	return r.db.WithContext(ctx).Save(tracking).Error
 }
 
-func (r *rednoteTrackingRepository) UpdateStatus(ctx context.Context, id, status string) error {
+func (r *seednoteTrackingRepository) UpdateStatus(ctx context.Context, id, status string) error {
 	return r.db.WithContext(ctx).
-		Model(&model.RednotePostTracking{}).
+		Model(&model.SeednotePostTracking{}).
 		Where("id = ?", id).
 		Update("status", status).Error
 }
 
-type rednoteMetricSnapshotRepository struct {
+type seednoteMetricSnapshotRepository struct {
 	db *gorm.DB
 }
 
-func newRednoteMetricSnapshotRepository(db *gorm.DB) RednoteMetricSnapshotRepository {
-	return &rednoteMetricSnapshotRepository{db: db}
+func newSeednoteMetricSnapshotRepository(db *gorm.DB) SeednoteMetricSnapshotRepository {
+	return &seednoteMetricSnapshotRepository{db: db}
 }
 
-func (r *rednoteMetricSnapshotRepository) Create(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error {
+func (r *seednoteMetricSnapshotRepository) Create(ctx context.Context, snapshot *model.SeednoteMetricSnapshot) error {
 	return r.db.WithContext(ctx).Create(snapshot).Error
 }
 
-func (r *rednoteMetricSnapshotRepository) UpsertByTrackingAndDate(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error {
+func (r *seednoteMetricSnapshotRepository) UpsertByTrackingAndDate(ctx context.Context, snapshot *model.SeednoteMetricSnapshot) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "tracking_id"},
@@ -498,8 +498,8 @@ func (r *rednoteMetricSnapshotRepository) UpsertByTrackingAndDate(ctx context.Co
 	}).Create(snapshot).Error
 }
 
-func (r *rednoteMetricSnapshotRepository) FindByTaskID(ctx context.Context, taskID string) ([]*model.RednoteMetricSnapshot, error) {
-	var snapshots []*model.RednoteMetricSnapshot
+func (r *seednoteMetricSnapshotRepository) FindByTaskID(ctx context.Context, taskID string) ([]*model.SeednoteMetricSnapshot, error) {
+	var snapshots []*model.SeednoteMetricSnapshot
 	err := r.db.WithContext(ctx).
 		Where("task_id = ?", taskID).
 		Order("captured_at ASC").
@@ -507,8 +507,8 @@ func (r *rednoteMetricSnapshotRepository) FindByTaskID(ctx context.Context, task
 	return snapshots, err
 }
 
-func (r *rednoteMetricSnapshotRepository) FindLatestByTrackingID(ctx context.Context, trackingID string) (*model.RednoteMetricSnapshot, error) {
-	var snapshot model.RednoteMetricSnapshot
+func (r *seednoteMetricSnapshotRepository) FindLatestByTrackingID(ctx context.Context, trackingID string) (*model.SeednoteMetricSnapshot, error) {
+	var snapshot model.SeednoteMetricSnapshot
 	if err := r.db.WithContext(ctx).
 		Where("tracking_id = ?", trackingID).
 		Order("captured_at DESC").
@@ -518,8 +518,8 @@ func (r *rednoteMetricSnapshotRepository) FindLatestByTrackingID(ctx context.Con
 	return &snapshot, nil
 }
 
-func (r *rednoteMetricSnapshotRepository) FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.RednoteMetricSnapshot, error) {
-	var snapshot model.RednoteMetricSnapshot
+func (r *seednoteMetricSnapshotRepository) FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.SeednoteMetricSnapshot, error) {
+	var snapshot model.SeednoteMetricSnapshot
 	if err := r.db.WithContext(ctx).
 		Where("tracking_id = ? AND captured_at < ?", trackingID, capturedAt).
 		Order("captured_at DESC").
@@ -543,29 +543,29 @@ Expected: pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/repository/repository.go server/repository/rednote_tracking.go server/repository/repository_test.go
-git commit -m "feat: add rednote tracking repositories"
+git add server/repository/repository.go server/repository/seednote_tracking.go server/repository/repository_test.go
+git commit -m "feat: add seednote tracking repositories"
 ```
 
 ---
 
-### Task 3: Add RedNote Public Parsing
+### Task 3: Add SeedNote Public Parsing
 
 **Files:**
 
-- Modify: `server/platform/rednote.go`
-- Create: `server/platform/rednote_metrics_test.go`
+- Modify: `server/platform/seednote.go`
+- Create: `server/platform/seednote_metrics_test.go`
 
 - [ ] **Step 1: Write parsing tests**
 
-Create `server/platform/rednote_metrics_test.go`:
+Create `server/platform/seednote_metrics_test.go`:
 
 ```go
 package platform
 
 import "testing"
 
-func TestExtractRednoteNoteID(t *testing.T) {
+func TestExtractSeednoteNoteID(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
@@ -579,14 +579,14 @@ func TestExtractRednoteNoteID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ExtractRednoteNoteID(tt.raw); got != tt.want {
-				t.Fatalf("ExtractRednoteNoteID() = %q, want %q", got, tt.want)
+			if got := ExtractSeednoteNoteID(tt.raw); got != tt.want {
+				t.Fatalf("ExtractSeednoteNoteID() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestNormalizeRednoteMetricCount(t *testing.T) {
+func TestNormalizeSeednoteMetricCount(t *testing.T) {
 	tests := []struct {
 		raw  string
 		want int
@@ -601,14 +601,14 @@ func TestNormalizeRednoteMetricCount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.raw, func(t *testing.T) {
-			if got := NormalizeRednoteMetricCount(tt.raw); got != tt.want {
-				t.Fatalf("NormalizeRednoteMetricCount(%q) = %d, want %d", tt.raw, got, tt.want)
+			if got := NormalizeSeednoteMetricCount(tt.raw); got != tt.want {
+				t.Fatalf("NormalizeSeednoteMetricCount(%q) = %d, want %d", tt.raw, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestParseRednotePostsIncludesNoteIDAndMetrics(t *testing.T) {
+func TestParseSeednotePostsIncludesNoteIDAndMetrics(t *testing.T) {
 	html := `
 	<a href="/explore/65f123abc456">
 		<img src="https://img.example/cover.jpg">
@@ -619,7 +619,7 @@ func TestParseRednotePostsIncludesNoteIDAndMetrics(t *testing.T) {
 		<span>分享 6</span>
 	</a>`
 
-	posts := parseRednotePosts(html)
+	posts := parseSeednotePosts(html)
 	if len(posts) != 1 {
 		t.Fatalf("len(posts) = %d, want 1", len(posts))
 	}
@@ -635,7 +635,7 @@ func TestParseRednotePostsIncludesNoteIDAndMetrics(t *testing.T) {
 	}
 }
 
-func TestParseRednotePostMetrics(t *testing.T) {
+func TestParseSeednotePostMetrics(t *testing.T) {
 	html := `
 	<html>
 		<body>
@@ -646,7 +646,7 @@ func TestParseRednotePostMetrics(t *testing.T) {
 		</body>
 	</html>`
 
-	metrics := parseRednotePostMetrics(html)
+	metrics := parseSeednotePostMetrics(html)
 	if metrics.LikeCount != 123 || metrics.CollectCount != 45 || metrics.CommentCount != 6 || metrics.ShareCount != 2 {
 		t.Fatalf("metrics = %+v", metrics)
 	}
@@ -661,17 +661,17 @@ func TestParseRednotePostMetrics(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/platform -run 'TestExtractRednoteNoteID|TestNormalizeRednoteMetricCount|TestParseRednotePostsIncludesNoteIDAndMetrics|TestParseRednotePostMetrics' -count=1
+go test ./server/platform -run 'TestExtractSeednoteNoteID|TestNormalizeSeednoteMetricCount|TestParseSeednotePostsIncludesNoteIDAndMetrics|TestParseSeednotePostMetrics' -count=1
 ```
 
-Expected: compile failure for missing exported functions and missing `RednotePost.NoteID`.
+Expected: compile failure for missing exported functions and missing `SeednotePost.NoteID`.
 
 - [ ] **Step 3: Extend platform types and parsing helpers**
 
-Modify `server/platform/rednote.go` so `RednotePost` has `NoteID`. If the type is already lower in the file, update the existing definition rather than adding a second one:
+Modify `server/platform/seednote.go` so `SeednotePost` has `NoteID`. If the type is already lower in the file, update the existing definition rather than adding a second one:
 
 ```go
-type RednotePost struct {
+type SeednotePost struct {
 	Title           string `json:"title"`
 	URL             string `json:"url"`
 	NoteID          string `json:"note_id"`
@@ -683,7 +683,7 @@ type RednotePost struct {
 	EngagementScore int    `json:"engagement_score"`
 }
 
-type RednotePostMetrics struct {
+type SeednotePostMetrics struct {
 	LikeCount    int  `json:"like_count"`
 	CollectCount int  `json:"collect_count"`
 	CommentCount int  `json:"comment_count"`
@@ -695,7 +695,7 @@ type RednotePostMetrics struct {
 Add exported helpers:
 
 ```go
-func ExtractRednoteNoteID(raw string) string {
+func ExtractSeednoteNoteID(raw string) string {
 	raw = strings.ReplaceAll(raw, `\u002F`, "/")
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`/explore/([^/?#]+)`),
@@ -710,12 +710,12 @@ func ExtractRednoteNoteID(raw string) string {
 	return ""
 }
 
-func NormalizeRednoteMetricCount(text string) int {
+func NormalizeSeednoteMetricCount(text string) int {
 	text = strings.TrimSpace(strings.ReplaceAll(text, ",", ""))
 	if text == "" {
 		return 0
 	}
-	match := rednoteNumberPattern.FindString(text)
+	match := seednoteNumberPattern.FindString(text)
 	if match == "" {
 		return 0
 	}
@@ -733,26 +733,26 @@ func NormalizeRednoteMetricCount(text string) int {
 }
 ```
 
-Update `parseMetricAfterLabels` to call `NormalizeRednoteMetricCount` for the matched fragment. Update `parseRednotePosts` so it sets `NoteID: ExtractRednoteNoteID(postURL)`.
+Update `parseMetricAfterLabels` to call `NormalizeSeednoteMetricCount` for the matched fragment. Update `parseSeednotePosts` so it sets `NoteID: ExtractSeednoteNoteID(postURL)`.
 
 - [ ] **Step 4: Add profile and note metric fetch methods**
 
-Add methods to `server/platform/rednote.go`:
+Add methods to `server/platform/seednote.go`:
 
 ```go
-func (p *RednoteProvider) FetchProfilePosts(ctx context.Context, profileURL string) ([]RednotePost, error) {
+func (p *SeednoteProvider) FetchProfilePosts(ctx context.Context, profileURL string) ([]SeednotePost, error) {
 	profile, err := p.FetchProfile(ctx, profileURL)
 	if err != nil {
 		return nil, err
 	}
-	posts, ok := profile.RawData["posts"].([]RednotePost)
+	posts, ok := profile.RawData["posts"].([]SeednotePost)
 	if !ok {
-		return []RednotePost{}, nil
+		return []SeednotePost{}, nil
 	}
 	return posts, nil
 }
 
-func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) (*RednotePostMetrics, error) {
+func (p *SeednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) (*SeednotePostMetrics, error) {
 	if strings.TrimSpace(noteURL) == "" {
 		return nil, fmt.Errorf("note URL is required")
 	}
@@ -760,7 +760,7 @@ func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) 
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	setRednoteHeaders(req)
+	setSeednoteHeaders(req)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch note page: %w", err)
@@ -769,20 +769,20 @@ func (p *RednoteProvider) FetchPostMetrics(ctx context.Context, noteURL string) 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, rednoteMaxProfileBytes+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, seednoteMaxProfileBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read response body: %w", err)
 	}
-	if len(body) > rednoteMaxProfileBytes {
+	if len(body) > seednoteMaxProfileBytes {
 		return nil, fmt.Errorf("note page is too large")
 	}
-	metrics := parseRednotePostMetrics(string(body))
+	metrics := parseSeednotePostMetrics(string(body))
 	return &metrics, nil
 }
 
-func parseRednotePostMetrics(html string) RednotePostMetrics {
-	text := normalizeRednoteText(rednoteTagPattern.ReplaceAllString(html, " "))
-	return RednotePostMetrics{
+func parseSeednotePostMetrics(html string) SeednotePostMetrics {
+	text := normalizeSeednoteText(seednoteTagPattern.ReplaceAllString(html, " "))
+	return SeednotePostMetrics{
 		LikeCount:    parseMetricAfterLabels(text, "点赞", "赞", "喜欢", "like"),
 		CollectCount: parseMetricAfterLabels(text, "收藏", "collect"),
 		CommentCount: parseMetricAfterLabels(text, "评论", "comment"),
@@ -805,22 +805,22 @@ Expected: pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/platform/rednote.go server/platform/rednote_metrics_test.go
-git commit -m "feat: parse rednote public metrics"
+git add server/platform/seednote.go server/platform/seednote_metrics_test.go
+git commit -m "feat: parse seednote public metrics"
 ```
 
 ---
 
-### Task 4: Add RedNote Tracking Service
+### Task 4: Add SeedNote Tracking Service
 
 **Files:**
 
-- Create: `server/service/rednote_tracking.go`
-- Create: `server/service/rednote_tracking_test.go`
+- Create: `server/service/seednote_tracking.go`
+- Create: `server/service/seednote_tracking_test.go`
 
 - [ ] **Step 1: Write service tests**
 
-Create `server/service/rednote_tracking_test.go`:
+Create `server/service/seednote_tracking_test.go`:
 
 ```go
 package service
@@ -841,26 +841,26 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 )
 
-type fakeRednotePlatform struct {
-	posts   []platform.RednotePost
-	metrics platform.RednotePostMetrics
+type fakeSeednotePlatform struct {
+	posts   []platform.SeednotePost
+	metrics platform.SeednotePostMetrics
 	err     error
 }
 
-func (f *fakeRednotePlatform) FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.RednotePost, error) {
+func (f *fakeSeednotePlatform) FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.SeednotePost, error) {
 	return f.posts, f.err
 }
 
-func (f *fakeRednotePlatform) FetchPostMetrics(ctx context.Context, noteURL string) (*platform.RednotePostMetrics, error) {
+func (f *fakeSeednotePlatform) FetchPostMetrics(ctx context.Context, noteURL string) (*platform.SeednotePostMetrics, error) {
 	return &f.metrics, f.err
 }
 
-type fakeRednoteLLM struct {
+type fakeSeednoteLLM struct {
 	response string
 	err      error
 }
 
-func (f *fakeRednoteLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+func (f *fakeSeednoteLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	return f.response, f.err
 }
 
@@ -879,7 +879,7 @@ func (f *fakeTrackingEnqueuer) EnqueueIn(taskType string, payload []byte, delay 
 	return nil
 }
 
-func setupRednoteTrackingServiceTest(t *testing.T) (*RednoteTrackingService, repository.Repository, *fakeTrackingEnqueuer) {
+func setupSeednoteTrackingServiceTest(t *testing.T) (*SeednoteTrackingService, repository.Repository, *fakeTrackingEnqueuer) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -897,11 +897,11 @@ func setupRednoteTrackingServiceTest(t *testing.T) (*RednoteTrackingService, rep
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
-	svc := NewRednoteTrackingService(repo, &fakeRednotePlatform{}, &fakeRednoteLLM{}, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, &fakeSeednotePlatform{}, &fakeSeednoteLLM{}, enq, &logger)
 	return svc, repo, enq
 }
 
-func createRednoteTrackingFixtures(t *testing.T, repo repository.Repository) (string, string, string) {
+func createSeednoteTrackingFixtures(t *testing.T, repo repository.Repository) (string, string, string) {
 	t.Helper()
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -913,8 +913,8 @@ func createRednoteTrackingFixtures(t *testing.T, repo repository.Repository) (st
 	if err := repo.Channels().Create(ctx, &model.Channel{
 		ID:         channelID,
 		UserID:     userID,
-		Platform:   model.PlatformRednote,
-		Name:       "RedNote",
+		Platform:   model.PlatformSeednote,
+		Name:       "SeedNote",
 		ProfileURL: "https://www.xiaohongshu.com/user/profile/profile-1",
 		Status:     model.ChannelStatusActive,
 	}); err != nil {
@@ -924,7 +924,7 @@ func createRednoteTrackingFixtures(t *testing.T, repo repository.Repository) (st
 		ID:        taskID,
 		UserID:    userID,
 		ChannelID: channelID,
-		Type:      model.PlatformRednote,
+		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 		Title:     "早起效率翻倍的方法",
 		Prompt:    "早起效率",
@@ -935,49 +935,49 @@ func createRednoteTrackingFixtures(t *testing.T, repo repository.Repository) (st
 	return userID, channelID, taskID
 }
 
-func TestRednoteTrackingService_EnsureTrackingForPublishedTask(t *testing.T) {
-	svc, repo, enq := setupRednoteTrackingServiceTest(t)
-	userID, _, taskID := createRednoteTrackingFixtures(t, repo)
+func TestSeednoteTrackingService_EnsureTrackingForPublishedTask(t *testing.T) {
+	svc, repo, enq := setupSeednoteTrackingServiceTest(t)
+	userID, _, taskID := createSeednoteTrackingFixtures(t, repo)
 
 	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err != nil {
 		t.Fatalf("EnsureTrackingForPublishedTask: %v", err)
 	}
 
-	tracking, err := repo.RednoteTrackings().FindByTaskID(context.Background(), taskID)
+	tracking, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID)
 	if err != nil {
 		t.Fatalf("FindByTaskID: %v", err)
 	}
-	if tracking.Status != model.RednoteTrackingStatusWaitingDiscovery {
+	if tracking.Status != model.SeednoteTrackingStatusWaitingDiscovery {
 		t.Fatalf("Status = %q", tracking.Status)
 	}
-	if len(enq.delayed) != 1 || enq.delayed[0] != "rednote:discover" {
+	if len(enq.delayed) != 1 || enq.delayed[0] != "seednote:discover" {
 		t.Fatalf("delayed jobs = %+v", enq.delayed)
 	}
 }
 
-func TestRednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing.T) {
-	svc, repo, _ := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
-	platformFake := &fakeRednotePlatform{
-		posts: []platform.RednotePost{
+func TestSeednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing.T) {
+	svc, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	platformFake := &fakeSeednotePlatform{
+		posts: []platform.SeednotePost{
 			{Title: "早起效率翻倍的方法", URL: "https://www.xiaohongshu.com/explore/note-1", NoteID: "note-1", CoverURL: "https://img.example/1.jpg"},
 		},
-		metrics: platform.RednotePostMetrics{LikeCount: 10, CollectCount: 3, CommentCount: 1, ShareCount: 0},
+		metrics: platform.SeednotePostMetrics{LikeCount: 10, CollectCount: 3, CommentCount: 1, ShareCount: 0},
 	}
-	llmFake := &fakeRednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-1","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
+	llmFake := &fakeSeednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-1","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	svc = NewRednoteTrackingService(repo, platformFake, llmFake, &fakeTrackingEnqueuer{}, &logger)
+	svc = NewSeednoteTrackingService(repo, platformFake, llmFake, &fakeTrackingEnqueuer{}, &logger)
 
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
 		ChannelID:         channelID,
-		Status:            model.RednoteTrackingStatusWaitingDiscovery,
+		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
 	}
-	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
 	}
 
@@ -985,14 +985,14 @@ func TestRednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing
 		t.Fatalf("DiscoverPublishedNote: %v", err)
 	}
 
-	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if updated.Status != model.RednoteTrackingStatusTracking || updated.NoteID != "note-1" {
+	if updated.Status != model.SeednoteTrackingStatusTracking || updated.NoteID != "note-1" {
 		t.Fatalf("tracking = %+v", updated)
 	}
-	snapshots, err := repo.RednoteMetricSnapshots().FindByTaskID(context.Background(), taskID)
+	snapshots, err := repo.SeednoteMetricSnapshots().FindByTaskID(context.Background(), taskID)
 	if err != nil {
 		t.Fatalf("FindByTaskID snapshots: %v", err)
 	}
@@ -1001,11 +1001,11 @@ func TestRednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing
 	}
 }
 
-func TestRednoteTrackingService_ShouldStopForLowGrowth(t *testing.T) {
-	if !shouldStopForLowGrowth(3, model.RednoteLowGrowthConsecutiveCaptures) {
+func TestSeednoteTrackingService_ShouldStopForLowGrowth(t *testing.T) {
+	if !shouldStopForLowGrowth(3, model.SeednoteLowGrowthConsecutiveCaptures) {
 		t.Fatal("expected low growth stop")
 	}
-	if shouldStopForLowGrowth(2, model.RednoteLowGrowthConsecutiveCaptures) {
+	if shouldStopForLowGrowth(2, model.SeednoteLowGrowthConsecutiveCaptures) {
 		t.Fatal("did not expect low growth stop")
 	}
 }
@@ -1016,14 +1016,14 @@ func TestRednoteTrackingService_ShouldStopForLowGrowth(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/service -run 'TestRednoteTrackingService' -count=1
+go test ./server/service -run 'TestSeednoteTrackingService' -count=1
 ```
 
-Expected: compile failure because `RednoteTrackingService` does not exist.
+Expected: compile failure because `SeednoteTrackingService` does not exist.
 
 - [ ] **Step 3: Implement service interfaces and constructor**
 
-Create `server/service/rednote_tracking.go` with the package, imports, interfaces, DTOs, and constructor:
+Create `server/service/seednote_tracking.go` with the package, imports, interfaces, DTOs, and constructor:
 
 ```go
 package service
@@ -1046,25 +1046,25 @@ import (
 )
 
 const (
-	RednoteDiscoverTaskType       = "rednote:discover"
-	RednoteCaptureMetricsTaskType = "rednote:capture_metrics"
+	SeednoteDiscoverTaskType       = "seednote:discover"
+	SeednoteCaptureMetricsTaskType = "seednote:capture_metrics"
 )
 
-type RednotePublicPlatform interface {
-	FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.RednotePost, error)
-	FetchPostMetrics(ctx context.Context, noteURL string) (*platform.RednotePostMetrics, error)
+type SeednotePublicPlatform interface {
+	FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.SeednotePost, error)
+	FetchPostMetrics(ctx context.Context, noteURL string) (*platform.SeednotePostMetrics, error)
 }
 
-type RednoteTrackingService struct {
+type SeednoteTrackingService struct {
 	repo     repository.Repository
-	platform RednotePublicPlatform
+	platform SeednotePublicPlatform
 	llm      LLMClient
 	enqueuer TaskEnqueuer
 	logger   *zerolog.Logger
 }
 
-func NewRednoteTrackingService(repo repository.Repository, platform RednotePublicPlatform, llm LLMClient, enqueuer TaskEnqueuer, logger *zerolog.Logger) *RednoteTrackingService {
-	return &RednoteTrackingService{
+func NewSeednoteTrackingService(repo repository.Repository, platform SeednotePublicPlatform, llm LLMClient, enqueuer TaskEnqueuer, logger *zerolog.Logger) *SeednoteTrackingService {
+	return &SeednoteTrackingService{
 		repo:     repo,
 		platform: platform,
 		llm:      llm,
@@ -1073,14 +1073,14 @@ func NewRednoteTrackingService(repo repository.Repository, platform RednotePubli
 	}
 }
 
-type RednoteAnalytics struct {
-	Tracking *RednoteTrackingInfo       `json:"tracking,omitempty"`
-	Latest   *RednoteMetricInfo         `json:"latest,omitempty"`
-	Deltas   *RednoteMetricDelta        `json:"deltas,omitempty"`
-	Series   []*RednoteMetricSeriesItem `json:"series"`
+type SeednoteAnalytics struct {
+	Tracking *SeednoteTrackingInfo       `json:"tracking,omitempty"`
+	Latest   *SeednoteMetricInfo         `json:"latest,omitempty"`
+	Deltas   *SeednoteMetricDelta        `json:"deltas,omitempty"`
+	Series   []*SeednoteMetricSeriesItem `json:"series"`
 }
 
-type RednoteTrackingInfo struct {
+type SeednoteTrackingInfo struct {
 	Status       string     `json:"status"`
 	NoteURL      string     `json:"note_url,omitempty"`
 	NoteTitle    string     `json:"note_title,omitempty"`
@@ -1093,7 +1093,7 @@ type RednoteTrackingInfo struct {
 	LastError    string     `json:"last_error,omitempty"`
 }
 
-type RednoteMetricInfo struct {
+type SeednoteMetricInfo struct {
 	LikeCount    int        `json:"like_count"`
 	CollectCount int        `json:"collect_count"`
 	CommentCount int        `json:"comment_count"`
@@ -1102,14 +1102,14 @@ type RednoteMetricInfo struct {
 	CapturedAt    *time.Time `json:"captured_at,omitempty"`
 }
 
-type RednoteMetricDelta struct {
+type SeednoteMetricDelta struct {
 	LikeCount    int `json:"like_count"`
 	CollectCount int `json:"collect_count"`
 	CommentCount int `json:"comment_count"`
 	ShareCount   int `json:"share_count"`
 }
 
-type RednoteMetricSeriesItem struct {
+type SeednoteMetricSeriesItem struct {
 	CapturedAt   time.Time `json:"captured_at"`
 	LikeCount    int       `json:"like_count"`
 	CollectCount int       `json:"collect_count"`
@@ -1118,7 +1118,7 @@ type RednoteMetricSeriesItem struct {
 	ViewCount     *int      `json:"view_count"`
 }
 
-type rednoteAIMatch struct {
+type seednoteAIMatch struct {
 	Matched    bool    `json:"matched"`
 	NoteURL    string  `json:"note_url"`
 	NoteID     string  `json:"note_id"`
@@ -1129,10 +1129,10 @@ type rednoteAIMatch struct {
 
 - [ ] **Step 4: Implement publish tracking creation and discovery**
 
-Add these methods to `server/service/rednote_tracking.go`:
+Add these methods to `server/service/seednote_tracking.go`:
 
 ```go
-func (s *RednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error {
+func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Context, userID, taskID string) error {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("find task: %w", err)
@@ -1140,7 +1140,7 @@ func (s *RednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Cont
 	if task.UserID != userID {
 		return fmt.Errorf("task does not belong to user")
 	}
-	if task.Type != model.PlatformRednote {
+	if task.Type != model.PlatformSeednote {
 		return nil
 	}
 	channel, err := s.repo.Channels().FindByID(ctx, task.ChannelID)
@@ -1148,18 +1148,18 @@ func (s *RednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Cont
 		return fmt.Errorf("find channel: %w", err)
 	}
 	if strings.TrimSpace(channel.ProfileURL) == "" {
-		return fmt.Errorf("rednote channel profile URL is required")
+		return fmt.Errorf("seednote channel profile URL is required")
 	}
 	now := time.Now()
 	nextRun := now.Add(24 * time.Hour)
-	existing, err := s.repo.RednoteTrackings().FindByTaskID(ctx, taskID)
+	existing, err := s.repo.SeednoteTrackings().FindByTaskID(ctx, taskID)
 	if err == nil {
-		existing.Status = model.RednoteTrackingStatusWaitingDiscovery
+		existing.Status = model.SeednoteTrackingStatusWaitingDiscovery
 		existing.ProfileURL = channel.ProfileURL
 		existing.PublishedMarkedAt = now
 		existing.NextRunAt = &nextRun
 		existing.LastError = ""
-		if updateErr := s.repo.RednoteTrackings().Update(ctx, existing); updateErr != nil {
+		if updateErr := s.repo.SeednoteTrackings().Update(ctx, existing); updateErr != nil {
 			return fmt.Errorf("update tracking: %w", updateErr)
 		}
 		return s.enqueueDiscover(existing.ID, 24*time.Hour)
@@ -1167,24 +1167,24 @@ func (s *RednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Cont
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("find tracking: %w", err)
 	}
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
 		ChannelID:         task.ChannelID,
-		Status:            model.RednoteTrackingStatusWaitingDiscovery,
+		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
 		ProfileURL:        channel.ProfileURL,
 		PublishedMarkedAt: now,
 		NextRunAt:         &nextRun,
 	}
-	if err := s.repo.RednoteTrackings().Create(ctx, tracking); err != nil {
+	if err := s.repo.SeednoteTrackings().Create(ctx, tracking); err != nil {
 		return fmt.Errorf("create tracking: %w", err)
 	}
 	return s.enqueueDiscover(tracking.ID, 24*time.Hour)
 }
 
-func (s *RednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trackingID string) error {
-	tracking, err := s.repo.RednoteTrackings().FindByID(ctx, trackingID)
+func (s *SeednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trackingID string) error {
+	tracking, err := s.repo.SeednoteTrackings().FindByID(ctx, trackingID)
 	if err != nil {
 		return fmt.Errorf("find tracking: %w", err)
 	}
@@ -1200,25 +1200,25 @@ func (s *RednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trac
 	match, err := s.matchPublishedNote(ctx, task, posts)
 	if err != nil || !match.Matched || match.Confidence < 0.8 || !matchExistsInCandidates(match, posts) {
 		tracking.LastRunAt = ptrTime(time.Now())
-		if tracking.DiscoveryAttemptCount >= model.RednoteDiscoveryMaxAttempts {
-			tracking.Status = model.RednoteTrackingStatusFailed
-			tracking.StopReason = model.RednoteStopReasonDiscoveryTimeout
+		if tracking.DiscoveryAttemptCount >= model.SeednoteDiscoveryMaxAttempts {
+			tracking.Status = model.SeednoteTrackingStatusFailed
+			tracking.StopReason = model.SeednoteStopReasonDiscoveryTimeout
 			tracking.LastError = "discovery timed out"
 			tracking.NextRunAt = nil
 		} else {
 			next := time.Now().Add(24 * time.Hour)
 			tracking.NextRunAt = &next
 		}
-		if updateErr := s.repo.RednoteTrackings().Update(ctx, tracking); updateErr != nil {
+		if updateErr := s.repo.SeednoteTrackings().Update(ctx, tracking); updateErr != nil {
 			return fmt.Errorf("update discovery retry: %w", updateErr)
 		}
-		if tracking.Status == model.RednoteTrackingStatusWaitingDiscovery {
+		if tracking.Status == model.SeednoteTrackingStatusWaitingDiscovery {
 			return s.enqueueDiscover(tracking.ID, 24*time.Hour)
 		}
 		return nil
 	}
 	now := time.Now()
-	tracking.Status = model.RednoteTrackingStatusTracking
+	tracking.Status = model.SeednoteTrackingStatusTracking
 	tracking.NoteID = match.NoteID
 	tracking.NoteURL = match.NoteURL
 	tracking.MatchConfidence = match.Confidence
@@ -1233,7 +1233,7 @@ func (s *RednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trac
 			break
 		}
 	}
-	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+	if err := s.repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
 		return fmt.Errorf("update matched tracking: %w", err)
 	}
 	return s.CaptureMetrics(ctx, tracking.ID)
@@ -1242,12 +1242,12 @@ func (s *RednoteTrackingService) DiscoverPublishedNote(ctx context.Context, trac
 
 - [ ] **Step 5: Implement AI match, capture, stop evaluation, analytics**
 
-Add these methods to `server/service/rednote_tracking.go`:
+Add these methods to `server/service/seednote_tracking.go`:
 
 ```go
-func (s *RednoteTrackingService) matchPublishedNote(ctx context.Context, task *model.Task, posts []platform.RednotePost) (*rednoteAIMatch, error) {
+func (s *SeednoteTrackingService) matchPublishedNote(ctx context.Context, task *model.Task, posts []platform.SeednotePost) (*seednoteAIMatch, error) {
 	if s.llm == nil {
-		return &rednoteAIMatch{Matched: false, Reason: "AI client unavailable"}, nil
+		return &seednoteAIMatch{Matched: false, Reason: "AI client unavailable"}, nil
 	}
 	payload := map[string]any{
 		"task": map[string]any{
@@ -1258,18 +1258,18 @@ func (s *RednoteTrackingService) matchPublishedNote(ctx context.Context, task *m
 		"candidates": posts,
 	}
 	raw, _ := json.Marshal(payload)
-	resp, err := s.llm.Complete(ctx, "你是小红书笔记匹配助手，只返回严格 JSON。", string(raw))
+	resp, err := s.llm.Complete(ctx, "你是种草笔记笔记匹配助手，只返回严格 JSON。", string(raw))
 	if err != nil {
 		return nil, err
 	}
-	var match rednoteAIMatch
+	var match seednoteAIMatch
 	if err := json.Unmarshal([]byte(resp), &match); err != nil {
 		return nil, err
 	}
 	return &match, nil
 }
 
-func matchExistsInCandidates(match *rednoteAIMatch, posts []platform.RednotePost) bool {
+func matchExistsInCandidates(match *seednoteAIMatch, posts []platform.SeednotePost) bool {
 	for _, post := range posts {
 		if match.NoteID != "" && post.NoteID == match.NoteID {
 			return true
@@ -1281,8 +1281,8 @@ func matchExistsInCandidates(match *rednoteAIMatch, posts []platform.RednotePost
 	return false
 }
 
-func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID string) error {
-	tracking, err := s.repo.RednoteTrackings().FindByID(ctx, trackingID)
+func (s *SeednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID string) error {
+	tracking, err := s.repo.SeednoteTrackings().FindByID(ctx, trackingID)
 	if err != nil {
 		return fmt.Errorf("find tracking: %w", err)
 	}
@@ -1295,12 +1295,12 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 	}
 	now := time.Now()
 	raw, _ := json.Marshal(metrics)
-	snapshot := &model.RednoteMetricSnapshot{
+	snapshot := &model.SeednoteMetricSnapshot{
 		ID:           uuid.New().String(),
 		TrackingID:   tracking.ID,
 		TaskID:       tracking.TaskID,
 		CapturedAt:   now,
-		CapturedDate: model.RednoteCapturedDate(now),
+		CapturedDate: model.SeednoteCapturedDate(now),
 		LikeCount:    metrics.LikeCount,
 		CollectCount: metrics.CollectCount,
 		CommentCount: metrics.CommentCount,
@@ -1308,47 +1308,47 @@ func (s *RednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID 
 		ViewCount:     metrics.ViewCount,
 		RawData:      string(raw),
 	}
-	if err := s.repo.RednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, snapshot); err != nil {
+	if err := s.repo.SeednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, snapshot); err != nil {
 		return fmt.Errorf("upsert snapshot: %w", err)
 	}
 	tracking.RunCount++
 	tracking.FailureCount = 0
 	tracking.LastRunAt = &now
 	tracking.LastError = ""
-	previous, prevErr := s.repo.RednoteMetricSnapshots().FindPreviousByTrackingID(ctx, tracking.ID, now)
+	previous, prevErr := s.repo.SeednoteMetricSnapshots().FindPreviousByTrackingID(ctx, tracking.ID, now)
 	if prevErr == nil {
 		growth := totalGrowth(snapshot, previous)
-		if growth < model.RednoteLowGrowthThreshold {
+		if growth < model.SeednoteLowGrowthThreshold {
 			tracking.ConsecutiveLowGrowthCount++
 		} else {
 			tracking.ConsecutiveLowGrowthCount = 0
 		}
 	}
 	if s.shouldStopTracking(tracking, now) {
-		tracking.Status = model.RednoteTrackingStatusStopped
+		tracking.Status = model.SeednoteTrackingStatusStopped
 		stoppedAt := now
 		tracking.TrackingStoppedAt = &stoppedAt
 		tracking.NextRunAt = nil
 		if tracking.StopReason == "" {
-			tracking.StopReason = model.RednoteStopReasonLowGrowth
+			tracking.StopReason = model.SeednoteStopReasonLowGrowth
 		}
-		return s.repo.RednoteTrackings().Update(ctx, tracking)
+		return s.repo.SeednoteTrackings().Update(ctx, tracking)
 	}
 	next := now.Add(24 * time.Hour)
 	tracking.NextRunAt = &next
-	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+	if err := s.repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
 		return fmt.Errorf("update tracking after capture: %w", err)
 	}
 	return s.enqueueCapture(tracking.ID, 24*time.Hour)
 }
 
-func (s *RednoteTrackingService) shouldStopTracking(tracking *model.RednotePostTracking, now time.Time) bool {
-	if now.Sub(tracking.PublishedMarkedAt) >= model.RednoteTrackingMaxDays*24*time.Hour {
-		tracking.StopReason = model.RednoteStopReasonMaxDurationReached
+func (s *SeednoteTrackingService) shouldStopTracking(tracking *model.SeednotePostTracking, now time.Time) bool {
+	if now.Sub(tracking.PublishedMarkedAt) >= model.SeednoteTrackingMaxDays*24*time.Hour {
+		tracking.StopReason = model.SeednoteStopReasonMaxDurationReached
 		return true
 	}
-	if shouldStopForLowGrowth(tracking.ConsecutiveLowGrowthCount, model.RednoteLowGrowthConsecutiveCaptures) {
-		tracking.StopReason = model.RednoteStopReasonLowGrowth
+	if shouldStopForLowGrowth(tracking.ConsecutiveLowGrowthCount, model.SeednoteLowGrowthConsecutiveCaptures) {
+		tracking.StopReason = model.SeednoteStopReasonLowGrowth
 		return true
 	}
 	return false
@@ -1358,14 +1358,14 @@ func shouldStopForLowGrowth(count, threshold int) bool {
 	return count >= threshold
 }
 
-func totalGrowth(current, previous *model.RednoteMetricSnapshot) int {
+func totalGrowth(current, previous *model.SeednoteMetricSnapshot) int {
 	return (current.LikeCount - previous.LikeCount) +
 		(current.CollectCount - previous.CollectCount) +
 		(current.CommentCount - previous.CommentCount) +
 		(current.ShareCount - previous.ShareCount)
 }
 
-func (s *RednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, taskID string) (*RednoteAnalytics, error) {
+func (s *SeednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, taskID string) (*SeednoteAnalytics, error) {
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("find task: %w", err)
@@ -1373,19 +1373,19 @@ func (s *RednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, t
 	if task.UserID != userID {
 		return nil, fmt.Errorf("task does not belong to user")
 	}
-	tracking, err := s.repo.RednoteTrackings().FindByTaskID(ctx, taskID)
+	tracking, err := s.repo.SeednoteTrackings().FindByTaskID(ctx, taskID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return &RednoteAnalytics{Series: []*RednoteMetricSeriesItem{}}, nil
+		return &SeednoteAnalytics{Series: []*SeednoteMetricSeriesItem{}}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("find tracking: %w", err)
 	}
-	snapshots, err := s.repo.RednoteMetricSnapshots().FindByTaskID(ctx, taskID)
+	snapshots, err := s.repo.SeednoteMetricSnapshots().FindByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("find snapshots: %w", err)
 	}
-	analytics := &RednoteAnalytics{
-		Tracking: &RednoteTrackingInfo{
+	analytics := &SeednoteAnalytics{
+		Tracking: &SeednoteTrackingInfo{
 			Status:       tracking.Status,
 			NoteURL:      tracking.NoteURL,
 			NoteTitle:    tracking.NoteTitle,
@@ -1397,10 +1397,10 @@ func (s *RednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, t
 			StopReason:   tracking.StopReason,
 			LastError:    tracking.LastError,
 		},
-		Series: make([]*RednoteMetricSeriesItem, 0, len(snapshots)),
+		Series: make([]*SeednoteMetricSeriesItem, 0, len(snapshots)),
 	}
 	for _, snapshot := range snapshots {
-		analytics.Series = append(analytics.Series, &RednoteMetricSeriesItem{
+		analytics.Series = append(analytics.Series, &SeednoteMetricSeriesItem{
 			CapturedAt:   snapshot.CapturedAt,
 			LikeCount:    snapshot.LikeCount,
 			CollectCount: snapshot.CollectCount,
@@ -1415,7 +1415,7 @@ func (s *RednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, t
 		if len(snapshots) > 1 {
 			analytics.Deltas = metricDelta(latest, snapshots[len(snapshots)-2])
 		} else {
-			analytics.Deltas = &RednoteMetricDelta{}
+			analytics.Deltas = &SeednoteMetricDelta{}
 		}
 	}
 	return analytics, nil
@@ -1427,49 +1427,49 @@ func (s *RednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, t
 Add these helper methods:
 
 ```go
-func (s *RednoteTrackingService) recordTrackingFailure(ctx context.Context, tracking *model.RednotePostTracking, cause error) error {
+func (s *SeednoteTrackingService) recordTrackingFailure(ctx context.Context, tracking *model.SeednotePostTracking, cause error) error {
 	now := time.Now()
 	tracking.FailureCount++
 	tracking.LastRunAt = &now
 	tracking.LastError = cause.Error()
-	if tracking.FailureCount >= model.RednoteTrackingMaxFailures {
-		tracking.Status = model.RednoteTrackingStatusFailed
-		tracking.StopReason = model.RednoteStopReasonTooManyFailures
+	if tracking.FailureCount >= model.SeednoteTrackingMaxFailures {
+		tracking.Status = model.SeednoteTrackingStatusFailed
+		tracking.StopReason = model.SeednoteStopReasonTooManyFailures
 		tracking.NextRunAt = nil
 	} else {
 		next := now.Add(24 * time.Hour)
 		tracking.NextRunAt = &next
 	}
-	if err := s.repo.RednoteTrackings().Update(ctx, tracking); err != nil {
+	if err := s.repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
 		return fmt.Errorf("update tracking failure: %w", err)
 	}
-	if tracking.Status == model.RednoteTrackingStatusWaitingDiscovery {
+	if tracking.Status == model.SeednoteTrackingStatusWaitingDiscovery {
 		return s.enqueueDiscover(tracking.ID, 24*time.Hour)
 	}
-	if tracking.Status == model.RednoteTrackingStatusTracking {
+	if tracking.Status == model.SeednoteTrackingStatusTracking {
 		return s.enqueueCapture(tracking.ID, 24*time.Hour)
 	}
 	return nil
 }
 
-func (s *RednoteTrackingService) enqueueDiscover(trackingID string, delay time.Duration) error {
+func (s *SeednoteTrackingService) enqueueDiscover(trackingID string, delay time.Duration) error {
 	if s.enqueuer == nil {
 		return nil
 	}
 	payload, _ := json.Marshal(map[string]string{"tracking_id": trackingID})
-	return s.enqueuer.EnqueueIn(RednoteDiscoverTaskType, payload, delay)
+	return s.enqueuer.EnqueueIn(SeednoteDiscoverTaskType, payload, delay)
 }
 
-func (s *RednoteTrackingService) enqueueCapture(trackingID string, delay time.Duration) error {
+func (s *SeednoteTrackingService) enqueueCapture(trackingID string, delay time.Duration) error {
 	if s.enqueuer == nil {
 		return nil
 	}
 	payload, _ := json.Marshal(map[string]string{"tracking_id": trackingID})
-	return s.enqueuer.EnqueueIn(RednoteCaptureMetricsTaskType, payload, delay)
+	return s.enqueuer.EnqueueIn(SeednoteCaptureMetricsTaskType, payload, delay)
 }
 
-func metricInfoFromSnapshot(snapshot *model.RednoteMetricSnapshot) *RednoteMetricInfo {
-	return &RednoteMetricInfo{
+func metricInfoFromSnapshot(snapshot *model.SeednoteMetricSnapshot) *SeednoteMetricInfo {
+	return &SeednoteMetricInfo{
 		LikeCount:    snapshot.LikeCount,
 		CollectCount: snapshot.CollectCount,
 		CommentCount: snapshot.CommentCount,
@@ -1479,8 +1479,8 @@ func metricInfoFromSnapshot(snapshot *model.RednoteMetricSnapshot) *RednoteMetri
 	}
 }
 
-func metricDelta(current, previous *model.RednoteMetricSnapshot) *RednoteMetricDelta {
-	return &RednoteMetricDelta{
+func metricDelta(current, previous *model.SeednoteMetricSnapshot) *SeednoteMetricDelta {
+	return &SeednoteMetricDelta{
 		LikeCount:    current.LikeCount - previous.LikeCount,
 		CollectCount: current.CollectCount - previous.CollectCount,
 		CommentCount: current.CommentCount - previous.CommentCount,
@@ -1498,7 +1498,7 @@ func ptrTime(t time.Time) *time.Time {
 Run:
 
 ```bash
-go test ./server/service -run 'TestRednoteTrackingService' -count=1
+go test ./server/service -run 'TestSeednoteTrackingService' -count=1
 ```
 
 Expected: pass.
@@ -1506,8 +1506,8 @@ Expected: pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add server/service/rednote_tracking.go server/service/rednote_tracking_test.go
-git commit -m "feat: add rednote tracking service"
+git add server/service/seednote_tracking.go server/service/seednote_tracking_test.go
+git commit -m "feat: add seednote tracking service"
 ```
 
 ---
@@ -1537,19 +1537,19 @@ func (f *fakePublishTrackingService) EnsureTrackingForPublishedTask(ctx context.
 	return nil
 }
 
-func TestTaskService_SetPublishedStartsRednoteTracking(t *testing.T) {
+func TestTaskService_SetPublishedStartsSeednoteTracking(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	tracking := &fakePublishTrackingService{}
-	svc.SetRednoteTrackingService(tracking)
+	svc.SetSeednoteTrackingService(tracking)
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformRednote)
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ChannelID: channelID,
-		Type:      model.PlatformRednote,
+		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
-		Prompt:    "rednote topic",
+		Prompt:    "seednote topic",
 	}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -1570,10 +1570,10 @@ func TestTaskService_SetPublishedStartsRednoteTracking(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/service -run TestTaskService_SetPublishedStartsRednoteTracking -count=1
+go test ./server/service -run TestTaskService_SetPublishedStartsSeednoteTracking -count=1
 ```
 
-Expected: compile failure because `SetRednoteTrackingService` does not exist.
+Expected: compile failure because `SetSeednoteTrackingService` does not exist.
 
 - [ ] **Step 3: Add task service dependency and hook**
 
@@ -1588,14 +1588,14 @@ type PublishedTrackingService interface {
 Add a field to `TaskService`:
 
 ```go
-rednoteTrackingSvc PublishedTrackingService
+seednoteTrackingSvc PublishedTrackingService
 ```
 
 Add setter:
 
 ```go
-func (s *TaskService) SetRednoteTrackingService(trackingSvc PublishedTrackingService) {
-	s.rednoteTrackingSvc = trackingSvc
+func (s *TaskService) SetSeednoteTrackingService(trackingSvc PublishedTrackingService) {
+	s.seednoteTrackingSvc = trackingSvc
 }
 ```
 
@@ -1605,9 +1605,9 @@ Modify `SetPublished` after `repo.Tasks().SetPublished` succeeds:
 if err := s.repo.Tasks().SetPublished(ctx, taskID, published); err != nil {
 	return err
 }
-if published && task.Type == model.PlatformRednote && s.rednoteTrackingSvc != nil {
-	if err := s.rednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, taskID); err != nil {
-		return fmt.Errorf("ensure rednote tracking: %w", err)
+if published && task.Type == model.PlatformSeednote && s.seednoteTrackingSvc != nil {
+	if err := s.seednoteTrackingSvc.EnsureTrackingForPublishedTask(ctx, userID, taskID); err != nil {
+		return fmt.Errorf("ensure seednote tracking: %w", err)
 	}
 }
 return nil
@@ -1622,52 +1622,52 @@ const (
 	TypeContentGenerate       = "content:generate"
 	TypePlanTrigger           = "plan:trigger"
 	TypeTaskCleanup           = "task:cleanup"
-	TypeRednoteDiscover       = "rednote:discover"
-	TypeRednoteCaptureMetrics = "rednote:capture_metrics"
+	TypeSeednoteDiscover       = "seednote:discover"
+	TypeSeednoteCaptureMetrics = "seednote:capture_metrics"
 )
 
-type RednoteDiscoverHandler func(ctx context.Context, trackingID string) error
-type RednoteCaptureMetricsHandler func(ctx context.Context, trackingID string) error
+type SeednoteDiscoverHandler func(ctx context.Context, trackingID string) error
+type SeednoteCaptureMetricsHandler func(ctx context.Context, trackingID string) error
 ```
 
 Add parameters to `NewTaskProcessor` after `cleanupHandler`:
 
 ```go
-rednoteDiscoverHandler RednoteDiscoverHandler,
-rednoteCaptureHandler RednoteCaptureMetricsHandler,
+seednoteDiscoverHandler SeednoteDiscoverHandler,
+seednoteCaptureHandler SeednoteCaptureMetricsHandler,
 ```
 
 Register handlers:
 
 ```go
-mux.HandleFunc(TypeRednoteDiscover, func(ctx context.Context, t *asynq.Task) error {
+mux.HandleFunc(TypeSeednoteDiscover, func(ctx context.Context, t *asynq.Task) error {
 	var payload struct {
 		TrackingID string `json:"tracking_id"`
 	}
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
-		logger.Error().Err(err).Msg("failed to unmarshal rednote discover payload")
+		logger.Error().Err(err).Msg("failed to unmarshal seednote discover payload")
 		return fmt.Errorf("unmarshal payload: %w", err)
 	}
-	if rednoteDiscoverHandler == nil {
-		return fmt.Errorf("rednote discover handler is not configured")
+	if seednoteDiscoverHandler == nil {
+		return fmt.Errorf("seednote discover handler is not configured")
 	}
-	logger.Info().Str("tracking_id", payload.TrackingID).Msg("processing rednote discovery")
-	return rednoteDiscoverHandler(ctx, payload.TrackingID)
+	logger.Info().Str("tracking_id", payload.TrackingID).Msg("processing seednote discovery")
+	return seednoteDiscoverHandler(ctx, payload.TrackingID)
 })
 
-mux.HandleFunc(TypeRednoteCaptureMetrics, func(ctx context.Context, t *asynq.Task) error {
+mux.HandleFunc(TypeSeednoteCaptureMetrics, func(ctx context.Context, t *asynq.Task) error {
 	var payload struct {
 		TrackingID string `json:"tracking_id"`
 	}
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
-		logger.Error().Err(err).Msg("failed to unmarshal rednote capture payload")
+		logger.Error().Err(err).Msg("failed to unmarshal seednote capture payload")
 		return fmt.Errorf("unmarshal payload: %w", err)
 	}
-	if rednoteCaptureHandler == nil {
-		return fmt.Errorf("rednote capture handler is not configured")
+	if seednoteCaptureHandler == nil {
+		return fmt.Errorf("seednote capture handler is not configured")
 	}
-	logger.Info().Str("tracking_id", payload.TrackingID).Msg("processing rednote metrics capture")
-	return rednoteCaptureHandler(ctx, payload.TrackingID)
+	logger.Info().Str("tracking_id", payload.TrackingID).Msg("processing seednote metrics capture")
+	return seednoteCaptureHandler(ctx, payload.TrackingID)
 })
 ```
 
@@ -1675,41 +1675,41 @@ mux.HandleFunc(TypeRednoteCaptureMetrics, func(ctx context.Context, t *asynq.Tas
 
 Modify `server/main.go`:
 
-1. Add a `rednoteTrackingSvc *service.RednoteTrackingService` variable near other services.
+1. Add a `seednoteTrackingSvc *service.SeednoteTrackingService` variable near other services.
 2. After `taskSvc` is created and `writingLLMClient` is available, instantiate this before the `// 15. Start Asynq worker if Redis is available.` block:
 
 ```go
-rednoteTrackingSvc = service.NewRednoteTrackingService(
+seednoteTrackingSvc = service.NewSeednoteTrackingService(
 	repo,
-	platform.NewRednoteProvider(),
+	platform.NewSeednoteProvider(),
 	writingLLMClient,
 	asynqClient,
 	log,
 )
-taskSvc.SetRednoteTrackingService(rednoteTrackingSvc)
+taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
 ```
 
 3. Add `github.com/royalrick/anbanwriter/server/platform` to imports.
 4. Change `startAsynqServer` signature:
 
 ```go
-func startAsynqServer(taskSvc *service.TaskService, rednoteTrackingSvc *service.RednoteTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor
+func startAsynqServer(taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor
 ```
 
-5. Pass rednote handlers into `scheduler.NewTaskProcessor`:
+5. Pass seednote handlers into `scheduler.NewTaskProcessor`:
 
 ```go
 func(ctx context.Context, trackingID string) error {
-	if rednoteTrackingSvc == nil {
-		return fmt.Errorf("rednote tracking service is not configured")
+	if seednoteTrackingSvc == nil {
+		return fmt.Errorf("seednote tracking service is not configured")
 	}
-	return rednoteTrackingSvc.DiscoverPublishedNote(ctx, trackingID)
+	return seednoteTrackingSvc.DiscoverPublishedNote(ctx, trackingID)
 },
 func(ctx context.Context, trackingID string) error {
-	if rednoteTrackingSvc == nil {
-		return fmt.Errorf("rednote tracking service is not configured")
+	if seednoteTrackingSvc == nil {
+		return fmt.Errorf("seednote tracking service is not configured")
 	}
-	return rednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
+	return seednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
 },
 ```
 
@@ -1727,7 +1727,7 @@ Expected: pass.
 
 ```bash
 git add server/service/task.go server/service/task_test.go server/scheduler/scheduler.go server/main.go
-git commit -m "feat: schedule rednote tracking jobs"
+git commit -m "feat: schedule seednote tracking jobs"
 ```
 
 ---
@@ -1736,14 +1736,14 @@ git commit -m "feat: schedule rednote tracking jobs"
 
 **Files:**
 
-- Create: `server/handler/rednote_analytics.go`
-- Create: `server/handler/rednote_analytics_test.go`
+- Create: `server/handler/seednote_analytics.go`
+- Create: `server/handler/seednote_analytics_test.go`
 - Modify: `server/router/router.go`
 - Modify: `server/main.go`
 
 - [ ] **Step 1: Write handler tests**
 
-Create `server/handler/rednote_analytics_test.go`:
+Create `server/handler/seednote_analytics_test.go`:
 
 ```go
 package handler
@@ -1760,40 +1760,40 @@ import (
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
-type fakeRednoteAnalyticsService struct {
-	analytics *service.RednoteAnalytics
+type fakeSeednoteAnalyticsService struct {
+	analytics *service.SeednoteAnalytics
 	err       error
 	userID    string
 	taskID    string
 }
 
-func (f *fakeRednoteAnalyticsService) GetTaskAnalytics(ctx context.Context, userID, taskID string) (*service.RednoteAnalytics, error) {
+func (f *fakeSeednoteAnalyticsService) GetTaskAnalytics(ctx context.Context, userID, taskID string) (*service.SeednoteAnalytics, error) {
 	f.userID = userID
 	f.taskID = taskID
 	return f.analytics, f.err
 }
 
-func TestRednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
+func TestSeednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 	now := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
-	fake := &fakeRednoteAnalyticsService{
-		analytics: &service.RednoteAnalytics{
-			Tracking: &service.RednoteTrackingInfo{Status: "tracking", NoteURL: "https://www.xiaohongshu.com/explore/note-1"},
-			Latest:   &service.RednoteMetricInfo{LikeCount: 12, CapturedAt: &now},
-			Deltas:   &service.RednoteMetricDelta{LikeCount: 3},
-			Series: []*service.RednoteMetricSeriesItem{
+	fake := &fakeSeednoteAnalyticsService{
+		analytics: &service.SeednoteAnalytics{
+			Tracking: &service.SeednoteTrackingInfo{Status: "tracking", NoteURL: "https://www.xiaohongshu.com/explore/note-1"},
+			Latest:   &service.SeednoteMetricInfo{LikeCount: 12, CapturedAt: &now},
+			Deltas:   &service.SeednoteMetricDelta{LikeCount: 3},
+			Series: []*service.SeednoteMetricSeriesItem{
 				{CapturedAt: now, LikeCount: 12},
 			},
 		},
 	}
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
-	h := NewRednoteAnalyticsHandler(fake, &logger)
+	h := NewSeednoteAnalyticsHandler(fake, &logger)
 	app := fiber.New()
-	app.Get("/tasks/:id/rednote-analytics", func(c fiber.Ctx) error {
+	app.Get("/tasks/:id/seednote-analytics", func(c fiber.Ctx) error {
 		c.Locals("user_id", "user-1")
 		return h.GetTaskAnalytics(c)
 	})
 
-	resp, err := app.Test(httptest.NewRequest("GET", "/tasks/task-1/rednote-analytics", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/tasks/task-1/seednote-analytics", nil))
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -1811,14 +1811,14 @@ func TestRednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 Run:
 
 ```bash
-go test ./server/handler -run TestRednoteAnalyticsHandler_GetTaskAnalytics -count=1
+go test ./server/handler -run TestSeednoteAnalyticsHandler_GetTaskAnalytics -count=1
 ```
 
 Expected: compile failure because handler does not exist.
 
 - [ ] **Step 3: Implement handler**
 
-Create `server/handler/rednote_analytics.go`:
+Create `server/handler/seednote_analytics.go`:
 
 ```go
 package handler
@@ -1832,20 +1832,20 @@ import (
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
-type RednoteAnalyticsService interface {
-	GetTaskAnalytics(ctx context.Context, userID, taskID string) (*service.RednoteAnalytics, error)
+type SeednoteAnalyticsService interface {
+	GetTaskAnalytics(ctx context.Context, userID, taskID string) (*service.SeednoteAnalytics, error)
 }
 
-type RednoteAnalyticsHandler struct {
-	service RednoteAnalyticsService
+type SeednoteAnalyticsHandler struct {
+	service SeednoteAnalyticsService
 	logger  *zerolog.Logger
 }
 
-func NewRednoteAnalyticsHandler(svc RednoteAnalyticsService, logger *zerolog.Logger) *RednoteAnalyticsHandler {
-	return &RednoteAnalyticsHandler{service: svc, logger: logger}
+func NewSeednoteAnalyticsHandler(svc SeednoteAnalyticsService, logger *zerolog.Logger) *SeednoteAnalyticsHandler {
+	return &SeednoteAnalyticsHandler{service: svc, logger: logger}
 }
 
-func (h *RednoteAnalyticsHandler) GetTaskAnalytics(c fiber.Ctx) error {
+func (h *SeednoteAnalyticsHandler) GetTaskAnalytics(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
@@ -1856,8 +1856,8 @@ func (h *RednoteAnalyticsHandler) GetTaskAnalytics(c fiber.Ctx) error {
 	}
 	analytics, err := h.service.GetTaskAnalytics(c.Context(), userID, taskID)
 	if err != nil {
-		h.logger.Error().Err(err).Str("task_id", taskID).Str("user_id", userID).Msg("get rednote analytics failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to get rednote analytics")
+		h.logger.Error().Err(err).Str("task_id", taskID).Str("user_id", userID).Msg("get seednote analytics failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to get seednote analytics")
 	}
 	return Success(c, analytics)
 }
@@ -1868,27 +1868,27 @@ func (h *RednoteAnalyticsHandler) GetTaskAnalytics(c fiber.Ctx) error {
 Modify `server/router/router.go`:
 
 ```go
-RednoteAnalyticsHandler *handler.RednoteAnalyticsHandler
+SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 ```
 
 Add route in the task endpoints group:
 
 ```go
-if svc.RednoteAnalyticsHandler != nil {
-	apiV1.Get("/tasks/:id/rednote-analytics", svc.RednoteAnalyticsHandler.GetTaskAnalytics)
+if svc.SeednoteAnalyticsHandler != nil {
+	apiV1.Get("/tasks/:id/seednote-analytics", svc.SeednoteAnalyticsHandler.GetTaskAnalytics)
 }
 ```
 
 Modify `server/main.go` to create and pass the handler:
 
 ```go
-var rednoteAnalyticsHandler *handler.RednoteAnalyticsHandler
-if rednoteTrackingSvc != nil {
-	rednoteAnalyticsHandler = handler.NewRednoteAnalyticsHandler(rednoteTrackingSvc, log)
+var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
+if seednoteTrackingSvc != nil {
+	seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
 }
 ```
 
-Add `RednoteAnalyticsHandler: rednoteAnalyticsHandler,` to `router.Services`.
+Add `SeednoteAnalyticsHandler: seednoteAnalyticsHandler,` to `router.Services`.
 
 - [ ] **Step 5: Run handler and router tests**
 
@@ -1903,8 +1903,8 @@ Expected: pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/handler/rednote_analytics.go server/handler/rednote_analytics_test.go server/router/router.go server/main.go
-git commit -m "feat: expose rednote analytics API"
+git add server/handler/seednote_analytics.go server/handler/seednote_analytics_test.go server/router/router.go server/main.go
+git commit -m "feat: expose seednote analytics API"
 ```
 
 ---
@@ -1913,22 +1913,22 @@ git commit -m "feat: expose rednote analytics API"
 
 **Files:**
 
-- Create: `studio/src/types/rednote-analytics.ts`
-- Create: `studio/src/lib/api/rednote-analytics.ts`
-- Create: `studio/src/components/tasks/RednoteAnalyticsPanel.tsx`
+- Create: `studio/src/types/seednote-analytics.ts`
+- Create: `studio/src/lib/api/seednote-analytics.ts`
+- Create: `studio/src/components/tasks/SeednoteAnalyticsPanel.tsx`
 - Modify: `studio/src/lib/api/index.ts`
 - Modify: `studio/src/lib/query-keys.ts`
 - Modify: `studio/src/pages/TaskDetailPage.tsx`
 
 - [ ] **Step 1: Add frontend types**
 
-Create `studio/src/types/rednote-analytics.ts`:
+Create `studio/src/types/seednote-analytics.ts`:
 
 ```ts
-export type RednoteTrackingStatus = 'waiting_discovery' | 'tracking' | 'stopped' | 'failed'
+export type SeednoteTrackingStatus = 'waiting_discovery' | 'tracking' | 'stopped' | 'failed'
 
-export interface RednoteTrackingInfo {
-  status: RednoteTrackingStatus
+export interface SeednoteTrackingInfo {
+  status: SeednoteTrackingStatus
   note_url?: string
   note_title?: string
   note_cover_url?: string
@@ -1940,7 +1940,7 @@ export interface RednoteTrackingInfo {
   last_error?: string
 }
 
-export interface RednoteMetricInfo {
+export interface SeednoteMetricInfo {
   like_count: number
   collect_count: number
   comment_count: number
@@ -1949,14 +1949,14 @@ export interface RednoteMetricInfo {
   captured_at?: string | null
 }
 
-export interface RednoteMetricDelta {
+export interface SeednoteMetricDelta {
   like_count: number
   collect_count: number
   comment_count: number
   share_count: number
 }
 
-export interface RednoteMetricSeriesItem {
+export interface SeednoteMetricSeriesItem {
   captured_at: string
   like_count: number
   collect_count: number
@@ -1965,32 +1965,32 @@ export interface RednoteMetricSeriesItem {
   view_count: number | null
 }
 
-export interface RednoteAnalytics {
-  tracking?: RednoteTrackingInfo
-  latest?: RednoteMetricInfo
-  deltas?: RednoteMetricDelta
-  series: RednoteMetricSeriesItem[]
+export interface SeednoteAnalytics {
+  tracking?: SeednoteTrackingInfo
+  latest?: SeednoteMetricInfo
+  deltas?: SeednoteMetricDelta
+  series: SeednoteMetricSeriesItem[]
 }
 ```
 
 - [ ] **Step 2: Add API client**
 
-Create `studio/src/lib/api/rednote-analytics.ts`:
+Create `studio/src/lib/api/seednote-analytics.ts`:
 
 ```ts
 import { http, unwrap } from '@/lib/http-client'
-import type { RednoteAnalytics } from '@/types/rednote-analytics'
+import type { SeednoteAnalytics } from '@/types/seednote-analytics'
 
-export const rednoteAnalyticsApi = {
+export const seednoteAnalyticsApi = {
   getForTask: (taskId: string) =>
-    unwrap<RednoteAnalytics>(http.get(`/tasks/${taskId}/rednote-analytics`)),
+    unwrap<SeednoteAnalytics>(http.get(`/tasks/${taskId}/seednote-analytics`)),
 }
 ```
 
 Modify `studio/src/lib/api/index.ts`:
 
 ```ts
-import { rednoteAnalyticsApi } from './rednote-analytics'
+import { seednoteAnalyticsApi } from './seednote-analytics'
 
 export const api = {
   auth: authApi,
@@ -2003,7 +2003,7 @@ export const api = {
   usage: usageApi,
   feedback: feedbackApi,
   modelConfig: modelConfigApi,
-  rednoteAnalytics: rednoteAnalyticsApi,
+  seednoteAnalytics: seednoteAnalyticsApi,
 }
 ```
 
@@ -2012,8 +2012,8 @@ export const api = {
 Modify `studio/src/lib/query-keys.ts` to include:
 
 ```ts
-rednoteAnalytics: {
-  task: (taskId: string) => ['rednote-analytics', taskId] as const,
+seednoteAnalytics: {
+  task: (taskId: string) => ['seednote-analytics', taskId] as const,
 },
 ```
 
@@ -2021,7 +2021,7 @@ Keep the existing exported `queryKeys` object shape intact.
 
 - [ ] **Step 4: Build the panel component**
 
-Create `studio/src/components/tasks/RednoteAnalyticsPanel.tsx`:
+Create `studio/src/components/tasks/SeednoteAnalyticsPanel.tsx`:
 
 ```tsx
 import { ExternalLink, Loader2 } from 'lucide-react'
@@ -2033,7 +2033,7 @@ import { formatFullDateTimeCN } from '@/lib/labels'
 import { Card, CardBody } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import type { RednoteAnalytics, RednoteMetricInfo } from '@/types/rednote-analytics'
+import type { SeednoteAnalytics, SeednoteMetricInfo } from '@/types/seednote-analytics'
 
 const statusText = {
   waiting_discovery: '明天将从账号主页自动识别这篇笔记',
@@ -2066,7 +2066,7 @@ function MetricCell({ label, value, delta }: { label: string; value: number | nu
   )
 }
 
-function LatestMetrics({ latest, deltas }: { latest?: RednoteMetricInfo; deltas?: RednoteAnalytics['deltas'] }) {
+function LatestMetrics({ latest, deltas }: { latest?: SeednoteMetricInfo; deltas?: SeednoteAnalytics['deltas'] }) {
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
       <MetricCell label="点赞" value={latest?.like_count ?? 0} delta={deltas?.like_count} />
@@ -2078,10 +2078,10 @@ function LatestMetrics({ latest, deltas }: { latest?: RednoteMetricInfo; deltas?
   )
 }
 
-export function RednoteAnalyticsPanel({ taskId }: { taskId: string }) {
+export function SeednoteAnalyticsPanel({ taskId }: { taskId: string }) {
   const { data, isLoading } = useQuery({
-    queryKey: queryKeys.rednoteAnalytics.task(taskId),
-    queryFn: () => api.rednoteAnalytics.getForTask(taskId),
+    queryKey: queryKeys.seednoteAnalytics.task(taskId),
+    queryFn: () => api.seednoteAnalytics.getForTask(taskId),
     refetchInterval: 60_000,
   })
 
@@ -2091,7 +2091,7 @@ export function RednoteAnalyticsPanel({ taskId }: { taskId: string }) {
         <CardBody>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            正在加载小红书数据
+            正在加载种草笔记数据
           </div>
         </CardBody>
       </Card>
@@ -2103,7 +2103,7 @@ export function RednoteAnalyticsPanel({ taskId }: { taskId: string }) {
     return (
       <Card>
         <CardBody>
-          <p className="text-sm text-muted-foreground">小红书数据追踪尚未创建</p>
+          <p className="text-sm text-muted-foreground">种草笔记数据追踪尚未创建</p>
         </CardBody>
       </Card>
     )
@@ -2115,7 +2115,7 @@ export function RednoteAnalyticsPanel({ taskId }: { taskId: string }) {
     <Card>
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-foreground">小红书数据</h2>
+          <h2 className="text-sm font-semibold text-foreground">种草笔记数据</h2>
           <Badge variant={statusVariant[tracking.status]}>{statusText[tracking.status]}</Badge>
         </div>
         {tracking.note_url && (
@@ -2130,7 +2130,7 @@ export function RednoteAnalyticsPanel({ taskId }: { taskId: string }) {
           <div className="flex items-center gap-3">
             {tracking.note_cover_url && <img src={tracking.note_cover_url} alt="" className="h-14 w-14 rounded-md object-cover" />}
             <div>
-              <p className="text-sm font-medium text-foreground">{tracking.note_title || '已绑定小红书笔记'}</p>
+              <p className="text-sm font-medium text-foreground">{tracking.note_title || '已绑定种草笔记笔记'}</p>
               <p className="text-xs text-muted-foreground">采集 {tracking.run_count} 次</p>
             </div>
           </div>
@@ -2179,14 +2179,14 @@ Modify `studio/src/pages/TaskDetailPage.tsx`:
 1. Add import:
 
 ```tsx
-import { RednoteAnalyticsPanel } from '@/components/tasks/RednoteAnalyticsPanel'
+import { SeednoteAnalyticsPanel } from '@/components/tasks/SeednoteAnalyticsPanel'
 ```
 
 2. Add the panel after the details cards and before generated files:
 
 ```tsx
-{task.type === 'rednote' && task.published && (
-  <RednoteAnalyticsPanel taskId={task.id} />
+{task.type === 'seednote' && task.published && (
+  <SeednoteAnalyticsPanel taskId={task.id} />
 )}
 ```
 
@@ -2203,8 +2203,8 @@ Expected: pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add studio/src/types/rednote-analytics.ts studio/src/lib/api/rednote-analytics.ts studio/src/components/tasks/RednoteAnalyticsPanel.tsx studio/src/lib/api/index.ts studio/src/lib/query-keys.ts studio/src/pages/TaskDetailPage.tsx
-git commit -m "feat: show rednote analytics panel"
+git add studio/src/types/seednote-analytics.ts studio/src/lib/api/seednote-analytics.ts studio/src/components/tasks/SeednoteAnalyticsPanel.tsx studio/src/lib/api/index.ts studio/src/lib/query-keys.ts studio/src/pages/TaskDetailPage.tsx
+git commit -m "feat: show seednote analytics panel"
 ```
 
 ---
@@ -2254,7 +2254,7 @@ git diff --stat HEAD
 git diff --check
 ```
 
-Expected: diff only contains RedNote tracking changes; `git diff --check` prints no output.
+Expected: diff only contains SeedNote tracking changes; `git diff --check` prints no output.
 
 - [ ] **Step 5: Commit final fixes**
 
@@ -2262,7 +2262,7 @@ If Step 1 through Step 4 required fixes, commit them:
 
 ```bash
 git add server studio
-git commit -m "fix: stabilize rednote tracking integration"
+git commit -m "fix: stabilize seednote tracking integration"
 ```
 
 If no fixes were required, skip this commit.
@@ -2283,7 +2283,7 @@ Spec coverage:
 
 Type consistency:
 
-- Backend status constants use `RednoteTrackingStatusWaitingDiscovery`, `RednoteTrackingStatusTracking`, `RednoteTrackingStatusStopped`, and `RednoteTrackingStatusFailed`.
-- Scheduler task types use `rednote:discover` and `rednote:capture_metrics`.
-- Frontend API path is `/tasks/:id/rednote-analytics`, matching router route.
+- Backend status constants use `SeednoteTrackingStatusWaitingDiscovery`, `SeednoteTrackingStatusTracking`, `SeednoteTrackingStatusStopped`, and `SeednoteTrackingStatusFailed`.
+- Scheduler task types use `seednote:discover` and `seednote:capture_metrics`.
+- Frontend API path is `/tasks/:id/seednote-analytics`, matching router route.
 - Metric names are consistent across model, service DTO, API response, and Studio types: `like_count`, `collect_count`, `comment_count`, `share_count`, `view_count`.

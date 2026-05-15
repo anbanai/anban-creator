@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/royalrick/anbanwriter/server/xhs"
+	"github.com/royalrick/anbanwriter/server/seednote"
 )
 
-func TestExtractRednoteNoteID(t *testing.T) {
+func TestExtractSeednoteNoteID(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
@@ -23,14 +23,14 @@ func TestExtractRednoteNoteID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ExtractRednoteNoteID(tt.raw); got != tt.want {
-				t.Fatalf("ExtractRednoteNoteID() = %q, want %q", got, tt.want)
+			if got := ExtractSeednoteNoteID(tt.raw); got != tt.want {
+				t.Fatalf("ExtractSeednoteNoteID() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestNormalizeRednoteMetricCount(t *testing.T) {
+func TestNormalizeSeednoteMetricCount(t *testing.T) {
 	tests := []struct {
 		raw  string
 		want int
@@ -45,8 +45,8 @@ func TestNormalizeRednoteMetricCount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.raw, func(t *testing.T) {
-			if got := NormalizeRednoteMetricCount(tt.raw); got != tt.want {
-				t.Fatalf("NormalizeRednoteMetricCount(%q) = %d, want %d", tt.raw, got, tt.want)
+			if got := NormalizeSeednoteMetricCount(tt.raw); got != tt.want {
+				t.Fatalf("NormalizeSeednoteMetricCount(%q) = %d, want %d", tt.raw, got, tt.want)
 			}
 		})
 	}
@@ -73,22 +73,22 @@ func TestParseCountString(t *testing.T) {
 }
 
 func TestMapFeedsToPosts(t *testing.T) {
-	feeds := []xhs.Feed{
+	feeds := []seednote.Feed{
 		{
 			ID: "f1", XsecToken: "t1",
-			NoteCard: xhs.NoteCard{
+			NoteCard: seednote.NoteCard{
 				DisplayTitle: "爆款标题",
-				User:         xhs.User{UserID: "u1", Nickname: "author1"},
-				InteractInfo: xhs.InteractInfo{LikedCount: "1.2万", CollectedCount: "3000", CommentCount: "500", SharedCount: "100"},
-				Cover:        xhs.Cover{URLDefault: "https://example.com/cover.jpg"},
+				User:         seednote.User{UserID: "u1", Nickname: "author1"},
+				InteractInfo: seednote.InteractInfo{LikedCount: "1.2万", CollectedCount: "3000", CommentCount: "500", SharedCount: "100"},
+				Cover:        seednote.Cover{URLDefault: "https://example.com/cover.jpg"},
 			},
 		},
 		{
 			ID: "f2", XsecToken: "",
-			NoteCard: xhs.NoteCard{
+			NoteCard: seednote.NoteCard{
 				DisplayTitle: "普通标题",
-				User:         xhs.User{UserID: "u2", Nickname: "author2"},
-				InteractInfo: xhs.InteractInfo{LikedCount: "50", CollectedCount: "10", CommentCount: "5", SharedCount: "1"},
+				User:         seednote.User{UserID: "u2", Nickname: "author2"},
+				InteractInfo: seednote.InteractInfo{LikedCount: "50", CollectedCount: "10", CommentCount: "5", SharedCount: "1"},
 			},
 		},
 	}
@@ -117,33 +117,33 @@ func TestMapFeedsToPosts(t *testing.T) {
 }
 
 func TestMapUserProfile(t *testing.T) {
-	profile := &xhs.UserProfile{
-		UserBasicInfo: xhs.UserBasicInfo{
-			Nickname: "小红书用户",
+	profile := &seednote.UserProfile{
+		UserBasicInfo: seednote.UserBasicInfo{
+			Nickname: "种草笔记用户",
 			RedID:    "red123",
 			Desc:     "AI 内容创作者",
 			Avatar:   "https://example.com/avatar.jpg",
 		},
-		Interactions: []xhs.UserInteractions{
+		Interactions: []seednote.UserInteractions{
 			{Type: "follows", Name: "关注", Count: "200"},
 			{Type: "fans", Name: "粉丝", Count: "10000"},
 			{Type: "interaction", Name: "获赞与收藏", Count: "5万"},
 		},
-		Feeds: []xhs.Feed{
+		Feeds: []seednote.Feed{
 			{
 				ID: "f1", XsecToken: "t1",
-				NoteCard: xhs.NoteCard{
+				NoteCard: seednote.NoteCard{
 					DisplayTitle: "笔记1",
-					User:         xhs.User{UserID: "u1", Nickname: "a1"},
-					InteractInfo: xhs.InteractInfo{LikedCount: "1000", CollectedCount: "500", CommentCount: "200"},
+					User:         seednote.User{UserID: "u1", Nickname: "a1"},
+					InteractInfo: seednote.InteractInfo{LikedCount: "1000", CollectedCount: "500", CommentCount: "200"},
 				},
 			},
 		},
 	}
 
 	result := mapUserProfile(profile, "https://www.xiaohongshu.com/user/profile/test")
-	if result.Name != "小红书用户" {
-		t.Fatalf("Name = %q, want 小红书用户", result.Name)
+	if result.Name != "种草笔记用户" {
+		t.Fatalf("Name = %q, want 种草笔记用户", result.Name)
 	}
 	if result.AvatarURL != "https://example.com/avatar.jpg" {
 		t.Fatalf("AvatarURL = %q, want https://example.com/avatar.jpg", result.AvatarURL)
@@ -155,7 +155,7 @@ func TestMapUserProfile(t *testing.T) {
 		t.Fatalf("RawData[fans] = %v, want 10000", result.RawData["fans"])
 	}
 
-	posts, ok := result.RawData["posts"].([]RednotePost)
+	posts, ok := result.RawData["posts"].([]SeednotePost)
 	if !ok || len(posts) != 1 {
 		t.Fatalf("len(posts) = %v, want 1", len(posts))
 	}
@@ -192,42 +192,42 @@ func TestResolveNoteURL(t *testing.T) {
 	// Invalid URL
 	_, _, err = resolveNoteURL("https://example.com/other")
 	if err == nil {
-		t.Fatal("expected error for non-xhs URL")
+		t.Fatal("expected error for non-seednote URL")
 	}
 }
 
 func TestFetchProfileEmptyURL(t *testing.T) {
-	_, err := NewRednoteProvider(nil).FetchProfile(context.Background(), "")
+	_, err := NewSeednoteProvider(nil).FetchProfile(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error for empty URL")
 	}
 }
 
 func TestFetchProfilePostsEmptyURL(t *testing.T) {
-	_, err := NewRednoteProvider(nil).FetchProfilePosts(context.Background(), "")
+	_, err := NewSeednoteProvider(nil).FetchProfilePosts(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error for empty URL")
 	}
 }
 
 func TestFetchNoteContentEmptyURL(t *testing.T) {
-	_, err := NewRednoteProvider(nil).FetchNoteContent(context.Background(), "")
+	_, err := NewSeednoteProvider(nil).FetchNoteContent(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error for empty URL")
 	}
 }
 
 func TestFetchPostMetricsEmptyURL(t *testing.T) {
-	_, err := NewRednoteProvider(nil).FetchPostMetrics(context.Background(), "")
+	_, err := NewSeednoteProvider(nil).FetchPostMetrics(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error for empty URL")
 	}
 }
 
 func TestFetchPostMetricsInvalidNoteURL(t *testing.T) {
-	provider := NewRednoteProvider(nil)
+	provider := NewSeednoteProvider(nil)
 	_, err := provider.FetchPostMetrics(context.Background(), "https://example.com/other")
 	if err == nil {
-		t.Fatal("expected error for non-xhs URL")
+		t.Fatal("expected error for non-seednote URL")
 	}
 }

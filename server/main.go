@@ -30,7 +30,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/scheduler"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
-	"github.com/royalrick/anbanwriter/server/xhs"
+	"github.com/royalrick/anbanwriter/server/seednote"
 )
 
 // defaultConfigPaths lists config file locations to try when -config is not set.
@@ -128,18 +128,18 @@ func main() {
 		log.Info().Msg("WeChat service initialized")
 	}
 
-	// 9.1 Create XHS (小红书) sidecar client.
-	var xhsClient *xhs.Client
+	// 9.1 Create Seednote (种草笔记) sidecar client.
+	var seednoteClient *seednote.Client
 	{
-		xhsClient = xhs.NewClient(cfg.XHS.BaseURL, time.Duration(cfg.XHS.Timeout)*time.Second)
+		seednoteClient = seednote.NewClient(cfg.Seednote.BaseURL, time.Duration(cfg.Seednote.Timeout)*time.Second)
 		hcCtx, hcCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := xhsClient.HealthCheck(hcCtx); err != nil {
+		if err := seednoteClient.HealthCheck(hcCtx); err != nil {
 			hcCancel()
-			log.Error().Err(err).Msg("XHS sidecar 不可用，小红书功能将不可用")
-			xhsClient = nil
+			log.Error().Err(err).Msg("Seednote sidecar 不可用，种草笔记功能将不可用")
+			seednoteClient = nil
 		} else {
 			hcCancel()
-			log.Info().Str("base_url", cfg.XHS.BaseURL).Msg("XHS sidecar client initialized")
+			log.Info().Str("base_url", cfg.Seednote.BaseURL).Msg("Seednote sidecar client initialized")
 		}
 	}
 
@@ -210,7 +210,7 @@ func main() {
 	var creditSvc *service.CreditService
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
-	var rednoteTrackingSvc *service.RednoteTrackingService
+	var seednoteTrackingSvc *service.SeednoteTrackingService
 	var templateSvc *service.TemplateService
 	var viralAnalysisSvc *service.ViralAnalysisService
 	var posterSvc *service.PosterService
@@ -275,12 +275,12 @@ func main() {
 		}
 	}
 
-	if repo != nil && xhsClient != nil {
-		rednoteTrackingSvc = service.NewRednoteTrackingService(repo, platform.NewRednoteProvider(xhsClient), writingLLMClient, asynqClient, log)
-		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("RedNote tracking service initialized")
+	if repo != nil && seednoteClient != nil {
+		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
+		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("SeedNote tracking service initialized")
 		if taskSvc != nil {
-			viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewRednoteProvider(xhsClient), writingLLMClient, asynqClient, log)
-			taskSvc.SetRednoteTrackingService(rednoteTrackingSvc)
+			viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
+			taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
 			log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("Viral analysis service initialized")
 		}
 	}
@@ -290,7 +290,7 @@ func main() {
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
 	var taskHandler *handler.TaskHandler
-	var rednoteAnalyticsHandler *handler.RednoteAnalyticsHandler
+	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var agentHandler *handler.AgentHandler
 	var channelHandler *handler.ChannelHandler
 	var timelineHandler *handler.TimelineHandler
@@ -308,7 +308,7 @@ func main() {
 		planHandler = handler.NewPlanHandler(planSvc, log)
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
-		rednoteAnalyticsHandler = handler.NewRednoteAnalyticsHandler(rednoteTrackingSvc, log)
+		seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
 		channelHandler = handler.NewChannelHandler(channelSvc, log)
 		if modelConfigSvc != nil {
 			channelHandler.SetModelConfigService(modelConfigSvc)
@@ -322,8 +322,8 @@ func main() {
 		if store != nil {
 			channelHandler.SetStore(store)
 		}
-		if xhsClient != nil {
-			channelHandler.SetXHSClient(xhsClient)
+		if seednoteClient != nil {
+			channelHandler.SetSeednoteClient(seednoteClient)
 		}
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
@@ -384,7 +384,7 @@ func main() {
 			PublishingSvc: publishingSvc,
 			WorkspaceSvc:  workspaceSvc,
 			TemplateSvc:   templateSvc,
-			XHSClient:     xhsClient,
+			SeednoteClient:     seednoteClient,
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcp.SetLogger(log)
@@ -403,7 +403,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(taskSvc, rednoteTrackingSvc, viralAnalysisSvc, cfg, log)
+		asynqServer = startAsynqServer(taskSvc, seednoteTrackingSvc, viralAnalysisSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -438,7 +438,7 @@ func main() {
 		ChannelHandler:          channelHandler,
 		PlanHandler:             planHandler,
 		TaskHandler:             taskHandler,
-		RednoteAnalyticsHandler: rednoteAnalyticsHandler,
+		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		AgentHandler:            agentHandler,
 		CreditHandler:           creditHandler,
 		TimelineHandler:         timelineHandler,
@@ -613,15 +613,15 @@ func connectRedis(ctx context.Context, cfg *config.Config, log *zerolog.Logger) 
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(taskSvc *service.TaskService, rednoteTrackingSvc *service.RednoteTrackingService, viralAnalysisSvc *service.ViralAnalysisService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
-	var rednoteDiscoverHandler scheduler.RednoteTrackingHandler
-	var rednoteCaptureHandler scheduler.RednoteTrackingHandler
-	if rednoteTrackingSvc != nil {
-		rednoteDiscoverHandler = func(ctx context.Context, trackingID string) error {
-			return rednoteTrackingSvc.DiscoverPublishedNote(ctx, trackingID)
+func startAsynqServer(taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, viralAnalysisSvc *service.ViralAnalysisService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+	var seednoteDiscoverHandler scheduler.SeednoteTrackingHandler
+	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
+	if seednoteTrackingSvc != nil {
+		seednoteDiscoverHandler = func(ctx context.Context, trackingID string) error {
+			return seednoteTrackingSvc.DiscoverPublishedNote(ctx, trackingID)
 		}
-		rednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
-			return rednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
+		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
+			return seednoteTrackingSvc.CaptureMetrics(ctx, trackingID)
 		}
 	}
 
@@ -643,8 +643,8 @@ func startAsynqServer(taskSvc *service.TaskService, rednoteTrackingSvc *service.
 		func(ctx context.Context) error {
 			return taskSvc.CleanupExpiredWorkspaces(ctx)
 		},
-		rednoteDiscoverHandler,
-		rednoteCaptureHandler,
+		seednoteDiscoverHandler,
+		seednoteCaptureHandler,
 		viralAnalysisHandler,
 		cfg.Redis.Addr,
 		cfg.Redis.Password,

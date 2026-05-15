@@ -12,20 +12,20 @@ import (
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
-type RednoteAnalyticsService interface {
-	GetTaskAnalytics(ctx context.Context, userID, taskID string) (*service.RednoteAnalytics, error)
+type SeednoteAnalyticsService interface {
+	GetTaskAnalytics(ctx context.Context, userID, taskID string) (*service.SeednoteAnalytics, error)
 }
 
-type RednoteAnalyticsHandler struct {
-	service RednoteAnalyticsService
+type SeednoteAnalyticsHandler struct {
+	service SeednoteAnalyticsService
 	logger  *zerolog.Logger
 }
 
-func NewRednoteAnalyticsHandler(svc RednoteAnalyticsService, logger *zerolog.Logger) *RednoteAnalyticsHandler {
-	return &RednoteAnalyticsHandler{service: svc, logger: logger}
+func NewSeednoteAnalyticsHandler(svc SeednoteAnalyticsService, logger *zerolog.Logger) *SeednoteAnalyticsHandler {
+	return &SeednoteAnalyticsHandler{service: svc, logger: logger}
 }
 
-func (h *RednoteAnalyticsHandler) GetTaskAnalytics(c fiber.Ctx) error {
+func (h *SeednoteAnalyticsHandler) GetTaskAnalytics(c fiber.Ctx) error {
 	id, err := validateUUIDParam(c, "id")
 	if err != nil {
 		return err
@@ -35,7 +35,7 @@ func (h *RednoteAnalyticsHandler) GetTaskAnalytics(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 	if h.service == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "rednote analytics unavailable")
+		return Error(c, fiber.StatusServiceUnavailable, "seednote analytics unavailable")
 	}
 
 	analytics, err := h.service.GetTaskAnalytics(c.Context(), userID, id)
@@ -47,9 +47,9 @@ func (h *RednoteAnalyticsHandler) GetTaskAnalytics(c fiber.Ctx) error {
 			return Forbidden(c, "you do not have access to this task")
 		}
 		if h.logger != nil {
-			h.logger.Error().Err(err).Str("task_id", id).Msg("get rednote analytics failed")
+			h.logger.Error().Err(err).Str("task_id", id).Msg("get seednote analytics failed")
 		}
-		return Error(c, fiber.StatusInternalServerError, "failed to get rednote analytics")
+		return Error(c, fiber.StatusInternalServerError, "failed to get seednote analytics")
 	}
 	return Success(c, analytics)
 }

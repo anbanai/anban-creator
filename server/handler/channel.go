@@ -22,7 +22,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
-	"github.com/royalrick/anbanwriter/server/xhs"
+	"github.com/royalrick/anbanwriter/server/seednote"
 )
 
 // ChannelHandler handles channel-related HTTP endpoints.
@@ -34,7 +34,7 @@ type ChannelHandler struct {
 	modelConfigSvc *service.ModelConfigService
 	templateSvc    *service.TemplateService
 	store          storage.Provider
-	xhsClient      *xhs.Client
+	seednoteClient      *seednote.Client
 }
 
 // NewChannelHandler creates a new ChannelHandler.
@@ -63,9 +63,9 @@ func (h *ChannelHandler) SetStore(s storage.Provider) {
 	h.store = s
 }
 
-// SetXHSClient injects the Xiaohongshu SDK client.
-func (h *ChannelHandler) SetXHSClient(client *xhs.Client) {
-	h.xhsClient = client
+// SetSeednoteClient injects the Seednote SDK client.
+func (h *ChannelHandler) SetSeednoteClient(client *seednote.Client) {
+	h.seednoteClient = client
 }
 
 // channelRequest is the shared request body for creating and updating a channel.
@@ -239,8 +239,8 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 
 	service.SanitizeChannel(created)
 
-	// For Xiaohongshu channels with profile data, return recommended templates.
-	if created.Platform == model.PlatformRednote && h.templateSvc != nil {
+	// For Seednote channels with profile data, return recommended templates.
+	if created.Platform == model.PlatformSeednote && h.templateSvc != nil {
 		recommended := h.getRecommendedTemplates(c.Context(), created)
 		if len(recommended) > 0 {
 			return Success(c, fiber.Map{
@@ -444,8 +444,8 @@ func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "profile_url is required")
 	}
 
-	if req.Platform != model.PlatformRednote {
-		return Error(c, fiber.StatusBadRequest, "profile auto-fetch is only available for Xiaohongshu")
+	if req.Platform != model.PlatformSeednote {
+		return Error(c, fiber.StatusBadRequest, "profile auto-fetch is only available for Seednote")
 	}
 
 	// Validate URL matches the platform's expected pattern.
@@ -472,7 +472,7 @@ func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
 		secret = req.WechatSecret
 	}
 
-	provider := platform.NewProvider(req.Platform, appID, secret, h.xhsClient)
+	provider := platform.NewProvider(req.Platform, appID, secret, h.seednoteClient)
 	if provider == nil {
 		return Error(c, fiber.StatusBadRequest, "unsupported platform: "+req.Platform)
 	}
@@ -485,12 +485,12 @@ func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
 			Msg("fetch profile failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to fetch profile: "+err.Error())
 	}
-	h.enrichRednoteProfileWithAI(c.Context(), userID, profile)
+	h.enrichSeednoteProfileWithAI(c.Context(), userID, profile)
 
 	return Success(c, profile)
 }
 
-type rednoteProfileAnalysis struct {
+type seednoteProfileAnalysis struct {
 	Name           string   `json:"name"`
 	AvatarURL      string   `json:"avatar_url"`
 	Positioning    string   `json:"positioning"`
@@ -499,7 +499,7 @@ type rednoteProfileAnalysis struct {
 	ContentSummary string   `json:"content_summary"`
 }
 
-func (h *ChannelHandler) enrichRednoteProfileWithAI(ctx context.Context, userID string, profile *platform.PlatformProfile) {
+func (h *ChannelHandler) enrichSeednoteProfileWithAI(ctx context.Context, userID string, profile *platform.PlatformProfile) {
 	llm := h.getLLMClient(ctx, userID)
 	if llm == nil || profile == nil {
 		return
@@ -507,15 +507,15 @@ func (h *ChannelHandler) enrichRednoteProfileWithAI(ctx context.Context, userID 
 
 	// Prefer AI extraction from __INITIAL_STATE__ JSON when available.
 	if initialState, ok := profile.RawData["initial_state"].(string); ok && initialState != "" {
-		prompt := buildRednoteProfileExtractionPrompt(initialState, topPostsFromProfile(profile))
+		prompt := buildSeednoteProfileExtractionPrompt(initialState, topPostsFromProfile(profile))
 		raw, err := llm.Complete(ctx, "", prompt)
 		if err != nil {
-			h.logger.Warn().Err(err).Str("user_id", userID).Msg("rednote profile AI extraction failed")
+			h.logger.Warn().Err(err).Str("user_id", userID).Msg("seednote profile AI extraction failed")
 			return
 		}
-		analysis, err := parseRednoteProfileAnalysis(raw)
+		analysis, err := parseSeednoteProfileAnalysis(raw)
 		if err != nil {
-			h.logger.Warn().Err(err).Str("user_id", userID).Msg("parse rednote profile AI extraction failed")
+			h.logger.Warn().Err(err).Str("user_id", userID).Msg("parse seednote profile AI extraction failed")
 			return
 		}
 		if analysis.Name != "" {
@@ -539,15 +539,15 @@ func (h *ChannelHandler) enrichRednoteProfileWithAI(ctx context.Context, userID 
 	}
 
 	// Fallback: generate positioning/keywords/style from code-parsed fields.
-	prompt := buildRednoteProfileAnalysisPrompt(profile)
+	prompt := buildSeednoteProfileAnalysisPrompt(profile)
 	raw, err := llm.Complete(ctx, "", prompt)
 	if err != nil {
-		h.logger.Warn().Err(err).Str("user_id", userID).Msg("rednote profile AI analysis failed")
+		h.logger.Warn().Err(err).Str("user_id", userID).Msg("seednote profile AI analysis failed")
 		return
 	}
-	analysis, err := parseRednoteProfileAnalysis(raw)
+	analysis, err := parseSeednoteProfileAnalysis(raw)
 	if err != nil {
-		h.logger.Warn().Err(err).Str("user_id", userID).Msg("parse rednote profile AI analysis failed")
+		h.logger.Warn().Err(err).Str("user_id", userID).Msg("parse seednote profile AI analysis failed")
 		return
 	}
 	if analysis.Positioning != "" {
@@ -570,7 +570,7 @@ func (h *ChannelHandler) getLLMClient(ctx context.Context, userID string) servic
 				Str("user_id", userID).
 				Str("endpoint", baseURL).
 				Str("model", modelName).
-				Msg("using user custom model for rednote profile analysis")
+				Msg("using user custom model for seednote profile analysis")
 			return service.NewOpenAILLMClient(baseURL, key, modelName, h.llmTimeout)
 		}
 	}
@@ -588,9 +588,9 @@ func cleanKeywords(keywords []string) string {
 	return strings.Join(cleaned, ", ")
 }
 
-func buildRednoteProfileAnalysisPrompt(profile *platform.PlatformProfile) string {
+func buildSeednoteProfileAnalysisPrompt(profile *platform.PlatformProfile) string {
 	var b strings.Builder
-	b.WriteString("你是小红书账号定位和视觉策略分析师。请基于账号主页信息和表现最好的可见作品，生成账号定位、关键词和视觉风格。\n\n")
+	b.WriteString("你是种草笔记账号定位和视觉策略分析师。请基于账号主页信息和表现最好的可见作品，生成账号定位、关键词和视觉风格。\n\n")
 	b.WriteString("## 账号信息\n")
 	b.WriteString("- 昵称: " + truncateRunes(profile.Name, 80) + "\n")
 	b.WriteString("- 简介: " + truncateRunes(profile.Positioning, 240) + "\n\n")
@@ -612,9 +612,9 @@ func buildRednoteProfileAnalysisPrompt(profile *platform.PlatformProfile) string
 	return b.String()
 }
 
-func buildRednoteProfileExtractionPrompt(initialState string, topPosts []platform.RednotePost) string {
+func buildSeednoteProfileExtractionPrompt(initialState string, topPosts []platform.SeednotePost) string {
 	var b strings.Builder
-	b.WriteString("你是小红书账号分析专家。请从以下小红书页面数据中提取账号信息并生成分析。\n\n")
+	b.WriteString("你是种草笔记账号分析专家。请从以下种草笔记页面数据中提取账号信息并生成分析。\n\n")
 	b.WriteString("## 页面数据\n")
 	b.WriteString(truncateRunes(initialState, 15000))
 	b.WriteString("\n\n")
@@ -640,11 +640,11 @@ func buildRednoteProfileExtractionPrompt(initialState string, topPosts []platfor
 	return b.String()
 }
 
-func topPostsFromProfile(profile *platform.PlatformProfile) []platform.RednotePost {
+func topPostsFromProfile(profile *platform.PlatformProfile) []platform.SeednotePost {
 	if profile == nil || profile.RawData == nil {
 		return nil
 	}
-	posts, ok := profile.RawData["top_posts"].([]platform.RednotePost)
+	posts, ok := profile.RawData["top_posts"].([]platform.SeednotePost)
 	if !ok {
 		return nil
 	}
@@ -654,15 +654,15 @@ func topPostsFromProfile(profile *platform.PlatformProfile) []platform.RednotePo
 	return posts
 }
 
-func parseRednoteProfileAnalysis(raw string) (rednoteProfileAnalysis, error) {
+func parseSeednoteProfileAnalysis(raw string) (seednoteProfileAnalysis, error) {
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 	raw = strings.TrimSpace(raw)
-	var analysis rednoteProfileAnalysis
+	var analysis seednoteProfileAnalysis
 	if err := json.Unmarshal([]byte(raw), &analysis); err != nil {
-		return analysis, fmt.Errorf("unmarshal rednote profile analysis: %w", err)
+		return analysis, fmt.Errorf("unmarshal seednote profile analysis: %w", err)
 	}
 	analysis.Positioning = truncateRunes(strings.TrimSpace(analysis.Positioning), 120)
 	analysis.Style = truncateRunes(strings.TrimSpace(analysis.Style), 180)
@@ -775,22 +775,22 @@ type analyzeImageRequest struct {
 	ImageURL string `json:"image_url"`
 }
 
-// XHSLoginStatus handles GET /xhs/login-status.
-func (h *ChannelHandler) XHSLoginStatus(c fiber.Ctx) error {
+// SeednoteLoginStatus handles GET /seednote/login-status.
+func (h *ChannelHandler) SeednoteLoginStatus(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	if h.xhsClient == nil {
+	if h.seednoteClient == nil {
 		return Success(c, fiber.Map{
 			"available": false,
 			"logged_in": false,
-			"message":   "XHS sidecar 未配置",
+			"message":   "Seednote sidecar 未配置",
 		})
 	}
 
-	loggedIn, err := h.xhsClient.CheckLoginStatus(c.Context())
+	loggedIn, err := h.seednoteClient.CheckLoginStatus(c.Context())
 	if err != nil {
 		return Success(c, fiber.Map{
 			"available": true,
@@ -801,7 +801,7 @@ func (h *ChannelHandler) XHSLoginStatus(c fiber.Ctx) error {
 
 	msg := "已登录"
 	if !loggedIn {
-		msg = "未登录，请使用 get_xhs_login_qrcode 获取二维码扫描登录"
+		msg = "未登录，请使用 get_seednote_login_qrcode 获取二维码扫描登录"
 	}
 	return Success(c, fiber.Map{
 		"available": true,

@@ -54,8 +54,8 @@ export const channelsApi = {
       image_url: imageUrl,
     }, { timeout: 60000 })),
 
-  xhsLoginStatus: () =>
+  seednoteLoginStatus: () =>
     unwrap<{ available: boolean; logged_in: boolean; message: string }>(
-      http.get('/xhs/login-status'),
+      http.get('/seednote/login-status'),
     ),
 }

@@ -18,32 +18,32 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 )
 
-type fakeRednotePlatform struct {
-	posts        []platform.RednotePost
-	metrics      platform.RednotePostMetrics
+type fakeSeednotePlatform struct {
+	posts        []platform.SeednotePost
+	metrics      platform.SeednotePostMetrics
 	err          error
 	metricsCalls int
 }
 
-func (f *fakeRednotePlatform) FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.RednotePost, error) {
+func (f *fakeSeednotePlatform) FetchProfilePosts(ctx context.Context, profileURL string) ([]platform.SeednotePost, error) {
 	return f.posts, f.err
 }
 
-func (f *fakeRednotePlatform) FetchPostMetrics(ctx context.Context, noteURL string) (*platform.RednotePostMetrics, error) {
+func (f *fakeSeednotePlatform) FetchPostMetrics(ctx context.Context, noteURL string) (*platform.SeednotePostMetrics, error) {
 	f.metricsCalls++
 	return &f.metrics, f.err
 }
 
-type fakeRednoteLLM struct {
+type fakeSeednoteLLM struct {
 	response string
 	err      error
 }
 
-func (f *fakeRednoteLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+func (f *fakeSeednoteLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	return f.response, f.err
 }
 
-func (f *fakeRednoteLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeSeednoteLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
 	return "", fmt.Errorf("not implemented")
 }
 
@@ -70,7 +70,7 @@ func (f *fakeTrackingEnqueuer) EnqueueIn(taskType string, payload []byte, delay 
 	return nil
 }
 
-func setupRednoteTrackingServiceTest(t *testing.T) (*RednoteTrackingService, repository.Repository, *fakeTrackingEnqueuer) {
+func setupSeednoteTrackingServiceTest(t *testing.T) (*SeednoteTrackingService, repository.Repository, *fakeTrackingEnqueuer) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -88,11 +88,11 @@ func setupRednoteTrackingServiceTest(t *testing.T) (*RednoteTrackingService, rep
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
-	svc := NewRednoteTrackingService(repo, &fakeRednotePlatform{}, &fakeRednoteLLM{}, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, &fakeSeednotePlatform{}, &fakeSeednoteLLM{}, enq, &logger)
 	return svc, repo, enq
 }
 
-func createRednoteTrackingFixtures(t *testing.T, repo repository.Repository) (string, string, string) {
+func createSeednoteTrackingFixtures(t *testing.T, repo repository.Repository) (string, string, string) {
 	t.Helper()
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -104,8 +104,8 @@ func createRednoteTrackingFixtures(t *testing.T, repo repository.Repository) (st
 	if err := repo.Channels().Create(ctx, &model.Channel{
 		ID:         channelID,
 		UserID:     userID,
-		Platform:   model.PlatformRednote,
-		Name:       "RedNote",
+		Platform:   model.PlatformSeednote,
+		Name:       "SeedNote",
 		ProfileURL: "https://www.xiaohongshu.com/user/profile/profile-1",
 		Status:     model.ChannelStatusActive,
 	}); err != nil {
@@ -115,7 +115,7 @@ func createRednoteTrackingFixtures(t *testing.T, repo repository.Repository) (st
 		ID:        taskID,
 		UserID:    userID,
 		ChannelID: channelID,
-		Type:      model.PlatformRednote,
+		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 		Title:     "早起效率翻倍的方法",
 		Prompt:    "早起效率",
@@ -126,29 +126,29 @@ func createRednoteTrackingFixtures(t *testing.T, repo repository.Repository) (st
 	return userID, channelID, taskID
 }
 
-func TestRednoteTrackingService_EnsureTrackingForPublishedTask(t *testing.T) {
-	svc, repo, enq := setupRednoteTrackingServiceTest(t)
-	userID, _, taskID := createRednoteTrackingFixtures(t, repo)
+func TestSeednoteTrackingService_EnsureTrackingForPublishedTask(t *testing.T) {
+	svc, repo, enq := setupSeednoteTrackingServiceTest(t)
+	userID, _, taskID := createSeednoteTrackingFixtures(t, repo)
 
 	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err != nil {
 		t.Fatalf("EnsureTrackingForPublishedTask: %v", err)
 	}
 
-	tracking, err := repo.RednoteTrackings().FindByTaskID(context.Background(), taskID)
+	tracking, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID)
 	if err != nil {
 		t.Fatalf("FindByTaskID: %v", err)
 	}
-	if tracking.Status != model.RednoteTrackingStatusWaitingDiscovery {
+	if tracking.Status != model.SeednoteTrackingStatusWaitingDiscovery {
 		t.Fatalf("Status = %q", tracking.Status)
 	}
-	if len(enq.delayed) != 1 || enq.delayed[0] != "rednote:discover" {
+	if len(enq.delayed) != 1 || enq.delayed[0] != "seednote:discover" {
 		t.Fatalf("delayed jobs = %+v", enq.delayed)
 	}
 }
 
-func TestRednoteTrackingService_EnsureTrackingForPublishedTaskMissingProfileCreatesFailedTracking(t *testing.T) {
-	svc, repo, enq := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskMissingProfileCreatesFailedTracking(t *testing.T) {
+	svc, repo, enq := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
 	channel, err := repo.Channels().FindByID(context.Background(), channelID)
 	if err != nil {
 		t.Fatalf("FindByID channel: %v", err)
@@ -162,11 +162,11 @@ func TestRednoteTrackingService_EnsureTrackingForPublishedTaskMissingProfileCrea
 		t.Fatalf("EnsureTrackingForPublishedTask: %v", err)
 	}
 
-	tracking, err := repo.RednoteTrackings().FindByTaskID(context.Background(), taskID)
+	tracking, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID)
 	if err != nil {
 		t.Fatalf("FindByTaskID: %v", err)
 	}
-	if tracking.Status != model.RednoteTrackingStatusFailed {
+	if tracking.Status != model.SeednoteTrackingStatusFailed {
 		t.Fatalf("Status = %q, want failed", tracking.Status)
 	}
 	if tracking.LastError == "" {
@@ -180,29 +180,29 @@ func TestRednoteTrackingService_EnsureTrackingForPublishedTaskMissingProfileCrea
 	}
 }
 
-func TestRednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing.T) {
-	_, repo, _ := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
-	platformFake := &fakeRednotePlatform{
-		posts: []platform.RednotePost{
+func TestSeednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing.T) {
+	_, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	platformFake := &fakeSeednotePlatform{
+		posts: []platform.SeednotePost{
 			{Title: "早起效率翻倍的方法", URL: "https://www.xiaohongshu.com/explore/note-1", NoteID: "note-1", CoverURL: "https://img.example/1.jpg"},
 		},
-		metrics: platform.RednotePostMetrics{LikeCount: 10, CollectCount: 3, CommentCount: 1, ShareCount: 0},
+		metrics: platform.SeednotePostMetrics{LikeCount: 10, CollectCount: 3, CommentCount: 1, ShareCount: 0},
 	}
-	llmFake := &fakeRednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-1","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
+	llmFake := &fakeSeednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-1","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	svc := NewRednoteTrackingService(repo, platformFake, llmFake, &fakeTrackingEnqueuer{}, &logger)
+	svc := NewSeednoteTrackingService(repo, platformFake, llmFake, &fakeTrackingEnqueuer{}, &logger)
 
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
 		ChannelID:         channelID,
-		Status:            model.RednoteTrackingStatusWaitingDiscovery,
+		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
 	}
-	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
 	}
 
@@ -210,14 +210,14 @@ func TestRednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing
 		t.Fatalf("DiscoverPublishedNote: %v", err)
 	}
 
-	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if updated.Status != model.RednoteTrackingStatusTracking || updated.NoteID != "note-1" {
+	if updated.Status != model.SeednoteTrackingStatusTracking || updated.NoteID != "note-1" {
 		t.Fatalf("tracking = %+v", updated)
 	}
-	snapshots, err := repo.RednoteMetricSnapshots().FindByTaskID(context.Background(), taskID)
+	snapshots, err := repo.SeednoteMetricSnapshots().FindByTaskID(context.Background(), taskID)
 	if err != nil {
 		t.Fatalf("FindByTaskID snapshots: %v", err)
 	}
@@ -226,33 +226,33 @@ func TestRednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing
 	}
 }
 
-func TestRednoteTrackingService_DiscoverPublishedNoteRejectsMismatchedIdentifiers(t *testing.T) {
-	_, repo, _ := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+func TestSeednoteTrackingService_DiscoverPublishedNoteRejectsMismatchedIdentifiers(t *testing.T) {
+	_, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
 	url1 := "https://www.xiaohongshu.com/explore/note-1"
 	url2 := "https://www.xiaohongshu.com/explore/note-2"
-	platformFake := &fakeRednotePlatform{
-		posts: []platform.RednotePost{
+	platformFake := &fakeSeednotePlatform{
+		posts: []platform.SeednotePost{
 			{Title: "早起效率翻倍的方法", URL: url1, NoteID: "note-1", CoverURL: "https://img.example/1.jpg"},
 			{Title: "午后精力恢复技巧", URL: url2, NoteID: "note-2", CoverURL: "https://img.example/2.jpg"},
 		},
-		metrics: platform.RednotePostMetrics{LikeCount: 99, CollectCount: 9, CommentCount: 9, ShareCount: 9},
+		metrics: platform.SeednotePostMetrics{LikeCount: 99, CollectCount: 9, CommentCount: 9, ShareCount: 9},
 	}
-	llmFake := &fakeRednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-2","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
+	llmFake := &fakeSeednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-2","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
-	svc := NewRednoteTrackingService(repo, platformFake, llmFake, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, platformFake, llmFake, enq, &logger)
 
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
 		ChannelID:         channelID,
-		Status:            model.RednoteTrackingStatusWaitingDiscovery,
+		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
 	}
-	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
 	}
 
@@ -260,54 +260,54 @@ func TestRednoteTrackingService_DiscoverPublishedNoteRejectsMismatchedIdentifier
 		t.Fatalf("DiscoverPublishedNote: %v", err)
 	}
 
-	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if updated.Status != model.RednoteTrackingStatusWaitingDiscovery {
-		t.Fatalf("Status = %q, want %q", updated.Status, model.RednoteTrackingStatusWaitingDiscovery)
+	if updated.Status != model.SeednoteTrackingStatusWaitingDiscovery {
+		t.Fatalf("Status = %q, want %q", updated.Status, model.SeednoteTrackingStatusWaitingDiscovery)
 	}
 	if updated.NoteID != "" || updated.NoteURL != "" {
 		t.Fatalf("matched note fields should remain empty, got note_id=%q note_url=%q", updated.NoteID, updated.NoteURL)
 	}
-	snapshots, err := repo.RednoteMetricSnapshots().FindByTaskID(context.Background(), taskID)
+	snapshots, err := repo.SeednoteMetricSnapshots().FindByTaskID(context.Background(), taskID)
 	if err != nil {
 		t.Fatalf("FindByTaskID snapshots: %v", err)
 	}
 	if len(snapshots) != 0 {
 		t.Fatalf("snapshots = %+v, want none", snapshots)
 	}
-	if len(enq.delayed) != 1 || enq.delayed[0] != RednoteDiscoverTaskType {
+	if len(enq.delayed) != 1 || enq.delayed[0] != SeednoteDiscoverTaskType {
 		t.Fatalf("delayed jobs = %+v", enq.delayed)
 	}
 }
 
-func TestRednoteTrackingService_StaleJobsNoopForTerminalStatuses(t *testing.T) {
-	_, repo, _ := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
-	platformFake := &fakeRednotePlatform{
-		posts: []platform.RednotePost{
+func TestSeednoteTrackingService_StaleJobsNoopForTerminalStatuses(t *testing.T) {
+	_, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	platformFake := &fakeSeednotePlatform{
+		posts: []platform.SeednotePost{
 			{Title: "早起效率翻倍的方法", URL: "https://www.xiaohongshu.com/explore/note-1", NoteID: "note-1"},
 		},
-		metrics: platform.RednotePostMetrics{LikeCount: 10},
+		metrics: platform.SeednotePostMetrics{LikeCount: 10},
 	}
-	llmFake := &fakeRednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-1","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
+	llmFake := &fakeSeednoteLLM{response: `{"matched":true,"note_url":"https://www.xiaohongshu.com/explore/note-1","note_id":"note-1","confidence":0.91,"reason":"标题和主题一致"}`}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
-	svc := NewRednoteTrackingService(repo, platformFake, llmFake, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, platformFake, llmFake, enq, &logger)
 
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
 		ChannelID:         channelID,
-		Status:            model.RednoteTrackingStatusStopped,
+		Status:            model.SeednoteTrackingStatusStopped,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
 		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
 		RunCount:          2,
 	}
-	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
 	}
 
@@ -318,11 +318,11 @@ func TestRednoteTrackingService_StaleJobsNoopForTerminalStatuses(t *testing.T) {
 		t.Fatalf("CaptureMetrics: %v", err)
 	}
 
-	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if updated.Status != model.RednoteTrackingStatusStopped || updated.RunCount != 2 {
+	if updated.Status != model.SeednoteTrackingStatusStopped || updated.RunCount != 2 {
 		t.Fatalf("tracking changed after stale jobs: %+v", updated)
 	}
 	if platformFake.metricsCalls != 0 {
@@ -333,22 +333,22 @@ func TestRednoteTrackingService_StaleJobsNoopForTerminalStatuses(t *testing.T) {
 	}
 }
 
-func TestRednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *testing.T) {
-	_, repo, _ := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
-	platformFake := &fakeRednotePlatform{metrics: platform.RednotePostMetrics{LikeCount: 99}}
+func TestSeednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *testing.T) {
+	_, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	platformFake := &fakeSeednotePlatform{metrics: platform.SeednotePostMetrics{LikeCount: 99}}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
-	svc := NewRednoteTrackingService(repo, platformFake, &fakeRednoteLLM{}, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, platformFake, &fakeSeednoteLLM{}, enq, &logger)
 	now := time.Now()
 	lastRun := now.Add(-time.Hour)
 	nextRun := now.Add(time.Hour)
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
 		ChannelID:         channelID,
-		Status:            model.RednoteTrackingStatusTracking,
+		Status:            model.SeednoteTrackingStatusTracking,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
 		PublishedMarkedAt: now.Add(-24 * time.Hour),
@@ -357,15 +357,15 @@ func TestRednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *te
 		NextRunAt:         &nextRun,
 		RunCount:          3,
 	}
-	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
 	}
-	if err := repo.RednoteMetricSnapshots().Create(context.Background(), &model.RednoteMetricSnapshot{
+	if err := repo.SeednoteMetricSnapshots().Create(context.Background(), &model.SeednoteMetricSnapshot{
 		ID:           uuid.New().String(),
 		TrackingID:   tracking.ID,
 		TaskID:       taskID,
 		CapturedAt:   now.Add(-30 * time.Minute),
-		CapturedDate: model.RednoteCapturedDate(now),
+		CapturedDate: model.SeednoteCapturedDate(now),
 		LikeCount:    10,
 	}); err != nil {
 		t.Fatalf("create snapshot: %v", err)
@@ -375,7 +375,7 @@ func TestRednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *te
 		t.Fatalf("CaptureMetrics: %v", err)
 	}
 
-	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
@@ -390,38 +390,38 @@ func TestRednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *te
 	}
 }
 
-func TestRednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLifecycle(t *testing.T) {
-	_, repo, _ := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
-	platformFake := &fakeRednotePlatform{metrics: platform.RednotePostMetrics{LikeCount: 99}}
+func TestSeednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLifecycle(t *testing.T) {
+	_, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	platformFake := &fakeSeednotePlatform{metrics: platform.SeednotePostMetrics{LikeCount: 99}}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
-	svc := NewRednoteTrackingService(repo, platformFake, &fakeRednoteLLM{}, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, platformFake, &fakeSeednoteLLM{}, enq, &logger)
 	now := time.Now()
 	yesterday := now.Add(-24 * time.Hour)
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                        uuid.New().String(),
 		TaskID:                    taskID,
 		UserID:                    userID,
 		ChannelID:                 channelID,
-		Status:                    model.RednoteTrackingStatusTracking,
+		Status:                    model.SeednoteTrackingStatusTracking,
 		ProfileURL:                "https://www.xiaohongshu.com/user/profile/profile-1",
 		NoteURL:                   "https://www.xiaohongshu.com/explore/note-1",
 		PublishedMarkedAt:         now.Add(-48 * time.Hour),
 		TrackingStartedAt:         &yesterday,
 		LastRunAt:                 &yesterday,
 		RunCount:                  0,
-		ConsecutiveLowGrowthCount: model.RednoteLowGrowthConsecutiveCaptures - 1,
+		ConsecutiveLowGrowthCount: model.SeednoteLowGrowthConsecutiveCaptures - 1,
 	}
-	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
 	}
-	if err := repo.RednoteMetricSnapshots().Create(context.Background(), &model.RednoteMetricSnapshot{
+	if err := repo.SeednoteMetricSnapshots().Create(context.Background(), &model.SeednoteMetricSnapshot{
 		ID:           uuid.New().String(),
 		TrackingID:   tracking.ID,
 		TaskID:       taskID,
 		CapturedAt:   now.Add(-30 * time.Minute),
-		CapturedDate: model.RednoteCapturedDate(now),
+		CapturedDate: model.SeednoteCapturedDate(now),
 		LikeCount:    10,
 	}); err != nil {
 		t.Fatalf("create snapshot: %v", err)
@@ -431,7 +431,7 @@ func TestRednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLife
 		t.Fatalf("CaptureMetrics: %v", err)
 	}
 
-	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
@@ -441,55 +441,55 @@ func TestRednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLife
 	if updated.RunCount != 1 {
 		t.Fatalf("RunCount = %d, want 1", updated.RunCount)
 	}
-	if updated.Status != model.RednoteTrackingStatusTracking {
+	if updated.Status != model.SeednoteTrackingStatusTracking {
 		t.Fatalf("Status = %q, want tracking", updated.Status)
 	}
-	if updated.ConsecutiveLowGrowthCount != model.RednoteLowGrowthConsecutiveCaptures-1 {
+	if updated.ConsecutiveLowGrowthCount != model.SeednoteLowGrowthConsecutiveCaptures-1 {
 		t.Fatalf("ConsecutiveLowGrowthCount = %d, want unchanged", updated.ConsecutiveLowGrowthCount)
 	}
-	if updated.LastRunAt == nil || model.RednoteCapturedDate(*updated.LastRunAt) != model.RednoteCapturedDate(now) {
+	if updated.LastRunAt == nil || model.SeednoteCapturedDate(*updated.LastRunAt) != model.SeednoteCapturedDate(now) {
 		t.Fatalf("LastRunAt = %v, want today", updated.LastRunAt)
 	}
 	if updated.NextRunAt == nil {
 		t.Fatal("NextRunAt should be set")
 	}
-	if len(enq.delayed) != 1 || enq.delayed[0] != RednoteCaptureMetricsTaskType {
+	if len(enq.delayed) != 1 || enq.delayed[0] != SeednoteCaptureMetricsTaskType {
 		t.Fatalf("delayed jobs = %+v", enq.delayed)
 	}
 }
 
-func TestRednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueueFailure(t *testing.T) {
-	_, repo, _ := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
-	platformFake := &fakeRednotePlatform{metrics: platform.RednotePostMetrics{LikeCount: 99}}
+func TestSeednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueueFailure(t *testing.T) {
+	_, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	platformFake := &fakeSeednotePlatform{metrics: platform.SeednotePostMetrics{LikeCount: 99}}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{err: errors.New("queue temporarily unavailable")}
-	svc := NewRednoteTrackingService(repo, platformFake, &fakeRednoteLLM{}, enq, &logger)
+	svc := NewSeednoteTrackingService(repo, platformFake, &fakeSeednoteLLM{}, enq, &logger)
 	now := time.Now()
 	startedAt := now.Add(-24 * time.Hour)
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
 		ChannelID:         channelID,
-		Status:            model.RednoteTrackingStatusTracking,
+		Status:            model.SeednoteTrackingStatusTracking,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
 		PublishedMarkedAt: now.Add(-48 * time.Hour),
 		TrackingStartedAt: &startedAt,
 	}
-	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
 	}
 
 	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err == nil {
 		t.Fatal("expected enqueue failure")
 	}
-	afterFailure, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	afterFailure, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
 	if err != nil {
 		t.Fatalf("FindByID after failure: %v", err)
 	}
-	if afterFailure.LastRunAt == nil || model.RednoteCapturedDate(*afterFailure.LastRunAt) != model.RednoteCapturedDate(now) {
+	if afterFailure.LastRunAt == nil || model.SeednoteCapturedDate(*afterFailure.LastRunAt) != model.SeednoteCapturedDate(now) {
 		t.Fatalf("LastRunAt = %v, want today after partial failure", afterFailure.LastRunAt)
 	}
 	if afterFailure.LastError == "" {
@@ -505,7 +505,7 @@ func TestRednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueueF
 	if err := svc.CaptureMetrics(context.Background(), tracking.ID); err != nil {
 		t.Fatalf("CaptureMetrics retry: %v", err)
 	}
-	updated, err := repo.RednoteTrackings().FindByID(context.Background(), tracking.ID)
+	updated, err := repo.SeednoteTrackings().FindByID(context.Background(), tracking.ID)
 	if err != nil {
 		t.Fatalf("FindByID after retry: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestRednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueueF
 	if platformFake.metricsCalls != 1 {
 		t.Fatalf("metricsCalls = %d, want no second fetch", platformFake.metricsCalls)
 	}
-	if len(enq.delayed) != 1 || enq.delayed[0] != RednoteCaptureMetricsTaskType {
+	if len(enq.delayed) != 1 || enq.delayed[0] != SeednoteCaptureMetricsTaskType {
 		t.Fatalf("delayed jobs = %+v", enq.delayed)
 	}
 	if len(enq.delays) != 1 {
@@ -529,32 +529,32 @@ func TestRednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueueF
 	}
 }
 
-func TestRednoteTrackingService_ResetHidesOldSnapshotsFromAnalytics(t *testing.T) {
-	svc, repo, _ := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+func TestSeednoteTrackingService_ResetHidesOldSnapshotsFromAnalytics(t *testing.T) {
+	svc, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
 	oldStartedAt := time.Now().Add(-72 * time.Hour)
 	oldCapturedAt := oldStartedAt.Add(time.Hour)
-	tracking := &model.RednotePostTracking{
+	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
 		ChannelID:         channelID,
-		Status:            model.RednoteTrackingStatusStopped,
+		Status:            model.SeednoteTrackingStatusStopped,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/old",
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-old",
 		PublishedMarkedAt: oldStartedAt,
 		TrackingStartedAt: &oldStartedAt,
 		RunCount:          1,
 	}
-	if err := repo.RednoteTrackings().Create(context.Background(), tracking); err != nil {
+	if err := repo.SeednoteTrackings().Create(context.Background(), tracking); err != nil {
 		t.Fatalf("create tracking: %v", err)
 	}
-	if err := repo.RednoteMetricSnapshots().Create(context.Background(), &model.RednoteMetricSnapshot{
+	if err := repo.SeednoteMetricSnapshots().Create(context.Background(), &model.SeednoteMetricSnapshot{
 		ID:           uuid.New().String(),
 		TrackingID:   tracking.ID,
 		TaskID:       taskID,
 		CapturedAt:   oldCapturedAt,
-		CapturedDate: model.RednoteCapturedDate(oldCapturedAt),
+		CapturedDate: model.SeednoteCapturedDate(oldCapturedAt),
 		LikeCount:    42,
 	}); err != nil {
 		t.Fatalf("create snapshot: %v", err)
@@ -572,9 +572,9 @@ func TestRednoteTrackingService_ResetHidesOldSnapshotsFromAnalytics(t *testing.T
 	}
 }
 
-func TestRednoteTrackingService_EnsureTrackingForPublishedTaskRejectsForeignChannel(t *testing.T) {
-	svc, repo, _ := setupRednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createRednoteTrackingFixtures(t, repo)
+func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskRejectsForeignChannel(t *testing.T) {
+	svc, repo, _ := setupSeednoteTrackingServiceTest(t)
+	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
 	otherUserID := uuid.New().String()
 	if err := repo.Users().Create(context.Background(), &model.User{ID: otherUserID, Email: otherUserID + "@example.com", Nickname: "Other", Password: "hashed", InviteCode: "other123"}); err != nil {
 		t.Fatalf("create other user: %v", err)
@@ -591,16 +591,16 @@ func TestRednoteTrackingService_EnsureTrackingForPublishedTaskRejectsForeignChan
 	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err == nil {
 		t.Fatal("expected channel ownership error")
 	}
-	if _, err := repo.RednoteTrackings().FindByTaskID(context.Background(), taskID); err == nil {
+	if _, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID); err == nil {
 		t.Fatal("tracking should not be created for a foreign channel")
 	}
 }
 
-func TestRednoteTrackingService_ShouldStopForLowGrowth(t *testing.T) {
-	if !shouldStopForLowGrowth(3, model.RednoteLowGrowthConsecutiveCaptures) {
+func TestSeednoteTrackingService_ShouldStopForLowGrowth(t *testing.T) {
+	if !shouldStopForLowGrowth(3, model.SeednoteLowGrowthConsecutiveCaptures) {
 		t.Fatal("expected low growth stop")
 	}
-	if shouldStopForLowGrowth(2, model.RednoteLowGrowthConsecutiveCaptures) {
+	if shouldStopForLowGrowth(2, model.SeednoteLowGrowthConsecutiveCaptures) {
 		t.Fatal("did not expect low growth stop")
 	}
 }

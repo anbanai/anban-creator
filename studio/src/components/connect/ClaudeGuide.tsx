@@ -110,7 +110,7 @@ export default function ClaudeGuide() {
             <p className="text-xs text-muted-foreground">自然语言示例：</p>
             <CodeBlock
               code={`帮我写一篇关于 AI Agent 的公众号文章
-小红书种草笔记，主题是降噪耳机
+种草笔记，主题是降噪耳机
 小绿书图片帖，主题是春日穿搭
 帮我生成一组郁金香的鲜花图片`}
               language="text"
@@ -120,7 +120,7 @@ export default function ClaudeGuide() {
             <p className="text-xs text-muted-foreground">指定 Agent 示例：</p>
             <CodeBlock
               code={`claude --dangerously-skip-permissions --verbose --agent anbanwriter:article AI Agent 入门指南
-claude --dangerously-skip-permissions --verbose --agent anbanwriter:rednote 降噪耳机种草笔记
+claude --dangerously-skip-permissions --verbose --agent anbanwriter:seednote 降噪耳机种草笔记
 claude --dangerously-skip-permissions --verbose --agent anbanwriter:xls 春日穿搭图片帖
 claude --dangerously-skip-permissions --verbose --agent anbanwriter:flower 春日鲜花摄影`}
             />

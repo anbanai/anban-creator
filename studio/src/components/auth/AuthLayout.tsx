@@ -40,7 +40,7 @@ export default function AuthLayout({
           更简单
         </h1>
         <p className="mt-4 max-w-sm text-base leading-relaxed text-amber-700 dark:text-amber-300">
-          从灵感到发布，AI 全程陪伴你的内容创作之旅。微信公众号、小红书，一站搞定。
+          从灵感到发布，AI 全程陪伴你的内容创作之旅。微信公众号、种草笔记，一站搞定。
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
           {featurePills.map((pill) => (

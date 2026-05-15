@@ -12,8 +12,8 @@ type PlatformProfile struct {
 	RawData     map[string]interface{} `json:"raw_data"`
 }
 
-// RednotePost holds visible Xiaohongshu post metadata parsed from a profile page.
-type RednotePost struct {
+// SeednotePost holds visible Seednote post metadata parsed from a profile page.
+type SeednotePost struct {
 	Title           string `json:"title,omitempty"`
 	URL             string `json:"url,omitempty"`
 	NoteID          string `json:"note_id,omitempty"`

@@ -56,22 +56,22 @@ func NewDefaultConfig() *Config {
 	c.Wechat.Xls.Content.Image.MaxWidth = DefaultImageMaxWidth
 	c.Wechat.Xls.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
 
-	// 小红书（可选平台）
-	c.Rednote = new(RednoteConfig)
-	c.Rednote.Style = "cute-doodle"
-	c.Rednote.Cover.Image.Provider = DefaultImageProvider
-	c.Rednote.Cover.Image.Key = "your_image_api_key"
-	c.Rednote.Cover.Image.Model = "gemini-3-pro-image-preview"
-	c.Rednote.Cover.Image.Size = DefaultRednoteImageSize
-	c.Rednote.Cover.Image.Refer = "path/to/refer.png"
-	c.Rednote.Cover.Image.Compress = true
-	c.Rednote.Content.Image.Provider = DefaultImageProvider
-	c.Rednote.Content.Image.Key = "your_image_api_key"
-	c.Rednote.Content.Image.Model = "gemini-3-pro-image-preview"
-	c.Rednote.Content.Image.Size = DefaultRednoteImageSize
-	c.Rednote.Content.Image.Refer = "path/to/refer.png"
-	c.Rednote.Content.Image.Compress = true
-	c.Rednote.Content.Count = DefaultRednoteImageCount
+	// 种草笔记（可选平台）
+	c.Seednote = new(SeednoteConfig)
+	c.Seednote.Style = "cute-doodle"
+	c.Seednote.Cover.Image.Provider = DefaultImageProvider
+	c.Seednote.Cover.Image.Key = "your_image_api_key"
+	c.Seednote.Cover.Image.Model = "gemini-3-pro-image-preview"
+	c.Seednote.Cover.Image.Size = DefaultSeednoteImageSize
+	c.Seednote.Cover.Image.Refer = "path/to/refer.png"
+	c.Seednote.Cover.Image.Compress = true
+	c.Seednote.Content.Image.Provider = DefaultImageProvider
+	c.Seednote.Content.Image.Key = "your_image_api_key"
+	c.Seednote.Content.Image.Model = "gemini-3-pro-image-preview"
+	c.Seednote.Content.Image.Size = DefaultSeednoteImageSize
+	c.Seednote.Content.Image.Refer = "path/to/refer.png"
+	c.Seednote.Content.Image.Compress = true
+	c.Seednote.Content.Count = DefaultSeednoteImageCount
 
 	// 花卉图片生成（可选）
 	c.Flower = &FlowerConfig{}

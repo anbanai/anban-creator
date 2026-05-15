@@ -98,14 +98,14 @@ func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *a
 			return &appCfg.Wechat.Xls.Cover.Image
 		}
 		return &appCfg.Wechat.Xls.Content.Image
-	case model.ScopeRednote:
-		if appCfg.Rednote == nil {
+	case model.ScopeSeednote:
+		if appCfg.Seednote == nil {
 			return nil
 		}
 		if imageType == "cover" {
-			return &appCfg.Rednote.Cover.Image
+			return &appCfg.Seednote.Cover.Image
 		}
-		return &appCfg.Rednote.Content.Image
+		return &appCfg.Seednote.Content.Image
 	}
 	return nil
 }
@@ -199,7 +199,7 @@ func (s *ImageService) GenerateImage(
 }
 
 // UploadImage uploads a local image. For WeChat platforms (article/xls), uploads
-// to WeChat CDN. For other platforms (rednote), uploads to the configured storage provider.
+// to WeChat CDN. For other platforms (seednote), uploads to the configured storage provider.
 func (s *ImageService) UploadImage(
 	ctx context.Context,
 	userID, channelID, filePath string,

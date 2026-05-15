@@ -19,7 +19,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
-import RednoteAnalyticsPanel from '@/components/tasks/RednoteAnalyticsPanel'
+import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
@@ -125,7 +125,7 @@ export default function TaskDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['task', id] })
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
       if (id) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.rednoteAnalytics(id) })
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(id) })
       }
     },
   })
@@ -437,8 +437,8 @@ export default function TaskDetailPage() {
         </Card>
       </div>
 
-      {task.type === 'rednote' && task.published && (
-        <RednoteAnalyticsPanel taskId={task.id} />
+      {task.type === 'seednote' && task.published && (
+        <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
       {task.status !== 'completed' && (

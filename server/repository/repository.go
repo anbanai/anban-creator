@@ -21,8 +21,8 @@ type Repository interface {
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
 	ModelConfigs() ModelConfigRepository
-	RednoteTrackings() RednoteTrackingRepository
-	RednoteMetricSnapshots() RednoteMetricSnapshotRepository
+	SeednoteTrackings() SeednoteTrackingRepository
+	SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository
 	Templates() TemplateRepository
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
@@ -125,23 +125,23 @@ type FeedbackRepository interface {
 	Create(ctx context.Context, feedback *model.Feedback) error
 }
 
-// RednoteTrackingRepository provides access to Rednote post tracking records.
-type RednoteTrackingRepository interface {
-	Create(ctx context.Context, tracking *model.RednotePostTracking) error
-	FindByTaskID(ctx context.Context, taskID string) (*model.RednotePostTracking, error)
-	FindByID(ctx context.Context, id string) (*model.RednotePostTracking, error)
-	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.RednotePostTracking, error)
-	Update(ctx context.Context, tracking *model.RednotePostTracking) error
+// SeednoteTrackingRepository provides access to Seednote post tracking records.
+type SeednoteTrackingRepository interface {
+	Create(ctx context.Context, tracking *model.SeednotePostTracking) error
+	FindByTaskID(ctx context.Context, taskID string) (*model.SeednotePostTracking, error)
+	FindByID(ctx context.Context, id string) (*model.SeednotePostTracking, error)
+	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.SeednotePostTracking, error)
+	Update(ctx context.Context, tracking *model.SeednotePostTracking) error
 	UpdateStatus(ctx context.Context, id, status string) error
 }
 
-// RednoteMetricSnapshotRepository provides access to Rednote metric snapshots.
-type RednoteMetricSnapshotRepository interface {
-	Create(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error
-	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.RednoteMetricSnapshot) error
-	FindByTaskID(ctx context.Context, taskID string) ([]*model.RednoteMetricSnapshot, error)
-	FindLatestByTrackingID(ctx context.Context, trackingID string) (*model.RednoteMetricSnapshot, error)
-	FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.RednoteMetricSnapshot, error)
+// SeednoteMetricSnapshotRepository provides access to Seednote metric snapshots.
+type SeednoteMetricSnapshotRepository interface {
+	Create(ctx context.Context, snapshot *model.SeednoteMetricSnapshot) error
+	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.SeednoteMetricSnapshot) error
+	FindByTaskID(ctx context.Context, taskID string) ([]*model.SeednoteMetricSnapshot, error)
+	FindLatestByTrackingID(ctx context.Context, trackingID string) (*model.SeednoteMetricSnapshot, error)
+	FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.SeednoteMetricSnapshot, error)
 }
 
 // -----------------------------------------------------------------------------
@@ -160,8 +160,8 @@ type repository struct {
 	apiKeys                APIKeyRepository
 	feedbacks              FeedbackRepository
 	modelConfigs           ModelConfigRepository
-	rednoteTrackings       RednoteTrackingRepository
-	rednoteMetricSnapshots RednoteMetricSnapshotRepository
+	seednoteTrackings       SeednoteTrackingRepository
+	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	templates              TemplateRepository
 	viralAnalyses          ViralAnalysisRepository
 	posterTasks            PosterTaskRepository
@@ -179,8 +179,8 @@ func New(db *gorm.DB) Repository {
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
 	modelConfigs := newModelConfigRepository(db)
-	rednoteTrackings := newRednoteTrackingRepository(db)
-	rednoteMetricSnapshots := newRednoteMetricSnapshotRepository(db)
+	seednoteTrackings := newSeednoteTrackingRepository(db)
+	seednoteMetricSnapshots := newSeednoteMetricSnapshotRepository(db)
 	templates := newTemplateRepository(db)
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
@@ -197,8 +197,8 @@ func New(db *gorm.DB) Repository {
 		apiKeys:                apiKeys,
 		feedbacks:              feedbacks,
 		modelConfigs:           modelConfigs,
-		rednoteTrackings:       rednoteTrackings,
-		rednoteMetricSnapshots: rednoteMetricSnapshots,
+		seednoteTrackings:       seednoteTrackings,
+		seednoteMetricSnapshots: seednoteMetricSnapshots,
 		templates:              templates,
 		viralAnalyses:          viralAnalyses,
 		posterTasks:            posterTasks,
@@ -215,9 +215,9 @@ func (r *repository) Credits() CreditRepository                   { return r.cre
 func (r *repository) APIKeys() APIKeyRepository                   { return r.apiKeys }
 func (r *repository) Feedbacks() FeedbackRepository               { return r.feedbacks }
 func (r *repository) ModelConfigs() ModelConfigRepository         { return r.modelConfigs }
-func (r *repository) RednoteTrackings() RednoteTrackingRepository { return r.rednoteTrackings }
-func (r *repository) RednoteMetricSnapshots() RednoteMetricSnapshotRepository {
-	return r.rednoteMetricSnapshots
+func (r *repository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
+func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
+	return r.seednoteMetricSnapshots
 }
 func (r *repository) Templates() TemplateRepository              { return r.templates }
 func (r *repository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
@@ -258,8 +258,8 @@ type txRepository struct {
 	apiKeys                APIKeyRepository
 	feedbacks              FeedbackRepository
 	modelConfigs           ModelConfigRepository
-	rednoteTrackings       RednoteTrackingRepository
-	rednoteMetricSnapshots RednoteMetricSnapshotRepository
+	seednoteTrackings       SeednoteTrackingRepository
+	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
 	templates              TemplateRepository
 	viralAnalyses          ViralAnalysisRepository
 	posterTasks            PosterTaskRepository
@@ -278,8 +278,8 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		apiKeys:                newAPIKeyRepository(tx),
 		feedbacks:              newFeedbackRepository(tx),
 		modelConfigs:           newModelConfigRepository(tx),
-		rednoteTrackings:       newRednoteTrackingRepository(tx),
-		rednoteMetricSnapshots: newRednoteMetricSnapshotRepository(tx),
+		seednoteTrackings:       newSeednoteTrackingRepository(tx),
+		seednoteMetricSnapshots: newSeednoteMetricSnapshotRepository(tx),
 		templates:              newTemplateRepository(tx),
 		viralAnalyses:          newViralAnalysisRepository(tx),
 		posterTasks:            newPosterTaskRepository(tx),
@@ -296,9 +296,9 @@ func (r *txRepository) Credits() CreditRepository                   { return r.c
 func (r *txRepository) APIKeys() APIKeyRepository                   { return r.apiKeys }
 func (r *txRepository) Feedbacks() FeedbackRepository               { return r.feedbacks }
 func (r *txRepository) ModelConfigs() ModelConfigRepository         { return r.modelConfigs }
-func (r *txRepository) RednoteTrackings() RednoteTrackingRepository { return r.rednoteTrackings }
-func (r *txRepository) RednoteMetricSnapshots() RednoteMetricSnapshotRepository {
-	return r.rednoteMetricSnapshots
+func (r *txRepository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
+func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
+	return r.seednoteMetricSnapshots
 }
 func (r *txRepository) Templates() TemplateRepository              { return r.templates }
 func (r *txRepository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }

@@ -10,7 +10,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/service"
-	"github.com/royalrick/anbanwriter/server/xhs"
+	"github.com/royalrick/anbanwriter/server/seednote"
 )
 
 // Services holds the service instances needed by MCP tools.
@@ -24,7 +24,7 @@ type Services struct {
 	PublishingSvc *service.PublishingService
 	WorkspaceSvc  *service.WorkspaceService
 	TemplateSvc   *service.TemplateService
-	XHSClient     *xhs.Client
+	SeednoteClient     *seednote.Client
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -37,10 +37,10 @@ func RegisterTools(server *mcp.Server) {
 	registerWritingTools(server)
 	registerPublishingTools(server)
 	registerWorkspaceTools(server)
-	registerRednoteTools(server)
+	registerSeednoteFormatTools(server)
 	registerTemplateTools(server)
 	registerResourceTools(server)
-	registerXHSTools(server)
+	registerSeednoteTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.
@@ -55,12 +55,12 @@ func parseArgs(raw json.RawMessage) map[string]any {
 func registerChannelTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "list_channels",
-		Description: "List the authenticated user's channels (WeChat accounts). Each channel represents a WeChat Official Account or Xiaohongshu account.",
+		Description: "List the authenticated user's channels (WeChat accounts). Each channel represents a WeChat Official Account or Seednote account.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"status":   map[string]any{"type": "string", "enum": []any{"active", "archived"}, "description": "Filter by status"},
-				"platform": map[string]any{"type": "string", "enum": []any{"article", "xls", "rednote"}, "description": "Filter by platform type"},
+				"platform": map[string]any{"type": "string", "enum": []any{"article", "xls", "seednote"}, "description": "Filter by platform type"},
 			},
 		},
 	}, channelListHandler)
@@ -84,7 +84,7 @@ func registerChannelTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "xls", "rednote", "flower"}, "description": "Filter output by content type"},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "xls", "seednote", "flower"}, "description": "Filter output by content type"},
 			},
 			"required": []any{"channel_id"},
 		},
@@ -94,7 +94,7 @@ func registerChannelTools(server *mcp.Server) {
 func registerTaskTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "create_task",
-		Description: "Create one or more content creation tasks for a channel. The task type is derived from the channel's platform (article/xls/rednote). Credits are deducted automatically.",
+		Description: "Create one or more content creation tasks for a channel. The task type is derived from the channel's platform (article/xls/seednote). Credits are deducted automatically.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -288,8 +288,8 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
 		}
-	case "rednote":
-			// For rednote, style is a visual/image style description used for image prompt generation.
+	case "seednote":
+			// For seednote, style is a visual/image style description used for image prompt generation.
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
 		}

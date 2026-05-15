@@ -150,8 +150,8 @@ export const mockPlatformConfigs: PlatformConfig[] = [
     fields: [],
   },
   {
-    id: 'rednote',
-    label: '小红书',
+    id: 'seednote',
+    label: '种草笔记',
     badge_variant: 'danger',
     supports_publishing: false,
     supports_auto_fetch: false,

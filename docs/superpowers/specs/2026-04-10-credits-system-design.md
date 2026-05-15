@@ -9,7 +9,7 @@ Add a credits-based billing system to anbanwriter. Users earn free credits via d
 | Operation | Credits |
 |-----------|---------|
 | Article task (article) | 500 |
-| XLS / Rednote task (xls/rednote) | 400 |
+| XLS / Seednote task (xls/seednote) | 400 |
 | Per image (1024px) | 50 |
 | Per image (2K) | 80 |
 | Per image (4K) | 150 |
@@ -18,8 +18,8 @@ Add a credits-based billing system to anbanwriter. Users earn free credits via d
 
 **Examples:**
 - 1 article + 1 cover (2K) + 3 content images (1024px) = 500 + 80 + 150 = 730 credits
-- 1 rednote + 6 images (2K) = 400 + 480 = 880 credits
-- Daily sign-in (1024) covers roughly 1 article task or 1 rednote task with images
+- 1 seednote + 6 images (2K) = 400 + 480 = 880 credits
+- Daily sign-in (1024) covers roughly 1 article task or 1 seednote task with images
 
 Pricing is configurable via `server/config.yaml` under the `credits` section.
 
@@ -60,7 +60,7 @@ credits:
   task_costs:
     article: 500
     xls: 400
-    rednote: 400
+    seednote: 400
   image_costs:
     "1024": 50
     "2k": 80

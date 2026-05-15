@@ -5,10 +5,10 @@
 
 ## 背景
 
-Anbanwriter 现有内容创作能力覆盖微信公众号文章、小红书笔记、小绿书图片帖。用户提出 4 项新功能需求，统一纳入"创意工坊"产品模块：
+Anbanwriter 现有内容创作能力覆盖微信公众号文章、种草笔记笔记、小绿书图片帖。用户提出 4 项新功能需求，统一纳入"创意工坊"产品模块：
 
 1. **商业海报** — 用户输入文字内容，AI 自动排版成海报
-2. **复刻小红书爆款** — 基于现有 rednote 管道增强，增加模板持久化
+2. **复刻种草笔记爆款** — 基于现有 seednote 管道增强，增加模板持久化
 3. **拆解爆文** — 输入笔记/主页链接，AI 多维度输出分析报告
 4. **模板系统** — 管理员在数据库配置模板，Studio 展示供用户选择
 
@@ -18,8 +18,8 @@ Anbanwriter 现有内容创作能力覆盖微信公众号文章、小红书笔�
 
 - Studio 新增 2 个页面模块，后端新增模板/海报/拆解 API
 - 海报生成复用现有 `app/image/` Provider 接口
-- 复刻复用现有 `tasks` 管道和 `rednote` Agent
-- 拆解复用现有 `server/platform/rednote.go` 抓取能力
+- 复刻复用现有 `tasks` 管道和 `seednote` Agent
+- 拆解复用现有 `server/platform/seednote.go` 抓取能力
 
 ## Studio 页面
 
@@ -36,12 +36,12 @@ Anbanwriter 现有内容创作能力覆盖微信公众号文章、小红书笔�
 
 ### `templates` 表
 
-统一模板存储，支撑海报、小红书复刻、后续文章/小绿书模板。
+统一模板存储，支撑海报、种草笔记复刻、后续文章/小绿书模板。
 
 ```go
 type Template struct {
     ID            string         `gorm:"type:char(36);primaryKey" json:"id"`
-    Type          string         `gorm:"type:varchar(20);not null" json:"type"`       // "poster" / "rednote" / "article" / "xls" (xls = 小绿书)
+    Type          string         `gorm:"type:varchar(20);not null" json:"type"`       // "poster" / "seednote" / "article" / "xls" (xls = 小绿书)
     Name          string         `gorm:"type:varchar(100);not null" json:"name"`
     Category      string         `gorm:"type:varchar(50)" json:"category"`            // 行业/场景分类
     ThumbnailURL  string         `gorm:"type:varchar(500)" json:"thumbnail_url"`
@@ -232,22 +232,22 @@ CreditTypeViralAnalysis     = "viral_analysis"       // 爆文拆解
 
 - 不做拖拽编辑器
 - 不做品牌素材库管理
-- 先做小红书 3:4 竖版海报
+- 先做种草笔记 3:4 竖版海报
 - 不做后端文字叠加/图片合成（依赖 AI 原生渲染）
 
-## 功能 2：复刻小红书爆款
+## 功能 2：复刻种草笔记爆款
 
 ### 交互流程
 
 两种入口：
 1. **从拆解报告跳转** — 一键"复刻此笔记"，自动带入分析数据
-2. **从模板库选择** — 选择小红书模板开始
+2. **从模板库选择** — 选择种草笔记模板开始
 
 ### 技术实现
 
-- **模板持久化**：复刻完成后提取的 5 维模板保存到 `templates` 表（type = "rednote"）
+- **模板持久化**：复刻完成后提取的 5 维模板保存到 `templates` 表（type = "seednote"）
 - **前端触发**：`POST /api/v1/tasks` 增加 `template_id` 和 `clone_depth` 参数
-- **Agent 侧**：现有 `claudecode/agents/rednote.md` replicate 模式不变，新增 MCP 工具 `save_template` 持久化模板
+- **Agent 侧**：现有 `claudecode/agents/seednote.md` replicate 模式不变，新增 MCP 工具 `save_template` 持久化模板
 - **模板保存时机**：Agent 在复刻任务完成后通过 MCP `save_template` 工具将提取的模板写入 `templates` 表。前端也可在任务完成后提供"保存为模板"按钮，触发 `POST /api/v1/tasks/:id/save-template`
 - **新增 MCP 工具**：`save_template`、`list_templates`、`get_template`
 
@@ -269,8 +269,8 @@ Agent 执行现有 replicate 管道
 
 ### 交互流程
 
-1. **输入链接** — 粘贴小红书笔记分享链接或主页链接
-2. **抓取数据** — 调用 `server/platform/rednote.go` 抓取
+1. **输入链接** — 粘贴种草笔记笔记分享链接或主页链接
+2. **抓取数据** — 调用 `server/platform/seednote.go` 抓取
 3. **AI 拆解** — 5 维度分析，生成结构化报告
 4. **展示报告** — 卡片+评分环形图+总分雷达图
 5. **一键复刻** — 底部 CTA 跳转复刻流程
@@ -280,7 +280,7 @@ Agent 执行现有 replicate 管道
 **后端**：
 - `server/service/viral_analysis.go` — 解析 URL → 抓取数据 → AI 分析 → 存储
 - 主页链接批量抓取近期笔记，取互动量最高 3-5 篇
-- 分析 prompt 基于现有 `rednote-writing/references/viral-elements.md` 的 5 要素权重
+- 分析 prompt 基于现有 `seednote-writing/references/viral-elements.md` 的 5 要素权重
 - 抓取失败处理：对无效/被屏蔽的 URL 返回明确错误码，不做重试爬取
 
 **前端**：
@@ -315,7 +315,7 @@ Agent 执行现有 replicate 管道
 }
 ```
 
-小红书模板：
+种草笔记模板：
 ```json
 {
   "title_template": "数字+情绪词+话题",
@@ -333,7 +333,7 @@ Agent 执行现有 replicate 管道
 - **点击预览**：弹窗展示详情（预览图 + 结构说明 + 示例内容）
 - **使用模板**：CTA 跳转到对应创作页面
 
-### 添加小红书频道时推荐模板
+### 添加种草笔记频道时推荐模板
 
 - 频道创建完成后，`POST /api/v1/channels` 返回 `recommended_templates`
 - 匹配逻辑：频道画像分析结果（行业、风格）与模板 `category` + `tags` 匹配
@@ -433,7 +433,7 @@ studio/package.json              — 新增 "ai" (Vercel AI SDK)
 2. **模板 API**：curl 测试 GET 列表（分页+筛选）+ GET 详情
 3. **积分扣减**：curl 测试海报生成和爆文拆解的积分扣减 + 失败回退
 4. **海报生成**：提交内容 → 检查图片包含用户文字 → 迭代对话生效
-5. **爆文拆解**：提交真实小红书链接 → 5 维度分析完整、评分合理
+5. **爆文拆解**：提交真实种草笔记链接 → 5 维度分析完整、评分合理
 6. **爆款复刻**：拆解报告跳转复刻 → 生成图文风格一致 → 模板持久化
 7. **频道推荐**：创建频道 → 推荐模板与账号画像匹配
 8. **E2E**：Studio 前端全流程走通

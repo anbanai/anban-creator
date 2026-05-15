@@ -55,7 +55,7 @@ Anban 智能创作助手采用**钱包模式**管理积分：
 |---------|---------|------|
 | `article` | 4,000 | 公众号文章 |
 | `xls` | 3,200 | 小绿书图片帖 |
-| `rednote` | 3,200 | 小红书图文 |
+| `seednote` | 3,200 | 种草笔记图文 |
 
 - 任务费包含该任务的所有操作（写作、生图、转换、发布等），不再额外扣费
 - 批量创建：总价 = 单价 x 数量
@@ -156,7 +156,7 @@ credits:
   task_costs:                  # Web 端任务创建费用
     article: 4000
     xls: 3200
-    rednote: 3200
+    seednote: 3200
   model_costs:                 # MCP 直接调用的按模型定价
     image_gen:
       "volcengine/doubao-seedream-5-0-260128": 50

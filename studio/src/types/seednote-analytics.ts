@@ -1,7 +1,7 @@
-export type RednoteTrackingStatus = 'waiting_discovery' | 'tracking' | 'stopped' | 'failed'
+export type SeednoteTrackingStatus = 'waiting_discovery' | 'tracking' | 'stopped' | 'failed'
 
-export interface RednoteTrackingInfo {
-  status: RednoteTrackingStatus | string
+export interface SeednoteTrackingInfo {
+  status: SeednoteTrackingStatus | string
   note_url?: string
   note_title?: string
   note_cover_url?: string
@@ -13,7 +13,7 @@ export interface RednoteTrackingInfo {
   last_error?: string
 }
 
-export interface RednoteMetricInfo {
+export interface SeednoteMetricInfo {
   like_count: number
   collect_count: number
   comment_count: number
@@ -22,14 +22,14 @@ export interface RednoteMetricInfo {
   captured_at?: string | null
 }
 
-export interface RednoteMetricDelta {
+export interface SeednoteMetricDelta {
   like_count: number
   collect_count: number
   comment_count: number
   share_count: number
 }
 
-export interface RednoteMetricSeriesItem {
+export interface SeednoteMetricSeriesItem {
   captured_at: string
   like_count: number
   collect_count: number
@@ -38,9 +38,9 @@ export interface RednoteMetricSeriesItem {
   view_count: number | null
 }
 
-export interface RednoteAnalytics {
-  tracking?: RednoteTrackingInfo
-  latest?: RednoteMetricInfo
-  deltas?: RednoteMetricDelta
-  series: RednoteMetricSeriesItem[]
+export interface SeednoteAnalytics {
+  tracking?: SeednoteTrackingInfo
+  latest?: SeednoteMetricInfo
+  deltas?: SeednoteMetricDelta
+  series: SeednoteMetricSeriesItem[]
 }

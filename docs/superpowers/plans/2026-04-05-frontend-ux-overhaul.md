@@ -685,7 +685,7 @@ interface ChannelCardProps {
 const platformLabels: Record<string, string> = {
   article: '公众号',
   xls: '小绿书',
-  rednote: '小红书',
+  seednote: '种草笔记',
 }
 
 export function ChannelCard({ channel, stats, onEdit, onArchive, onRestore, onDelete }: ChannelCardProps) {
@@ -784,7 +784,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 // Create Task
 export const createTaskSchema = z.object({
   channel_id: z.string().optional(),
-  type: z.enum(["rednote", "article", "xls"]),
+  type: z.enum(["seednote", "article", "xls"]),
   topic: z.string().min(1, "主题不能为空").max(200, "主题不能超过 200 个字符"),
 })
 export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
@@ -792,7 +792,7 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 // Create/Edit Plan
 export const planSchema = z.object({
   channel_id: z.string().optional(),
-  type: z.enum(["rednote", "article", "xls"]),
+  type: z.enum(["seednote", "article", "xls"]),
   title: z.string().min(1, "标题不能为空").max(200, "标题不能超过 200 个字符"),
   description: z.string().max(500, "描述不能超过 500 个字符").optional(),
   cron_expr: z.string().min(1, "请设置排期"),
@@ -802,7 +802,7 @@ export type PlanFormValues = z.infer<typeof planSchema>
 
 // Create/Edit Channel
 export const channelSchema = z.object({
-  platform: z.enum(["article", "xls", "rednote"]),
+  platform: z.enum(["article", "xls", "seednote"]),
   name: z.string().min(1, "频道名称不能为空").max(100, "名称不能超过 100 个字符"),
   description: z.string().max(500, "简介不能超过 500 个字符").optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
