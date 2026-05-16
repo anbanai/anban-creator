@@ -53,8 +53,12 @@ func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*Volce
 		mdl = DefaultVolcengineModel
 	}
 
+	timeout := 300 * time.Second
+	if apiCfg.TimeoutSec > 0 {
+		timeout = time.Duration(apiCfg.TimeoutSec) * time.Second
+	}
 	opts := []arkruntime.ConfigOption{
-		arkruntime.WithTimeout(120 * time.Second),
+		arkruntime.WithTimeout(timeout),
 	}
 	if apiCfg.BaseURL != "" {
 		opts = append(opts, arkruntime.WithBaseUrl(apiCfg.BaseURL))

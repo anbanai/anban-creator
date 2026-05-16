@@ -62,6 +62,7 @@ type ImageAPI struct {
 	Compress   bool              `json:"compress,omitempty" yaml:"compress,omitempty"`
 	MaxWidth   int               `json:"max_width,omitempty" yaml:"max_width,omitempty"`
 	MaxSizeMB  int               `json:"max_size_mb,omitempty" yaml:"max_size_mb,omitempty"`
+	TimeoutSec int               `json:"timeout_sec,omitempty" yaml:"timeout_sec,omitempty"`
 	Volcengine *VolcengineConfig `json:"volcengine,omitempty" yaml:"volcengine,omitempty"`
 }
 
@@ -331,6 +332,9 @@ func mergeImageAPI(base, fallback ImageAPI) ImageAPI {
 	}
 	if result.Volcengine == nil {
 		result.Volcengine = fallback.Volcengine
+	}
+	if result.TimeoutSec == 0 {
+		result.TimeoutSec = fallback.TimeoutSec
 	}
 	return result
 }

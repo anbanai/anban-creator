@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,11 +32,17 @@ func NewGeminiProvider(apiCfg *config.ImageAPI) (*GeminiProvider, error) {
 	// 处理宽高比配置
 	aspectRatio := mapSizeToGeminiAspectRatio(apiCfg.Size)
 
+	timeout := 300 * time.Second
+	if apiCfg.TimeoutSec > 0 {
+		timeout = time.Duration(apiCfg.TimeoutSec) * time.Second
+	}
+
 	// 创建 Gemini 客户端
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiCfg.Key,
 		Backend: genai.BackendGeminiAPI,
+		HTTPClient: &http.Client{Timeout: timeout},
 	})
 	if err != nil {
 		return nil, &GenerateError{

@@ -35,8 +35,14 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 	ratio, _ := ParseSize(apiCfg.Size)
 
 	// 创建 OpenAI client，使用官方 SDK
+	timeout := 300 * time.Second
+	if apiCfg.TimeoutSec > 0 {
+		timeout = time.Duration(apiCfg.TimeoutSec) * time.Second
+	}
+
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiCfg.Key),
+		option.WithRequestTimeout(timeout),
 	}
 
 	// 如果配置了自定义 BaseURL，使用它

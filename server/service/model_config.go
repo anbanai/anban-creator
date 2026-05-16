@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
@@ -245,20 +244,30 @@ func (s *ModelConfigService) GetEffectiveImageConfig(ctx context.Context, userID
 		return nil
 	}
 
+	// Start from server config as base so fields like TimeoutSec, Size,
+	// Volcengine, MaxSizeMB etc. are preserved when user only overrides provider/key/model.
+	cover := *s.cfg.ImageAPI.Cover
+	content := *s.cfg.ImageAPI.Content
+	if uc.Provider != "" {
+		cover.Provider = uc.Provider
+		content.Provider = uc.Provider
+	}
+	if uc.APIKey != "" {
+		cover.Key = uc.APIKey
+		content.Key = uc.APIKey
+	}
+	if uc.Endpoint != "" {
+		cover.BaseURL = uc.Endpoint
+		content.BaseURL = uc.Endpoint
+	}
+	if uc.Model != "" {
+		cover.Model = uc.Model
+		content.Model = uc.Model
+	}
 	cfg := &config.ImageAPIConfig{
-		Cover: &appconfig.ImageAPI{
-			Provider: uc.Provider,
-			Key:      uc.APIKey,
-			BaseURL:  uc.Endpoint,
-			Model:    uc.Model,
-		},
-		Content: &appconfig.ImageAPI{
-			Provider: uc.Provider,
-			Key:      uc.APIKey,
-			BaseURL:  uc.Endpoint,
-			Model:    uc.Model,
-		},
-		Sizes: s.cfg.ImageAPI.Sizes,
+		Cover:   &cover,
+		Content: &content,
+		Sizes:   s.cfg.ImageAPI.Sizes,
 	}
 
 	return cfg
