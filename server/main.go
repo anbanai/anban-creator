@@ -308,7 +308,9 @@ func main() {
 		planHandler = handler.NewPlanHandler(planSvc, log)
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
-		seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
+		if seednoteTrackingSvc != nil {
+			seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
+		}
 		channelHandler = handler.NewChannelHandler(channelSvc, log)
 		if modelConfigSvc != nil {
 			channelHandler.SetModelConfigService(modelConfigSvc)
@@ -338,7 +340,9 @@ func main() {
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
-		viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
+		if viralAnalysisSvc != nil {
+			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
+		}
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
 	}
 	resourceHandler = handler.NewResourceHandler(log)
