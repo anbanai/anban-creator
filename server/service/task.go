@@ -253,12 +253,16 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 
 	// Deduct credits for the plan task.
 	if s.creditSvc != nil {
+		if _, costOK := s.creditSvc.TaskCost(taskType); !costOK {
+			s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task with unknown task type")
+			return nil, nil
+		}
 		if _, err := s.creditSvc.DeductForTask(ctx, plan.UserID, taskType, taskID); err != nil {
 			if errors.Is(err, ErrInsufficientCredits) {
 				s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task due to insufficient credits")
 				return nil, nil
 			}
-			s.logger.Error().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("failed to deduct credits for plan task")
+			s.logger.Error().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("failed to deduct credits for plan task")
 			return nil, nil
 		}
 	}
