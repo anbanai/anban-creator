@@ -47,7 +47,7 @@ func (p *WechatProvider) FetchProfile(ctx context.Context, profileURL string) (*
 	}, nil
 }
 
-// MiniProgramProvider fetches profile data from WeChat Mini Program (小绿书).
+// MiniProgramProvider fetches profile data from WeChat Mini Program.
 type MiniProgramProvider struct {
 	appID  string
 	secret string

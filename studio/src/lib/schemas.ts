@@ -17,7 +17,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
   channel_id: z.string().min(1, "请选择账号"),
-  type: z.enum(["seednote", "article", "xls"]),
+  type: z.enum(["seednote", "article"]),
   prompt: z.string().max(500, "Prompt 不能超过 500 个字符").optional(),
   quantity: z.number().int().min(1).max(5).default(1),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).default(""),
@@ -27,14 +27,14 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
 export const planSchema = z.object({
   channel_id: z.string().optional(),
-  type: z.enum(["seednote", "article", "xls"]),
+  type: z.enum(["seednote", "article"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: z.string().max(500, "Prompt 不能超过 500 个字符").optional(),
 })
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const channelSchema = z.object({
-  platform: z.enum(["seednote", "article", "xls"]),
+  platform: z.enum(["seednote", "article"]),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),

@@ -690,24 +690,6 @@ func (s *TaskService) autoPublishIfNeeded(ctx context.Context, task *model.Task,
 		s.logger.Info().Str("task_id", taskID).Str("media_id", result.MediaID).Msg("auto-published article draft")
 		published = true
 
-	case model.ScopeXls:
-		title := task.Title
-		if title == "" {
-			title = ExtractTitleFromWorkspace(workDir)
-		}
-		xlsReq, err := extractXlsDraftFromWorkspace(workDir, title)
-		if err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to extract XLS data from workspace")
-			return
-		}
-		result, err := s.publishingSvc.PublishXls(ctx, task.UserID, channel.ID, *xlsReq)
-		if err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("auto-publish XLS draft failed")
-			return
-		}
-		s.logger.Info().Str("task_id", taskID).Str("media_id", result.MediaID).Msg("auto-published XLS draft")
-		published = true
-
 	default:
 		return
 	}
@@ -722,7 +704,7 @@ func (s *TaskService) autoPublishIfNeeded(ctx context.Context, task *model.Task,
 // wasPublishedByAgent checks the agent's log text for evidence that the agent
 // already called a publish MCP tool during execution.
 func wasPublishedByAgent(logText string) bool {
-	return strings.Contains(logText, "publish_draft") || strings.Contains(logText, "publish_xls_draft")
+	return strings.Contains(logText, "publish_draft")
 }
 
 // extractArticleDraftFromWorkspace reads the agent's draft.json from the workspace
@@ -775,44 +757,6 @@ func extractArticleDraftFromWorkspace(workDir string) ([]DraftArticleInput, erro
 		Title:   title,
 		Content: string(content),
 	}}, nil
-}
-
-// extractXlsDraftFromWorkspace collects images from the workspace and constructs
-// an XlsPublishRequest for PublishingService.PublishXls.
-func extractXlsDraftFromWorkspace(workDir, title string) (*XlsPublishRequest, error) {
-	scanDir := workDir
-	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
-		scanDir = filepath.Join(workDir, "output")
-	}
-
-	var images []string
-	_ = filepath.WalkDir(scanDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(d.Name()))
-		switch ext {
-		case ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp":
-			images = append(images, path)
-		}
-		return nil
-	})
-
-	if len(images) == 0 {
-		return nil, fmt.Errorf("no images found in workspace for XLS publish")
-	}
-
-	if title == "" {
-		title = "小绿书图片帖"
-	}
-
-	return &XlsPublishRequest{
-		Title:  title,
-		Images: images,
-	}, nil
 }
 
 // formatToolUseSummary returns a compact string like "generate_image(12), Bash(8)"

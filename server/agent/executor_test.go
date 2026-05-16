@@ -89,24 +89,6 @@ func TestBuildAppConfig(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "empty keywords",
-			ch: &model.Channel{
-				Platform: model.ScopeXls,
-				Name:     "XLS Account",
-			},
-			wantErr: false,
-			check: func(t *testing.T, cfg map[string]any) {
-				if cfg["name"] != "XLS Account" {
-					t.Errorf("name = %v, want XLS Account", cfg["name"])
-				}
-				// Empty keywords should be nil or empty in JSON.
-				kwRaw, ok := cfg["keywords"].([]any)
-				if ok && len(kwRaw) != 0 {
-					t.Errorf("keywords = %v, want empty", kwRaw)
-				}
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -153,18 +135,6 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 			},
 			wantCoverSize:   "16:9",
 			wantContentSize: "16:9",
-		},
-		{
-			name:     "xls defaults",
-			platform: model.ScopeXls,
-			imageAPICfg: &srvconfig.ImageAPIConfig{
-				Sizes: srvconfig.SizesConfig{
-					XlsCover:   "3:4",
-					XlsContent: "3:4",
-				},
-			},
-			wantCoverSize:   "3:4",
-			wantContentSize: "3:4",
 		},
 		{
 			name:     "seednote defaults",
@@ -231,8 +201,6 @@ func getPlatformSizes(cfg *appconfig.Config, platform string) (cover, content st
 	switch platform {
 	case model.ScopeArticle:
 		return cfg.Wechat.Article.Cover.Image.Size, cfg.Wechat.Article.Content.Image.Size
-	case model.ScopeXls:
-		return cfg.Wechat.Xls.Cover.Image.Size, cfg.Wechat.Xls.Content.Image.Size
 	case model.ScopeSeednote:
 		if cfg.Seednote != nil {
 			return cfg.Seednote.Cover.Image.Size, cfg.Seednote.Content.Image.Size
@@ -333,7 +301,6 @@ func TestTaskTypeToAgent(t *testing.T) {
 		want     string
 	}{
 		{model.ScopeArticle, "wechatarticle"},
-		{model.ScopeXls, "wechatxls"},
 		{model.ScopeSeednote, "seednote"},
 		{"unknown", "seednote"},
 	}
@@ -351,7 +318,6 @@ func TestTaskTypeToAgent(t *testing.T) {
 func TestDefaultMaxTurns(t *testing.T) {
 	maxTurns := map[string]int{
 		"article": 100,
-		"xls":     50,
 		"seednote": 60,
 	}
 	tests := []struct {
@@ -359,7 +325,6 @@ func TestDefaultMaxTurns(t *testing.T) {
 		want     int
 	}{
 		{model.ScopeArticle, 100},
-		{model.ScopeXls, 50},
 		{model.ScopeSeednote, 60},
 		{"unknown", 40},
 	}
@@ -586,13 +551,6 @@ func TestBuildUserPrompt(t *testing.T) {
 			wantContains:  []string{"Use the seednote agent", "旅行分享", "Merge the generated images"},
 		},
 		{
-			name:          "no topic with video flag",
-			taskType:      "xls",
-			topic:         "",
-			agentName:     "wechatxls",
-			generateVideo: true,
-			wantContains:  []string{"Use the wechatxls agent", "Merge the generated images"},
-		},		{
 			name:         "empty agent name still produces prompt",
 			taskType:     "seednote",
 			topic:        "test topic",

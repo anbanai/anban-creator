@@ -47,28 +47,6 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "image_ratio", Label: "图片比例", Placeholder: "16:9（公众号默认）", Type: "select", Group: "advanced"},
 		},
 	},
-	PlatformXLS: {
-		ID:                 PlatformXLS,
-		Label:              "小绿书",
-		BadgeVariant:       "info",
-		SupportsPublishing: true,
-		SupportsAutoFetch:  false,
-		ProfileURLPattern:  `^https?://mp\.weixin\.qq\.com`,
-		DefaultImageRatio:  "3:4",
-		Fields: []PlatformFieldConfig{
-			{Key: "name", Label: "频道名称", Placeholder: "例如 我的小绿书", Required: true, Type: "text", Group: "basic"},
-			{Key: "avatar_url", Label: "头像", Placeholder: "自动获取或手动填写", Type: "url", Group: "basic", AutoFetched: true},
-			{Key: "positioning", Label: "账号定位", Placeholder: "例如 生活方式分享", Type: "textarea", Group: "basic", AutoFetched: true},
-			{Key: "wechat_app_id", Label: "微信 AppID", Placeholder: "wx...", Type: "text", Group: "credentials"},
-			{Key: "wechat_secret", Label: "微信 AppSecret", Placeholder: "创建后不可查看", Type: "password", Group: "credentials"},
-			{Key: "keywords", Label: "关键词", Placeholder: "例如 生活方式, 美食, 旅行", Type: "textarea", Group: "advanced"},
-			{Key: "style", Label: "写作风格", Placeholder: "例如 casual-science, dan-koe", Type: "text", Group: "advanced"},
-			{Key: "theme", Label: "主题", Placeholder: "例如 autumn-warm, spring-fresh", Type: "text", Group: "advanced"},
-			{Key: "author", Label: "作者名", Placeholder: "例如 张三", Type: "text", Group: "advanced"},
-			{Key: "reference_image_url", Label: "品牌视觉参考图", Placeholder: "粘贴图片 URL（支持 JPG, PNG）", Type: "url", Group: "advanced"},
-			{Key: "image_ratio", Label: "图片比例", Placeholder: "3:4（小绿书默认）", Type: "select", Group: "advanced"},
-		},
-	},
 	PlatformSeednote: {
 		ID:                 PlatformSeednote,
 		Label:              "种草笔记",
@@ -99,7 +77,7 @@ func GetPlatformConfig(platform string) *PlatformConfig {
 
 // GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-	order := []string{PlatformSeednote, PlatformArticle, PlatformXLS}
+	order := []string{PlatformSeednote, PlatformArticle}
 	configs := make([]*PlatformConfig, 0, len(order))
 	for _, key := range order {
 		if pc, ok := PlatformConfigs[key]; ok {

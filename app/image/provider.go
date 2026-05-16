@@ -115,7 +115,7 @@ func validateOpenAIConfig(apiCfg *config.ImageAPI) error {
 		return &config.ConfigError{
 			Field:   "ImageAPIKey",
 			Message: "使用 OpenAI 图片服务需要配置 API Key",
-			HintMsg: "在配置文件中设置 article.image.key 或 xls.image.key",
+			HintMsg: "在配置文件中设置 image.key",
 		}
 	}
 	if apiCfg.BaseURL == "" {

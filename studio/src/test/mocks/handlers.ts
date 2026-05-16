@@ -140,16 +140,6 @@ export const mockPlatformConfigs: PlatformConfig[] = [
     fields: [],
   },
   {
-    id: 'xls',
-    label: '小绿书',
-    badge_variant: 'info',
-    supports_publishing: true,
-    supports_auto_fetch: true,
-    profile_url_pattern: 'https://mp.weixin.qq.com/*',
-    default_image_ratio: '3:4',
-    fields: [],
-  },
-  {
     id: 'seednote',
     label: '种草笔记',
     badge_variant: 'danger',

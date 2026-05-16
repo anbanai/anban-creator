@@ -26,7 +26,6 @@ const (
 	WorkflowStageContentScript   = "content_script"
 	WorkflowStageVisualPlan      = "visual_plan"
 	WorkflowStageImages          = "images"
-	WorkflowStageXLSPackage      = "xls_package"
 
 	WorkflowStageStatusPending   = "pending"
 	WorkflowStageStatusCompleted = "completed"
@@ -141,18 +140,6 @@ func BuildWorkflowStatus(taskType string, files []*model.TaskFile, reviewJSON []
 }
 
 func buildWorkflowStages(taskType string, artifactPathsByRole map[string][]string) []WorkflowStage {
-	if taskType == model.ScopeXls {
-		return []WorkflowStage{
-			buildStage(WorkflowStageTopic, "选题", artifactPathsByRole[model.FileRoleTopic]),
-			buildStage(WorkflowStageContentScript, "文案脚本", artifactPathsByRole[model.FileRoleDraft]),
-			buildStage(WorkflowStageVisualPlan, "视觉规划", artifactPathsByRole[model.FileRoleOutline]),
-			buildStage(WorkflowStageImages, "图片", append(copyStrings(artifactPathsByRole[model.FileRoleImage]), artifactPathsByRole[model.FileRoleCover]...)),
-			buildStage(WorkflowStageXLSPackage, "小绿书草稿包", append(copyStrings(artifactPathsByRole[model.FileRoleDraftPackage]), artifactPathsByRole[model.FileRoleImageManifest]...)),
-			buildStage(WorkflowStagePublishOptional, "发布草稿", nil),
-			buildStage(WorkflowStageReview, "质量复盘", artifactPathsByRole[model.FileRoleReview]),
-		}
-	}
-
 	return []WorkflowStage{
 		buildStage(WorkflowStageTopic, "选题", artifactPathsByRole[model.FileRoleTopic]),
 		buildStage(WorkflowStageOutline, "大纲", artifactPathsByRole[model.FileRoleOutline]),

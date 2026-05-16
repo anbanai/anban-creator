@@ -118,7 +118,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	plan3 := &model.Plan{
 		ID:        "plan-3",
 		UserID:    userID,
-		Type:      model.ScopeXls,
+		Type:      model.ScopeSeednote,
 		Title:     "Paused Plan",
 		CronExpr:  "0 9 * * 1-5",
 		Status:    model.PlanStatusPaused,

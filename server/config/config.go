@@ -109,8 +109,6 @@ type StorageConfig struct {
 type SizesConfig struct {
 	ArticleCover   string `yaml:"article_cover"`   // default "16:9"
 	ArticleContent string `yaml:"article_content"` // default "16:9"
-	XlsCover       string `yaml:"xls_cover"`       // default "3:4"
-	XlsContent     string `yaml:"xls_content"`     // default "3:4"
 	SeednoteCover   string `yaml:"seednote_cover"`   // default "3:4"
 	SeednoteContent string `yaml:"seednote_content"` // default "3:4"
 }
@@ -142,7 +140,7 @@ type ClaudeConfig struct {
 	PluginDir      string            `yaml:"plugin_dir"`       // Path to the abwriter plugin directory (contains agents/, skills/)
 	Sandbox        bool              `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
-	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 100, "xls": 50, "seednote": 60}
+	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 100, "seednote": 60}
 	TaskLogDir     string            `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
 	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). Override with ANBAN_SERVER_CLAUDE_AGENT_SERVER_URL.
 }
@@ -162,7 +160,7 @@ type CreditsConfig struct {
 	DailySignIn   int                       `yaml:"daily_sign_in"`    // credits awarded per daily sign-in (default 1024)
 	RegisterBonus int                       `yaml:"register_bonus"`   // credits awarded on registration (default 4096)
 	InviteReward  int                       `yaml:"invite_reward"`    // credits awarded to inviter when invitee registers (default 2048)
-	TaskCosts     map[string]int            `yaml:"task_costs"`       // per-task-type costs, e.g. {"article": 4000, "xls": 3200, "seednote": 3200}
+	TaskCosts     map[string]int            `yaml:"task_costs"`       // per-task-type costs, e.g. {"article": 4000, "seednote": 3200}
 	ModelCosts    map[string]map[string]int `yaml:"model_costs"`     // per-model costs, key format: "provider/model"
 	AdminAPIKey   string                    `yaml:"admin_api_key"`    // API key for admin credit grant endpoint
 }
@@ -271,12 +269,6 @@ func (c *Config) applyDefaults() {
 	if c.ImageAPI.Sizes.ArticleContent == "" {
 		c.ImageAPI.Sizes.ArticleContent = "16:9"
 	}
-	if c.ImageAPI.Sizes.XlsCover == "" {
-		c.ImageAPI.Sizes.XlsCover = "3:4"
-	}
-	if c.ImageAPI.Sizes.XlsContent == "" {
-		c.ImageAPI.Sizes.XlsContent = "3:4"
-	}
 	if c.ImageAPI.Sizes.SeednoteCover == "" {
 		c.ImageAPI.Sizes.SeednoteCover = "3:4"
 	}
@@ -297,7 +289,6 @@ func (c *Config) applyDefaults() {
 	if c.Credits.TaskCosts == nil {
 		c.Credits.TaskCosts = map[string]int{
 			"article": 4000,
-			"xls":     3200,
 			"seednote": 3200,
 		}
 	}
@@ -339,7 +330,6 @@ func (c *Config) applyDefaults() {
 	if c.Claude.MaxTurns == nil {
 		c.Claude.MaxTurns = map[string]int{
 			"article": 100,
-			"xls":     50,
 			"seednote": 60,
 		}
 	}

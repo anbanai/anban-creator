@@ -37,7 +37,6 @@ import { Badge } from '@/components/ui/badge'
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
-  { value: 'xls', label: '小绿书' },
 ]
 
 const statusTabs: { label: string; value: string }[] = [
@@ -424,7 +423,7 @@ export default function ChannelsPage() {
     if (!payload.image_ratio) {
       if (payload.platform === 'article') {
         payload.image_ratio = '16:9'
-      } else if (payload.platform === 'seednote' || payload.platform === 'xls') {
+      } else if (payload.platform === 'seednote') {
         payload.image_ratio = '3:4'
       }
     }
@@ -445,7 +444,7 @@ export default function ChannelsPage() {
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
-  const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
+  const isWechat = selectedPlatform === 'article'
 
   const { data: seednoteStatus } = useQuery({
     queryKey: queryKeys.channels.seednoteLoginStatus,

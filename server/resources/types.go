@@ -47,11 +47,11 @@ var ValidCategories = []Category{CategoryTheme, CategoryWriter, CategoryLayout, 
 func (c Category) IsPlatformRelevant(platform string) bool {
 	switch c {
 	case CategoryTheme, CategoryWriter:
-		return platform == "article" || platform == "xls"
+		return platform == "article"
 	case CategoryLayout:
 		return platform == "article"
 	case CategoryImagePreset:
-		return platform == "article" || platform == "xls" || platform == "seednote"
+		return platform == "article" || platform == "seednote"
 	}
 	return false
 }

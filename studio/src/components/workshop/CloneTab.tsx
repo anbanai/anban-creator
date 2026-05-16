@@ -80,7 +80,7 @@ export default function CloneTab() {
     promptParts.push(`复刻深度: ${cloneDepth}`)
 
     createTaskMutation.mutate({
-      type: (channelPlatform as 'seednote' | 'article' | 'xls') || 'seednote',
+      type: (channelPlatform as 'seednote' | 'article') || 'seednote',
       channel_id: channelId,
       prompt: promptParts.join('\n'),
     })

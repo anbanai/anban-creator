@@ -13,7 +13,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 )
 
-// PublishingService handles WeChat draft publishing (articles and Xiaolvshu image posts).
+// PublishingService handles WeChat draft publishing.
 type PublishingService struct {
 	repo   repository.Repository
 	logger *zerolog.Logger
@@ -42,25 +42,6 @@ type DraftArticleInput struct {
 type PublishDraftResult struct {
 	MediaID  string `json:"media_id"`
 	DraftURL string `json:"draft_url,omitempty"`
-}
-
-// XlsPublishRequest holds the fields for a Xiaolvshu image post publish request.
-type XlsPublishRequest struct {
-	Title        string   `json:"title"`
-	Content      string   `json:"content,omitempty"`
-	Images       []string `json:"images,omitempty"`
-	MediaIDs     []string `json:"media_ids,omitempty"`
-	OpenComment  bool     `json:"open_comment,omitempty"`
-	FansOnly     bool     `json:"fans_only,omitempty"`
-	FromMarkdown string   `json:"from_markdown,omitempty"`
-}
-
-// XlsPublishResult holds the result of a Xiaolvshu image post publish operation.
-type XlsPublishResult struct {
-	MediaID     string   `json:"media_id"`
-	DraftURL    string   `json:"draft_url,omitempty"`
-	Count       int      `json:"count"`
-	UploadedIDs []string `json:"uploaded_ids"`
 }
 
 // buildAppConfig creates an app config from a channel (nil image config since publishing doesn't need image API).
@@ -134,43 +115,6 @@ func (s *PublishingService) PublishDraft(ctx context.Context, userID, channelID 
 	return &PublishDraftResult{
 		MediaID:  result.MediaID,
 		DraftURL: result.DraftURL,
-	}, nil
-}
-
-// PublishXls creates a WeChat Xiaolvshu (image post) draft for the given channel.
-func (s *PublishingService) PublishXls(ctx context.Context, userID, channelID string, req XlsPublishRequest) (*XlsPublishResult, error) {
-	ch, err := s.getChannel(ctx, userID, channelID)
-	if err != nil {
-		return nil, err
-	}
-
-	ds, err := s.createDraftService(ch)
-	if err != nil {
-		return nil, err
-	}
-
-	draftReq := &draft.ImageXlsRequest{
-		Title:        req.Title,
-		Content:      req.Content,
-		Images:       req.Images,
-		MediaIDs:     req.MediaIDs,
-		OpenComment:  req.OpenComment,
-		FansOnly:     req.FansOnly,
-		FromMarkdown: req.FromMarkdown,
-	}
-
-	result, err := ds.CreateImageXls(draftReq)
-	if err != nil {
-		return nil, fmt.Errorf("create xls draft: %w", err)
-	}
-
-	s.logger.Info().Str("user_id", userID).Str("channel_id", channelID).Str("media_id", result.MediaID).Int("count", result.Count).Msg("xls draft published")
-
-	return &XlsPublishResult{
-		MediaID:     result.MediaID,
-		DraftURL:    result.DraftURL,
-		Count:       result.Count,
-		UploadedIDs: result.UploadedIDs,
 	}, nil
 }
 

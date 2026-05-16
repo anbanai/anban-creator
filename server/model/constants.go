@@ -26,7 +26,6 @@ const (
 // Config scope constants.
 const (
 	ScopeArticle = "article"
-	ScopeXls     = "xls"
 	ScopeSeednote = "seednote"
 )
 
@@ -56,7 +55,6 @@ const (
 // Platform constants.
 const (
 	PlatformArticle = "article"
-	PlatformXLS     = "xls"
 	PlatformSeednote = "seednote"
 )
 
@@ -160,7 +158,6 @@ const (
 	TemplateTypePoster  = "poster"
 	TemplateTypeSeednote = "seednote"
 	TemplateTypeArticle = "article"
-	TemplateTypeXLS     = "xls"
 )
 
 // Viral analysis source type constants.

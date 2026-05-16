@@ -1,4 +1,4 @@
-export type TaskType = 'seednote' | 'article' | 'xls'
+export type TaskType = 'seednote' | 'article'
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface Task {

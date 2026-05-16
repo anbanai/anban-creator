@@ -25,8 +25,8 @@ func setupTestChannelService(t *testing.T) (*ChannelService, repository.Reposito
 	return NewChannelService(repo, &logger), repo
 }
 
-func TestChannelServiceDefaultsArticleAndXLSStyle(t *testing.T) {
-	for _, platform := range []string{model.PlatformArticle, model.PlatformXLS} {
+func TestChannelServiceDefaultsArticleStyle(t *testing.T) {
+	for _, platform := range []string{model.PlatformArticle} {
 		t.Run(platform, func(t *testing.T) {
 			svc, _ := setupTestChannelService(t)
 			ch, err := svc.Create(context.Background(), "user-1", &model.Channel{

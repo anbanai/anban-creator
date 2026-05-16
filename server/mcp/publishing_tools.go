@@ -33,25 +33,6 @@ func registerPublishingTools(server *mcp.Server) {
 	}, publishDraftHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "publish_xls_draft",
-		Description: "Create a WeChat Xiaolvshu (image post/newspic) draft. Uploads local images to WeChat and creates an image-based post. Supports up to 20 images.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"channel_id":    map[string]any{"type": "string", "description": "Channel ID"},
-				"title":         map[string]any{"type": "string", "description": "Post title"},
-				"content":       map[string]any{"type": "string", "description": "Post text content (plain text, no HTML)"},
-				"images":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Local image file paths to upload"},
-				"media_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Pre-uploaded WeChat media IDs (optional)"},
-				"from_markdown": map[string]any{"type": "string", "description": "Markdown file path to extract images from (optional)"},
-				"open_comment":  map[string]any{"type": "boolean", "description": "Enable comments (default: false)"},
-				"fans_only":     map[string]any{"type": "boolean", "description": "Comments from fans only (default: false)"},
-			},
-			"required": []any{"channel_id", "title"},
-		},
-	}, publishXlsHandler)
-
-	server.AddTool(&mcp.Tool{
 		Name:        "list_drafts",
 		Description: "List WeChat drafts for a channel. Returns draft media IDs, titles, and update times.",
 		InputSchema: map[string]any{
@@ -110,66 +91,6 @@ func publishDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	result, err := svcs.PublishingSvc.PublishDraft(ctx, userID, channelID, articles)
 	if err != nil {
 		return errorResult(fmt.Sprintf("publish draft: %v", err)), nil
-	}
-
-	return textResult(result)
-}
-
-func publishXlsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.PublishingSvc == nil {
-		return errorResult("publishing service not available"), nil
-	}
-	userID := getUserID(ctx)
-	args := parseArgs(req.Params.Arguments)
-
-	channelID, _ := args["channel_id"].(string)
-	title, _ := args["title"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
-	}
-	if title == "" {
-		return errorResult("title is required"), nil
-	}
-
-	var images []string
-	if imgArr, ok := args["images"].([]any); ok {
-		for _, img := range imgArr {
-			if s, ok := img.(string); ok {
-				images = append(images, s)
-			}
-		}
-	}
-
-	var mediaIDs []string
-	if idArr, ok := args["media_ids"].([]any); ok {
-		for _, id := range idArr {
-			if s, ok := id.(string); ok {
-				mediaIDs = append(mediaIDs, s)
-			}
-		}
-	}
-
-	content, _ := args["content"].(string)
-	publishReq := service.XlsPublishRequest{
-		Title:    title,
-		Content:  content,
-		Images:   images,
-		MediaIDs: mediaIDs,
-	}
-
-	if fromMD, ok := args["from_markdown"].(string); ok {
-		publishReq.FromMarkdown = fromMD
-	}
-	if openComment, ok := args["open_comment"].(bool); ok {
-		publishReq.OpenComment = openComment
-	}
-	if fansOnly, ok := args["fans_only"].(bool); ok {
-		publishReq.FansOnly = fansOnly
-	}
-
-	result, err := svcs.PublishingSvc.PublishXls(ctx, userID, channelID, publishReq)
-	if err != nil {
-		return errorResult(fmt.Sprintf("publish xls: %v", err)), nil
 	}
 
 	return textResult(result)

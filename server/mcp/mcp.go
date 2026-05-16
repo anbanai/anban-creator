@@ -115,7 +115,7 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 		Name:    "anbanwriter-mcp",
 		Version: "1.2.0",
 	}, &mcp.ServerOptions{
-		Instructions: "Content creation assistant for WeChat, Xiaolvshu, and Seednote publishing.",
+		Instructions: "Content creation assistant for WeChat and Seednote publishing.",
 	})
 
 	// Register all tools.

@@ -35,7 +35,7 @@ type Processor struct {
 }
 
 // NewProcessor 创建图片处理器
-// apiCfg 决定使用哪套图片生成配置（article.image 或 xls.image）
+// apiCfg 决定使用哪套图片生成配置（image）
 func NewProcessor(cfg *config.Config, apiCfg *config.ImageAPI, log *zerolog.Logger) *Processor {
 	// 创建图片生成 Provider
 	var provider Provider

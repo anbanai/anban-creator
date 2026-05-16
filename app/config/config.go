@@ -26,12 +26,8 @@ const (
 	DefaultImageMaxWidth = 1920
 	// DefaultImageMaxSizeMB 默认图片最大大小（MB）
 	DefaultImageMaxSizeMB = 5
-	// DefaultXlsImageCount 默认小绿书图片数量
-	DefaultXlsImageCount = 4
 	// DefaultArticleImageSize 默认图文文章图片尺寸（16:9 横版 2K）
 	DefaultArticleImageSize = "16:9"
-	// DefaultXlsImageSize 默认小绿书图片尺寸（3:4 竖版 2K）
-	DefaultXlsImageSize = "3:4"
 )
 
 // DefaultConfigPath 返回默认配置文件路径（项目本地）
@@ -45,11 +41,6 @@ const DefaultSeednoteImageSize = "3:4:1K"
 // DefaultSeednoteImageCount 默认种草笔记图片数量
 const DefaultSeednoteImageCount = 6
 
-// DefaultFlowerImageSize 默认花卉图片尺寸（9:16 竖版 2K）
-const DefaultFlowerImageSize = "9:16"
-
-// DefaultFlowerImageCount 默认花卉图片数量（每次生成的花卉种数）
-const DefaultFlowerImageCount = 5
 
 // VolcengineConfig 火山方舟 Seedream 高级选项（仅 settings.json 配置，不暴露到 agent/skill 层）
 type VolcengineConfig struct {
@@ -104,8 +95,8 @@ type ImageSection struct {
 	Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
 }
 
-// XlsContentSection 带数量的图片内容配置（用于小绿书内容图）
-type XlsContentSection struct {
+// CountedImageSection 带数量的图片内容配置
+type CountedImageSection struct {
 	Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
 	Count int      `json:"count,omitempty" yaml:"count,omitempty"`
 }
@@ -119,39 +110,22 @@ type ArticleConfig struct {
 	Content ImageSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
-// WechatXlsConfig 微信小绿书配置
-type WechatXlsConfig struct {
-	Style   string            `json:"style,omitempty" yaml:"style,omitempty"`
-	Cover   ImageSection      `json:"cover,omitempty" yaml:"cover,omitempty"`
-	Content XlsContentSection `json:"content,omitempty" yaml:"content,omitempty"`
-}
 
 // WechatConfig 微信公众号配置
 type WechatConfig struct {
-	AppID   string          `json:"appid" yaml:"appid"`
-	Secret  string          `json:"secret" yaml:"secret"`
-	Article ArticleConfig   `json:"article,omitempty" yaml:"article,omitempty"`
-	Xls     WechatXlsConfig `json:"xls,omitempty" yaml:"xls,omitempty"`
+	AppID   string        `json:"appid" yaml:"appid"`
+	Secret  string        `json:"secret" yaml:"secret"`
+	Article ArticleConfig `json:"article,omitempty" yaml:"article,omitempty"`
 }
 
 // SeednoteConfig 种草笔记配置
 type SeednoteConfig struct {
 	// Style 视觉风格描述，用于图片生成时的风格提示
-	Style   string            `json:"style,omitempty" yaml:"style,omitempty"`
-	Cover   ImageSection      `json:"cover,omitempty" yaml:"cover,omitempty"`
-	Content XlsContentSection `json:"content,omitempty" yaml:"content,omitempty"`
+	Style   string              `json:"style,omitempty" yaml:"style,omitempty"`
+	Cover   ImageSection        `json:"cover,omitempty" yaml:"cover,omitempty"`
+	Content CountedImageSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
-// FlowerContentSection 花卉图片内容配置
-type FlowerContentSection struct {
-	Image ImageAPI `json:"image,omitempty" yaml:"image,omitempty"`
-	Count int      `json:"count,omitempty" yaml:"count,omitempty"`
-}
-
-// FlowerConfig 花卉图片生成配置
-type FlowerConfig struct {
-	Content FlowerContentSection `json:"content,omitempty" yaml:"content,omitempty"`
-}
 
 // Config 应用配置（嵌套结构，直接对应 JSON 文件）
 type Config struct {
@@ -159,9 +133,8 @@ type Config struct {
 	Keywords    []string `json:"keywords,omitempty" yaml:"keywords,omitempty"`
 	Positioning string   `json:"positioning,omitempty" yaml:"positioning,omitempty"`
 
-	Wechat  WechatConfig   `json:"wechat,omitempty" yaml:"wechat,omitempty"`
+	Wechat  WechatConfig    `json:"wechat,omitempty" yaml:"wechat,omitempty"`
 	Seednote *SeednoteConfig `json:"seednote,omitempty" yaml:"seednote,omitempty"`
-	Flower  *FlowerConfig  `json:"flower,omitempty" yaml:"flower,omitempty"`
 
 	configPath string
 }
@@ -305,27 +278,6 @@ func (c *Config) validateCommon() error {
 	if err := c.Wechat.Article.Content.Image.Validate(); err != nil {
 		return err
 	}
-	if err := c.Wechat.Xls.Content.Image.Validate(); err != nil {
-		return err
-	}
-
-	// 验证小绿书图片数量
-	if c.Wechat.Xls.Content.Count != 0 && (c.Wechat.Xls.Content.Count < 1 || c.Wechat.Xls.Content.Count > 20) {
-		return &ConfigError{
-			Field:   "XlsImageCount",
-			Message: "小绿书图片数量必须在 1 到 20 之间",
-			HintMsg: "配置文件中设置 wechat.xls.content.count: 4",
-		}
-	}
-
-	// 验证花卉图片数量
-	if c.Flower != nil && c.Flower.Content.Count != 0 && (c.Flower.Content.Count < 1 || c.Flower.Content.Count > 50) {
-		return &ConfigError{
-			Field:   "FlowerImageCount",
-			Message: "花卉图片数量必须在 1 到 50 之间",
-			HintMsg: "配置文件中设置 flower.content.count: 5",
-		}
-	}
 
 	return nil
 }
@@ -336,7 +288,7 @@ func ValidateForImageGeneration(apiCfg *ImageAPI) error {
 		return &ConfigError{
 			Field:   "ImageAPIKey",
 			Message: "图片生成需要配置 API Key",
-			HintMsg: "在配置文件中设置 wechat.article.content.image.key、wechat.xls.content.image.key 或 seednote.content.image.key",
+			HintMsg: "在配置文件中设置 wechat.article.content.image.key 或 seednote.content.image.key",
 		}
 	}
 	return nil
@@ -345,30 +297,6 @@ func ValidateForImageGeneration(apiCfg *ImageAPI) error {
 // GetConfigFile 获取配置文件路径
 func (c *Config) GetConfigFile() string {
 	return c.configPath
-}
-
-// XlsImageSize 返回小绿书图片尺寸，默认 3:4 竖版
-// 优先级: wechat.xls.content.image.size > seednote.content.image.size > 默认值
-func (c *Config) XlsImageSize() string {
-	if c.Wechat.Xls.Content.Image.Size != "" {
-		return c.Wechat.Xls.Content.Image.Size
-	}
-	if c.Seednote != nil && c.Seednote.Content.Image.Size != "" {
-		return c.Seednote.Content.Image.Size
-	}
-	return DefaultXlsImageSize
-}
-
-// XlsImageCount 返回小绿书图片数量，默认 4 张
-// 优先级: wechat.xls.content.count > seednote.content.count > 默认值
-func (c *Config) XlsImageCount() int {
-	if c.Wechat.Xls.Content.Count > 0 {
-		return c.Wechat.Xls.Content.Count
-	}
-	if c.Seednote != nil && c.Seednote.Content.Count > 0 {
-		return c.Seednote.Content.Count
-	}
-	return DefaultXlsImageCount
 }
 
 // mergeImageAPI 合并两个 ImageAPI 配置，base 字段非空时优先使用 base，否则使用 fallback
@@ -407,26 +335,6 @@ func mergeImageAPI(base, fallback ImageAPI) ImageAPI {
 	return result
 }
 
-// ResolvedXlsContentImage 返回合并后的小绿书内容图配置
-// wechat.xls.content.image 字段优先，seednote.content.image 作为 fallback
-func (c *Config) ResolvedXlsContentImage() ImageAPI {
-	base := c.Wechat.Xls.Content.Image
-	if c.Seednote == nil {
-		return base
-	}
-	return mergeImageAPI(base, c.Seednote.Content.Image)
-}
-
-// ResolvedXlsCoverImage 返回合并后的小绿书封面图配置
-// wechat.xls.cover.image 字段优先，seednote.cover.image 作为 fallback
-func (c *Config) ResolvedXlsCoverImage() ImageAPI {
-	base := c.Wechat.Xls.Cover.Image
-	if c.Seednote == nil {
-		return base
-	}
-	return mergeImageAPI(base, c.Seednote.Cover.Image)
-}
-
 // ArticleImageSize 返回图文文章图片尺寸，默认 2560x1440（16:9 横版 2K）
 func (c *Config) ArticleImageSize() string {
 	if c.Wechat.Article.Content.Image.Size != "" {
@@ -454,52 +362,21 @@ func (c *Config) SeednoteImageCount() int {
 }
 
 // ResolvedSeednoteContentImage 返回合并后的种草笔记内容图配置
-// seednote.content.image 字段优先，wechat.xls.content.image 作为 fallback
+// seednote.content.image 字段优先，wechat.article.content.image 作为 fallback
 func (c *Config) ResolvedSeednoteContentImage() ImageAPI {
 	if c.Seednote == nil {
-		return c.Wechat.Xls.Content.Image
+		return c.Wechat.Article.Content.Image
 	}
-	return mergeImageAPI(c.Seednote.Content.Image, c.Wechat.Xls.Content.Image)
+	return mergeImageAPI(c.Seednote.Content.Image, c.Wechat.Article.Content.Image)
 }
 
 // ResolvedSeednoteCoverImage 返回合并后的种草笔记封面图配置
-// seednote.cover.image 字段优先，wechat.xls.cover.image 作为 fallback
+// seednote.cover.image 字段优先，wechat.article.cover.image 作为 fallback
 func (c *Config) ResolvedSeednoteCoverImage() ImageAPI {
 	if c.Seednote == nil {
-		return c.Wechat.Xls.Cover.Image
+		return c.Wechat.Article.Cover.Image
 	}
-	return mergeImageAPI(c.Seednote.Cover.Image, c.Wechat.Xls.Cover.Image)
-}
-
-// FlowerImageSize 返回花卉图片尺寸，默认 9:16 竖版
-func (c *Config) FlowerImageSize() string {
-	if c.Flower != nil && c.Flower.Content.Image.Size != "" {
-		return c.Flower.Content.Image.Size
-	}
-	return DefaultFlowerImageSize
-}
-
-// FlowerImageCount 返回花卉图片数量（花卉种数），默认 5
-func (c *Config) FlowerImageCount() int {
-	if c.Flower != nil && c.Flower.Content.Count > 0 {
-		return c.Flower.Content.Count
-	}
-	return DefaultFlowerImageCount
-}
-
-// ResolvedFlowerImage 返回花卉图片生成配置
-// flower.content.image 字段优先，seednote.content.image 作为 fallback
-func (c *Config) ResolvedFlowerImage() ImageAPI {
-	if c.Flower == nil {
-		if c.Seednote != nil {
-			return c.Seednote.Content.Image
-		}
-		return c.Wechat.Xls.Content.Image
-	}
-	if c.Seednote != nil {
-		return mergeImageAPI(c.Flower.Content.Image, c.Seednote.Content.Image)
-	}
-	return mergeImageAPI(c.Flower.Content.Image, c.Wechat.Xls.Content.Image)
+	return mergeImageAPI(c.Seednote.Cover.Image, c.Wechat.Article.Cover.Image)
 }
 
 // SaveConfig 保存配置到文件（JSON 格式）

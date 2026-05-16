@@ -97,18 +97,14 @@ export default function OpenClawGuide() {
             <p className="text-xs text-muted-foreground">斜杠命令示例：</p>
             <CodeBlock
               code={`/article AI Agent 入门指南
-/seednote 降噪耳机种草笔记
-/xls 春日穿搭图片帖
-/flower 春日鲜花摄影`}
+/seednote 降噪耳机种草笔记`}
             />
           </div>
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">自然语言示例：</p>
             <CodeBlock
               code={`帮我写一篇关于 AI Agent 的公众号文章
-种草笔记，主题是降噪耳机
-小绿书图片帖，主题是春日穿搭
-帮我生成一组郁金香的鲜花图片`}
+种草笔记，主题是降噪耳机`}
               language="text"
             />
           </div>

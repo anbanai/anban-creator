@@ -85,16 +85,6 @@ func TestLoad_JSONConfig_Full(t *testing.T) {
           "max_size_mb": 10
         }
       }
-    },
-    "xls": {
-      "content": {
-        "image": {
-          "key": "test_xls_key",
-          "provider": "gemini",
-          "model": "gemini-3-pro-image-preview",
-          "size": "3:4"
-        }
-      }
     }
   }
 }`
@@ -141,12 +131,6 @@ func TestLoad_JSONConfig_Full(t *testing.T) {
 	}
 	if cfg.Wechat.Article.Content.Image.Size != "16:9" {
 		t.Errorf("Wechat.Article.Content.Image.Size = %v, want 16:9", cfg.Wechat.Article.Content.Image.Size)
-	}
-	if cfg.Wechat.Xls.Content.Image.Key != "test_xls_key" {
-		t.Errorf("Wechat.Xls.Content.Image.Key = %v, want test_xls_key", cfg.Wechat.Xls.Content.Image.Key)
-	}
-	if cfg.Wechat.Xls.Content.Image.Size != "3:4" {
-		t.Errorf("Wechat.Xls.Content.Image.Size = %v, want 3:4", cfg.Wechat.Xls.Content.Image.Size)
 	}
 	if cfg.Wechat.Article.Content.Image.Compress != false {
 		t.Errorf("Wechat.Article.Content.Image.Compress = %v, want false", cfg.Wechat.Article.Content.Image.Compress)
@@ -369,110 +353,6 @@ func TestConfig_ValidateForImageGeneration(t *testing.T) {
 	}
 }
 
-func TestConfig_XlsImageCount_Default(t *testing.T) {
-	cfg := &Config{}
-	if got := cfg.XlsImageCount(); got != 4 {
-		t.Errorf("XlsImageCount() = %d, want 4 (default)", got)
-	}
-}
-
-func TestConfig_XlsImageCount_Custom(t *testing.T) {
-	tests := []struct {
-		name  string
-		count int
-		want  int
-	}{
-		{"set to 3", 3, 3},
-		{"set to 5", 5, 5},
-		{"set to 1", 1, 1},
-		{"set to 20", 20, 20},
-		{"zero uses default", 0, 4},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
-			cfg.Wechat.Xls.Content.Count = tt.count
-			if got := cfg.XlsImageCount(); got != tt.want {
-				t.Errorf("XlsImageCount() = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestConfig_Validate_InvalidXlsImageCount(t *testing.T) {
-	tests := []struct {
-		name    string
-		count   int
-		wantErr bool
-	}{
-		{"zero (unset)", 0, false},
-		{"valid min", 1, false},
-		{"valid mid", 5, false},
-		{"valid max", 20, false},
-		{"too small", -1, true},
-		{"too large", 21, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
-			cfg.Wechat.AppID = "wx123456"
-			cfg.Wechat.Secret = "secret123"
-			cfg.Wechat.Xls.Content.Count = tt.count
-
-			err := cfg.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				configErr, ok := err.(*ConfigError)
-				if !ok {
-					t.Fatalf("Error type = %T, want *ConfigError", err)
-				}
-				if configErr.Field != "XlsImageCount" {
-					t.Errorf("Error field = %v, want XlsImageCount", configErr.Field)
-				}
-			}
-		})
-	}
-}
-
-func TestLoad_JSONConfig_WithXlsImageCount(t *testing.T) {
-	configContent := `{
-  "wechat": {
-    "appid": "wx123456",
-    "secret": "secret123",
-    "xls": {
-      "content": {
-        "count": 5,
-        "image": {
-          "key": "test_key",
-          "size": "3:4"
-        }
-      }
-    }
-  }
-}`
-
-	tmpFile := filepath.Join(t.TempDir(), "test.json")
-	if err := os.WriteFile(tmpFile, []byte(configContent), 0644); err != nil {
-		t.Fatalf("Failed to create temp config file: %v", err)
-	}
-
-	cfg, err := LoadWithDefaults(tmpFile)
-	if err != nil {
-		t.Fatalf("LoadWithDefaults() error = %v", err)
-	}
-
-	if cfg.Wechat.Xls.Content.Count != 5 {
-		t.Errorf("Wechat.Xls.Content.Count = %d, want 5", cfg.Wechat.Xls.Content.Count)
-	}
-	if cfg.XlsImageCount() != 5 {
-		t.Errorf("XlsImageCount() = %d, want 5", cfg.XlsImageCount())
-	}
-}
-
 func TestFindConfigFile_PriorityOrder(t *testing.T) {
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -542,30 +422,9 @@ func TestNewDefaultConfig(t *testing.T) {
 	if c.Wechat.Article.Content.Image.MaxSizeMB != DefaultImageMaxSizeMB {
 		t.Errorf("Wechat.Article.Content.Image.MaxSizeMB = %d, want %d", c.Wechat.Article.Content.Image.MaxSizeMB, DefaultImageMaxSizeMB)
 	}
-	if c.Wechat.Xls.Content.Count != DefaultXlsImageCount {
-		t.Errorf("Wechat.Xls.Content.Count = %d, want %d", c.Wechat.Xls.Content.Count, DefaultXlsImageCount)
-	}
-	if c.Wechat.Xls.Content.Image.Provider != DefaultImageProvider {
-		t.Errorf("Wechat.Xls.Content.Image.Provider = %q, want %q", c.Wechat.Xls.Content.Image.Provider, DefaultImageProvider)
-	}
-	if c.Wechat.Xls.Content.Image.Size != DefaultXlsImageSize {
-		t.Errorf("Wechat.Xls.Content.Image.Size = %q, want %q", c.Wechat.Xls.Content.Image.Size, DefaultXlsImageSize)
-	}
-	if c.Wechat.Xls.Content.Image.Compress != true {
-		t.Errorf("Wechat.Xls.Content.Image.Compress = %v, want true", c.Wechat.Xls.Content.Image.Compress)
-	}
-	if c.Wechat.Xls.Content.Image.MaxWidth != DefaultImageMaxWidth {
-		t.Errorf("Wechat.Xls.Content.Image.MaxWidth = %d, want %d", c.Wechat.Xls.Content.Image.MaxWidth, DefaultImageMaxWidth)
-	}
-	if c.Wechat.Xls.Content.Image.MaxSizeMB != DefaultImageMaxSizeMB {
-		t.Errorf("Wechat.Xls.Content.Image.MaxSizeMB = %d, want %d", c.Wechat.Xls.Content.Image.MaxSizeMB, DefaultImageMaxSizeMB)
-	}
 	// BaseURL should not be set for Gemini (uses SDK, not HTTP)
 	if c.Wechat.Article.Content.Image.BaseURL != "" {
 		t.Errorf("Wechat.Article.Content.Image.BaseURL = %q, want empty (Gemini uses SDK)", c.Wechat.Article.Content.Image.BaseURL)
-	}
-	if c.Wechat.Xls.Content.Image.BaseURL != "" {
-		t.Errorf("Wechat.Xls.Content.Image.BaseURL = %q, want empty (Gemini uses SDK)", c.Wechat.Xls.Content.Image.BaseURL)
 	}
 }
 
@@ -577,26 +436,10 @@ func TestNewDefaultConfig_ConsistentWithRuntimeDefaults(t *testing.T) {
 		t.Errorf("ArticleImageSize() = %q, want %q (DefaultArticleImageSize)", got, DefaultArticleImageSize)
 	}
 
-	// XlsImageSize() should return the value set in NewDefaultConfig
-	if got := c.XlsImageSize(); got != DefaultXlsImageSize {
-		t.Errorf("XlsImageSize() = %q, want %q (DefaultXlsImageSize)", got, DefaultXlsImageSize)
-	}
-
-	// XlsImageCount() should return the value set in NewDefaultConfig
-	if got := c.XlsImageCount(); got != DefaultXlsImageCount {
-		t.Errorf("XlsImageCount() = %d, want %d (DefaultXlsImageCount)", got, DefaultXlsImageCount)
-	}
-
 	// Empty config should also use the same defaults
 	empty := &Config{}
 	if got := empty.ArticleImageSize(); got != DefaultArticleImageSize {
 		t.Errorf("empty.ArticleImageSize() = %q, want %q", got, DefaultArticleImageSize)
-	}
-	if got := empty.XlsImageSize(); got != DefaultXlsImageSize {
-		t.Errorf("empty.XlsImageSize() = %q, want %q", got, DefaultXlsImageSize)
-	}
-	if got := empty.XlsImageCount(); got != DefaultXlsImageCount {
-		t.Errorf("empty.XlsImageCount() = %d, want %d", got, DefaultXlsImageCount)
 	}
 }
 
@@ -668,144 +511,6 @@ func TestMergeImageAPI(t *testing.T) {
 	})
 }
 
-func TestResolvedXlsContentImage(t *testing.T) {
-	t.Run("no seednote config returns wechat.xls", func(t *testing.T) {
-		cfg := &Config{}
-		cfg.Wechat.Xls.Content.Image.Key = "xls-key"
-		cfg.Wechat.Xls.Content.Image.Provider = "openai"
-		result := cfg.ResolvedXlsContentImage()
-		if result.Key != "xls-key" {
-			t.Errorf("Key = %q, want xls-key", result.Key)
-		}
-		if result.Provider != "openai" {
-			t.Errorf("Provider = %q, want openai", result.Provider)
-		}
-	})
-
-	t.Run("seednote fills missing wechat.xls fields", func(t *testing.T) {
-		cfg := &Config{}
-		cfg.Wechat.Xls.Content.Image = ImageAPI{} // empty
-		cfg.Seednote = &SeednoteConfig{}
-		cfg.Seednote.Content.Image = ImageAPI{
-			Key:      "seednote-key",
-			Provider: "gemini",
-			Size:     "3:4:1K",
-		}
-		result := cfg.ResolvedXlsContentImage()
-		if result.Key != "seednote-key" {
-			t.Errorf("Key = %q, want seednote-key (from seednote)", result.Key)
-		}
-		if result.Provider != "gemini" {
-			t.Errorf("Provider = %q, want gemini (from seednote)", result.Provider)
-		}
-		if result.Size != "3:4:1K" {
-			t.Errorf("Size = %q, want 3:4:1K (from seednote)", result.Size)
-		}
-	})
-
-	t.Run("wechat.xls takes priority over seednote", func(t *testing.T) {
-		cfg := &Config{}
-		cfg.Wechat.Xls.Content.Image = ImageAPI{
-			Key:      "xls-key",
-			Provider: "volcengine",
-			Size:     "16:9",
-		}
-		cfg.Seednote = &SeednoteConfig{}
-		cfg.Seednote.Content.Image = ImageAPI{
-			Key:      "seednote-key",
-			Provider: "gemini",
-			Size:     "3:4:1K",
-		}
-		result := cfg.ResolvedXlsContentImage()
-		if result.Key != "xls-key" {
-			t.Errorf("Key = %q, want xls-key (wechat.xls priority)", result.Key)
-		}
-		if result.Provider != "volcengine" {
-			t.Errorf("Provider = %q, want volcengine (wechat.xls priority)", result.Provider)
-		}
-		if result.Size != "16:9" {
-			t.Errorf("Size = %q, want 16:9 (wechat.xls priority)", result.Size)
-		}
-	})
-}
-
-func TestResolvedXlsCoverImage(t *testing.T) {
-	t.Run("seednote cover fills missing wechat.xls.cover", func(t *testing.T) {
-		cfg := &Config{}
-		cfg.Seednote = &SeednoteConfig{}
-		cfg.Seednote.Cover.Image = ImageAPI{
-			Key:      "seednote-cover-key",
-			Provider: "volcengine",
-			Size:     "3:4",
-		}
-		result := cfg.ResolvedXlsCoverImage()
-		if result.Key != "seednote-cover-key" {
-			t.Errorf("Key = %q, want seednote-cover-key", result.Key)
-		}
-		if result.Provider != "volcengine" {
-			t.Errorf("Provider = %q, want volcengine", result.Provider)
-		}
-	})
-}
-
-func TestXlsImageSize_SeednoteFallback(t *testing.T) {
-	tests := []struct {
-		name        string
-		xlsSize     string
-		seednoteSize string
-		hasSeednote      bool
-		wantSize    string
-	}{
-		{"wechat.xls has size", "3:4", "3:4:1K", true, "3:4"},
-		{"fallback to seednote", "", "3:4:1K", true, "3:4:1K"},
-		{"no seednote", "", "", false, DefaultXlsImageSize},
-		{"both empty", "", "", true, DefaultXlsImageSize},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
-			cfg.Wechat.Xls.Content.Image.Size = tt.xlsSize
-			if tt.hasSeednote {
-				cfg.Seednote = &SeednoteConfig{}
-				cfg.Seednote.Content.Image.Size = tt.seednoteSize
-			}
-			if got := cfg.XlsImageSize(); got != tt.wantSize {
-				t.Errorf("XlsImageSize() = %q, want %q", got, tt.wantSize)
-			}
-		})
-	}
-}
-
-func TestXlsImageCount_SeednoteFallback(t *testing.T) {
-	tests := []struct {
-		name         string
-		xlsCount     int
-		seednoteCount int
-		hasSeednote       bool
-		wantCount    int
-	}{
-		{"wechat.xls has count", 4, 6, true, 4},
-		{"fallback to seednote", 0, 6, true, 6},
-		{"no seednote", 0, 0, false, DefaultXlsImageCount},
-		{"both zero", 0, 0, true, DefaultXlsImageCount},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
-			cfg.Wechat.Xls.Content.Count = tt.xlsCount
-			if tt.hasSeednote {
-				cfg.Seednote = &SeednoteConfig{}
-				cfg.Seednote.Content.Count = tt.seednoteCount
-			}
-			if got := cfg.XlsImageCount(); got != tt.wantCount {
-				t.Errorf("XlsImageCount() = %d, want %d", got, tt.wantCount)
-			}
-		})
-	}
-}
-
 func TestSeednoteImageSize(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -861,22 +566,22 @@ func TestSeednoteImageCount(t *testing.T) {
 }
 
 func TestResolvedSeednoteContentImage(t *testing.T) {
-	t.Run("nil seednote returns wechat.xls", func(t *testing.T) {
+	t.Run("nil seednote returns wechat.article", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.Wechat.Xls.Content.Image.Key = "xls-key"
-		cfg.Wechat.Xls.Content.Image.Provider = "openai"
+		cfg.Wechat.Article.Content.Image.Key = "article-key"
+		cfg.Wechat.Article.Content.Image.Provider = "openai"
 		result := cfg.ResolvedSeednoteContentImage()
-		if result.Key != "xls-key" {
-			t.Errorf("Key = %q, want xls-key", result.Key)
+		if result.Key != "article-key" {
+			t.Errorf("Key = %q, want article-key", result.Key)
 		}
 		if result.Provider != "openai" {
 			t.Errorf("Provider = %q, want openai", result.Provider)
 		}
 	})
 
-	t.Run("seednote primary over wechat.xls", func(t *testing.T) {
+	t.Run("seednote primary over wechat.article", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.Wechat.Xls.Content.Image = ImageAPI{Key: "xls-key", Provider: "openai", Size: "3:4"}
+		cfg.Wechat.Article.Content.Image = ImageAPI{Key: "article-key", Provider: "openai", Size: "3:4"}
 		cfg.Seednote = &SeednoteConfig{}
 		cfg.Seednote.Content.Image = ImageAPI{Key: "seednote-key", Provider: "gemini", Size: "3:4:1K"}
 		result := cfg.ResolvedSeednoteContentImage()
@@ -891,20 +596,20 @@ func TestResolvedSeednoteContentImage(t *testing.T) {
 		}
 	})
 
-	t.Run("wechat.xls fills missing seednote fields", func(t *testing.T) {
+	t.Run("wechat.article fills missing seednote fields", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.Wechat.Xls.Content.Image = ImageAPI{Key: "xls-key", MaxWidth: 1920, MaxSizeMB: 5}
+		cfg.Wechat.Article.Content.Image = ImageAPI{Key: "article-key", MaxWidth: 1920, MaxSizeMB: 5}
 		cfg.Seednote = &SeednoteConfig{}
 		cfg.Seednote.Content.Image = ImageAPI{Provider: "volcengine", Size: "3:4:1K"}
 		result := cfg.ResolvedSeednoteContentImage()
 		if result.Provider != "volcengine" {
 			t.Errorf("Provider = %q, want volcengine (seednote primary)", result.Provider)
 		}
-		if result.Key != "xls-key" {
-			t.Errorf("Key = %q, want xls-key (from wechat.xls fallback)", result.Key)
+		if result.Key != "article-key" {
+			t.Errorf("Key = %q, want article-key (from wechat.article fallback)", result.Key)
 		}
 		if result.MaxWidth != 1920 {
-			t.Errorf("MaxWidth = %d, want 1920 (from wechat.xls fallback)", result.MaxWidth)
+			t.Errorf("MaxWidth = %d, want 1920 (from wechat.article fallback)", result.MaxWidth)
 		}
 	})
 

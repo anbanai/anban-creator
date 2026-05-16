@@ -630,8 +630,8 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 	testChannel := &model.Channel{
 		ID:       "plan-ownership-channel",
 		UserID:   userID1,
-		Platform: model.PlatformXLS,
-		Name:     "User1 XLS Channel",
+		Platform: model.PlatformSeednote,
+		Name:     "User1 Seednote Channel",
 		Status:   model.ChannelStatusActive,
 	}
 	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {

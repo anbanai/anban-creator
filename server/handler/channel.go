@@ -419,7 +419,7 @@ func (h *ChannelHandler) GetPlatformConfigs(c fiber.Ctx) error {
 type fetchProfileRequest struct {
 	Platform   string `json:"platform"`
 	ProfileURL string `json:"profile_url"`
-	// Optional WeChat credentials for article/xls platforms.
+	// Optional WeChat credentials for article platforms.
 	WechatAppID  string `json:"wechat_app_id"`
 	WechatSecret string `json:"wechat_secret"`
 }

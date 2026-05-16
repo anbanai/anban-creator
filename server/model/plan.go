@@ -7,7 +7,7 @@ type Plan struct {
 	ID          string     `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID      string     `gorm:"type:char(36);index;not null" json:"user_id"`
 	ChannelID   string     `gorm:"type:char(36);index" json:"channel_id"`
-	Type        string     `gorm:"type:varchar(20);not null" json:"type"` // seednote, article, xls
+	Type        string     `gorm:"type:varchar(20);not null" json:"type"` // seednote, article
 	Title       string     `gorm:"type:varchar(200)" json:"title"`
 	Description string     `gorm:"type:text" json:"description"`
 	CronExpr    string     `gorm:"type:varchar(100)" json:"cron_expr"`

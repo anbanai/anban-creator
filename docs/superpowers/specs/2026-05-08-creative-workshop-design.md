@@ -5,7 +5,7 @@
 
 ## 背景
 
-Anbanwriter 现有内容创作能力覆盖微信公众号文章、种草笔记笔记、小绿书图片帖。用户提出 4 项新功能需求，统一纳入"创意工坊"产品模块：
+Anbanwriter 现有内容创作能力覆盖微信公众号文章、种草笔记笔记。用户提出 4 项新功能需求，统一纳入"创意工坊"产品模块：
 
 1. **商业海报** — 用户输入文字内容，AI 自动排版成海报
 2. **复刻种草笔记爆款** — 基于现有 seednote 管道增强，增加模板持久化
@@ -36,12 +36,12 @@ Anbanwriter 现有内容创作能力覆盖微信公众号文章、种草笔记�
 
 ### `templates` 表
 
-统一模板存储，支撑海报、种草笔记复刻、后续文章/小绿书模板。
+统一模板存储，支撑海报、种草笔记复刻、后续文章模板。
 
 ```go
 type Template struct {
     ID            string         `gorm:"type:char(36);primaryKey" json:"id"`
-    Type          string         `gorm:"type:varchar(20);not null" json:"type"`       // "poster" / "seednote" / "article" / "xls" (xls = 小绿书)
+    Type          string         `gorm:"type:varchar(20);not null" json:"type"`       // "poster" / "seednote" / "article"
     Name          string         `gorm:"type:varchar(100);not null" json:"name"`
     Category      string         `gorm:"type:varchar(50)" json:"category"`            // 行业/场景分类
     ThumbnailURL  string         `gorm:"type:varchar(500)" json:"thumbnail_url"`

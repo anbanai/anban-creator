@@ -236,7 +236,7 @@ func (tp *TaskProcessor) Shutdown() {
 }
 
 // validPlanTypes defines the allowed content types for plans and tasks.
-var validPlanTypes = []string{model.ScopeArticle, model.ScopeXls, model.ScopeSeednote}
+var validPlanTypes = []string{model.ScopeArticle, model.ScopeSeednote}
 
 // IsValidType checks if a content type is valid.
 func IsValidType(t string) bool {

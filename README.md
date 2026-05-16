@@ -1,12 +1,12 @@
 # AnbanWriter 智能创作平台
 
-AnbanWriter is a Studio-first content creation platform for WeChat articles, Xiaolvshu image posts, and Seednote-oriented creation workflows. It combines a Web Studio, MCP tools, Claude/OpenClaw agent execution, AI image generation, publishing helpers, task tracking, and credits into one repeatable creator workspace.
+AnbanWriter is a Studio-first content creation platform for WeChat articles and Seednote-oriented creation workflows. It combines a Web Studio, MCP tools, Claude/OpenClaw agent execution, AI image generation, publishing helpers, task tracking, and credits into one repeatable creator workspace.
 
 ## Product Surfaces
 
 - **Web Studio** — manage channels, plans, tasks, generated files, credits, model settings, and publishing state.
 - **MCP Server** — exposes writing, image, publishing, billing, workspace, and Seednote formatting tools to connected agents.
-- **Agent Runtime** — executes `wechatarticle`, `wechatxls`, and related content agents locally or in Docker.
+- **Agent Runtime** — executes `wechatarticle`, `seednote`, and related content agents locally or in Docker.
 - **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
 - **Plugin Assets** — Claude/OpenClaw skills, agents, themes, and writer styles live under `claudecode/` and `openclaw/`.
 
@@ -58,7 +58,7 @@ make vet
 3. The agent writes canonical artifacts into `output/`.
 4. The server uploads task files and builds workflow metadata from known artifacts.
 5. Studio shows stage progress, generated files, review readiness, warnings, and publishing state.
-6. Optional auto-publishing creates WeChat article or Xiaolvshu draft entries when enabled.
+6. Optional auto-publishing creates WeChat article draft entries when enabled.
 
 Canonical Creation Workflow v1 artifacts include:
 
@@ -75,7 +75,6 @@ Canonical Creation Workflow v1 artifacts include:
 ## Supported Platforms
 
 - **公众号文章** — long-form Markdown/HTML conversion, cover generation, WeChat draft publishing.
-- **小绿书/XLS** — image post generation, image upload, WeChat newspic draft publishing.
 - **种草笔记/Seednote** — profile-assisted content creation and export formatting; direct publishing is not part of v1.
 
 ## Configuration

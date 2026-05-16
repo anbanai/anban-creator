@@ -303,7 +303,7 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 			Provider: p.Name(),
 			Code:     "unauthorized",
 			Message:  "API Key 无效或已过期",
-			HintMsg:  "请检查配置文件中的 article.image.key 或 xls.image.key 是否正确",
+			HintMsg:  "请检查配置文件中的 image.key 是否正确",
 			Original: err,
 		}
 	}

@@ -20,8 +20,7 @@ var (
 
 // validPlatforms defines the allowed platform values.
 var validPlatforms = map[string]bool{
-	model.PlatformArticle: true,
-	model.PlatformXLS:     true,
+	model.PlatformArticle:  true,
 	model.PlatformSeednote: true,
 }
 
@@ -46,7 +45,7 @@ func defaultWritingStyleForPlatform(platform, style string) string {
 	if style != "" {
 		return style
 	}
-	if platform == model.PlatformArticle || platform == model.PlatformXLS {
+	if platform == model.PlatformArticle {
 		return writer.DefaultStyleName
 	}
 	return style

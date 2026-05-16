@@ -333,7 +333,7 @@ func (s *WritingService) WriteArticle(
 		assistant.SetWritersDir(s.writersDir)
 	}
 	styleName := ch.Style
-	if styleName == "" && (ch.Platform == "article" || ch.Platform == "xls") {
+	if styleName == "" && (ch.Platform == "article") {
 		styleName = writer.DefaultStyleName
 	}
 

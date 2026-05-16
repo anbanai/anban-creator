@@ -60,7 +60,7 @@ func registerChannelTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"status":   map[string]any{"type": "string", "enum": []any{"active", "archived"}, "description": "Filter by status"},
-				"platform": map[string]any{"type": "string", "enum": []any{"article", "xls", "seednote"}, "description": "Filter by platform type"},
+				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote"}, "description": "Filter by platform type"},
 			},
 		},
 	}, channelListHandler)
@@ -84,7 +84,7 @@ func registerChannelTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "xls", "seednote", "flower"}, "description": "Filter output by content type"},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote"}, "description": "Filter output by content type"},
 			},
 			"required": []any{"channel_id"},
 		},
@@ -94,7 +94,7 @@ func registerChannelTools(server *mcp.Server) {
 func registerTaskTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "create_task",
-		Description: "Create one or more content creation tasks for a channel. The task type is derived from the channel's platform (article/xls/seednote). Credits are deducted automatically.",
+		Description: "Create one or more content creation tasks for a channel. The task type is derived from the channel's platform (article/seednote). Credits are deducted automatically.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -283,17 +283,8 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	switch scope {
 	case "article":
 		info["style"] = ch.Style
-	case "xls":
-		// XLS config is derived from channel fields.
-		info["image_config"] = map[string]any{
-			"reference_image_url": ch.ReferenceImageURL,
-		}
 	case "seednote":
 			// For seednote, style is a visual/image style description used for image prompt generation.
-		info["image_config"] = map[string]any{
-			"reference_image_url": ch.ReferenceImageURL,
-		}
-	case "flower":
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
 		}

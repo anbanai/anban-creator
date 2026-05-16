@@ -93,11 +93,6 @@ func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *a
 			return &appCfg.Wechat.Article.Cover.Image
 		}
 		return &appCfg.Wechat.Article.Content.Image
-	case model.ScopeXls:
-		if imageType == "cover" {
-			return &appCfg.Wechat.Xls.Cover.Image
-		}
-		return &appCfg.Wechat.Xls.Content.Image
 	case model.ScopeSeednote:
 		if appCfg.Seednote == nil {
 			return nil
@@ -198,7 +193,7 @@ func (s *ImageService) GenerateImage(
 	return result, nil
 }
 
-// UploadImage uploads a local image. For WeChat platforms (article/xls), uploads
+// UploadImage uploads a local image. For WeChat platforms (article), uploads
 // to WeChat CDN. For other platforms (seednote), uploads to the configured storage provider.
 func (s *ImageService) UploadImage(
 	ctx context.Context,
@@ -210,7 +205,7 @@ func (s *ImageService) UploadImage(
 	}
 
 	// Non-WeChat platforms: upload to storage provider (local/OSS).
-	if ch.Platform != model.PlatformArticle && ch.Platform != model.PlatformXLS {
+	if ch.Platform != model.PlatformArticle {
 		return s.uploadToStorage(ctx, filePath)
 	}
 
@@ -307,7 +302,7 @@ func (s *ImageService) DownloadImage(
 
 	if strings.EqualFold(upload, "true") || strings.EqualFold(upload, "wechat") {
 		// WeChat platforms: download and upload to WeChat CDN.
-		if ch.Platform == model.PlatformArticle || ch.Platform == model.PlatformXLS {
+		if ch.Platform == model.PlatformArticle {
 			processor, err := s.buildProcessor(ctx, ch, "content")
 			if err != nil {
 				return nil, err

@@ -29,7 +29,7 @@ Creation Workflow v1 should make a task feel like a managed editorial process:
 - The final output includes a review report, not just article/images.
 - The platform can later learn from stage outputs and publishing results.
 
-The first release should target creators publishing to WeChat article and Xiaolvshu/XLS. Seednote can reuse parts of the flow later, but v1 should avoid expanding scope into direct Seednote publishing.
+The first release should target creators publishing to WeChat article. Seednote can reuse parts of the flow later, but v1 should avoid expanding scope into direct Seednote publishing.
 
 ## Scope
 
@@ -61,7 +61,6 @@ Users still create a task from Studio by selecting a channel, entering an option
 For v1, the server derives a workflow template from the channel platform:
 
 - `article`: topic, outline, draft, humanize, seo, cover, html, draft_package, publish_optional, review
-- `xls`: topic, content_script, visual_plan, images, xls_package, publish_optional, review
 
 The task can keep its current `pending/running/completed/failed/cancelled` status. Stage status is additive.
 
@@ -175,7 +174,7 @@ This should happen before marking the task completed so the final task detail re
 
 ### Agent Contract
 
-Update agent instructions for `wechatarticle` and `wechatxls` to produce the canonical artifacts. The agent should treat artifact creation as required output, not a nice-to-have.
+Update agent instructions for `wechatarticle` to produce the canonical artifacts. The agent should treat artifact creation as required output, not a nice-to-have.
 
 Minimum contract:
 
@@ -195,7 +194,7 @@ If the agent can generate `review.json` without a server MCP tool, defer this to
 
 ### Publishing
 
-Current auto-publish can publish article and XLS drafts when enabled. v1 should keep publishing optional and non-blocking. Publishing failures should appear in workflow warnings.
+Current auto-publish can publish article drafts when enabled. v1 should keep publishing optional and non-blocking. Publishing failures should appear in workflow warnings.
 
 Important fix: make publish detection more explicit than searching log text for tool names. If possible, prefer `draft.json` or a structured publish result artifact.
 
@@ -324,7 +323,6 @@ Agent contract tests can start as fixture-based checks:
 Creation Workflow v1 is successful when:
 
 - A completed article task shows staged artifacts and review summary in Studio.
-- A completed XLS task shows staged artifacts and review summary in Studio.
 - Existing task creation, execution, upload, download, retry, cancel, and auto-publish behavior continues to work.
 - At least one backend test fixture proves artifact recognition.
 - At least one frontend test proves review summary rendering.

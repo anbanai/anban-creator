@@ -4,7 +4,7 @@
 
 When a user creates a Seednote account in Studio, the account homepage field accepts either a clean URL or copied share text. The backend extracts the Seednote URL, fetches the public profile, selects the best-performing visible posts, and uses AI to generate useful account metadata: positioning, keywords, and visual style.
 
-For WeChat article and WeChat Xiaolvshu accounts, the account homepage option is disabled for now.
+For WeChat article accounts, the account homepage option is disabled for now.
 
 ## Scope
 
@@ -17,7 +17,7 @@ In scope:
 - Sort posts by available engagement metrics and choose the best few as AI samples.
 - Use AI analysis as an enhancement, with graceful fallback to scraped profile data if AI is not configured or returns invalid output.
 - Auto-fill Studio form fields: name, avatar, positioning, keywords, and visual style.
-- Hide the account homepage field for article and xls platforms.
+- Hide the account homepage field for article platforms.
 
 Out of scope:
 
@@ -35,7 +35,7 @@ The feature uses the existing `POST /api/v1/channels/fetch-profile` endpoint and
 
 The handler enriches Seednote profiles by calling the existing OpenAI-compatible `service.LLMClient` path when available. The AI response is parsed as strict JSON and merged into the profile response. If the call fails, the handler logs a warning and returns the scraped data.
 
-Studio uses platform config to render only the fields that apply. Since article and xls no longer expose `profile_url`, their account homepage input is hidden. Seednote keeps it and lets users paste either a URL or share text.
+Studio uses platform config to render only the fields that apply. Since article no longer exposes `profile_url`, its account homepage input is hidden. Seednote keeps it and lets users paste either a URL or share text.
 
 ## Data Flow
 
@@ -110,7 +110,7 @@ Backend tests cover:
 
 Frontend tests or type-safe build cover:
 
-- Article and xls platform configs no longer expose `profile_url`.
+- Article platform configs no longer expose `profile_url`.
 - Seednote profile input accepts arbitrary text and fetch button enables when a supported URL exists inside it.
 - Auto-fill applies keywords and style when returned.
 

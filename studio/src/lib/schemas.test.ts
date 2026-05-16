@@ -110,7 +110,7 @@ describe('createTaskSchema', () => {
   })
 
   it('accepts all valid content types', () => {
-    for (const type of ['seednote', 'article', 'xls'] as const) {
+    for (const type of ['seednote', 'article'] as const) {
       expect(createTaskSchema.safeParse({
         channel_id: 'ch-1',
         type,

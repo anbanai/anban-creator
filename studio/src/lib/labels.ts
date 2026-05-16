@@ -184,7 +184,6 @@ export const operationLabel: Record<string, string> = {
 
 export const taskTypeLabelCN: Record<string, string> = {
   article: '公众号',
-  xls: '小绿书',
   seednote: '种草笔记',
 }
 
@@ -193,7 +192,6 @@ export const taskTypeLabelCN: Record<string, string> = {
 export const contentTypes = {
   seednote: { label: '种草笔记', platform: '种草笔记' },
   article: { label: '公众号', platform: '公众号' },
-  xls: { label: '小绿书', platform: '小绿书' },
 } as const satisfies Record<TaskType, { label: string; platform: string }>
 
 export const contentTypeLabel = Object.fromEntries(
@@ -207,13 +205,11 @@ export const platformLabels = Object.fromEntries(
 export const platformDefaultRatio: Record<string, string> = {
   article: '16:9',
   seednote: '3:4',
-  xls: '3:4',
 }
 
 export const platformRatioLabel: Record<string, string> = {
   article: '16:9（公众号默认）',
   seednote: '3:4（种草笔记默认）',
-  xls: '3:4（小绿书默认）',
 }
 
 export const contentTypeOptions = Object.entries(contentTypes).map(([value, { label }]) => ({

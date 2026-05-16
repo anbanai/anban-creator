@@ -9,7 +9,7 @@ Add a credits-based billing system to anbanwriter. Users earn free credits via d
 | Operation | Credits |
 |-----------|---------|
 | Article task (article) | 500 |
-| XLS / Seednote task (xls/seednote) | 400 |
+| Seednote task (seednote) | 400 |
 | Per image (1024px) | 50 |
 | Per image (2K) | 80 |
 | Per image (4K) | 150 |
@@ -59,7 +59,6 @@ credits:
   daily_sign_in: 1024
   task_costs:
     article: 500
-    xls: 400
     seednote: 400
   image_costs:
     "1024": 50

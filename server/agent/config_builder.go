@@ -44,8 +44,6 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		cfg.Wechat.Article.Author = ch.Author
 		cfg.Wechat.Article.Style = ch.Style
 		cfg.Wechat.Article.Theme = ch.Theme
-	case model.ScopeXls:
-		cfg.Wechat.Xls.Style = ch.Style
 	case model.ScopeSeednote:
 		cfg.Seednote = &appconfig.SeednoteConfig{}
 		cfg.Seednote.Style = ch.Style
@@ -57,8 +55,6 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 			switch ch.Platform {
 			case model.ScopeArticle:
 				cfg.Wechat.Article.Cover.Image = *imageAPICfg.Cover
-			case model.ScopeXls:
-				cfg.Wechat.Xls.Cover.Image = *imageAPICfg.Cover
 			case model.ScopeSeednote:
 				cfg.Seednote.Cover.Image = *imageAPICfg.Cover
 			}
@@ -67,8 +63,6 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 			switch ch.Platform {
 			case model.ScopeArticle:
 				cfg.Wechat.Article.Content.Image = *imageAPICfg.Content
-			case model.ScopeXls:
-				cfg.Wechat.Xls.Content.Image = *imageAPICfg.Content
 			case model.ScopeSeednote:
 				cfg.Seednote.Content.Image = *imageAPICfg.Content
 			}
@@ -85,13 +79,6 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 			}
 			if cfg.Wechat.Article.Content.Image.Size == "" {
 				cfg.Wechat.Article.Content.Image.Size = imageAPICfg.Sizes.ArticleContent
-			}
-		case model.ScopeXls:
-			if cfg.Wechat.Xls.Cover.Image.Size == "" {
-				cfg.Wechat.Xls.Cover.Image.Size = imageAPICfg.Sizes.XlsCover
-			}
-			if cfg.Wechat.Xls.Content.Image.Size == "" {
-				cfg.Wechat.Xls.Content.Image.Size = imageAPICfg.Sizes.XlsContent
 			}
 		case model.ScopeSeednote:
 			if cfg.Seednote.Cover.Image.Size == "" {
@@ -113,9 +100,6 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		case model.ScopeArticle:
 			cfg.Wechat.Article.Cover.Image.Size = effectiveRatio
 			cfg.Wechat.Article.Content.Image.Size = effectiveRatio
-		case model.ScopeXls:
-			cfg.Wechat.Xls.Cover.Image.Size = effectiveRatio
-			cfg.Wechat.Xls.Content.Image.Size = effectiveRatio
 		case model.ScopeSeednote:
 			cfg.Seednote.Cover.Image.Size = effectiveRatio
 			cfg.Seednote.Content.Image.Size = effectiveRatio
@@ -129,9 +113,6 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		case model.ScopeArticle:
 			cfg.Wechat.Article.Cover.Image.Refer = referPath
 			cfg.Wechat.Article.Content.Image.Refer = referPath
-		case model.ScopeXls:
-			cfg.Wechat.Xls.Cover.Image.Refer = referPath
-			cfg.Wechat.Xls.Content.Image.Refer = referPath
 		case model.ScopeSeednote:
 			cfg.Seednote.Cover.Image.Refer = referPath
 			cfg.Seednote.Content.Image.Refer = referPath
@@ -157,8 +138,6 @@ func TaskTypeToAgent(taskType string) string {
 	switch taskType {
 	case model.ScopeArticle:
 		return "wechatarticle"
-	case model.ScopeXls:
-		return "wechatxls"
 	case model.ScopeSeednote:
 		return "seednote"
 	default:

@@ -15,10 +15,10 @@
 - `server/platform/provider.go`: extend `PlatformProfile` with `Keywords` and `Style`, and add a `SeednotePost` DTO.
 - `server/platform/seednote.go`: extract Seednote URLs from arbitrary text, parse visible post metadata, normalize counts, rank top posts.
 - `server/platform/seednote_test.go`: TDD coverage for URL extraction, post ranking, and profile raw data.
-- `server/handler/channel.go`: accept share text for seednote, block auto-fetch for article/xls, optionally enrich seednote profile through AI.
+- `server/handler/channel.go`: accept share text for seednote, block auto-fetch for article, optionally enrich seednote profile through AI.
 - `server/handler/channel_test.go`: handler-level tests for AI merge and fallback.
 - `server/main.go`: inject the existing LLM client into `ChannelHandler`.
-- `server/model/platform.go`: remove homepage fields and auto-fetch for article/xls; keep seednote homepage with share-text wording.
+- `server/model/platform.go`: remove homepage fields and auto-fetch for article; keep seednote homepage with share-text wording.
 - `studio/src/types/channel.ts`: expose `keywords` and `style` in `PlatformProfile`.
 - `studio/src/pages/ChannelsPage.tsx`: hide profile input for non-seednote, enable fetch based on embedded supported URL, auto-fill keywords/style.
 
@@ -43,7 +43,7 @@
 - Modify: `server/main.go`
 - Test: `server/handler/channel_test.go`
 
-- [ ] Write failing handler tests using a fake `LLMClient`: AI JSON merges into profile; invalid AI output keeps scraped profile; article/xls fetch is rejected.
+- [ ] Write failing handler tests using a fake `LLMClient`: AI JSON merges into profile; invalid AI output keeps scraped profile; article fetch is rejected.
 - [ ] Run `go test ./server/handler -run 'TestChannelFetchProfile' -count=1` and confirm the new tests fail.
 - [ ] Add optional LLM injection to `ChannelHandler`, build a bounded Chinese analysis prompt from profile and top posts, parse strict JSON, and merge non-empty fields.
 - [ ] Wire `server/main.go` to provide the same configured LLM client to `ChannelHandler` when available.
@@ -56,7 +56,7 @@
 - Modify: `studio/src/types/channel.ts`
 - Modify: `studio/src/pages/ChannelsPage.tsx`
 
-- [ ] Update backend platform config so article/xls do not expose `profile_url` and do not support auto-fetch.
+- [ ] Update backend platform config so article does not expose `profile_url` and does not support auto-fetch.
 - [ ] Update frontend URL detection to support Seednote URLs embedded in share text.
 - [ ] Render the profile input only when the current platform has a `profile_url` field.
 - [ ] Auto-fill `keywords` and `style` from `fetchProfile`.

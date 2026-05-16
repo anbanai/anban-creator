@@ -34,28 +34,6 @@ func NewDefaultConfig() *Config {
 	c.Wechat.Article.Content.Image.MaxWidth = DefaultImageMaxWidth
 	c.Wechat.Article.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
 
-	// 小绿书
-	c.Wechat.Xls.Style = "flat-vector"
-	// 小绿书封面图
-	c.Wechat.Xls.Cover.Image.Provider = DefaultImageProvider
-	c.Wechat.Xls.Cover.Image.Key = "your_image_api_key"
-	c.Wechat.Xls.Cover.Image.Model = "gemini-3-pro-image-preview"
-	c.Wechat.Xls.Cover.Image.Size = DefaultXlsImageSize
-	c.Wechat.Xls.Cover.Image.Refer = "path/to/refer.png"
-	c.Wechat.Xls.Cover.Image.Compress = true
-	c.Wechat.Xls.Cover.Image.MaxWidth = DefaultImageMaxWidth
-	c.Wechat.Xls.Cover.Image.MaxSizeMB = DefaultImageMaxSizeMB
-	// 小绿书内容图
-	c.Wechat.Xls.Content.Count = DefaultXlsImageCount
-	c.Wechat.Xls.Content.Image.Provider = DefaultImageProvider
-	c.Wechat.Xls.Content.Image.Key = "your_image_api_key"
-	c.Wechat.Xls.Content.Image.Model = "gemini-3-pro-image-preview"
-	c.Wechat.Xls.Content.Image.Size = DefaultXlsImageSize
-	c.Wechat.Xls.Content.Image.Refer = "path/to/refer.png"
-	c.Wechat.Xls.Content.Image.Compress = true
-	c.Wechat.Xls.Content.Image.MaxWidth = DefaultImageMaxWidth
-	c.Wechat.Xls.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
-
 	// 种草笔记（可选平台）
 	c.Seednote = new(SeednoteConfig)
 	c.Seednote.Style = "cute-doodle"
@@ -72,18 +50,6 @@ func NewDefaultConfig() *Config {
 	c.Seednote.Content.Image.Refer = "path/to/refer.png"
 	c.Seednote.Content.Image.Compress = true
 	c.Seednote.Content.Count = DefaultSeednoteImageCount
-
-	// 花卉图片生成（可选）
-	c.Flower = &FlowerConfig{}
-	c.Flower.Content.Image.Provider = DefaultImageProvider
-	c.Flower.Content.Image.Key = "your_image_api_key"
-	c.Flower.Content.Image.Model = "gemini-3-pro-image-preview"
-	c.Flower.Content.Image.Size = DefaultFlowerImageSize
-	c.Flower.Content.Image.Refer = "path/to/refer.png"
-	c.Flower.Content.Image.Compress = true
-	c.Flower.Content.Image.MaxWidth = DefaultImageMaxWidth
-	c.Flower.Content.Image.MaxSizeMB = DefaultImageMaxSizeMB
-	c.Flower.Content.Count = DefaultFlowerImageCount
 
 	return c
 }

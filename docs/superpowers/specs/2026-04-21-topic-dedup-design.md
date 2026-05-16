@@ -56,7 +56,6 @@ Handler 获取 userID（验证 channel 归属），调用 `TaskSvc.ListTopics`�
 | `plugin/skills/topic-research/SKILL.md` | 步骤 0 中增加 `list_topics(channel_id)` 调用 |
 | `plugin/skills/seednote-research/SKILL.md` | 新增选题前检查已有选题的步骤 |
 | `plugin/skills/article/SKILL.md` | 步骤 1 增加 `list_topics(channel_id)` 调用 |
-| `plugin/skills/xls/SKILL.md` | 步骤 1 增加 `list_topics(channel_id)` 调用 |
 | `plugin/skills/seednote/SKILL.md` | 步骤 3 前（或步骤 1 末尾）增加 `list_topics(channel_id)` 调用 |
 
 更新方式：在已有的 `list_drafts`/`list_published` 检查之后，追加 `list_topics(channel_id)` 调用，注明"选题应同时避开这些已有任务选题"。
@@ -70,8 +69,7 @@ Handler 获取 userID（验证 channel 归属），调用 `TaskSvc.ListTopics`�
 5. `plugin/skills/topic-research/SKILL.md` — 更新步骤 0
 6. `plugin/skills/seednote-research/SKILL.md` — 添加选题前检查步骤
 7. `plugin/skills/article/SKILL.md` — 更新步骤 1
-8. `plugin/skills/xls/SKILL.md` — 更新步骤 1
-9. `plugin/skills/seednote/SKILL.md` — 更新步骤 1 或步骤 3 前
+8. `plugin/skills/seednote/SKILL.md` — 更新步骤 1 或步骤 3 前
 
 ## 验证方式
 

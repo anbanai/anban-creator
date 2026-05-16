@@ -612,7 +612,7 @@ export default function TasksPage() {
               }} />
 
               {/* Generate video toggle — only for image-heavy types */}
-              {(watchedType === 'seednote' || watchedType === 'xls') && (
+              {watchedType === 'seednote' && (
                 <button
                   type="button"
                   onClick={() => setGenerateVideo(!generateVideo)}

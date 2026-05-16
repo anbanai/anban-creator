@@ -13,7 +13,7 @@ type ChannelConfig struct {
 type Channel struct {
 	ID          string        `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID      string        `gorm:"type:char(36);index;not null" json:"user_id"`
-	Platform    string        `gorm:"type:varchar(20);not null" json:"platform"` // article, xls, seednote
+	Platform    string        `gorm:"type:varchar(20);not null" json:"platform"` // article, seednote
 	Name        string        `gorm:"type:varchar(100);not null" json:"name"`
 	AvatarURL   string        `gorm:"type:varchar(500)" json:"avatar_url"`
 	ProfileURL  string        `gorm:"type:varchar(500)" json:"profile_url"`    // 平台主页链接

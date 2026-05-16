@@ -106,8 +106,6 @@ image_api:
     # Examples: "16:9", "3:4:4K", "9:16:2K"
     article_cover: "16:9" # 公众号封面（横版）
     article_content: "16:9" # 公众号正文配图
-    xls_cover: "3:4" # 小绿书封面（竖版）
-    xls_content: "3:4" # 小绿书正文配图
     seednote_cover: "3:4" # 种草笔记封面（竖版）
     seednote_content: "3:4" # 种草笔记正文配图
 
@@ -130,7 +128,6 @@ credits:
   invite_reward: 2048 # credits awarded to inviter when invitee registers (2^11)
   task_costs:
     article: 4000 # cost per article task
-    xls: 3200 # cost per xls task
     seednote: 3200 # cost per seednote task
   model_costs:
     image_gen:
@@ -184,10 +181,9 @@ claude:
   # Override with ANBAN_SERVER_CLAUDE_SANDBOX=true.
 
   # Per-task-type max turns for agent execution.
-  # Defaults: article=100, xls=50, seednote=60. Increase if agent hits max_turns errors.
+  # Defaults: article=100, seednote=60. Increase if agent hits max_turns errors.
   max_turns:
     article: 100
-    xls: 50
     seednote: 60
 
   # Docker executor settings (used when executor=docker).
