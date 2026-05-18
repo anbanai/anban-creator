@@ -74,19 +74,19 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		timelineHandler := handler.NewTimelineHandler(repo, &logger)
 
 		svcs = &Services{
-			Config:                  cfg,
-			Logger:                  &logger,
-			DB:                      db,
-			Repo:                    repo,
-			JWTService:              jwtSvc,
-			WSHub:                   wsHub,
-			AuthHandler:             authHandler,
-			PlanService:             planSvc,
-			TaskService:             taskSvc,
-			PlanHandler:             planHandler,
-			TaskHandler:             taskHandler,
+			Config:                   cfg,
+			Logger:                   &logger,
+			DB:                       db,
+			Repo:                     repo,
+			JWTService:               jwtSvc,
+			WSHub:                    wsHub,
+			AuthHandler:              authHandler,
+			PlanService:              planSvc,
+			TaskService:              taskSvc,
+			PlanHandler:              planHandler,
+			TaskHandler:              taskHandler,
 			SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
-			TimelineHandler:         timelineHandler,
+			TimelineHandler:          timelineHandler,
 		}
 	} else {
 		svcs = &Services{

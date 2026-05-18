@@ -6,8 +6,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/app/draft"
 	appconfig "github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/app/draft"
 	"github.com/royalrick/anbanwriter/server/agent"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"

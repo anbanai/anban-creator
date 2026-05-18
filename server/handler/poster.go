@@ -24,8 +24,8 @@ func NewPosterHandler(svc *service.PosterService, logger *zerolog.Logger) *Poste
 
 type createPosterRequest struct {
 	TemplateID      *string `json:"template_id"`
-	InputContent    any      `json:"input_content"`
-	StylePreference string   `json:"style_preference"`
+	InputContent    any     `json:"input_content"`
+	StylePreference string  `json:"style_preference"`
 }
 
 // Create handles POST /api/v1/posters.

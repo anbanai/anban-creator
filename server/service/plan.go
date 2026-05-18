@@ -62,7 +62,7 @@ func (s *PlanService) Create(
 		CronExpr:  cronExpr,
 		Prompt:    prompt,
 		Status:    model.PlanStatusActive,
-		NextRunAt:  nextRun,
+		NextRunAt: nextRun,
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {

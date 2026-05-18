@@ -19,12 +19,12 @@ func registerPublishingTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id": map[string]any{"type": "string", "description": "Channel ID (determines WeChat credentials)"},
-				"articles":   map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{
-					"title":     map[string]any{"type": "string", "description": "Article title"},
-					"author":    map[string]any{"type": "string", "description": "Author name (optional)"},
-					"digest":    map[string]any{"type": "string", "description": "Article digest/summary (optional)"},
-					"content":   map[string]any{"type": "string", "description": "HTML content of the article"},
-					"thumb_media_id": map[string]any{"type": "string", "description": "Cover image media ID (optional)"},
+				"articles": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{
+					"title":              map[string]any{"type": "string", "description": "Article title"},
+					"author":             map[string]any{"type": "string", "description": "Author name (optional)"},
+					"digest":             map[string]any{"type": "string", "description": "Article digest/summary (optional)"},
+					"content":            map[string]any{"type": "string", "description": "HTML content of the article"},
+					"thumb_media_id":     map[string]any{"type": "string", "description": "Cover image media ID (optional)"},
 					"content_source_url": map[string]any{"type": "string", "description": "Original article URL (optional)"},
 				}}, "description": "Array of articles to publish as a draft"},
 			},

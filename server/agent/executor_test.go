@@ -212,8 +212,8 @@ func getPlatformSizes(cfg *appconfig.Config, platform string) (cover, content st
 func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 	yamlCfg := &srvconfig.ImageAPIConfig{
 		Sizes: srvconfig.SizesConfig{
-			ArticleCover:   "16:9",
-			ArticleContent: "16:9",
+			ArticleCover:    "16:9",
+			ArticleContent:  "16:9",
 			SeednoteCover:   "3:4",
 			SeednoteContent: "3:4",
 		},
@@ -317,7 +317,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 
 func TestDefaultMaxTurns(t *testing.T) {
 	maxTurns := map[string]int{
-		"article": 100,
+		"article":  100,
 		"seednote": 60,
 	}
 	tests := []struct {
@@ -555,7 +555,7 @@ func TestBuildUserPrompt(t *testing.T) {
 			taskType:     "seednote",
 			topic:        "test topic",
 			agentName:    "",
-			wantContains:  []string{"Use the  agent", "test topic"},
+			wantContains: []string{"Use the  agent", "test topic"},
 		},
 	}
 
@@ -570,7 +570,6 @@ func TestBuildUserPrompt(t *testing.T) {
 		})
 	}
 }
-
 
 func TestLoadAgentDefinition(t *testing.T) {
 	t.Run("valid agent file", func(t *testing.T) {

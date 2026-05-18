@@ -58,7 +58,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 		UserID:    userID,
 		Type:      model.ScopeSeednote,
 		Status:    model.TaskStatusCompleted,
-		Prompt:     "Test topic 1",
+		Prompt:    "Test topic 1",
 		CreatedAt: time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC),
 	}
 	completedAt := time.Date(2026, 4, 1, 9, 15, 0, 0, time.UTC)
@@ -69,7 +69,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 		UserID:    userID,
 		Type:      model.ScopeArticle,
 		Status:    model.TaskStatusPending,
-		Prompt:     "Test topic 2",
+		Prompt:    "Test topic 2",
 		CreatedAt: time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC),
 	}
 
@@ -78,7 +78,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 		UserID:    "other-user",
 		Type:      model.ScopeSeednote,
 		Status:    model.TaskStatusCompleted,
-		Prompt:     "Other user task",
+		Prompt:    "Other user task",
 		CreatedAt: time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC),
 	}
 
@@ -97,7 +97,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 		Title:       "Scheduled Plan",
 		Description: "A scheduled plan",
 		CronExpr:    "0 9 * * 1-5",
-		Prompt:   "scheduled topic",
+		Prompt:      "scheduled topic",
 		Status:      model.PlanStatusActive,
 		NextRunAt:   &nextRun,
 	}
@@ -105,13 +105,13 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	// Create an active plan with next_run_at outside range.
 	nextRunFar := time.Date(2026, 5, 15, 9, 0, 0, 0, time.UTC)
 	plan2 := &model.Plan{
-		ID:          "plan-2",
-		UserID:      userID,
-		Type:        model.ScopeArticle,
-		Title:       "Far Future Plan",
-		CronExpr:    "0 9 * * 1-5",
-		Status:      model.PlanStatusActive,
-		NextRunAt:   &nextRunFar,
+		ID:        "plan-2",
+		UserID:    userID,
+		Type:      model.ScopeArticle,
+		Title:     "Far Future Plan",
+		CronExpr:  "0 9 * * 1-5",
+		Status:    model.PlanStatusActive,
+		NextRunAt: &nextRunFar,
 	}
 
 	// Create a paused plan (should not appear in timeline).

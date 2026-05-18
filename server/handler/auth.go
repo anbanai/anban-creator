@@ -110,7 +110,7 @@ type changePasswordRequest struct {
 }
 
 type generateQRCodeRequest struct {
-	Width     int            `json:"width,omitempty"`
+	Width     int `json:"width,omitempty"`
 	LineColor *struct {
 		R int `json:"r"`
 		G int `json:"g"`
@@ -907,9 +907,9 @@ func (h *AuthHandler) QRLoginCallback(c fiber.Ctx) error {
 			return Error(c, fiber.StatusInternalServerError, "internal error")
 		}
 		user = &model.User{
-			ID:      uuid.New().String(),
-			OpenID:  wxSession.OpenID,
-			UnionID: wxSession.UnionID,
+			ID:         uuid.New().String(),
+			OpenID:     wxSession.OpenID,
+			UnionID:    wxSession.UnionID,
 			InviteCode: inviteCode,
 		}
 		if req.Nickname != "" {

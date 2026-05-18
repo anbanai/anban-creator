@@ -40,12 +40,12 @@ type User struct {
 
 // InteractInfo holds engagement metrics for a note.
 type InteractInfo struct {
-	Liked         bool   `json:"liked"`
-	LikedCount    string `json:"likedCount"`
-	SharedCount   string `json:"sharedCount"`
-	CommentCount  string `json:"commentCount"`
+	Liked          bool   `json:"liked"`
+	LikedCount     string `json:"likedCount"`
+	SharedCount    string `json:"sharedCount"`
+	CommentCount   string `json:"commentCount"`
 	CollectedCount string `json:"collectedCount"`
-	Collected     bool   `json:"collected"`
+	Collected      bool   `json:"collected"`
 }
 
 // Cover holds cover image information.
@@ -78,15 +78,15 @@ type FeedDetail struct {
 
 // FeedNote holds the complete note data from the detail page.
 type FeedNote struct {
-	NoteID       string       `json:"noteId"`
-	XsecToken    string       `json:"xsecToken"`
-	Title        string       `json:"title"`
-	Desc         string       `json:"desc"`
-	Type         string       `json:"type"`
-	Time         int64        `json:"time"`
-	IPLocation   string       `json:"ipLocation"`
-	User         User         `json:"user"`
-	InteractInfo InteractInfo `json:"interactInfo"`
+	NoteID       string        `json:"noteId"`
+	XsecToken    string        `json:"xsecToken"`
+	Title        string        `json:"title"`
+	Desc         string        `json:"desc"`
+	Type         string        `json:"type"`
+	Time         int64         `json:"time"`
+	IPLocation   string        `json:"ipLocation"`
+	User         User          `json:"user"`
+	InteractInfo InteractInfo  `json:"interactInfo"`
 	ImageList    []DetailImage `json:"imageList"`
 }
 
@@ -142,8 +142,8 @@ type UserBasicInfo struct {
 
 // UserInteractions holds follower/following/like counts.
 type UserInteractions struct {
-	Type  string `json:"type"`  // follows, fans, interaction
-	Name  string `json:"name"`  // 关注, 粉丝, 获赞与收藏
+	Type  string `json:"type"` // follows, fans, interaction
+	Name  string `json:"name"` // 关注, 粉丝, 获赞与收藏
 	Count string `json:"count"`
 }
 
@@ -151,23 +151,23 @@ type UserInteractions struct {
 
 // FeedDetailRequest is the request body for /api/v1/feeds/detail.
 type FeedDetailRequest struct {
-	FeedID          string              `json:"feed_id"`
-	XsecToken       string              `json:"xsec_token"`
-	LoadAllComments bool                `json:"load_all_comments,omitempty"`
-	CommentConfig   *CommentLoadConfig  `json:"comment_config,omitempty,omitzero"`
+	FeedID          string             `json:"feed_id"`
+	XsecToken       string             `json:"xsec_token"`
+	LoadAllComments bool               `json:"load_all_comments,omitempty"`
+	CommentConfig   *CommentLoadConfig `json:"comment_config,omitempty,omitzero"`
 }
 
 // CommentLoadConfig controls comment loading behavior.
 type CommentLoadConfig struct {
-	ClickMoreReplies  bool   `json:"click_more_replies,omitempty"`
-	MaxRepliesThreshold int `json:"max_replies_threshold,omitempty"`
-	MaxCommentItems   int    `json:"max_comment_items,omitempty"`
-	ScrollSpeed       string `json:"scroll_speed,omitempty"`
+	ClickMoreReplies    bool   `json:"click_more_replies,omitempty"`
+	MaxRepliesThreshold int    `json:"max_replies_threshold,omitempty"`
+	MaxCommentItems     int    `json:"max_comment_items,omitempty"`
+	ScrollSpeed         string `json:"scroll_speed,omitempty"`
 }
 
 // SearchRequest is the request body for /api/v1/feeds/search.
 type SearchRequest struct {
-	Keyword string       `json:"keyword"`
+	Keyword string        `json:"keyword"`
 	Filters SearchFilters `json:"filters,omitempty"`
 }
 
@@ -190,14 +190,14 @@ type UserProfileRequest struct {
 
 // LoginStatusResponse is the response from /api/v1/login/status.
 type LoginStatusResponse struct {
-	Success bool   `json:"success"`
-	LoggedIn bool  `json:"logged_in"`
-	Message string `json:"message"`
+	Success  bool   `json:"success"`
+	LoggedIn bool   `json:"logged_in"`
+	Message  string `json:"message"`
 }
 
 // QRCodeResponse is the response from /api/v1/login/qrcode.
 type QRCodeResponse struct {
-	Success bool   `json:"success"`
+	Success bool `json:"success"`
 	Data    struct {
 		QRCodeImage string `json:"qrcode_image"`
 	} `json:"data"`

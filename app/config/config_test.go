@@ -513,10 +513,10 @@ func TestMergeImageAPI(t *testing.T) {
 
 func TestSeednoteImageSize(t *testing.T) {
 	tests := []struct {
-		name        string
+		name         string
 		hasSeednote  bool
 		seednoteSize string
-		want        string
+		want         string
 	}{
 		{"nil seednote returns default", false, "", DefaultSeednoteImageSize},
 		{"seednote with size returns it", true, "3:4:2K", "3:4:2K"},
@@ -540,10 +540,10 @@ func TestSeednoteImageSize(t *testing.T) {
 
 func TestSeednoteImageCount(t *testing.T) {
 	tests := []struct {
-		name         string
+		name          string
 		hasSeednote   bool
 		seednoteCount int
-		want         int
+		want          int
 	}{
 		{"nil seednote returns default", false, 0, DefaultSeednoteImageCount},
 		{"seednote with count returns it", true, 8, 8},

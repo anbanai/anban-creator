@@ -1,8 +1,8 @@
 package storage
 
 import (
-	"github.com/rs/zerolog"
 	"github.com/royalrick/anbanwriter/server/config"
+	"github.com/rs/zerolog"
 )
 
 // NewProvider creates a storage Provider based on the configuration.

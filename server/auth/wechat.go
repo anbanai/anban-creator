@@ -33,8 +33,8 @@ type WeChatService struct {
 	client    *http.Client
 
 	// access_token cache
-	tokenMu    sync.Mutex
-	tokenValue string
+	tokenMu     sync.Mutex
+	tokenValue  string
 	tokenExpiry time.Time
 }
 

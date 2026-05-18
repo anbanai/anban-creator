@@ -14,9 +14,9 @@ import (
 var ip2regionFS embed.FS
 
 var (
-	geoOnce    sync.Once
+	geoOnce     sync.Once
 	geoSearcher *xdb.Searcher
-	geoErr     error
+	geoErr      error
 )
 
 // InitGeoCheck loads the ip2region database eagerly at startup.

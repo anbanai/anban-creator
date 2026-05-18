@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"time"
 
-	mail "github.com/wneessen/go-mail"
 	"github.com/redis/go-redis/v9"
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/rs/zerolog"
+	mail "github.com/wneessen/go-mail"
 )
 
 // UserError is an error intended to be shown to the end user (e.g. validation failures).

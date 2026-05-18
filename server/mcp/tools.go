@@ -9,22 +9,22 @@ import (
 
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/resources"
-	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/seednote"
+	"github.com/royalrick/anbanwriter/server/service"
 )
 
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ChannelSvc    *service.ChannelService
-	TaskSvc       *service.TaskService
-	CreditSvc     *service.CreditService
-	PlanSvc       *service.PlanService
-	ImageSvc      *service.ImageService
-	WritingSvc    *service.WritingService
-	PublishingSvc *service.PublishingService
-	WorkspaceSvc  *service.WorkspaceService
-	TemplateSvc   *service.TemplateService
-	SeednoteClient     *seednote.Client
+	ChannelSvc     *service.ChannelService
+	TaskSvc        *service.TaskService
+	CreditSvc      *service.CreditService
+	PlanSvc        *service.PlanService
+	ImageSvc       *service.ImageService
+	WritingSvc     *service.WritingService
+	PublishingSvc  *service.PublishingService
+	WorkspaceSvc   *service.WorkspaceService
+	TemplateSvc    *service.TemplateService
+	SeednoteClient *seednote.Client
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -284,7 +284,7 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	case "article":
 		info["style"] = ch.Style
 	case "seednote":
-			// For seednote, style is a visual/image style description used for image prompt generation.
+		// For seednote, style is a visual/image style description used for image prompt generation.
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
 		}
@@ -387,7 +387,7 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 		"id":            task.ID,
 		"type":          task.Type,
 		"status":        task.Status,
-		"prompt":         task.Prompt,
+		"prompt":        task.Prompt,
 		"progress_log":  task.ProgressLog,
 		"result":        result,
 		"error_message": task.ErrorMessage,

@@ -457,4 +457,3 @@ func (s *ImageService) downloadURLToTempFile(url string) (string, error) {
 
 	return localPath, nil
 }
-

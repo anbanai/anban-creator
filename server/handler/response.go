@@ -20,12 +20,12 @@ func Success(c fiber.Ctx, data interface{}) error {
 
 // Error returns a JSON error response with the given HTTP status and message.
 func Error(c fiber.Ctx, status int, msg string) error {
-	return c.Status(status).JSON(Response{Code: status*100, Msg: msg})
+	return c.Status(status).JSON(Response{Code: status * 100, Msg: msg})
 }
 
 // Errorf returns a JSON error response with a formatted message.
 func Errorf(c fiber.Ctx, status int, format string, args ...interface{}) error {
-	return c.Status(status).JSON(Response{Code: status*100, Msg: fmt.Sprintf(format, args...)})
+	return c.Status(status).JSON(Response{Code: status * 100, Msg: fmt.Sprintf(format, args...)})
 }
 
 // Forbidden returns a 403 JSON error response.

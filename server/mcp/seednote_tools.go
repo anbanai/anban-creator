@@ -16,9 +16,9 @@ func registerSeednoteTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"keyword": map[string]any{"type": "string", "description": "搜索关键词"},
-				"sort_by": map[string]any{"type": "string", "description": "排序依据: 综合|最新|最多点赞|最多评论|最多收藏"},
-				"note_type": map[string]any{"type": "string", "description": "笔记类型: 不限|视频|图文"},
+				"keyword":      map[string]any{"type": "string", "description": "搜索关键词"},
+				"sort_by":      map[string]any{"type": "string", "description": "排序依据: 综合|最新|最多点赞|最多评论|最多收藏"},
+				"note_type":    map[string]any{"type": "string", "description": "笔记类型: 不限|视频|图文"},
 				"publish_time": map[string]any{"type": "string", "description": "发布时间: 不限|一天内|一周内|半年内"},
 			},
 			"required": []any{"keyword"},
@@ -31,8 +31,8 @@ func registerSeednoteTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"feed_id": map[string]any{"type": "string", "description": "笔记ID"},
-				"xsec_token": map[string]any{"type": "string", "description": "安全令牌"},
+				"feed_id":           map[string]any{"type": "string", "description": "笔记ID"},
+				"xsec_token":        map[string]any{"type": "string", "description": "安全令牌"},
 				"load_all_comments": map[string]any{"type": "boolean", "description": "是否加载所有评论"},
 			},
 			"required": []any{"feed_id", "xsec_token"},
@@ -74,7 +74,7 @@ func registerSeednoteTools(server *mcp.Server) {
 func seednoteUnavailable() (*mcp.CallToolResult, error) {
 	return textResult(map[string]any{
 		"available": false,
-		"message":  "Seednote sidecar 未配置或不可用",
+		"message":   "Seednote sidecar 未配置或不可用",
 	})
 }
 
@@ -110,11 +110,11 @@ func searchSeednoteFeedsHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		item := map[string]any{
 			"id": f.ID, "title": f.NoteCard.DisplayTitle,
 			"author": f.NoteCard.User.Nickname, "author_id": f.NoteCard.User.UserID,
-			"like_count": f.NoteCard.InteractInfo.LikedCount,
+			"like_count":    f.NoteCard.InteractInfo.LikedCount,
 			"collect_count": f.NoteCard.InteractInfo.CollectedCount,
 			"comment_count": f.NoteCard.InteractInfo.CommentCount,
-			"share_count": f.NoteCard.InteractInfo.SharedCount,
-			"type": f.NoteCard.Type, "xsec_token": f.XsecToken,
+			"share_count":   f.NoteCard.InteractInfo.SharedCount,
+			"type":          f.NoteCard.Type, "xsec_token": f.XsecToken,
 		}
 		if f.NoteCard.Cover.URLDefault != "" {
 			item["cover_url"] = f.NoteCard.Cover.URLDefault
@@ -154,17 +154,17 @@ func getSeednoteFeedDetailHandler(ctx context.Context, req *mcp.CallToolRequest)
 		"note_id": detail.Note.NoteID, "title": detail.Note.Title,
 		"desc": detail.Note.Desc, "type": detail.Note.Type,
 		"author": detail.Note.User.Nickname, "author_id": detail.Note.User.UserID,
-		"like_count": detail.Note.InteractInfo.LikedCount,
+		"like_count":    detail.Note.InteractInfo.LikedCount,
 		"collect_count": detail.Note.InteractInfo.CollectedCount,
 		"comment_count": detail.Note.InteractInfo.CommentCount,
-		"share_count": detail.Note.InteractInfo.SharedCount,
-		"image_urls": extractDetailImageURLs(detail.Note.ImageList),
+		"share_count":   detail.Note.InteractInfo.SharedCount,
+		"image_urls":    extractDetailImageURLs(detail.Note.ImageList),
 	}
 
 	result := map[string]any{
-		"note":               note,
-		"comments_count":     len(detail.Comments.List),
-		"has_more_comments":  detail.Comments.HasMore,
+		"note":              note,
+		"comments_count":    len(detail.Comments.List),
+		"has_more_comments": detail.Comments.HasMore,
 	}
 
 	if len(detail.Comments.List) > 0 {
@@ -243,11 +243,11 @@ func getSeednoteUserProfileHandler(ctx context.Context, req *mcp.CallToolRequest
 	for _, f := range profile.Feeds {
 		feed := map[string]any{
 			"id": f.ID, "title": f.NoteCard.DisplayTitle,
-			"author": f.NoteCard.User.Nickname,
-			"like_count": f.NoteCard.InteractInfo.LikedCount,
+			"author":        f.NoteCard.User.Nickname,
+			"like_count":    f.NoteCard.InteractInfo.LikedCount,
 			"collect_count": f.NoteCard.InteractInfo.CollectedCount,
 			"comment_count": f.NoteCard.InteractInfo.CommentCount,
-			"xsec_token": f.XsecToken,
+			"xsec_token":    f.XsecToken,
 		}
 		if f.NoteCard.Cover.URLDefault != "" {
 			feed["cover_url"] = f.NoteCard.Cover.URLDefault
@@ -256,14 +256,14 @@ func getSeednoteUserProfileHandler(ctx context.Context, req *mcp.CallToolRequest
 	}
 
 	return textResult(map[string]any{
-		"nickname": profile.UserBasicInfo.Nickname,
-		"red_id": profile.UserBasicInfo.RedID,
-		"desc": profile.UserBasicInfo.Desc,
-		"avatar_url": profile.UserBasicInfo.Avatar,
-		"ip_location": profile.UserBasicInfo.IPLocation,
+		"nickname":     profile.UserBasicInfo.Nickname,
+		"red_id":       profile.UserBasicInfo.RedID,
+		"desc":         profile.UserBasicInfo.Desc,
+		"avatar_url":   profile.UserBasicInfo.Avatar,
+		"ip_location":  profile.UserBasicInfo.IPLocation,
 		"interactions": interactions,
-		"feeds_count": len(feeds),
-		"feeds": feeds,
+		"feeds_count":  len(feeds),
+		"feeds":        feeds,
 	})
 }
 

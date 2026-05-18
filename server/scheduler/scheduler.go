@@ -14,12 +14,12 @@ import (
 
 // Task type constants for Asynq.
 const (
-	TypeContentGenerate       = "content:generate"
-	TypePlanTrigger           = "plan:trigger"
-	TypeTaskCleanup           = "task:cleanup"
+	TypeContentGenerate        = "content:generate"
+	TypePlanTrigger            = "plan:trigger"
+	TypeTaskCleanup            = "task:cleanup"
 	TypeSeednoteDiscover       = "seednote:discover"
 	TypeSeednoteCaptureMetrics = "seednote:capture_metrics"
-	TypeViralAnalysis         = "viral:analyze"
+	TypeViralAnalysis          = "viral:analyze"
 )
 
 // TaskEnqueuer abstracts the async task enqueue mechanism.

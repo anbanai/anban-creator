@@ -50,11 +50,11 @@ func setupTestPlanService(t *testing.T) (*PlanService, repository.Repository) {
 func createTestChannel(t *testing.T, repo repository.Repository, userID, platform string) string {
 	t.Helper()
 	ch := &model.Channel{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		Platform:  platform,
-		Name:      "Test Channel " + platform,
-		Status:    model.ChannelStatusActive,
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: platform,
+		Name:     "Test Channel " + platform,
+		Status:   model.ChannelStatusActive,
 	}
 	if err := repo.Channels().Create(context.Background(), ch); err != nil {
 		t.Fatalf("create test channel: %v", err)
@@ -71,11 +71,11 @@ func TestPlanService_Create(t *testing.T) {
 	chID2 := createTestChannel(t, repo, "user-1", model.PlatformArticle)
 
 	tests := []struct {
-		name       string
-		channelID  string
-		cronExpr   string
-		wantErr    bool
-		errSubstr  string
+		name      string
+		channelID string
+		cronExpr  string
+		wantErr   bool
+		errSubstr string
 	}{
 		{
 			name:      "valid plan",

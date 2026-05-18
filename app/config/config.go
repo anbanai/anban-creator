@@ -41,7 +41,6 @@ const DefaultSeednoteImageSize = "3:4:1K"
 // DefaultSeednoteImageCount 默认种草笔记图片数量
 const DefaultSeednoteImageCount = 6
 
-
 // VolcengineConfig 火山方舟 Seedream 高级选项（仅 settings.json 配置，不暴露到 agent/skill 层）
 type VolcengineConfig struct {
 	Seed                      *int64   `json:"seed,omitempty" yaml:"seed,omitempty"`
@@ -111,7 +110,6 @@ type ArticleConfig struct {
 	Content ImageSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
-
 // WechatConfig 微信公众号配置
 type WechatConfig struct {
 	AppID   string        `json:"appid" yaml:"appid"`
@@ -127,14 +125,13 @@ type SeednoteConfig struct {
 	Content CountedImageSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
-
 // Config 应用配置（嵌套结构，直接对应 JSON 文件）
 type Config struct {
 	Name        string   `json:"name,omitempty" yaml:"name,omitempty"`
 	Keywords    []string `json:"keywords,omitempty" yaml:"keywords,omitempty"`
 	Positioning string   `json:"positioning,omitempty" yaml:"positioning,omitempty"`
 
-	Wechat  WechatConfig    `json:"wechat,omitempty" yaml:"wechat,omitempty"`
+	Wechat   WechatConfig    `json:"wechat,omitempty" yaml:"wechat,omitempty"`
 	Seednote *SeednoteConfig `json:"seednote,omitempty" yaml:"seednote,omitempty"`
 
 	configPath string

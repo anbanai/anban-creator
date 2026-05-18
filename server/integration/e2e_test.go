@@ -41,7 +41,7 @@ type apiResponse struct {
 
 type noopEnqueuer struct{}
 
-func (n *noopEnqueuer) Enqueue(taskType string, payload []byte) error      { return nil }
+func (n *noopEnqueuer) Enqueue(taskType string, payload []byte) error { return nil }
 func (n *noopEnqueuer) EnqueueIn(taskType string, payload []byte, delay time.Duration) error {
 	return nil
 }
@@ -71,7 +71,6 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	); err != nil {
 		t.Fatalf("failed to auto-migrate: %v", err)
 	}
-
 
 	closeFunc := func() {
 		sqlDB, _ := db.DB()
@@ -195,7 +194,7 @@ func TestE2E_FullUserFlow(t *testing.T) {
 	// Step 2: Create a manual task.
 	taskBody, _ := json.Marshal(map[string]string{
 		"channel_id": testChannel.ID,
-		"prompt":      "TestTopic",
+		"prompt":     "TestTopic",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -323,9 +322,9 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 
 	// Step 1: Create a plan.
 	planBody, _ := json.Marshal(map[string]string{
-		"channel_id":  testChannel.ID,
-		"cron_expr":   "0 9 * * *",
-		"prompt":      "spring fashion",
+		"channel_id": testChannel.ID,
+		"cron_expr":  "0 9 * * *",
+		"prompt":     "spring fashion",
 	})
 	createReq := httptest.NewRequest("POST", "/api/v1/plans", strings.NewReader(string(planBody)))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -555,7 +554,7 @@ func TestE2E_TaskOwnershipIsolation(t *testing.T) {
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
 		"channel_id": testChannel.ID,
-		"prompt":      "User1 Article",
+		"prompt":     "User1 Article",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")
@@ -642,7 +641,7 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 	planBody, _ := json.Marshal(map[string]string{
 		"channel_id": testChannel.ID,
 		"cron_expr":  "0 10 * * *",
-		"prompt": "daily inspiration",
+		"prompt":     "daily inspiration",
 	})
 	planReq := httptest.NewRequest("POST", "/api/v1/plans", strings.NewReader(string(planBody)))
 	planReq.Header.Set("Content-Type", "application/json")
@@ -809,7 +808,7 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
 		"channel_id": testChannel.ID,
-		"prompt":      "Runner1 Task",
+		"prompt":     "Runner1 Task",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
 	taskReq.Header.Set("Content-Type", "application/json")

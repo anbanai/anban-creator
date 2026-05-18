@@ -71,7 +71,7 @@ func NewProcessor(cfg *config.Config, apiCfg *config.ImageAPI, log *zerolog.Logg
 func (p *Processor) wechatUpload(filePath string) (*wechat.UploadMaterialResult, error) {
 	if p.ws == nil {
 		return nil, &ProcessorError{
-			Message: "wechat credentials not configured, cannot upload image",
+			Message:  "wechat credentials not configured, cannot upload image",
 			HintText: "请先在频道配置中填写 WeChat App ID 和 Secret",
 		}
 	}

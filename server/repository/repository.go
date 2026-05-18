@@ -149,22 +149,22 @@ type SeednoteMetricSnapshotRepository interface {
 // -----------------------------------------------------------------------------
 
 type repository struct {
-	db                     *gorm.DB
-	users                  UserRepository
-	sessions               SessionRepository
-	plans                  PlanRepository
-	tasks                  TaskRepository
-	files                  TaskFileRepository
-	channels               ChannelRepository
-	credits                CreditRepository
-	apiKeys                APIKeyRepository
-	feedbacks              FeedbackRepository
-	modelConfigs           ModelConfigRepository
+	db                      *gorm.DB
+	users                   UserRepository
+	sessions                SessionRepository
+	plans                   PlanRepository
+	tasks                   TaskRepository
+	files                   TaskFileRepository
+	channels                ChannelRepository
+	credits                 CreditRepository
+	apiKeys                 APIKeyRepository
+	feedbacks               FeedbackRepository
+	modelConfigs            ModelConfigRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
-	templates              TemplateRepository
-	viralAnalyses          ViralAnalysisRepository
-	posterTasks            PosterTaskRepository
+	templates               TemplateRepository
+	viralAnalyses           ViralAnalysisRepository
+	posterTasks             PosterTaskRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -186,42 +186,42 @@ func New(db *gorm.DB) Repository {
 	posterTasks := newPosterTaskRepository(db)
 
 	return &repository{
-		db:                     db,
-		users:                  users,
-		sessions:               sessions,
-		plans:                  plans,
-		tasks:                  tasks,
-		files:                  files,
-		channels:               channels,
-		credits:                credits,
-		apiKeys:                apiKeys,
-		feedbacks:              feedbacks,
-		modelConfigs:           modelConfigs,
+		db:                      db,
+		users:                   users,
+		sessions:                sessions,
+		plans:                   plans,
+		tasks:                   tasks,
+		files:                   files,
+		channels:                channels,
+		credits:                 credits,
+		apiKeys:                 apiKeys,
+		feedbacks:               feedbacks,
+		modelConfigs:            modelConfigs,
 		seednoteTrackings:       seednoteTrackings,
 		seednoteMetricSnapshots: seednoteMetricSnapshots,
-		templates:              templates,
-		viralAnalyses:          viralAnalyses,
-		posterTasks:            posterTasks,
+		templates:               templates,
+		viralAnalyses:           viralAnalyses,
+		posterTasks:             posterTasks,
 	}
 }
 
-func (r *repository) Users() UserRepository                       { return r.users }
-func (r *repository) Sessions() SessionRepository                 { return r.sessions }
-func (r *repository) Plans() PlanRepository                       { return r.plans }
-func (r *repository) Tasks() TaskRepository                       { return r.tasks }
-func (r *repository) TaskFiles() TaskFileRepository               { return r.files }
-func (r *repository) Channels() ChannelRepository                 { return r.channels }
-func (r *repository) Credits() CreditRepository                   { return r.credits }
-func (r *repository) APIKeys() APIKeyRepository                   { return r.apiKeys }
-func (r *repository) Feedbacks() FeedbackRepository               { return r.feedbacks }
-func (r *repository) ModelConfigs() ModelConfigRepository         { return r.modelConfigs }
+func (r *repository) Users() UserRepository                         { return r.users }
+func (r *repository) Sessions() SessionRepository                   { return r.sessions }
+func (r *repository) Plans() PlanRepository                         { return r.plans }
+func (r *repository) Tasks() TaskRepository                         { return r.tasks }
+func (r *repository) TaskFiles() TaskFileRepository                 { return r.files }
+func (r *repository) Channels() ChannelRepository                   { return r.channels }
+func (r *repository) Credits() CreditRepository                     { return r.credits }
+func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
+func (r *repository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
+func (r *repository) ModelConfigs() ModelConfigRepository           { return r.modelConfigs }
 func (r *repository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
 func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
 }
-func (r *repository) Templates() TemplateRepository              { return r.templates }
-func (r *repository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
-func (r *repository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
+func (r *repository) Templates() TemplateRepository          { return r.templates }
+func (r *repository) ViralAnalyses() ViralAnalysisRepository { return r.viralAnalyses }
+func (r *repository) PosterTasks() PosterTaskRepository      { return r.posterTasks }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -247,62 +247,62 @@ func (r *repository) Close() error {
 // -----------------------------------------------------------------------------
 
 type txRepository struct {
-	db                     *gorm.DB
-	users                  UserRepository
-	sessions               SessionRepository
-	plans                  PlanRepository
-	tasks                  TaskRepository
-	files                  TaskFileRepository
-	channels               ChannelRepository
-	credits                CreditRepository
-	apiKeys                APIKeyRepository
-	feedbacks              FeedbackRepository
-	modelConfigs           ModelConfigRepository
+	db                      *gorm.DB
+	users                   UserRepository
+	sessions                SessionRepository
+	plans                   PlanRepository
+	tasks                   TaskRepository
+	files                   TaskFileRepository
+	channels                ChannelRepository
+	credits                 CreditRepository
+	apiKeys                 APIKeyRepository
+	feedbacks               FeedbackRepository
+	modelConfigs            ModelConfigRepository
 	seednoteTrackings       SeednoteTrackingRepository
 	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
-	templates              TemplateRepository
-	viralAnalyses          ViralAnalysisRepository
-	posterTasks            PosterTaskRepository
+	templates               TemplateRepository
+	viralAnalyses           ViralAnalysisRepository
+	posterTasks             PosterTaskRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
 	return &txRepository{
-		db:                     tx,
-		users:                  newUserRepository(tx),
-		sessions:               newSessionRepository(tx),
-		plans:                  newPlanRepository(tx),
-		tasks:                  newTaskRepository(tx),
-		files:                  newTaskFileRepository(tx),
-		channels:               newChannelRepository(tx),
-		credits:                newCreditRepository(tx),
-		apiKeys:                newAPIKeyRepository(tx),
-		feedbacks:              newFeedbackRepository(tx),
-		modelConfigs:           newModelConfigRepository(tx),
+		db:                      tx,
+		users:                   newUserRepository(tx),
+		sessions:                newSessionRepository(tx),
+		plans:                   newPlanRepository(tx),
+		tasks:                   newTaskRepository(tx),
+		files:                   newTaskFileRepository(tx),
+		channels:                newChannelRepository(tx),
+		credits:                 newCreditRepository(tx),
+		apiKeys:                 newAPIKeyRepository(tx),
+		feedbacks:               newFeedbackRepository(tx),
+		modelConfigs:            newModelConfigRepository(tx),
 		seednoteTrackings:       newSeednoteTrackingRepository(tx),
 		seednoteMetricSnapshots: newSeednoteMetricSnapshotRepository(tx),
-		templates:              newTemplateRepository(tx),
-		viralAnalyses:          newViralAnalysisRepository(tx),
-		posterTasks:            newPosterTaskRepository(tx),
+		templates:               newTemplateRepository(tx),
+		viralAnalyses:           newViralAnalysisRepository(tx),
+		posterTasks:             newPosterTaskRepository(tx),
 	}
 }
 
-func (r *txRepository) Users() UserRepository                       { return r.users }
-func (r *txRepository) Sessions() SessionRepository                 { return r.sessions }
-func (r *txRepository) Plans() PlanRepository                       { return r.plans }
-func (r *txRepository) Tasks() TaskRepository                       { return r.tasks }
-func (r *txRepository) TaskFiles() TaskFileRepository               { return r.files }
-func (r *txRepository) Channels() ChannelRepository                 { return r.channels }
-func (r *txRepository) Credits() CreditRepository                   { return r.credits }
-func (r *txRepository) APIKeys() APIKeyRepository                   { return r.apiKeys }
-func (r *txRepository) Feedbacks() FeedbackRepository               { return r.feedbacks }
-func (r *txRepository) ModelConfigs() ModelConfigRepository         { return r.modelConfigs }
+func (r *txRepository) Users() UserRepository                         { return r.users }
+func (r *txRepository) Sessions() SessionRepository                   { return r.sessions }
+func (r *txRepository) Plans() PlanRepository                         { return r.plans }
+func (r *txRepository) Tasks() TaskRepository                         { return r.tasks }
+func (r *txRepository) TaskFiles() TaskFileRepository                 { return r.files }
+func (r *txRepository) Channels() ChannelRepository                   { return r.channels }
+func (r *txRepository) Credits() CreditRepository                     { return r.credits }
+func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }
+func (r *txRepository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
+func (r *txRepository) ModelConfigs() ModelConfigRepository           { return r.modelConfigs }
 func (r *txRepository) SeednoteTrackings() SeednoteTrackingRepository { return r.seednoteTrackings }
 func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
 }
-func (r *txRepository) Templates() TemplateRepository              { return r.templates }
-func (r *txRepository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
-func (r *txRepository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
+func (r *txRepository) Templates() TemplateRepository          { return r.templates }
+func (r *txRepository) ViralAnalyses() ViralAnalysisRepository { return r.viralAnalyses }
+func (r *txRepository) PosterTasks() PosterTaskRepository      { return r.posterTasks }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

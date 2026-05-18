@@ -13,15 +13,15 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hibiken/asynq v0.26.0
-	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260509115213-59cf54710765
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260516030638-f4fcd5e900a9
 	github.com/modelcontextprotocol/go-sdk v1.6.0
-	github.com/openai/openai-go/v3 v3.35.0
+	github.com/openai/openai-go/v3 v3.36.0
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.1
-	github.com/severity1/claude-agent-sdk-go v0.6.18
+	github.com/severity1/claude-agent-sdk-go v0.6.20
 	github.com/silenceper/wechat/v2 v2.1.13
-	github.com/volcengine/volcengine-go-sdk v1.2.27
+	github.com/volcengine/volcengine-go-sdk v1.2.28
 	github.com/wneessen/go-mail v0.7.3
 	golang.org/x/crypto v0.51.0
 	golang.org/x/net v0.54.0
@@ -92,7 +92,7 @@ require (
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.71.0 // indirect
-	github.com/volcengine/volc-sdk-golang v1.0.246 // indirect
+	github.com/volcengine/volc-sdk-golang v1.0.247 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 // indirect
@@ -109,7 +109,7 @@ require (
 	google.golang.org/api v0.279.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260511170946-3700d4141b60 // indirect
-	google.golang.org/grpc v1.81.0 // indirect
+	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect

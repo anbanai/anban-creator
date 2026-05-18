@@ -162,11 +162,11 @@ func TestStyleManager_ValidateStyle(t *testing.T) {
 func TestStyleManager_ExportAndReload(t *testing.T) {
 	dir := t.TempDir()
 	style := &WriterStyle{
-		Name:         "Export Test",
-		EnglishName:  "export-test",
-		Category:     "测试",
-		Description:  "Export test",
-		Version:      "2.0",
+		Name:          "Export Test",
+		EnglishName:   "export-test",
+		Category:      "测试",
+		Description:   "Export test",
+		Version:       "2.0",
 		WritingPrompt: "Write exported",
 	}
 

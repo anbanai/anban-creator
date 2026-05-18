@@ -40,8 +40,8 @@ func NewGeminiProvider(apiCfg *config.ImageAPI) (*GeminiProvider, error) {
 	// 创建 Gemini 客户端
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiCfg.Key,
-		Backend: genai.BackendGeminiAPI,
+		APIKey:     apiCfg.Key,
+		Backend:    genai.BackendGeminiAPI,
 		HTTPClient: &http.Client{Timeout: timeout},
 	})
 	if err != nil {

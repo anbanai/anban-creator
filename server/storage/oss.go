@@ -9,18 +9,18 @@ import (
 	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
-	"github.com/rs/zerolog"
 	"github.com/royalrick/anbanwriter/server/config"
+	"github.com/rs/zerolog"
 )
 
 // OSSProvider implements Provider using Alibaba Cloud OSS.
 type OSSProvider struct {
-	client      *oss.Client
-	bucket      *oss.Bucket
-	endpoint    string
-	bucketName  string
+	client       *oss.Client
+	bucket       *oss.Bucket
+	endpoint     string
+	bucketName   string
 	customDomain string
-	logger      *zerolog.Logger
+	logger       *zerolog.Logger
 }
 
 // NewOSSProvider creates a new OSSProvider by validating the config and

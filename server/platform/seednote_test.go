@@ -114,11 +114,11 @@ func setupMockSeednoteServer() (*httptest.Server, *seednote.Client) {
 			Success: true,
 			Data: seednote.FeedDetail{
 				Note: seednote.FeedNote{
-					NoteID: "note123",
-					Title:  "测试笔记标题",
-					Desc:   "这是一篇关于 #AI写作 的笔记内容",
-					Type:   "normal",
-					User:   seednote.User{UserID: "u1", Nickname: "测试作者"},
+					NoteID:       "note123",
+					Title:        "测试笔记标题",
+					Desc:         "这是一篇关于 #AI写作 的笔记内容",
+					Type:         "normal",
+					User:         seednote.User{UserID: "u1", Nickname: "测试作者"},
 					InteractInfo: seednote.InteractInfo{LikedCount: "500", CollectedCount: "200", CommentCount: "50", SharedCount: "30"},
 					ImageList: []seednote.DetailImage{
 						{Width: 1080, Height: 1440, URLDefault: "https://example.com/img1.jpg"},
@@ -245,7 +245,7 @@ func TestResolveProfileURL(t *testing.T) {
 	}{
 		{name: "standard", url: "https://www.xiaohongshu.com/user/profile/abc123?xsec_token=token", wantUserID: "abc123", wantToken: "token"},
 		{name: "no token", url: "https://www.xiaohongshu.com/user/profile/abc123", wantUserID: "abc123", wantToken: ""},
-	{name: "no user segment", url: "https://example.com/", wantErr: true},
+		{name: "no user segment", url: "https://example.com/", wantErr: true},
 		{name: "empty", url: "", wantErr: true},
 	}
 	for _, tt := range tests {

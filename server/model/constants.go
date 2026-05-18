@@ -25,7 +25,7 @@ const (
 
 // Config scope constants.
 const (
-	ScopeArticle = "article"
+	ScopeArticle  = "article"
 	ScopeSeednote = "seednote"
 )
 
@@ -54,7 +54,7 @@ const (
 
 // Platform constants.
 const (
-	PlatformArticle = "article"
+	PlatformArticle  = "article"
 	PlatformSeednote = "seednote"
 )
 
@@ -126,13 +126,13 @@ func ResolveTier(tier Tier) Tier {
 
 // Per-operation credit type constants (for MCP tool billing).
 const (
-	CreditTypeImageGen      = "image_gen"
-	CreditTypeArticleWrite  = "article_write"
-	CreditTypeConvert       = "convert"
-	CreditTypeHumanize      = "humanize"
-	CreditTypeTopicResearch = "topic_research"
-	CreditTypeSEO           = "seo"
-	CreditTypeOutline       = "outline"
+	CreditTypeImageGen         = "image_gen"
+	CreditTypeArticleWrite     = "article_write"
+	CreditTypeConvert          = "convert"
+	CreditTypeHumanize         = "humanize"
+	CreditTypeTopicResearch    = "topic_research"
+	CreditTypeSEO              = "seo"
+	CreditTypeOutline          = "outline"
 	CreditTypePosterGeneration = "poster_generation"
 	CreditTypeViralAnalysis    = "viral_analysis"
 )
@@ -155,9 +155,9 @@ const (
 
 // Template type constants.
 const (
-	TemplateTypePoster  = "poster"
+	TemplateTypePoster   = "poster"
 	TemplateTypeSeednote = "seednote"
-	TemplateTypeArticle = "article"
+	TemplateTypeArticle  = "article"
 )
 
 // Viral analysis source type constants.

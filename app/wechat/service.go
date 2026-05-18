@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/rs/zerolog"
 	"github.com/silenceper/wechat/v2"
 	wechatcache "github.com/silenceper/wechat/v2/cache"
 	"github.com/silenceper/wechat/v2/officialaccount"
 	wechatconfig "github.com/silenceper/wechat/v2/officialaccount/config"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"github.com/silenceper/wechat/v2/officialaccount/material"
-	"github.com/rs/zerolog"
 )
 
 // Service 微信服务

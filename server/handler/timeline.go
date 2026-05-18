@@ -14,8 +14,8 @@ import (
 // TimelineItem represents a unified item in the timeline view.
 type TimelineItem struct {
 	ID          string     `json:"id"`
-	Type        string     `json:"type"`          // "task" or "plan"
-	ContentType string     `json:"content_type"`  // "seednote", "article"
+	Type        string     `json:"type"`         // "task" or "plan"
+	ContentType string     `json:"content_type"` // "seednote", "article"
 	Title       string     `json:"title"`
 	Status      string     `json:"status"`
 	ChannelID   string     `json:"channel_id,omitempty"`

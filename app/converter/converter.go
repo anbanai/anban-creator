@@ -147,7 +147,6 @@ func (c *converter) ExtractImages(markdown string) []ImageRef {
 		}
 	}
 
-
 	return images
 }
 

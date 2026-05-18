@@ -26,7 +26,6 @@ type GenerateOptions struct {
 	RefImagePaths []string // 多张参考图路径（组图模式，可选）
 }
 
-
 // Provider 图片生成服务提供者接口
 type Provider interface {
 	// Name 返回提供者名称
@@ -41,11 +40,11 @@ type Provider interface {
 
 // GenerateResult 图片生成结果
 type GenerateResult struct {
-	URL           string // 生成的图片 URL
-	RevisedPrompt string // 优化后的提示词（某些提供者会返回）
-	Model         string // 实际使用的模型
-	Size          string // 实际尺寸
-	ResponseType  string // 返回类型：b64_json / url / empty
+	URL             string // 生成的图片 URL
+	RevisedPrompt   string // 优化后的提示词（某些提供者会返回）
+	Model           string // 实际使用的模型
+	Size            string // 实际尺寸
+	ResponseType    string // 返回类型：b64_json / url / empty
 	ResponsePreview string // 原始返回预览：URL 原样输出，base64 截断输出
 }
 

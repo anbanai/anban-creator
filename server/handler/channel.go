@@ -20,9 +20,9 @@ import (
 	"github.com/royalrick/anbanwriter/server/platform"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/resources"
+	"github.com/royalrick/anbanwriter/server/seednote"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
-	"github.com/royalrick/anbanwriter/server/seednote"
 )
 
 // ChannelHandler handles channel-related HTTP endpoints.
@@ -34,7 +34,7 @@ type ChannelHandler struct {
 	modelConfigSvc *service.ModelConfigService
 	templateSvc    *service.TemplateService
 	store          storage.Provider
-	seednoteClient      *seednote.Client
+	seednoteClient *seednote.Client
 }
 
 // NewChannelHandler creates a new ChannelHandler.
@@ -244,7 +244,7 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 		recommended := h.getRecommendedTemplates(c.Context(), created)
 		if len(recommended) > 0 {
 			return Success(c, fiber.Map{
-				"channel":              created,
+				"channel":               created,
 				"recommended_templates": recommended,
 			})
 		}

@@ -10,10 +10,10 @@ import (
 // RuleSet holds a set of MITM rules that determine which hosts should have
 // their HTTPS traffic intercepted. Rules are loaded from a simple text format:
 //
-//	*            - match all hosts (MITM everything)
-//	*.domain.com - match domain.com and all subdomains
-//	domain.com   - match exactly domain.com
-//	!domain.com  - negate: do NOT MITM domain.com
+//   - - match all hosts (MITM everything)
+//     *.domain.com - match domain.com and all subdomains
+//     domain.com   - match exactly domain.com
+//     !domain.com  - negate: do NOT MITM domain.com
 //
 // Blank lines and lines starting with # are ignored.
 // Rules are evaluated in order; the last matching rule wins.

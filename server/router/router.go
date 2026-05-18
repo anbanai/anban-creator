@@ -27,36 +27,36 @@ import (
 
 // Services aggregates all service dependencies required by the router.
 type Services struct {
-	Config                  *config.Config
-	Logger                  *zerolog.Logger
-	DB                      *gorm.DB
-	Redis                   *redis.Client
-	Repo                    repository.Repository
-	JWTService              *auth.JWTService
-	WechatSvc               *auth.WeChatService
-	WSHub                   *handler.WebSocketHub
-	AuthHandler             *handler.AuthHandler
-	Executor                agent.TaskExecutor
-	PlanService             *service.PlanService
-	TaskService             *service.TaskService
-	CreditService           *service.CreditService
-	PlanHandler             *handler.PlanHandler
-	TaskHandler             *handler.TaskHandler
+	Config                   *config.Config
+	Logger                   *zerolog.Logger
+	DB                       *gorm.DB
+	Redis                    *redis.Client
+	Repo                     repository.Repository
+	JWTService               *auth.JWTService
+	WechatSvc                *auth.WeChatService
+	WSHub                    *handler.WebSocketHub
+	AuthHandler              *handler.AuthHandler
+	Executor                 agent.TaskExecutor
+	PlanService              *service.PlanService
+	TaskService              *service.TaskService
+	CreditService            *service.CreditService
+	PlanHandler              *handler.PlanHandler
+	TaskHandler              *handler.TaskHandler
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
-	AgentHandler            *handler.AgentHandler
-	CreditHandler           *handler.CreditHandler
-	ChannelHandler          *handler.ChannelHandler
-	TimelineHandler         *handler.TimelineHandler
-	APIKeyHandler           *handler.APIKeyHandler
-	FileHandler             *handler.FileHandler
-	FeedbackHandler         *handler.FeedbackHandler
-	ModelConfigHandler      *handler.ModelConfigHandler
-	TemplateHandler         *handler.TemplateHandler
-	ViralAnalysisHandler    *handler.ViralAnalysisHandler
-	PosterHandler           *handler.PosterHandler
-	ResourceHandler         *handler.ResourceHandler
-	MCPHandler              http.Handler
-	StorageProvider         storage.Provider
+	AgentHandler             *handler.AgentHandler
+	CreditHandler            *handler.CreditHandler
+	ChannelHandler           *handler.ChannelHandler
+	TimelineHandler          *handler.TimelineHandler
+	APIKeyHandler            *handler.APIKeyHandler
+	FileHandler              *handler.FileHandler
+	FeedbackHandler          *handler.FeedbackHandler
+	ModelConfigHandler       *handler.ModelConfigHandler
+	TemplateHandler          *handler.TemplateHandler
+	ViralAnalysisHandler     *handler.ViralAnalysisHandler
+	PosterHandler            *handler.PosterHandler
+	ResourceHandler          *handler.ResourceHandler
+	MCPHandler               http.Handler
+	StorageProvider          storage.Provider
 }
 
 // NewRouter creates a new Fiber app with middleware and route groups.
@@ -167,9 +167,9 @@ func NewRouter(svc *Services) *fiber.App {
 		authPublic.Post("/refresh", svc.AuthHandler.Refresh)
 		authPublic.Post("/logout", svc.AuthHandler.Logout)
 		authPublic.Post("/wx-login", svc.AuthHandler.WXLogin)
-			authPublic.Post("/qrcode", svc.AuthHandler.GenerateQRCode)
-			authPublic.Post("/scanned", svc.AuthHandler.NotifyScanned)
-			authPublic.Post("/qr-callback", svc.AuthHandler.QRLoginCallback)
+		authPublic.Post("/qrcode", svc.AuthHandler.GenerateQRCode)
+		authPublic.Post("/scanned", svc.AuthHandler.NotifyScanned)
+		authPublic.Post("/qr-callback", svc.AuthHandler.QRLoginCallback)
 	}
 
 	// ---------------------------------------------------------------------------

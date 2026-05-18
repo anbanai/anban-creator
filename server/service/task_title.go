@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	h1Re     = regexp.MustCompile(`(?is)<h1[^>]*>(.*?)</h1>`)
-	titleRe  = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	h1Re      = regexp.MustCompile(`(?is)<h1[^>]*>(.*?)</h1>`)
+	titleRe   = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 	headingRe = regexp.MustCompile(`^#\s+(.+)$`)
-	stripRe  = regexp.MustCompile(`<[^>]+>`)
+	stripRe   = regexp.MustCompile(`<[^>]+>`)
 )
 
 // ExtractTitleFromWorkspace scans workspace output files for a content title.

@@ -29,8 +29,8 @@ type createPlanRequest struct {
 }
 
 type updatePlanRequest struct {
-	CronExpr  string `json:"cron_expr"`
-	Prompt    string `json:"prompt"`
+	CronExpr string `json:"cron_expr"`
+	Prompt   string `json:"prompt"`
 }
 
 // Create handles POST /api/v1/plans.
