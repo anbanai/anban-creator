@@ -19,8 +19,11 @@ func TestParseWechatError(t *testing.T) {
 		{"40001 invalid credential", errors.New("errcode=40001, invalid credential"), false, 40001, false},
 		{"42001 token expired", errors.New("errcode=42001, access_token expired"), false, 42001, true},
 		{"45009 rate limit", errors.New("errcode=45009, api freq out of limit"), false, 45009, true},
+		{"40007 invalid media_id", errors.New("errcode=40007, errmsg=invalid media_id"), false, 40007, false},
+		{"40009 invalid img media_id", errors.New("errcode=40009, errmsg=invalid media_id"), false, 40009, false},
+		{"41006 missing media_id", errors.New("errcode=41006, errmsg=invalid media_id"), false, 41006, false},
 		{"-1 system busy", errors.New("errcode=-1, system error"), false, -1, true},
-		{"unknown code", errors.New("errcode=99999, unknown"), false, 99999, true},
+		{"unknown code", errors.New("errcode=99999, unknown"), false, 99999, false},
 	}
 
 	for _, tt := range tests {

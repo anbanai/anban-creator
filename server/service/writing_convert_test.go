@@ -78,8 +78,7 @@ func setupConvertTest(t *testing.T, llm *diagnosticLLM) (*WritingService, reposi
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
 
-
-	svc := NewWritingService(repo, llm, "", 0, &logger)
+	svc := NewWritingService(repo, llm, "", 0, 0, &logger)
 	return svc, repo
 }
 

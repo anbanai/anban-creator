@@ -8,8 +8,8 @@ import (
 
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/app/wechat"
-	"github.com/silenceper/wechat/v2/officialaccount/draft"
 	"github.com/rs/zerolog"
+	"github.com/silenceper/wechat/v2/officialaccount/draft"
 )
 
 // ServiceError 草稿服务错误，携带修复建议
@@ -101,6 +101,12 @@ func (s *Service) CreateDraft(articles []Article) (*DraftResult, error) {
 		}
 
 		if a.ThumbMediaID != "" {
+			if !isValidMediaID(a.ThumbMediaID) {
+				return nil, &ServiceError{
+					Message:  fmt.Sprintf("invalid thumb_media_id: %q", a.ThumbMediaID),
+					HintText: "thumb_media_id 必须是微信素材上传接口返回的 media_id（字母数字字符串），不能使用 URL 或文件路径",
+				}
+			}
 			article.ThumbMediaID = a.ThumbMediaID
 			article.ShowCoverPic = uint(a.ShowCoverPic)
 		}
@@ -264,4 +270,25 @@ func stripHTML(html string) string {
 	}
 
 	return clean.String()
+}
+
+// isValidMediaID checks whether a thumb_media_id looks like a valid WeChat
+// permanent media ID. WeChat media IDs are alphanumeric strings returned by
+// the material upload API. They should never be URLs or file paths.
+func isValidMediaID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	if strings.HasPrefix(id, "http://") || strings.HasPrefix(id, "https://") {
+		return false
+	}
+	if strings.HasPrefix(id, "/") || strings.HasPrefix(id, "./") || strings.HasPrefix(id, "..") {
+		return false
+	}
+	for _, ch := range id {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') {
+			return false
+		}
+	}
+	return true
 }

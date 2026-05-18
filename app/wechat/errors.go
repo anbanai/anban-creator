@@ -10,11 +10,11 @@ var errCodeRegexp = regexp.MustCompile(`errcode=(-?\d+)`)
 
 // WechatAPIError 微信 API 错误
 type WechatAPIError struct {
-	ErrCode  int
-	UserMsg  string
-	HintMsg  string
+	ErrCode   int
+	UserMsg   string
+	HintMsg   string
 	Retryable bool
-	Original error
+	Original  error
 }
 
 func (e *WechatAPIError) Error() string {
@@ -43,6 +43,9 @@ var knownErrors = map[int]struct {
 	48001: {"API 功能未授权", "仅认证后的服务号支持此接口，订阅号和未认证服务号无此权限", false},
 	42001: {"access_token 已过期", "SDK 将自动刷新，请重试", true},
 	45009: {"接口调用频率超限", "请稍后重试", true},
+	40007: {"无效的 media_id", "thumb_media_id 必须是微信素材管理接口返回的永久素材 ID，不能使用 URL 或文件路径", false},
+	40009: {"无效的图片媒体 ID", "图片 media_id 不存在或已过期，请重新上传", false},
+	41006: {"缺少 media_id", "请检查请求中是否包含必需的 media_id", false},
 	-1:    {"系统繁忙", "请稍后重试", true},
 }
 
@@ -73,12 +76,12 @@ func ParseWechatError(err error) *WechatAPIError {
 		}
 	}
 
-	// 未知错误码，默认可重试（保守策略）
+	// 未知错误码默认不可重试，避免永久性错误导致无效重试
 	return &WechatAPIError{
 		ErrCode:   code,
-		UserMsg:   fmt.Sprintf("微信 API 错误"),
+		UserMsg:   "微信 API 错误",
 		HintMsg:   "",
-		Retryable: true,
+		Retryable: false,
 		Original:  err,
 	}
 }

@@ -295,17 +295,28 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	}
 
 	// Auto-publish if channel has publishing enabled (non-blocking).
-	// Uses a detached context with timeout so it never blocks task completion.
+	// Extract article data BEFORE launching goroutine to avoid race with
+	// workspace cleanup defer.
 	if s.publishingSvc != nil && channel != nil && channel.GetEnablePublishing() {
-		publishCtx, publishCancel := context.WithTimeout(context.Background(), 60*time.Second)
-		taskCopy := *task
-		channelCopy := *channel
-		workDirCopy := result.WorkDir
-		logTextCopy := result.LogText
-		go func() {
-			defer publishCancel()
-			s.autoPublishIfNeeded(publishCtx, &taskCopy, &channelCopy, workDirCopy, logTextCopy)
-		}()
+		published := wasPublishedByAgent(result.LogText)
+		var articles []DraftArticleInput
+		if !published && task.Type == model.ScopeArticle && result.WorkDir != "" {
+			var extractErr error
+			articles, extractErr = extractArticleDraftFromWorkspace(result.WorkDir)
+			if extractErr != nil {
+				s.logger.Error().Err(extractErr).Str("task_id", taskID).Msg("failed to extract article draft for auto-publish")
+			}
+		}
+		if published || len(articles) > 0 {
+			publishCtx, publishCancel := context.WithTimeout(context.Background(), 60*time.Second)
+			taskCopy := *task
+			channelCopy := *channel
+			logTextCopy := result.LogText
+			go func() {
+				defer publishCancel()
+				s.autoPublishWithData(publishCtx, &taskCopy, &channelCopy, articles, logTextCopy)
+			}()
+		}
 	}
 
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {
@@ -655,12 +666,9 @@ func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
 	return nil
 }
 
-// autoPublishIfNeeded checks if the channel has publishing enabled and
-// attempts to publish the task output as a WeChat draft.
-// If the agent already published during execution (detected via log text),
-// it only sets the published flag. Otherwise it publishes from workspace files.
-// Publishing failure is logged but does not affect task completion.
-func (s *TaskService) autoPublishIfNeeded(ctx context.Context, task *model.Task, channel *model.Channel, workDir, logText string) {
+// autoPublishWithData publishes pre-extracted article data, avoiding filesystem
+// access that could race with workspace cleanup.
+func (s *TaskService) autoPublishWithData(ctx context.Context, task *model.Task, channel *model.Channel, articles []DraftArticleInput, logText string) {
 	taskID := task.ID
 
 	if wasPublishedByAgent(logText) {
@@ -671,33 +679,16 @@ func (s *TaskService) autoPublishIfNeeded(ctx context.Context, task *model.Task,
 		return
 	}
 
-	s.logger.Info().Str("task_id", taskID).Msg("agent did not publish, attempting server-side auto-publish")
-
-	var published bool
-
-	switch task.Type {
-	case model.ScopeArticle:
-		articles, err := extractArticleDraftFromWorkspace(workDir)
-		if err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to extract article draft from workspace")
-			return
-		}
-		result, err := s.publishingSvc.PublishDraft(ctx, task.UserID, channel.ID, articles)
-		if err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("auto-publish article draft failed")
-			return
-		}
-		s.logger.Info().Str("task_id", taskID).Str("media_id", result.MediaID).Msg("auto-published article draft")
-		published = true
-
-	default:
+	s.logger.Info().Str("task_id", taskID).Msg("auto-publishing with pre-extracted articles")
+	result, err := s.publishingSvc.PublishDraft(ctx, task.UserID, channel.ID, articles)
+	if err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("auto-publish article draft failed")
 		return
 	}
+	s.logger.Info().Str("task_id", taskID).Str("media_id", result.MediaID).Msg("auto-published article draft")
 
-	if published {
-		if err := s.setPublishedAndMaybeTrack(ctx, task.UserID, task, true); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set published flag after auto-publish")
-		}
+	if err := s.setPublishedAndMaybeTrack(ctx, task.UserID, task, true); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set published flag after auto-publish")
 	}
 }
 

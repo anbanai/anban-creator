@@ -44,7 +44,7 @@ func setupTestWritingService(t *testing.T, llm *fakeWritingLLM) (*WritingService
 	if err != nil {
 		t.Fatalf("resolve writers dir: %v", err)
 	}
-	svc := NewWritingService(repo, llm, writersDir, 0, &logger)
+	svc := NewWritingService(repo, llm, writersDir, 0, 0, &logger)
 	return svc, repo
 }
 
@@ -198,6 +198,37 @@ func TestExtractJSONArray(t *testing.T) {
 		_, err := extractJSONArray("[{\"topic\":\"a\"}")
 		if err == nil {
 			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("malformed extra quote repaired by lenient fallback", func(t *testing.T) {
+		// Production case: "angle"":value desynchronizes bracket matcher,
+		// but lenient fallback repairs the extra quote and parses successfully.
+		input := `[{"topic":"a","angle":"b"},{"topic":"c","angle"":"malformed"}]`
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatalf("expected lenient fallback to succeed, got: %v", err)
+		}
+		if !strings.HasPrefix(out, "[") {
+			t.Fatalf("expected array, got: %s", out[:20])
+		}
+	})
+
+	t.Run("lenient fallback with preamble and trailing text", func(t *testing.T) {
+		input := "好的，以下是话题：\n[{\"topic\":\"a\"},{\"topic\":\"b\"}]\n更多内容"
+		out, err := extractJSONArray(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `[{"topic":"a"},{"topic":"b"}]` {
+			t.Fatalf("got: %s", out)
+		}
+	})
+
+	t.Run("unmatched with no valid JSON still fails", func(t *testing.T) {
+		_, err := extractJSONArray("[{\"topic\":\"a\"}")
+		if err == nil {
+			t.Fatal("expected error for truly broken JSON")
 		}
 	})
 }

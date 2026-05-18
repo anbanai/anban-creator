@@ -15,23 +15,23 @@ import (
 
 // Config holds all server configuration.
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Logging  LoggingConfig  `yaml:"logging"`
-	Database DatabaseConfig `yaml:"database"`
-	Redis    RedisConfig    `yaml:"redis"`
-	JWT      JWTConfig      `yaml:"jwt"`
-	WeChat   WeChatConfig   `yaml:"wechat"`
-	Storage  StorageConfig  `yaml:"storage"`
-	MCP      MCPConfig      `yaml:"mcp"`
-	ImageAPI ImageAPIConfig `yaml:"image_api"`
-	Writing  WritingConfig  `yaml:"writing"`
-	Claude   ClaudeConfig   `yaml:"claude"`
-	Credits  CreditsConfig  `yaml:"credits"`
+	Server     ServerConfig     `yaml:"server"`
+	Logging    LoggingConfig    `yaml:"logging"`
+	Database   DatabaseConfig   `yaml:"database"`
+	Redis      RedisConfig      `yaml:"redis"`
+	JWT        JWTConfig        `yaml:"jwt"`
+	WeChat     WeChatConfig     `yaml:"wechat"`
+	Storage    StorageConfig    `yaml:"storage"`
+	MCP        MCPConfig        `yaml:"mcp"`
+	ImageAPI   ImageAPIConfig   `yaml:"image_api"`
+	Writing    WritingConfig    `yaml:"writing"`
+	Claude     ClaudeConfig     `yaml:"claude"`
+	Credits    CreditsConfig    `yaml:"credits"`
 	CORS       CORSConfig       `yaml:"cors"`
 	Asynq      AsynqConfig      `yaml:"asynq"`
 	Email      EmailConfig      `yaml:"email"`
 	Invitation InvitationConfig `yaml:"invitation"`
-	Seednote        SeednoteConfig        `yaml:"seednote"`
+	Seednote   SeednoteConfig   `yaml:"seednote"`
 }
 
 // SeednoteConfig holds Seednote (种草笔记) sidecar configuration.
@@ -42,14 +42,14 @@ type SeednoteConfig struct {
 
 // EmailConfig holds email/verification code configuration.
 type EmailConfig struct {
-	SMTPHost    string        `yaml:"smtp_host"`
-	SMTPPort    int           `yaml:"smtp_port"`
-	SMTPUsername string       `yaml:"smtp_username"`
-	SMTPPassword string       `yaml:"smtp_password"`
-	FromAddress string        `yaml:"from_address"`
-	FromName    string        `yaml:"from_name"`
-	CodeTTL     time.Duration `yaml:"code_ttl"`    // default 5m
-	CodeLength  int           `yaml:"code_length"`  // default 6
+	SMTPHost     string        `yaml:"smtp_host"`
+	SMTPPort     int           `yaml:"smtp_port"`
+	SMTPUsername string        `yaml:"smtp_username"`
+	SMTPPassword string        `yaml:"smtp_password"`
+	FromAddress  string        `yaml:"from_address"`
+	FromName     string        `yaml:"from_name"`
+	CodeTTL      time.Duration `yaml:"code_ttl"`    // default 5m
+	CodeLength   int           `yaml:"code_length"` // default 6
 }
 
 type ServerConfig struct {
@@ -107,8 +107,8 @@ type StorageConfig struct {
 
 // SizesConfig holds per-platform image size defaults (ratio:tier format, e.g. "16:9", "3:4:4K").
 type SizesConfig struct {
-	ArticleCover   string `yaml:"article_cover"`   // default "16:9"
-	ArticleContent string `yaml:"article_content"` // default "16:9"
+	ArticleCover    string `yaml:"article_cover"`    // default "16:9"
+	ArticleContent  string `yaml:"article_content"`  // default "16:9"
 	SeednoteCover   string `yaml:"seednote_cover"`   // default "3:4"
 	SeednoteContent string `yaml:"seednote_content"` // default "3:4"
 }
@@ -124,18 +124,19 @@ type ImageAPIConfig struct {
 // WritingConfig holds LLM API configuration for writing services
 // (article writing, humanization, topic research, SEO, outlines).
 type WritingConfig struct {
-	BaseURL string        `yaml:"base_url"` // LLM API endpoint
-	Key     string        `yaml:"key"`      // API key
-	Model   string        `yaml:"model"`    // Model name
-	Timeout time.Duration `yaml:"timeout"`  // LLM request timeout (default 5m)
+	BaseURL        string        `yaml:"base_url"`        // LLM API endpoint
+	Key            string        `yaml:"key"`             // API key
+	Model          string        `yaml:"model"`           // Model name
+	Timeout        time.Duration `yaml:"timeout"`         // LLM request timeout (default 5m)
+	ConvertTimeout time.Duration `yaml:"convert_timeout"` // Markdown-to-HTML convert timeout (default 2x Timeout)
 }
 
 // ClaudeConfig holds configuration for the Claude CLI subprocess.
 // The Env map is passed as environment variables to the CLI process,
 // supporting auth tokens, base URLs, model overrides, etc.
 type ClaudeConfig struct {
-	Model          string            `yaml:"model"`            // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
-	Executor       string            `yaml:"executor"`         // "local" (default) or "docker"
+	Model          string            `yaml:"model"`    // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
+	Executor       string            `yaml:"executor"` // "local" (default) or "docker"
 	Env            map[string]string `yaml:"env"`
 	PluginDir      string            `yaml:"plugin_dir"`       // Path to the abwriter plugin directory (contains agents/, skills/)
 	Sandbox        bool              `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
@@ -157,12 +158,12 @@ type DockerConfig struct {
 
 // CreditsConfig holds credits/points system configuration.
 type CreditsConfig struct {
-	DailySignIn   int                       `yaml:"daily_sign_in"`    // credits awarded per daily sign-in (default 1024)
-	RegisterBonus int                       `yaml:"register_bonus"`   // credits awarded on registration (default 4096)
-	InviteReward  int                       `yaml:"invite_reward"`    // credits awarded to inviter when invitee registers (default 2048)
-	TaskCosts     map[string]int            `yaml:"task_costs"`       // per-task-type costs, e.g. {"article": 4000, "seednote": 3200}
-	ModelCosts    map[string]map[string]int `yaml:"model_costs"`     // per-model costs, key format: "provider/model"
-	AdminAPIKey   string                    `yaml:"admin_api_key"`    // API key for admin credit grant endpoint
+	DailySignIn   int                       `yaml:"daily_sign_in"`  // credits awarded per daily sign-in (default 1024)
+	RegisterBonus int                       `yaml:"register_bonus"` // credits awarded on registration (default 4096)
+	InviteReward  int                       `yaml:"invite_reward"`  // credits awarded to inviter when invitee registers (default 2048)
+	TaskCosts     map[string]int            `yaml:"task_costs"`     // per-task-type costs, e.g. {"article": 4000, "seednote": 3200}
+	ModelCosts    map[string]map[string]int `yaml:"model_costs"`    // per-model costs, key format: "provider/model"
+	AdminAPIKey   string                    `yaml:"admin_api_key"`  // API key for admin credit grant endpoint
 }
 
 // ModelCost returns the per-operation cost for a specific model.
@@ -288,11 +289,10 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Credits.TaskCosts == nil {
 		c.Credits.TaskCosts = map[string]int{
-			"article": 4000,
+			"article":  4000,
 			"seednote": 3200,
 		}
 	}
-
 
 	// Asynq defaults.
 	if c.Asynq.Concurrency == 0 {
@@ -329,7 +329,7 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Claude.MaxTurns == nil {
 		c.Claude.MaxTurns = map[string]int{
-			"article": 100,
+			"article":  100,
 			"seednote": 60,
 		}
 	}
@@ -610,6 +610,16 @@ func (c *Config) applyEnvOverrides() {
 			c.Writing.Timeout = d
 		} else {
 			fmt.Fprintf(os.Stderr, "invalid %sWRITING_TIMEOUT=%q: %v, using default %v\n", prefix, v, err, c.Writing.Timeout)
+		}
+	}
+	if c.Writing.ConvertTimeout == 0 {
+		c.Writing.ConvertTimeout = 2 * c.Writing.Timeout
+	}
+	if v := os.Getenv(prefix + "WRITING_CONVERT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Writing.ConvertTimeout = d
+		} else {
+			fmt.Fprintf(os.Stderr, "invalid %sWRITING_CONVERT_TIMEOUT=%q: %v, using default %v\n", prefix, v, err, c.Writing.ConvertTimeout)
 		}
 	}
 

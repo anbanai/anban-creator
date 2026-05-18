@@ -17,8 +17,8 @@ import (
 	"github.com/royalrick/anbanwriter/app/converter"
 	"github.com/royalrick/anbanwriter/app/humanizer"
 	"github.com/royalrick/anbanwriter/app/writer"
-	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/royalrick/anbanwriter/server/resources"
 )
 
 // ---------------------------------------------------------------------------
@@ -55,9 +55,13 @@ func NewOpenAILLMClient(baseURL, apiKey, modelName string, timeout time.Duration
 // assistant's text content.
 func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	if c.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.timeout)
-		defer cancel()
+		// Only add timeout if the context doesn't already have a deadline.
+		// Callers (e.g. ConvertMarkdown) may set a longer convert-specific timeout.
+		if _, ok := ctx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, c.timeout)
+			defer cancel()
+		}
 	}
 
 	messages := []openai.ChatCompletionMessageParamUnion{}
@@ -111,9 +115,11 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 // or a base64 data URL (data:image/...;base64,...).
 func (c *openaiLLMClient) CompleteWithImage(ctx context.Context, systemPrompt, userPrompt, imageURL string) (string, error) {
 	if c.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.timeout)
-		defer cancel()
+		if _, ok := ctx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, c.timeout)
+			defer cancel()
+		}
 	}
 
 	messages := []openai.ChatCompletionMessageParamUnion{}
@@ -190,19 +196,21 @@ type WritingService struct {
 	repo           repository.Repository
 	llmClient      LLMClient
 	llmTimeout     time.Duration
+	convertTimeout time.Duration
 	modelConfigSvc *ModelConfigService
 	writersDir     string
 	logger         *zerolog.Logger
 }
 
 // NewWritingService creates a new WritingService.
-func NewWritingService(repo repository.Repository, llmClient LLMClient, writersDir string, llmTimeout time.Duration, logger *zerolog.Logger) *WritingService {
+func NewWritingService(repo repository.Repository, llmClient LLMClient, writersDir string, llmTimeout, convertTimeout time.Duration, logger *zerolog.Logger) *WritingService {
 	return &WritingService{
-		repo:       repo,
-		llmClient:  llmClient,
-		llmTimeout: llmTimeout,
-		writersDir: writersDir,
-		logger:     logger,
+		repo:           repo,
+		llmClient:      llmClient,
+		llmTimeout:     llmTimeout,
+		convertTimeout: convertTimeout,
+		writersDir:     writersDir,
+		logger:         logger,
 	}
 }
 
@@ -433,7 +441,15 @@ func (s *WritingService) ConvertMarkdown(
 	}
 
 	// Call LLM with the assembled prompt.
-	html, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
+	// Apply convert-specific timeout (longer than default) since HTML
+	// conversion can be slow for large markdown documents.
+	convertCtx := ctx
+	if s.convertTimeout > 0 {
+		var cancel context.CancelFunc
+		convertCtx, cancel = context.WithTimeout(ctx, s.convertTimeout)
+		defer cancel()
+	}
+	html, err := s.getLLMClient(convertCtx, userID).Complete(convertCtx, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm convert markdown: %w", err)
 	}
@@ -820,13 +836,51 @@ func extractJSONValue(raw string, openBrace byte) (string, error) {
 	}
 
 	if end == -1 {
-		return "", fmt.Errorf("unmatched JSON %c bracket", openBrace)
+		return extractJSONValueLenient(raw, openBrace)
 	}
 
 	extracted := raw[start:end]
 	// Repair trailing commas (common LLM JSON issue)
 	extracted = trailingCommaRe.ReplaceAllString(extracted, "$1")
 	return extracted, nil
+}
+
+// repairMalformedDoubleQuote fixes the common LLM JSON malformation
+// where an extra quote appears before a colon: "angle"":value -> "angle":"value".
+var repairMalformedDoubleQuote = strings.NewReplacer(`"":`, `":`)
+
+// repairMalformedJSON attempts to fix common LLM JSON issues.
+func repairMalformedJSON(s string) string {
+	return repairMalformedDoubleQuote.Replace(s)
+}
+
+// extractJSONValueLenient is a fallback when strict bracket matching fails
+// due to malformed JSON from LLM output. It finds the first opening bracket
+// and last closing bracket, repairs common malformations, then validates.
+func extractJSONValueLenient(raw string, openBrace byte) (string, error) {
+	closeBrace := byte(']')
+	if openBrace == '{' {
+		closeBrace = byte('}')
+	}
+
+	start := strings.IndexByte(raw, openBrace)
+	if start == -1 {
+		return "", fmt.Errorf("no JSON %c found in response", openBrace)
+	}
+	end := strings.LastIndexByte(raw, closeBrace)
+	if end == -1 || end <= start {
+		return "", fmt.Errorf("unmatched JSON %c bracket", openBrace)
+	}
+
+	candidate := raw[start : end+1]
+	candidate = trailingCommaRe.ReplaceAllString(candidate, "$1")
+	candidate = repairMalformedJSON(candidate)
+
+	var js json.RawMessage
+	if err := json.Unmarshal([]byte(candidate), &js); err != nil {
+		return "", fmt.Errorf("unmatched JSON %c bracket (lenient parse also failed: %v)", openBrace, err)
+	}
+	return candidate, nil
 }
 
 // extractJSONArray extracts a JSON array from raw LLM output.

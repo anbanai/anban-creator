@@ -28,9 +28,9 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/router"
 	"github.com/royalrick/anbanwriter/server/scheduler"
+	"github.com/royalrick/anbanwriter/server/seednote"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
-	"github.com/royalrick/anbanwriter/server/seednote"
 )
 
 // defaultConfigPaths lists config file locations to try when -config is not set.
@@ -369,7 +369,7 @@ func main() {
 				if cfg.Claude.PluginDir != "" {
 					writersDir = filepath.Join(cfg.Claude.PluginDir, "writers")
 				}
-				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, cfg.Writing.Timeout, log)
+				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, cfg.Writing.Timeout, cfg.Writing.ConvertTimeout, log)
 				if modelConfigSvc != nil {
 					writingSvc.SetModelConfigService(modelConfigSvc)
 				}
@@ -379,16 +379,16 @@ func main() {
 		}
 
 		mcp.SetServices(&mcp.Services{
-			ChannelSvc:    channelSvc,
-			TaskSvc:       taskSvc,
-			CreditSvc:     creditSvc,
-			PlanSvc:       planSvc,
-			ImageSvc:      imageSvc,
-			WritingSvc:    writingSvc,
-			PublishingSvc: publishingSvc,
-			WorkspaceSvc:  workspaceSvc,
-			TemplateSvc:   templateSvc,
-			SeednoteClient:     seednoteClient,
+			ChannelSvc:     channelSvc,
+			TaskSvc:        taskSvc,
+			CreditSvc:      creditSvc,
+			PlanSvc:        planSvc,
+			ImageSvc:       imageSvc,
+			WritingSvc:     writingSvc,
+			PublishingSvc:  publishingSvc,
+			WorkspaceSvc:   workspaceSvc,
+			TemplateSvc:    templateSvc,
+			SeednoteClient: seednoteClient,
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcp.SetLogger(log)
@@ -426,36 +426,36 @@ func main() {
 
 	// 16. Build Services struct.
 	svcs := &router.Services{
-		Config:                  cfg,
-		Logger:                  log,
-		DB:                      mysqlDB,
-		Redis:                   rdb,
-		Repo:                    repo,
-		JWTService:              jwtSvc,
-		WechatSvc:               wechatSvc,
-		WSHub:                   wsHub,
-		AuthHandler:             authHandler,
-		Executor:                agentExecutor,
-		PlanService:             planSvc,
-		TaskService:             taskSvc,
-		CreditService:           creditSvc,
-		ChannelHandler:          channelHandler,
-		PlanHandler:             planHandler,
-		TaskHandler:             taskHandler,
+		Config:                   cfg,
+		Logger:                   log,
+		DB:                       mysqlDB,
+		Redis:                    rdb,
+		Repo:                     repo,
+		JWTService:               jwtSvc,
+		WechatSvc:                wechatSvc,
+		WSHub:                    wsHub,
+		AuthHandler:              authHandler,
+		Executor:                 agentExecutor,
+		PlanService:              planSvc,
+		TaskService:              taskSvc,
+		CreditService:            creditSvc,
+		ChannelHandler:           channelHandler,
+		PlanHandler:              planHandler,
+		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
-		AgentHandler:            agentHandler,
-		CreditHandler:           creditHandler,
-		TimelineHandler:         timelineHandler,
-		APIKeyHandler:           apiKeyHandler,
-		FileHandler:             fileHandler,
-		FeedbackHandler:         feedbackHandler,
-		ModelConfigHandler:      modelConfigHandler,
-		TemplateHandler:         templateHandler,
-		ViralAnalysisHandler:    viralAnalysisHandler,
-		PosterHandler:           posterHandler,
-		ResourceHandler:         resourceHandler,
-		MCPHandler:              mcpHandler,
-		StorageProvider:         store,
+		AgentHandler:             agentHandler,
+		CreditHandler:            creditHandler,
+		TimelineHandler:          timelineHandler,
+		APIKeyHandler:            apiKeyHandler,
+		FileHandler:              fileHandler,
+		FeedbackHandler:          feedbackHandler,
+		ModelConfigHandler:       modelConfigHandler,
+		TemplateHandler:          templateHandler,
+		ViralAnalysisHandler:     viralAnalysisHandler,
+		PosterHandler:            posterHandler,
+		ResourceHandler:          resourceHandler,
+		MCPHandler:               mcpHandler,
+		StorageProvider:          store,
 	}
 
 	// 17. Create router.
