@@ -21,6 +21,11 @@ func AuthMiddleware(jwtSvc *auth.JWTService, repo repository.Repository, logger 
 			return c.Next()
 		}
 
+		// Skip admin endpoints — they use their own API key authentication.
+		if strings.HasPrefix(c.Path(), "/api/v1/admin/") {
+			return c.Next()
+		}
+
 		// Skip public auth endpoints — they handle their own authentication.
 		// This is necessary because Fiber v3 registers group middleware as USE routes
 		// that match all paths under the prefix, including routes from other groups.
