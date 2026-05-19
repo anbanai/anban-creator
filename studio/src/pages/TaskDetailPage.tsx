@@ -47,7 +47,7 @@ export default function TaskDetailPage() {
   const [sseProgress, setSseProgress] = useState<number | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const logContainerRef = useRef<HTMLDivElement | null>(null)
-  const { submit } = useSubmitLock()
+  const { submit, isSubmitting } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
 
@@ -306,16 +306,24 @@ export default function TaskDetailPage() {
 
   async function handleRetry() {
     await submit(async () => {
-      const nextTask = await api.tasks.create({
-        type: currentTask.type,
-        prompt: currentTask.prompt || undefined,
-        channel_id: currentTask.channel_id,
-        image_ratio: currentTask.image_ratio || undefined,
-        generate_video: currentTask.generate_video || undefined,
-      })
-      toast.success('已重新创建任务')
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-      navigate(`/tasks/${nextTask.id}`)
+      if (!currentTask.channel_id) {
+        toast.error('无法重新生成：任务缺少关联账号')
+        return
+      }
+      try {
+        const nextTask = await api.tasks.create({
+          type: currentTask.type,
+          prompt: currentTask.prompt || undefined,
+          channel_id: currentTask.channel_id,
+          image_ratio: currentTask.image_ratio || undefined,
+          generate_video: currentTask.generate_video || undefined,
+        })
+        toast.success('已重新创建任务')
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+        navigate(`/tasks/${nextTask.id}`)
+      } catch {
+        toast.error('重新创建任务失败，请稍后重试')
+      }
     })
   }
 
@@ -368,6 +376,7 @@ export default function TaskDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           {task.status === 'completed' && (
+            <>
             <Button
               variant={task.published ? 'outline' : 'default'}
               size="sm"
@@ -377,6 +386,16 @@ export default function TaskDetailPage() {
               <Eye className="h-4 w-4" />
               {task.published ? '已发布' : '标记已发布'}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={() => void handleRetry()}
+            >
+              <RefreshCw className="h-4 w-4" />
+              重新生成
+            </Button>
+            </>
           )}
           {canCancel && (
             <Button
