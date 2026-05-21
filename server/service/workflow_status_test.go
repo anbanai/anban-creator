@@ -23,7 +23,7 @@ func TestDetermineWorkflowArtifactRole(t *testing.T) {
 		{"images manifest", "images.json", "application/json", model.FileRoleImageManifest},
 		{"draft package", "draft.json", "application/json", model.FileRoleDraftPackage},
 		{"review", "review.json", "application/json", model.FileRoleReview},
-		{"video", "clip.mp4", "video/mp4", model.FileRoleVideo},
+		{"video falls back to other", "clip.mp4", "video/mp4", model.FileRoleOther},
 		{"fallback image", "img_01.png", "image/png", model.FileRoleImage},
 	}
 

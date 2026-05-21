@@ -44,10 +44,11 @@ func TestExecutionOptionsDoesNotExposeModelOverride(t *testing.T) {
 
 func TestBuildAppConfig(t *testing.T) {
 	tests := []struct {
-		name    string
-		ch      *model.Channel
-		wantErr bool
-		check   func(t *testing.T, cfg map[string]any)
+		name         string
+		ch           *model.Channel
+		wantErr      bool
+		skipRefImage bool
+		check        func(t *testing.T, cfg map[string]any)
 	}{
 		{
 			name: "basic article config",
@@ -89,11 +90,47 @@ func TestBuildAppConfig(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "skip_reference_image omits refer path",
+			ch: &model.Channel{
+				Platform:          model.ScopeSeednote,
+				Name:              "SkipRef Account",
+				ReferenceImageURL: "http://example.com/ref.png",
+			},
+			wantErr:      false,
+			skipRefImage: true,
+			check: func(t *testing.T, cfg map[string]any) {
+				sn := cfg["seednote"].(map[string]any)
+				cover := sn["cover"].(map[string]any)
+				img := cover["image"].(map[string]any)
+				if img["refer"] != nil {
+					t.Errorf("refer should be nil when skipRefImage=true, got %v", img["refer"])
+				}
+			},
+		},
+		{
+			name: "reference_image sets refer path when not skipped",
+			ch: &model.Channel{
+				Platform:          model.ScopeSeednote,
+				Name:              "WithRef Account",
+				ReferenceImageURL: "http://example.com/ref.png",
+			},
+			wantErr:      false,
+			skipRefImage: false,
+			check: func(t *testing.T, cfg map[string]any) {
+				sn := cfg["seednote"].(map[string]any)
+				cover := sn["cover"].(map[string]any)
+				img := cover["image"].(map[string]any)
+				if img["refer"] == nil || img["refer"] == "" {
+					t.Errorf("refer should be set when skipRefImage=false and ReferenceImageURL is set")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.ch, nil, "")
+			cfg, err := BuildAppConfig(tt.ch, nil, "", tt.skipRefImage)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -180,7 +217,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 				Platform: tt.platform,
 				Name:     "Test",
 			}
-			cfg, err := BuildAppConfig(ch, tt.imageAPICfg, "")
+			cfg, err := BuildAppConfig(ch, tt.imageAPICfg, "", false)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -279,7 +316,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.channel, tt.imageAPICfg, tt.taskImageRatio)
+			cfg, err := BuildAppConfig(tt.channel, tt.imageAPICfg, tt.taskImageRatio, false)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -507,12 +544,11 @@ func TestCompactToolResultContent(t *testing.T) {
 
 func TestBuildUserPrompt(t *testing.T) {
 	tests := []struct {
-		name          string
-		taskType      string
-		topic         string
-		agentName     string
-		generateVideo bool
-		wantContains  []string
+		name         string
+		taskType     string
+		topic        string
+		agentName    string
+		wantContains []string
 	}{
 		{
 			name:         "seednote with topic references agent",
@@ -543,14 +579,6 @@ func TestBuildUserPrompt(t *testing.T) {
 			wantContains: []string{"Use the seednote agent", "research and create content"},
 		},
 		{
-			name:          "with topic and video flag",
-			taskType:      "seednote",
-			topic:         "旅行分享",
-			agentName:     "seednote",
-			generateVideo: true,
-			wantContains:  []string{"Use the seednote agent", "旅行分享", "Merge the generated images"},
-		},
-		{
 			name:         "empty agent name still produces prompt",
 			taskType:     "seednote",
 			topic:        "test topic",
@@ -561,11 +589,14 @@ func TestBuildUserPrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildUserPrompt(tt.taskType, tt.topic, tt.agentName, tt.generateVideo)
+			got := BuildUserPrompt(tt.taskType, tt.topic, tt.agentName)
 			for _, sub := range tt.wantContains {
 				if !strings.Contains(got, sub) {
 					t.Errorf("BuildUserPrompt() = %q, want to contain %q", got, sub)
 				}
+			}
+			if strings.Contains(got, "video") || strings.Contains(got, "Merge the generated images") {
+				t.Errorf("BuildUserPrompt() = %q, should not mention video generation", got)
 			}
 		})
 	}

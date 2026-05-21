@@ -138,14 +138,14 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if opts.Channel != nil {
-		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio)
+		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
-		if opts.Channel.ReferenceImageURL != "" {
+		if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
 			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download reference image")
 			}

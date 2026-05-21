@@ -221,6 +221,7 @@ import {
   planStatusLabel,
   timelineItemTypeLabel,
   contentTypeLabel,
+  contentTypeOptions as labelContentTypeOptions,
   getBadgeVariant,
 } from '@/utils/labels'
 import { formatTimeCN, formatDateLabelCN, formatMonthCN, getMonthRange } from '@/utils/format'
@@ -306,6 +307,11 @@ const statusOptions = [
   { key: 'running', label: '运行中' },
   { key: 'completed', label: '已完成' },
   { key: 'failed', label: '失败' },
+]
+
+const contentTypeOptions = [
+  { key: '', label: '全部' },
+  ...labelContentTypeOptions.map((opt) => ({ key: opt.value, label: opt.label })),
 ]
 
 // Channels for filter picker (populated from timeline items)

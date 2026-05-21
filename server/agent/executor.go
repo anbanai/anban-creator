@@ -33,8 +33,7 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
 // The agent definition is loaded via WithAgent() (system prompt), so the user
 // message only needs to provide the topic or an autonomous execution instruction.
-// When generateVideo is true, appends a video generation hint to the prompt.
-func BuildUserPrompt(taskType, topic, agentName string, generateVideo bool) string {
+func BuildUserPrompt(taskType, topic, agentName string) string {
 	_ = taskType // reserved for future platform-specific prompt variations
 	var base string
 	if topic == "" {
@@ -45,9 +44,6 @@ func BuildUserPrompt(taskType, topic, agentName string, generateVideo bool) stri
 			agentName)
 	} else {
 		base = fmt.Sprintf("Use the %s agent to create content about: %s", agentName, topic)
-	}
-	if generateVideo {
-		base += "\n\nMerge the generated images into a video."
 	}
 	return base
 }
@@ -259,7 +255,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 	// 3. Write channel config to workspace settings.json.
 	if opts.Channel != nil {
-		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio)
+		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -268,7 +264,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		}
 
 		// Download brand reference image if configured.
-		if opts.Channel.ReferenceImageURL != "" {
+		if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
 			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
 					Str("task_id", opts.Task.ID).
@@ -324,7 +320,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	agentName := TaskTypeToAgent(opts.Task.Type)
 
 	// 5. Build user prompt that references the agent by name.
-	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.GenerateVideo)
+	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName)
 
 	// Load agent definition from plugin directory and pass via WithAgent()
 	// (SDK programmatic subagents) instead of --agent CLI flag lookup.

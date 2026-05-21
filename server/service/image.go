@@ -119,7 +119,7 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, im
 		}
 	}
 
-	appCfg, err := agent.BuildAppConfig(ch, effectiveCfg, "")
+	appCfg, err := agent.BuildAppConfig(ch, effectiveCfg, "", false)
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}

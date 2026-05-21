@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	appdraft "github.com/royalrick/anbanwriter/app/draft"
+	"github.com/royalrick/anbanwriter/app/wechat"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -13,6 +16,29 @@ import (
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 )
+
+type stubDraftClient struct {
+	listDraftsErr    error
+	listPublishedErr error
+}
+
+func (c *stubDraftClient) CreateDraft([]appdraft.Article) (*appdraft.DraftResult, error) {
+	return &appdraft.DraftResult{MediaID: "media-id"}, nil
+}
+
+func (c *stubDraftClient) ListDrafts(offset, count int64) (*appdraft.ListDraftsResult, error) {
+	if c.listDraftsErr != nil {
+		return nil, c.listDraftsErr
+	}
+	return &appdraft.ListDraftsResult{TotalCount: 1, ItemCount: 1}, nil
+}
+
+func (c *stubDraftClient) ListPublished(offset, count int64) (*appdraft.ListPublishedResult, error) {
+	if c.listPublishedErr != nil {
+		return nil, c.listPublishedErr
+	}
+	return &appdraft.ListPublishedResult{TotalCount: 1, ItemCount: 1}, nil
+}
 
 // setupTestDB creates an in-memory SQLite database for testing.
 func setupTestDB(t *testing.T) *gorm.DB {
@@ -58,6 +84,25 @@ func createTestChannel(t *testing.T, repo repository.Repository, userID, platfor
 	}
 	if err := repo.Channels().Create(context.Background(), ch); err != nil {
 		t.Fatalf("create test channel: %v", err)
+	}
+	return ch.ID
+}
+
+func createTestWechatChannel(t *testing.T, repo repository.Repository, userID string) string {
+	t.Helper()
+	ch := &model.Channel{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Test WeChat Channel",
+		Status:   model.ChannelStatusActive,
+		Config: model.ChannelConfig{
+			WechatAppID:  "app-id",
+			WechatSecret: "secret",
+		},
+	}
+	if err := repo.Channels().Create(context.Background(), ch); err != nil {
+		t.Fatalf("create test wechat channel: %v", err)
 	}
 	return ch.ID
 }
@@ -121,7 +166,7 @@ func TestPlanService_Create(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := svc.Create(ctx, "user-1", tt.channelID, tt.cronExpr, "topic hint")
+			plan, err := svc.Create(ctx, "user-1", tt.channelID, tt.cronExpr, "topic hint", nil)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -153,13 +198,28 @@ func TestPlanService_Create(t *testing.T) {
 	}
 }
 
+func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+
+	skipRef := true
+	plan, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "topic hint", &skipRef)
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	if !plan.SkipReferenceImage {
+		t.Fatal("expected skip_reference_image to be true when explicitly set")
+	}
+}
+
 func TestPlanService_GetByID(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
 	// Create a test channel and plan.
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", nil)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -191,14 +251,14 @@ func TestPlanService_List(t *testing.T) {
 
 	// Create multiple plans for user-1.
 	for i := 0; i < 5; i++ {
-		_, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
+		_, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", nil)
 		if err != nil {
 			t.Fatalf("create plan %d: %v", i, err)
 		}
 	}
 
 	// Create plans for another user.
-	_, err := svc.Create(ctx, "user-2", chID2, "0 10 * * *", "hint")
+	_, err := svc.Create(ctx, "user-2", chID2, "0 10 * * *", "hint", nil)
 	if err != nil {
 		t.Fatalf("create plan for user-2: %v", err)
 	}
@@ -239,13 +299,13 @@ func TestPlanService_Update(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "old hint")
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "old hint", nil)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
 
 	// Update title only.
-	updated, err := svc.Update(ctx, created.ID, "", "new hint")
+	updated, err := svc.Update(ctx, created.ID, "", "new hint", nil)
 	if err != nil {
 		t.Fatalf("update plan: %v", err)
 	}
@@ -258,7 +318,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with new cron expression.
-	updated, err = svc.Update(ctx, created.ID, "0 18 * * *", "new hint")
+	updated, err = svc.Update(ctx, created.ID, "0 18 * * *", "new hint", nil)
 	if err != nil {
 		t.Fatalf("update plan cron: %v", err)
 	}
@@ -270,9 +330,49 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with invalid cron.
-	_, err = svc.Update(ctx, created.ID, "bad cron", "hint")
+	_, err = svc.Update(ctx, created.ID, "bad cron", "hint", nil)
 	if err == nil {
 		t.Error("expected error for invalid cron expression")
+	}
+}
+
+func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+
+	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "old hint", nil)
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	if created.SkipReferenceImage {
+		t.Fatal("expected default skip_reference_image to be false")
+	}
+
+	skipRef := true
+	updated, err := svc.Update(ctx, created.ID, "", "new hint", &skipRef)
+	if err != nil {
+		t.Fatalf("update skip_reference_image true: %v", err)
+	}
+	if !updated.SkipReferenceImage {
+		t.Fatal("expected skip_reference_image to update to true")
+	}
+
+	updated, err = svc.Update(ctx, created.ID, "", "unchanged hint", nil)
+	if err != nil {
+		t.Fatalf("update without skip_reference_image: %v", err)
+	}
+	if !updated.SkipReferenceImage {
+		t.Fatal("expected skip_reference_image to stay true when omitted")
+	}
+
+	skipRef = false
+	updated, err = svc.Update(ctx, created.ID, "", "final hint", &skipRef)
+	if err != nil {
+		t.Fatalf("update skip_reference_image false: %v", err)
+	}
+	if updated.SkipReferenceImage {
+		t.Fatal("expected skip_reference_image to update to false")
 	}
 }
 
@@ -281,7 +381,7 @@ func TestPlanService_Pause_Resume(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", nil)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -324,7 +424,7 @@ func TestPlanService_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint")
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", nil)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -339,5 +439,74 @@ func TestPlanService_Delete(t *testing.T) {
 	_, err = repo.Plans().FindByID(ctx, created.ID)
 	if err == nil {
 		t.Error("expected error when finding deleted plan")
+	}
+}
+
+func TestPublishingService_ListDrafts_DegradesWechat48001(t *testing.T) {
+	_, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	chID := createTestWechatChannel(t, repo, "user-1")
+	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
+	svc := NewPublishingService(repo, &logger)
+	svc.createDraftServiceFn = func(*model.Channel) (draftClient, error) {
+		return &stubDraftClient{
+			listDraftsErr: &wechat.WechatAPIError{ErrCode: 48001, UserMsg: "API 功能未授权"},
+		}, nil
+	}
+
+	result, err := svc.ListDrafts(ctx, "user-1", chID, 0, 20)
+	if err != nil {
+		t.Fatalf("expected 48001 to degrade without error, got %v", err)
+	}
+	if result.TotalCount != 0 || result.ItemCount != 0 {
+		t.Fatalf("expected empty result counts, got total=%d item=%d", result.TotalCount, result.ItemCount)
+	}
+	if result.Note == "" {
+		t.Fatal("expected explanatory note for 48001")
+	}
+}
+
+func TestPublishingService_ListPublished_DegradesWrappedWechat48001(t *testing.T) {
+	_, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	chID := createTestWechatChannel(t, repo, "user-1")
+	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
+	svc := NewPublishingService(repo, &logger)
+	svc.createDraftServiceFn = func(*model.Channel) (draftClient, error) {
+		return &stubDraftClient{
+			listPublishedErr: fmt.Errorf("list published: %w", &wechat.WechatAPIError{ErrCode: 48001, UserMsg: "API 功能未授权"}),
+		}, nil
+	}
+
+	result, err := svc.ListPublished(ctx, "user-1", chID, 0, 20)
+	if err != nil {
+		t.Fatalf("expected wrapped 48001 to degrade without error, got %v", err)
+	}
+	if result.TotalCount != 0 || result.ItemCount != 0 {
+		t.Fatalf("expected empty result counts, got total=%d item=%d", result.TotalCount, result.ItemCount)
+	}
+	if result.Note == "" {
+		t.Fatal("expected explanatory note for 48001")
+	}
+}
+
+func TestPublishingService_ListDrafts_ReturnsNon48001Error(t *testing.T) {
+	_, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	chID := createTestWechatChannel(t, repo, "user-1")
+	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
+	svc := NewPublishingService(repo, &logger)
+	svc.createDraftServiceFn = func(*model.Channel) (draftClient, error) {
+		return &stubDraftClient{
+			listDraftsErr: &wechat.WechatAPIError{ErrCode: 40164, UserMsg: "IP 不在白名单"},
+		}, nil
+	}
+
+	_, err := svc.ListDrafts(ctx, "user-1", chID, 0, 20)
+	if err == nil {
+		t.Fatal("expected non-48001 error to be returned")
+	}
+	if !strings.Contains(err.Error(), "list drafts") {
+		t.Fatalf("expected wrapped list drafts error, got %v", err)
 	}
 }

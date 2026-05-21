@@ -21,9 +21,9 @@
     </view>
 
     <!-- Image thumbnails for completed tasks -->
-    <view class="task-card__images" v-if="task.status === 'completed' && thumbnailUrls.length > 0">
+    <view class="task-card__images" v-if="task.status === 'completed' && safeThumbnailUrls.length > 0">
       <image
-        v-for="(url, i) in thumbnailUrls.slice(0, 3)"
+        v-for="(url, i) in safeThumbnailUrls.slice(0, 3)"
         :key="i"
         :src="url"
         class="task-card__thumbnail"
@@ -70,6 +70,7 @@ defineEmits<{
 
 const platformLabel = computed(() => contentTypeLabel[props.task.type] || props.task.type)
 const statusLabel = computed(() => taskStatusLabel[props.task.status])
+const safeThumbnailUrls = computed(() => props.thumbnailUrls ?? [])
 
 const timeText = computed(() => {
   if (props.task.completed_at) return relativeTime(props.task.completed_at)

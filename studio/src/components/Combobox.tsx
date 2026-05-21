@@ -82,7 +82,7 @@ export function Combobox({
   }, [options])
 
   return (
-    <div className={className}>
+    <div className={cn('relative', className)}>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         disabled={disabled}
@@ -103,16 +103,7 @@ export function Combobox({
           <span className="text-muted-foreground truncate">{placeholder}</span>
         )}
         {value && (
-          <button
-            type="button"
-            className="shrink-0 rounded-full p-0.5 hover:bg-muted-foreground/20"
-            onClick={(e) => {
-              e.stopPropagation()
-              onChange('')
-            }}
-          >
-            <X className="size-3 text-muted-foreground" />
-          </button>
+          <span aria-hidden="true" className="size-5 shrink-0" />
         )}
         <ChevronsUpDown className="pointer-events-none shrink-0 size-3.5 text-muted-foreground" />
       </PopoverTrigger>
@@ -148,6 +139,19 @@ export function Combobox({
         </Command>
       </PopoverContent>
     </Popover>
+    {value && !disabled && (
+      <button
+        type="button"
+        aria-label="清除选择"
+        className="absolute right-6 top-1/2 z-10 -translate-y-1/2 rounded-full p-0.5 hover:bg-muted-foreground/20"
+        onClick={(e) => {
+          e.stopPropagation()
+          onChange('')
+        }}
+      >
+        <X className="size-3 text-muted-foreground" />
+      </button>
+    )}
     </div>
   )
 }

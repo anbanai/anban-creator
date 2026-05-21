@@ -262,7 +262,8 @@ const otherItems: MenuItem[] = [
   { icon: '📤', title: '分享给好友', action: () => { /* handled by onShareAppMessage */ } },
 ]
 
-function navigateTo(path: string) {
+function navigateTo(path?: string) {
+  if (!path) return
   uni.navigateTo({ url: path })
 }
 

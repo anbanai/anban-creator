@@ -135,7 +135,7 @@ func (s *TaskService) StorageProviderName() string {
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The quantity parameter (1-5) determines how many tasks to create, each independently billed.
-func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio string, generateVideo bool) ([]*model.Task, error) {
+func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio string, skipRefImage *bool) ([]*model.Task, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
 	}
@@ -198,14 +198,14 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 		}
 
 		task := &model.Task{
-			ID:            taskID,
-			UserID:        userID,
-			ChannelID:     channelID,
-			Type:          taskType,
-			Status:        model.TaskStatusPending,
-			Prompt:        prompt,
-			ImageRatio:    imageRatio,
-			GenerateVideo: generateVideo,
+			ID:                 taskID,
+			UserID:             userID,
+			ChannelID:          channelID,
+			Type:               taskType,
+			Status:             model.TaskStatusPending,
+			Prompt:             prompt,
+			ImageRatio:         imageRatio,
+			SkipReferenceImage: skipRefImage != nil && *skipRefImage,
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -268,12 +268,13 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	task := &model.Task{
-		ID:        taskID,
-		UserID:    plan.UserID,
-		ChannelID: plan.ChannelID,
-		Type:      taskType,
-		Status:    model.TaskStatusPending,
-		Prompt:    prompt,
+		ID:                 taskID,
+		UserID:             plan.UserID,
+		ChannelID:          plan.ChannelID,
+		Type:               taskType,
+		Status:             model.TaskStatusPending,
+		Prompt:             prompt,
+		SkipReferenceImage: plan.SkipReferenceImage,
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {

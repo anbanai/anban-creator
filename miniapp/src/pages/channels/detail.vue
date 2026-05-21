@@ -344,14 +344,14 @@ watch(keywordList, (val) => {
   form.keywords = val.join(',')
 })
 
-watch(form.platform, (val) => {
+watch(() => form.platform, (val) => {
   // Reset image ratio to platform default when platform changes
   const defaults: Record<string, string> = {
     article: '16:9',
     seednote: '3:4',
     xls: '3:4',
   }
-  if (defaults[val]) {
+  if (val && defaults[val]) {
     form.image_ratio = defaults[val]
   }
 })

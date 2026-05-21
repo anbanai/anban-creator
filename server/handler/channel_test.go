@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/royalrick/anbanwriter/server/platform"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
 
 type fakeChannelLLM struct {
@@ -25,9 +28,45 @@ func (f *fakeChannelLLM) Complete(ctx context.Context, systemPrompt, userPrompt 
 	return f.response, f.err
 }
 
-func (f *fakeChannelLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeChannelLLM) CompleteWithImage(_ context.Context, systemPrompt, userPrompt, imageURL string) (string, error) {
+	f.prompt = userPrompt
+	return f.response, f.err
+}
+
+type fakeStorageProvider struct {
+	data map[string][]byte
+	read []string
+}
+
+var _ storage.Provider = (*fakeStorageProvider)(nil)
+
+func (f *fakeStorageProvider) Name() string { return "fake" }
+
+func (f *fakeStorageProvider) Upload(context.Context, string, io.Reader, string) (*storage.UploadResult, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (f *fakeStorageProvider) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (f *fakeStorageProvider) GetURL(key string) string { return "/api/v1/files/" + key }
+
+func (f *fakeStorageProvider) Read(_ context.Context, key string) ([]byte, error) {
+	f.read = append(f.read, key)
+	if data, ok := f.data[key]; ok {
+		return data, nil
+	}
+	return nil, fmt.Errorf("not found")
+}
+
+func (f *fakeStorageProvider) Delete(context.Context, string) error { return nil }
+
+func (f *fakeStorageProvider) DownloadURL(context.Context, string, int) (string, error) {
 	return "", fmt.Errorf("not implemented")
 }
+
+func (f *fakeStorageProvider) HasCustomDomain() bool { return false }
 
 func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {
 	llm := &fakeChannelLLM{response: `{
@@ -108,6 +147,104 @@ func TestChannelFetchProfileRejectsNonSeednoteAutoFetch(t *testing.T) {
 	}
 }
 
+func TestAnalyzeImageRejectsInternalFileFromDifferentUser(t *testing.T) {
+	store := &fakeStorageProvider{
+		data: map[string][]byte{
+			"uploads/channels/user-2/reference.png": tinyPNG(),
+		},
+	}
+	llm := &fakeChannelLLM{response: "清爽自然的视觉风格"}
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetLLMClient(llm, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/uploads/channels/user-2/reference.png"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusForbidden)
+	}
+	if len(store.read) != 0 {
+		t.Fatalf("store.Read should not be called for unauthorized files, got %v", store.read)
+	}
+}
+
+func TestAnalyzeImageAllowsOwnedInternalFile(t *testing.T) {
+	key := "uploads/channels/user-1/reference.png"
+	store := &fakeStorageProvider{
+		data: map[string][]byte{
+			key: tinyPNG(),
+		},
+	}
+	llm := &fakeChannelLLM{response: "清爽自然的视觉风格"}
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetLLMClient(llm, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/`+key+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusOK)
+	}
+	if len(store.read) != 1 || store.read[0] != key {
+		t.Fatalf("store.Read keys = %v, want [%s]", store.read, key)
+	}
+	if llm.prompt == "" {
+		t.Fatal("expected image analysis prompt to be sent to LLM")
+	}
+}
+
+func TestGetPublicHTTPSImageRejectsLoopbackHost(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(tinyPNG())
+	}))
+	defer server.Close()
+
+	if _, err := getPublicHTTPSImage(context.Background(), server.URL, 10<<20); err == nil {
+		t.Fatal("expected loopback HTTPS URL to be rejected")
+	}
+}
+
+func TestIsPublicIP(t *testing.T) {
+	tests := []struct {
+		name string
+		ip   string
+		want bool
+	}{
+		{name: "public ipv4", ip: "8.8.8.8", want: true},
+		{name: "private ipv4", ip: "10.0.0.1", want: false},
+		{name: "loopback ipv4", ip: "127.0.0.1", want: false},
+		{name: "link local ipv4", ip: "169.254.1.1", want: false},
+		{name: "public ipv6", ip: "2001:4860:4860::8888", want: true},
+		{name: "unique local ipv6", ip: "fc00::1", want: false},
+		{name: "loopback ipv6", ip: "::1", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isPublicIP(net.ParseIP(tt.ip)); got != tt.want {
+				t.Fatalf("isPublicIP(%s) = %v, want %v", tt.ip, got, tt.want)
+			}
+		})
+	}
+}
+
 func httptestJSON(method, target, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -127,4 +264,14 @@ func containsAll(s string, parts ...string) bool {
 		}
 	}
 	return true
+}
+
+func tinyPNG() []byte {
+	return []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde,
+	}
 }

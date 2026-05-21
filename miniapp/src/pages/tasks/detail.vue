@@ -228,7 +228,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
-import type { Task, WorkflowStage, WorkflowReview } from '@/types'
+import type { Task, TaskStatus, WorkflowStage, WorkflowReview } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import { taskStatusLabel } from '@/utils/labels'
 import { formatDateTimeCN, formatFullDateTimeCN, sanitizeHtml } from '@/utils/format'
@@ -257,7 +257,10 @@ const {
   stopPolling,
 } = usePolling()
 
-const statusLabel = computed(() => taskStatusLabel[task.value?.status as any] || '')
+const statusLabel = computed(() => {
+  const taskStatus = task.value?.status
+  return taskStatus ? taskStatusLabel[taskStatus as TaskStatus] || '' : ''
+})
 
 const statusBadgeVariant = computed(() => {
   switch (task.value?.status) {
@@ -375,7 +378,6 @@ async function onRetry() {
       channel_id: task.value.channel_id,
       prompt: task.value.prompt,
       image_ratio: task.value.image_ratio || undefined,
-      generate_video: task.value.generate_video || undefined,
     })
 
     uni.showToast({ title: '已重新创建任务', icon: 'success' })

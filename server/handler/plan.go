@@ -23,14 +23,16 @@ func NewPlanHandler(svc *service.PlanService, logger *zerolog.Logger) *PlanHandl
 // Request types.
 
 type createPlanRequest struct {
-	ChannelID string `json:"channel_id"`
-	CronExpr  string `json:"cron_expr"`
-	Prompt    string `json:"prompt"`
+	ChannelID          string `json:"channel_id"`
+	CronExpr           string `json:"cron_expr"`
+	Prompt             string `json:"prompt"`
+	SkipReferenceImage *bool  `json:"skip_reference_image"`
 }
 
 type updatePlanRequest struct {
-	CronExpr string `json:"cron_expr"`
-	Prompt   string `json:"prompt"`
+	CronExpr           string `json:"cron_expr"`
+	Prompt             string `json:"prompt"`
+	SkipReferenceImage *bool  `json:"skip_reference_image"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -49,7 +51,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt)
+	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.SkipReferenceImage)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
@@ -135,7 +137,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this plan")
 	}
 
-	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt)
+	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.SkipReferenceImage)
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")

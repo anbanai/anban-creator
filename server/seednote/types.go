@@ -28,7 +28,6 @@ type NoteCard struct {
 	User         User         `json:"user"`
 	InteractInfo InteractInfo `json:"interactInfo"`
 	Cover        Cover        `json:"cover"`
-	Video        *Video       `json:"video,omitempty"`
 }
 
 // User holds basic user information.
@@ -61,11 +60,6 @@ type Cover struct {
 type ImageInfo struct {
 	ImageScene string `json:"imageScene"`
 	URL        string `json:"url"`
-}
-
-// Video holds video metadata (nil for image notes).
-type Video struct {
-	Duration int `json:"duration"`
 }
 
 // --- Feed detail types ---

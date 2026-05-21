@@ -43,11 +43,12 @@ func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...st
 // Request types.
 
 type createTaskRequest struct {
-	ChannelID     string `json:"channel_id"`
-	Prompt        string `json:"prompt"`
-	Quantity      int    `json:"quantity"`
-	ImageRatio    string `json:"image_ratio"`
-	GenerateVideo bool   `json:"generate_video"`
+	ChannelID          string `json:"channel_id"`
+	Prompt             string `json:"prompt"`
+	Quantity           int    `json:"quantity"`
+	ImageRatio         string `json:"image_ratio"`
+	GenerateVideo      bool   `json:"generate_video"`
+	SkipReferenceImage *bool  `json:"skip_reference_image"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -87,7 +88,11 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.GenerateVideo)
+	if req.GenerateVideo {
+		return Error(c, fiber.StatusBadRequest, "video generation is no longer supported")
+	}
+
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.SkipReferenceImage)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {
@@ -686,8 +691,8 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid file path")
 	}
 
-	// Verify ownership: key format is {userID}/{taskID}/...
-	if !strings.HasPrefix(cleanKey, userID+"/") {
+	// Verify ownership: key format is {userID}/{taskID}/... or uploads/channels/{userID}/...
+	if !strings.HasPrefix(cleanKey, userID+"/") && !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") {
 		return Forbidden(c, "you do not have access to this file")
 	}
 
@@ -729,8 +734,6 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 		c.Set("Content-Type", "image/svg+xml")
 		c.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
 		c.Set("X-Content-Type-Options", "nosniff")
-	case ".mp4":
-		c.Set("Content-Type", "video/mp4")
 	case ".pdf":
 		c.Set("Content-Type", "application/pdf")
 	}

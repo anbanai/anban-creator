@@ -18,7 +18,7 @@ import (
 // BuildAppConfig constructs an app/config.Config from a Channel DB record.
 // This bridges the multi-user server config to the single-account app config
 // used by the abwriter CLI binary.
-func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string) (*appconfig.Config, error) {
+func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, skipRefImage bool) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
 		Name:        ch.Name,
 		Positioning: ch.Positioning,
@@ -107,7 +107,7 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 	}
 
 	// Set brand reference image path for image generation (downloaded by executor).
-	if ch.ReferenceImageURL != "" {
+	if ch.ReferenceImageURL != "" && !skipRefImage {
 		referPath := filepath.Join(appconfig.ConfigDir, "reference.png")
 		switch ch.Platform {
 		case model.ScopeArticle:

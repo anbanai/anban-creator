@@ -334,7 +334,7 @@ func taskCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		quantity = int(v)
 	}
 
-	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, prompt, quantity, "", false)
+	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, prompt, quantity, "", nil)
 	if err != nil {
 		return billingError("create task", err), nil
 	}
@@ -476,7 +476,7 @@ func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		return errorResult("channel_id and cron_expr are required"), nil
 	}
 
-	plan, err := svcs.PlanSvc.Create(context.Background(), userID, channelID, cronExpr, prompt)
+	plan, err := svcs.PlanSvc.Create(context.Background(), userID, channelID, cronExpr, prompt, nil)
 	if err != nil {
 		return errorResult(fmt.Sprintf("create plan: %v", err)), nil
 	}

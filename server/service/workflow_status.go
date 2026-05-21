@@ -91,9 +91,6 @@ func DetermineWorkflowArtifactRole(fileName, mimeType string) string {
 	if ext == ".html" || ext == ".htm" || mimeType == "text/html" {
 		return model.FileRoleHTML
 	}
-	if strings.HasPrefix(mimeType, "video/") {
-		return model.FileRoleVideo
-	}
 	if strings.HasPrefix(mimeType, "image/") {
 		return model.FileRoleImage
 	}

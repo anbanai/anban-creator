@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Film, Download, Square, CheckSquare } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, ImageIcon } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -68,7 +68,6 @@ export default function TasksPage() {
   const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
   const [quantity, setQuantity] = useState(1)
-  const [generateVideo, setGenerateVideo] = useState(false)
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
@@ -107,6 +106,9 @@ export default function TasksPage() {
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
+  const watchedChannelId = useWatch({ control: form.control, name: 'channel_id' })
+
+  const selectedChannel = useMemo(() => channels.find((c) => c.id === watchedChannelId), [channels, watchedChannelId])
 
   // Auto-focus prompt field when dialog opens
   useEffect(() => {
@@ -216,9 +218,8 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '' })
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', skip_reference_image: false })
     setQuantity(1)
-    setGenerateVideo(false)
     setChannelImageRatio('')
     setModalOpen(true)
   }
@@ -234,9 +235,8 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '' })
+    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', skip_reference_image: false })
     setQuantity(1)
-    setGenerateVideo(false)
     setChannelImageRatio('')
   }
 
@@ -247,7 +247,7 @@ export default function TasksPage() {
       channel_id: values.channel_id,
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
-      generate_video: generateVideo || undefined,
+      skip_reference_image: values.skip_reference_image || undefined,
     }))
   }
 
@@ -535,6 +535,7 @@ export default function TasksPage() {
                       value={field.value || ''}
                       onChange={(id, platform) => {
                         field.onChange(id)
+                        form.setValue('skip_reference_image', false)
                         if (id) {
                           form.setValue('type', platform as TaskType)
                           form.setValue('image_ratio', '')
@@ -611,25 +612,29 @@ export default function TasksPage() {
                 )
               }} />
 
-              {/* Generate video toggle — only for image-heavy types */}
-              {watchedType === 'seednote' && (
-                <button
-                  type="button"
-                  onClick={() => setGenerateVideo(!generateVideo)}
-                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                    generateVideo
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-foreground/20'
-                  }`}
-                >
-                  <Film className={`mt-0.5 h-5 w-5 shrink-0 ${generateVideo ? 'text-primary' : 'text-muted-foreground'}`} />
-                  <div className="min-w-0">
-                    <p className={`text-sm font-medium ${generateVideo ? 'text-foreground' : 'text-muted-foreground'}`}>
-                      生成视频
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">开启后将自动合成视频</p>
-                  </div>
-                </button>
+              {/* Use reference image toggle */}
+              {selectedChannel?.reference_image_url && (
+                <FormField control={form.control} name="skip_reference_image" render={({ field }) => (
+                  <button
+                    type="button"
+                    onClick={() => field.onChange(!field.value)}
+                    className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      !field.value
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-foreground/20'
+                    }`}
+                  >
+                    <ImageIcon className={`mt-0.5 h-5 w-5 shrink-0 ${!field.value ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <div className="min-w-0">
+                      <p className={`text-sm font-medium ${!field.value ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        使用参考图
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        使用账号配置的品牌参考图保持视觉一致性
+                      </p>
+                    </div>
+                  </button>
+                )} />
               )}
 
               {/* Cost display */}

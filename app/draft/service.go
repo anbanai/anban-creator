@@ -145,6 +145,7 @@ type ListDraftsResult struct {
 	TotalCount int64       `json:"total_count"`
 	ItemCount  int64       `json:"item_count"`
 	Items      []DraftItem `json:"items"`
+	Note       string      `json:"note,omitempty"`
 }
 
 // DraftItem 草稿列表项
@@ -160,6 +161,7 @@ type ListPublishedResult struct {
 	TotalCount int64           `json:"total_count"`
 	ItemCount  int64           `json:"item_count"`
 	Items      []PublishedItem `json:"items"`
+	Note       string          `json:"note,omitempty"`
 }
 
 // PublishedItem 已发布文章列表项

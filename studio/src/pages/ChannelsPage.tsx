@@ -749,6 +749,20 @@ export default function ChannelsPage() {
                     </FormItem>
                   )} />
 
+                  <FormField control={form.control} name="reference_image_url" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>视觉参考图</FormLabel>
+                      <FormControl>
+                        <ReferenceImageUpload
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
+                      </FormControl>
+                      <FormDescription>用于 AI 图片生成的视觉风格参考，保持品牌一致性</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
                   <FormField control={form.control} name="style" render={({ field }) => (
                     <FormItem>
                       <FormLabel>{isSeednote ? '视觉风格' : '写作风格'}</FormLabel>
@@ -859,20 +873,6 @@ export default function ChannelsPage() {
                       <FormControl>
                         <Input className="flex-1 min-w-0" placeholder="例如 张三" {...field} />
                       </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <FormField control={form.control} name="reference_image_url" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>视觉参考图</FormLabel>
-                      <FormControl>
-                        <ReferenceImageUpload
-                          value={field.value}
-                          onChange={field.onChange}
-                        />
-                      </FormControl>
-                      <FormDescription>用于 AI 图片生成的视觉风格参考，保持品牌一致性</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />

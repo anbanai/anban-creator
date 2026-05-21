@@ -316,7 +316,7 @@ export default function TaskDetailPage() {
           prompt: currentTask.prompt || undefined,
           channel_id: currentTask.channel_id,
           image_ratio: currentTask.image_ratio || undefined,
-          generate_video: currentTask.generate_video || undefined,
+          skip_reference_image: currentTask.skip_reference_image || undefined,
         })
         toast.success('已重新创建任务')
         queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })

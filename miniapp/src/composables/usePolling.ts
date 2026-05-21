@@ -4,7 +4,7 @@ import { POLL_INTERVAL_RUNNING, POLL_INTERVAL_PENDING } from '@/utils/constants'
 import type { Task } from '@/types'
 
 export function usePolling() {
-  const task = ref<Task | null>(null) as { value: Task | null }
+  const task = ref<Task | null>(null)
   const logs = ref<string[]>([])
   const progress = ref(0)
   const status = ref<string>('')
@@ -13,11 +13,11 @@ export function usePolling() {
   let timer: ReturnType<typeof setInterval> | null = null
   let lastLogLength = 0
 
-  function startPolling(taskId: string) {
+  async function startPolling(taskId: string) {
     stopPolling()
     polling.value = true
     lastLogLength = 0
-    poll(taskId)
+    await poll(taskId)
   }
 
   async function poll(taskId: string) {

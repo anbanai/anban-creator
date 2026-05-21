@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText } from 'lucide-react'
+import { Plus, FileText, ImageIcon } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { Channel, Plan, PlanType, CreatePlanRequest } from '@/types'
+import type { Channel, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
+import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/ui/button'
@@ -34,6 +35,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     type: plan.type,
     cron_expr: plan.cron_expr,
     prompt: plan.prompt || '',
+    skip_reference_image: plan.skip_reference_image ?? false,
   }
 }
 
@@ -49,7 +51,7 @@ export default function PlansPage() {
   const { submit } = useSubmitLock()
 
   const form = useForm<PlanFormValues>({
-    resolver: zodResolver(planSchema),
+    resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
     defaultValues: {
       channel_id: '',
       type: 'seednote',
@@ -105,6 +107,9 @@ export default function PlansPage() {
     return map
   }, [allChannels])
 
+  const watchedChannelId = useWatch({ control: form.control, name: 'channel_id' })
+  const selectedChannel = useMemo(() => allChannels?.find((c) => c.id === watchedChannelId), [allChannels, watchedChannelId])
+
   const createMutation = useMutation({
     mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
     onSuccess: () => {
@@ -118,7 +123,7 @@ export default function PlansPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: CreatePlanRequest }) => api.plans.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: UpdatePlanRequest }) => api.plans.update(id, data),
     onSuccess: () => {
       toast.success('计划更新成功')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
@@ -161,6 +166,7 @@ export default function PlansPage() {
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
+      skip_reference_image: false,
     })
     setModalOpen(true)
   }
@@ -188,6 +194,7 @@ export default function PlansPage() {
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
+      skip_reference_image: false,
     })
   }
 
@@ -197,10 +204,16 @@ export default function PlansPage() {
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id || undefined,
+      skip_reference_image: values.skip_reference_image,
     }
 
     if (editingPlan) {
-      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: payload }))
+      const updatePayload: UpdatePlanRequest = {
+        cron_expr: payload.cron_expr,
+        prompt: payload.prompt,
+        skip_reference_image: payload.skip_reference_image,
+      }
+      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: updatePayload }))
     } else {
       await submit(async () => createMutation.mutateAsync(payload))
     }
@@ -351,12 +364,19 @@ export default function PlansPage() {
                   <FormControl>
                     <ChannelSelector
                       value={field.value || ''}
+                      disabled={!!editingPlan}
                       onChange={(id, platform) => {
                         field.onChange(id)
-                        if (id) form.setValue('type', platform as PlanType)
+                        form.setValue('skip_reference_image', false)
+                        if (id) {
+                          form.setValue('type', platform as PlanType)
+                        }
                       }}
                     />
                   </FormControl>
+                  {editingPlan && (
+                    <FormDescription>计划创建后不可更换账号</FormDescription>
+                  )}
                   <FormMessage />
                 </FormItem>
               )} />
@@ -402,6 +422,31 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {/* Use reference image toggle */}
+              {selectedChannel?.reference_image_url && (
+                <FormField control={form.control} name="skip_reference_image" render={({ field }) => (
+                  <button
+                    type="button"
+                    onClick={() => field.onChange(!field.value)}
+                    className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      !field.value
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-foreground/20'
+                    }`}
+                  >
+                    <ImageIcon className={`mt-0.5 h-5 w-5 shrink-0 ${!field.value ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <div className="min-w-0">
+                      <p className={`text-sm font-medium ${!field.value ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        使用参考图
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        使用账号配置的品牌参考图保持视觉一致性
+                      </p>
+                    </div>
+                  </button>
+                )} />
+              )}
             </form>
           </Form>
           <DialogFooter>

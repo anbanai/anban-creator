@@ -29,6 +29,7 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 func (s *PlanService) Create(
 	ctx context.Context,
 	userID, channelID, cronExpr, prompt string,
+	skipRefImage *bool,
 ) (*model.Plan, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
@@ -55,14 +56,15 @@ func (s *PlanService) Create(
 	}
 
 	plan := &model.Plan{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		ChannelID: channelID,
-		Type:      channel.Platform,
-		CronExpr:  cronExpr,
-		Prompt:    prompt,
-		Status:    model.PlanStatusActive,
-		NextRunAt: nextRun,
+		ID:                 uuid.New().String(),
+		UserID:             userID,
+		ChannelID:          channelID,
+		Type:               channel.Platform,
+		CronExpr:           cronExpr,
+		Prompt:             prompt,
+		Status:             model.PlanStatusActive,
+		NextRunAt:          nextRun,
+		SkipReferenceImage: skipRefImage != nil && *skipRefImage,
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -101,6 +103,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 func (s *PlanService) Update(
 	ctx context.Context,
 	id, cronExpr, prompt string,
+	skipRefImage *bool,
 ) (*model.Plan, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, id)
 	if err != nil {
@@ -108,6 +111,9 @@ func (s *PlanService) Update(
 	}
 
 	plan.Prompt = prompt
+	if skipRefImage != nil {
+		plan.SkipReferenceImage = *skipRefImage
+	}
 
 	// If cron expression changed, validate and recompute next run.
 	if cronExpr != "" && cronExpr != plan.CronExpr {

@@ -219,7 +219,7 @@ async function loadStats() {
 
     // Invite count from user info
     if (authStore.user) {
-      const invited = authStore.user.invited_count ?? 0
+      const invited = authStore.user.invite_count ?? 0
       inviteCount.value = `${invited}/10`
     }
   } catch (err) {

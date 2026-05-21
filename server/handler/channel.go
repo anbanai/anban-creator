@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -840,8 +842,10 @@ func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
 		if h.store == nil {
 			return Error(c, fiber.StatusInternalServerError, "file storage is not available")
 		}
-		key := strings.TrimPrefix(req.ImageURL, "/api/v1/files/")
-		key = strings.TrimPrefix(key, "/files/")
+		key, respondErr := cleanOwnedUploadKey(req.ImageURL, userID)
+		if respondErr != nil {
+			return respondErr(c)
+		}
 		var err error
 		imageData, err = h.store.Read(c.Context(), key)
 		if err != nil {
@@ -849,19 +853,12 @@ func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
 			return Error(c, fiber.StatusInternalServerError, "failed to read image file")
 		}
 	} else if strings.HasPrefix(req.ImageURL, "https://") {
-		resp, err := http.Get(req.ImageURL)
+		resp, err := getPublicHTTPSImage(c.Context(), req.ImageURL, maxAnalysisImageSize)
 		if err != nil {
 			h.logger.Error().Err(err).Str("url", req.ImageURL).Msg("failed to download external image")
-			return Error(c, fiber.StatusInternalServerError, "failed to download image")
-		}
-		defer resp.Body.Close()
-		imageData, err = io.ReadAll(io.LimitReader(resp.Body, maxAnalysisImageSize+1))
-		if err != nil {
-			return Error(c, fiber.StatusInternalServerError, "failed to read image")
-		}
-		if resp.StatusCode != http.StatusOK {
 			return Error(c, fiber.StatusBadRequest, "failed to download image")
 		}
+		imageData = resp
 	} else {
 		return Error(c, fiber.StatusBadRequest, "image_url must start with /api/v1/files/ or https://")
 	}
@@ -877,7 +874,7 @@ func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
 	imageURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(imageData))
 
 	systemPrompt := "你是一位专业的视觉风格分析师，专注于 AI 图片生成的风格描述。"
-	userPrompt := "请分析这张图片的视觉风格，输出一段简洁的中文描述（50-100字），涵盖：配色方案、整体氛围、构图特点、元素风格。描述将用于 AI 生成图片的风格提示，请直接输出描述文本，不要有标题或其他格式。"
+	userPrompt := "请分析这张图片的视觉风格，输出一段简洁的中文风格指令（30-60字）。只描述抽象的风格维度：艺术流派、视觉氛围、画面质感、构图手法、表现方式。绝对不要提及任何具体颜色、具体物体、具体元素或具体场景。输出应该是「风格指令」而非「画面描述」，给 AI 图片生成留有充分的创作发挥空间。直接输出描述文本，不要有标题或其他格式。"
 
 	result, err := llm.CompleteWithImage(c.Context(), systemPrompt, userPrompt, imageURL)
 	if err != nil {
@@ -891,4 +888,104 @@ func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{"style": style})
+}
+
+func getPublicHTTPSImage(ctx context.Context, imageURL string, maxSize int64) ([]byte, error) {
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			DialContext: publicOnlyDialContext,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("too many redirects")
+			}
+			if req.URL.Scheme != "https" {
+				return fmt.Errorf("external image redirects must use https")
+			}
+			return nil
+		},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if req.URL.Scheme != "https" || req.URL.Hostname() == "" || req.URL.User != nil {
+		return nil, fmt.Errorf("invalid external image URL")
+	}
+	req.Header.Set("Accept", "image/*")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download external image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download external image: unexpected status %d", resp.StatusCode)
+	}
+	if resp.ContentLength > maxSize {
+		return nil, fmt.Errorf("external image exceeds max size")
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("read external image: %w", err)
+	}
+	if int64(len(data)) > maxSize {
+		return nil, fmt.Errorf("external image exceeds max size")
+	}
+	return data, nil
+}
+
+func publicOnlyDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("invalid address: %w", err)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve host: %w", err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("host did not resolve")
+	}
+	for _, addr := range ips {
+		if !isPublicIP(addr.IP) {
+			return nil, fmt.Errorf("external image host resolves to a non-public address")
+		}
+	}
+
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+}
+
+func isPublicIP(ip net.IP) bool {
+	return ip.IsGlobalUnicast() &&
+		!ip.IsPrivate() &&
+		!ip.IsLoopback() &&
+		!ip.IsLinkLocalUnicast() &&
+		!ip.IsLinkLocalMulticast() &&
+		!ip.IsUnspecified() &&
+		!ip.IsMulticast()
+}
+
+type fiberErrorFunc func(fiber.Ctx) error
+
+func cleanOwnedUploadKey(imageURL, userID string) (string, fiberErrorFunc) {
+	key := strings.TrimPrefix(imageURL, "/api/v1/files/")
+	key = strings.TrimPrefix(key, "/files/")
+	if key == "" {
+		return "", func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
+	}
+
+	cleanKey := path.Clean(key)
+	if strings.Contains(cleanKey, "..") {
+		return "", func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
+	}
+	if !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") {
+		return "", func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }
+	}
+	return cleanKey, nil
 }

@@ -8,9 +8,10 @@ interface ChannelSelectorProps {
   value: string
   onChange: (channelId: string, platform: string) => void
   platform?: string
+  disabled?: boolean
 }
 
-export function ChannelSelector({ value, onChange, platform }: ChannelSelectorProps) {
+export function ChannelSelector({ value, onChange, platform, disabled }: ChannelSelectorProps) {
   const { data: channels = [], isLoading } = useQuery({
     queryKey: ['channels', 'active', platform],
     queryFn: () => api.channels.list({ status: 'active', platform }),
@@ -42,6 +43,7 @@ export function ChannelSelector({ value, onChange, platform }: ChannelSelectorPr
         placeholder="选择账号..."
         searchPlaceholder="搜索账号..."
         emptyText="没有找到账号"
+        disabled={disabled}
       />
       {channels.length === 0 && (
         <p className="text-xs text-muted-foreground">

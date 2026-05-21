@@ -142,7 +142,6 @@ const typeTabs = [
   { key: 'poster', label: '海报' },
   { key: 'seednote', label: '种草笔记' },
   { key: 'article', label: '公众号' },
-  { key: 'xls', label: '小绿书' },
 ]
 const activeType = ref('')
 
@@ -208,7 +207,7 @@ function getTypeLabel(type: TemplateType): string {
 
 function getTypeBadgeVariant(type: TemplateType): 'success' | 'danger' | 'warning' | 'info' | 'neutral' {
   if (type === 'seednote') return 'danger'
-  if (type === 'article' || type === 'xls') return 'success'
+  if (type === 'article') return 'success'
   return 'neutral'
 }
 

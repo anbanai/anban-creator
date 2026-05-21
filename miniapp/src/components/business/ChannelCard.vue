@@ -8,12 +8,12 @@
       </view>
     </view>
     <view class="channel-card__stats" v-if="stats">
-      <text class="stats-item success">✅{{ stats.completed }}</text>
-      <text class="stats-item danger">❌{{ stats.failed }}</text>
+      <text class="stats-item success">✅{{ stats.completed_tasks }}</text>
+      <text class="stats-item danger">❌{{ stats.failed_tasks }}</text>
       <text class="stats-item">{{ stats.success_rate }}%成功</text>
     </view>
-    <text class="channel-card__activity" v-if="stats?.last_activity">
-      最近活跃: {{ stats.last_activity }}
+    <text class="channel-card__activity" v-if="stats?.last_activity_at">
+      最近活跃: {{ stats.last_activity_at }}
     </text>
   </view>
 </template>

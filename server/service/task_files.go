@@ -34,7 +34,6 @@ var mimeTypes = map[string]string{
 	".gif":      "image/gif",
 	".webp":     "image/webp",
 	".svg":      "image/svg+xml",
-	".mp4":      "video/mp4",
 	".pdf":      "application/pdf",
 	".zip":      "application/zip",
 }
@@ -83,9 +82,6 @@ func DetermineTaskFileRole(filename, mimeType string) string {
 	}
 	if strings.HasPrefix(mimeType, "image/") {
 		return model.FileRoleImage
-	}
-	if strings.HasPrefix(mimeType, "video/") {
-		return model.FileRoleVideo
 	}
 	return model.FileRoleOther
 }

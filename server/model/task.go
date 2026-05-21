@@ -13,7 +13,7 @@ type Task struct {
 	Prompt              string     `gorm:"column:topic;type:varchar(500)" json:"prompt"`
 	Title               string     `gorm:"type:varchar(200)" json:"title,omitempty"`
 	ImageRatio          string     `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
-	GenerateVideo       bool       `gorm:"default:false" json:"generate_video,omitempty"`
+	SkipReferenceImage  bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
 	ProgressLog         string     `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Result              *string    `gorm:"type:json" json:"result,omitempty"`
 	InputTokens         *int64     `json:"input_tokens,omitempty"`

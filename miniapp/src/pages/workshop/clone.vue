@@ -247,7 +247,9 @@ async function onClone() {
 
 onMounted(() => {
   // Check if returning from template selection with a selected template
-  const eventChannel = uni.getOpenerEventChannel?.()
+  const eventChannel = (uni as typeof uni & {
+    getOpenerEventChannel?: () => { on: (event: string, callback: (data: { template: Template }) => void) => void }
+  }).getOpenerEventChannel?.()
   if (eventChannel) {
     eventChannel.on('selectTemplate', (data: { template: Template }) => {
       if (data?.template) {

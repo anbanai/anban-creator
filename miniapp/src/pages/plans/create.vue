@@ -20,7 +20,6 @@
         <AbInput
           v-model="form.title"
           placeholder="如: 每日种草笔记"
-          :error="errors.title"
         />
       </view>
 
@@ -87,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { plansApi } from '@/api/plans'
 import ChannelSelector from '@/components/business/ChannelSelector.vue'
@@ -96,7 +95,6 @@ import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import AbLoading from '@/components/common/AbLoading.vue'
-import type { Plan, PlanType } from '@/types'
 
 // --- Form state ---
 const form = reactive({
@@ -220,9 +218,10 @@ async function handleSubmit() {
     } else {
       await plansApi.create({
         channel_id: form.channelId,
+        type: 'seednote',
         cron_expr: cronExpr,
         prompt: form.prompt || undefined,
-      } as any)
+      })
       uni.showToast({ title: '创建成功', icon: 'none' })
     }
 

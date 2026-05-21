@@ -72,21 +72,6 @@
       </view>
     </view>
 
-    <!-- Advanced options (collapsible) -->
-    <view class="task-create__section">
-      <view class="collapsible-header" @tap="showAdvanced = !showAdvanced">
-        <text class="field-label" style="margin-bottom: 0;">高级选项</text>
-        <text class="collapsible-arrow">{{ showAdvanced ? '收起' : '展开' }}</text>
-      </view>
-      <view v-if="showAdvanced" class="advanced-options">
-        <!-- Generate video (seednote/xls only) -->
-        <view v-if="isImagePlatform" class="switch-row">
-          <text class="field-label" style="margin-bottom: 0;">生成视频</text>
-          <AbSwitch v-model="form.generate_video" />
-        </view>
-      </view>
-    </view>
-
     <!-- Credit info -->
     <view class="task-create__section">
       <view class="credit-info">
@@ -133,7 +118,6 @@ import { TASK_QUANTITIES, IMAGE_RATIOS } from '@/utils/constants'
 import { contentTypeLabel } from '@/utils/labels'
 import AbButton from '@/components/common/AbButton.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
-import AbSwitch from '@/components/common/AbSwitch.vue'
 import ChannelSelector from '@/components/business/ChannelSelector.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
 
@@ -148,7 +132,6 @@ const selectedChannel = ref<Channel | null>(null)
 const balance = ref(0)
 const pricing = ref<CreditPricing | null>(null)
 const submitting = ref(false)
-const showAdvanced = ref(false)
 const inspirationIndex = ref(0)
 
 const form = reactive({
@@ -156,17 +139,11 @@ const form = reactive({
   prompt: '',
   quantity: 1,
   image_ratio: '3:4',
-  generate_video: false,
 })
 
 const errors = reactive<Record<string, string>>({})
 
 const currentInspiration = computed(() => inspirations[inspirationIndex.value % inspirations.length])
-
-const isImagePlatform = computed(() => {
-  if (!selectedChannel.value) return false
-  return ['seednote', 'xls'].includes(selectedChannel.value.platform)
-})
 
 const estimatedCost = computed(() => {
   if (!pricing.value?.task_costs) return 0
@@ -192,11 +169,6 @@ function onChannelChange(channel: Channel) {
       xls: '3:4',
     }
     form.image_ratio = defaults[channel.platform] || '3:4'
-  }
-
-  // Reset video for non-image platforms
-  if (!isImagePlatform.value) {
-    form.generate_video = false
   }
 
   // Clear error
@@ -243,7 +215,6 @@ async function onSubmit() {
       prompt: form.prompt.trim(),
       quantity: form.quantity,
       image_ratio: form.image_ratio,
-      generate_video: form.generate_video || undefined,
     })
 
     uni.showToast({ title: '任务已创建', icon: 'success' })
