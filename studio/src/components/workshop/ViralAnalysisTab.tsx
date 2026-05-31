@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Loader2, Search, FlaskConical, Clock } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -28,14 +29,16 @@ const statusLabelMap: Record<string, string> = {
 
 export default function ViralAnalysisTab() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const analysisIdParam = searchParams.get('analysisId')
   const [url, setUrl] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const polledIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
+    return clearPolling
   }, [])
 
   const { data: analysesData, isLoading: listLoading } = useQuery({
@@ -47,12 +50,28 @@ export default function ViralAnalysisTab() {
 
   const selected = selectedId ? analyses.find((a) => a.id === selectedId) : null
 
+  useEffect(() => {
+    if (analysisIdParam) {
+      if (selectedId !== analysisIdParam) {
+        setSelectedId(analysisIdParam)
+      }
+      if (polledIdRef.current !== analysisIdParam) {
+        pollAnalysis(analysisIdParam)
+      }
+      return
+    }
+    if (!selectedId && analyses.length > 0) {
+      setSelectedId(analyses[0].id)
+    }
+  }, [analyses, analysisIdParam, selectedId])
+
   const createMutation = useMutation({
     mutationFn: (data: CreateViralAnalysisRequest) => api.viralAnalyses.create(data),
     onSuccess: (newAnalysis) => {
       toast.success('分析任务已创建')
       queryClient.invalidateQueries({ queryKey: ['viral-analyses'] })
       setSelectedId(newAnalysis.id)
+      setSearchParams({ tab: 'analysis', analysisId: newAnalysis.id }, { replace: true })
       setUrl('')
       pollAnalysis(newAnalysis.id)
     },
@@ -62,26 +81,54 @@ export default function ViralAnalysisTab() {
   })
 
   function pollAnalysis(id: string) {
-    if (timerRef.current) clearInterval(timerRef.current)
-    timerRef.current = setInterval(async () => {
+    if (polledIdRef.current === id && timerRef.current) return
+    polledIdRef.current = id
+    clearPolling(false)
+
+    const checkStatus = async () => {
       try {
         const result = await api.viralAnalyses.get(id)
         if (result.status === 'completed' || result.status === 'failed') {
-          if (timerRef.current) clearInterval(timerRef.current)
-          timerRef.current = null
+          clearPolling()
           queryClient.invalidateQueries({ queryKey: ['viral-analyses'] })
         }
       } catch {
-        if (timerRef.current) clearInterval(timerRef.current)
-        timerRef.current = null
+        clearPolling()
       }
-    }, 3000)
+    }
+
+    void checkStatus()
+    timerRef.current = setInterval(checkStatus, 3000)
 
     // Safety timeout: stop polling after 5 minutes
-    setTimeout(() => {
-      if (timerRef.current) clearInterval(timerRef.current)
-      timerRef.current = null
+    timeoutRef.current = setTimeout(() => {
+      if (polledIdRef.current === id) clearPolling()
     }, 300_000)
+  }
+
+  function clearPolling(clearPolledId = true) {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
+    }
+    if (clearPolledId) {
+      polledIdRef.current = null
+    }
+  }
+
+  function selectAnalysis(id: string) {
+    setSelectedId(id)
+    setSearchParams({ tab: 'analysis', analysisId: id }, { replace: true })
+    const analysis = analyses.find((item) => item.id === id)
+    if (analysis?.status === 'pending' || analysis?.status === 'analyzing') {
+      pollAnalysis(id)
+    } else {
+      clearPolling()
+    }
   }
 
   function extractUrl(text: string): string | null {
@@ -126,7 +173,7 @@ export default function ViralAnalysisTab() {
                 <button
                   key={analysis.id}
                   type="button"
-                  onClick={() => setSelectedId(analysis.id)}
+                  onClick={() => selectAnalysis(analysis.id)}
                   className={`w-full rounded-md px-2.5 py-2 text-left transition-colors ${
                     selectedId === analysis.id
                       ? 'bg-primary/10 text-foreground'
@@ -186,7 +233,7 @@ export default function ViralAnalysisTab() {
           <EmptyState
             icon={FlaskConical}
             title="爆文拆解"
-            description="粘贴一篇种草笔记爆款笔记链接，AI 将从标题、封面、文案、标签、互动五个维度进行深度拆解，帮你掌握爆文规律。"
+            description="粘贴一篇种草笔记链接，AI 将从选题、标题、封面、正文、互动、标签、评论信号七个维度做证据驱动拆解。"
           />
         ) : selected.status === 'pending' || selected.status === 'analyzing' ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16">
@@ -200,6 +247,9 @@ export default function ViralAnalysisTab() {
             <p className="text-sm font-medium text-destructive">分析失败</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {selected.error_message || '请检查链接后重试'}
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              如已扣除积分，系统会按失败任务自动退还。
             </p>
           </div>
         ) : selected.analysis_result ? (
@@ -220,7 +270,7 @@ export default function ViralAnalysisTab() {
                 <button
                   key={analysis.id}
                   type="button"
-                  onClick={() => setSelectedId(analysis.id)}
+                  onClick={() => selectAnalysis(analysis.id)}
                   className={`shrink-0 rounded-md border px-3 py-1.5 text-xs transition-colors ${
                     selectedId === analysis.id
                       ? 'border-primary bg-primary/10 text-foreground'

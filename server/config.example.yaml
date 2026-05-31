@@ -142,6 +142,7 @@ credits:
   task_costs:
     article: 4000 # cost per article task
     seednote: 3200 # cost per seednote task
+    viral_analysis: 800 # cost per viral analysis task
   model_costs:
     image_gen:
       "volcengine/doubao-seedream-5-0-260128": 50

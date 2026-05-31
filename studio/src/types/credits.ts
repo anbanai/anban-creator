@@ -12,6 +12,7 @@ export type CreditTransactionType =
   | 'seo'
   | 'draft_publish'
   | 'outline'
+  | 'viral_analysis'
 
 export interface CreditBalance {
   balance: number

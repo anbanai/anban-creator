@@ -91,6 +91,24 @@ describe('createTaskSchema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('accepts viral analysis without a channel when prompt contains a note URL', () => {
+    const result = createTaskSchema.safeParse({
+      channel_id: '',
+      type: 'viral_analysis',
+      prompt: '帮我拆解这篇 http://xhslink.com/a1b2c3',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects viral analysis without a URL in prompt', () => {
+    const result = createTaskSchema.safeParse({
+      channel_id: '',
+      type: 'viral_analysis',
+      prompt: '帮我拆解这篇爆款笔记',
+    })
+    expect(result.success).toBe(false)
+  })
+
   it('accepts optional prompt', () => {
     const result = createTaskSchema.safeParse({
       channel_id: 'ch-1',
@@ -128,11 +146,11 @@ describe('createTaskSchema', () => {
   })
 
   it('accepts all valid content types', () => {
-    for (const type of ['seednote', 'article'] as const) {
+    for (const type of ['seednote', 'article', 'viral_analysis'] as const) {
       expect(createTaskSchema.safeParse({
-        channel_id: 'ch-1',
+        channel_id: type === 'viral_analysis' ? '' : 'ch-1',
         type,
-        prompt: '测试',
+        prompt: type === 'viral_analysis' ? 'https://www.xiaohongshu.com/explore/mock' : '测试',
       }).success).toBe(true)
     }
   })

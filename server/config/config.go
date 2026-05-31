@@ -317,9 +317,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Credits.TaskCosts == nil {
 		c.Credits.TaskCosts = map[string]int{
-			"article":  4000,
-			"seednote": 3200,
+			"article":        4000,
+			"seednote":       3200,
+			"viral_analysis": 800,
 		}
+	} else if _, ok := c.Credits.TaskCosts["viral_analysis"]; !ok {
+		c.Credits.TaskCosts["viral_analysis"] = 800
 	}
 
 	// Asynq defaults.

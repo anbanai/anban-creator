@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -32,9 +33,11 @@ func (h *ViralAnalysisHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
+	req.SourceType = strings.TrimSpace(req.SourceType)
+	req.SourceURL = strings.TrimSpace(req.SourceURL)
 
-	if req.SourceType != "note" && req.SourceType != "profile" {
-		return Error(c, fiber.StatusBadRequest, "source_type must be 'note' or 'profile'")
+	if req.SourceType != "note" {
+		return Error(c, fiber.StatusBadRequest, "source_type must be 'note'")
 	}
 
 	if req.SourceURL == "" {
@@ -57,6 +60,12 @@ func (h *ViralAnalysisHandler) Create(c fiber.Ctx) error {
 	analysis, err := h.service.Create(c.Context(), userID, req.SourceType, req.SourceURL)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create viral analysis failed")
+		if errors.Is(err, service.ErrInsufficientCredits) {
+			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
+				"code": 40200,
+				"msg":  "insufficient_credits",
+			})
+		}
 		return Error(c, fiber.StatusInternalServerError, "failed to create viral analysis")
 	}
 

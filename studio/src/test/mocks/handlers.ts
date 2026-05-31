@@ -21,7 +21,7 @@ export const mockUser: User = {
   phone: '',
   nickname: '测试用户',
   avatar: '',
-  credits_balance: 1024,
+  credits_balance: 10000,
   tier: 'pro',
   max_concurrent_limit: 5,
   invite_code: 'AB2C4D6E',
@@ -31,7 +31,7 @@ export const mockUser: User = {
   updated_at: '2025-01-01T00:00:00Z',
 }
 
-export const mockBalance: CreditBalance = { balance: 1024 }
+export const mockBalance: CreditBalance = { balance: 10000 }
 export const mockSignInStatus: SignInStatus = { signed_in_today: false }
 
 export const mockTransactions: PaginatedResponse<CreditTransaction> = {
@@ -227,6 +227,26 @@ export const handlers = [
     })
   }),
 
+  http.get('/api/v1/credits/pricing', async () => {
+    return HttpResponse.json({
+      code: 0,
+      msg: 'ok',
+      data: {
+        task_costs: {
+          article: 4000,
+          seednote: 3200,
+          viral_analysis: 800,
+        },
+        model_costs: {},
+        income: {
+          daily_sign_in: 1024,
+          register_bonus: 4096,
+          invite_reward: 2048,
+        },
+      },
+    })
+  }),
+
   // Plans
   http.get('/api/v1/plans', async () => {
     return HttpResponse.json({ code: 0, msg: 'ok', data: mockPlans })
@@ -271,6 +291,24 @@ export const handlers = [
 
   http.get('/api/v1/tasks/:id/files', async () => {
     return HttpResponse.json({ code: 0, msg: 'ok', data: [] })
+  }),
+
+  http.post('/api/v1/viral-analyses', async () => {
+    return HttpResponse.json({
+      code: 0,
+      msg: 'ok',
+      data: {
+        id: 'analysis-1',
+        user_id: '1',
+        source_type: 'note',
+        source_url: 'https://www.xiaohongshu.com/explore/mock',
+        source_data: {},
+        analysis_result: null,
+        status: 'pending',
+        created_at: '2025-01-15T10:00:00Z',
+        updated_at: '2025-01-15T10:00:00Z',
+      },
+    })
   }),
 
   // Channels
