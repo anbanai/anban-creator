@@ -170,6 +170,7 @@ export const transactionTypeLabel: Record<CreditTransactionType, string> = {
   seo: 'SEO优化',
   draft_publish: '草稿发布',
   outline: '大纲生成',
+  viral_analysis: '爆文拆解',
 }
 
 export const operationLabel: Record<string, string> = {
@@ -180,23 +181,37 @@ export const operationLabel: Record<string, string> = {
   topic_research: '选题研究',
   seo: 'SEO 优化',
   outline: '大纲生成',
+  viral_analysis: '爆文拆解',
 }
 
 export const taskTypeLabelCN: Record<string, string> = {
   article: '公众号',
   seednote: '种草笔记',
+  viral_analysis: '爆文拆解',
 }
 
 // --- Single Source of Truth for Content Types ---
+
+type TaskCreationType = TaskType | 'viral_analysis'
 
 export const contentTypes = {
   seednote: { label: '种草笔记', platform: '种草笔记' },
   article: { label: '公众号', platform: '公众号' },
 } as const satisfies Record<TaskType, { label: string; platform: string }>
 
+export const taskCreationTypes = {
+  seednote: { label: '创建种草笔记', platform: '种草笔记' },
+  article: { label: '创建公众号', platform: '公众号' },
+  viral_analysis: { label: '爆文拆解', platform: '种草笔记' },
+} as const satisfies Record<TaskCreationType, { label: string; platform: string }>
+
 export const contentTypeLabel = Object.fromEntries(
   Object.entries(contentTypes).map(([key, val]) => [key, val.label]),
 ) as Record<TaskType, string>
+
+export const taskCreationTypeLabel = Object.fromEntries(
+  Object.entries(taskCreationTypes).map(([key, val]) => [key, val.label]),
+) as Record<TaskCreationType, string>
 
 export const platformLabels = Object.fromEntries(
   Object.entries(contentTypes).map(([key, val]) => [key, val.platform]),
@@ -214,6 +229,11 @@ export const platformRatioLabel: Record<string, string> = {
 
 export const contentTypeOptions = Object.entries(contentTypes).map(([value, { label }]) => ({
   value,
+  label,
+}))
+
+export const taskCreationTypeOptions = Object.entries(taskCreationTypes).map(([value, { label }]) => ({
+  value: value as TaskCreationType,
   label,
 }))
 

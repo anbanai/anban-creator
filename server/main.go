@@ -285,6 +285,7 @@ func main() {
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("SeedNote tracking service initialized")
 		if taskSvc != nil {
 			viralAnalysisSvc = service.NewViralAnalysisService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
+			viralAnalysisSvc.SetCreditService(creditSvc)
 			taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
 			log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("Viral analysis service initialized")
 		}

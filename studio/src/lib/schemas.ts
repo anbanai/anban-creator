@@ -25,12 +25,32 @@ export const registerSchema = z.object({
 export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
-  channel_id: z.string().min(1, "请选择账号"),
-  type: z.enum(["seednote", "article"]),
+  channel_id: z.string().optional().default(""),
+  type: z.enum(["seednote", "article", "viral_analysis"]),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).default(""),
   skip_reference_image: z.boolean().default(false),
+}).superRefine((data, ctx) => {
+  if (data.type === "viral_analysis") {
+    const prompt = data.prompt?.trim() || ""
+    if (!/https?:\/\/[^\s]+/.test(prompt)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "请粘贴种草笔记链接或分享文本",
+        path: ["prompt"],
+      })
+    }
+    return
+  }
+
+  if (!data.channel_id?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      message: "请选择账号",
+      path: ["channel_id"],
+    })
+  }
 })
 export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 

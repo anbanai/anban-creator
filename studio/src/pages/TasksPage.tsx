@@ -4,11 +4,11 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, ImageIcon } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, ImageIcon, BookOpen, FileText, FlaskConical } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus } from '@/types'
+import type { TaskType, TaskStatus, CreateTaskRequest, CreateViralAnalysisRequest, Channel, WorkflowStatus } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -36,6 +36,19 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已完成', value: 'completed' },
   { label: '失败', value: 'failed' },
   { label: '已取消', value: 'cancelled' },
+]
+
+type CreationTaskType = TaskType | 'viral_analysis'
+
+const creationOptions: Array<{
+  value: CreationTaskType
+  label: string
+  description: string
+  icon: typeof BookOpen
+}> = [
+  { value: 'seednote', label: '创建种草笔记', description: '生成小红书风格内容与配图规划', icon: BookOpen },
+  { value: 'viral_analysis', label: '爆文拆解', description: '拆解爆款笔记，生成可复用模板', icon: FlaskConical },
+  { value: 'article', label: '创建公众号', description: '生成公众号文章和发布素材', icon: FileText },
 ]
 
 function workflowReadinessLabel(workflow: WorkflowStatus | string | null | undefined) {
@@ -98,7 +111,7 @@ export default function TasksPage() {
     queryFn: () => api.credits.pricing(),
   })
 
-  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3200
+  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? (type === 'viral_analysis' ? 800 : 3200)
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
@@ -107,6 +120,7 @@ export default function TasksPage() {
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedChannelId = useWatch({ control: form.control, name: 'channel_id' })
+  const isViralAnalysis = watchedType === 'viral_analysis'
 
   const selectedChannel = useMemo(() => channels.find((c) => c.id === watchedChannelId), [channels, watchedChannelId])
 
@@ -126,15 +140,6 @@ export default function TasksPage() {
     openCreate()
     setSearchParams({}, { replace: true })
   }, [shouldCreate, channelsLoading, setSearchParams])
-
-  useEffect(() => {
-    if (!modalOpen) return
-    if (channels.length > 0) return
-
-    setModalOpen(false)
-    toast.error('请先创建一个账号，再开始新建任务。')
-    navigate('/channels')
-  }, [channels.length, modalOpen, navigate])
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['tasks', statusFilter, channelFilter, page],
@@ -188,6 +193,21 @@ export default function TasksPage() {
     },
   })
 
+  const createViralAnalysisMutation = useMutation({
+    mutationFn: (data: CreateViralAnalysisRequest) => api.viralAnalyses.create(data),
+    onSuccess: (analysis) => {
+      queryClient.invalidateQueries({ queryKey: ['viral-analyses'] })
+      toast.success('爆文拆解任务已创建')
+      setTimeout(() => {
+        resetModal()
+        navigate(`/workshop?tab=analysis&analysisId=${analysis.id}`)
+      }, 800)
+    },
+    onError: () => {
+      toast.error('创建爆文拆解失败，请检查链接后重试')
+    },
+  })
+
   const togglePublished = useMutation({
     mutationFn: ({ id, published }: { id: string; published: boolean }) =>
       api.tasks.markPublished(id, published),
@@ -212,12 +232,8 @@ export default function TasksPage() {
   })
 
   function openCreate() {
-    if (channels.length === 0) {
-      toast.error('请先创建一个账号，再开始新建任务。')
-      navigate('/channels')
-      return
-    }
-    const defaultType = (searchParams.get('type') || 'seednote') as TaskType
+    const requestedType = searchParams.get('type')
+    const defaultType: CreationTaskType = requestedType === 'article' || requestedType === 'viral_analysis' ? requestedType : 'seednote'
     form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', skip_reference_image: false })
     setQuantity(1)
     setChannelImageRatio('')
@@ -241,14 +257,33 @@ export default function TasksPage() {
   }
 
   async function onSubmit(values: CreateTaskFormValues) {
+    if (values.type === 'viral_analysis') {
+      const sourceUrl = extractUrl(values.prompt || '')
+      if (!sourceUrl) {
+        form.setError('prompt', { type: 'manual', message: '请粘贴种草笔记链接或分享文本' })
+        return
+      }
+      await submit(async () => createViralAnalysisMutation.mutateAsync({
+        source_type: 'note',
+        source_url: sourceUrl,
+      }))
+      return
+    }
+
     await submit(async () => createMutation.mutateAsync({
-      type: values.type,
+      type: values.type as TaskType,
       prompt: values.prompt?.trim() || undefined,
-      channel_id: values.channel_id,
+      channel_id: values.channel_id || '',
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
       skip_reference_image: values.skip_reference_image || undefined,
     }))
+  }
+
+  function extractUrl(text: string): string | null {
+    const match = text.match(/https?:\/\/[^\s]+/)
+    if (!match) return null
+    return match[0].replace(/[.,，。！!？?;；:：]+$/, '')
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -527,59 +562,107 @@ export default function TasksPage() {
           </DialogHeader>
           <Form {...form}>
             <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
-              <FormField control={form.control} name="channel_id" render={({ field }) => (
+              <FormField control={form.control} name="type" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>账号</FormLabel>
+                  <FormLabel>任务类型</FormLabel>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {creationOptions.map((option) => {
+                      const Icon = option.icon
+                      const selected = watchedType === option.value
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => {
+                            field.onChange(option.value)
+                            form.setValue('skip_reference_image', false)
+                            if (option.value === 'viral_analysis') {
+                              form.setValue('channel_id', '')
+                              form.setValue('image_ratio', '')
+                              setQuantity(1)
+                              setChannelImageRatio('')
+                            }
+                          }}
+                          className={`flex min-h-24 flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors ${
+                            selected
+                              ? 'border-primary bg-primary/5 text-foreground'
+                              : 'border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground'
+                          }`}
+                        >
+                          <Icon className={selected ? 'h-5 w-5 text-primary' : 'h-5 w-5 text-muted-foreground'} />
+                          <span className="text-sm font-medium">{option.label}</span>
+                          <span className="text-xs leading-relaxed text-muted-foreground">{option.description}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              {!isViralAnalysis && (
+                <FormField control={form.control} name="channel_id" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>账号</FormLabel>
+                    <FormControl>
+                      <ChannelSelector
+                        value={field.value || ''}
+                        onChange={(id, platform) => {
+                          field.onChange(id)
+                          form.setValue('skip_reference_image', false)
+                          if (id) {
+                            form.setValue('type', platform as TaskType)
+                            form.setValue('image_ratio', '')
+                            const ch = channels.find((c) => c.id === id)
+                            setChannelImageRatio(ch?.image_ratio || platformDefaultRatio[platform] || '3:4')
+                          } else {
+                            setChannelImageRatio('')
+                          }
+                        }}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              )}
+
+              <FormField control={form.control} name="prompt" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{isViralAnalysis ? '种草笔记链接' : '创作要求（可选）'}</FormLabel>
                   <FormControl>
-                    <ChannelSelector
-                      value={field.value || ''}
-                      onChange={(id, platform) => {
-                        field.onChange(id)
-                        form.setValue('skip_reference_image', false)
-                        if (id) {
-                          form.setValue('type', platform as TaskType)
-                          form.setValue('image_ratio', '')
-                          const ch = channels.find((c) => c.id === id)
-                          setChannelImageRatio(ch?.image_ratio || platformDefaultRatio[platform] || '3:4')
-                        } else {
-                          setChannelImageRatio('')
-                        }
-                      }}
+                    <Textarea
+                      placeholder={isViralAnalysis
+                        ? '粘贴笔记链接或分享文本，例如 http://xhslink.com/...'
+                        : '描述你的创作要求，留空则根据账号信息自动生成'}
+                      {...field}
                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="prompt" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>创作要求（可选）</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="描述你的创作要求，留空则根据账号信息自动生成" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
               {/* Quantity selector */}
-              <div className="space-y-2">
-                <FormLabel>数量</FormLabel>
-                <div className="flex gap-2">
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <Button
-                      key={n}
-                      type="button"
-                      variant={quantity === n ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setQuantity(n)}
-                    >
-                      {n}
-                    </Button>
-                  ))}
+              {!isViralAnalysis && (
+                <div className="space-y-2">
+                  <FormLabel>数量</FormLabel>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <Button
+                        key={n}
+                        type="button"
+                        variant={quantity === n ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setQuantity(n)}
+                      >
+                        {n}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Image ratio selector */}
+              {!isViralAnalysis && (
               <FormField control={form.control} name="image_ratio" render={({ field }) => {
                 const defaultRatio = channelImageRatio || platformDefaultRatio[watchedType] || '3:4'
                 const defaultLabel = platformRatioLabel[watchedType] || `${defaultRatio}（默认）`
@@ -611,9 +694,10 @@ export default function TasksPage() {
                 </FormItem>
                 )
               }} />
+              )}
 
               {/* Use reference image toggle */}
-              {selectedChannel?.reference_image_url && (
+              {!isViralAnalysis && selectedChannel?.reference_image_url && (
                 <FormField control={form.control} name="skip_reference_image" render={({ field }) => (
                   <button
                     type="button"
@@ -671,7 +755,7 @@ export default function TasksPage() {
                 const cost = taskCostFor(watchedType)
                 const totalCost = cost * quantity
                 const balance = creditsBalance?.balance ?? 0
-                return balance - totalCost < 0 || createMutation.isPending
+                return balance - totalCost < 0 || createMutation.isPending || createViralAnalysisMutation.isPending
               })()}
             >
               创建
