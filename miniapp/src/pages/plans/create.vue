@@ -65,7 +65,7 @@
         <AbTextarea
           v-model="form.prompt"
           placeholder="每次执行时的额外要求，如: 结合当日热点..."
-          :maxlength="500"
+          :maxlength="5120"
           :rows="3"
         />
       </view>

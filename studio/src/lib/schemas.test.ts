@@ -100,11 +100,29 @@ describe('createTaskSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  it('accepts prompt at max length', () => {
+    const result = createTaskSchema.safeParse({
+      channel_id: 'ch-1',
+      type: 'article',
+      prompt: 'a'.repeat(5120),
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('counts unicode prompt length like the API', () => {
+    const result = createTaskSchema.safeParse({
+      channel_id: 'ch-1',
+      type: 'article',
+      prompt: '😀'.repeat(5120),
+    })
+    expect(result.success).toBe(true)
+  })
+
   it('rejects prompt exceeding max length', () => {
     const result = createTaskSchema.safeParse({
       channel_id: 'ch-1',
       type: 'article',
-      prompt: 'a'.repeat(501),
+      prompt: 'a'.repeat(5121),
     })
     expect(result.success).toBe(false)
   })
@@ -145,6 +163,33 @@ describe('planSchema', () => {
       prompt: '写一篇护肤指南',
     })
     expect(result.success).toBe(true)
+  })
+
+  it('accepts prompt at max length', () => {
+    const result = planSchema.safeParse({
+      type: 'article',
+      cron_expr: '0 9 * * 1',
+      prompt: 'a'.repeat(5120),
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('counts unicode prompt length like the API', () => {
+    const result = planSchema.safeParse({
+      type: 'article',
+      cron_expr: '0 9 * * 1',
+      prompt: '😀'.repeat(5120),
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects prompt exceeding max length', () => {
+    const result = planSchema.safeParse({
+      type: 'article',
+      cron_expr: '0 9 * * 1',
+      prompt: 'a'.repeat(5121),
+    })
+    expect(result.success).toBe(false)
   })
 
   it('rejects empty cron expression', () => {

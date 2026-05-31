@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -19,6 +20,8 @@ import (
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/service"
 )
+
+const maxTaskPromptCharacters = 5120
 
 // TaskHandler handles task-related HTTP endpoints.
 type TaskHandler struct {
@@ -67,8 +70,8 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	}
 
 	prompt := strings.TrimSpace(req.Prompt)
-	if len(prompt) > 500 {
-		return Error(c, fiber.StatusBadRequest, "prompt must not exceed 500 characters")
+	if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
+		return Error(c, fiber.StatusBadRequest, "prompt must not exceed 5120 characters")
 	}
 
 	userID := GetUserID(c)

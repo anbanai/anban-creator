@@ -95,7 +95,7 @@
         v-model="form.extra_prompt"
         placeholder="补充你想要的风格、关键词或特殊要求..."
         :rows="3"
-        :maxlength="500"
+        :maxlength="5120"
       />
     </view>
 
