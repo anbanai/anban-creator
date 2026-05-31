@@ -121,9 +121,11 @@ func (p *GeminiProvider) Generate(ctx context.Context, prompt string, opts *Gene
 	}
 
 	return &GenerateResult{
-		URL:   filePath, // 返回本地文件路径
-		Model: p.model,
-		Size:  p.aspectRatio,
+		URL:             filePath, // 返回本地文件路径
+		Model:           p.model,
+		Size:            p.aspectRatio,
+		ResponseType:    "file",
+		ResponsePreview: filepath.Base(filePath),
 	}, nil
 }
 

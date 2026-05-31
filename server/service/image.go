@@ -1,9 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
+	stdimage "image"
+	_ "image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"os"
@@ -24,11 +28,19 @@ import (
 
 // ImageResult is the response for single image generation.
 type ImageResult struct {
-	FilePath    string `json:"file_path"`
-	DownloadURL string `json:"download_url,omitempty"`
-	Size        string `json:"size"`
-	Width       int    `json:"width,omitempty"`
-	Height      int    `json:"height,omitempty"`
+	FilePath        string `json:"file_path"`
+	DownloadURL     string `json:"download_url,omitempty"`
+	Size            string `json:"size"`
+	Width           int    `json:"width,omitempty"`
+	Height          int    `json:"height,omitempty"`
+	Prompt          string `json:"prompt,omitempty"`
+	ImageType       string `json:"image_type,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	Model           string `json:"model,omitempty"`
+	RevisedPrompt   string `json:"revised_prompt,omitempty"`
+	ResponseType    string `json:"response_type,omitempty"`
+	ResponsePreview string `json:"response_preview,omitempty"`
+	OutputMIME      string `json:"output_mime,omitempty"`
 }
 
 // UploadImageResult is the response for image upload.
@@ -82,6 +94,46 @@ func (s *ImageService) resolveToLocalFile(rawURL string) (string, error) {
 		return s.dataURLToTempFile(rawURL)
 	}
 	return s.downloadURLToTempFile(rawURL)
+}
+
+func buildImageResult(rawResult *image.GenerateRawResult, imageType string) *ImageResult {
+	return &ImageResult{
+		DownloadURL:     rawResult.URL,
+		Size:            rawResult.Size,
+		Prompt:          rawResult.Prompt,
+		ImageType:       imageType,
+		Provider:        rawResult.Provider,
+		Model:           rawResult.Model,
+		RevisedPrompt:   rawResult.RevisedPrompt,
+		ResponseType:    rawResult.ResponseType,
+		ResponsePreview: rawResult.ResponsePreview,
+		OutputMIME:      rawResult.OutputMIME,
+	}
+}
+
+func saveGeneratedImageBytes(outputPath string, data []byte) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return "", fmt.Errorf("create output directory: %w", err)
+	}
+
+	outputMIME := http.DetectContentType(data)
+	if strings.EqualFold(filepath.Ext(outputPath), ".png") && outputMIME != "image/png" {
+		img, _, err := stdimage.Decode(bytes.NewReader(data))
+		if err != nil {
+			return "", fmt.Errorf("decode image for png output: %w", err)
+		}
+		var pngBuf bytes.Buffer
+		if err := png.Encode(&pngBuf, img); err != nil {
+			return "", fmt.Errorf("encode png output: %w", err)
+		}
+		data = pngBuf.Bytes()
+		outputMIME = "image/png"
+	}
+
+	if err := os.WriteFile(outputPath, data, 0644); err != nil {
+		return "", fmt.Errorf("save image to %s: %w", outputPath, err)
+	}
+	return outputMIME, nil
 }
 
 // resolveAppImageAPI extracts the ImageAPI config from a channel-aware appCfg
@@ -163,10 +215,7 @@ func (s *ImageService) GenerateImage(
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
 
-	result := &ImageResult{
-		DownloadURL: rawResult.URL,
-		Size:        rawResult.Size,
-	}
+	result := buildImageResult(rawResult, imageType)
 
 	// If outputPath provided, download and save the image there.
 	if outputPath != "" {
@@ -176,18 +225,16 @@ func (s *ImageService) GenerateImage(
 		}
 		defer os.RemoveAll(filepath.Dir(localPath))
 
-		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-			return nil, fmt.Errorf("create output directory: %w", err)
-		}
-
 		data, err := os.ReadFile(localPath)
 		if err != nil {
 			return nil, fmt.Errorf("read downloaded image: %w", err)
 		}
-		if err := os.WriteFile(outputPath, data, 0644); err != nil {
-			return nil, fmt.Errorf("save image to %s: %w", outputPath, err)
+		outputMIME, err := saveGeneratedImageBytes(outputPath, data)
+		if err != nil {
+			return nil, err
 		}
 		result.FilePath = outputPath
+		result.OutputMIME = outputMIME
 	}
 
 	return result, nil
@@ -242,7 +289,8 @@ func (s *ImageService) uploadToStorage(ctx context.Context, filePath string) (*U
 	ext := strings.ToLower(filepath.Ext(filePath))
 	key := fmt.Sprintf("uploads/images/%s%s", uuid.New().String(), ext)
 
-	result, err := s.storage.Upload(ctx, key, file, "image/jpeg")
+	mimeType := DetectTaskFileMIME(filePath)
+	result, err := s.storage.Upload(ctx, key, file, mimeType)
 	if err != nil {
 		return nil, fmt.Errorf("upload to storage: %w", err)
 	}

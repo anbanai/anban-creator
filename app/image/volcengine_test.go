@@ -165,6 +165,12 @@ func TestVolcengineGenerate_Success(t *testing.T) {
 	if result.Size != wantSize {
 		t.Errorf("Generate() Size = %q, want ratio %q", result.Size, wantSize)
 	}
+	if result.ResponseType != "url" {
+		t.Errorf("Generate() ResponseType = %q, want url", result.ResponseType)
+	}
+	if result.ResponsePreview != imageURL {
+		t.Errorf("Generate() ResponsePreview = %q, want %q", result.ResponsePreview, imageURL)
+	}
 }
 
 func TestVolcengineGenerate_WithAdvancedOptions(t *testing.T) {

@@ -143,9 +143,11 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 	// Return ratio (not pixel size) for consistent GenerateResult.Size format
 	ratio, _ := ParseSize(p.sizePixel)
 	return &GenerateResult{
-		URL:   *resp.Data[0].Url,
-		Model: p.model,
-		Size:  ratio,
+		URL:             *resp.Data[0].Url,
+		Model:           p.model,
+		Size:            ratio,
+		ResponseType:    "url",
+		ResponsePreview: *resp.Data[0].Url,
 	}, nil
 }
 
