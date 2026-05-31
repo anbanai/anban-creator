@@ -361,6 +361,7 @@ func main() {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
 		var writingSvc *service.WritingService
+		var liveSliceSvc *service.LiveSliceService
 
 		if store != nil {
 			imageSvc = service.NewImageService(&cfg.ImageAPI, store, repo, log)
@@ -382,6 +383,19 @@ func main() {
 				log.Warn().Msg("LLM client not configured (missing writing config or ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
 			}
 		}
+		if writingLLMClient != nil || cfg.TingWu.Complete() || store != nil {
+			var err error
+			liveSliceSvc, err = service.NewLiveSliceService(cfg.TingWu, writingLLMClient, store, log)
+			if err != nil {
+				log.Warn().Err(err).Msg("live-slice service unavailable")
+			} else {
+				log.Info().
+					Bool("llm_configured", writingLLMClient != nil).
+					Bool("tingwu_configured", cfg.TingWu.Complete()).
+					Bool("storage_configured", store != nil).
+					Msg("live-slice service initialized")
+			}
+		}
 
 		mcp.SetServices(&mcp.Services{
 			ChannelSvc:     channelSvc,
@@ -393,6 +407,7 @@ func main() {
 			PublishingSvc:  publishingSvc,
 			WorkspaceSvc:   workspaceSvc,
 			TemplateSvc:    templateSvc,
+			LiveSliceSvc:   liveSliceSvc,
 			SeednoteClient: seednoteClient,
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
@@ -402,6 +417,7 @@ func main() {
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
 			Bool("writing_tools", writingSvc != nil).
+			Bool("live_slice_tools", liveSliceSvc != nil).
 			Bool("publishing_tools", publishingSvc != nil).
 			Msg("MCP handler initialized with tools (official SDK)")
 	} else {

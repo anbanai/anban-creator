@@ -25,6 +25,7 @@ type Services struct {
 	PublishingSvc  *service.PublishingService
 	WorkspaceSvc   *service.WorkspaceService
 	TemplateSvc    *service.TemplateService
+	LiveSliceSvc   *service.LiveSliceService
 	SeednoteClient *seednote.Client
 }
 
@@ -42,6 +43,7 @@ func RegisterTools(server *mcp.Server) {
 	registerTemplateTools(server)
 	registerResourceTools(server)
 	registerSeednoteTools(server)
+	registerLiveSliceTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.

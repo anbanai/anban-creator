@@ -362,7 +362,7 @@ func (s *TaskService) FinalizeTitle(ctx context.Context, userID, taskID, title s
 	if err != nil {
 		return "", fmt.Errorf("task not found: %w", err)
 	}
-	if userID != "" && task.UserID != "" && task.UserID != userID {
+	if userID != "" && task.UserID != userID {
 		return "", fmt.Errorf("task not found")
 	}
 

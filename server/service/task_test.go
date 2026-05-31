@@ -177,6 +177,28 @@ func TestTaskService_FinalizeTitleRejectsForeignTask(t *testing.T) {
 	}
 }
 
+func TestTaskService_FinalizeTitleRejectsUserKeyForUnownedTask(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    "",
+		ChannelID: channelID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	_, err := svc.FinalizeTitle(ctx, userID, task.ID, "真实标题")
+	if err == nil || !strings.Contains(err.Error(), "task not found") {
+		t.Fatalf("FinalizeTitle error = %v, want task not found", err)
+	}
+}
+
 func TestTaskService_FinalizeTitleRejectsDuplicateWithinChannel(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()

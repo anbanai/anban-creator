@@ -25,6 +25,7 @@ type Config struct {
 	MCP        MCPConfig        `yaml:"mcp"`
 	ImageAPI   ImageAPIConfig   `yaml:"image_api"`
 	Writing    WritingConfig    `yaml:"writing"`
+	TingWu     TingWuConfig     `yaml:"tingwu"`
 	Claude     ClaudeConfig     `yaml:"claude"`
 	Credits    CreditsConfig    `yaml:"credits"`
 	CORS       CORSConfig       `yaml:"cors"`
@@ -129,6 +130,33 @@ type WritingConfig struct {
 	Model          string        `yaml:"model"`           // Model name
 	Timeout        time.Duration `yaml:"timeout"`         // LLM request timeout (default 5m)
 	ConvertTimeout time.Duration `yaml:"convert_timeout"` // Markdown-to-HTML convert timeout (default 2x Timeout)
+}
+
+// TingWuConfig holds Alibaba TingWu speech analysis configuration.
+type TingWuConfig struct {
+	Endpoint     string `yaml:"endpoint"`
+	Region       string `yaml:"region"`
+	AppKey       string `yaml:"app_key"`
+	AccessKey    string `yaml:"access_key"`
+	AccessSecret string `yaml:"access_secret"`
+}
+
+// Empty reports whether no TingWu settings are configured.
+func (c TingWuConfig) Empty() bool {
+	return strings.TrimSpace(c.Endpoint) == "" &&
+		strings.TrimSpace(c.Region) == "" &&
+		strings.TrimSpace(c.AppKey) == "" &&
+		strings.TrimSpace(c.AccessKey) == "" &&
+		strings.TrimSpace(c.AccessSecret) == ""
+}
+
+// Complete reports whether all settings required for direct TingWu calls exist.
+func (c TingWuConfig) Complete() bool {
+	return strings.TrimSpace(c.Endpoint) != "" &&
+		strings.TrimSpace(c.Region) != "" &&
+		strings.TrimSpace(c.AppKey) != "" &&
+		strings.TrimSpace(c.AccessKey) != "" &&
+		strings.TrimSpace(c.AccessSecret) != ""
 }
 
 // ClaudeConfig holds configuration for the Claude CLI subprocess.
@@ -623,6 +651,22 @@ func (c *Config) applyEnvOverrides() {
 		}
 	}
 
+	if v := os.Getenv(prefix + "TINGWU_ENDPOINT"); v != "" {
+		c.TingWu.Endpoint = v
+	}
+	if v := os.Getenv(prefix + "TINGWU_REGION"); v != "" {
+		c.TingWu.Region = v
+	}
+	if v := os.Getenv(prefix + "TINGWU_APP_KEY"); v != "" {
+		c.TingWu.AppKey = v
+	}
+	if v := os.Getenv(prefix + "TINGWU_ACCESS_KEY"); v != "" {
+		c.TingWu.AccessKey = v
+	}
+	if v := os.Getenv(prefix + "TINGWU_ACCESS_SECRET"); v != "" {
+		c.TingWu.AccessSecret = v
+	}
+
 	if v := os.Getenv(prefix + "SEEDNOTE_BASE_URL"); v != "" {
 		c.Seednote.BaseURL = v
 	}
@@ -699,6 +743,24 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Storage.BucketName) == "" {
 			errs = append(errs, "storage.bucket_name is required when provider is \"oss\"")
+		}
+	}
+
+	if !c.TingWu.Empty() {
+		if strings.TrimSpace(c.TingWu.Endpoint) == "" {
+			errs = append(errs, "tingwu.endpoint is required when any TingWu setting is configured")
+		}
+		if strings.TrimSpace(c.TingWu.Region) == "" {
+			errs = append(errs, "tingwu.region is required when any TingWu setting is configured")
+		}
+		if strings.TrimSpace(c.TingWu.AppKey) == "" {
+			errs = append(errs, "tingwu.app_key is required when any TingWu setting is configured")
+		}
+		if strings.TrimSpace(c.TingWu.AccessKey) == "" {
+			errs = append(errs, "tingwu.access_key is required when any TingWu setting is configured")
+		}
+		if strings.TrimSpace(c.TingWu.AccessSecret) == "" {
+			errs = append(errs, "tingwu.access_secret is required when any TingWu setting is configured")
 		}
 	}
 

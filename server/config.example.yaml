@@ -120,6 +120,19 @@ writing:
   model: "" # Model name (e.g. "glm-5-turbo")
 
 # ---------------------------------------------------------------------------
+# TingWu: Alibaba Cloud speech transcription/analysis for live-slice workflows
+# Optional. Configure this plus OSS storage to let MCP create/query live
+# analysis tasks directly. All fields can be overridden with:
+# ANBAN_SERVER_TINGWU_ENDPOINT / REGION / APP_KEY / ACCESS_KEY / ACCESS_SECRET.
+# ---------------------------------------------------------------------------
+tingwu:
+  endpoint: "" # e.g. "tingwu.cn-beijing.aliyuncs.com"
+  region: "" # e.g. "cn-beijing"
+  app_key: "" # TingWu app key
+  access_key: "" # Alibaba Cloud AccessKey ID
+  access_secret: "" # Alibaba Cloud AccessKey Secret
+
+# ---------------------------------------------------------------------------
 # Credits: Credits system configuration
 # ---------------------------------------------------------------------------
 credits:
