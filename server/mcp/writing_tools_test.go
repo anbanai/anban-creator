@@ -8,16 +8,34 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
+	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
 // stubWritingSvc is a minimal non-nil WritingService pointer used to bypass
 // the nil check in handlers so argument validation tests can reach the arg parsing code.
 var stubWritingSvc = &service.WritingService{}
+
+func repositoryTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	return db
+}
 
 // ---------------------------------------------------------------------------
 // parseArgs tests
@@ -825,6 +843,215 @@ func TestGenerateOutlineHandler_MissingTopic(t *testing.T) {
 
 	if !strings.Contains(text, "topic is required") {
 		t.Errorf("expected 'topic is required', got: %q", text)
+	}
+}
+
+func TestListChannelTitlesHandler_ReturnsTitlesOnly(t *testing.T) {
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	log := zerolog.New(zerolog.NewTestWriter(t))
+
+	userID := "user-title-mcp"
+	channelID := "channel-title-mcp"
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:       userID,
+		Email:    "title-mcp@example.com",
+		Nickname: "Title MCP",
+		Password: "hashed",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Channels().Create(ctx, &model.Channel{
+		ID:       channelID,
+		UserID:   "",
+		Platform: model.PlatformSeednote,
+		Name:     "Seednote",
+		Status:   model.ChannelStatusActive,
+	}); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	for _, task := range []*model.Task{
+		{
+			ID:        "task-title-mcp-1",
+			UserID:    userID,
+			ChannelID: channelID,
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusCompleted,
+			Prompt:    "prompt should not leak",
+			Title:     "新手咖啡豆怎么选",
+			CreatedAt: time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        "task-title-mcp-2",
+			UserID:    userID,
+			ChannelID: channelID,
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusCompleted,
+			Prompt:    "empty title prompt should not leak",
+			Title:     "",
+			CreatedAt: time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC),
+		},
+	} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("create task %s: %v", task.ID, err)
+		}
+	}
+
+	handler, cleanup := setupMCPHandlerWithServices(t)
+	defer cleanup()
+	SetServices(&Services{
+		ChannelSvc: service.NewChannelService(repo, &log),
+		TaskSvc:    service.NewTaskService(repo, nil, nil, nil, nil, &log, "", nil, "", nil, nil),
+	})
+
+	text := callMCPTool(t, handler, "list_channel_titles",
+		fmt.Sprintf(`{"channel_id":%q}`, channelID),
+		"test-api-key")
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v\ntext: %s", err, text)
+	}
+	if _, ok := payload["topics"]; ok {
+		t.Fatalf("payload contains deprecated topics key: %v", payload)
+	}
+	titles, ok := payload["titles"].([]any)
+	if !ok {
+		t.Fatalf("payload titles type = %T, want []any: %v", payload["titles"], payload)
+	}
+	if len(titles) != 1 || titles[0] != "新手咖啡豆怎么选" {
+		t.Fatalf("titles = %v, want [新手咖啡豆怎么选]", titles)
+	}
+}
+
+func TestFinalizeTaskTitleHandler_ViaMCP(t *testing.T) {
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	log := zerolog.New(zerolog.NewTestWriter(t))
+
+	userID := "user-finalize-title-mcp"
+	channelID := "channel-finalize-title-mcp"
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:       userID,
+		Email:    "finalize-title@example.com",
+		Nickname: "Finalize Title",
+		Password: "hashed",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Channels().Create(ctx, &model.Channel{
+		ID:       channelID,
+		UserID:   userID,
+		Platform: model.PlatformSeednote,
+		Name:     "Seednote",
+		Status:   model.ChannelStatusActive,
+	}); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        "task-finalize-title-mcp",
+		UserID:    "",
+		ChannelID: channelID,
+		Type:      model.ScopeSeednote,
+		Status:    model.TaskStatusRunning,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	handler, cleanup := setupMCPHandlerWithServices(t)
+	defer cleanup()
+	SetServices(&Services{
+		TaskSvc: service.NewTaskService(repo, nil, nil, nil, nil, &log, "", nil, "", nil, nil),
+	})
+
+	text := callMCPTool(t, handler, "finalize_task_title",
+		`{"task_id":"task-finalize-title-mcp","title":"茶桌新手避坑指南"}`,
+		"test-api-key")
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v\ntext: %s", err, text)
+	}
+	if payload["task_id"] != "task-finalize-title-mcp" {
+		t.Fatalf("task_id = %v", payload["task_id"])
+	}
+	if payload["title"] != "茶桌新手避坑指南" {
+		t.Fatalf("title = %v", payload["title"])
+	}
+	if payload["updated"] != true {
+		t.Fatalf("updated = %v", payload["updated"])
+	}
+	if _, ok := payload["topics"]; ok {
+		t.Fatalf("payload contains deprecated topics key: %v", payload)
+	}
+}
+
+func TestFinalizeTaskTitleHandler_RejectsDuplicateViaMCP(t *testing.T) {
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	log := zerolog.New(zerolog.NewTestWriter(t))
+
+	userID := "user-finalize-duplicate-mcp"
+	channelID := "channel-finalize-duplicate-mcp"
+	for _, task := range []*model.Task{
+		{
+			ID:        "task-finalize-duplicate-existing",
+			UserID:    userID,
+			ChannelID: channelID,
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusCompleted,
+			Title:     "新手咖啡豆怎么选",
+			CreatedAt: time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        "task-finalize-duplicate-current",
+			UserID:    "",
+			ChannelID: channelID,
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusRunning,
+			CreatedAt: time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC),
+		},
+	} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("create task %s: %v", task.ID, err)
+		}
+	}
+
+	handler, cleanup := setupMCPHandlerWithServices(t)
+	defer cleanup()
+	SetServices(&Services{
+		TaskSvc: service.NewTaskService(repo, nil, nil, nil, nil, &log, "", nil, "", nil, nil),
+	})
+
+	text := callMCPTool(t, handler, "finalize_task_title",
+		`{"task_id":"task-finalize-duplicate-current","title":" 新手 咖啡豆怎么选 "}`,
+		"test-api-key")
+
+	if !strings.Contains(text, "duplicate title") {
+		t.Fatalf("text = %q, want duplicate title", text)
+	}
+}
+
+func TestFinalizeTaskTitleHandler_MissingArgs(t *testing.T) {
+	handler, cleanup := setupMCPHandlerWithServices(t)
+	defer cleanup()
+	SetServices(&Services{TaskSvc: &service.TaskService{}})
+
+	text := callMCPTool(t, handler, "finalize_task_title",
+		`{"title":"标题"}`,
+		"test-api-key")
+	if !strings.Contains(text, "task_id is required") {
+		t.Fatalf("text = %q, want task_id is required", text)
+	}
+
+	text = callMCPTool(t, handler, "finalize_task_title",
+		`{"task_id":"task-1"}`,
+		"test-api-key")
+	if !strings.Contains(text, "title is required") {
+		t.Fatalf("text = %q, want title is required", text)
 	}
 }
 

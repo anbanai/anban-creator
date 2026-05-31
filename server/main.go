@@ -237,6 +237,11 @@ func main() {
 		}
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		if count, err := taskSvc.ClearArtifactTitles(context.Background()); err != nil {
+			log.Warn().Err(err).Msg("failed to clear artifact task titles")
+		} else if count > 0 {
+			log.Info().Int64("count", count).Msg("cleared artifact task titles")
+		}
 	}
 
 	// 12.1 Create per-user model config service.

@@ -243,16 +243,38 @@ func (r *taskRepository) FindPendingByChannel(ctx context.Context, channelID str
 	return tasks, err
 }
 
-// FindTopicsByChannelID returns all topic texts for a channel, ordered by creation time descending.
-func (r *taskRepository) FindTopicsByChannelID(ctx context.Context, channelID string) ([]string, error) {
-	var topics []string
+// FindTitlesByChannelID returns all recorded titles for a channel, ordered by creation time descending.
+func (r *taskRepository) FindTitlesByChannelID(ctx context.Context, channelID string) ([]string, error) {
+	var titles []string
 	err := r.db.WithContext(ctx).
 		Model(&model.Task{}).
-		Where("channel_id = ? AND topic != ''", channelID).
+		Where("channel_id = ? AND title != ''", channelID).
+		Group("title").
+		Order("MAX(created_at) DESC").
+		Limit(200).
+		Pluck("title", &titles).Error
+	return titles, err
+}
+
+func (r *taskRepository) FindTitleTasksByChannelID(ctx context.Context, channelID string) ([]*model.Task, error) {
+	var tasks []*model.Task
+	err := r.db.WithContext(ctx).
+		Where("channel_id = ? AND title != ''", channelID).
 		Order("created_at DESC").
 		Limit(200).
-		Pluck("topic", &topics).Error
-	return topics, err
+		Find(&tasks).Error
+	return tasks, err
+}
+
+func (r *taskRepository) ClearTitles(ctx context.Context, titles []string) (int64, error) {
+	if len(titles) == 0 {
+		return 0, nil
+	}
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("title IN ?", titles).
+		Update("title", "")
+	return result.RowsAffected, result.Error
 }
 
 // CompareAndSwapStatus atomically transitions task status from expected to newStatus.

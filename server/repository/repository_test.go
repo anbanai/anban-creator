@@ -421,6 +421,122 @@ func TestTaskRepository_CRUD(t *testing.T) {
 	}
 }
 
+func TestTaskRepository_FindTitlesByChannelID(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+
+	tasks := []*model.Task{
+		{
+			ID:        "task-title-1",
+			UserID:    "user-title-1",
+			ChannelID: "channel-title-1",
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusCompleted,
+			Prompt:    "this prompt must not be returned",
+			Title:     "早餐店爆款标题",
+			CreatedAt: time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        "task-title-2",
+			UserID:    "user-title-1",
+			ChannelID: "channel-title-1",
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusCompleted,
+			Prompt:    "empty title prompt must not be returned",
+			Title:     "",
+			CreatedAt: time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        "task-title-3",
+			UserID:    "user-title-1",
+			ChannelID: "channel-title-1",
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusCompleted,
+			Prompt:    "another prompt must not be returned",
+			Title:     "咖啡探店避坑指南",
+			CreatedAt: time.Date(2026, 5, 3, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        "task-title-4",
+			UserID:    "user-title-1",
+			ChannelID: "other-channel",
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusCompleted,
+			Prompt:    "other channel prompt",
+			Title:     "其他频道标题",
+			CreatedAt: time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC),
+		},
+	}
+
+	for _, task := range tasks {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("Create task %s: %v", task.ID, err)
+		}
+	}
+
+	titles, err := repo.Tasks().FindTitlesByChannelID(ctx, "channel-title-1")
+	if err != nil {
+		t.Fatalf("FindTitlesByChannelID: %v", err)
+	}
+
+	want := []string{"咖啡探店避坑指南", "早餐店爆款标题"}
+	if len(titles) != len(want) {
+		t.Fatalf("titles len = %d, want %d: %v", len(titles), len(want), titles)
+	}
+	for i := range want {
+		if titles[i] != want[i] {
+			t.Errorf("titles[%d] = %q, want %q", i, titles[i], want[i])
+		}
+	}
+}
+
+func TestTaskRepository_ClearArtifactTitles(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+
+	for _, task := range []*model.Task{
+		{
+			ID:        "task-artifact-title-1",
+			UserID:    "user-artifact-title",
+			ChannelID: "channel-artifact-title",
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusCompleted,
+			Title:     "图片内容规划",
+			CreatedAt: time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        "task-artifact-title-2",
+			UserID:    "user-artifact-title",
+			ChannelID: "channel-artifact-title",
+			Type:      model.ScopeSeednote,
+			Status:    model.TaskStatusCompleted,
+			Title:     "真实标题",
+			CreatedAt: time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC),
+		},
+	} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("Create task %s: %v", task.ID, err)
+		}
+	}
+
+	count, err := repo.Tasks().ClearTitles(ctx, []string{"图片内容规划", "标题候选与评分", "选题研究报告", "违禁词合规检查报告"})
+	if err != nil {
+		t.Fatalf("ClearTitles: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+	titles, err := repo.Tasks().FindTitlesByChannelID(ctx, "channel-artifact-title")
+	if err != nil {
+		t.Fatalf("FindTitlesByChannelID: %v", err)
+	}
+	if len(titles) != 1 || titles[0] != "真实标题" {
+		t.Fatalf("titles = %v, want [真实标题]", titles)
+	}
+}
+
 func TestPlanRepository_CRUD(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)

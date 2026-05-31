@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -332,9 +333,74 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 	return tasks, total, nil
 }
 
-// ListTopics returns all existing topic texts for a channel, ordered by creation time descending.
-func (s *TaskService) ListTopics(ctx context.Context, channelID string) ([]string, error) {
-	return s.repo.Tasks().FindTopicsByChannelID(ctx, channelID)
+// ListTitles returns all recorded titles for a channel, ordered by creation time descending.
+func (s *TaskService) ListTitles(ctx context.Context, channelID string) ([]string, error) {
+	return s.repo.Tasks().FindTitlesByChannelID(ctx, channelID)
+}
+
+var artifactTaskTitles = map[string]struct{}{
+	"图片内容规划":    {},
+	"标题候选与评分":   {},
+	"选题研究报告":    {},
+	"违禁词合规检查报告": {},
+}
+
+// FinalizeTitle records the hook-reported final title as the canonical task title.
+func (s *TaskService) FinalizeTitle(ctx context.Context, userID, taskID, title string) (string, error) {
+	cleaned := cleanFinalTitle(title)
+	if cleaned == "" {
+		return "", fmt.Errorf("title is required")
+	}
+	if len([]rune(cleaned)) > 200 {
+		return "", fmt.Errorf("title must be <= 200 characters")
+	}
+	if _, ok := artifactTaskTitles[cleaned]; ok {
+		return "", fmt.Errorf("artifact title is not allowed: %s", cleaned)
+	}
+
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("task not found: %w", err)
+	}
+	if userID != "" && task.UserID != "" && task.UserID != userID {
+		return "", fmt.Errorf("task not found")
+	}
+
+	tasks, err := s.repo.Tasks().FindTitleTasksByChannelID(ctx, task.ChannelID)
+	if err != nil {
+		return "", fmt.Errorf("list existing title tasks: %w", err)
+	}
+	normalized := normalizeTitleForDedup(cleaned)
+	for _, existing := range tasks {
+		if existing.ID != task.ID && normalizeTitleForDedup(existing.Title) == normalized {
+			return "", fmt.Errorf("duplicate title: %s", cleaned)
+		}
+	}
+
+	if err := s.repo.Tasks().UpdateTitle(ctx, taskID, cleaned); err != nil {
+		return "", fmt.Errorf("update task title: %w", err)
+	}
+	return cleaned, nil
+}
+
+func (s *TaskService) ClearArtifactTitles(ctx context.Context) (int64, error) {
+	titles := make([]string, 0, len(artifactTaskTitles))
+	for title := range artifactTaskTitles {
+		titles = append(titles, title)
+	}
+	count, err := s.repo.Tasks().ClearTitles(ctx, titles)
+	if err != nil {
+		return 0, fmt.Errorf("clear artifact titles: %w", err)
+	}
+	return count, nil
+}
+
+func cleanFinalTitle(title string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(title)), " ")
+}
+
+func normalizeTitleForDedup(title string) string {
+	return strings.ToLower(strings.Join(strings.Fields(title), ""))
 }
 
 // Cancel atomically transitions a task from pending/running to cancelled and signals

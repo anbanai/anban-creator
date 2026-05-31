@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -144,8 +145,8 @@ func registerTaskTools(server *mcp.Server) {
 	}, taskCancelHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "list_channel_topics",
-		Description: "List all existing topic texts for a channel. Use this before selecting a new topic to avoid duplicates within the same channel.",
+		Name:        "list_channel_titles",
+		Description: "List all recorded content titles for a channel. Use this before selecting a new title to avoid duplicates within the same channel.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -153,7 +154,20 @@ func registerTaskTools(server *mcp.Server) {
 			},
 			"required": []any{"channel_id"},
 		},
-	}, topicListHandler)
+	}, titleListHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "finalize_task_title",
+		Description: "Record the hook-selected final content title for a task. Hooks call this before final delivery so future tasks can deduplicate by canonical title.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task_id": map[string]any{"type": "string", "description": "Task ID"},
+				"title":   map[string]any{"type": "string", "description": "Final content title selected by the completion hook"},
+			},
+			"required": []any{"task_id", "title"},
+		},
+	}, titleFinalizeHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_task_files",
@@ -411,7 +425,7 @@ func taskCancelHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	return textResult(map[string]any{"cancelled": true, "task_id": taskID})
 }
 
-func topicListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func titleListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	channelID, _ := args["channel_id"].(string)
@@ -423,11 +437,30 @@ func topicListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult(fmt.Sprintf("get channel: %v", err)), nil
 	}
 
-	topics, err := svcs.TaskSvc.ListTopics(context.Background(), channelID)
+	titles, err := svcs.TaskSvc.ListTitles(context.Background(), channelID)
 	if err != nil {
-		return errorResult(fmt.Sprintf("list topics: %v", err)), nil
+		return errorResult(fmt.Sprintf("list titles: %v", err)), nil
 	}
-	return textResult(map[string]any{"topics": topics, "count": len(topics)})
+	return textResult(map[string]any{"titles": titles, "count": len(titles)})
+}
+
+func titleFinalizeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+	taskID, _ := args["task_id"].(string)
+	title, _ := args["title"].(string)
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
+	}
+	if strings.TrimSpace(title) == "" {
+		return errorResult("title is required"), nil
+	}
+
+	finalTitle, err := svcs.TaskSvc.FinalizeTitle(context.Background(), userID, taskID, title)
+	if err != nil {
+		return errorResult(fmt.Sprintf("finalize title: %v", err)), nil
+	}
+	return textResult(map[string]any{"task_id": taskID, "title": finalTitle, "updated": true})
 }
 
 func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
