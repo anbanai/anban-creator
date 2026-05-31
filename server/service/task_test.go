@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +84,309 @@ func (f *fakePublishedTrackingService) EnsureTrackingForPublishedTask(ctx contex
 		taskID string
 	}{userID: userID, taskID: taskID})
 	return f.err
+}
+
+func TestTaskService_FinalizeTitleUpdatesCanonicalTitle(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	title, err := svc.FinalizeTitle(ctx, userID, task.ID, "  月薪5000和月薪5万的人，喝茶差距在哪  ")
+	if err != nil {
+		t.Fatalf("FinalizeTitle: %v", err)
+	}
+	if title != "月薪5000和月薪5万的人，喝茶差距在哪" {
+		t.Fatalf("title = %q", title)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Title != title {
+		t.Fatalf("stored title = %q, want %q", found.Title, title)
+	}
+}
+
+func TestTaskService_FinalizeTitleRejectsInvalidTitles(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{"empty", "   ", "title is required"},
+		{"too long", strings.Repeat("长", 201), "title must be <= 200 characters"},
+		{"artifact", "图片内容规划", "artifact title"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.FinalizeTitle(ctx, userID, task.ID, tt.title)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("FinalizeTitle error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskService_FinalizeTitleRejectsForeignTask(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	ownerID := uuid.New().String()
+	otherID := uuid.New().String()
+	channelID := createTestChannel(t, repo, ownerID, model.PlatformSeednote)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    ownerID,
+		ChannelID: channelID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	_, err := svc.FinalizeTitle(ctx, otherID, task.ID, "真实标题")
+	if err == nil || !strings.Contains(err.Error(), "task not found") {
+		t.Fatalf("FinalizeTitle error = %v, want task not found", err)
+	}
+}
+
+func TestTaskService_FinalizeTitleRejectsUserKeyForUnownedTask(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    "",
+		ChannelID: channelID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	_, err := svc.FinalizeTitle(ctx, userID, task.ID, "真实标题")
+	if err == nil || !strings.Contains(err.Error(), "task not found") {
+		t.Fatalf("FinalizeTitle error = %v, want task not found", err)
+	}
+}
+
+func TestTaskService_FinalizeTitleRejectsDuplicateWithinChannel(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	otherChannelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+
+	existing := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusCompleted,
+		Title:     "新手咖啡豆怎么选",
+		CreatedAt: time.Now().Add(-1 * time.Hour),
+	}
+	current := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusRunning,
+	}
+	foreignChannel := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: otherChannelID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusRunning,
+	}
+	for _, task := range []*model.Task{existing, current, foreignChannel} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+	}
+
+	_, err := svc.FinalizeTitle(ctx, userID, current.ID, " 新手 咖啡豆怎么选 ")
+	if err == nil || !strings.Contains(err.Error(), "duplicate title") {
+		t.Fatalf("FinalizeTitle error = %v, want duplicate title", err)
+	}
+
+	if _, err := svc.FinalizeTitle(ctx, userID, foreignChannel.ID, "新手咖啡豆怎么选"); err != nil {
+		t.Fatalf("other channel duplicate should be allowed: %v", err)
+	}
+}
+
+func TestTaskService_FinalizeTitleRejectsDuplicateEvenWhenCurrentTaskAlreadyHasTitle(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+
+	for _, task := range []*model.Task{
+		{
+			ID:        uuid.New().String(),
+			UserID:    userID,
+			ChannelID: channelID,
+			Type:      model.PlatformSeednote,
+			Status:    model.TaskStatusCompleted,
+			Title:     "新手咖啡豆怎么选",
+			CreatedAt: time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        "task-current-with-same-title",
+			UserID:    userID,
+			ChannelID: channelID,
+			Type:      model.PlatformSeednote,
+			Status:    model.TaskStatusRunning,
+			Title:     "新手咖啡豆怎么选",
+			CreatedAt: time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC),
+		},
+	} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+	}
+
+	_, err := svc.FinalizeTitle(ctx, userID, "task-current-with-same-title", "新手 咖啡豆怎么选")
+	if err == nil || !strings.Contains(err.Error(), "duplicate title") {
+		t.Fatalf("FinalizeTitle error = %v, want duplicate title", err)
+	}
+}
+
+func TestTaskService_ClearArtifactTitles(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	for _, task := range []*model.Task{
+		{
+			ID:        uuid.New().String(),
+			UserID:    userID,
+			ChannelID: channelID,
+			Type:      model.PlatformSeednote,
+			Status:    model.TaskStatusCompleted,
+			Title:     "图片内容规划",
+			CreatedAt: time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        uuid.New().String(),
+			UserID:    userID,
+			ChannelID: channelID,
+			Type:      model.PlatformSeednote,
+			Status:    model.TaskStatusCompleted,
+			Title:     "真实茶饮标题",
+			CreatedAt: time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC),
+		},
+	} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+	}
+
+	count, err := svc.ClearArtifactTitles(ctx)
+	if err != nil {
+		t.Fatalf("ClearArtifactTitles: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+	titles, err := svc.ListTitles(ctx, channelID)
+	if err != nil {
+		t.Fatalf("ListTitles: %v", err)
+	}
+	if len(titles) != 1 || titles[0] != "真实茶饮标题" {
+		t.Fatalf("titles = %v, want [真实茶饮标题]", titles)
+	}
+}
+
+type fakeTaskExecutor struct {
+	result *agent.ExecutionResult
+	err    error
+}
+
+func (f *fakeTaskExecutor) Execute(ctx context.Context, opts *agent.ExecutionOptions) (*agent.ExecutionResult, error) {
+	return f.result, f.err
+}
+
+func TestTaskService_ExecuteDoesNotExtractTitleFromWorkspace(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	workDir := t.TempDir()
+	outputDir := filepath.Join(workDir, "output")
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("mkdir output: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "image-plan.md"), []byte("# 图片内容规划\n\ninternal"), 0644); err != nil {
+		t.Fatalf("write image plan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "content.md"), []byte("# 真实最终标题\n\ncontent"), 0644); err != nil {
+		t.Fatalf("write content: %v", err)
+	}
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusRunning,
+		Title:     "AI 已上报标题",
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+		WorkDir: workDir,
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Title != "AI 已上报标题" {
+		t.Fatalf("title = %q, want existing AI-reported title", found.Title)
+	}
 }
 
 func TestTaskService_HandleExecutionFailure_PermanentAuthErrorDoesNotRetry(t *testing.T) {

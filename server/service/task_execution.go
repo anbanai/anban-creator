@@ -145,13 +145,6 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		}
 		// Schedule workspace cleanup after all processing is done.
 		cleanupWorkDir = result.WorkDir
-		if title := ExtractTitleFromWorkspace(result.WorkDir); title != "" {
-			if err := s.repo.Tasks().UpdateTitle(ctx, taskID, title); err != nil {
-				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task title")
-			} else {
-				s.logger.Info().Str("task_id", taskID).Str("title", title).Msg("extracted task title from output files")
-			}
-		}
 	}
 
 	// If the execution context was cancelled (shutdown or user cancel),

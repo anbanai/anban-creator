@@ -97,7 +97,9 @@ type TaskRepository interface {
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
 	IncrementRetryAndSetPending(ctx context.Context, taskID string, field string) error
-	FindTopicsByChannelID(ctx context.Context, channelID string) ([]string, error)
+	FindTitlesByChannelID(ctx context.Context, channelID string) ([]string, error)
+	FindTitleTasksByChannelID(ctx context.Context, channelID string) ([]*model.Task, error)
+	ClearTitles(ctx context.Context, titles []string) (int64, error)
 	SetPublished(ctx context.Context, id string, published bool) error
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	Delete(ctx context.Context, id string) error
