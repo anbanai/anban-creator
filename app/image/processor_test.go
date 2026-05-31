@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -136,5 +137,55 @@ func TestProcessor_buildPrompt(t *testing.T) {
 				t.Errorf("buildPrompt(%q) =\n  %q\nwant\n  %q", tt.userPrompt, got, tt.want)
 			}
 		})
+	}
+}
+
+type rawMetadataProvider struct {
+	result *GenerateResult
+}
+
+func (p rawMetadataProvider) Name() string {
+	return "metadata-provider"
+}
+
+func (p rawMetadataProvider) Generate(_ context.Context, _ string, _ *GenerateOptions) (*GenerateResult, error) {
+	return p.result, nil
+}
+
+func TestProcessor_GenerateRawIncludesProviderMetadata(t *testing.T) {
+	p := newTestProcessor(&config.ImageAPI{Provider: "test", Key: "test-key"})
+	p.provider = rawMetadataProvider{
+		result: &GenerateResult{
+			URL:             "data:image/png;base64,iVBORw0KGgo=",
+			RevisedPrompt:   "revised spring tea prompt",
+			Model:           "image-model",
+			Size:            "3:4",
+			ResponseType:    "b64_json",
+			ResponsePreview: "preview",
+		},
+	}
+
+	got, err := p.GenerateRaw("春日饮茶")
+	if err != nil {
+		t.Fatalf("GenerateRaw() error = %v", err)
+	}
+
+	if got.Prompt != "春日饮茶" {
+		t.Fatalf("Prompt = %q, want original prompt", got.Prompt)
+	}
+	if got.Provider != "metadata-provider" {
+		t.Fatalf("Provider = %q, want metadata-provider", got.Provider)
+	}
+	if got.Model != "image-model" {
+		t.Fatalf("Model = %q, want image-model", got.Model)
+	}
+	if got.RevisedPrompt != "revised spring tea prompt" {
+		t.Fatalf("RevisedPrompt = %q, want revised spring tea prompt", got.RevisedPrompt)
+	}
+	if got.ResponseType != "b64_json" {
+		t.Fatalf("ResponseType = %q, want b64_json", got.ResponseType)
+	}
+	if got.OutputMIME != "image/png" {
+		t.Fatalf("OutputMIME = %q, want image/png", got.OutputMIME)
 	}
 }

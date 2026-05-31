@@ -215,9 +215,16 @@ type GenerateOnlyResult struct {
 // GenerateRawResult 调用 AI provider 生成图片后返回原始结果。
 // URL 字段为 provider 直接返回的内容：远程 HTTPS URL、data URL 或本地临时文件路径（已转为 data URL）。
 type GenerateRawResult struct {
-	URL   string `json:"url"`   // 远程 URL 或 data URL
-	Size  string `json:"size"`  // provider 报告的尺寸（如 "1024x1024"）
-	Index int    `json:"index"` // 批量时的序号
+	URL             string `json:"url"`                        // 远程 URL 或 data URL
+	Size            string `json:"size"`                       // provider 报告的尺寸（如 "1024x1024"）
+	Index           int    `json:"index"`                      // 批量时的序号
+	Prompt          string `json:"prompt,omitempty"`           // 实际发送给 provider 的最终提示词
+	Provider        string `json:"provider,omitempty"`         // provider 名称
+	Model           string `json:"model,omitempty"`            // 实际使用的模型
+	RevisedPrompt   string `json:"revised_prompt,omitempty"`   // provider 返回的优化提示词
+	ResponseType    string `json:"response_type,omitempty"`    // 返回类型：b64_json / url / empty
+	ResponsePreview string `json:"response_preview,omitempty"` // URL 原样输出，base64 截断输出
+	OutputMIME      string `json:"output_mime,omitempty"`      // 当前 URL/data URL 对应的图片 MIME
 }
 
 // GenerateRaw 调用 AI provider 生成图片，返回原始 URL 或 data URL。
@@ -232,7 +239,8 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 
 	ctx := context.Background()
 	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
-	result, err := p.provider.Generate(ctx, p.buildPrompt(prompt), genOpts)
+	finalPrompt := p.buildPrompt(prompt)
+	result, err := p.provider.Generate(ctx, finalPrompt, genOpts)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
@@ -245,8 +253,15 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 	}
 
 	return &GenerateRawResult{
-		URL:  url,
-		Size: result.Size,
+		URL:             url,
+		Size:            result.Size,
+		Prompt:          finalPrompt,
+		Provider:        p.provider.Name(),
+		Model:           result.Model,
+		RevisedPrompt:   result.RevisedPrompt,
+		ResponseType:    result.ResponseType,
+		ResponsePreview: result.ResponsePreview,
+		OutputMIME:      detectImageMIMEFromURL(url),
 	}, nil
 }
 
@@ -273,7 +288,8 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 
 	ctx := context.Background()
 	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
-	result, err := activeProvider.Generate(ctx, p.buildPrompt(prompt), genOpts)
+	finalPrompt := p.buildPrompt(prompt)
+	result, err := activeProvider.Generate(ctx, finalPrompt, genOpts)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
@@ -286,9 +302,26 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 	}
 
 	return &GenerateRawResult{
-		URL:  url,
-		Size: result.Size,
+		URL:             url,
+		Size:            result.Size,
+		Prompt:          finalPrompt,
+		Provider:        activeProvider.Name(),
+		Model:           result.Model,
+		RevisedPrompt:   result.RevisedPrompt,
+		ResponseType:    result.ResponseType,
+		ResponsePreview: result.ResponsePreview,
+		OutputMIME:      detectImageMIMEFromURL(url),
 	}, nil
+}
+
+func detectImageMIMEFromURL(rawURL string) string {
+	if strings.HasPrefix(rawURL, "data:") {
+		header, _, ok := strings.Cut(rawURL, ";")
+		if ok {
+			return strings.TrimPrefix(header, "data:")
+		}
+	}
+	return ""
 }
 
 // resolveRawURL 统一处理 provider 返回的 URL：

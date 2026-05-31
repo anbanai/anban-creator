@@ -48,19 +48,25 @@ const (
 // Falls back to net/http.DetectContentType by reading the first 512 bytes.
 func DetectTaskFileMIME(filePath string) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
-	if mime, ok := mimeTypes[ext]; ok {
-		return mime
-	}
-
 	f, err := os.Open(filePath)
 	if err != nil {
+		if mime, ok := mimeTypes[ext]; ok {
+			return mime
+		}
 		return "application/octet-stream"
 	}
 	defer f.Close()
 
 	buf := make([]byte, 512)
 	n, _ := f.Read(buf)
-	return http.DetectContentType(buf[:n])
+	detected := http.DetectContentType(buf[:n])
+	if strings.HasPrefix(detected, "image/") {
+		return detected
+	}
+	if mime, ok := mimeTypes[ext]; ok {
+		return mime
+	}
+	return detected
 }
 
 // DetermineTaskFileRole returns the role for a file based on its name and MIME type.
