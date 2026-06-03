@@ -56,6 +56,7 @@ type Services struct {
 	PosterHandler            *handler.PosterHandler
 	ResourceHandler          *handler.ResourceHandler
 	TopicPoolHandler         *handler.TopicPoolHandler
+	DesignerHandler          *handler.DesignerHandler
 	MCPHandler               http.Handler
 	StorageProvider          storage.Provider
 }
@@ -247,6 +248,18 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/channels/:channel_id/topics", svc.TopicPoolHandler.Create)
 		apiV1.Delete("/channels/:channel_id/topics/:id", svc.TopicPoolHandler.Delete)
 		apiV1.Patch("/channels/:channel_id/topics/:id/reset", svc.TopicPoolHandler.Reset)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Designer endpoints (image generation studio)
+	// ---------------------------------------------------------------------------
+
+	if svc.DesignerHandler != nil {
+		designer := apiV1.Group("/designer")
+		designer.Post("/generate", svc.DesignerHandler.Generate)
+		designer.Post("/upload-reference", svc.DesignerHandler.UploadReference)
+		designer.Get("/history", svc.DesignerHandler.GetHistory)
+		designer.Get("/generations/:id", svc.DesignerHandler.GetGeneration)
 	}
 
 	// ---------------------------------------------------------------------------

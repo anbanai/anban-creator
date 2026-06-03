@@ -67,6 +67,20 @@ func (p *GeminiProvider) Name() string {
 	return "Gemini"
 }
 
+// Capabilities returns Gemini provider capabilities
+func (p *GeminiProvider) Capabilities() *ProviderCapabilities {
+	return &ProviderCapabilities{
+		MaxRefImages:  10,
+		Batch:         false,
+		MaxBatch:      1,
+		Streaming:     false,
+		Inpainting:    false,
+		QualityLevels: []string{},
+		OutputFormats: []string{"png"},
+		FlexibleSize:  false,
+	}
+}
+
 // Generate 生成图片
 func (p *GeminiProvider) Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error) {
 	// 构建请求内容
@@ -75,22 +89,29 @@ func (p *GeminiProvider) Generate(ctx context.Context, prompt string, opts *Gene
 	}
 
 	// 如果有参考图，追加内联数据
-	if opts != nil && opts.RefImagePath != "" {
-		data, mimeType, err := ReadRefImage(opts.RefImagePath)
-		if err != nil {
-			return nil, &GenerateError{
-				Provider: p.Name(),
-				Code:     "refer_error",
-				Message:  "读取参考图失败",
-				Original: err,
-			}
+	if opts != nil {
+		refPaths := make([]string, 0, len(opts.RefImagePaths)+1)
+		if opts.RefImagePath != "" {
+			refPaths = append(refPaths, opts.RefImagePath)
 		}
-		parts = append(parts, &genai.Part{
-			InlineData: &genai.Blob{
-				MIMEType: mimeType,
-				Data:     data,
-			},
-		})
+		refPaths = append(refPaths, opts.RefImagePaths...)
+		for _, refPath := range refPaths {
+			data, mimeType, err := ReadRefImage(refPath)
+			if err != nil {
+				return nil, &GenerateError{
+					Provider: p.Name(),
+					Code:     "refer_error",
+					Message:  "读取参考图失败",
+					Original: err,
+				}
+			}
+			parts = append(parts, &genai.Part{
+				InlineData: &genai.Blob{
+					MIMEType: mimeType,
+					Data:     data,
+				},
+			})
+		}
 	}
 
 	contents := []*genai.Content{

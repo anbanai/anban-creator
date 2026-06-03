@@ -82,6 +82,20 @@ func (p *VolcengineProvider) Name() string {
 	return "Volcengine"
 }
 
+// Capabilities returns Volcengine provider capabilities
+func (p *VolcengineProvider) Capabilities() *ProviderCapabilities {
+	return &ProviderCapabilities{
+		MaxRefImages:  1,
+		Batch:         true,
+		MaxBatch:      4,
+		Streaming:     false,
+		Inpainting:    false,
+		QualityLevels: []string{},
+		OutputFormats: []string{"png", "jpeg"},
+		FlexibleSize:  false,
+	}
+}
+
 // Generate 生成图片
 func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error) {
 	respFmt := model.GenerateImagesResponseFormatURL

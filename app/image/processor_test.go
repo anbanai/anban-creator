@@ -152,6 +152,10 @@ func (p rawMetadataProvider) Generate(_ context.Context, _ string, _ *GenerateOp
 	return p.result, nil
 }
 
+func (p rawMetadataProvider) Capabilities() *ProviderCapabilities {
+	return &ProviderCapabilities{}
+}
+
 func TestProcessor_GenerateRawIncludesProviderMetadata(t *testing.T) {
 	p := newTestProcessor(&config.ImageAPI{Provider: "test", Key: "test-key"})
 	p.provider = rawMetadataProvider{

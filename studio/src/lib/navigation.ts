@@ -12,6 +12,7 @@ import {
   Puzzle,
   LayoutGrid,
   Wand2,
+  Palette,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -25,6 +26,7 @@ export const workflowItems: NavItem[] = [
   { to: '/', label: '仪表盘', icon: LayoutDashboard, end: true },
   { to: '/channels', label: '账号', icon: Rss },
   { to: '/workshop', label: '创意工坊', icon: Wand2 },
+  { to: '/designer', label: '设计师', icon: Palette },
   { to: '/templates', label: '模板库', icon: LayoutGrid },
   { to: '/plans', label: '计划', icon: CalendarRange },
   { to: '/tasks', label: '任务', icon: ListChecks },

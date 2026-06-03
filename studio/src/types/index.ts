@@ -105,3 +105,15 @@ export type {
   ViralAnalysis,
   CreateViralAnalysisRequest,
 } from './viral-analysis'
+
+// Designer
+export type {
+  ModelCapabilities,
+  DesignerModel,
+  GenerateRequest,
+  GenerateImage,
+  GenerateResult,
+  ImageGeneration,
+  ImageGenerationResult,
+  HistoryResponse,
+} from './designer'

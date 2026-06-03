@@ -52,4 +52,10 @@ export const queryKeys = {
     all: (channelId: string) => ['topic-pool', channelId] as const,
     list: (channelId: string, status?: string) => ['topic-pool', channelId, status] as const,
   },
+  designer: {
+    all: ['designer'] as const,
+    history: (params?: { channel_id?: string; page?: number; page_size?: number }) =>
+      ['designer', 'history', params] as const,
+    generation: (id: string) => ['designer', 'generation', id] as const,
+  },
 } as const

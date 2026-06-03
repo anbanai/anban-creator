@@ -24,6 +24,23 @@ const (
 type GenerateOptions struct {
 	RefImagePath  string   // 本地参考图文件路径（单张，可选）
 	RefImagePaths []string // 多张参考图路径（组图模式，可选）
+	MaskPath      string   // inpainting mask 文件路径（PNG with alpha，可选）
+	Quality       string   // 图片质量: "low", "medium", "high", "auto"（可选）
+	OutputFormat  string   // 输出格式: "png", "jpeg", "webp"（可选）
+	N             int      // 批量生成数量，1-10（默认 1）
+	Size          string   // 自定义尺寸或比例（覆盖默认尺寸）
+	StreamCB      StreamCallback // 流式回调（nil 表示不启用流式）
+}
+
+// StreamCallback 流式图片生成回调函数
+type StreamCallback func(partial *PartialImage)
+
+// PartialImage 流式生成过程中的部分图片
+type PartialImage struct {
+	Index    int    // 图片序号（批量生成时从 0 开始）
+	B64Data  string // Base64 编码的部分图片数据
+	Progress int    // 生成进度 0-100
+	Final    bool   // 是否为最终图片
 }
 
 // Provider 图片生成服务提供者接口
@@ -34,18 +51,41 @@ type Provider interface {
 	// Generate 生成图片，返回图片 URL 或本地路径
 	// ctx: 上下文，用于超时控制
 	// prompt: 图片生成提示词
-	// opts: 可选参数（如参考图），传 nil 表示无附加选项
+	// opts: 可选参数（如参考图、质量、批量等），传 nil 表示无附加选项
 	Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error)
+
+	// Capabilities 返回提供者支持的能力
+	Capabilities() *ProviderCapabilities
 }
 
 // GenerateResult 图片生成结果
 type GenerateResult struct {
-	URL             string // 生成的图片 URL
-	RevisedPrompt   string // 优化后的提示词（某些提供者会返回）
-	Model           string // 实际使用的模型
-	Size            string // 实际尺寸
-	ResponseType    string // 返回类型：b64_json / url / file / empty
-	ResponsePreview string // 原始返回预览：URL 原样输出，base64 截断输出
+	URL             string           // 生成的图片 URL（单张时使用）
+	RevisedPrompt   string           // 优化后的提示词（某些提供者会返回）
+	Model           string           // 实际使用的模型
+	Size            string           // 实际尺寸
+	ResponseType    string           // 返回类型：b64_json / url / file / empty
+	ResponsePreview string           // 原始返回预览：URL 原样输出，base64 截断输出
+	Images          []GeneratedImage // 批量生成的多张图片
+}
+
+// GeneratedImage 单张生成的图片
+type GeneratedImage struct {
+	URL   string // 图片 URL 或本地路径
+	B64   string // Base64 编码的图片数据（可选）
+	Index int    // 图片序号
+}
+
+// ProviderCapabilities 图片生成提供者的能力描述
+type ProviderCapabilities struct {
+	MaxRefImages  int      // 最大参考图数量
+	Batch         bool     // 是否支持批量生成
+	MaxBatch      int      // 最大批量数量
+	Streaming     bool     // 是否支持流式生成
+	Inpainting    bool     // 是否支持 mask inpainting
+	QualityLevels []string // 支持的质量级别
+	OutputFormats []string // 支持的输出格式
+	FlexibleSize  bool     // 是否支持自定义尺寸
 }
 
 // GenerateError 图片生成错误

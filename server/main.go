@@ -311,6 +311,8 @@ func main() {
 	var resourceHandler *handler.ResourceHandler
 	var topicPoolHandler *handler.TopicPoolHandler
 	var topicPoolSvc *service.TopicPoolService
+	var designerSvc *service.DesignerService
+	var designerHandler *handler.DesignerHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -376,6 +378,10 @@ func main() {
 			if modelConfigSvc != nil {
 				imageSvc.SetModelConfigService(modelConfigSvc)
 			}
+		}
+		if mysqlDB != nil && imageSvc != nil {
+			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, &cfg.ImageAPI, store, log)
+			designerHandler = handler.NewDesignerHandler(designerSvc, log)
 		}
 		if repo != nil {
 			if writingLLMClient != nil {
@@ -485,6 +491,7 @@ func main() {
 		PosterHandler:            posterHandler,
 		ResourceHandler:          resourceHandler,
 		TopicPoolHandler:         topicPoolHandler,
+			DesignerHandler:          designerHandler,
 		MCPHandler:               mcpHandler,
 		StorageProvider:          store,
 	}

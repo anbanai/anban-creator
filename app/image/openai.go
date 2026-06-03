@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,27 +127,91 @@ func (p *OpenAIProvider) Name() string {
 
 // Generate 生成图片
 func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error) {
-	// 有参考图时，使用 Images.Edit() API
-	if opts != nil && opts.RefImagePath != "" {
-		return p.generateWithRef(ctx, prompt, opts.RefImagePath)
+	if opts == nil {
+		opts = &GenerateOptions{}
 	}
 
-	// 调用 SDK 生成图片
+	// Determine effective size
+	size := p.size
+	if opts.Size != "" {
+		size = mapToDALLESize(opts.Size, p.model)
+	}
+
+	hasRefImages := opts.RefImagePath != "" || len(opts.RefImagePaths) > 0
+	hasMask := opts.MaskPath != ""
+	useStreaming := opts.StreamCB != nil && isGPTImageModel(p.model)
+
+	// Edit mode: reference images or mask provided
+	if hasRefImages || hasMask {
+		if useStreaming {
+			return p.generateEditStreaming(ctx, prompt, opts, size)
+		}
+		return p.generateEdit(ctx, prompt, opts, size)
+	}
+
+	// Streaming generation
+	if useStreaming {
+		return p.generateStreaming(ctx, prompt, opts, size)
+	}
+
+	// Standard generation
+	return p.generateStandard(ctx, prompt, opts, size)
+}
+
+// Capabilities returns OpenAI provider capabilities
+func (p *OpenAIProvider) Capabilities() *ProviderCapabilities {
+	caps := &ProviderCapabilities{
+		MaxRefImages:  1,
+		Batch:         false,
+		MaxBatch:      1,
+		Streaming:     false,
+		Inpainting:    false,
+		QualityLevels: []string{"standard", "hd"},
+		OutputFormats: []string{"png"},
+		FlexibleSize:  false,
+	}
+
+	if isGPTImageModel(p.model) {
+		caps.MaxRefImages = 16
+		caps.Batch = true
+		caps.MaxBatch = 10
+		caps.Streaming = true
+		caps.Inpainting = true
+		caps.QualityLevels = []string{"auto", "low", "medium", "high"}
+		caps.OutputFormats = []string{"png", "jpeg", "webp"}
+		caps.FlexibleSize = true
+	}
+
+	return caps
+}
+
+// generateStandard generates images without streaming
+func (p *OpenAIProvider) generateStandard(ctx context.Context, prompt string, opts *GenerateOptions, size string) (*GenerateResult, error) {
+	n := int64(1)
+	if opts.N > 1 {
+		n = int64(opts.N)
+	}
+
 	params := openai.ImageGenerateParams{
 		Prompt:         prompt,
 		Model:          openai.ImageModel(p.model),
-		N:              param.NewOpt(int64(1)),
-		Size:           openai.ImageGenerateParamsSize(p.size),
+		N:              param.NewOpt(n),
+		Size:           openai.ImageGenerateParamsSize(size),
 		ResponseFormat: openai.ImageGenerateParamsResponseFormatB64JSON,
 	}
-	resp, err := p.client.Images.Generate(ctx, params)
 
+	if opts.Quality != "" {
+		params.Quality = openai.ImageGenerateParamsQuality(opts.Quality)
+	}
+	if opts.OutputFormat != "" {
+		params.OutputFormat = openai.ImageGenerateParamsOutputFormat(opts.OutputFormat)
+	}
+
+	resp, err := p.client.Images.Generate(ctx, params)
 	if err != nil {
-		// 包装 SDK 错误为 GenerateError
 		return nil, p.wrapSDKError(err)
 	}
 
-	// 检查是否有生成的图片
 	if len(resp.Data) == 0 {
 		return nil, &GenerateError{
 			Provider: p.Name(),
@@ -156,31 +221,103 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 		}
 	}
 
-	return p.imageDataToResult(resp.Data[0])
+	return p.imageResponseToResult(resp)
 }
 
-// generateWithRef 使用参考图生成图片（调用 Images.Edit() API）
-func (p *OpenAIProvider) generateWithRef(ctx context.Context, prompt, refImagePath string) (*GenerateResult, error) {
-	f, err := os.Open(refImagePath)
-	if err != nil {
-		return nil, &GenerateError{
-			Provider: p.Name(),
-			Code:     "refer_error",
-			Message:  "打开参考图失败",
-			Original: err,
+// generateStreaming generates images with progressive partial delivery
+func (p *OpenAIProvider) generateStreaming(ctx context.Context, prompt string, opts *GenerateOptions, size string) (*GenerateResult, error) {
+	n := int64(1)
+	if opts.N > 1 {
+		n = int64(opts.N)
+	}
+
+	params := openai.ImageGenerateParams{
+		Prompt:        prompt,
+		Model:         openai.ImageModel(p.model),
+		N:             param.NewOpt(n),
+		Size:          openai.ImageGenerateParamsSize(size),
+		PartialImages: param.NewOpt(int64(3)),
+	}
+
+	if opts.Quality != "" {
+		params.Quality = openai.ImageGenerateParamsQuality(opts.Quality)
+	}
+	if opts.OutputFormat != "" {
+		params.OutputFormat = openai.ImageGenerateParamsOutputFormat(opts.OutputFormat)
+	}
+
+	stream := p.client.Images.GenerateStreaming(ctx, params)
+	var finalB64 string
+	var resultSize string
+
+	for stream.Next() {
+		event := stream.Current()
+		switch evt := event.AsAny().(type) {
+		case openai.ImageGenPartialImageEvent:
+			if opts.StreamCB != nil {
+				progress := int((evt.PartialImageIndex + 1) * 25)
+				if progress > 100 {
+					progress = 100
+				}
+				opts.StreamCB(&PartialImage{
+					Index:    int(evt.PartialImageIndex),
+					B64Data:  evt.B64JSON,
+					Progress: progress,
+					Final:    false,
+				})
+			}
+		case openai.ImageGenCompletedEvent:
+			finalB64 = evt.B64JSON
+			resultSize = string(evt.Size)
 		}
 	}
-	defer f.Close()
 
-	params := openai.ImageEditParams{
-		Image:          openai.ImageEditParamsImageUnion{OfFile: f},
-		Prompt:         prompt,
-		Model:          openai.ImageModel(p.model),
-		Size:           openai.ImageEditParamsSize(p.size),
-		N:              param.NewOpt(int64(1)),
-		ResponseFormat: openai.ImageEditParamsResponseFormatB64JSON,
+	if err := stream.Err(); err != nil {
+		return nil, p.wrapSDKError(err)
 	}
-	resp, err := p.client.Images.Edit(ctx, params)
+
+	if finalB64 == "" {
+		return nil, &GenerateError{
+			Provider: p.Name(),
+			Code:     "no_image",
+			Message:  "流式生成完成但未收到最终图片",
+			HintMsg:  "请稍后重试",
+		}
+	}
+
+	// Send final via callback
+	if opts.StreamCB != nil {
+		opts.StreamCB(&PartialImage{
+			Index:    0,
+			B64Data:  finalB64,
+			Progress: 100,
+			Final:    true,
+		})
+	}
+
+	filePath, err := p.saveBase64Image(finalB64)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GenerateResult{
+		URL:             filePath,
+		Model:           p.model,
+		Size:            resultSize,
+		ResponseType:    "b64_json",
+		ResponsePreview: previewBase64(finalB64),
+	}, nil
+}
+
+// generateEdit generates images using the edit API (with reference images / mask)
+func (p *OpenAIProvider) generateEdit(ctx context.Context, prompt string, opts *GenerateOptions, size string) (*GenerateResult, error) {
+	params, cleanup, err := p.buildEditParams(prompt, opts, size)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	resp, err := p.client.Images.Edit(ctx, *params)
 	if err != nil {
 		return nil, p.wrapSDKError(err)
 	}
@@ -194,7 +331,221 @@ func (p *OpenAIProvider) generateWithRef(ctx context.Context, prompt, refImagePa
 		}
 	}
 
-	return p.imageDataToResult(resp.Data[0])
+	return p.imageResponseToResult(resp)
+}
+
+// generateEditStreaming generates edited images with streaming
+func (p *OpenAIProvider) generateEditStreaming(ctx context.Context, prompt string, opts *GenerateOptions, size string) (*GenerateResult, error) {
+	params, cleanup, err := p.buildEditParams(prompt, opts, size)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	stream := p.client.Images.EditStreaming(ctx, *params)
+	var finalB64 string
+	var resultSize string
+
+	for stream.Next() {
+		event := stream.Current()
+		switch evt := event.AsAny().(type) {
+		case openai.ImageEditPartialImageEvent:
+			if opts.StreamCB != nil {
+				progress := int((evt.PartialImageIndex + 1) * 25)
+				if progress > 100 {
+					progress = 100
+				}
+				opts.StreamCB(&PartialImage{
+					Index:    int(evt.PartialImageIndex),
+					B64Data:  evt.B64JSON,
+					Progress: progress,
+					Final:    false,
+				})
+			}
+		case openai.ImageEditCompletedEvent:
+			finalB64 = evt.B64JSON
+			resultSize = string(evt.Size)
+		}
+	}
+
+	if err := stream.Err(); err != nil {
+		return nil, p.wrapSDKError(err)
+	}
+
+	if finalB64 == "" {
+		return nil, &GenerateError{
+			Provider: p.Name(),
+			Code:     "no_image",
+			Message:  "流式编辑完成但未收到最终图片",
+			HintMsg:  "请稍后重试",
+		}
+	}
+
+	if opts.StreamCB != nil {
+		opts.StreamCB(&PartialImage{
+			Index:    0,
+			B64Data:  finalB64,
+			Progress: 100,
+			Final:    true,
+		})
+	}
+
+	filePath, err := p.saveBase64Image(finalB64)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GenerateResult{
+		URL:             filePath,
+		Model:           p.model,
+		Size:            resultSize,
+		ResponseType:    "b64_json",
+		ResponsePreview: previewBase64(finalB64),
+	}, nil
+}
+
+// buildEditParams constructs ImageEditParams from GenerateOptions.
+// Returns the params, a cleanup function, and any error.
+func (p *OpenAIProvider) buildEditParams(prompt string, opts *GenerateOptions, size string) (*openai.ImageEditParams, func(), error) {
+	var openFiles []*os.File
+	var cleanupFiles []string
+	cleanup := func() {
+		for _, f := range openFiles {
+			f.Close()
+		}
+		for _, f := range cleanupFiles {
+			os.Remove(f)
+		}
+	}
+
+	// Collect all reference image paths
+	paths := make([]string, 0, len(opts.RefImagePaths)+1)
+	if opts.RefImagePath != "" {
+		paths = append(paths, opts.RefImagePath)
+	}
+	paths = append(paths, opts.RefImagePaths...)
+
+	params := &openai.ImageEditParams{
+		Prompt: prompt,
+		Model:  openai.ImageModel(p.model),
+		Size:   openai.ImageEditParamsSize(size),
+	}
+
+	if opts.Quality != "" {
+		params.Quality = openai.ImageEditParamsQuality(opts.Quality)
+	}
+	if opts.OutputFormat != "" {
+		params.OutputFormat = openai.ImageEditParamsOutputFormat(opts.OutputFormat)
+	}
+	if opts.N > 1 {
+		params.N = param.NewOpt(int64(opts.N))
+	}
+
+	// Handle reference images
+	if len(paths) == 1 {
+		f, err := os.Open(paths[0])
+		if err != nil {
+			cleanup()
+			return nil, nil, &GenerateError{
+				Provider: p.Name(),
+				Code:     "refer_error",
+				Message:  "打开参考图失败",
+				Original: err,
+			}
+		}
+		openFiles = append(openFiles, f)
+		params.Image = openai.ImageEditParamsImageUnion{OfFile: f}
+	} else if len(paths) > 1 {
+		readers := make([]io.Reader, 0, len(paths))
+		for _, p := range paths {
+			f, err := os.Open(p)
+			if err != nil {
+				cleanup()
+				return nil, nil, &GenerateError{
+					Provider: "OpenAI",
+					Code:     "refer_error",
+					Message:  fmt.Sprintf("打开参考图失败: %s", p),
+					Original: err,
+				}
+			}
+			openFiles = append(openFiles, f)
+			readers = append(readers, f)
+		}
+		params.Image = openai.ImageEditParamsImageUnion{OfFileArray: readers}
+	}
+
+	// Handle mask
+	if opts.MaskPath != "" {
+		maskFile, err := os.Open(opts.MaskPath)
+		if err != nil {
+			cleanup()
+			return nil, nil, &GenerateError{
+				Provider: p.Name(),
+				Code:     "mask_error",
+				Message:  "打开 mask 文件失败",
+				Original: err,
+			}
+		}
+		openFiles = append(openFiles, maskFile)
+		params.Mask = maskFile
+	}
+
+	return params, cleanup, nil
+}
+
+// imageResponseToResult converts an ImagesResponse to a GenerateResult
+func (p *OpenAIProvider) imageResponseToResult(resp *openai.ImagesResponse) (*GenerateResult, error) {
+	result := &GenerateResult{
+		Model: p.model,
+		Size:  p.sizeRatio,
+	}
+
+	if len(resp.Data) == 1 {
+		return p.imageDataToResult(resp.Data[0])
+	}
+
+	// Multiple images (batch)
+	images := make([]GeneratedImage, 0, len(resp.Data))
+	for i, img := range resp.Data {
+		filePath, err := p.saveImageData(img)
+		if err != nil {
+			return nil, err
+		}
+		images = append(images, GeneratedImage{
+			URL:   filePath,
+			Index: i,
+		})
+	}
+	result.Images = images
+	if len(images) > 0 {
+		result.URL = images[0].URL
+	}
+	result.ResponseType = "b64_json"
+	return result, nil
+}
+
+// saveImageData saves a single Image from API response to a temp file
+func (p *OpenAIProvider) saveImageData(img openai.Image) (string, error) {
+	if img.B64JSON != "" {
+		return p.saveBase64Image(img.B64JSON)
+	}
+	if img.URL != "" {
+		filePath, err := wechat.DownloadFile(img.URL)
+		if err != nil {
+			return "", &GenerateError{
+				Provider: p.Name(),
+				Code:     "url_download_error",
+				Message:  fmt.Sprintf("下载图片失败: %s", img.URL),
+				Original: err,
+			}
+		}
+		return filePath, nil
+	}
+	return "", &GenerateError{
+		Provider: p.Name(),
+		Code:     "no_image",
+		Message:  "响应中没有图片数据",
+	}
 }
 
 func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, error) {
