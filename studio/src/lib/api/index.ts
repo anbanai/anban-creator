@@ -13,6 +13,7 @@ import { templatesApi } from './templates'
 import { postersApi } from './posters'
 import { viralAnalysesApi } from './viral-analyses'
 import { resourcesApi } from './resources'
+import { topicPoolApi } from './topic-pool'
 
 export const api = {
   auth: authApi,
@@ -30,4 +31,5 @@ export const api = {
   posters: postersApi,
   viralAnalyses: viralAnalysesApi,
   resources: resourcesApi,
+  topicPool: topicPoolApi,
 }

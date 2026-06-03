@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import type { Channel, ChannelStats } from '@/types'
 import { platformLabels } from '@/lib/labels'
 import { renderPlatformIcon, platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { TopicPoolDialog } from '@/components/TopicPoolDialog'
 
 interface ChannelCardProps {
   channel: Channel
@@ -17,6 +19,7 @@ interface ChannelCardProps {
 }
 
 export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {
+  const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const platformLabel = platformLabels[channel.platform] || channel.platform
   const platformBadge = platformBadgeVariant[channel.platform] || ('secondary' as const)
   const borderColor = platformBorderColor[channel.platform] || ''
@@ -70,7 +73,11 @@ export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onAr
             删除
           </Button>
         )}
+        <Button variant="ghost" size="xs" onClick={() => setTopicPoolOpen(true)} aria-label="选题池">
+          选题池
+        </Button>
       </div>
+      <TopicPoolDialog channel={channel} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
     </div>
   )
 }

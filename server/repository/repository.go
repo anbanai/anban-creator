@@ -26,6 +26,7 @@ type Repository interface {
 	Templates() TemplateRepository
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
+	TopicPools() TopicPoolRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -146,6 +147,19 @@ type SeednoteMetricSnapshotRepository interface {
 	FindPreviousByTrackingID(ctx context.Context, trackingID string, capturedAt time.Time) (*model.SeednoteMetricSnapshot, error)
 }
 
+// TopicPoolRepository provides access to the topic_pool table.
+type TopicPoolRepository interface {
+	Create(ctx context.Context, topic *model.TopicPool) error
+	CreateBatch(ctx context.Context, topics []*model.TopicPool) error
+	FindByID(ctx context.Context, id uint) (*model.TopicPool, error)
+	FindByChannel(ctx context.Context, channelID, status string, offset, limit int) ([]*model.TopicPool, int64, error)
+	ClaimOne(ctx context.Context, userID, channelID string) (*model.TopicPool, error)
+	ClaimWithTask(ctx context.Context, userID, channelID, taskID string) (*model.TopicPool, error)
+	MarkUsed(ctx context.Context, id uint, taskID string) error
+	ResetStatus(ctx context.Context, id uint) error
+	Delete(ctx context.Context, id uint) error
+}
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
@@ -167,6 +181,7 @@ type repository struct {
 	templates               TemplateRepository
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
+	topicPools              TopicPoolRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -186,6 +201,7 @@ func New(db *gorm.DB) Repository {
 	templates := newTemplateRepository(db)
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
+	topicPools := newTopicPoolRepository(db)
 
 	return &repository{
 		db:                      db,
@@ -204,6 +220,7 @@ func New(db *gorm.DB) Repository {
 		templates:               templates,
 		viralAnalyses:           viralAnalyses,
 		posterTasks:             posterTasks,
+		topicPools:              topicPools,
 	}
 }
 
@@ -224,6 +241,7 @@ func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository 
 func (r *repository) Templates() TemplateRepository          { return r.templates }
 func (r *repository) ViralAnalyses() ViralAnalysisRepository { return r.viralAnalyses }
 func (r *repository) PosterTasks() PosterTaskRepository      { return r.posterTasks }
+func (r *repository) TopicPools() TopicPoolRepository        { return r.topicPools }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -265,6 +283,7 @@ type txRepository struct {
 	templates               TemplateRepository
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
+	topicPools              TopicPoolRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -285,6 +304,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		templates:               newTemplateRepository(tx),
 		viralAnalyses:           newViralAnalysisRepository(tx),
 		posterTasks:             newPosterTaskRepository(tx),
+		topicPools:              newTopicPoolRepository(tx),
 	}
 }
 
@@ -305,6 +325,7 @@ func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepositor
 func (r *txRepository) Templates() TemplateRepository          { return r.templates }
 func (r *txRepository) ViralAnalyses() ViralAnalysisRepository { return r.viralAnalyses }
 func (r *txRepository) PosterTasks() PosterTaskRepository      { return r.posterTasks }
+func (r *txRepository) TopicPools() TopicPoolRepository        { return r.topicPools }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

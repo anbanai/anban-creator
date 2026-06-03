@@ -46,6 +46,7 @@ type TaskService struct {
 	pubsubCancel        context.CancelFunc // stops the listenCancelEvents goroutine
 	cancelFuncs         sync.Map           // taskID → context.CancelFunc
 	seednoteTrackingSvc PublishedTrackingService
+	topicPoolSvc        *TopicPoolService
 }
 
 // NewTaskService creates a new TaskService.
@@ -97,6 +98,11 @@ func (s *TaskService) Close() {
 
 func (s *TaskService) SetSeednoteTrackingService(trackingSvc PublishedTrackingService) {
 	s.seednoteTrackingSvc = trackingSvc
+}
+
+// SetTopicPoolService sets the topic pool service for plan-task integration.
+func (s *TaskService) SetTopicPoolService(svc *TopicPoolService) {
+	s.topicPoolSvc = svc
 }
 
 // listenCancelEvents subscribes to Redis cancel events and triggers local
@@ -241,6 +247,16 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	prompt := plan.Prompt
 	if prompt == "" {
 		prompt = plan.Title
+	}
+
+	// Try to claim a topic from the topic pool if no prompt is set.
+	if prompt == "" && s.topicPoolSvc != nil && plan.ChannelID != "" {
+		claimed, err := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ChannelID, taskID)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
+		} else if claimed != "" {
+			prompt = claimed
+		}
 	}
 
 	// Derive task type from the channel if ChannelID is set.

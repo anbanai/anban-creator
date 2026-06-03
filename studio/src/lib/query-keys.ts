@@ -48,4 +48,8 @@ export const queryKeys = {
     stats: (params?: { from?: string; to?: string; channel_id?: string }) =>
       ['usage', 'stats', params] as const,
   },
+  topicPool: {
+    all: (channelId: string) => ['topic-pool', channelId] as const,
+    list: (channelId: string, status?: string) => ['topic-pool', channelId, status] as const,
+  },
 } as const

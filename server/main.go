@@ -309,6 +309,8 @@ func main() {
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
 	var resourceHandler *handler.ResourceHandler
+	var topicPoolHandler *handler.TopicPoolHandler
+	var topicPoolSvc *service.TopicPoolService
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -350,6 +352,11 @@ func main() {
 			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
 		}
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
+		topicPoolSvc = service.NewTopicPoolService(repo, log)
+		topicPoolHandler = handler.NewTopicPoolHandler(topicPoolSvc, log)
+		if taskSvc != nil {
+			taskSvc.SetTopicPoolService(topicPoolSvc)
+		}
 	}
 	resourceHandler = handler.NewResourceHandler(log)
 	if modelConfigSvc != nil {
@@ -410,6 +417,7 @@ func main() {
 			TemplateSvc:    templateSvc,
 			LiveSliceSvc:   liveSliceSvc,
 			SeednoteClient: seednoteClient,
+			TopicPoolSvc:   topicPoolSvc,
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcp.SetLogger(log)
@@ -476,6 +484,7 @@ func main() {
 		ViralAnalysisHandler:     viralAnalysisHandler,
 		PosterHandler:            posterHandler,
 		ResourceHandler:          resourceHandler,
+		TopicPoolHandler:         topicPoolHandler,
 		MCPHandler:               mcpHandler,
 		StorageProvider:          store,
 	}

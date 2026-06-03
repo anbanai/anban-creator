@@ -27,6 +27,7 @@ type Services struct {
 	TemplateSvc    *service.TemplateService
 	LiveSliceSvc   *service.LiveSliceService
 	SeednoteClient *seednote.Client
+	TopicPoolSvc   *service.TopicPoolService
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -44,6 +45,7 @@ func RegisterTools(server *mcp.Server) {
 	registerResourceTools(server)
 	registerSeednoteTools(server)
 	registerLiveSliceTools(server)
+	registerTopicPoolTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.

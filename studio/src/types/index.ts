@@ -84,6 +84,9 @@ export type {
 // Resource
 export type { ResourceEntry, ResourceListResponse } from './resource'
 
+// Topic Pool
+export type { TopicPoolStatus, TopicPool } from './topic-pool'
+
 // Viral Analysis
 export type {
   ViralAnalysisStatus,

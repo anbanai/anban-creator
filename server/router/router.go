@@ -55,6 +55,7 @@ type Services struct {
 	ViralAnalysisHandler     *handler.ViralAnalysisHandler
 	PosterHandler            *handler.PosterHandler
 	ResourceHandler          *handler.ResourceHandler
+	TopicPoolHandler         *handler.TopicPoolHandler
 	MCPHandler               http.Handler
 	StorageProvider          storage.Provider
 }
@@ -235,6 +236,17 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Patch("/channels/:id/archive", svc.ChannelHandler.Archive)
 		apiV1.Patch("/channels/:id/restore", svc.ChannelHandler.Restore)
 		apiV1.Delete("/channels/:id", svc.ChannelHandler.Delete)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Topic pool endpoints (nested under channels)
+	// ---------------------------------------------------------------------------
+
+	if svc.TopicPoolHandler != nil {
+		apiV1.Get("/channels/:channel_id/topics", svc.TopicPoolHandler.List)
+		apiV1.Post("/channels/:channel_id/topics", svc.TopicPoolHandler.Create)
+		apiV1.Delete("/channels/:channel_id/topics/:id", svc.TopicPoolHandler.Delete)
+		apiV1.Patch("/channels/:channel_id/topics/:id/reset", svc.TopicPoolHandler.Reset)
 	}
 
 	// ---------------------------------------------------------------------------

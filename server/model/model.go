@@ -20,6 +20,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&Template{},
 		&ViralAnalysis{},
 		&PosterTask{},
+		&TopicPool{},
 	)
 	if err != nil {
 		return err
