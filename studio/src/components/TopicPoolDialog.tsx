@@ -88,9 +88,8 @@ export function TopicPoolDialog({ channel, open, onOpenChange }: TopicPoolDialog
 
           {/* Status filter */}
           <ToggleGroup
-            type="single"
-            value={statusFilter}
-            onValueChange={(v) => { if (v) setStatusFilter(v) }}
+            value={[statusFilter]}
+            onValueChange={(v) => setStatusFilter(v[0] || '')}
             className="justify-start"
           >
             <ToggleGroupItem value="unused">未使用</ToggleGroupItem>
