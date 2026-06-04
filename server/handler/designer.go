@@ -36,6 +36,12 @@ func NewDesignerHandler(svc *service.DesignerService, logger *zerolog.Logger) *D
 	return &DesignerHandler{svc: svc, logger: logger}
 }
 
+// GetProviders handles GET /api/v1/designer/providers
+func (h *DesignerHandler) GetProviders(c fiber.Ctx) error {
+	providers := h.svc.GetProviders()
+	return c.JSON(fiber.Map{"data": providers})
+}
+
 // Generate handles POST /api/v1/designer/generate
 func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 	userID := GetUserID(c)

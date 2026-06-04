@@ -29,7 +29,7 @@ export interface DesignerSettings {
 }
 
 interface SettingsPanelProps {
-  model: string
+  provider: string
   settings: DesignerSettings
   onSettingsChange: (settings: DesignerSettings) => void
 }
@@ -42,8 +42,8 @@ const SIZE_OPTIONS = [
   { value: '3:4', label: '3:4', desc: '竖屏' },
 ]
 
-export default function SettingsPanel({ model, settings, onSettingsChange }: SettingsPanelProps) {
-  const caps: ModelCapabilities | undefined = getModelCapabilities(model)
+export default function SettingsPanel({ provider, settings, onSettingsChange }: SettingsPanelProps) {
+  const caps: ModelCapabilities | undefined = getModelCapabilities(provider)
   const refInputRef = useRef<HTMLInputElement>(null)
   const maskInputRef = useRef<HTMLInputElement>(null)
   const [sizeOpen, setSizeOpen] = useState(true)

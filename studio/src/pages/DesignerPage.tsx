@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import PageHeader from '@/components/layout/PageHeader'
 import ModelSelector from '@/components/designer/ModelSelector'
@@ -11,8 +11,7 @@ import HistorySidebar from '@/components/designer/HistorySidebar'
 import ImagePreview from '@/components/designer/ImagePreview'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import { DESIGNER_MODELS } from '@/types/designer'
-import type { GenerateImage, ImageGeneration } from '@/types/designer'
+import type { GenerateImage, ImageGeneration, DesignerProvider } from '@/types/designer'
 
 const DEFAULT_SETTINGS: DesignerSettings = {
   quality: 'auto',
@@ -25,16 +24,27 @@ const DEFAULT_SETTINGS: DesignerSettings = {
 
 export default function DesignerPage() {
   const queryClient = useQueryClient()
-  const [selectedModel, setSelectedModel] = useState(DESIGNER_MODELS[0].id)
+  const [selectedProviderId, setSelectedProviderId] = useState<string>('')
   const [settings, setSettings] = useState<DesignerSettings>(DEFAULT_SETTINGS)
   const [currentImages, setCurrentImages] = useState<GenerateImage[]>([])
   const [selectedGenerationId, setSelectedGenerationId] = useState<string>()
   const [previewImage, setPreviewImage] = useState<string | null>(null)
 
+  // Fetch available providers from backend
+  const { data: providers } = useQuery({
+    queryKey: ['designer', 'providers'],
+    queryFn: () => api.designer.getProviders(),
+  })
+
+  const providerList: DesignerProvider[] = providers ?? []
+
+  // Auto-select first provider if none selected or current selection is unavailable
+  const activeProvider = providerList.find((p) => p.id === selectedProviderId)
+  const effectiveProvider = activeProvider ?? providerList[0]
+
   const generateMutation = useMutation({
     mutationFn: async (prompt: string) => {
-      const modelDef = DESIGNER_MODELS.find((m) => m.id === selectedModel)
-      if (!modelDef) throw new Error('未选择模型')
+      if (!effectiveProvider) throw new Error('没有可用的图片模型')
 
       // Upload reference files if any
       const refFileIds: string[] = []
@@ -50,11 +60,10 @@ export default function DesignerPage() {
         maskFileId = result.file_id
       }
 
-      // Determine provider from model definition
       return api.designer.generate({
         channel_id: '',
         prompt,
-        provider: modelDef.provider,
+        provider: effectiveProvider.provider,
         quality: settings.quality !== 'auto' ? settings.quality : undefined,
         size: settings.size,
         n: settings.n > 1 ? settings.n : undefined,
@@ -93,9 +102,8 @@ export default function DesignerPage() {
     }
   }, [])
 
-  function handleModelChange(modelId: string) {
-    setSelectedModel(modelId)
-    // Reset settings to defaults when model changes
+  function handleModelChange(providerId: string) {
+    setSelectedProviderId(providerId)
     setSettings(DEFAULT_SETTINGS)
   }
 
@@ -104,14 +112,18 @@ export default function DesignerPage() {
       <PageHeader title="设计师" description="AI 图片生成工作室，支持多种模型和风格。" />
 
       {/* Model selector */}
-      <ModelSelector selectedModel={selectedModel} onModelChange={handleModelChange} />
+      <ModelSelector
+        providers={providerList}
+        selectedId={effectiveProvider?.id ?? ''}
+        onModelChange={handleModelChange}
+      />
 
       {/* Main content area */}
       <div className="flex min-h-0 flex-1 gap-4">
         {/* Left: Settings */}
         <div className="hidden md:block">
           <SettingsPanel
-            model={selectedModel}
+            provider={effectiveProvider?.provider ?? ''}
             settings={settings}
             onSettingsChange={setSettings}
           />

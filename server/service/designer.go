@@ -317,6 +317,38 @@ func (s *DesignerService) updateGenerationStatus(genID, status, errMsg string) {
 	s.db.Model(&model.ImageGeneration{}).Where("id = ?", genID).Updates(updates)
 }
 
+type DesignerProviderInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	Description string `json:"description,omitempty"`
+}
+
+func (s *DesignerService) GetProviders() []DesignerProviderInfo {
+	if s.imageCfg == nil || s.imageCfg.Designer == nil {
+		return nil
+	}
+	var providers []DesignerProviderInfo
+	for id, cfg := range s.imageCfg.Designer {
+		if cfg == nil || !cfg.IsEnabled() {
+			continue
+		}
+		name := cfg.Alias
+		if name == "" {
+			name = strings.ToUpper(id[:1]) + id[1:]
+		}
+		providers = append(providers, DesignerProviderInfo{
+			ID:          id,
+			Name:        name,
+			Provider:    cfg.Provider,
+			Model:       cfg.Model,
+			Description: cfg.Alias,
+		})
+	}
+	return providers
+}
+
 func (s *DesignerService) resolveAPIKey(provider string) string {
 	if s.imageCfg == nil {
 		return ""

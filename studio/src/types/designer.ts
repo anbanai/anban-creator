@@ -9,20 +9,9 @@ export interface ModelCapabilities {
   flexibleSize: boolean
 }
 
-// Map full model IDs to their capability keys
-const MODEL_CAPABILITY_MAP: Record<string, string> = {
-  'gpt-image-2': 'gpt-image-2',
-  'gemini': 'gemini',
-  'seedream': 'seedream',
-}
-
-export function getModelCapabilities(modelId: string): ModelCapabilities | undefined {
-  const key = MODEL_CAPABILITY_MAP[modelId]
-  return key ? MODEL_CAPABILITIES[key] : undefined
-}
-
-const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
-  'gpt-image-2': {
+// Capabilities keyed by provider name (matches config designer.*.provider)
+const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
+  openai: {
     maxRefImages: 16,
     batch: true,
     maxBatch: 10,
@@ -32,7 +21,7 @@ const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
     outputFormats: ['png', 'jpeg', 'webp'],
     flexibleSize: true,
   },
-  'gemini': {
+  gemini: {
     maxRefImages: 10,
     batch: false,
     maxBatch: 1,
@@ -42,7 +31,7 @@ const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
     outputFormats: ['png'],
     flexibleSize: false,
   },
-  'seedream': {
+  volcengine: {
     maxRefImages: 1,
     batch: true,
     maxBatch: 4,
@@ -54,18 +43,18 @@ const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
   },
 }
 
-export interface DesignerModel {
+export function getModelCapabilities(provider: string): ModelCapabilities | undefined {
+  return PROVIDER_CAPABILITIES[provider]
+}
+
+// Dynamic provider info from backend API
+export interface DesignerProvider {
   id: string
   name: string
   provider: string
-  description: string
+  model: string
+  description?: string
 }
-
-export const DESIGNER_MODELS: DesignerModel[] = [
-  { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'openai', description: 'OpenAI 最强图片生成模型' },
-  { id: 'gemini', name: 'Gemini', provider: 'gemini', description: 'Google Gemini 图片生成' },
-  { id: 'seedream', name: 'Seedream', provider: 'seedream', description: '火山引擎 Seedream 图片生成' },
-]
 
 export interface GenerateRequest {
   channel_id: string

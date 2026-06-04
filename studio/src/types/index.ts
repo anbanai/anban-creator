@@ -109,7 +109,7 @@ export type {
 // Designer
 export type {
   ModelCapabilities,
-  DesignerModel,
+  DesignerProvider,
   GenerateRequest,
   GenerateImage,
   GenerateResult,

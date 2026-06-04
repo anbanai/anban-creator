@@ -1,7 +1,10 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { GenerateRequest, GenerateResult, HistoryResponse, ImageGeneration } from '@/types/designer'
+import type { DesignerProvider, GenerateRequest, GenerateResult, HistoryResponse, ImageGeneration } from '@/types/designer'
 
 export const designerApi = {
+  getProviders: () =>
+    unwrap<DesignerProvider[]>(http.get('/designer/providers')),
+
   generate: (req: GenerateRequest) =>
     unwrap<GenerateResult>(http.post('/designer/generate', req)),
 

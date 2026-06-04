@@ -100,18 +100,25 @@ image_api:
     model: ""
     size: "" # Default size override for content images (ratio:tier, e.g. "3:4:4K")
   # Designer: per-provider image generation config for the Designer studio.
-  # Each key is a provider name used by the frontend (openai, gemini, seedream).
-  # If a provider is not listed here, it falls back to the cover config above.
+  # Each key is a provider ID used by the frontend. Set alias for display name,
+  # enable: false to hide a provider. If a provider is not listed here,
+  # it falls back to the cover config above.
   designer:
     openai:
+      alias: "GPT Image 2"
+      enable: true
       provider: "openai"
       key: "" # OpenAI API key
       model: "gpt-image-2"
     gemini:
+      alias: "Gemini"
+      enable: true
       provider: "gemini"
       key: "" # Google AI API key
       model: "gemini-2.0-flash-preview-image-generation"
     seedream:
+      alias: "Seedream"
+      enable: true
       provider: "volcengine"
       key: "" # Volcengine API key
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
