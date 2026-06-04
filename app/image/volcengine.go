@@ -86,8 +86,8 @@ func (p *VolcengineProvider) Name() string {
 func (p *VolcengineProvider) Capabilities() *ProviderCapabilities {
 	return &ProviderCapabilities{
 		MaxRefImages:  1,
-		Batch:         true,
-		MaxBatch:      4,
+		Batch:         false,
+		MaxBatch:      1,
 		Streaming:     false,
 		Inpainting:    false,
 		QualityLevels: []string{},

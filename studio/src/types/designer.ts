@@ -33,8 +33,8 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
   },
   volcengine: {
     maxRefImages: 1,
-    batch: true,
-    maxBatch: 4,
+    batch: false,
+    maxBatch: 1,
     streaming: false,
     inpainting: false,
     qualityLevels: [],
