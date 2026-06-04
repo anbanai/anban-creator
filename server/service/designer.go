@@ -95,10 +95,13 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 
 	provider := req.Provider
 	if provider == "" {
-		provider = "openai"
+		provider = s.resolveProvider()
 	}
 
 	modelName := req.Model
+	if modelName == "" {
+		modelName = s.resolveModel(provider)
+	}
 	if modelName == "" {
 		switch provider {
 		case "openai":
@@ -332,6 +335,29 @@ func (s *DesignerService) resolveBaseURL(provider string) string {
 		return s.imageCfg.Cover.BaseURL
 	}
 	return ""
+}
+
+func (s *DesignerService) resolveModel(provider string) string {
+	if s.imageCfg == nil {
+		return ""
+	}
+	if p, ok := s.imageCfg.Designer[provider]; ok && p != nil {
+		return p.Model
+	}
+	if s.imageCfg.Cover != nil {
+		return s.imageCfg.Cover.Model
+	}
+	return ""
+}
+
+func (s *DesignerService) resolveProvider() string {
+	if s.imageCfg == nil {
+		return "openai"
+	}
+	if s.imageCfg.Cover != nil && s.imageCfg.Cover.Provider != "" {
+		return s.imageCfg.Cover.Provider
+	}
+	return "openai"
 }
 
 func (s *DesignerService) resolveFilePath(fileID string) (string, error) {
