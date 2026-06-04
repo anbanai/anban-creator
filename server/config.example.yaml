@@ -99,6 +99,23 @@ image_api:
     base_url: ""
     model: ""
     size: "" # Default size override for content images (ratio:tier, e.g. "3:4:4K")
+  # Designer: per-provider image generation config for the Designer studio.
+  # Each key is a provider name used by the frontend (openai, gemini, seedream).
+  # If a provider is not listed here, it falls back to the cover config above.
+  designer:
+    openai:
+      provider: "openai"
+      key: "" # OpenAI API key
+      model: "gpt-image-2"
+    gemini:
+      provider: "gemini"
+      key: "" # Google AI API key
+      model: "gemini-2.0-flash-preview-image-generation"
+    seedream:
+      provider: "volcengine"
+      key: "" # Volcengine API key
+      base_url: "https://ark.cn-beijing.volces.com/api/v3"
+      model: "doubao-seedream-5-0-260128"
   sizes:
     # Per-platform default image sizes in ratio:tier format.
     # Ratio: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
