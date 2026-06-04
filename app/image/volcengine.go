@@ -125,8 +125,16 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 	}
 
 	// 有参考图时，添加 image 字段（data URI）
-	if opts != nil && opts.RefImagePath != "" {
-		data, mimeType, err := ReadRefImage(opts.RefImagePath)
+	refPath := ""
+	if opts != nil {
+		if opts.RefImagePath != "" {
+			refPath = opts.RefImagePath
+		} else if len(opts.RefImagePaths) > 0 {
+			refPath = opts.RefImagePaths[0]
+		}
+	}
+	if refPath != "" {
+		data, mimeType, err := ReadRefImage(refPath)
 		if err != nil {
 			return nil, &GenerateError{
 				Provider: p.Name(),
