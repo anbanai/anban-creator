@@ -98,6 +98,14 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 		provider = s.resolveProvider()
 	}
 
+	// Normalize provider aliases
+	switch provider {
+	case "google":
+		provider = "gemini"
+	case "volc", "seedream":
+		provider = "volcengine"
+	}
+
 	modelName := req.Model
 	if modelName == "" {
 		modelName = s.resolveModel(provider)
@@ -106,12 +114,10 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 		switch provider {
 		case "openai":
 			modelName = "gpt-image-2"
-		case "gemini", "google":
+		case "gemini":
 			modelName = image.DefaultGeminiModel
-			provider = "gemini"
-		case "volcengine", "volc", "seedream":
+		case "volcengine":
 			modelName = image.DefaultVolcengineModel
-			provider = "volcengine"
 		}
 	}
 

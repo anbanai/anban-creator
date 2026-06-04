@@ -12,8 +12,8 @@ export interface ModelCapabilities {
 // Map full model IDs to their capability keys
 const MODEL_CAPABILITY_MAP: Record<string, string> = {
   'gpt-image-2': 'gpt-image-2',
-  'gemini-3-pro-image-preview': 'gemini',
-  'doubao-seedream-5-0-250128': 'seedream',
+  'gemini': 'gemini',
+  'seedream': 'seedream',
 }
 
 export function getModelCapabilities(modelId: string): ModelCapabilities | undefined {
@@ -63,15 +63,15 @@ export interface DesignerModel {
 
 export const DESIGNER_MODELS: DesignerModel[] = [
   { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'openai', description: 'OpenAI 最强图片生成模型' },
-  { id: 'gemini-3-pro-image-preview', name: 'Gemini', provider: 'gemini', description: 'Google Gemini 图片生成' },
-  { id: 'doubao-seedream-5-0-250128', name: 'Seedream', provider: 'seedream', description: '火山引擎 Seedream 图片生成' },
+  { id: 'gemini', name: 'Gemini', provider: 'gemini', description: 'Google Gemini 图片生成' },
+  { id: 'seedream', name: 'Seedream', provider: 'seedream', description: '火山引擎 Seedream 图片生成' },
 ]
 
 export interface GenerateRequest {
   channel_id: string
   prompt: string
   provider: string
-  model: string
+  model?: string
   quality?: string
   size?: string
   n?: number

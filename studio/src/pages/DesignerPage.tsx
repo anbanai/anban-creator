@@ -55,7 +55,6 @@ export default function DesignerPage() {
         channel_id: '',
         prompt,
         provider: modelDef.provider,
-        model: selectedModel,
         quality: settings.quality !== 'auto' ? settings.quality : undefined,
         size: settings.size,
         n: settings.n > 1 ? settings.n : undefined,
