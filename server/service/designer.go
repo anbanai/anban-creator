@@ -322,7 +322,6 @@ type DesignerProviderInfo struct {
 	Name        string `json:"name"`
 	Provider    string `json:"provider"`
 	Model       string `json:"model"`
-	Description string `json:"description,omitempty"`
 }
 
 func (s *DesignerService) GetProviders() []DesignerProviderInfo {
@@ -343,46 +342,50 @@ func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 			Name:        name,
 			Provider:    cfg.Provider,
 			Model:       cfg.Model,
-			Description: cfg.Alias,
+
 		})
 	}
 	return providers
 }
 
-func (s *DesignerService) resolveAPIKey(provider string) string {
-	if s.imageCfg == nil {
-		return ""
+// findDesignerConfig finds the first Designer entry matching the given provider name.
+func (s *DesignerService) findDesignerConfig(provider string) *config.ImageAPI {
+	if s.imageCfg == nil || s.imageCfg.Designer == nil {
+		return nil
 	}
-	if p, ok := s.imageCfg.Designer[provider]; ok && p != nil {
+	for _, cfg := range s.imageCfg.Designer {
+		if cfg != nil && cfg.Provider == provider {
+			return cfg
+		}
+	}
+	return nil
+}
+
+func (s *DesignerService) resolveAPIKey(provider string) string {
+	if p := s.findDesignerConfig(provider); p != nil {
 		return p.Key
 	}
-	if s.imageCfg.Cover != nil {
+	if s.imageCfg != nil && s.imageCfg.Cover != nil {
 		return s.imageCfg.Cover.Key
 	}
 	return ""
 }
 
 func (s *DesignerService) resolveBaseURL(provider string) string {
-	if s.imageCfg == nil {
-		return ""
-	}
-	if p, ok := s.imageCfg.Designer[provider]; ok && p != nil {
+	if p := s.findDesignerConfig(provider); p != nil {
 		return p.BaseURL
 	}
-	if s.imageCfg.Cover != nil {
+	if s.imageCfg != nil && s.imageCfg.Cover != nil {
 		return s.imageCfg.Cover.BaseURL
 	}
 	return ""
 }
 
 func (s *DesignerService) resolveModel(provider string) string {
-	if s.imageCfg == nil {
-		return ""
-	}
-	if p, ok := s.imageCfg.Designer[provider]; ok && p != nil {
+	if p := s.findDesignerConfig(provider); p != nil {
 		return p.Model
 	}
-	if s.imageCfg.Cover != nil {
+	if s.imageCfg != nil && s.imageCfg.Cover != nil {
 		return s.imageCfg.Cover.Model
 	}
 	return ""
