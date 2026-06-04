@@ -6,7 +6,7 @@ export const designerApi = {
     unwrap<DesignerProvider[]>(http.get('/designer/providers')),
 
   generate: (req: GenerateRequest) =>
-    unwrap<GenerateResult>(http.post('/designer/generate', req)),
+    unwrap<GenerateResult>(http.post('/designer/generate', req, { timeout: 300000 })),
 
   uploadReference: (file: File) => {
     const form = new FormData()
