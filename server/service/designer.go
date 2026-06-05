@@ -161,17 +161,38 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 		return nil, fmt.Errorf("create generation record: %w", err)
 	}
 
+	apiKey := s.resolveAPIKey(provider)
+	baseURL := s.resolveBaseURL(provider)
+
+	keyPreview := ""
+	if len(apiKey) > 4 {
+		keyPreview = apiKey[:4] + "..."
+	} else if apiKey != "" {
+		keyPreview = "**"
+	}
+
+	s.logger.Info().
+		Str("provider", provider).
+		Str("model", modelName).
+		Str("base_url", baseURL).
+		Str("key_preview", keyPreview).
+		Str("size", req.Size).
+		Int("n", req.N).
+		Bool("stream", streamCB != nil).
+		Int("ref_count", len(refPaths)).
+		Msg("designer: starting image generation")
+
 	apiCfg := &config.ImageAPI{
-		Key:      s.resolveAPIKey(provider),
-		BaseURL:  s.resolveBaseURL(provider),
+		Key:      apiKey,
+		BaseURL:  baseURL,
 		Provider: provider,
 		Model:    modelName,
 		Size:     req.Size,
 	}
 
-	log := zerolog.Nop()
-	providerInst, err := image.NewProvider(apiCfg, &log)
+	providerInst, err := image.NewProvider(apiCfg, s.logger)
 	if err != nil {
+		s.logger.Error().Err(err).Str("provider", provider).Msg("designer: failed to create image provider")
 		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
 		return nil, fmt.Errorf("create image provider: %w", err)
 	}
@@ -188,9 +209,22 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 
 	result, err := providerInst.Generate(ctx, req.Prompt, genOpts)
 	if err != nil {
+		s.logger.Error().Err(err).
+			Str("provider", provider).
+			Str("model", modelName).
+			Str("prompt_preview", truncate(req.Prompt, 100)).
+			Msg("designer: image generation failed")
 		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
+
+	s.logger.Info().
+		Str("provider", provider).
+		Str("model", modelName).
+		Str("result_type", result.ResponseType).
+		Int("image_count", len(result.Images)).
+		Str("url_preview", truncate(result.URL, 80)).
+		Msg("designer: image generation completed")
 
 	images := s.processResults(genID, result)
 
@@ -408,4 +442,12 @@ func (s *DesignerService) resolveFilePath(fileID string) (string, error) {
 		return "", fmt.Errorf("reference file not found: %s", fileID)
 	}
 	return matches[0], nil
+}
+
+func truncate(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
 }
