@@ -30,6 +30,7 @@ func (s *PlanService) Create(
 	ctx context.Context,
 	userID, channelID, cronExpr, prompt string,
 	skipRefImage *bool,
+	referenceImageURL string,
 ) (*model.Plan, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
@@ -64,6 +65,7 @@ func (s *PlanService) Create(
 		Prompt:             prompt,
 		Status:             model.PlanStatusActive,
 		NextRunAt:          nextRun,
+		ReferenceImageURL:  referenceImageURL,
 		SkipReferenceImage: skipRefImage != nil && *skipRefImage,
 	}
 
@@ -104,6 +106,7 @@ func (s *PlanService) Update(
 	ctx context.Context,
 	id, cronExpr, prompt string,
 	skipRefImage *bool,
+	referenceImageURL string,
 ) (*model.Plan, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, id)
 	if err != nil {
@@ -111,6 +114,7 @@ func (s *PlanService) Update(
 	}
 
 	plan.Prompt = prompt
+	plan.ReferenceImageURL = referenceImageURL
 	if skipRefImage != nil {
 		plan.SkipReferenceImage = *skipRefImage
 	}

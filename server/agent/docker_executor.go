@@ -138,7 +138,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if opts.Channel != nil {
-		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage)
+		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -148,6 +148,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
 			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download reference image")
+			}
+		}
+		// Task-level reference image takes priority over channel image.
+		if opts.Task.ReferenceImageURL != "" {
+			if err := DownloadReferenceImage(ctx, workDir, opts.Task.ReferenceImageURL); err != nil {
+				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download task reference image")
 			}
 		}
 	}

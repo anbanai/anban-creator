@@ -12,6 +12,7 @@ import type { TaskType, TaskStatus, CreateTaskRequest, CreateViralAnalysisReques
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
+import { FileUpload } from '@/components/ui/FileUpload'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -234,7 +235,7 @@ export default function TasksPage() {
   function openCreate() {
     const requestedType = searchParams.get('type')
     const defaultType: CreationTaskType = requestedType === 'article' || requestedType === 'viral_analysis' ? requestedType : 'seednote'
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', skip_reference_image: false })
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', skip_reference_image: false, reference_image_url: '' })
     setQuantity(1)
     setChannelImageRatio('')
     setModalOpen(true)
@@ -251,7 +252,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', skip_reference_image: false })
+    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', skip_reference_image: false, reference_image_url: '' })
     setQuantity(1)
     setChannelImageRatio('')
   }
@@ -277,6 +278,7 @@ export default function TasksPage() {
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
       skip_reference_image: values.skip_reference_image || undefined,
+      reference_image_url: values.reference_image_url || undefined,
     }))
   }
 
@@ -694,6 +696,23 @@ export default function TasksPage() {
                 </FormItem>
                 )
               }} />
+              )}
+
+              {/* Task reference image */}
+              {!isViralAnalysis && (
+              <FormField control={form.control} name="reference_image_url" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>参考图片（可选）</FormLabel>
+                  <FormControl>
+                    <FileUpload
+                      value={field.value || ''}
+                      onChange={field.onChange}
+                      purpose="reference"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
               )}
 
               {/* Use reference image toggle */}

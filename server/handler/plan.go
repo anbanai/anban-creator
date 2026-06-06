@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -20,6 +22,17 @@ func NewPlanHandler(svc *service.PlanService, logger *zerolog.Logger) *PlanHandl
 	return &PlanHandler{service: svc, logger: logger}
 }
 
+// validReferenceImageURL checks that a reference image URL is empty, an internal
+// /api/v1/files/ path, or an absolute http(s) URL.
+var referenceURLPattern = regexp.MustCompile(`^https?://`)
+
+func validReferenceImageURL(url string) bool {
+	if url == "" {
+		return true
+	}
+	return strings.HasPrefix(url, "/api/v1/files/") || referenceURLPattern.MatchString(url)
+}
+
 // Request types.
 
 type createPlanRequest struct {
@@ -27,12 +40,14 @@ type createPlanRequest struct {
 	CronExpr           string `json:"cron_expr"`
 	Prompt             string `json:"prompt"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
+	ReferenceImageURL  string `json:"reference_image_url"`
 }
 
 type updatePlanRequest struct {
 	CronExpr           string `json:"cron_expr"`
 	Prompt             string `json:"prompt"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
+	ReferenceImageURL  string `json:"reference_image_url"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -46,12 +61,16 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "channel_id is required")
 	}
 
+	if !validReferenceImageURL(req.ReferenceImageURL) {
+		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
+	}
+
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.SkipReferenceImage)
+	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.SkipReferenceImage, req.ReferenceImageURL)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
@@ -128,6 +147,10 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
+	if !validReferenceImageURL(req.ReferenceImageURL) {
+		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
+	}
+
 	// Verify ownership before update.
 	existing, err := h.service.GetByID(c.Context(), id)
 	if err != nil {
@@ -137,7 +160,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this plan")
 	}
 
-	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.SkipReferenceImage)
+	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.SkipReferenceImage, req.ReferenceImageURL)
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")

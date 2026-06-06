@@ -9,6 +9,7 @@ interface FileUploadProps {
   accept?: string
   maxSize?: number // in MB
   className?: string
+  purpose?: "channel" | "reference"
 }
 
 export function FileUpload({
@@ -17,6 +18,7 @@ export function FileUpload({
   accept = "image/jpeg,image/png,image/webp,image/gif",
   maxSize = 10,
   className,
+  purpose,
 }: FileUploadProps) {
   const [uploading, setUploading] = React.useState(false)
   const [error, setError] = React.useState("")
@@ -37,6 +39,9 @@ export function FileUpload({
     try {
       const formData = new FormData()
       formData.append("file", file)
+      if (purpose) {
+        formData.append("purpose", purpose)
+      }
 
       const res = await http.post("/files/upload", formData, {
         headers: { "Content-Type": "multipart/form-data" },

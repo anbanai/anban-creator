@@ -99,7 +99,18 @@ func (h *FileHandler) Upload(c fiber.Ctx) error {
 	// Rewind reader for upload.
 	src.Seek(0, 0)
 
-	key := fmt.Sprintf("uploads/channels/%s/%s%s", userID, uuid.New().String(), ext)
+	// Determine storage path prefix based on purpose.
+	purpose := c.FormValue("purpose")
+	prefix := "uploads/channels"
+	switch purpose {
+	case "reference":
+		prefix = "uploads/references"
+	case "channel", "":
+	default:
+		return Error(c, fiber.StatusBadRequest, "invalid purpose value")
+	}
+
+	key := fmt.Sprintf("%s/%s/%s%s", prefix, userID, uuid.New().String(), ext)
 
 	result, err := h.store.Upload(c.Context(), key, src, mimeType)
 	if err != nil {
@@ -133,8 +144,8 @@ func (h *FileHandler) ServeFile(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid file path")
 	}
 
-	// Verify ownership: key format is uploads/channels/{userID}/...
-	if !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") {
+	// Verify ownership: key format is uploads/{channels|references}/{userID}/...
+	if !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") && !strings.HasPrefix(cleanKey, "uploads/references/"+userID+"/") {
 		return Forbidden(c, "you do not have access to this file")
 	}
 

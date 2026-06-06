@@ -11,6 +11,7 @@ export interface Task {
   progress_log?: string
   image_ratio?: string
   skip_reference_image?: boolean
+  reference_image_url?: string
   error: string | null
   plan_id: string | null
   channel_id: string
@@ -48,6 +49,7 @@ export interface CreateTaskRequest {
   quantity?: number
   image_ratio?: string
   skip_reference_image?: boolean
+  reference_image_url?: string
 }
 
 export interface WorkflowStatus {

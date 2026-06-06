@@ -13,6 +13,7 @@ type Task struct {
 	Prompt              string     `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
 	Title               string     `gorm:"type:varchar(200)" json:"title,omitempty"`
 	ImageRatio          string     `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
+	ReferenceImageURL   string     `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
 	SkipReferenceImage  bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
 	ProgressLog         string     `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Result              *string    `gorm:"type:json" json:"result,omitempty"`

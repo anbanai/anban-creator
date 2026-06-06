@@ -130,7 +130,7 @@ func TestBuildAppConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.ch, nil, "", tt.skipRefImage)
+			cfg, err := BuildAppConfig(tt.ch, nil, "", tt.skipRefImage, "")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -217,7 +217,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 				Platform: tt.platform,
 				Name:     "Test",
 			}
-			cfg, err := BuildAppConfig(ch, tt.imageAPICfg, "", false)
+			cfg, err := BuildAppConfig(ch, tt.imageAPICfg, "", false, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -316,7 +316,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.channel, tt.imageAPICfg, tt.taskImageRatio, false)
+			cfg, err := BuildAppConfig(tt.channel, tt.imageAPICfg, tt.taskImageRatio, false, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

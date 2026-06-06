@@ -255,7 +255,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 
 	// 3. Write channel config to workspace settings.json.
 	if opts.Channel != nil {
-		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage)
+		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -270,6 +270,17 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 					Str("task_id", opts.Task.ID).
 					Str("url", opts.Channel.ReferenceImageURL).
 					Msg("failed to download reference image, continuing without it")
+			}
+		}
+
+		// Task-level reference image takes priority over channel image.
+		// Not affected by SkipReferenceImage (which only controls channel brand image).
+		if opts.Task.ReferenceImageURL != "" {
+			if err := DownloadReferenceImage(ctx, workDir, opts.Task.ReferenceImageURL); err != nil {
+				e.logger.Warn().Err(err).
+					Str("task_id", opts.Task.ID).
+					Str("url", opts.Task.ReferenceImageURL).
+					Msg("failed to download task reference image, continuing without it")
 			}
 		}
 	}

@@ -31,6 +31,7 @@ export const createTaskSchema = z.object({
   quantity: z.number().int().min(1).max(5).default(1),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).default(""),
   skip_reference_image: z.boolean().default(false),
+  reference_image_url: z.string().optional(),
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -60,6 +61,7 @@ export const planSchema = z.object({
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   skip_reference_image: z.boolean().default(false),
+  reference_image_url: z.string().optional(),
 })
 export type PlanFormValues = z.infer<typeof planSchema>
 

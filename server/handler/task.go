@@ -52,6 +52,7 @@ type createTaskRequest struct {
 	ImageRatio         string `json:"image_ratio"`
 	GenerateVideo      bool   `json:"generate_video"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
+	ReferenceImageURL  string `json:"reference_image_url"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -91,11 +92,15 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
 
+	if !validReferenceImageURL(req.ReferenceImageURL) {
+		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
+	}
+
 	if req.GenerateVideo {
 		return Error(c, fiber.StatusBadRequest, "video generation is no longer supported")
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.SkipReferenceImage)
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.SkipReferenceImage, req.ReferenceImageURL)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {
@@ -694,8 +699,8 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid file path")
 	}
 
-	// Verify ownership: key format is {userID}/{taskID}/... or uploads/channels/{userID}/...
-	if !strings.HasPrefix(cleanKey, userID+"/") && !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") {
+	// Verify ownership: key format is {userID}/{taskID}/... or uploads/{channels|references}/{userID}/...
+	if !strings.HasPrefix(cleanKey, userID+"/") && !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") && !strings.HasPrefix(cleanKey, "uploads/references/"+userID+"/") {
 		return Forbidden(c, "you do not have access to this file")
 	}
 

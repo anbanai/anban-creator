@@ -11,6 +11,7 @@ import type { Channel, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } fr
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
+import { FileUpload } from '@/components/ui/FileUpload'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -36,6 +37,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     cron_expr: plan.cron_expr,
     prompt: plan.prompt || '',
     skip_reference_image: plan.skip_reference_image ?? false,
+    reference_image_url: plan.reference_image_url || '',
   }
 }
 
@@ -167,6 +169,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       skip_reference_image: false,
+      reference_image_url: '',
     })
     setModalOpen(true)
   }
@@ -195,6 +198,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       skip_reference_image: false,
+      reference_image_url: '',
     })
   }
 
@@ -205,6 +209,7 @@ export default function PlansPage() {
       prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id || undefined,
       skip_reference_image: values.skip_reference_image,
+      reference_image_url: values.reference_image_url || undefined,
     }
 
     if (editingPlan) {
@@ -212,6 +217,7 @@ export default function PlansPage() {
         cron_expr: payload.cron_expr,
         prompt: payload.prompt,
         skip_reference_image: payload.skip_reference_image,
+        reference_image_url: values.reference_image_url || undefined,
       }
       await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: updatePayload }))
     } else {
@@ -419,6 +425,21 @@ export default function PlansPage() {
                   <FormControl>
                     <Input placeholder="留空则根据账号信息自动生成" {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="reference_image_url" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>参考图片（可选）</FormLabel>
+                  <FormControl>
+                    <FileUpload
+                      value={field.value || ''}
+                      onChange={field.onChange}
+                      purpose="reference"
+                    />
+                  </FormControl>
+                  <FormDescription>上传商品照片等参考图，生成配图时作为风格参考</FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />
