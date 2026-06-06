@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -249,42 +251,52 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 
 func (s *DesignerService) processResults(ctx context.Context, userID, genID string, result *image.GenerateResult) {
 	collectURLs := func(rawURL string, idx int) {
-		serveURL := rawURL
+		// Resolve to a local file path — download remote URLs if needed.
+		localPath := rawURL
+		isTemp := false
+		if !isLocalFilePath(rawURL) {
+			tmpPath, err := downloadToTempFile(rawURL, idx)
+			if err != nil {
+				s.logger.Error().Err(err).Str("url", rawURL).Msg("failed to download remote image")
+				// Fallback: store the original remote URL
+				s.db.Create(&model.ImageGenerationResult{
+					GenerationID: genID, ImageURL: rawURL, Index: idx,
+				})
+				return
+			}
+			localPath = tmpPath
+			isTemp = true
+		}
+
+		serveURL := rawURL // fallback if upload fails
 		var storageKey string
 
-		// Upload local files to storage so the frontend can access them.
-		if s.storage != nil && isLocalFilePath(rawURL) {
-			uploadedURL, k, err := s.uploadGeneratedImage(ctx, userID, genID, rawURL, idx)
+		if s.storage != nil {
+			uploadedURL, k, err := s.uploadGeneratedImage(ctx, userID, genID, localPath, idx)
 			if err != nil {
-				s.logger.Error().Err(err).Str("path", rawURL).Msg("failed to upload generated image to storage")
+				s.logger.Error().Err(err).Str("path", localPath).Msg("failed to upload generated image to storage")
 			} else {
 				serveURL = uploadedURL
 				storageKey = k
 			}
-
-			dbResult := model.ImageGenerationResult{
-				GenerationID: genID,
-				ImageURL:     serveURL,
-				ImagePath:    rawURL,
-				FileID:       storageKey,
-				Index:        idx,
-			}
-			if err := s.db.Create(&dbResult).Error; err != nil {
-				s.logger.Error().Err(err).Str("generation_id", genID).Int("index", idx).Msg("failed to save generation result")
-			} else if storageKey != "" {
-				_ = os.Remove(rawURL)
-			}
-			return
 		}
 
-		// Remote URL (e.g. Volcengine) — store directly.
 		dbResult := model.ImageGenerationResult{
 			GenerationID: genID,
-			ImageURL:     rawURL,
+			ImageURL:     serveURL,
+			ImagePath:    rawURL,
+			FileID:       storageKey,
 			Index:        idx,
 		}
 		if err := s.db.Create(&dbResult).Error; err != nil {
 			s.logger.Error().Err(err).Str("generation_id", genID).Int("index", idx).Msg("failed to save generation result")
+		}
+
+		// Cleanup temp file after successful upload.
+		if isTemp {
+			_ = os.Remove(localPath)
+		} else if storageKey != "" {
+			_ = os.Remove(localPath)
 		}
 	}
 
@@ -298,6 +310,47 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 	if result.URL != "" {
 		collectURLs(result.URL, 0)
 	}
+}
+
+// downloadToTempFile downloads a remote URL to a temp file and returns its path.
+func downloadToTempFile(url string, index int) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download image: HTTP %d", resp.StatusCode)
+	}
+
+	// Infer extension from URL or Content-Type.
+	ext := ".png"
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		switch {
+		case strings.Contains(ct, "jpeg") || strings.Contains(ct, "jpg"):
+			ext = ".jpg"
+		case strings.Contains(ct, "webp"):
+			ext = ".webp"
+		case strings.Contains(ct, "gif"):
+			ext = ".gif"
+		}
+	} else if urlExt := filepath.Ext(url); urlExt != "" {
+		ext = urlExt
+	}
+
+	f, err := os.CreateTemp("", fmt.Sprintf("anbanwriter_download_%d_*%s", index, ext))
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", fmt.Errorf("write temp file: %w", err)
+	}
+	f.Close()
+
+	return f.Name(), nil
 }
 
 // uploadGeneratedImage uploads a local image file to storage and returns the serveable URL and storage key.
