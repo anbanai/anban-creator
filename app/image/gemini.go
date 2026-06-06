@@ -277,6 +277,19 @@ func (p *GeminiProvider) handleError(err error) error {
 		}
 	}
 
+	if strings.Contains(errStr, "INTERNAL") || strings.Contains(errStr, "UNAVAILABLE") ||
+		strings.Contains(errStr, "DEADLINE_EXCEEDED") || strings.Contains(errStr, "500") ||
+		strings.Contains(errStr, "502") || strings.Contains(errStr, "503") ||
+		strings.Contains(errStr, "504") {
+		return &GenerateError{
+			Provider: p.Name(),
+			Code:     "server_error",
+			Message:  fmt.Sprintf("上游服务暂时不可用: %s", errStr),
+			HintMsg:  "服务端错误，请稍后重试",
+			Original: err,
+		}
+	}
+
 	return &GenerateError{
 		Provider: p.Name(),
 		Code:     "unknown",

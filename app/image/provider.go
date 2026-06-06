@@ -111,6 +111,15 @@ func (e *GenerateError) Unwrap() error {
 
 func (e *GenerateError) Hint() string { return e.HintMsg }
 
+func (e *GenerateError) Retryable() bool {
+	switch e.Code {
+	case "server_error", "rate_limit", "network_error":
+		return true
+	default:
+		return false
+	}
+}
+
 // isContentSafetyError 检测错误信息是否为内容安全/审核拦截
 func isContentSafetyError(errMsg string) bool {
 	lower := strings.ToLower(errMsg)

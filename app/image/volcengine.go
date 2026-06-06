@@ -219,9 +219,18 @@ func (p *VolcengineProvider) convertSDKError(err error) error {
 				Original: err,
 			}
 		default:
+			if apiErr.HTTPStatusCode >= 500 {
+				return &GenerateError{
+					Provider: p.Name(),
+					Code:     "server_error",
+					Message:  fmt.Sprintf("上游服务暂时不可用 (HTTP %d): %s", apiErr.HTTPStatusCode, apiErr.Message),
+					HintMsg:  "服务端错误，请稍后重试",
+					Original: err,
+				}
+			}
 			return &GenerateError{
 				Provider: p.Name(),
-				Code:     "api_error",
+				Code:     "unknown",
 				Message:  fmt.Sprintf("API 返回错误 (HTTP %d): %s", apiErr.HTTPStatusCode, apiErr.Message),
 				Original: err,
 			}

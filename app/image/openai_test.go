@@ -439,3 +439,134 @@ func TestOpenAIProviderManualSmoke(t *testing.T) {
 	}
 	t.Logf("model=%s size=%s response_type=%s response_preview=%s output=%s revised_prompt=%q", result.Model, result.Size, result.ResponseType, result.ResponsePreview, outputPath, result.RevisedPrompt)
 }
+
+func TestGenerateError_Retryable(t *testing.T) {
+	tests := []struct {
+		code string
+		want bool
+	}{
+		{"server_error", true},
+		{"rate_limit", true},
+		{"network_error", true},
+		{"unauthorized", false},
+		{"bad_request", false},
+		{"safety_blocked", false},
+		{"payment_required", false},
+		{"endpoint_protocol", false},
+		{"no_image", false},
+		{"unknown", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			e := &GenerateError{Code: tt.code}
+			if got := e.Retryable(); got != tt.want {
+				t.Errorf("Retryable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenAIGenerateClassifies5xxAsServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"message":"Upstream service temporarily unavailable","type":"upstream_error","param":"","code":null}}`))
+	}))
+	defer srv.Close()
+
+	provider, err := NewOpenAIProvider(&config.ImageAPI{
+		Key:      "test-key",
+		BaseURL:  srv.URL,
+		Provider: "openai",
+		Model:    "gpt-image-2",
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider: %v", err)
+	}
+
+	_, err = provider.Generate(context.Background(), "a cat", nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var genErr *GenerateError
+	if !errors.As(err, &genErr) {
+		t.Fatalf("error type = %T, want *GenerateError", err)
+	}
+	if genErr.Code != "server_error" {
+		t.Fatalf("Code = %q, want server_error; error=%v", genErr.Code, err)
+	}
+	if !genErr.Retryable() {
+		t.Fatalf("Retryable() = false, want true for server_error")
+	}
+}
+
+func TestOpenAIGenerateClassifies401AsUnauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"Invalid API key","type":"invalid_request_error","param":"","code":"invalid_api_key"}}`))
+	}))
+	defer srv.Close()
+
+	provider, err := NewOpenAIProvider(&config.ImageAPI{
+		Key:      "test-key",
+		BaseURL:  srv.URL,
+		Provider: "openai",
+		Model:    "gpt-image-2",
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider: %v", err)
+	}
+
+	_, err = provider.Generate(context.Background(), "a cat", nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var genErr *GenerateError
+	if !errors.As(err, &genErr) {
+		t.Fatalf("error type = %T, want *GenerateError", err)
+	}
+	if genErr.Code != "unauthorized" {
+		t.Fatalf("Code = %q, want unauthorized; error=%v", genErr.Code, err)
+	}
+	if genErr.Retryable() {
+		t.Fatalf("Retryable() = true, want false for unauthorized")
+	}
+}
+
+func TestOpenAIGenerateClassifies429AsRateLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"Rate limit exceeded","type":"rate_limit_error","param":"","code":"rate_limit_exceeded"}}`))
+	}))
+	defer srv.Close()
+
+	provider, err := NewOpenAIProvider(&config.ImageAPI{
+		Key:      "test-key",
+		BaseURL:  srv.URL,
+		Provider: "openai",
+		Model:    "gpt-image-2",
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider: %v", err)
+	}
+
+	_, err = provider.Generate(context.Background(), "a cat", nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var genErr *GenerateError
+	if !errors.As(err, &genErr) {
+		t.Fatalf("error type = %T, want *GenerateError", err)
+	}
+	if genErr.Code != "rate_limit" {
+		t.Fatalf("Code = %q, want rate_limit; error=%v", genErr.Code, err)
+	}
+	if !genErr.Retryable() {
+		t.Fatalf("Retryable() = false, want true for rate_limit")
+	}
+}

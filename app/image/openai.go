@@ -3,8 +3,10 @@ package image
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -640,10 +642,15 @@ func normalizeBase64ImageData(value string) string {
 
 // wrapSDKError 将 SDK 错误包装为 GenerateError
 func (p *OpenAIProvider) wrapSDKError(err error) error {
-	// SDK 错误已经包含详细信息，我们只需要添加友好的提示
+	e, ok := errors.AsType[*openai.Error](err)
+	if ok {
+		return p.wrapAPIError(e)
+	}
+
 	errMsg := err.Error()
 	lowerMsg := strings.ToLower(errMsg)
 
+	// HTML 响应说明 Endpoint 配置错误（SDK 不会为此返回 APIError）
 	if strings.Contains(lowerMsg, "text/html") || strings.Contains(lowerMsg, "not 'application/json'") {
 		return &GenerateError{
 			Provider: p.Name(),
@@ -654,35 +661,44 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 		}
 	}
 
-	// 尝试识别常见错误类型
-	if strings.Contains(errMsg, "401") || strings.Contains(lowerMsg, "unauthorized") || strings.Contains(lowerMsg, "authentication") {
+	return &GenerateError{
+		Provider: p.Name(),
+		Code:     "network_error",
+		Message:  fmt.Sprintf("网络请求失败: %v", err),
+		HintMsg:  "请检查网络连接和 API 地址是否正确",
+		Original: err,
+	}
+}
+
+// wrapAPIError 将 SDK APIError 按 HTTP StatusCode 分类包装为 GenerateError
+func (p *OpenAIProvider) wrapAPIError(err *openai.Error) error {
+	original := error(err)
+
+	switch err.StatusCode {
+	case http.StatusUnauthorized:
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "unauthorized",
 			Message:  "API Key 无效或已过期",
 			HintMsg:  "请检查配置文件中的 image.key 是否正确",
-			Original: err,
+			Original: original,
 		}
-	}
-
-	if strings.Contains(errMsg, "429") || strings.Contains(lowerMsg, "rate limit") {
+	case http.StatusTooManyRequests:
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "rate_limit",
 			Message:  "请求过于频繁，请稍后重试",
 			HintMsg:  "OpenAI API 有速率限制，请等待一段时间后再试",
-			Original: err,
+			Original: original,
 		}
-	}
-
-	if strings.Contains(errMsg, "400") || strings.Contains(lowerMsg, "bad request") {
-		if isContentSafetyError(errMsg) {
+	case http.StatusBadRequest:
+		if isContentSafetyError(err.Message) || isContentSafetyError(err.Code) || isContentSafetyError(err.Type) {
 			return &GenerateError{
 				Provider: p.Name(),
 				Code:     "safety_blocked",
 				Message:  "提示词被内容安全策略拦截",
 				HintMsg:  "提示词可能包含敏感内容，请修改提示词后重试",
-				Original: err,
+				Original: original,
 			}
 		}
 		return &GenerateError{
@@ -690,26 +706,32 @@ func (p *OpenAIProvider) wrapSDKError(err error) error {
 			Code:     "bad_request",
 			Message:  "请求参数错误",
 			HintMsg:  "请检查图片尺寸、模型名称等参数是否正确",
-			Original: err,
+			Original: original,
 		}
-	}
-
-	if strings.Contains(errMsg, "402") || strings.Contains(errMsg, "403") || strings.Contains(lowerMsg, "insufficient") || strings.Contains(lowerMsg, "quota") {
+	case http.StatusPaymentRequired, http.StatusForbidden:
 		return &GenerateError{
 			Provider: p.Name(),
 			Code:     "payment_required",
 			Message:  "账户余额不足或访问受限",
 			HintMsg:  "请检查 OpenAI 账户余额和 API 使用权限",
-			Original: err,
+			Original: original,
 		}
-	}
-
-	// 其他错误
-	return &GenerateError{
-		Provider: p.Name(),
-		Code:     "unknown",
-		Message:  fmt.Sprintf("API 请求失败: %v", err),
-		HintMsg:  "请稍后重试，或检查 OpenAI 服务状态",
-		Original: err,
+	default:
+		if err.StatusCode >= 500 {
+			return &GenerateError{
+				Provider: p.Name(),
+				Code:     "server_error",
+				Message:  fmt.Sprintf("上游服务暂时不可用 (HTTP %d): %s", err.StatusCode, err.Message),
+				HintMsg:  "服务端错误，请稍后重试",
+				Original: original,
+			}
+		}
+		return &GenerateError{
+			Provider: p.Name(),
+			Code:     "unknown",
+			Message:  fmt.Sprintf("API 请求失败 (HTTP %d): %s", err.StatusCode, err.Message),
+			HintMsg:  "请稍后重试，或检查 OpenAI 服务状态",
+			Original: original,
+		}
 	}
 }
