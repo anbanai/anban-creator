@@ -119,7 +119,7 @@ func (h *FileHandler) Upload(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{
-		"url":  "/api/v1/files/" + result.Key,
+		"url":  result.URL,
 		"key":  result.Key,
 		"size": result.Size,
 		"type": result.MimeType,

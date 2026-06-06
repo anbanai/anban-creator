@@ -14,15 +14,18 @@ interface ReferenceImageUploadProps {
 }
 
 function isInternalUrl(url: string) {
-  return url.startsWith('/api/v1/files/') || url.startsWith('/files/')
+  return url.startsWith('/files/')
 }
 
 function normalizeUrl(url: string): string {
-  if (url.startsWith('/')) return url
+  if (url.startsWith('/api/v1/files/')) {
+    return url.replace('/api/v1/files/', '/files/')
+  }
+  if (url.startsWith('/files/')) return url
   try {
     const u = new URL(url)
     if (u.hostname.endsWith('.aliyuncs.com')) {
-      return '/api/v1/files/' + u.pathname.slice(1)
+      return '/files/' + u.pathname.slice(1)
     }
   } catch {}
   return url
