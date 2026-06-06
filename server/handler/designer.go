@@ -6,9 +6,9 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/royalrick/anbanwriter/app/image"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/rs/zerolog"
 )
@@ -68,39 +68,42 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{"data": result})
 	}
 
-	// Streaming: SSE
+	// Streaming: SSE with keepalive (non-streaming API call)
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("Connection", "keep-alive")
 	c.Set("Transfer-Encoding", "chunked")
 
-	streamCB := func(partial *image.PartialImage) {
-		event := "partial"
-		if partial.Final {
-			event = "completed"
+	type genOutcome struct {
+		result *service.DesignerGenerateResult
+		err    error
+	}
+	done := make(chan genOutcome, 1)
+
+	go func() {
+		result, err := h.svc.Generate(c.Context(), userID, req, nil)
+		done <- genOutcome{result, err}
+	}()
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case res := <-done:
+			if res.err != nil {
+				h.logger.Error().Err(res.err).Str("user_id", userID).Msg("designer generate failed")
+				data, _ := json.Marshal(fiber.Map{"error": res.err.Error()})
+				fmt.Fprintf(c, "event: error\ndata: %s\n\n", string(data))
+			} else {
+				data, _ := json.Marshal(res.result)
+				fmt.Fprintf(c, "event: result\ndata: %s\n\n", string(data))
+			}
+			return nil
+		case <-ticker.C:
+			fmt.Fprintf(c, ": keepalive\n\n")
 		}
-		data, _ := json.Marshal(fiber.Map{
-			"index":    partial.Index,
-			"b64_data": partial.B64Data,
-			"progress": partial.Progress,
-			"final":    partial.Final,
-		})
-		fmt.Fprintf(c, "event: %s\ndata: %s\n\n", event, string(data))
 	}
-
-	result, err := h.svc.Generate(c.Context(), userID, req, streamCB)
-	if err != nil {
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("designer generate streaming failed")
-		data, _ := json.Marshal(fiber.Map{"error": err.Error()})
-		fmt.Fprintf(c, "event: error\ndata: %s\n\n", string(data))
-		return nil
-	}
-
-	// Send final result
-	data, _ := json.Marshal(result)
-	fmt.Fprintf(c, "event: result\ndata: %s\n\n", string(data))
-
-	return nil
 }
 
 // UploadReference handles POST /api/v1/designer/upload-reference
