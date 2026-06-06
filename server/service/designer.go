@@ -255,13 +255,14 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 		localPath := rawURL
 		isTemp := false
 		if !isLocalFilePath(rawURL) {
-			tmpPath, err := downloadToTempFile(rawURL, idx)
+			tmpPath, err := downloadToTempFile(ctx, rawURL, idx)
 			if err != nil {
 				s.logger.Error().Err(err).Str("url", rawURL).Msg("failed to download remote image")
-				// Fallback: store the original remote URL
-				s.db.Create(&model.ImageGenerationResult{
+				if err := s.db.Create(&model.ImageGenerationResult{
 					GenerationID: genID, ImageURL: rawURL, Index: idx,
-				})
+				}).Error; err != nil {
+					s.logger.Error().Err(err).Msg("failed to save fallback generation result")
+				}
 				return
 			}
 			localPath = tmpPath
@@ -313,8 +314,13 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 }
 
 // downloadToTempFile downloads a remote URL to a temp file and returns its path.
-func downloadToTempFile(url string, index int) (string, error) {
-	resp, err := http.Get(url)
+func downloadToTempFile(ctx context.Context, url string, index int) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download image: %w", err)
 	}
@@ -343,7 +349,8 @@ func downloadToTempFile(url string, index int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	// Limit to 10MB to prevent disk exhaustion from oversized responses.
+	if _, err := io.Copy(f, io.LimitReader(resp.Body, 10*1024*1024)); err != nil {
 		f.Close()
 		os.Remove(f.Name())
 		return "", fmt.Errorf("write temp file: %w", err)
