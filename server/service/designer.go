@@ -226,7 +226,7 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 		Str("url_preview", truncate(result.URL, 80)).
 		Msg("designer: image generation completed")
 
-	images := s.processResults(genID, result)
+	images := s.processResults(ctx, userID, genID, result)
 
 	s.db.Model(&model.ImageGeneration{}).Where("id = ?", genID).Updates(map[string]any{
 		"status":         model.ImageGenerationStatusCompleted,
@@ -240,39 +240,82 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 	}, nil
 }
 
-func (s *DesignerService) processResults(genID string, result *image.GenerateResult) []DesignerGenerateImage {
+func (s *DesignerService) processResults(ctx context.Context, userID, genID string, result *image.GenerateResult) []DesignerGenerateImage {
 	var images []DesignerGenerateImage
+
+	collectURLs := func(rawURL string, idx int) {
+		serveURL := rawURL
+		var storageKey string
+
+		// Upload local files to storage so the frontend can access them.
+		if s.storage != nil && isLocalFilePath(rawURL) {
+			uploadedURL, k, err := s.uploadGeneratedImage(ctx, userID, genID, rawURL, idx)
+			if err != nil {
+				s.logger.Error().Err(err).Str("path", rawURL).Msg("failed to upload generated image to storage")
+			} else {
+				serveURL = uploadedURL
+				storageKey = k
+			}
+
+			dbResult := model.ImageGenerationResult{
+				GenerationID: genID,
+				ImageURL:     serveURL,
+				ImagePath:    rawURL,
+				FileID:       storageKey,
+				Index:        idx,
+			}
+			if err := s.db.Create(&dbResult).Error; err != nil {
+				s.logger.Error().Err(err).Str("generation_id", genID).Int("index", idx).Msg("failed to save generation result")
+			} else if storageKey != "" {
+				_ = os.Remove(rawURL)
+			}
+			images = append(images, DesignerGenerateImage{URL: serveURL, Index: idx})
+			return
+		}
+
+		// Remote URL (e.g. Volcengine) — store directly.
+		dbResult := model.ImageGenerationResult{
+			GenerationID: genID,
+			ImageURL:     rawURL,
+			Index:        idx,
+		}
+		if err := s.db.Create(&dbResult).Error; err != nil {
+			s.logger.Error().Err(err).Str("generation_id", genID).Int("index", idx).Msg("failed to save generation result")
+		}
+		images = append(images, DesignerGenerateImage{URL: rawURL, Index: idx})
+	}
 
 	if len(result.Images) > 0 {
 		for _, img := range result.Images {
-			dbResult := model.ImageGenerationResult{
-				GenerationID: genID,
-				ImagePath:    img.URL,
-				Index:        img.Index,
-			}
-			s.db.Create(&dbResult)
-			images = append(images, DesignerGenerateImage{
-				URL:   img.URL,
-				Index: img.Index,
-			})
+			collectURLs(img.URL, img.Index)
 		}
 		return images
 	}
 
 	if result.URL != "" {
-		dbResult := model.ImageGenerationResult{
-			GenerationID: genID,
-			ImagePath:    result.URL,
-			Index:        0,
-		}
-		s.db.Create(&dbResult)
-		images = append(images, DesignerGenerateImage{
-			URL:   result.URL,
-			Index: 0,
-		})
+		collectURLs(result.URL, 0)
 	}
 
 	return images
+}
+
+// uploadGeneratedImage uploads a local image file to storage and returns the serveable URL and storage key.
+func (s *DesignerService) uploadGeneratedImage(ctx context.Context, userID, genID, filePath string, index int) (string, string, error) {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	key := fmt.Sprintf("%s/designer/%s/%d%s", userID, genID, index, ext)
+
+	mimeType := DetectTaskFileMIME(filePath)
+	result, err := s.storage.UploadFile(ctx, key, filePath, mimeType)
+	if err != nil {
+		return "", "", fmt.Errorf("upload generated image: %w", err)
+	}
+
+	return result.URL, result.Key, nil
+}
+
+// isLocalFilePath returns true if the URL looks like a local filesystem path.
+func isLocalFilePath(url string) bool {
+	return strings.HasPrefix(url, "/") || (!strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://"))
 }
 
 func (s *DesignerService) UploadReference(ctx context.Context, userID string, filename string, data []byte) (string, error) {
