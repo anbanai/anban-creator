@@ -30,6 +30,9 @@ func validReferenceImageURL(url string) bool {
 	if url == "" {
 		return true
 	}
+	if len(url) > 500 {
+		return false
+	}
 	return strings.HasPrefix(url, "/api/v1/files/") || referenceURLPattern.MatchString(url)
 }
 

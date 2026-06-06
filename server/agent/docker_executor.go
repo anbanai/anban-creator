@@ -145,15 +145,15 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
-		if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
-				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download reference image")
-			}
-		}
-		// Task-level reference image takes priority over channel image.
+		// Download effective reference image.
+		// Task-level image takes priority over channel brand image.
 		if opts.Task.ReferenceImageURL != "" {
 			if err := DownloadReferenceImage(ctx, workDir, opts.Task.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download task reference image")
+			}
+		} else if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
+			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
+				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download reference image")
 			}
 		}
 	}

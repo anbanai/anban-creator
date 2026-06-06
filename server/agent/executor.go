@@ -263,24 +263,22 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
 
-		// Download brand reference image if configured.
-		if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
-				e.logger.Warn().Err(err).
-					Str("task_id", opts.Task.ID).
-					Str("url", opts.Channel.ReferenceImageURL).
-					Msg("failed to download reference image, continuing without it")
-			}
-		}
-
-		// Task-level reference image takes priority over channel image.
-		// Not affected by SkipReferenceImage (which only controls channel brand image).
+		// Download effective reference image.
+		// Task-level image takes priority over channel brand image.
+		// SkipReferenceImage only controls the channel brand image, not task-level.
 		if opts.Task.ReferenceImageURL != "" {
 			if err := DownloadReferenceImage(ctx, workDir, opts.Task.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
 					Str("task_id", opts.Task.ID).
 					Str("url", opts.Task.ReferenceImageURL).
 					Msg("failed to download task reference image, continuing without it")
+			}
+		} else if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
+			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
+				e.logger.Warn().Err(err).
+					Str("task_id", opts.Task.ID).
+					Str("url", opts.Channel.ReferenceImageURL).
+					Msg("failed to download reference image, continuing without it")
 			}
 		}
 	}
