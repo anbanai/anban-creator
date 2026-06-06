@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import PageHeader from '@/components/layout/PageHeader'
 import ModelSelector from '@/components/designer/ModelSelector'
@@ -10,8 +10,9 @@ import PromptInput from '@/components/designer/PromptInput'
 import HistorySidebar from '@/components/designer/HistorySidebar'
 import ImagePreview from '@/components/designer/ImagePreview'
 import { api } from '@/lib/api'
+import { generateStream } from '@/lib/api/designer'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { GenerateImage, ImageGeneration, DesignerProvider } from '@/types/designer'
+import type { GenerateImage, ImageGeneration, DesignerProvider, GenerateResult } from '@/types/designer'
 
 const DEFAULT_SETTINGS: DesignerSettings = {
   quality: 'auto',
@@ -29,6 +30,13 @@ export default function DesignerPage() {
   const [currentImages, setCurrentImages] = useState<GenerateImage[]>([])
   const [selectedGenerationId, setSelectedGenerationId] = useState<string>()
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
+
+  // Abort in-progress generation on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort() }
+  }, [])
 
   // Fetch available providers from backend
   const { data: providers } = useQuery({
@@ -42,10 +50,21 @@ export default function DesignerPage() {
   const activeProvider = providerList.find((p) => p.id === selectedProviderId)
   const effectiveProvider = activeProvider ?? providerList[0]
 
-  const generateMutation = useMutation({
-    mutationFn: async (prompt: string) => {
-      if (!effectiveProvider) throw new Error('没有可用的图片模型')
+  const handleGenerate = useCallback(async (prompt: string) => {
+    if (!effectiveProvider) {
+      toast.error('没有可用的图片模型')
+      return
+    }
 
+    // Cancel any in-progress generation
+    abortRef.current?.abort()
+    const abort = new AbortController()
+    abortRef.current = abort
+
+    setIsGenerating(true)
+    setCurrentImages([])
+
+    try {
       // Upload reference files if any
       const refFileIds: string[] = []
       for (const file of settings.referenceFiles) {
@@ -60,7 +79,8 @@ export default function DesignerPage() {
         maskFileId = result.file_id
       }
 
-      return api.designer.generate({
+      // Stream generation via SSE
+      const stream = generateStream({
         channel_id: '',
         prompt,
         provider: effectiveProvider.provider,
@@ -70,22 +90,38 @@ export default function DesignerPage() {
         output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
         reference_file_ids: refFileIds.length > 0 ? refFileIds : undefined,
         mask_file_id: maskFileId,
-      })
-    },
-    onSuccess: (result) => {
-      setCurrentImages(result.images)
-      setSelectedGenerationId(result.generation_id)
-      toast.success('图片生成成功')
-      queryClient.invalidateQueries({ queryKey: ['designer', 'history'] })
-    },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '图片生成失败，请重试'))
-    },
-  })
+      }, abort.signal)
 
-  const handleGenerate = useCallback((prompt: string) => {
-    generateMutation.mutate(prompt)
-  }, [generateMutation])
+      for await (const event of stream) {
+        if (abort.signal.aborted) break
+
+        switch (event.event) {
+          case 'result': {
+            let result: GenerateResult
+            try { result = JSON.parse(event.data) } catch { throw new Error('服务端返回数据异常') }
+            setCurrentImages(result.images)
+            setSelectedGenerationId(result.generation_id)
+            toast.success('图片生成成功')
+            queryClient.invalidateQueries({ queryKey: ['designer', 'history'] })
+            break
+          }
+          case 'error': {
+            let errMsg = '图片生成失败'
+            try { errMsg = JSON.parse(event.data).error || errMsg } catch {}
+            throw new Error(errMsg)
+          }
+        }
+      }
+    } catch (err) {
+      if (abort.signal.aborted) return
+      toast.error(getApiErrorMessage(err, '图片生成失败，请重试'))
+    } finally {
+      if (abortRef.current === abort) {
+        setIsGenerating(false)
+        abortRef.current = null
+      }
+    }
+  }, [effectiveProvider, settings, queryClient])
 
   const handleHistorySelect = useCallback((gen: ImageGeneration) => {
     setSelectedGenerationId(gen.id)
@@ -134,13 +170,13 @@ export default function DesignerPage() {
           <div className="flex-1">
             <GenerationGrid
               images={currentImages}
-              isGenerating={generateMutation.isPending}
+              isGenerating={isGenerating}
               onImageClick={(img) => setPreviewImage(img.url)}
             />
           </div>
           <PromptInput
             onSubmit={handleGenerate}
-            isGenerating={generateMutation.isPending}
+            isGenerating={isGenerating}
           />
         </div>
 
