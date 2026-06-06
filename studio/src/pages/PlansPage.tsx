@@ -11,7 +11,7 @@ import type { Channel, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } fr
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
-import { FileUpload } from '@/components/ui/FileUpload'
+import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -433,7 +433,7 @@ export default function PlansPage() {
                 <FormItem>
                   <FormLabel>参考图片（可选）</FormLabel>
                   <FormControl>
-                    <FileUpload
+                    <ReferenceImageUpload
                       value={field.value || ''}
                       onChange={field.onChange}
                       purpose="reference"

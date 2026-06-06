@@ -10,6 +10,7 @@ import {
 interface ReferenceImageUploadProps {
   value?: string
   onChange?: (url: string) => void
+  purpose?: "channel" | "reference"
 }
 
 function isInternalUrl(url: string) {
@@ -27,7 +28,7 @@ function normalizeUrl(url: string): string {
   return url
 }
 
-export function ReferenceImageUpload({ value, onChange }: ReferenceImageUploadProps) {
+export function ReferenceImageUpload({ value, onChange, purpose }: ReferenceImageUploadProps) {
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState(false)
@@ -117,7 +118,7 @@ export function ReferenceImageUpload({ value, onChange }: ReferenceImageUploadPr
           </button>
         </div>
       ) : (
-        <FileUpload value={value} onChange={onChange} />
+        <FileUpload value={value} onChange={onChange} purpose={purpose} />
       )}
 
       <Dialog open={enlargeOpen} onOpenChange={setEnlargeOpen}>
