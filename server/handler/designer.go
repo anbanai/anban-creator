@@ -1,12 +1,10 @@
 package handler
 
 import (
-	"encoding/json"
-	"fmt"
+	"context"
 	"io"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/royalrick/anbanwriter/server/service"
@@ -58,52 +56,20 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "prompt is required"})
 	}
 
-	// Non-streaming: simple JSON response
-	if !req.Stream {
-		result, err := h.svc.Generate(c.Context(), userID, req, nil)
-		if err != nil {
-			h.logger.Error().Err(err).Str("user_id", userID).Msg("designer generate failed")
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-		}
-		return c.JSON(fiber.Map{"data": result})
+	genID, err := h.svc.CreateGenerationRecord(c.Context(), userID, req)
+	if err != nil {
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("designer create generation record failed")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Streaming: SSE with keepalive (non-streaming API call)
-	c.Set("Content-Type", "text/event-stream")
-	c.Set("Cache-Control", "no-cache")
-	c.Set("Connection", "keep-alive")
-	c.Set("Transfer-Encoding", "chunked")
+	go h.svc.ExecuteGeneration(context.Background(), genID)
 
-	type genOutcome struct {
-		result *service.DesignerGenerateResult
-		err    error
-	}
-	done := make(chan genOutcome, 1)
-
-	go func() {
-		result, err := h.svc.Generate(c.Context(), userID, req, nil)
-		done <- genOutcome{result, err}
-	}()
-
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case res := <-done:
-			if res.err != nil {
-				h.logger.Error().Err(res.err).Str("user_id", userID).Msg("designer generate failed")
-				data, _ := json.Marshal(fiber.Map{"error": res.err.Error()})
-				fmt.Fprintf(c, "event: error\ndata: %s\n\n", string(data))
-			} else {
-				data, _ := json.Marshal(res.result)
-				fmt.Fprintf(c, "event: result\ndata: %s\n\n", string(data))
-			}
-			return nil
-		case <-ticker.C:
-			fmt.Fprintf(c, ": keepalive\n\n")
-		}
-	}
+	return c.JSON(fiber.Map{
+		"data": fiber.Map{
+			"generation_id": genID,
+			"status":        "generating",
+		},
+	})
 }
 
 // UploadReference handles POST /api/v1/designer/upload-reference

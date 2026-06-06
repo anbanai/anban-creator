@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2 } from 'lucide-react'
+import { Send, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface PromptInputProps {
   onSubmit: (prompt: string) => void
   isGenerating: boolean
+  onCancel?: () => void
 }
 
-export default function PromptInput({ onSubmit, isGenerating }: PromptInputProps) {
+export default function PromptInput({ onSubmit, isGenerating, onCancel }: PromptInputProps) {
   const [prompt, setPrompt] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -44,18 +45,21 @@ export default function PromptInput({ onSubmit, isGenerating }: PromptInputProps
         rows={1}
         className="flex-1 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
       />
-      <Button
-        size="sm"
-        onClick={handleSubmit}
-        disabled={!prompt.trim() || isGenerating}
-      >
-        {isGenerating ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
+      {isGenerating && onCancel ? (
+        <Button size="sm" variant="destructive" onClick={onCancel}>
+          <X className="h-4 w-4" />
+          取消
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          onClick={handleSubmit}
+          disabled={!prompt.trim() || isGenerating}
+        >
           <Send className="h-4 w-4" />
-        )}
-        生成
-      </Button>
+          生成
+        </Button>
+      )}
     </div>
   )
 }

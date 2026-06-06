@@ -112,7 +112,6 @@ export type {
   DesignerProvider,
   GenerateRequest,
   GenerateImage,
-  GenerateResult,
   ImageGeneration,
   ImageGenerationResult,
   HistoryResponse,

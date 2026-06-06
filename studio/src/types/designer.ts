@@ -67,7 +67,6 @@ export interface GenerateRequest {
   output_format?: string
   reference_file_ids?: string[]
   mask_file_id?: string
-  stream?: boolean
 }
 
 export interface GenerateImage {
@@ -75,16 +74,6 @@ export interface GenerateImage {
   width?: number
   height?: number
   index: number
-}
-
-export interface GenerateResult {
-  generation_id: string
-  images: GenerateImage[]
-  revised_prompt?: string
-  usage?: {
-    input_tokens: number
-    output_tokens: number
-  }
 }
 
 export interface ImageGeneration {

@@ -57,31 +57,13 @@ type DesignerGenerateRequest struct {
 	OutputFormat     string   `json:"output_format,omitempty"`
 	ReferenceFileIDs []string `json:"reference_file_ids,omitempty"`
 	MaskFileID       string   `json:"mask_file_id,omitempty"`
-	Stream           bool     `json:"stream,omitempty"`
 }
 
-type DesignerGenerateResult struct {
-	GenerationID  string                  `json:"generation_id"`
-	Images        []DesignerGenerateImage `json:"images"`
-	RevisedPrompt string                  `json:"revised_prompt,omitempty"`
-	Usage         *DesignerGenerateUsage  `json:"usage,omitempty"`
-}
-
-type DesignerGenerateImage struct {
-	URL    string `json:"url"`
-	Width  int    `json:"width,omitempty"`
-	Height int    `json:"height,omitempty"`
-	Index  int    `json:"index"`
-}
-
-type DesignerGenerateUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-}
-
-func (s *DesignerService) Generate(ctx context.Context, userID string, req DesignerGenerateRequest, streamCB image.StreamCallback) (*DesignerGenerateResult, error) {
+// CreateGenerationRecord validates the request, resolves config, and creates
+// a generation record with "generating" status. Returns the generation ID.
+func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID string, req DesignerGenerateRequest) (string, error) {
 	if req.Prompt == "" {
-		return nil, fmt.Errorf("prompt is required")
+		return "", fmt.Errorf("prompt is required")
 	}
 	if req.ChannelID == "" {
 		req.ChannelID = "default"
@@ -97,8 +79,6 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 	if provider == "" {
 		provider = s.resolveProvider()
 	}
-
-	// Normalize provider aliases
 	switch provider {
 	case "google":
 		provider = "gemini"
@@ -121,24 +101,6 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 		}
 	}
 
-	refPaths := make([]string, 0)
-	for _, fileID := range req.ReferenceFileIDs {
-		path, err := s.resolveFilePath(fileID)
-		if err != nil {
-			return nil, fmt.Errorf("resolve reference file %s: %w", fileID, err)
-		}
-		refPaths = append(refPaths, path)
-	}
-
-	maskPath := ""
-	if req.MaskFileID != "" {
-		path, err := s.resolveFilePath(req.MaskFileID)
-		if err != nil {
-			return nil, fmt.Errorf("resolve mask file %s: %w", req.MaskFileID, err)
-		}
-		maskPath = path
-	}
-
 	genID := uuid.New().String()
 	refFilesJSON, _ := json.Marshal(req.ReferenceFileIDs)
 	gen := &model.ImageGeneration{
@@ -158,8 +120,36 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 	}
 
 	if err := s.db.Create(gen).Error; err != nil {
-		return nil, fmt.Errorf("create generation record: %w", err)
+		return "", fmt.Errorf("create generation record: %w", err)
 	}
+
+	return genID, nil
+}
+
+// ExecuteGeneration runs the actual image generation for the given ID.
+// Reads the generation record from the database, runs generation, processes
+// results, and updates the status. Designed to be called from a goroutine.
+//
+// Note: The handler passes context.Background() because the HTTP request
+// context is cancelled as soon as the handler returns. The generation
+// goroutine will not be interrupted on server shutdown, but will complete
+// naturally. A server-level lifecycle context could be added later.
+func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error().Str("gen_id", genID).Any("panic", r).Msg("generation panicked")
+			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, fmt.Sprintf("internal error: %v", r))
+		}
+	}()
+
+	var gen model.ImageGeneration
+	if err := s.db.Where("id = ?", genID).First(&gen).Error; err != nil {
+		s.logger.Error().Err(err).Str("gen_id", genID).Msg("generation record not found")
+		return
+	}
+
+	provider := gen.Provider
+	modelName := gen.Model
 
 	apiKey := s.resolveAPIKey(provider)
 	baseURL := s.resolveBaseURL(provider)
@@ -176,10 +166,8 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 		Str("model", modelName).
 		Str("base_url", baseURL).
 		Str("key_preview", keyPreview).
-		Str("size", req.Size).
-		Int("n", req.N).
-		Bool("stream", streamCB != nil).
-		Int("ref_count", len(refPaths)).
+		Str("size", gen.Size).
+		Int("n", gen.N).
 		Msg("designer: starting image generation")
 
 	apiCfg := &config.ImageAPI{
@@ -187,35 +175,60 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 		BaseURL:  baseURL,
 		Provider: provider,
 		Model:    modelName,
-		Size:     req.Size,
+		Size:     gen.Size,
 	}
 
 	providerInst, err := image.NewProvider(apiCfg, s.logger)
 	if err != nil {
 		s.logger.Error().Err(err).Str("provider", provider).Msg("designer: failed to create image provider")
 		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
-		return nil, fmt.Errorf("create image provider: %w", err)
+		return
+	}
+
+	var refFileIDs []string
+	if gen.ReferenceFiles != "" {
+		_ = json.Unmarshal([]byte(gen.ReferenceFiles), &refFileIDs)
+	}
+	refPaths := make([]string, 0, len(refFileIDs))
+	for _, fileID := range refFileIDs {
+		path, err := s.resolveFilePath(fileID)
+		if err != nil {
+			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed,
+				fmt.Sprintf("resolve reference file %s: %v", fileID, err))
+			return
+		}
+		refPaths = append(refPaths, path)
+	}
+
+	maskPath := ""
+	if gen.MaskFileID != "" {
+		path, err := s.resolveFilePath(gen.MaskFileID)
+		if err != nil {
+			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed,
+				fmt.Sprintf("resolve mask file %s: %v", gen.MaskFileID, err))
+			return
+		}
+		maskPath = path
 	}
 
 	genOpts := &image.GenerateOptions{
-		Quality:       req.Quality,
-		OutputFormat:  req.OutputFormat,
-		N:             req.N,
-		Size:          req.Size,
-		StreamCB:      streamCB,
+		Quality:       gen.Quality,
+		OutputFormat:  gen.OutputFormat,
+		N:             gen.N,
+		Size:          gen.Size,
 		RefImagePaths: refPaths,
 		MaskPath:      maskPath,
 	}
 
-	result, err := providerInst.Generate(ctx, req.Prompt, genOpts)
+	result, err := providerInst.Generate(ctx, gen.Prompt, genOpts)
 	if err != nil {
 		s.logger.Error().Err(err).
 			Str("provider", provider).
 			Str("model", modelName).
-			Str("prompt_preview", truncate(req.Prompt, 100)).
+			Str("prompt_preview", truncate(gen.Prompt, 100)).
 			Msg("designer: image generation failed")
 		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
-		return nil, fmt.Errorf("generate image: %w", err)
+		return
 	}
 
 	s.logger.Info().
@@ -226,23 +239,15 @@ func (s *DesignerService) Generate(ctx context.Context, userID string, req Desig
 		Str("url_preview", truncate(result.URL, 80)).
 		Msg("designer: image generation completed")
 
-	images := s.processResults(ctx, userID, genID, result)
+	s.processResults(ctx, gen.UserID, genID, result)
 
 	s.db.Model(&model.ImageGeneration{}).Where("id = ?", genID).Updates(map[string]any{
 		"status":         model.ImageGenerationStatusCompleted,
 		"revised_prompt": result.RevisedPrompt,
 	})
-
-	return &DesignerGenerateResult{
-		GenerationID:  genID,
-		Images:        images,
-		RevisedPrompt: result.RevisedPrompt,
-	}, nil
 }
 
-func (s *DesignerService) processResults(ctx context.Context, userID, genID string, result *image.GenerateResult) []DesignerGenerateImage {
-	var images []DesignerGenerateImage
-
+func (s *DesignerService) processResults(ctx context.Context, userID, genID string, result *image.GenerateResult) {
 	collectURLs := func(rawURL string, idx int) {
 		serveURL := rawURL
 		var storageKey string
@@ -269,7 +274,6 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 			} else if storageKey != "" {
 				_ = os.Remove(rawURL)
 			}
-			images = append(images, DesignerGenerateImage{URL: serveURL, Index: idx})
 			return
 		}
 
@@ -282,21 +286,18 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 		if err := s.db.Create(&dbResult).Error; err != nil {
 			s.logger.Error().Err(err).Str("generation_id", genID).Int("index", idx).Msg("failed to save generation result")
 		}
-		images = append(images, DesignerGenerateImage{URL: rawURL, Index: idx})
 	}
 
 	if len(result.Images) > 0 {
 		for _, img := range result.Images {
 			collectURLs(img.URL, img.Index)
 		}
-		return images
+		return
 	}
 
 	if result.URL != "" {
 		collectURLs(result.URL, 0)
 	}
-
-	return images
 }
 
 // uploadGeneratedImage uploads a local image file to storage and returns the serveable URL and storage key.

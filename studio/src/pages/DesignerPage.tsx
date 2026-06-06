@@ -10,9 +10,9 @@ import PromptInput from '@/components/designer/PromptInput'
 import HistorySidebar from '@/components/designer/HistorySidebar'
 import ImagePreview from '@/components/designer/ImagePreview'
 import { api } from '@/lib/api'
-import { generateStream } from '@/lib/api/designer'
+import { designerApi } from '@/lib/api/designer'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { GenerateImage, ImageGeneration, DesignerProvider, GenerateResult } from '@/types/designer'
+import type { GenerateImage, ImageGeneration, ImageGenerationResult, DesignerProvider } from '@/types/designer'
 
 const DEFAULT_SETTINGS: DesignerSettings = {
   quality: 'auto',
@@ -23,6 +23,22 @@ const DEFAULT_SETTINGS: DesignerSettings = {
   maskFile: null,
 }
 
+const POLL_INTERVAL = 2000
+const MAX_POLLS = 90 // 3 minutes at 2s interval
+const MAX_CONSECUTIVE_ERRORS = 3
+
+function resultsToImages(results?: ImageGenerationResult[]): GenerateImage[] {
+  if (!results || results.length === 0) return []
+  return results
+    .filter((r) => r.image_url || r.image_path)
+    .map((r, i) => ({
+      url: r.image_url || r.image_path!,
+      width: r.width,
+      height: r.height,
+      index: i,
+    }))
+}
+
 export default function DesignerPage() {
   const queryClient = useQueryClient()
   const [selectedProviderId, setSelectedProviderId] = useState<string>('')
@@ -31,11 +47,14 @@ export default function DesignerPage() {
   const [selectedGenerationId, setSelectedGenerationId] = useState<string>()
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const abortedRef = useRef(false)
 
-  // Abort in-progress generation on unmount
+  // Stop polling on unmount
   useEffect(() => {
-    return () => { abortRef.current?.abort() }
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current)
+    }
   }, [])
 
   // Fetch available providers from backend
@@ -50,16 +69,22 @@ export default function DesignerPage() {
   const activeProvider = providerList.find((p) => p.id === selectedProviderId)
   const effectiveProvider = activeProvider ?? providerList[0]
 
+  function stopPolling() {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+  }
+
   const handleGenerate = useCallback(async (prompt: string) => {
     if (!effectiveProvider) {
       toast.error('没有可用的图片模型')
       return
     }
 
-    // Cancel any in-progress generation
-    abortRef.current?.abort()
-    const abort = new AbortController()
-    abortRef.current = abort
+    // Cancel any in-progress polling
+    stopPolling()
+    abortedRef.current = false
 
     setIsGenerating(true)
     setCurrentImages([])
@@ -79,8 +104,8 @@ export default function DesignerPage() {
         maskFileId = result.file_id
       }
 
-      // Stream generation via SSE
-      const stream = generateStream({
+      // Start async generation
+      const { generation_id } = await designerApi.generate({
         channel_id: '',
         prompt,
         provider: effectiveProvider.provider,
@@ -90,57 +115,73 @@ export default function DesignerPage() {
         output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
         reference_file_ids: refFileIds.length > 0 ? refFileIds : undefined,
         mask_file_id: maskFileId,
-      }, abort.signal)
+      })
 
-      for await (const event of stream) {
-        if (abort.signal.aborted) break
+      setSelectedGenerationId(generation_id)
 
-        switch (event.event) {
-          case 'result': {
-            let result: GenerateResult
-            try { result = JSON.parse(event.data) } catch { throw new Error('服务端返回数据异常') }
-            setCurrentImages(result.images)
-            setSelectedGenerationId(result.generation_id)
+      // Poll for completion
+      let pollCount = 0
+      let consecutiveErrors = 0
+
+      pollingRef.current = setInterval(async () => {
+        if (abortedRef.current) {
+          stopPolling()
+          setIsGenerating(false)
+          return
+        }
+
+        pollCount++
+        if (pollCount >= MAX_POLLS) {
+          stopPolling()
+          setIsGenerating(false)
+          toast.error('生成超时，请稍后在历史记录中查看结果')
+          return
+        }
+
+        try {
+          const gen = await designerApi.getGeneration(generation_id)
+          consecutiveErrors = 0
+
+          if (gen.status === 'completed') {
+            stopPolling()
+            setIsGenerating(false)
+            setCurrentImages(resultsToImages(gen.results))
             toast.success('图片生成成功')
             queryClient.invalidateQueries({ queryKey: ['designer', 'history'] })
-            break
+          } else if (gen.status === 'failed') {
+            stopPolling()
+            setIsGenerating(false)
+            toast.error(gen.error || '图片生成失败')
           }
-          case 'error': {
-            let errMsg = '图片生成失败'
-            try { errMsg = JSON.parse(event.data).error || errMsg } catch {}
-            throw new Error(errMsg)
+        } catch {
+          consecutiveErrors++
+          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+            stopPolling()
+            setIsGenerating(false)
+            toast.error('查询生成状态失败')
           }
         }
-      }
+      }, POLL_INTERVAL)
     } catch (err) {
-      if (abort.signal.aborted) return
+      setIsGenerating(false)
       toast.error(getApiErrorMessage(err, '图片生成失败，请重试'))
-    } finally {
-      if (abortRef.current === abort) {
-        setIsGenerating(false)
-        abortRef.current = null
-      }
     }
   }, [effectiveProvider, settings, queryClient])
 
   const handleHistorySelect = useCallback((gen: ImageGeneration) => {
     setSelectedGenerationId(gen.id)
-    if (gen.results && gen.results.length > 0) {
-      const images: GenerateImage[] = gen.results
-        .filter((r) => r.image_url || r.image_path)
-        .map((r, i) => ({
-          url: r.image_url || r.image_path!,
-          width: r.width,
-          height: r.height,
-          index: i,
-        }))
-      setCurrentImages(images)
-    }
+    setCurrentImages(resultsToImages(gen.results))
   }, [])
 
   function handleModelChange(providerId: string) {
     setSelectedProviderId(providerId)
     setSettings(DEFAULT_SETTINGS)
+  }
+
+  function handleCancel() {
+    abortedRef.current = true
+    stopPolling()
+    setIsGenerating(false)
   }
 
   return (
@@ -177,6 +218,7 @@ export default function DesignerPage() {
           <PromptInput
             onSubmit={handleGenerate}
             isGenerating={isGenerating}
+            onCancel={handleCancel}
           />
         </div>
 
