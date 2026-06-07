@@ -114,13 +114,15 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 			totalCost = unitCost * req.N
 		}
 	}
+
+	genID := uuid.New().String()
+
 	if totalCost > 0 {
-		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, totalCost); err != nil {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, totalCost, genID); err != nil {
 			return "", fmt.Errorf("deduct credits: %w", err)
 		}
 	}
 
-	genID := uuid.New().String()
 	refFilesJSON, _ := json.Marshal(req.ReferenceFileIDs)
 	gen := &model.ImageGeneration{
 		ID:             genID,
@@ -142,7 +144,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	if err := s.db.Create(gen).Error; err != nil {
 		// Refund on DB create failure to avoid losing credits.
 		if totalCost > 0 && s.creditSvc != nil {
-			if refundErr := s.creditSvc.RefundForOperation(ctx, userID, model.CreditTypeImageGen, totalCost, "生成记录创建失败退还"); refundErr != nil {
+			if refundErr := s.creditSvc.RefundForOperation(ctx, userID, model.CreditTypeImageGen, totalCost, "生成记录创建失败退还", genID); refundErr != nil {
 				s.logger.Error().Err(refundErr).Int("cost", totalCost).Msg("failed to refund after DB create failure")
 			}
 		}
@@ -164,6 +166,13 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	var gen model.ImageGeneration
 	if err := s.db.Where("id = ?", genID).First(&gen).Error; err != nil {
 		s.logger.Error().Err(err).Str("gen_id", genID).Msg("generation record not found")
+		// Attempt refund via the deduction's OperationID trace.
+		if s.creditSvc != nil {
+			if refundErr := s.creditSvc.RefundForOperationByID(ctx, genID,
+				fmt.Sprintf("生成记录丢失退还 (genID=%s)", genID)); refundErr != nil {
+				s.logger.Error().Err(refundErr).Str("gen_id", genID).Msg("failed to refund for missing record")
+			}
+		}
 		return
 	}
 
@@ -171,7 +180,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	refund := func() {
 		refundOnce.Do(func() {
 			if gen.Cost > 0 && s.creditSvc != nil {
-				if err := s.creditSvc.RefundForOperation(ctx, gen.UserID, model.CreditTypeImageGen, gen.Cost, fmt.Sprintf("设计师生成失败退还 +%d", gen.Cost)); err != nil {
+				if err := s.creditSvc.RefundForOperation(ctx, gen.UserID, model.CreditTypeImageGen, gen.Cost, fmt.Sprintf("设计师生成失败退还 +%d", gen.Cost), genID); err != nil {
 					s.logger.Error().Err(err).Str("gen_id", genID).Int("cost", gen.Cost).Msg("failed to refund designer generation")
 				}
 			}

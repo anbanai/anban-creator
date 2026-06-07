@@ -10,6 +10,7 @@ type CreditTransaction struct {
 	Amount       int       `gorm:"not null" json:"amount"`        // positive=income, negative=expense
 	BalanceAfter int       `gorm:"not null" json:"balance_after"` // balance after this transaction
 	TaskID       *string   `gorm:"type:char(36);index" json:"task_id,omitempty"`
+	OperationID  *string   `gorm:"type:char(36);index" json:"operation_id,omitempty"`
 	Description  string    `gorm:"type:varchar(500)" json:"description"`
 	CreatedAt    time.Time `gorm:"index:idx_ct_user_created,priority:2" json:"created_at"`
 }

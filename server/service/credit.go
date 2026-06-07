@@ -333,7 +333,8 @@ func (s *CreditService) ModelCosts() map[string]map[string]int {
 
 // DeductForOperation deducts credits for a single MCP tool operation.
 // The amount parameter is the total credits to deduct (already calculated by the caller).
-func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType string, amount int) (int, error) {
+// An optional operationID can be provided for database-level idempotency of refunds.
+func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType string, amount int, operationID ...string) (int, error) {
 	if amount <= 0 {
 		return 0, ErrInvalidAmount
 	}
@@ -358,6 +359,10 @@ func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType s
 			BalanceAfter: newBalance,
 			Description:  fmt.Sprintf("操作扣费 (%s) -%d", opType, totalCost),
 		}
+		if len(operationID) > 0 && operationID[0] != "" {
+			opIDCopy := operationID[0]
+			tx.OperationID = &opIDCopy
+		}
 		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 			return fmt.Errorf("create deduction transaction: %w", err)
 		}
@@ -372,12 +377,26 @@ func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType s
 }
 
 // RefundForOperation refunds credits for a failed operation.
-func (s *CreditService) RefundForOperation(ctx context.Context, userID, opType string, amount int, description string) error {
+// When operationID is provided, the refund is idempotent — calling it multiple times
+// with the same operationID will only refund once.
+func (s *CreditService) RefundForOperation(ctx context.Context, userID, opType string, amount int, description string, operationID ...string) error {
 	if amount <= 0 {
 		return nil
 	}
 
 	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		// Idempotency check when operationID is provided.
+		if len(operationID) > 0 && operationID[0] != "" {
+			_, err := txRepo.Credits().FindRefundByOperationID(ctx, operationID[0])
+			if err == nil {
+				s.logger.Warn().Str("operation_id", operationID[0]).Msg("operation refund already exists, skipping")
+				return nil
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("check existing refund: %w", err)
+			}
+		}
+
 		newBalance, err := txRepo.Users().AdjustBalance(ctx, userID, amount)
 		if err != nil {
 			return fmt.Errorf("adjust balance: %w", err)
@@ -390,11 +409,64 @@ func (s *CreditService) RefundForOperation(ctx context.Context, userID, opType s
 			BalanceAfter: newBalance,
 			Description:  description,
 		}
+		if len(operationID) > 0 && operationID[0] != "" {
+			opIDCopy := operationID[0]
+			tx.OperationID = &opIDCopy
+		}
 		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 			return fmt.Errorf("create refund transaction: %w", err)
 		}
 
 		s.logger.Info().Str("user_id", userID).Str("op_type", opType).Int("refund", amount).Int("balance", newBalance).Msg("credits refunded for operation")
+		return nil
+	})
+}
+
+// RefundForOperationByID refunds credits for an operation identified by its operationID.
+// It derives the user and amount from the original deduction transaction.
+// Idempotent — calling it multiple times with the same operationID will only refund once.
+func (s *CreditService) RefundForOperationByID(ctx context.Context, operationID string, description string) error {
+	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		// Check for existing refund.
+		_, err := txRepo.Credits().FindRefundByOperationID(ctx, operationID)
+		if err == nil {
+			s.logger.Warn().Str("operation_id", operationID).Msg("operation refund already exists, skipping")
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("check existing refund: %w", err)
+		}
+
+		// Find original deduction to derive user and amount.
+		deduction, err := txRepo.Credits().FindDeductionByOperationID(ctx, operationID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				s.logger.Warn().Str("operation_id", operationID).Msg("no deduction found for operation, skipping refund")
+				return nil
+			}
+			return fmt.Errorf("find deduction: %w", err)
+		}
+
+		refundAmount := -deduction.Amount
+		newBalance, err := txRepo.Users().AdjustBalance(ctx, deduction.UserID, refundAmount)
+		if err != nil {
+			return fmt.Errorf("adjust balance: %w", err)
+		}
+
+		opIDCopy := operationID
+		tx := &model.CreditTransaction{
+			UserID:       deduction.UserID,
+			Type:         deduction.Type,
+			Amount:       refundAmount,
+			BalanceAfter: newBalance,
+			OperationID:  &opIDCopy,
+			Description:  description,
+		}
+		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
+			return fmt.Errorf("create refund transaction: %w", err)
+		}
+
+		s.logger.Info().Str("operation_id", operationID).Int("refund", refundAmount).Int("balance", newBalance).Msg("credits refunded for operation by ID")
 		return nil
 	})
 }

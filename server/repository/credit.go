@@ -17,6 +17,8 @@ type CreditRepository interface {
 	CountByUserID(ctx context.Context, userID string) (int64, error)
 	FindDeductionByTaskID(ctx context.Context, taskID string) (*model.CreditTransaction, error)
 	FindRefundByTaskID(ctx context.Context, taskID string) (*model.CreditTransaction, error)
+	FindDeductionByOperationID(ctx context.Context, operationID string) (*model.CreditTransaction, error)
+	FindRefundByOperationID(ctx context.Context, operationID string) (*model.CreditTransaction, error)
 }
 
 type creditRepository struct {
@@ -79,6 +81,28 @@ func (r *creditRepository) FindRefundByTaskID(ctx context.Context, taskID string
 	var tx model.CreditTransaction
 	err := r.db.WithContext(ctx).
 		Where("task_id = ? AND type = ?", taskID, model.CreditTypeTaskRefund).
+		First(&tx).Error
+	if err != nil {
+		return nil, err
+	}
+	return &tx, nil
+}
+
+func (r *creditRepository) FindDeductionByOperationID(ctx context.Context, operationID string) (*model.CreditTransaction, error) {
+	var tx model.CreditTransaction
+	err := r.db.WithContext(ctx).
+		Where("operation_id = ? AND amount < 0", operationID).
+		First(&tx).Error
+	if err != nil {
+		return nil, err
+	}
+	return &tx, nil
+}
+
+func (r *creditRepository) FindRefundByOperationID(ctx context.Context, operationID string) (*model.CreditTransaction, error) {
+	var tx model.CreditTransaction
+	err := r.db.WithContext(ctx).
+		Where("operation_id = ? AND amount > 0", operationID).
 		First(&tx).Error
 	if err != nil {
 		return nil, err
