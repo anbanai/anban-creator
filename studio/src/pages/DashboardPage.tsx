@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
+import { useDashboardAnimation } from '@/hooks/useDashboardAnimation'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Inbox, CalendarPlus, Clock, Copy } from 'lucide-react'
@@ -43,6 +44,7 @@ export default function DashboardPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { submit } = useSubmitLock()
+  const containerRef = useDashboardAnimation()
 
   const { data: creditsBalance } = useQuery({
     queryKey: ['credits', 'balance'],
@@ -159,21 +161,23 @@ export default function DashboardPage() {
   const hasError = plansError || tasksError
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title={`欢迎${user?.nickname ? `，${user.nickname}` : ''}`}
-        description="以下是你的内容工作区概览。"
-      >
-        <Link to="/tasks?create=true">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            创建任务
-          </Button>
-        </Link>
-      </PageHeader>
+    <div ref={containerRef} className="space-y-6">
+      <div data-animate="header">
+        <PageHeader
+          title={`欢迎${user?.nickname ? `，${user.nickname}` : ''}`}
+          description="以下是你的内容工作区概览。"
+        >
+          <Link to="/tasks?create=true">
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              创建任务
+            </Button>
+          </Link>
+        </PageHeader>
+      </div>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-animate="stats" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {hasError ? (
           <div className="col-span-full">
             <QueryErrorState onRetry={() => { refetchPlans(); refetchTasks() }} />
@@ -187,13 +191,14 @@ export default function DashboardPage() {
               title={stat.title}
               value={stat.value}
               description={stat.description}
+              animateCounter
             />
           ))
         )}
       </div>
 
       {/* Credits card */}
-      <Card>
+      <Card data-animate="credits">
         <CardContent>
           <div className="flex items-center justify-between py-1">
             <div>
@@ -217,7 +222,7 @@ export default function DashboardPage() {
       </Card>
 
       {/* Invite card */}
-      <Card>
+      <Card data-animate="invite">
         <CardContent>
           <div className="flex items-center justify-between py-1">
             <div>
@@ -246,7 +251,7 @@ export default function DashboardPage() {
       </Card>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div data-animate="charts" className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Task trend line chart */}
         <Card>
           <CardHeader>
@@ -358,7 +363,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Recent tasks */}
-      <Card>
+      <Card data-animate="recent">
         <CardHeader className="border-b border-border">
           <CardTitle>最近任务</CardTitle>
           <div className="col-start-2 row-start-1 self-center">
@@ -420,7 +425,7 @@ export default function DashboardPage() {
       </Card>
 
       {/* Quick actions */}
-      <div>
+      <div data-animate="actions">
         <h2 className="mb-3 text-lg font-semibold text-foreground">快捷操作</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Link
