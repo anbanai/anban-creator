@@ -2,41 +2,22 @@ import { useState } from 'react'
 import { Palette, ChevronDown } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/Select'
 import { getModelCapabilities } from '@/types/designer'
 import type { DesignerProvider, ModelCapabilities } from '@/types/designer'
-import type { DesignerSettings } from '@/types/designer'
 
 interface DesignerTopBarProps {
   providers: DesignerProvider[]
   selectedProviderId: string
   onModelChange: (id: string) => void
-  provider: string
-  settings: DesignerSettings
-  onSettingsChange: (settings: DesignerSettings) => void
 }
 
 export default function DesignerTopBar({
   providers,
   selectedProviderId,
   onModelChange,
-  provider,
-  settings,
-  onSettingsChange,
 }: DesignerTopBarProps) {
-  const caps = getModelCapabilities(provider)
   const selected = providers.find((p) => p.id === selectedProviderId) ?? providers[0]
   const [modelOpen, setModelOpen] = useState(false)
-
-  function update(patch: Partial<DesignerSettings>) {
-    onSettingsChange({ ...settings, ...patch })
-  }
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border/50 bg-card/80 px-4 backdrop-blur-md">
@@ -97,44 +78,6 @@ export default function DesignerTopBar({
           </div>
         </PopoverContent>
       </Popover>
-
-      <div className="ml-auto flex items-center gap-2">
-        {caps && caps.qualityLevels.length > 0 && (
-          <Select
-            value={settings.quality}
-            onValueChange={(val: string | null) => update({ quality: val ?? '' })}
-          >
-            <SelectTrigger className="h-7 w-24 border-transparent bg-transparent text-[11px] text-muted-foreground hover:bg-accent/50">
-              <SelectValue placeholder="质量" />
-            </SelectTrigger>
-            <SelectContent>
-              {caps.qualityLevels.map((level) => (
-                <SelectItem key={level} value={level}>
-                  {level === 'auto' ? '自动' : level === 'low' ? '低' : level === 'medium' ? '中' : '高'}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
-        {caps && caps.outputFormats.length > 1 && (
-          <Select
-            value={settings.outputFormat}
-            onValueChange={(val: string | null) => update({ outputFormat: val ?? '' })}
-          >
-            <SelectTrigger className="h-7 w-20 border-transparent bg-transparent text-[11px] text-muted-foreground hover:bg-accent/50">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {caps.outputFormats.map((fmt) => (
-                <SelectItem key={fmt} value={fmt}>
-                  {fmt.toUpperCase()}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
     </div>
   )
 }

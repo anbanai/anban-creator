@@ -49,8 +49,8 @@ export default function DesignerPromptBar({
   const selected = providers.find((p) => p.id === selectedProviderId) ?? providers[0]
 
   return (
-    <div className="shrink-0 bg-[oklch(0.11_0.005_60)] px-3 pb-4 pt-2 md:px-4">
-      <div className="mx-auto max-w-2xl rounded-2xl border border-white/10 bg-[oklch(0.16_0.01_60)]/90 p-2 shadow-xl shadow-black/20 backdrop-blur-xl">
+    <div className="shrink-0 bg-muted/30 px-3 pb-4 pt-2 md:px-4">
+      <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-card p-2 shadow-xl shadow-black/10">
         <div className="flex items-end gap-2">
           {providers.length > 1 && (
             <DropdownMenu>
@@ -112,7 +112,7 @@ export default function DesignerPromptBar({
       {isGenerating && (
         <div className="mx-auto mt-1.5 flex max-w-2xl items-center gap-2 px-2">
           <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse-dot" />
-          <span className="text-[11px] text-white/40">正在生成...</span>
+          <span className="text-[11px] text-muted-foreground/60">正在生成...</span>
         </div>
       )}
     </div>

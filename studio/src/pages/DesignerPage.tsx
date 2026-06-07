@@ -192,9 +192,6 @@ export default function DesignerPage() {
         providers={providerList}
         selectedProviderId={effectiveProvider?.id ?? ''}
         onModelChange={handleModelChange}
-        provider={effectiveProvider?.provider ?? ''}
-        settings={settings}
-        onSettingsChange={setSettings}
       />
 
       {/* Main content: flex-col on mobile, flex-row on desktop */}
@@ -212,8 +209,8 @@ export default function DesignerPage() {
         {/* Center: Canvas + PromptBar */}
         <div className="order-1 flex min-h-0 flex-1 flex-col">
           <div
-            className="flex-1 overflow-y-auto bg-[oklch(0.11_0.005_60)] p-4 md:p-6"
-            style={{ backgroundImage: 'radial-gradient(circle, oklch(0.25 0.005 60 / 0.3) 1px, transparent 1px)', backgroundSize: '24px 24px' }}
+            className="flex-1 overflow-y-auto bg-muted/30 p-4 md:p-6"
+            style={{ backgroundImage: 'radial-gradient(circle, var(--color-border) 0.5px, transparent 0.5px)', backgroundSize: '24px 24px' }}
           >
             <DesignerCanvas
               images={currentImages}
