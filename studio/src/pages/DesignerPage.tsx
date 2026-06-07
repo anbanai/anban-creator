@@ -7,7 +7,6 @@ import DesignerPromptBar from '@/components/designer/DesignerPromptBar'
 import HistoryDrawer from '@/components/designer/HistoryDrawer'
 import ImagePreview from '@/components/designer/ImagePreview'
 import type { DesignerSettings } from '@/types/designer'
-import { api } from '@/lib/api'
 import { designerApi } from '@/lib/api/designer'
 import { getApiErrorMessage } from '@/lib/http-client'
 import type { GenerateImage, ImageGeneration, ImageGenerationResult, DesignerProvider } from '@/types/designer'
@@ -60,7 +59,7 @@ export default function DesignerPage() {
   // Fetch available providers from backend
   const { data: providers } = useQuery({
     queryKey: ['designer', 'providers'],
-    queryFn: () => api.designer.getProviders(),
+    queryFn: () => designerApi.getProviders(),
   })
 
   const providerList: DesignerProvider[] = providers ?? []
@@ -90,17 +89,17 @@ export default function DesignerPage() {
     setCurrentImages([])
 
     try {
-      // Upload reference files if any
-      const refFileIds: string[] = []
-      for (const file of settings.referenceFiles) {
-        const result = await api.designer.uploadReference(file)
-        refFileIds.push(result.file_id)
-      }
+      // Upload reference files in parallel
+      const refFileIds = settings.referenceFiles.length > 0
+        ? (await Promise.all(
+            settings.referenceFiles.map((file) => designerApi.uploadReference(file)),
+          )).map((r) => r.file_id)
+        : []
 
       // Upload mask if present
       let maskFileId: string | undefined
       if (settings.maskFile) {
-        const result = await api.designer.uploadReference(settings.maskFile)
+        const result = await designerApi.uploadReference(settings.maskFile)
         maskFileId = result.file_id
       }
 
@@ -201,10 +200,12 @@ export default function DesignerPage() {
 
       {/* Main area: canvas + prompt */}
       <div className="relative flex min-h-0 flex-1 flex-col p-3 pl-0">
-        {/* Ambient gradient blobs */}
+        {/* Ambient accent orbs */}
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute -top-32 right-1/4 h-80 w-80 rounded-full bg-primary/[0.03] blur-3xl dark:bg-primary/[0.04]" />
-          <div className="absolute -bottom-32 right-1/3 h-64 w-64 rounded-full bg-chart-2/[0.03] blur-3xl dark:bg-chart-2/[0.04]" />
+          <div className="absolute top-8 right-12 h-4 w-4 rounded-full bg-primary/10 blur-[8px]" />
+          <div className="absolute top-1/3 right-8 h-3 w-3 rounded-full bg-chart-2/10 blur-[6px]" />
+          <div className="absolute bottom-16 left-1/3 h-4 w-4 rounded-full bg-chart-4/10 blur-[8px]" />
+          <div className="absolute bottom-8 right-1/4 h-3 w-3 rounded-full bg-primary/8 blur-[6px]" />
         </div>
         <div
           className="relative flex-1 overflow-y-auto rounded-2xl border border-border/30 bg-background/40 p-4 backdrop-blur-sm md:p-6"

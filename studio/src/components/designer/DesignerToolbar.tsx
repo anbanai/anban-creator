@@ -25,9 +25,9 @@ const SIZE_OPTIONS = [
 ]
 
 const RESOLUTION_OPTIONS = [
-  { value: '1K', label: '1K', desc: '1024' },
-  { value: '2K', label: '2K', desc: '2048' },
-  { value: '4K', label: '4K', desc: '4096' },
+  { value: '1K', label: '1K', desc: '标准' },
+  { value: '2K', label: '2K', desc: '高清' },
+  { value: '4K', label: '4K', desc: '超清' },
 ]
 
 interface DesignerToolbarProps {
@@ -96,8 +96,6 @@ export default function DesignerToolbar({
       {/* Desktop: floating glass sidebar */}
       <div className="hidden w-[280px] shrink-0 p-3 md:block">
         <aside className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-background/50 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.05)] backdrop-blur-2xl dark:border-white/[0.04] dark:bg-background/40 dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]">
-          {/* Ambient glow from top */}
-          <div className="pointer-events-none absolute -top-16 left-1/2 h-32 w-4/5 -translate-x-1/2 rounded-full bg-primary/15 blur-3xl dark:bg-primary/8" />
           {/* Top accent line */}
           <div className="relative h-px shrink-0 bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
 
