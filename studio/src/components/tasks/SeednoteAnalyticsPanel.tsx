@@ -26,7 +26,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { formatFullDateTimeCN } from '@/lib/labels'
 import type { SeednoteAnalytics, SeednoteTrackingStatus } from '@/types'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
 interface SeednoteAnalyticsPanelProps {

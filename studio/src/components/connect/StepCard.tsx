@@ -1,5 +1,5 @@
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/Card'
+import { Card, CardContent } from '@/components/ui/card'
 
 interface StepCardProps {
   step: number

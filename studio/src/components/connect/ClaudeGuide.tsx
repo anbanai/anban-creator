@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent } from '@/components/ui/Card'
+import { Card, CardContent } from '@/components/ui/card'
 import CodeBlock from '@/components/connect/CodeBlock'
 import StepCard from '@/components/connect/StepCard'
 import McpConfigStep from '@/components/connect/McpConfigStep'

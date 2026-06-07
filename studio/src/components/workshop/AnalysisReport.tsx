@@ -1,5 +1,5 @@
 import type { AnalysisDimensionName, AnalysisResult, EvidenceDrivenDimension } from '@/types'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
 interface AnalysisReportProps {
