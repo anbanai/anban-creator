@@ -11,13 +11,6 @@ import {
 import { Slider } from '@/components/ui/slider'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/Select'
 import { getModelCapabilities } from '@/types/designer'
 import type { DesignerSettings } from '@/types/designer'
 

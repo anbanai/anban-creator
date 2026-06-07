@@ -105,6 +105,7 @@ export default function GeneratingAnimation() {
   const rafRef = useRef<number>(0)
   const timeRef = useRef({ value: 0, speed: 1 })
   const noiseRef = useRef<ReturnType<typeof createNoise> | null>(null)
+  const offscreenRef = useRef<{ canvas: HTMLCanvasElement; sw: number; sh: number } | null>(null)
 
   const render = useCallback(() => {
     const canvas = canvasRef.current
@@ -158,9 +159,12 @@ export default function GeneratingAnimation() {
     }
 
     // Draw at low res then scale up (creates natural blur/smoothness)
-    const offscreen = document.createElement('canvas')
-    offscreen.width = sw
-    offscreen.height = sh
+    if (!offscreenRef.current || offscreenRef.current.sw !== sw || offscreenRef.current.sh !== sh) {
+      offscreenRef.current = { canvas: document.createElement('canvas'), sw, sh }
+      offscreenRef.current.canvas.width = sw
+      offscreenRef.current.canvas.height = sh
+    }
+    const offscreen = offscreenRef.current.canvas
     offscreen.getContext('2d')!.putImageData(imageData, 0, 0)
 
     ctx.imageSmoothingEnabled = true

@@ -138,7 +138,9 @@ export default function AuthLayout({
     })
 
     // Subtle pulse on title characters after entrance
-    gsap.to('[data-animate="title-line-1"] span, [data-animate="title-line-2"] span', {
+    gsap.fromTo('[data-animate="title-line-1"] span, [data-animate="title-line-2"] span', {
+      textShadow: '0 0 0px rgba(217, 119, 6, 0)',
+    }, {
       textShadow: '0 0 20px rgba(217, 119, 6, 0.3)',
       duration: 2,
       ease: 'sine.inOut',

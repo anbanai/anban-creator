@@ -83,7 +83,6 @@ func NewRouter(svc *Services) *fiber.App {
 				return true
 			}
 			return slices.Contains(svc.Config.CORS.AllowedOrigins, origin)
-			return false
 		},
 		AllowCredentials: true,
 	}

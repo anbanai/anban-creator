@@ -1,43 +1,8 @@
-import { useRef, useCallback } from 'react'
+import { useRef } from 'react'
 import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 
 gsap.registerPlugin(useGSAP)
-
-/**
- * Animates a number counter from 0 → target value.
- * Call with the element ref, target number, and format function.
- */
-export function animateCounter(
-  el: HTMLElement,
-  target: number,
-  format: (v: number) => string = (v) => String(Math.round(v))
-) {
-  const obj = { value: 0 }
-  return gsap.to(obj, {
-    value: target,
-    duration: 1.6,
-    ease: 'power2.out',
-    delay: 0.4,
-    onUpdate: () => {
-      el.textContent = format(obj.value)
-    },
-  })
-}
-
-/**
- * Format percentage counter: 0 → "87%"
- */
-export function formatPercent(v: number): string {
-  return `${Math.round(v)}%`
-}
-
-/**
- * Format number with locale: 0 → "1,234"
- */
-export function formatLocale(v: number): string {
-  return Math.round(v).toLocaleString()
-}
 
 /**
  * Main dashboard entrance animation orchestrator.
