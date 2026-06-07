@@ -106,9 +106,18 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	}
 
 	// Billing: look up per-image cost from model config.
+	// Prefer designer entry ID for accurate cost lookup when multiple entries
+	// share the same provider type (e.g., two "openai" entries).
 	var totalCost int
-	if unitCost := s.resolveCredits(provider, modelName); unitCost > 0 {
-		totalCost = unitCost * req.N
+	if req.ProviderID != "" {
+		if cfg := s.findDesignerConfigByID(req.ProviderID); cfg != nil {
+			totalCost = cfg.Credits * req.N
+		}
+	}
+	if totalCost == 0 {
+		if unitCost := s.resolveCredits(provider, modelName); unitCost > 0 {
+			totalCost = unitCost * req.N
+		}
 	}
 
 	genID := uuid.New().String()
@@ -584,6 +593,14 @@ func (s *DesignerService) findDesignerConfig(provider string) *config.ImageAPI {
 		}
 	}
 	return nil
+}
+
+// findDesignerConfigByID finds a Designer entry by its config map key (e.g., "wangcai").
+func (s *DesignerService) findDesignerConfigByID(id string) *config.ImageAPI {
+	if s.imageCfg == nil || s.imageCfg.Designer == nil {
+		return nil
+	}
+	return s.imageCfg.Designer[id]
 }
 
 func (s *DesignerService) resolveAPIKey(provider string) string {
