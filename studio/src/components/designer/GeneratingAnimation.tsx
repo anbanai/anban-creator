@@ -1,147 +1,236 @@
-import { useRef } from 'react'
+import { useRef, useCallback } from 'react'
 import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 
 gsap.registerPlugin(useGSAP)
 
+// Compact 2D simplex noise
+function createNoise() {
+  const perm = new Uint8Array(512)
+  const p = new Uint8Array(256)
+  for (let i = 0; i < 256; i++) p[i] = i
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [p[i], p[j]] = [p[j], p[i]]
+  }
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255]
+
+  const grad = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]]
+
+  return function noise2D(x: number, y: number): number {
+    const F2 = 0.5 * (Math.sqrt(3) - 1)
+    const G2 = (3 - Math.sqrt(3)) / 6
+    const s = (x + y) * F2
+    const i = Math.floor(x + s)
+    const j = Math.floor(y + s)
+    const t = (i + j) * G2
+    const x0 = x - (i - t)
+    const y0 = y - (j - t)
+    const i1 = x0 > y0 ? 1 : 0
+    const j1 = x0 > y0 ? 0 : 1
+    const x1 = x0 - i1 + G2
+    const y1 = y0 - j1 + G2
+    const x2 = x0 - 1 + 2 * G2
+    const y2 = y0 - 1 + 2 * G2
+    const ii = i & 255
+    const jj = j & 255
+
+    let n0 = 0, n1 = 0, n2 = 0
+    let t0 = 0.5 - x0 * x0 - y0 * y0
+    if (t0 >= 0) {
+      const g = perm[ii + perm[jj]] & 7
+      t0 *= t0
+      n0 = t0 * t0 * (grad[g][0] * x0 + grad[g][1] * y0)
+    }
+    let t1 = 0.5 - x1 * x1 - y1 * y1
+    if (t1 >= 0) {
+      const g = perm[ii + i1 + perm[jj + j1]] & 7
+      t1 *= t1
+      n1 = t1 * t1 * (grad[g][0] * x1 + grad[g][1] * y1)
+    }
+    let t2 = 0.5 - x2 * x2 - y2 * y2
+    if (t2 >= 0) {
+      const g = perm[ii + 1 + perm[jj + 1]] & 7
+      t2 *= t2
+      n2 = t2 * t2 * (grad[g][0] * x2 + grad[g][1] * y2)
+    }
+    return 70 * (n0 + n1 + n2)
+  }
+}
+
+// Color palette — warm amber/gold tones matching the site's OKLCH primary
+const COLORS = [
+  [0.72, 0.17, 60],  // primary warm gold
+  [0.65, 0.15, 30],  // warm orange
+  [0.55, 0.12, 170], // teal accent
+  [0.60, 0.10, 330], // rose accent
+  [0.50, 0.08, 250], // soft blue
+  [0.67, 0.17, 60],  // bright gold
+]
+
+function oklchToRgb(l: number, c: number, h: number): [number, number, number] {
+  // Simplified OKLCH → sRGB approximation
+  const a = c * Math.cos((h * Math.PI) / 180)
+  const b = c * Math.sin((h * Math.PI) / 180)
+  const L_ = l + 0.3963377774 * a + 0.2158037573 * b
+  const M_ = l - 0.1055613458 * a - 0.0638541728 * b
+  const S_ = l - 0.0894841775 * a - 1.2914855480 * b
+  const l_ = L_ * L_ * L_
+  const m_ = M_ * M_ * M_
+  const s_ = S_ * S_ * S_
+  const r = +4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_
+  const g = -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_
+  const bl = -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_
+  return [
+    Math.max(0, Math.min(255, Math.round(r * 255))),
+    Math.max(0, Math.min(255, Math.round(g * 255))),
+    Math.max(0, Math.min(255, Math.round(bl * 255))),
+  ]
+}
+
+// Pre-compute palette as RGB arrays
+const PALETTE = COLORS.map(([l, c, h]) => oklchToRgb(l, c, h))
+
+function lerpColor(a: number[], b: number[], t: number): [number, number, number] {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ]
+}
+
 export default function GeneratingAnimation() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const rafRef = useRef<number>(0)
+  const timeRef = useRef({ value: 0, speed: 1 })
+  const noiseRef = useRef<ReturnType<typeof createNoise> | null>(null)
+
+  const render = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !noiseRef.current) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const w = canvas.width
+    const h = canvas.height
+    const noise = noiseRef.current
+    const t = timeRef.current.value
+
+    // Low-res render for performance, then upscale
+    const scale = 4
+    const sw = Math.ceil(w / scale)
+    const sh = Math.ceil(h / scale)
+    const imageData = ctx.createImageData(sw, sh)
+    const data = imageData.data
+
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const nx = x / sw
+        const ny = y / sh
+
+        // 3 octaves of noise with flowing offsets
+        const n1 = noise(nx * 3 + t * 0.4, ny * 3 + t * 0.3)
+        const n2 = noise(nx * 5 - t * 0.25, ny * 5 + t * 0.35) * 0.5
+        const n3 = noise(nx * 8 + t * 0.15, ny * 8 - t * 0.2) * 0.25
+
+        // Combined noise [-1, 1] → [0, 1]
+        const v = (n1 + n2 + n3) * 0.4 + 0.5
+
+        // Map to palette with smooth interpolation
+        const palIdx = v * (PALETTE.length - 1)
+        const idx = Math.floor(palIdx)
+        const frac = palIdx - idx
+        const c1 = PALETTE[Math.min(idx, PALETTE.length - 1)]
+        const c2 = PALETTE[Math.min(idx + 1, PALETTE.length - 1)]
+        const [r, g, b] = lerpColor(c1, c2, frac)
+
+        // Add subtle luminance variation
+        const lum = 0.85 + n1 * 0.15
+
+        const i = (y * sw + x) * 4
+        data[i] = Math.min(255, Math.round(r * lum))
+        data[i + 1] = Math.min(255, Math.round(g * lum))
+        data[i + 2] = Math.min(255, Math.round(b * lum))
+        data[i + 3] = 255
+      }
+    }
+
+    // Draw at low res then scale up (creates natural blur/smoothness)
+    const offscreen = document.createElement('canvas')
+    offscreen.width = sw
+    offscreen.height = sh
+    offscreen.getContext('2d')!.putImageData(imageData, 0, 0)
+
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(offscreen, 0, 0, w, h)
+
+    // Advance time
+    timeRef.current.value += 0.008 * timeRef.current.speed
+
+    rafRef.current = requestAnimationFrame(render)
+  }, [])
 
   useGSAP(() => {
-    const tl = gsap.timeline({ repeat: -1 })
+    const canvas = canvasRef.current
+    if (!canvas) return
 
-    // Core orb pulsing
-    tl.to('.gen-orb', {
-      scale: 1.15,
-      duration: 1.2,
-      ease: 'power2.inOut',
-      yoyo: true,
-      repeat: 1,
-    }, 0)
+    // Size canvas to container
+    const resizeCanvas = () => {
+      const parent = canvas.parentElement
+      if (!parent) return
+      const rect = parent.getBoundingClientRect()
+      const dpr = Math.min(window.devicePixelRatio, 1.5)
+      canvas.width = Math.round(rect.width * dpr)
+      canvas.height = Math.round(rect.height * dpr)
+      canvas.style.width = `${rect.width}px`
+      canvas.style.height = `${rect.height}px`
+    }
+    resizeCanvas()
+    window.addEventListener('resize', resizeCanvas)
 
-    // Outer ring rotation
-    gsap.to('.gen-ring', {
-      rotation: 360,
-      duration: 8,
-      ease: 'none',
-      repeat: -1,
-    })
+    noiseRef.current = createNoise()
+    rafRef.current = requestAnimationFrame(render)
 
-    // Second ring counter-rotation
-    gsap.to('.gen-ring-2', {
-      rotation: -360,
-      duration: 12,
-      ease: 'none',
-      repeat: -1,
-    })
-
-    // Orbiting dots
-    gsap.to('.gen-dot', {
-      rotation: 360,
-      duration: 6,
-      ease: 'none',
-      repeat: -1,
-      stagger: {
-        each: 1.5,
-        from: 'random',
-      },
-    })
-
-    // Floating particles
-    gsap.to('.gen-particle', {
-      y: 'random(-30, 30)',
-      x: 'random(-20, 20)',
-      opacity: 'random(0.2, 0.8)',
-      scale: 'random(0.5, 1.5)',
-      duration: 'random(1.5, 3)',
+    // GSAP drives the speed pulsing — slow → fast → slow breathing
+    gsap.to(timeRef.current, {
+      speed: 2.5,
+      duration: 3,
       ease: 'sine.inOut',
       repeat: -1,
       yoyo: true,
-      stagger: { each: 0.15, from: 'random' },
     })
 
-    // Scan line
-    tl.to('.gen-scanline', {
-      yPercent: 200,
-      duration: 2,
-      ease: 'power1.inOut',
-      repeat: -1,
-      yoyo: true,
-    }, 0)
-
-    // Pulse text opacity
-    gsap.to('.gen-text', {
+    // Pulse the overlay text
+    gsap.to('.gen-fluid-text', {
       opacity: 0.4,
-      duration: 1.5,
+      duration: 2,
       ease: 'sine.inOut',
       repeat: -1,
       yoyo: true,
     })
 
     return () => {
-      tl.kill()
+      cancelAnimationFrame(rafRef.current)
+      window.removeEventListener('resize', resizeCanvas)
     }
   }, { scope: containerRef })
 
   return (
-    <div ref={containerRef} className="flex h-full flex-col items-center justify-center">
-      <div className="gen-scene relative flex h-48 w-48 items-center justify-center">
-        {/* Outer ring 2 */}
-        <div className="gen-ring-2 absolute inset-2 rounded-full border border-primary/10" style={{ borderTopColor: 'transparent', borderRightColor: 'transparent' }} />
-
-        {/* Outer ring */}
-        <div className="gen-ring absolute inset-4 rounded-full border border-primary/20" style={{ borderBottomColor: 'transparent', borderLeftColor: 'transparent' }} />
-
-        {/* Orbiting dots */}
-        {[0, 1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className="gen-dot absolute"
-            style={{ top: '50%', left: '50%', marginLeft: -4, marginTop: -4 }}
-          >
-            <div
-              className="h-2 w-2 rounded-full bg-primary/60"
-              style={{ transform: `translateX(${56}px)` }}
-            />
-          </div>
-        ))}
-
-        {/* Core orb */}
-        <div className="gen-orb relative flex h-24 w-24 items-center justify-center rounded-full bg-primary/5">
-          {/* Inner glow */}
-          <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/20 to-primary/5" />
-
-          {/* Scan line */}
-          <div className="gen-scanline absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
-
-          {/* AI icon - abstract grid */}
-          <svg width="32" height="32" viewBox="0 0 32 32" fill="none" className="relative z-10 text-primary/60">
-            <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" />
-            <rect x="18" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" />
-            <rect x="2" y="18" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" />
-            <rect x="18" y="18" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" fill="currentColor" fillOpacity="0.15" />
-            <circle cx="8" cy="8" r="2" fill="currentColor" fillOpacity="0.5" />
-            <circle cx="24" cy="8" r="2" fill="currentColor" fillOpacity="0.5" />
-            <circle cx="8" cy="24" r="2" fill="currentColor" fillOpacity="0.5" />
-            <circle cx="24" cy="24" r="2" fill="currentColor" fillOpacity="0.8" />
-          </svg>
-        </div>
-
-        {/* Floating particles */}
-        {Array.from({ length: 12 }).map((_, i) => (
-          <div
-            key={`p-${i}`}
-            className="gen-particle absolute h-1 w-1 rounded-full bg-primary/40"
-            style={{
-              top: `${15 + Math.random() * 70}%`,
-              left: `${15 + Math.random() * 70}%`,
-              opacity: 0.3 + Math.random() * 0.5,
-            }}
-          />
-        ))}
-      </div>
-
-      <div className="gen-text mt-6 text-sm font-medium text-muted-foreground">
+    <div ref={containerRef} className="relative flex h-full flex-col items-center justify-center">
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 h-full w-full"
+        style={{ filter: 'blur(1px) saturate(1.3)', opacity: 0.6 }}
+      />
+      {/* Radial vignette overlay */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ background: 'radial-gradient(ellipse at center, transparent 20%, var(--color-background) 75%)' }}
+      />
+      <div className="gen-fluid-text relative z-10 text-sm font-medium text-muted-foreground">
         正在生成图片...
       </div>
     </div>
