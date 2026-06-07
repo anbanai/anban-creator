@@ -1,4 +1,5 @@
 import { Download, Maximize2, ImageIcon } from 'lucide-react'
+import GeneratingAnimation from '@/components/designer/GeneratingAnimation'
 import type { GenerateImage } from '@/types/designer'
 
 interface DesignerCanvasProps {
@@ -20,16 +21,7 @@ export default function DesignerCanvas({ images, isGenerating, onImageClick }: D
   }
 
   if (isGenerating) {
-    return (
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div
-            key={i}
-            className="aspect-square w-full rounded-xl bg-muted animate-shimmer"
-          />
-        ))}
-      </div>
-    )
+    return <GeneratingAnimation />
   }
 
   if (images.length === 0) {
