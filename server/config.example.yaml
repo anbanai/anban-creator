@@ -93,12 +93,14 @@ image_api:
     base_url: ""
     model: ""
     size: "" # Default size override for cover images (ratio:tier, e.g. "16:9:4K")
+    credits: 1000 # Per-image credit cost
   content:
     provider: ""
     key: ""
     base_url: ""
     model: ""
     size: "" # Default size override for content images (ratio:tier, e.g. "3:4:4K")
+    credits: 1000 # Per-image credit cost
   # Designer: per-provider image generation config for the Designer studio.
   # Each key is a provider ID used by the frontend. Set alias for display name,
   # enable: false to hide a provider. If a provider is not listed here,
@@ -110,12 +112,14 @@ image_api:
       provider: "openai"
       key: "" # OpenAI API key
       model: "gpt-image-2"
+      credits: 2400 # Per-image credit cost
     gemini:
       alias: "Gemini"
       enable: true
       provider: "gemini"
       key: "" # Google AI API key
       model: "gemini-2.0-flash-preview-image-generation"
+      credits: 1600 # Per-image credit cost
     seedream:
       alias: "Seedream"
       enable: true
@@ -123,6 +127,7 @@ image_api:
       key: "" # Volcengine API key
       base_url: "https://ark.cn-beijing.volces.com/api/v3"
       model: "doubao-seedream-5-0-260128"
+      credits: 1000 # Per-image credit cost
   sizes:
     # Per-platform default image sizes in ratio:tier format.
     # Ratio: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
@@ -168,10 +173,6 @@ credits:
     seednote: 3200 # cost per seednote task
     viral_analysis: 800 # cost per viral analysis task
   model_costs:
-    image_gen:
-      "volcengine/doubao-seedream-5-0-260128": 50
-      "openai/dall-e-3": 120
-      "gemini/gemini-2.0-flash": 80
     article_write:
       "glm-5-turbo": 300
       "glm-5.1": 400
