@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Proportions,
   Layers,
@@ -9,12 +10,18 @@ import {
   Upload,
   Sparkles,
   Maximize,
+  Coins,
+  Lock,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { getModelCapabilities } from '@/types/designer'
 import type { DesignerSettings, DesignerProvider } from '@/types/designer'
+import { api } from '@/lib/api'
 
 const SIZE_OPTIONS = [
   { value: '1:1', label: '1:1', desc: '方形' },
@@ -53,6 +60,13 @@ export default function DesignerToolbar({
   const refInputRef = useRef<HTMLInputElement>(null)
   const maskInputRef = useRef<HTMLInputElement>(null)
 
+  // Fetch user credit balance
+  const { data: balanceData, isLoading: balanceLoading } = useQuery({
+    queryKey: ['credits', 'balance'],
+    queryFn: () => api.credits.balance(),
+  })
+  const balance = balanceData?.balance ?? 0
+
   function update(patch: Partial<DesignerSettings>) {
     onSettingsChange({ ...settings, ...patch })
   }
@@ -89,7 +103,7 @@ export default function DesignerToolbar({
     return () => urls.forEach((u) => URL.revokeObjectURL(u))
   }, [settings.referenceFiles])
 
-  const headerClass = 'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50'
+  const sectionHeader = 'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50'
 
   return (
     <>
@@ -101,30 +115,45 @@ export default function DesignerToolbar({
 
           {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
-            {/* Brand header */}
-            <div className="flex items-center gap-2.5 px-1">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-chart-2/20 shadow-[inset_0_0_8px_rgba(var(--color-primary),0.1)]">
-                <Sparkles className="h-3.5 w-3.5 text-primary" />
+            {/* Brand header + credits balance */}
+            <div className="flex items-center justify-between px-1">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-chart-2/20">
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                </div>
+                <span className="bg-gradient-to-r from-primary via-chart-2 to-chart-4 bg-clip-text text-sm font-bold tracking-wide text-transparent">
+                  Designer
+                </span>
               </div>
-              <span className="bg-gradient-to-r from-primary via-chart-2 to-chart-4 bg-clip-text text-sm font-bold tracking-wide text-transparent">
-                Designer
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="secondary" className="gap-1 text-[11px] font-medium">
+                    <Coins className="h-3 w-3" />
+                    {balanceLoading ? <Skeleton className="h-3 w-8" /> : balance.toLocaleString()}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>积分余额</TooltipContent>
+              </Tooltip>
             </div>
 
             {/* Model selector */}
             <div className="space-y-1">
               {providers.map((p) => {
-                const isActive = selectedProviderId === p.id
+                const isActive = selectedProviderId === p.id && p.enabled
+                const isDisabled = !p.enabled
                 const pCaps = getModelCapabilities(p.provider)
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => onModelChange(p.id)}
+                    disabled={isDisabled}
+                    onClick={() => !isDisabled && onModelChange(p.id)}
                     className={`group relative flex w-full flex-col items-start gap-0.5 rounded-xl px-3 py-2.5 text-left transition-all duration-300 ${
-                      isActive
-                        ? 'bg-primary/[0.07] ring-1 ring-primary/20 dark:bg-primary/[0.12]'
-                        : 'hover:bg-muted/40'
+                      isDisabled
+                        ? 'cursor-not-allowed opacity-40'
+                        : isActive
+                          ? 'bg-primary/[0.07] ring-1 ring-primary/20 dark:bg-primary/[0.12]'
+                          : 'hover:bg-muted/40'
                     }`}
                     style={isActive ? { boxShadow: '0 0 20px -6px var(--color-primary)' } : undefined}
                   >
@@ -133,11 +162,24 @@ export default function DesignerToolbar({
                       {isActive && (
                         <span className="h-1.5 w-1.5 rounded-full bg-primary animate-glow-pulse" style={{ boxShadow: '0 0 6px var(--color-primary)' }} />
                       )}
+                      {isDisabled && (
+                        <Badge variant="outline" className="h-4 gap-0.5 px-1.5 text-[9px] text-muted-foreground">
+                          <Lock className="h-2.5 w-2.5" />
+                          未启用
+                        </Badge>
+                      )}
+                      {!isDisabled && p.credits > 0 && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
+                              {p.credits}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent>每次生成消耗 {p.credits} 积分</TooltipContent>
+                        </Tooltip>
+                      )}
                     </div>
-                    {p.description && (
-                      <span className="text-[11px] leading-tight text-muted-foreground/60">{p.description}</span>
-                    )}
-                    {pCaps && (
+                    {pCaps && !isDisabled && (
                       <div className="mt-0.5 flex gap-1">
                         {pCaps.batch && <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">批量</Badge>}
                         {pCaps.inpainting && <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">局部编辑</Badge>}
@@ -148,12 +190,11 @@ export default function DesignerToolbar({
               })}
             </div>
 
-            {/* Gradient divider */}
-            <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+            <Separator />
 
             {/* Size */}
             <div className="space-y-2">
-              <h4 className={headerClass}>
+              <h4 className={sectionHeader}>
                 <Proportions className="h-3 w-3" />
                 尺寸
               </h4>
@@ -168,7 +209,6 @@ export default function DesignerToolbar({
                         ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
                         : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
                     }`}
-                    style={settings.size === opt.value ? { boxShadow: '0 0 10px -4px var(--color-primary)' } : undefined}
                   >
                     <span className="font-medium">{opt.label}</span>
                     <span className="text-[10px] opacity-60">{opt.desc}</span>
@@ -177,38 +217,37 @@ export default function DesignerToolbar({
               </div>
             </div>
 
-            {/* Resolution — only for providers with flexible size support */}
+            {/* Resolution */}
             {caps?.flexibleSize && (
-            <div className="space-y-2">
-              <h4 className={headerClass}>
-                <Maximize className="h-3 w-3" />
-                分辨率
-              </h4>
-              <div className="grid grid-cols-3 gap-1">
-                {RESOLUTION_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => update({ resolution: opt.value })}
-                    className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
-                      settings.resolution === opt.value
-                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                        : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-                    }`}
-                    style={settings.resolution === opt.value ? { boxShadow: '0 0 10px -4px var(--color-primary)' } : undefined}
-                  >
-                    <span className="font-medium">{opt.label}</span>
-                    <span className="text-[10px] opacity-60">{opt.desc}</span>
-                  </button>
-                ))}
+              <div className="space-y-2">
+                <h4 className={sectionHeader}>
+                  <Maximize className="h-3 w-3" />
+                  分辨率
+                </h4>
+                <div className="grid grid-cols-3 gap-1">
+                  {RESOLUTION_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => update({ resolution: opt.value })}
+                      className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+                        settings.resolution === opt.value
+                          ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                          : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                      }`}
+                    >
+                      <span className="font-medium">{opt.label}</span>
+                      <span className="text-[10px] opacity-60">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
             )}
 
             {/* Count */}
             {showCount && (
               <div className="space-y-2">
-                <h4 className={headerClass}>
+                <h4 className={sectionHeader}>
                   <Layers className="h-3 w-3" />
                   数量
                 </h4>
@@ -229,7 +268,7 @@ export default function DesignerToolbar({
             {/* Quality */}
             {showQuality && (
               <div className="space-y-2">
-                <h4 className={headerClass}>质量</h4>
+                <h4 className={sectionHeader}>质量</h4>
                 <div className="flex flex-wrap gap-1">
                   {caps!.qualityLevels.map((level) => (
                     <button
@@ -252,7 +291,7 @@ export default function DesignerToolbar({
             {/* Output Format */}
             {showFormat && (
               <div className="space-y-2">
-                <h4 className={headerClass}>格式</h4>
+                <h4 className={sectionHeader}>格式</h4>
                 <div className="flex flex-wrap gap-1">
                   {caps!.outputFormats.map((fmt) => (
                     <button
@@ -275,7 +314,7 @@ export default function DesignerToolbar({
             {/* References */}
             {showRefs && (
               <div className="space-y-2">
-                <h4 className={headerClass}>
+                <h4 className={sectionHeader}>
                   <ImagePlus className="h-3 w-3" />
                   参考图 ({settings.referenceFiles.length}/{caps!.maxRefImages})
                 </h4>
@@ -322,7 +361,7 @@ export default function DesignerToolbar({
             {/* Mask */}
             {showMask && (
               <div className="space-y-2">
-                <h4 className={headerClass}>
+                <h4 className={sectionHeader}>
                   <Paintbrush className="h-3 w-3" />
                   蒙版
                 </h4>
@@ -361,8 +400,9 @@ export default function DesignerToolbar({
             )}
           </div>
 
-          {/* Bottom: History - always visible */}
-          <div className="shrink-0 border-t border-border/30 p-3">
+          {/* Bottom: History */}
+          <div className="shrink-0 p-3">
+            <Separator className="mb-3" />
             <button
               type="button"
               onClick={onHistoryToggle}
@@ -385,14 +425,18 @@ export default function DesignerToolbar({
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => onModelChange(p.id)}
+                  disabled={!p.enabled}
+                  onClick={() => p.enabled && onModelChange(p.id)}
                   className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                    selectedProviderId === p.id
-                      ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                      : 'bg-muted/30 text-muted-foreground'
+                    !p.enabled
+                      ? 'cursor-not-allowed opacity-40'
+                      : selectedProviderId === p.id
+                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                        : 'bg-muted/30 text-muted-foreground'
                   }`}
                 >
                   {p.name}
+                  {!p.enabled && <Lock className="ml-1 inline h-2.5 w-2.5" />}
                 </button>
               ))}
             </div>

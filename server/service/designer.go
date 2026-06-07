@@ -510,6 +510,7 @@ type DesignerProviderInfo struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	Credits  int    `json:"credits"`
+	Enabled  bool   `json:"enabled"`
 }
 
 func (s *DesignerService) GetProviders() []DesignerProviderInfo {
@@ -518,7 +519,7 @@ func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 	}
 	var providers []DesignerProviderInfo
 	for id, cfg := range s.imageCfg.Designer {
-		if cfg == nil || !cfg.IsEnabled() {
+		if cfg == nil {
 			continue
 		}
 		name := cfg.Alias
@@ -531,6 +532,7 @@ func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 			Provider: cfg.Provider,
 			Model:    cfg.Model,
 			Credits:  cfg.Credits,
+			Enabled:  cfg.IsEnabled(),
 		})
 	}
 	return providers

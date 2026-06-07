@@ -64,9 +64,9 @@ export default function DesignerPage() {
 
   const providerList: DesignerProvider[] = providers ?? []
 
-  // Auto-select first provider if none selected or current selection is unavailable
-  const activeProvider = providerList.find((p) => p.id === selectedProviderId)
-  const effectiveProvider = activeProvider ?? providerList[0]
+  // Auto-select first enabled provider if none selected or current selection is unavailable/disabled
+  const activeProvider = providerList.find((p) => p.id === selectedProviderId && p.enabled)
+  const effectiveProvider = activeProvider ?? providerList.find((p) => p.enabled)
 
   function stopPolling() {
     if (pollingRef.current) {

@@ -54,6 +54,7 @@ export interface DesignerProvider {
   provider: string
   model: string
   credits: number
+  enabled: boolean
   description?: string
 }
 
