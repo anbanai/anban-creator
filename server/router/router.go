@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,20 +75,17 @@ func NewRouter(svc *Services) *fiber.App {
 	// Request ID: inject X-Request-ID header into context.
 	app.Use(requestid.New())
 
-	// CORS: configurable allowed origins. Defaults to localhost-only when empty.
-	var corsConfig cors.Config
-	if len(svc.Config.CORS.AllowedOrigins) > 0 {
-		corsConfig = cors.Config{
-			AllowOrigins: svc.Config.CORS.AllowedOrigins,
-		}
-	} else {
-		// Development default: dynamically allow any localhost origin.
-		corsConfig = cors.Config{
-			AllowOriginsFunc: func(origin string) bool {
-				return strings.HasPrefix(origin, "http://localhost") ||
-					strings.HasPrefix(origin, "http://127.0.0.1")
-			},
-		}
+	// CORS: configurable allowed origins. Always includes localhost for local development.
+	corsConfig := cors.Config{
+		AllowOriginsFunc: func(origin string) bool {
+			if strings.HasPrefix(origin, "http://localhost") ||
+				strings.HasPrefix(origin, "http://127.0.0.1") {
+				return true
+			}
+			return slices.Contains(svc.Config.CORS.AllowedOrigins, origin)
+			return false
+		},
+		AllowCredentials: true,
 	}
 	app.Use(cors.New(corsConfig))
 
