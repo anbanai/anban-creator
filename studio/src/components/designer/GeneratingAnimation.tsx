@@ -136,8 +136,8 @@ export default function GeneratingAnimation() {
         const n2 = noise(nx * 5 - t * 0.25, ny * 5 + t * 0.35) * 0.5
         const n3 = noise(nx * 8 + t * 0.15, ny * 8 - t * 0.2) * 0.25
 
-        // Combined noise [-1, 1] → [0, 1]
-        const v = (n1 + n2 + n3) * 0.4 + 0.5
+        // Combined noise → clamped [0, 1] for palette mapping
+        const v = Math.max(0, Math.min(1, (n1 + n2 + n3) * 0.4 + 0.5))
 
         // Map to palette with smooth interpolation
         const palIdx = v * (PALETTE.length - 1)
