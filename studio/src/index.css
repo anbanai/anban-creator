@@ -185,3 +185,21 @@
 @utility animate-slide-in-right {
     animation: slide-in-right 0.15s ease-out;
 }
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+@keyframes scale-in {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+@utility animate-shimmer {
+    animation: shimmer 2s linear infinite;
+}
+
+@utility animate-scale-in {
+    animation: scale-in 0.2s ease-out;
+}

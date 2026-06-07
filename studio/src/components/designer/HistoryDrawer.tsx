@@ -48,21 +48,23 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, selectedId
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-80 p-0 sm:max-w-md">
-        <SheetHeader className="px-4 pt-4">
-          <SheetTitle>历史记录</SheetTitle>
+      <SheetContent side="right" className="w-80 border-l-border/30 bg-popover/95 p-0 backdrop-blur-xl sm:max-w-md">
+        <SheetHeader className="border-b border-border/30 px-4 pt-4 pb-2">
+          <SheetTitle className="text-sm font-medium">历史记录</SheetTitle>
         </SheetHeader>
         <ScrollArea className="flex-1">
           {isLoading ? (
-            <div className="space-y-2 p-4">
+            <div className="space-y-2 p-3">
               {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-14 w-full rounded-md" />
+                <Skeleton key={i} className="h-16 w-full rounded-xl" />
               ))}
             </div>
           ) : items.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-              <Clock className="h-5 w-5 text-muted-foreground" />
-              <p className="text-xs text-muted-foreground">暂无历史记录</p>
+            <div className="flex flex-col items-center gap-3 px-4 py-16 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted/30">
+                <Clock className="h-4 w-4 text-muted-foreground/40" />
+              </div>
+              <p className="text-xs text-muted-foreground/60">暂无历史记录</p>
             </div>
           ) : (
             <div className="space-y-1 p-3">
@@ -77,24 +79,24 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, selectedId
                       onSelect(gen)
                       onOpenChange(false)
                     }}
-                    className={`flex w-full items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                    className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-all duration-200 ${
                       isSelected
-                        ? 'bg-primary/10 text-foreground'
+                        ? 'bg-primary/10 text-foreground ring-1 ring-primary/20'
                         : 'text-foreground hover:bg-accent/50'
                     }`}
                   >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50">
                       {thumbnail ? (
                         <img src={thumbnail} alt="" className="h-full w-full object-cover" />
                       ) : (
-                        <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                        <ImageIcon className="h-4 w-4 text-muted-foreground/40" />
                       )}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="line-clamp-2 text-xs leading-relaxed text-foreground">
+                    <div className="min-w-0 flex-1 pt-0.5">
+                      <p className="line-clamp-2 text-xs leading-relaxed text-foreground/90">
                         {gen.prompt}
                       </p>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      <p className="mt-1 text-[10px] text-muted-foreground/60">
                         {formatTime(gen.created_at)}
                       </p>
                     </div>

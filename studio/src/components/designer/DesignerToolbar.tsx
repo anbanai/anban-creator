@@ -79,7 +79,6 @@ export default function DesignerToolbar({
     e.target.value = ''
   }
 
-  // Filter tools by capabilities
   const visibleTools = TOOLS.filter((tool) => {
     if (!caps) return tool.capability === null
     if (tool.capability === null) return true
@@ -101,10 +100,10 @@ export default function DesignerToolbar({
                   key={opt.value}
                   type="button"
                   onClick={() => update({ size: opt.value })}
-                  className={`flex flex-col items-center gap-0.5 rounded-md border px-2 py-1.5 text-xs transition-all ${
+                  className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
                     settings.size === opt.value
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                      ? 'bg-primary/10 text-primary ring-1 ring-primary/30'
+                      : 'bg-muted/30 text-muted-foreground hover:bg-accent/50 hover:text-foreground'
                   }`}
                 >
                   <span className="font-medium">{opt.label}</span>
@@ -217,10 +216,9 @@ export default function DesignerToolbar({
   return (
     <>
       {/* Desktop: vertical sidebar */}
-      <aside className="hidden md:flex shrink-0 flex-col border-r border-border bg-card">
+      <aside className="hidden shrink-0 flex-col md:flex">
         <div className="flex flex-1">
-          {/* Icon column */}
-          <div className="flex w-14 flex-col items-center gap-1 py-2">
+          <div className="flex w-12 flex-col items-center gap-0.5 border-r border-border/30 bg-card/60 py-3 backdrop-blur-sm">
             {visibleTools.map((tool) => (
               <Tooltip key={tool.id}>
                 <TooltipTrigger
@@ -228,10 +226,10 @@ export default function DesignerToolbar({
                     <button
                       type="button"
                       onClick={() => setActiveTool(activeTool === tool.id ? null : tool.id)}
-                      className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200 ${
                         activeTool === tool.id
-                          ? 'bg-primary/10 text-primary'
-                          : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                          ? 'bg-primary/10 text-primary shadow-sm shadow-primary/20'
+                          : 'text-muted-foreground/60 hover:bg-accent/50 hover:text-foreground'
                       }`}
                     />
                   }
@@ -242,7 +240,7 @@ export default function DesignerToolbar({
               </Tooltip>
             ))}
 
-            <Separator className="my-2 w-8" />
+            <Separator className="my-1.5 w-6 opacity-30" />
 
             <Tooltip>
               <TooltipTrigger
@@ -250,7 +248,7 @@ export default function DesignerToolbar({
                   <button
                     type="button"
                     onClick={onHistoryToggle}
-                    className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground/60 transition-all duration-200 hover:bg-accent/50 hover:text-foreground"
                   />
                 }
               >
@@ -260,9 +258,8 @@ export default function DesignerToolbar({
             </Tooltip>
           </div>
 
-          {/* Expanded panel */}
           {activeTool && (
-            <div className="w-56 border-l border-border p-3 overflow-y-auto">
+            <div className="w-52 animate-fade-in overflow-y-auto border-l border-border/30 bg-card/70 p-3 shadow-lg backdrop-blur-md">
               {renderToolPanel(activeTool)}
             </div>
           )}
@@ -270,7 +267,7 @@ export default function DesignerToolbar({
       </aside>
 
       {/* Mobile: horizontal strip */}
-      <div className="flex md:hidden shrink-0 items-center gap-1 border-t border-border bg-card px-2 py-1.5">
+      <div className="flex shrink-0 items-center gap-0.5 border-t border-border/30 bg-card/60 px-2 py-1.5 backdrop-blur-sm md:hidden">
         {visibleTools.map((tool) => (
           <Tooltip key={tool.id}>
             <TooltipTrigger
@@ -278,10 +275,10 @@ export default function DesignerToolbar({
                 <button
                   type="button"
                   onClick={() => setActiveTool(activeTool === tool.id ? null : tool.id)}
-                  className={`flex h-9 w-9 items-center justify-center rounded-md transition-colors ${
+                  className={`flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 ${
                     activeTool === tool.id
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                      ? 'bg-primary/10 text-primary shadow-sm shadow-primary/20'
+                      : 'text-muted-foreground/60 hover:bg-accent/50 hover:text-foreground'
                   }`}
                 />
               }
@@ -292,7 +289,7 @@ export default function DesignerToolbar({
           </Tooltip>
         ))}
 
-        <Separator orientation="vertical" className="mx-1 h-6" />
+        <Separator orientation="vertical" className="mx-1 h-6 opacity-30" />
 
         <Tooltip>
           <TooltipTrigger
@@ -300,7 +297,7 @@ export default function DesignerToolbar({
               <button
                 type="button"
                 onClick={onHistoryToggle}
-                className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground/60 transition-all duration-200 hover:bg-accent/50 hover:text-foreground"
               />
             }
           >
@@ -309,7 +306,6 @@ export default function DesignerToolbar({
           <TooltipContent side="top">历史记录</TooltipContent>
         </Tooltip>
 
-        {/* Mobile expanded panel */}
         {activeTool && (
           <div className="ml-2 flex-1 overflow-x-auto">
             <div className="min-w-max">

@@ -39,26 +39,25 @@ export default function DesignerTopBar({
   }
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card px-4">
+    <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border/50 bg-card/80 px-4 backdrop-blur-md">
       <div className="flex items-center gap-2">
-        <Palette className="h-4 w-4 text-primary" />
-        <span className="text-sm font-medium text-foreground">设计师</span>
+        <Palette className="h-3.5 w-3.5 text-muted-foreground/60" />
+        <span className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground/50">Designer</span>
       </div>
 
-      {/* Model selector popover */}
       <Popover open={modelOpen} onOpenChange={setModelOpen}>
         <PopoverTrigger
           render={
             <button
               type="button"
-              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-foreground/80 transition-all hover:bg-accent/50 hover:text-foreground"
             />
           }
         >
           {selected?.name ?? '选择模型'}
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          <ChevronDown className="h-3 w-3 text-muted-foreground/60" />
         </PopoverTrigger>
-        <PopoverContent align="start" side="bottom" className="w-80">
+        <PopoverContent align="start" side="bottom" className="w-80 border-border/50 shadow-xl backdrop-blur-lg">
           <div className="space-y-1">
             {providers.map((p) => {
               const isActive = selectedProviderId === p.id
@@ -71,10 +70,10 @@ export default function DesignerTopBar({
                     onModelChange(p.id)
                     setModelOpen(false)
                   }}
-                  className={`flex w-full flex-col items-start gap-1 rounded-md px-3 py-2 text-left transition-colors ${
+                  className={`flex w-full flex-col items-start gap-1 rounded-md px-3 py-2.5 text-left transition-all ${
                     isActive
-                      ? 'bg-primary/10 text-foreground'
-                      : 'text-foreground hover:bg-accent'
+                      ? 'border-l-2 border-l-primary bg-primary/5 text-foreground'
+                      : 'border-l-2 border-l-transparent text-foreground hover:bg-accent/50'
                   }`}
                 >
                   <div className="flex items-center gap-2">
@@ -99,14 +98,13 @@ export default function DesignerTopBar({
         </PopoverContent>
       </Popover>
 
-      {/* Quick settings on the right */}
       <div className="ml-auto flex items-center gap-2">
         {caps && caps.qualityLevels.length > 0 && (
           <Select
             value={settings.quality}
             onValueChange={(val: string | null) => update({ quality: val ?? '' })}
           >
-            <SelectTrigger className="h-8 w-24 text-xs">
+            <SelectTrigger className="h-7 w-24 border-transparent bg-transparent text-[11px] text-muted-foreground hover:bg-accent/50">
               <SelectValue placeholder="质量" />
             </SelectTrigger>
             <SelectContent>
@@ -124,7 +122,7 @@ export default function DesignerTopBar({
             value={settings.outputFormat}
             onValueChange={(val: string | null) => update({ outputFormat: val ?? '' })}
           >
-            <SelectTrigger className="h-8 w-20 text-xs">
+            <SelectTrigger className="h-7 w-20 border-transparent bg-transparent text-[11px] text-muted-foreground hover:bg-accent/50">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

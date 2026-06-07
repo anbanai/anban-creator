@@ -49,59 +49,71 @@ export default function DesignerPromptBar({
   const selected = providers.find((p) => p.id === selectedProviderId) ?? providers[0]
 
   return (
-    <div className="flex shrink-0 items-end gap-2 border-t border-border bg-card px-4 py-3">
-      {/* Model quick-select (only when multiple providers) */}
-      {providers.length > 1 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button variant="outline" size="sm" className="shrink-0 gap-1" />
-            }
-          >
-            {selected?.name ?? '模型'}
-            <ChevronDown className="h-3 w-3" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {providers.map((p) => (
-              <DropdownMenuItem
-                key={p.id}
-                onClick={() => onModelChange(p.id)}
-                className={selectedProviderId === p.id ? 'bg-primary/10' : ''}
+    <div className="shrink-0 bg-[oklch(0.11_0.005_60)] px-3 pb-4 pt-2 md:px-4">
+      <div className="mx-auto max-w-2xl rounded-2xl border border-white/10 bg-[oklch(0.16_0.01_60)]/90 p-2 shadow-xl shadow-black/20 backdrop-blur-xl">
+        <div className="flex items-end gap-2">
+          {providers.length > 1 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="ghost" size="sm" className="shrink-0 gap-1 text-xs text-muted-foreground hover:text-foreground" />
+                }
               >
-                {p.name}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+                {selected?.name ?? '模型'}
+                <ChevronDown className="h-3 w-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {providers.map((p) => (
+                  <DropdownMenuItem
+                    key={p.id}
+                    onClick={() => onModelChange(p.id)}
+                    className={selectedProviderId === p.id ? 'bg-primary/10' : ''}
+                  >
+                    {p.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
-      {/* Textarea */}
-      <textarea
-        ref={textareaRef}
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="描述你想要生成的图片... (Ctrl+Enter 发送)"
-        rows={1}
-        className="flex-1 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-      />
+          <textarea
+            ref={textareaRef}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="描述你想要生成的图片..."
+            rows={1}
+            className="min-h-[36px] flex-1 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/50"
+          />
 
-      {/* Send / Cancel */}
-      {isGenerating && onCancel ? (
-        <Button size="sm" variant="destructive" onClick={onCancel} className="shrink-0">
-          <X className="h-4 w-4" />
-          取消
-        </Button>
-      ) : (
-        <Button
-          size="sm"
-          onClick={handleSubmit}
-          disabled={!prompt.trim() || isGenerating}
-          className="shrink-0"
-        >
-          <Send className="h-4 w-4" />
-          生成
-        </Button>
+          {isGenerating && onCancel ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onCancel}
+              className="shrink-0 rounded-xl text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
+            >
+              <X className="h-3.5 w-3.5" />
+              取消
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              onClick={handleSubmit}
+              disabled={!prompt.trim() || isGenerating}
+              className="rounded-xl bg-primary px-4 font-medium shadow-md shadow-primary/20 transition-all hover:shadow-lg hover:shadow-primary/30 disabled:opacity-40"
+            >
+              <Send className="h-3.5 w-3.5" />
+              生成
+            </Button>
+          )}
+        </div>
+      </div>
+      {isGenerating && (
+        <div className="mx-auto mt-1.5 flex max-w-2xl items-center gap-2 px-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse-dot" />
+          <span className="text-[11px] text-white/40">正在生成...</span>
+        </div>
       )}
     </div>
   )

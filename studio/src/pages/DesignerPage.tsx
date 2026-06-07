@@ -211,7 +211,10 @@ export default function DesignerPage() {
 
         {/* Center: Canvas + PromptBar */}
         <div className="order-1 flex min-h-0 flex-1 flex-col">
-          <div className="flex-1 overflow-y-auto p-4">
+          <div
+            className="flex-1 overflow-y-auto bg-[oklch(0.11_0.005_60)] p-4 md:p-6"
+            style={{ backgroundImage: 'radial-gradient(circle, oklch(0.25 0.005 60 / 0.3) 1px, transparent 1px)', backgroundSize: '24px 24px' }}
+          >
             <DesignerCanvas
               images={currentImages}
               isGenerating={isGenerating}
