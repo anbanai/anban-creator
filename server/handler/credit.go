@@ -16,13 +16,14 @@ import (
 type CreditHandler struct {
 	service     *service.CreditService
 	cfg         *config.CreditsConfig
+	imageCfg    *config.ImageAPIConfig
 	adminAPIKey string
 	logger      *zerolog.Logger
 }
 
 // NewCreditHandler creates a new CreditHandler.
-func NewCreditHandler(svc *service.CreditService, cfg *config.CreditsConfig, adminAPIKey string, logger *zerolog.Logger) *CreditHandler {
-	return &CreditHandler{service: svc, cfg: cfg, adminAPIKey: adminAPIKey, logger: logger}
+func NewCreditHandler(svc *service.CreditService, cfg *config.CreditsConfig, imageCfg *config.ImageAPIConfig, adminAPIKey string, logger *zerolog.Logger) *CreditHandler {
+	return &CreditHandler{service: svc, cfg: cfg, imageCfg: imageCfg, adminAPIKey: adminAPIKey, logger: logger}
 }
 
 // Balance handles GET /api/v1/credits/balance.
@@ -152,9 +153,34 @@ func (h *CreditHandler) AdminGrant(c fiber.Ctx) error {
 
 // Pricing handles GET /api/v1/credits/pricing.
 func (h *CreditHandler) Pricing(c fiber.Ctx) error {
+	modelCosts := h.service.ModelCosts()
+
+	// Synthesize image_gen pricing from ImageAPI config entries.
+	imageGenCosts := map[string]int{}
+	if h.imageCfg != nil {
+		if h.imageCfg.Cover != nil && h.imageCfg.Cover.Credits > 0 {
+			imageGenCosts[h.imageCfg.Cover.Provider+"/"+h.imageCfg.Cover.Model] = h.imageCfg.Cover.Credits
+		}
+		if h.imageCfg.Content != nil && h.imageCfg.Content.Credits > 0 {
+			key := h.imageCfg.Content.Provider + "/" + h.imageCfg.Content.Model
+			imageGenCosts[key] = h.imageCfg.Content.Credits
+		}
+		for _, d := range h.imageCfg.Designer {
+			if d != nil && d.Credits > 0 {
+				imageGenCosts[d.Provider+"/"+d.Model] = d.Credits
+			}
+		}
+	}
+	if len(imageGenCosts) > 0 {
+		if modelCosts == nil {
+			modelCosts = map[string]map[string]int{}
+		}
+		modelCosts["image_gen"] = imageGenCosts
+	}
+
 	return Success(c, fiber.Map{
 		"task_costs":  h.service.TaskCosts(),
-		"model_costs": h.service.ModelCosts(),
+		"model_costs": modelCosts,
 		"income": fiber.Map{
 			"daily_sign_in":  h.cfg.DailySignIn,
 			"register_bonus": h.cfg.RegisterBonus,

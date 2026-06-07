@@ -23,31 +23,28 @@ import (
 )
 
 type DesignerService struct {
-	db         *gorm.DB
-	imageSvc   *ImageService
-	creditSvc  *CreditService
-	creditsCfg *srvconfig.CreditsConfig
-	imageCfg   *srvconfig.ImageAPIConfig
-	storage    storage.Provider
-	logger     *zerolog.Logger
+	db        *gorm.DB
+	imageSvc  *ImageService
+	creditSvc *CreditService
+	imageCfg  *srvconfig.ImageAPIConfig
+	storage   storage.Provider
+	logger    *zerolog.Logger
 }
 
 func NewDesignerService(
 	db *gorm.DB,
 	imageSvc *ImageService,
 	creditSvc *CreditService,
-	creditsCfg *srvconfig.CreditsConfig,
 	imageCfg *srvconfig.ImageAPIConfig,
 	store storage.Provider,
 	logger *zerolog.Logger,
 ) *DesignerService {
 	return &DesignerService{
-		db:         db,
-		imageSvc:   imageSvc,
-		creditSvc:  creditSvc,
-		creditsCfg: creditsCfg,
-		imageCfg:   imageCfg,
-		storage:    store,
+		db:        db,
+		imageSvc:  imageSvc,
+		creditSvc: creditSvc,
+		imageCfg:  imageCfg,
+		storage:   store,
 		logger:     logger,
 	}
 }
@@ -107,12 +104,10 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		}
 	}
 
-	// Billing: look up per-image cost from config and deduct before creating record.
+	// Billing: look up per-image cost from model config.
 	var totalCost int
-	if s.creditsCfg != nil {
-		if unitCost, ok := s.creditsCfg.ModelCost(model.CreditTypeImageGen, provider, modelName); ok && unitCost > 0 {
-			totalCost = unitCost * req.N
-		}
+	if unitCost := s.resolveCredits(provider, modelName); unitCost > 0 {
+		totalCost = unitCost * req.N
 	}
 
 	genID := uuid.New().String()
@@ -510,10 +505,11 @@ func (s *DesignerService) updateGenerationStatus(genID, status, errMsg string) {
 }
 
 type DesignerProviderInfo struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Provider    string `json:"provider"`
-	Model       string `json:"model"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Credits  int    `json:"credits"`
 }
 
 func (s *DesignerService) GetProviders() []DesignerProviderInfo {
@@ -530,14 +526,27 @@ func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 			name = strings.ToUpper(id[:1]) + id[1:]
 		}
 		providers = append(providers, DesignerProviderInfo{
-			ID:          id,
-			Name:        name,
-			Provider:    cfg.Provider,
-			Model:       cfg.Model,
-
+			ID:       id,
+			Name:     name,
+			Provider: cfg.Provider,
+			Model:    cfg.Model,
+			Credits:  cfg.Credits,
 		})
 	}
 	return providers
+}
+
+// resolveCredits returns the per-image credit cost for the given provider+model combination.
+func (s *DesignerService) resolveCredits(provider, modelName string) int {
+	if s.imageCfg == nil || s.imageCfg.Designer == nil {
+		return 0
+	}
+	for _, cfg := range s.imageCfg.Designer {
+		if cfg != nil && cfg.Provider == provider && cfg.Model == modelName {
+			return cfg.Credits
+		}
+	}
+	return 0
 }
 
 // findDesignerConfig finds the first Designer entry matching the given provider name.

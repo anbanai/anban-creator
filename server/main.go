@@ -339,7 +339,7 @@ func main() {
 		}
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
-			creditHandler = handler.NewCreditHandler(creditSvc, &cfg.Credits, cfg.Credits.AdminAPIKey, log)
+			creditHandler = handler.NewCreditHandler(creditSvc, &cfg.Credits, &cfg.ImageAPI, cfg.Credits.AdminAPIKey, log)
 		}
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
@@ -380,7 +380,7 @@ func main() {
 			}
 		}
 		if mysqlDB != nil && imageSvc != nil {
-			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, &cfg.Credits, &cfg.ImageAPI, store, log)
+			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, &cfg.ImageAPI, store, log)
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
 		}
 		if repo != nil {

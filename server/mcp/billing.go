@@ -52,12 +52,43 @@ func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, coun
 	if isByok(ctx, userID, opType) {
 		return nil
 	}
-	cost, ok := billSvc.config.Credits.ModelCost(opType, provider, mdl)
-	if !ok {
-		return nil // no pricing configured = free
+
+	var cost int
+	if opType == model.CreditTypeImageGen {
+		cost = imageGenCredits(provider, mdl)
+	} else {
+		var ok bool
+		cost, ok = billSvc.config.Credits.ModelCost(opType, provider, mdl)
+		if !ok {
+			return nil // no pricing configured = free
+		}
 	}
+	if cost == 0 {
+		return nil
+	}
+
 	_, err := billSvc.creditSvc.DeductForOperation(ctx, userID, opType, cost*count)
 	return err
+}
+
+// imageGenCredits looks up per-image credit cost from ImageAPI configs.
+func imageGenCredits(provider, mdl string) int {
+	if billSvc == nil || billSvc.config == nil {
+		return 0
+	}
+	cfg := billSvc.config.ImageAPI
+	if cfg.Cover != nil && cfg.Cover.Provider == provider && cfg.Cover.Model == mdl {
+		return cfg.Cover.Credits
+	}
+	if cfg.Content != nil && cfg.Content.Provider == provider && cfg.Content.Model == mdl {
+		return cfg.Content.Credits
+	}
+	for _, d := range cfg.Designer {
+		if d != nil && d.Provider == provider && d.Model == mdl {
+			return d.Credits
+		}
+	}
+	return 0
 }
 
 // isByok checks if the user has their own model configured (BYOK).

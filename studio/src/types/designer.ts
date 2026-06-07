@@ -19,7 +19,7 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
     inpainting: true,
     qualityLevels: ['auto', 'low', 'medium', 'high'],
     outputFormats: ['png', 'jpeg', 'webp'],
-    flexibleSize: true,
+    flexibleSize: false,
   },
   gemini: {
     maxRefImages: 10,
@@ -39,7 +39,7 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
     inpainting: false,
     qualityLevels: [],
     outputFormats: ['png', 'jpeg'],
-    flexibleSize: false,
+    flexibleSize: true,
   },
 }
 
@@ -53,6 +53,7 @@ export interface DesignerProvider {
   name: string
   provider: string
   model: string
+  credits: number
   description?: string
 }
 

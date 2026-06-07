@@ -66,6 +66,7 @@ type ImageAPI struct {
 	TimeoutSec int               `json:"timeout_sec,omitempty" yaml:"timeout_sec,omitempty"`
 	ResponseFormat string            `json:"response_format,omitempty" yaml:"response_format,omitempty"` // "b64_json" | "url" | ""
 	Volcengine     *VolcengineConfig `json:"volcengine,omitempty" yaml:"volcengine,omitempty"`
+	Credits        int               `json:"credits,omitempty" yaml:"credits,omitempty"`
 }
 
 // IsEnabled returns true if the config is explicitly enabled or not set (default-on).
