@@ -64,7 +64,8 @@ type ImageAPI struct {
 	MaxWidth   int               `json:"max_width,omitempty" yaml:"max_width,omitempty"`
 	MaxSizeMB  int               `json:"max_size_mb,omitempty" yaml:"max_size_mb,omitempty"`
 	TimeoutSec int               `json:"timeout_sec,omitempty" yaml:"timeout_sec,omitempty"`
-	Volcengine *VolcengineConfig `json:"volcengine,omitempty" yaml:"volcengine,omitempty"`
+	ResponseFormat string            `json:"response_format,omitempty" yaml:"response_format,omitempty"` // "b64_json" | "url" | ""
+	Volcengine     *VolcengineConfig `json:"volcengine,omitempty" yaml:"volcengine,omitempty"`
 }
 
 // IsEnabled returns true if the config is explicitly enabled or not set (default-on).
@@ -339,6 +340,9 @@ func mergeImageAPI(base, fallback ImageAPI) ImageAPI {
 	}
 	if result.TimeoutSec == 0 {
 		result.TimeoutSec = fallback.TimeoutSec
+	}
+	if result.ResponseFormat == "" {
+		result.ResponseFormat = fallback.ResponseFormat
 	}
 	return result
 }

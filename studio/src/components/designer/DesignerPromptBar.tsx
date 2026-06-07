@@ -1,25 +1,17 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, X, ChevronDown } from 'lucide-react'
+import { Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu'
-import type { DesignerProvider } from '@/types/designer'
 
 interface DesignerPromptBarProps {
   onSubmit: (prompt: string) => void
   isGenerating: boolean
   onCancel?: () => void
-  providers: DesignerProvider[]
-  selectedProviderId: string
-  onModelChange: (id: string) => void
 }
 
 export default function DesignerPromptBar({
   onSubmit,
   isGenerating,
   onCancel,
-  providers,
-  selectedProviderId,
-  onModelChange,
 }: DesignerPromptBarProps) {
   const [prompt, setPrompt] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -46,36 +38,10 @@ export default function DesignerPromptBar({
     }
   }
 
-  const selected = providers.find((p) => p.id === selectedProviderId) ?? providers[0]
-
   return (
-    <div className="shrink-0 bg-muted/30 px-3 pb-4 pt-2 md:px-4">
-      <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-card p-2 shadow-xl shadow-black/10">
+    <div className="relative z-10 shrink-0 px-3 pb-3 pt-2 md:px-4">
+      <div className="mx-auto max-w-2xl rounded-2xl border border-white/[0.06] bg-background/60 p-2 shadow-[0_4px_24px_-8px_rgba(0,0,0,0.1)] backdrop-blur-xl dark:border-white/[0.04] dark:bg-background/50">
         <div className="flex items-end gap-2">
-          {providers.length > 1 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="sm" className="shrink-0 gap-1 text-xs text-muted-foreground hover:text-foreground" />
-                }
-              >
-                {selected?.name ?? '模型'}
-                <ChevronDown className="h-3 w-3" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                {providers.map((p) => (
-                  <DropdownMenuItem
-                    key={p.id}
-                    onClick={() => onModelChange(p.id)}
-                    className={selectedProviderId === p.id ? 'bg-primary/10' : ''}
-                  >
-                    {p.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
           <textarea
             ref={textareaRef}
             value={prompt}

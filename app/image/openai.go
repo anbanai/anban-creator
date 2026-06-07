@@ -21,10 +21,11 @@ import (
 
 // OpenAIProvider OpenAI 图片生成服务提供者
 type OpenAIProvider struct {
-	client    openai.Client
-	model     string
-	size      string // DALL-E pixel size for API calls
-	sizeRatio string // ratio string for GenerateResult.Size
+	client         openai.Client
+	model          string
+	size           string // DALL-E pixel size for API calls
+	sizeRatio      string // ratio string for GenerateResult.Size
+	responseFormat string // "b64_json" | "url" | "" (auto → b64_json)
 }
 
 // NewOpenAIProvider 创建 OpenAI Provider
@@ -56,10 +57,11 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 	client := openai.NewClient(opts...)
 
 	return &OpenAIProvider{
-		client:    client,
-		model:     model,
-		size:      size,
-		sizeRatio: ratio,
+		client:         client,
+		model:          model,
+		size:           size,
+		sizeRatio:      ratio,
+		responseFormat: apiCfg.ResponseFormat,
 	}, nil
 }
 
@@ -195,11 +197,17 @@ func (p *OpenAIProvider) generateStandard(ctx context.Context, prompt string, op
 	}
 
 	params := openai.ImageGenerateParams{
-		Prompt:         prompt,
-		Model:          openai.ImageModel(p.model),
-		N:              param.NewOpt(n),
-		Size:           openai.ImageGenerateParamsSize(size),
-		ResponseFormat: openai.ImageGenerateParamsResponseFormatB64JSON,
+		Prompt: prompt,
+		Model:  openai.ImageModel(p.model),
+		N:      param.NewOpt(n),
+		Size:   openai.ImageGenerateParamsSize(size),
+	}
+
+	switch p.responseFormat {
+	case "url":
+		params.ResponseFormat = openai.ImageGenerateParamsResponseFormatURL
+	default:
+		params.ResponseFormat = openai.ImageGenerateParamsResponseFormatB64JSON
 	}
 
 	if opts.Quality != "" {

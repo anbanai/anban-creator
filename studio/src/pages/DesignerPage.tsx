@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import DesignerTopBar from '@/components/designer/DesignerTopBar'
 import DesignerToolbar from '@/components/designer/DesignerToolbar'
 import DesignerCanvas from '@/components/designer/DesignerCanvas'
 import DesignerPromptBar from '@/components/designer/DesignerPromptBar'
@@ -185,51 +184,44 @@ export default function DesignerPage() {
   }
 
   return (
-    // Full-bleed: negate AppLayout padding (px-4 py-6 md:px-8 md:py-8)
-    <div className="-mx-4 -my-6 flex flex-col overflow-hidden md:-mx-8 md:-my-8" style={{ height: '100dvh' }}>
-      {/* Top bar */}
-      <DesignerTopBar
+    // Full-bleed: negate AppLayout padding
+    <div className="-mx-4 -my-6 flex overflow-hidden bg-muted/20 md:-mx-8 md:-my-8" style={{ height: '100dvh' }}>
+      {/* Sidebar: full-height floating panel */}
+      <DesignerToolbar
         providers={providerList}
         selectedProviderId={effectiveProvider?.id ?? ''}
         onModelChange={handleModelChange}
+        provider={effectiveProvider?.provider ?? ''}
+        settings={settings}
+        onSettingsChange={setSettings}
+        onHistoryToggle={() => setHistoryOpen(true)}
       />
 
-      {/* Main content: flex-col on mobile, flex-row on desktop */}
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        {/* Toolbar: order-2 on mobile (bottom), order-first on desktop (left) */}
-        <div className="order-2 md:order-first">
-          <DesignerToolbar
-            provider={effectiveProvider?.provider ?? ''}
-            settings={settings}
-            onSettingsChange={setSettings}
-            onHistoryToggle={() => setHistoryOpen(true)}
-          />
+      {/* Main area: canvas + prompt */}
+      <div className="relative flex min-h-0 flex-1 flex-col p-3 pl-0">
+        {/* Ambient gradient blobs */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -top-32 right-1/4 h-80 w-80 rounded-full bg-primary/[0.03] blur-3xl dark:bg-primary/[0.04]" />
+          <div className="absolute -bottom-32 right-1/3 h-64 w-64 rounded-full bg-chart-2/[0.03] blur-3xl dark:bg-chart-2/[0.04]" />
         </div>
-
-        {/* Center: Canvas + PromptBar */}
-        <div className="order-1 flex min-h-0 flex-1 flex-col">
-          <div
-            className="flex-1 overflow-y-auto bg-muted/30 p-4 md:p-6"
-            style={{ backgroundImage: 'radial-gradient(circle, var(--color-border) 0.5px, transparent 0.5px)', backgroundSize: '24px 24px' }}
-          >
-            <DesignerCanvas
-              images={currentImages}
-              isGenerating={isGenerating}
-              onImageClick={(img) => setPreviewImage(img.url)}
-            />
-          </div>
-          <DesignerPromptBar
-            onSubmit={handleGenerate}
+        <div
+          className="relative flex-1 overflow-y-auto rounded-2xl border border-border/30 bg-background/40 p-4 backdrop-blur-sm md:p-6"
+          style={{ backgroundImage: 'radial-gradient(circle, var(--color-border) 0.4px, transparent 0.4px)', backgroundSize: '20px 20px' }}
+        >
+          <DesignerCanvas
+            images={currentImages}
             isGenerating={isGenerating}
-            onCancel={handleCancel}
-            providers={providerList}
-            selectedProviderId={effectiveProvider?.id ?? ''}
-            onModelChange={handleModelChange}
+            onImageClick={(img) => setPreviewImage(img.url)}
           />
         </div>
+        <DesignerPromptBar
+          onSubmit={handleGenerate}
+          isGenerating={isGenerating}
+          onCancel={handleCancel}
+        />
       </div>
 
-      {/* History drawer (portal-based, no layout impact) */}
+      {/* History drawer */}
       <HistoryDrawer
         open={historyOpen}
         onOpenChange={setHistoryOpen}

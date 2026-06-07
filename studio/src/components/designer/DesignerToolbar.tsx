@@ -7,12 +7,13 @@ import {
   History,
   X,
   Upload,
+  Sparkles,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
+import { Badge } from '@/components/ui/badge'
 import { getModelCapabilities } from '@/types/designer'
-import type { DesignerSettings } from '@/types/designer'
+import type { DesignerSettings, DesignerProvider } from '@/types/designer'
 
 const SIZE_OPTIONS = [
   { value: '1:1', label: '1:1', desc: '方形' },
@@ -23,6 +24,9 @@ const SIZE_OPTIONS = [
 ]
 
 interface DesignerToolbarProps {
+  providers: DesignerProvider[]
+  selectedProviderId: string
+  onModelChange: (id: string) => void
   provider: string
   settings: DesignerSettings
   onSettingsChange: (settings: DesignerSettings) => void
@@ -30,6 +34,9 @@ interface DesignerToolbarProps {
 }
 
 export default function DesignerToolbar({
+  providers,
+  selectedProviderId,
+  onModelChange,
   provider,
   settings,
   onSettingsChange,
@@ -67,229 +74,311 @@ export default function DesignerToolbar({
   const showRefs = (caps?.maxRefImages ?? 0) > 0
   const showMask = caps?.inpainting
 
-  const sectionClass = 'space-y-2'
-  const headerClass = 'flex items-center gap-1.5 text-xs font-medium text-muted-foreground'
-
-  const sidebarContent = (
-    <>
-      {/* Size */}
-      <div className={sectionClass}>
-        <h4 className={headerClass}>
-          <Proportions className="h-3.5 w-3.5" />
-          尺寸
-        </h4>
-        <div className="grid grid-cols-3 gap-1.5">
-          {SIZE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => update({ size: opt.value })}
-              className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
-                settings.size === opt.value
-                  ? 'bg-primary/10 text-primary ring-1 ring-primary/30'
-                  : 'bg-muted/30 text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-              }`}
-            >
-              <span className="font-medium">{opt.label}</span>
-              <span className="text-[10px] opacity-70">{opt.desc}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Count */}
-      {showCount && (
-        <>
-          <div className={sectionClass}>
-            <h4 className={headerClass}>
-              <Layers className="h-3.5 w-3.5" />
-              数量
-            </h4>
-            <div className="flex items-center gap-3">
-              <Slider
-                value={[settings.n]}
-                onValueChange={(val) => update({ n: Array.isArray(val) ? val[0] : val })}
-                min={1}
-                max={caps!.maxBatch}
-                step={1}
-                className="flex-1"
-              />
-              <span className="w-6 text-center text-xs font-medium text-foreground">{settings.n}</span>
-            </div>
-          </div>
-          <Separator />
-        </>
-      )}
-
-      {/* Quality */}
-      {showQuality && (
-        <>
-          <div className={sectionClass}>
-            <h4 className={headerClass}>质量</h4>
-            <div className="flex flex-wrap gap-1">
-              {caps!.qualityLevels.map((level) => (
-                <button
-                  key={level}
-                  type="button"
-                  onClick={() => update({ quality: level })}
-                  className={`rounded-md px-2.5 py-1 text-xs transition-all duration-200 ${
-                    settings.quality === level
-                      ? 'bg-primary/10 text-primary ring-1 ring-primary/30'
-                      : 'bg-muted/30 text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                  }`}
-                >
-                  {level === 'auto' ? '自动' : level === 'low' ? '低' : level === 'medium' ? '中' : '高'}
-                </button>
-              ))}
-            </div>
-          </div>
-          <Separator />
-        </>
-      )}
-
-      {/* Output Format */}
-      {showFormat && (
-        <>
-          <div className={sectionClass}>
-            <h4 className={headerClass}>格式</h4>
-            <div className="flex flex-wrap gap-1">
-              {caps!.outputFormats.map((fmt) => (
-                <button
-                  key={fmt}
-                  type="button"
-                  onClick={() => update({ outputFormat: fmt })}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all duration-200 ${
-                    settings.outputFormat === fmt
-                      ? 'bg-primary/10 text-primary ring-1 ring-primary/30'
-                      : 'bg-muted/30 text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                  }`}
-                >
-                  {fmt.toUpperCase()}
-                </button>
-              ))}
-            </div>
-          </div>
-          <Separator />
-        </>
-      )}
-
-      {/* References */}
-      {showRefs && (
-        <>
-          <div className={sectionClass}>
-            <h4 className={headerClass}>
-              <ImagePlus className="h-3.5 w-3.5" />
-              参考图片 ({settings.referenceFiles.length}/{caps!.maxRefImages})
-            </h4>
-            <div className="space-y-1.5">
-              {settings.referenceFiles.map((file, i) => (
-                <div key={i} className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
-                  <span className="flex-1 truncate text-xs text-foreground">{file.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeRefFile(i)}
-                    className="shrink-0 text-muted-foreground hover:text-destructive"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              ))}
-              {settings.referenceFiles.length < caps!.maxRefImages && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => refInputRef.current?.click()}
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  上传参考图
-                </Button>
-              )}
-              <input
-                ref={refInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={handleRefFiles}
-              />
-            </div>
-          </div>
-          <Separator />
-        </>
-      )}
-
-      {/* Mask */}
-      {showMask && (
-        <>
-          <div className={sectionClass}>
-            <h4 className={headerClass}>
-              <Paintbrush className="h-3.5 w-3.5" />
-              蒙版（局部编辑）
-            </h4>
-            <div className="space-y-1.5">
-              {settings.maskFile ? (
-                <div className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
-                  <span className="flex-1 truncate text-xs text-foreground">{settings.maskFile.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => update({ maskFile: null })}
-                    className="shrink-0 text-muted-foreground hover:text-destructive"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => maskInputRef.current?.click()}
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  上传蒙版
-                </Button>
-              )}
-              <input
-                ref={maskInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleMaskFile}
-              />
-            </div>
-          </div>
-          <Separator />
-        </>
-      )}
-
-      {/* History */}
-      <button
-        type="button"
-        onClick={onHistoryToggle}
-        className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs text-muted-foreground transition-all duration-200 hover:bg-accent/50 hover:text-foreground"
-      >
-        <History className="h-4 w-4" />
-        历史记录
-      </button>
-    </>
-  )
+  const headerClass = 'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50'
 
   return (
     <>
-      {/* Desktop: scrollable sidebar */}
-      <aside className="hidden w-56 shrink-0 flex-col border-r border-border/50 bg-card/60 backdrop-blur-sm md:flex">
-        <div className="flex-1 overflow-y-auto p-3">
-          {sidebarContent}
-        </div>
-      </aside>
+      {/* Desktop: floating glass sidebar */}
+      <div className="hidden w-[280px] shrink-0 p-3 md:block">
+        <aside className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-background/50 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.05)] backdrop-blur-2xl dark:border-white/[0.04] dark:bg-background/40 dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]">
+          {/* Ambient glow from top */}
+          <div className="pointer-events-none absolute -top-16 left-1/2 h-32 w-4/5 -translate-x-1/2 rounded-full bg-primary/15 blur-3xl dark:bg-primary/8" />
+          {/* Top accent line */}
+          <div className="relative h-px shrink-0 bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
 
-      {/* Mobile: scrollable panel */}
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {/* Brand header */}
+            <div className="flex items-center gap-2.5 px-1">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-chart-2/20 shadow-[inset_0_0_8px_rgba(var(--color-primary),0.1)]">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+              </div>
+              <span className="bg-gradient-to-r from-primary via-chart-2 to-chart-4 bg-clip-text text-sm font-bold tracking-wide text-transparent">
+                Designer
+              </span>
+            </div>
+
+            {/* Model selector */}
+            <div className="space-y-1">
+              {providers.map((p) => {
+                const isActive = selectedProviderId === p.id
+                const pCaps = getModelCapabilities(p.provider)
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => onModelChange(p.id)}
+                    className={`group relative flex w-full flex-col items-start gap-0.5 rounded-xl px-3 py-2.5 text-left transition-all duration-300 ${
+                      isActive
+                        ? 'bg-primary/[0.07] ring-1 ring-primary/20 dark:bg-primary/[0.12]'
+                        : 'hover:bg-muted/40'
+                    }`}
+                    style={isActive ? { boxShadow: '0 0 20px -6px var(--color-primary)' } : undefined}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-medium">{p.name}</span>
+                      {isActive && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-glow-pulse" style={{ boxShadow: '0 0 6px var(--color-primary)' }} />
+                      )}
+                    </div>
+                    {p.description && (
+                      <span className="text-[11px] leading-tight text-muted-foreground/60">{p.description}</span>
+                    )}
+                    {pCaps && (
+                      <div className="mt-0.5 flex gap-1">
+                        {pCaps.batch && <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">批量</Badge>}
+                        {pCaps.inpainting && <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">局部编辑</Badge>}
+                      </div>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Gradient divider */}
+            <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+
+            {/* Size */}
+            <div className="space-y-2">
+              <h4 className={headerClass}>
+                <Proportions className="h-3 w-3" />
+                尺寸
+              </h4>
+              <div className="grid grid-cols-3 gap-1">
+                {SIZE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => update({ size: opt.value })}
+                    className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+                      settings.size === opt.value
+                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                        : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                    }`}
+                    style={settings.size === opt.value ? { boxShadow: '0 0 10px -4px var(--color-primary)' } : undefined}
+                  >
+                    <span className="font-medium">{opt.label}</span>
+                    <span className="text-[10px] opacity-60">{opt.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Count */}
+            {showCount && (
+              <div className="space-y-2">
+                <h4 className={headerClass}>
+                  <Layers className="h-3 w-3" />
+                  数量
+                </h4>
+                <div className="flex items-center gap-3">
+                  <Slider
+                    value={[settings.n]}
+                    onValueChange={(val) => update({ n: Array.isArray(val) ? val[0] : val })}
+                    min={1}
+                    max={caps!.maxBatch}
+                    step={1}
+                    className="flex-1"
+                  />
+                  <span className="w-6 text-center text-xs font-bold tabular-nums text-foreground">{settings.n}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Quality */}
+            {showQuality && (
+              <div className="space-y-2">
+                <h4 className={headerClass}>质量</h4>
+                <div className="flex flex-wrap gap-1">
+                  {caps!.qualityLevels.map((level) => (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => update({ quality: level })}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
+                        settings.quality === level
+                          ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                          : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                      }`}
+                    >
+                      {level === 'auto' ? '自动' : level === 'low' ? '低' : level === 'medium' ? '中' : '高'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Output Format */}
+            {showFormat && (
+              <div className="space-y-2">
+                <h4 className={headerClass}>格式</h4>
+                <div className="flex flex-wrap gap-1">
+                  {caps!.outputFormats.map((fmt) => (
+                    <button
+                      key={fmt}
+                      type="button"
+                      onClick={() => update({ outputFormat: fmt })}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
+                        settings.outputFormat === fmt
+                          ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                          : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                      }`}
+                    >
+                      {fmt.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* References */}
+            {showRefs && (
+              <div className="space-y-2">
+                <h4 className={headerClass}>
+                  <ImagePlus className="h-3 w-3" />
+                  参考图 ({settings.referenceFiles.length}/{caps!.maxRefImages})
+                </h4>
+                <div className="space-y-1.5">
+                  {settings.referenceFiles.map((file, i) => (
+                    <div key={i} className="flex items-center gap-1.5 rounded-lg bg-muted/20 px-2.5 py-1.5">
+                      <span className="flex-1 truncate text-[11px] text-foreground">{file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeRefFile(i)}
+                        className="shrink-0 text-muted-foreground/60 transition-colors hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {settings.referenceFiles.length < (caps?.maxRefImages ?? 0) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full border border-dashed border-border/50 text-[11px] text-muted-foreground hover:border-primary/30 hover:text-primary"
+                      onClick={() => refInputRef.current?.click()}
+                    >
+                      <Upload className="h-3 w-3" />
+                      上传参考图
+                    </Button>
+                  )}
+                  <input
+                    ref={refInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleRefFiles}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Mask */}
+            {showMask && (
+              <div className="space-y-2">
+                <h4 className={headerClass}>
+                  <Paintbrush className="h-3 w-3" />
+                  蒙版
+                </h4>
+                <div className="space-y-1.5">
+                  {settings.maskFile ? (
+                    <div className="flex items-center gap-1.5 rounded-lg bg-muted/20 px-2.5 py-1.5">
+                      <span className="flex-1 truncate text-[11px] text-foreground">{settings.maskFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => update({ maskFile: null })}
+                        className="shrink-0 text-muted-foreground/60 transition-colors hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full border border-dashed border-border/50 text-[11px] text-muted-foreground hover:border-primary/30 hover:text-primary"
+                      onClick={() => maskInputRef.current?.click()}
+                    >
+                      <Upload className="h-3 w-3" />
+                      上传蒙版
+                    </Button>
+                  )}
+                  <input
+                    ref={maskInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleMaskFile}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom: History - always visible */}
+          <div className="shrink-0 border-t border-border/30 p-3">
+            <button
+              type="button"
+              onClick={onHistoryToggle}
+              className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-xs text-muted-foreground/60 transition-all duration-200 hover:bg-muted/40 hover:text-foreground"
+            >
+              <History className="h-3.5 w-3.5" />
+              历史记录
+            </button>
+          </div>
+        </aside>
+      </div>
+
+      {/* Mobile: bottom scrollable panel */}
       <div className="flex max-h-48 shrink-0 overflow-y-auto border-t border-border/50 bg-card/60 px-3 py-2 backdrop-blur-sm md:hidden">
-        <div className="w-full">
-          {sidebarContent}
+        <div className="w-full space-y-2">
+          {/* Mobile model selector */}
+          {providers.length > 1 && (
+            <div className="flex gap-1 overflow-x-auto pb-1">
+              {providers.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onModelChange(p.id)}
+                  className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                    selectedProviderId === p.id
+                      ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                      : 'bg-muted/30 text-muted-foreground'
+                  }`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Mobile settings row */}
+          <div className="flex gap-1 overflow-x-auto">
+            {SIZE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => update({ size: opt.value })}
+                className={`shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all ${
+                  settings.size === opt.value
+                    ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                    : 'bg-muted/30 text-muted-foreground'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={onHistoryToggle}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <History className="h-3.5 w-3.5" />
+            历史记录
+          </button>
         </div>
       </div>
     </>

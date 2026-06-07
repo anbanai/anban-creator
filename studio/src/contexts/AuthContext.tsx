@@ -112,15 +112,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, user, isAuthenticated: prev.isAuthenticated, isBootstrapping: false }))
   }, [])
 
-  // Fetch current user on mount to ensure data is fresh
+  // Fetch current user on mount to ensure data is fresh.
+  // DEV mode: skip /auth/me to avoid blocking UI when backend is not running.
+  // The user data from localStorage is used directly; expired tokens will
+  // still be caught by API 401 responses on subsequent requests.
   useEffect(() => {
-    if (state.token) {
+    if (state.token && !import.meta.env.DEV) {
       api.auth.me().then((user) => {
         setUser(user)
       }).catch(() => {
         clearStoredState()
         setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
       })
+    } else if (import.meta.env.DEV && state.token) {
+      setState((prev) => ({ ...prev, isBootstrapping: false }))
     }
   }, [state.token, setUser])
 
