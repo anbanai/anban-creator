@@ -277,8 +277,8 @@ func (s *DesignerService) processResults(ctx context.Context, userID, genID stri
 			if err != nil {
 				s.logger.Error().Err(err).Str("path", localPath).Msg("failed to upload generated image to storage")
 			} else {
-				serveURL = uploadedURL
 				storageKey = k
+				serveURL = uploadedURL
 			}
 		}
 
@@ -435,6 +435,10 @@ func (s *DesignerService) GetHistory(ctx context.Context, userID, channelID stri
 		return nil, 0, err
 	}
 
+	for i := range generations {
+		s.signResultURLs(ctx, generations[i].Results)
+	}
+
 	return generations, total, nil
 }
 
@@ -444,6 +448,7 @@ func (s *DesignerService) GetGeneration(ctx context.Context, userID, generationI
 		Preload("Results").First(&gen).Error; err != nil {
 		return nil, err
 	}
+	s.signResultURLs(ctx, gen.Results)
 	return &gen, nil
 }
 
@@ -546,6 +551,24 @@ func (s *DesignerService) resolveFilePath(fileID string) (string, error) {
 		return "", fmt.Errorf("reference file not found: %s", fileID)
 	}
 	return matches[0], nil
+}
+
+// signResultURLs re-signs OSS URLs for private buckets so that expired
+// signed URLs get fresh signatures when results are fetched.
+func (s *DesignerService) signResultURLs(ctx context.Context, results []model.ImageGenerationResult) {
+	if s.storage == nil || s.storage.HasCustomDomain() {
+		return
+	}
+	for i := range results {
+		if results[i].FileID != "" {
+			signedURL, err := s.storage.DownloadURL(ctx, results[i].FileID, 3600)
+			if err == nil {
+				results[i].ImageURL = signedURL
+			} else {
+				s.logger.Warn().Err(err).Str("file_id", results[i].FileID).Msg("failed to sign designer result URL")
+			}
+		}
+	}
 }
 
 func truncate(s string, maxRunes int) string {
