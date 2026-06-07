@@ -44,6 +44,10 @@ func TestMapToDALLESize(t *testing.T) {
 		{"gpt-image-1 1:1 maps to 1024x1024", "1:1", "gpt-image-1", "1024x1024"},
 		// Pixel format not supported, defaults to 1024x1024
 		{"pixel format not supported", "2560x1440", "dall-e-3", "1024x1024"},
+		// GPT-image models pass through raw pixel sizes.
+		{"gpt-image-2 pixel passthrough 4K", "3840x2160", "gpt-image-2", "3840x2160"},
+		{"gpt-image-1 pixel passthrough HD", "1920x1080", "gpt-image-1", "1920x1080"},
+		{"chatgpt-image-latest pixel passthrough", "4096x4096", "chatgpt-image-latest", "4096x4096"},
 		// Unknown format defaults to 1024x1024
 		{"unknown format defaults", "badformat", "dall-e-3", "1024x1024"},
 	}

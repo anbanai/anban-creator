@@ -56,6 +56,36 @@ func TestParseSize(t *testing.T) {
 	}
 }
 
+func TestIsPixelSize(t *testing.T) {
+	tests := []struct {
+		name string
+		size string
+		want bool
+	}{
+		{"valid 4K", "3840x2160", true},
+		{"valid HD", "1920x1080", true},
+		{"valid square", "1024x1024", true},
+		{"valid small", "1x1", true},
+		{"empty string", "", false},
+		{"ratio format", "16:9", false},
+		{"ratio with tier", "3:4:2K", false},
+		{"single number", "1024", false},
+		{"trailing x", "3840x", false},
+		{"leading x", "x2160", false},
+		{"letters", "abc", false},
+		{"letters in number", "3840xabc", false},
+		{"garbage", "foobar", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsPixelSize(tt.size); got != tt.want {
+				t.Errorf("IsPixelSize(%q) = %v, want %v", tt.size, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseRatioNumbers(t *testing.T) {
 	tests := []struct {
 		ratio string
