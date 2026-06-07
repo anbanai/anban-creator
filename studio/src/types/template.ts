@@ -1,4 +1,4 @@
-export type TemplateType = 'poster' | 'seednote' | 'article'
+export type TemplateType = 'poster' | 'seednote' | 'rednote' | 'article' | 'xls'
 
 export interface Template {
   id: string

@@ -1,4 +1,4 @@
-export type PlanType = 'seednote' | 'article'
+export type PlanType = 'seednote' | 'rednote' | 'article' | 'xls'
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
 export interface Plan {
@@ -8,6 +8,7 @@ export interface Plan {
   description: string
   cron_expr: string
   prompt: string
+  topic_hint?: string
   status: PlanStatus
   next_run_at: string
   channel_id: string

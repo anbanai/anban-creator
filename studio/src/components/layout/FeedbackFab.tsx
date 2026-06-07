@@ -101,7 +101,8 @@ export default function FeedbackFab() {
               {/* Submit */}
               <Button
                 className="w-full"
-                disabled={!content.trim() || isSubmitting}
+                loading={isSubmitting}
+                disabled={!content.trim()}
                 onClick={handleSubmit}
               >
                 提交反馈

@@ -1,5 +1,3 @@
-import type { TaskStatus, PlanStatus, TaskType, CreditTransactionType } from '@/types'
-
 // --- Label Maps ---
 
 export const tierLabels: Record<string, string> = {
@@ -137,7 +135,7 @@ export const membershipComparisonGroups: MembershipComparisonGroup[] = [
   },
 ]
 
-export const taskStatusLabel: Record<TaskStatus, string> = {
+export const taskStatusLabel: Record<string, string> = {
   pending: '待执行',
   running: '运行中',
   completed: '已完成',
@@ -145,7 +143,7 @@ export const taskStatusLabel: Record<TaskStatus, string> = {
   cancelled: '已取消',
 }
 
-export const planStatusLabel: Record<PlanStatus, string> = {
+export const planStatusLabel: Record<string, string> = {
   active: '运行中',
   paused: '已暂停',
   completed: '已完成',
@@ -156,7 +154,7 @@ export const timelineItemTypeLabel: Record<string, string> = {
   plan: '计划',
 }
 
-export const transactionTypeLabel: Record<CreditTransactionType, string> = {
+export const transactionTypeLabel: Record<string, string> = {
   sign_in: '签到',
   task_deduct: '任务消耗',
   task_refund: '任务退还',
@@ -187,62 +185,53 @@ export const operationLabel: Record<string, string> = {
 export const taskTypeLabelCN: Record<string, string> = {
   article: '公众号',
   seednote: '种草笔记',
+  rednote: '小红书',
+  xls: '小绿书',
   viral_analysis: '爆文拆解',
 }
 
-// --- Single Source of Truth for Content Types ---
+// --- Content Types ---
 
-type TaskCreationType = TaskType | 'viral_analysis'
+export const contentTypeLabel: Record<string, string> = {
+  seednote: '种草笔记',
+  rednote: '小红书',
+  article: '公众号文章',
+  xls: '小绿书',
+}
 
-export const contentTypes = {
-  seednote: { label: '种草笔记', platform: '种草笔记' },
-  article: { label: '公众号', platform: '公众号' },
-} as const satisfies Record<TaskType, { label: string; platform: string }>
+export const contentTypeOptions = [
+  { value: 'rednote', label: '小红书' },
+  { value: 'article', label: '公众号文章' },
+  { value: 'xls', label: '小绿书' },
+]
 
-export const taskCreationTypes = {
-  seednote: { label: '创建种草笔记', platform: '种草笔记' },
-  article: { label: '创建公众号', platform: '公众号' },
-  viral_analysis: { label: '爆文拆解', platform: '种草笔记' },
-} as const satisfies Record<TaskCreationType, { label: string; platform: string }>
-
-export const contentTypeLabel = Object.fromEntries(
-  Object.entries(contentTypes).map(([key, val]) => [key, val.label]),
-) as Record<TaskType, string>
-
-export const taskCreationTypeLabel = Object.fromEntries(
-  Object.entries(taskCreationTypes).map(([key, val]) => [key, val.label]),
-) as Record<TaskCreationType, string>
-
-export const platformLabels = Object.fromEntries(
-  Object.entries(contentTypes).map(([key, val]) => [key, val.platform]),
-) as Record<TaskType, string>
+export const platformLabels: Record<string, string> = {
+  seednote: '种草笔记',
+  rednote: '小红书',
+  article: '公众号',
+  xls: '小绿书',
+}
 
 export const platformDefaultRatio: Record<string, string> = {
   article: '16:9',
   seednote: '3:4',
+  rednote: '3:4',
+  xls: '1:1',
 }
 
 export const platformRatioLabel: Record<string, string> = {
   article: '16:9（公众号默认）',
   seednote: '3:4（种草笔记默认）',
+  rednote: '3:4（小红书默认）',
+  xls: '1:1（小绿书默认）',
 }
 
-export const contentTypeOptions = Object.entries(contentTypes).map(([value, { label }]) => ({
-  value,
-  label,
-}))
-
-export const taskCreationTypeOptions = Object.entries(taskCreationTypes).map(([value, { label }]) => ({
-  value: value as TaskCreationType,
-  label,
-}))
+// --- Option Arrays ---
 
 export const contentTypeFilterOptions = [
   { value: '', label: '全部内容' },
   ...contentTypeOptions,
 ]
-
-// --- Option Arrays ---
 
 export const timelineItemTypeOptions = [
   { value: '', label: '全部类型' },
@@ -290,7 +279,6 @@ export function getBadgeVariant(status: string, type?: 'task' | 'plan'): BadgeVa
   }
 }
 
-/** Convenience wrapper for task status badges */
 export function statusBadgeVariant(status: string): BadgeVariant {
   return getBadgeVariant(status, 'task')
 }

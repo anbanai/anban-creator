@@ -1,10 +1,11 @@
-export type TaskType = 'seednote' | 'article'
+export type TaskType = 'seednote' | 'rednote' | 'article' | 'xls'
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface Task {
   id: string
   type: TaskType
   title?: string
+  topic?: string
   prompt: string
   status: TaskStatus
   progress?: number
@@ -12,6 +13,7 @@ export interface Task {
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  generate_video?: boolean
   error: string | null
   plan_id: string | null
   channel_id: string
@@ -44,12 +46,14 @@ export interface TaskFile {
 
 export interface CreateTaskRequest {
   type: TaskType
+  topic?: string
   prompt?: string
   channel_id: string
   quantity?: number
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  generate_video?: boolean
 }
 
 export interface WorkflowStatus {

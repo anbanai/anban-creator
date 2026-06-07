@@ -36,7 +36,13 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 	}
 
 	size := mapToDALLESize(apiCfg.Size, model)
-	ratio, _ := ParseSize(apiCfg.Size)
+
+	var sizeRatio string
+	if IsPixelSize(apiCfg.Size) {
+		sizeRatio = apiCfg.Size
+	} else {
+		sizeRatio, _ = ParseSize(apiCfg.Size)
+	}
 
 	// 创建 OpenAI client，使用官方 SDK
 	timeout := 300 * time.Second
@@ -60,7 +66,7 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 		client:         client,
 		model:          model,
 		size:           size,
-		sizeRatio:      ratio,
+		sizeRatio:      sizeRatio,
 		responseFormat: apiCfg.ResponseFormat,
 	}, nil
 }
@@ -76,6 +82,11 @@ func mapToDALLESize(size, model string) string {
 
 	if isDallE2Model(model) {
 		return "1024x1024"
+	}
+
+	// GPT-image models accept arbitrary pixel sizes — pass through directly.
+	if isGPTImageModel(model) && IsPixelSize(size) {
+		return size
 	}
 
 	ratio, _ := ParseSize(size)

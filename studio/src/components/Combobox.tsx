@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Check, ChevronsUpDown, X } from 'lucide-react'
+import { Check, ChevronsUpDown } from 'lucide-react'
 import {
   Command,
   CommandEmpty,
@@ -41,7 +41,7 @@ export function Combobox({
   placeholder = '选择...',
   searchPlaceholder = '搜索...',
   emptyText = '没有找到',
-  className,
+  className: _className,
   triggerClassName,
   disabled,
 }: ComboboxProps) {
@@ -70,10 +70,12 @@ export function Combobox({
       }
     }
 
+    // If all items have groups, return grouped
     if (groups.length > 0 && ungrouped.length === 0) {
       return groups
     }
 
+    // If some items are ungrouped, prepend them as "Other"
     if (ungrouped.length > 0) {
       return [{ group: '', items: ungrouped }, ...groups]
     }
@@ -82,7 +84,6 @@ export function Combobox({
   }, [options])
 
   return (
-    <div className={cn('relative', className)}>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         disabled={disabled}
@@ -102,12 +103,9 @@ export function Combobox({
         ) : (
           <span className="text-muted-foreground truncate">{placeholder}</span>
         )}
-        {value && (
-          <span aria-hidden="true" className="size-5 shrink-0" />
-        )}
         <ChevronsUpDown className="pointer-events-none shrink-0 size-3.5 text-muted-foreground" />
       </PopoverTrigger>
-      <PopoverContent className="w-auto min-w-[--radix-popover-trigger-width] p-0" align="start">
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
         <Command>
           <CommandInput placeholder={searchPlaceholder} />
           <CommandList>
@@ -117,7 +115,7 @@ export function Combobox({
                 {items.map((opt) => (
                   <CommandItem
                     key={opt.value}
-                    value={`${opt.group ? `${opt.group} ` : ''}${opt.label} ${opt.value}`}
+                    value={`${opt.group ? `${opt.group} ` : ''}${opt.label}`}
                     onSelect={() => {
                       onChange(opt.value)
                       setOpen(false)
@@ -139,19 +137,5 @@ export function Combobox({
         </Command>
       </PopoverContent>
     </Popover>
-    {value && !disabled && (
-      <button
-        type="button"
-        aria-label="清除选择"
-        className="absolute right-6 top-1/2 z-10 -translate-y-1/2 rounded-full p-0.5 hover:bg-muted-foreground/20"
-        onClick={(e) => {
-          e.stopPropagation()
-          onChange('')
-        }}
-      >
-        <X className="size-3 text-muted-foreground" />
-      </button>
-    )}
-    </div>
   )
 }

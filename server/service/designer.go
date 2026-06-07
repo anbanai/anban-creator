@@ -53,6 +53,7 @@ type DesignerGenerateRequest struct {
 	ChannelID        string   `json:"channel_id"`
 	Prompt           string   `json:"prompt"`
 	Provider         string   `json:"provider"`
+	ProviderID       string   `json:"provider_id,omitempty"`
 	Model            string   `json:"model"`
 	Quality          string   `json:"quality,omitempty"`
 	Size             string   `json:"size,omitempty"`
@@ -125,6 +126,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		ChannelID:      req.ChannelID,
 		Prompt:         req.Prompt,
 		Provider:       provider,
+		ProviderID:     req.ProviderID,
 		Model:          modelName,
 		Quality:        req.Quality,
 		Size:           req.Size,
@@ -192,9 +194,27 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 
 	provider := gen.Provider
 	modelName := gen.Model
+	providerID := gen.ProviderID
 
-	apiKey := s.resolveAPIKey(provider)
-	baseURL := s.resolveBaseURL(provider)
+	// Resolve config by designer entry ID when available, fallback to provider type.
+	var designerCfg *config.ImageAPI
+	if providerID != "" {
+		designerCfg = s.findDesignerConfigByID(providerID)
+	}
+
+	var apiKey, baseURL, responseFormat string
+	if designerCfg != nil {
+		apiKey = designerCfg.Key
+		baseURL = designerCfg.BaseURL
+		responseFormat = designerCfg.ResponseFormat
+		if modelName == "" {
+			modelName = designerCfg.Model
+		}
+	} else {
+		apiKey = s.resolveAPIKey(provider)
+		baseURL = s.resolveBaseURL(provider)
+		responseFormat = s.resolveResponseFormat(provider)
+	}
 
 	keyPreview := ""
 	if len(apiKey) > 4 {
@@ -205,6 +225,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 
 	s.logger.Info().
 		Str("provider", provider).
+		Str("provider_id", providerID).
 		Str("model", modelName).
 		Str("base_url", baseURL).
 		Str("key_preview", keyPreview).
@@ -213,11 +234,12 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		Msg("designer: starting image generation")
 
 	apiCfg := &config.ImageAPI{
-		Key:      apiKey,
-		BaseURL:  baseURL,
-		Provider: provider,
-		Model:    modelName,
-		Size:     gen.Size,
+		Key:            apiKey,
+		BaseURL:        baseURL,
+		Provider:       provider,
+		Model:          modelName,
+		Size:           gen.Size,
+		ResponseFormat: responseFormat,
 	}
 
 	providerInst, err := image.NewProvider(apiCfg, s.logger)
@@ -590,6 +612,13 @@ func (s *DesignerService) resolveModel(provider string) string {
 	}
 	if s.imageCfg != nil && s.imageCfg.Cover != nil {
 		return s.imageCfg.Cover.Model
+	}
+	return ""
+}
+
+func (s *DesignerService) resolveResponseFormat(provider string) string {
+	if p := s.findDesignerConfig(provider); p != nil {
+		return p.ResponseFormat
 	}
 	return ""
 }

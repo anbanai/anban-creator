@@ -102,6 +102,7 @@ export default function RegisterPage() {
                     variant="outline"
                     size="default"
                     disabled={!emailValid || countdown > 0 || sendingCode}
+                    loading={sendingCode}
                     onClick={handleSendCode}
                     className="shrink-0 whitespace-nowrap"
                   >
@@ -151,7 +152,7 @@ export default function RegisterPage() {
               </FormItem>
             )}
           />
-          <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+          <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>
             创建账号
           </Button>
         </form>

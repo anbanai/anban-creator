@@ -1,11 +1,4 @@
-import { useState } from 'react'
 import type { Channel, ChannelStats } from '@/types'
-import { platformLabels } from '@/lib/labels'
-import { renderPlatformIcon, platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
-import { PlatformAvatar } from '@/components/PlatformAvatar'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { TopicPoolDialog } from '@/components/TopicPoolDialog'
 
 interface ChannelCardProps {
   channel: Channel
@@ -18,66 +11,92 @@ interface ChannelCardProps {
   onDelete?: (id: string) => void
 }
 
-export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {
-  const [topicPoolOpen, setTopicPoolOpen] = useState(false)
+const platformLabels: Record<string, string> = {
+  article: '公众号',
+  xls: '小绿书',
+  rednote: '小红书',
+}
+
+const platformColors: Record<string, string> = {
+  article: 'bg-green-100 text-green-800',
+  xls: 'bg-blue-100 text-blue-800',
+  rednote: 'bg-red-100 text-red-800',
+}
+
+export function ChannelCard({ channel, stats, onEdit, archiving: _archiving, restoring: _restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {
   const platformLabel = platformLabels[channel.platform] || channel.platform
-  const platformBadge = platformBadgeVariant[channel.platform] || ('secondary' as const)
-  const borderColor = platformBorderColor[channel.platform] || ''
-  const hoverBorderColor = platformHoverBorderColor[channel.platform] || ''
+  const platformColor = platformColors[channel.platform] || 'bg-gray-100 text-gray-800'
 
   return (
-    <div className={`group rounded-lg border border-border bg-card p-5 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md active:scale-[0.98]`}>
+    <div className="rounded-lg border border-gray-200 p-4 transition-shadow hover:shadow-md">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <PlatformAvatar avatarUrl={channel.avatar_url} name={channel.name} platform={channel.platform} size="lg" />
+          {channel.avatar_url ? (
+            <img
+              src={channel.avatar_url}
+              alt={channel.name}
+              className="h-12 w-12 rounded-full object-cover"
+            />
+          ) : (
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-200 text-lg font-medium text-gray-500">
+              {channel.name.charAt(0)}
+            </div>
+          )}
           <div>
-            <h3 className="text-sm font-semibold text-foreground">{channel.name}</h3>
-            <Badge variant={platformBadge} className="mt-1 text-[10px]">
-              {renderPlatformIcon(channel.platform)}
+            <h3 className="font-medium text-gray-900">{channel.name}</h3>
+            <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${platformColor}`}>
               {platformLabel}
-            </Badge>
+            </span>
           </div>
         </div>
         {channel.status === 'archived' && (
-          <Badge variant="outline" className="text-[10px]">已归档</Badge>
+          <span className="rounded bg-yellow-100 px-2 py-1 text-xs text-yellow-800">已归档</span>
         )}
       </div>
       {channel.positioning && (
-        <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{channel.positioning}</p>
+        <p className="mt-2 line-clamp-2 text-sm text-gray-500">{channel.positioning}</p>
       )}
       {stats && (
-        <div className="mt-4 flex gap-4 border-t border-border pt-3 text-xs text-muted-foreground">
+        <div className="mt-3 flex gap-4 border-t border-gray-100 pt-3 text-xs text-gray-500">
           <span>任务 {stats.total_tasks}</span>
           <span>完成 {stats.completed_tasks}</span>
           {stats.total_tasks > 0 && <span>成功率 {(stats.success_rate * 100).toFixed(0)}%</span>}
         </div>
       )}
-      <div className="mt-3 flex gap-1.5">
+      <div className="mt-3 flex gap-2">
         {onEdit && (
-          <Button variant="ghost" size="xs" onClick={() => onEdit(channel)} aria-label="编辑账号">
+          <button
+            onClick={() => onEdit(channel)}
+            className="rounded bg-gray-100 px-2 py-1 text-xs hover:bg-gray-200"
+          >
             编辑
-          </Button>
+          </button>
         )}
         {channel.status === 'active' && onArchive && (
-          <Button variant="ghost" size="xs" disabled={archiving} onClick={() => onArchive(channel.id)} aria-label="归档账号">
+          <button
+            onClick={() => onArchive(channel.id)}
+            className="rounded bg-yellow-100 px-2 py-1 text-xs text-yellow-800 hover:bg-yellow-200"
+          >
             归档
-          </Button>
+          </button>
         )}
         {channel.status === 'archived' && onRestore && (
-          <Button variant="ghost" size="xs" disabled={restoring} onClick={() => onRestore(channel.id)} aria-label="恢复账号">
+          <button
+            onClick={() => onRestore(channel.id)}
+            className="rounded bg-green-100 px-2 py-1 text-xs text-green-800 hover:bg-green-200"
+          >
             恢复
-          </Button>
+          </button>
         )}
         {onDelete && (
-          <Button variant="destructive" size="xs" onClick={() => onDelete(channel.id)} aria-label="删除账号">
+          <button
+            onClick={() => onDelete(channel.id)}
+            className="rounded bg-red-100 px-2 py-1 text-xs text-red-800 hover:bg-red-200"
+          >
             删除
-          </Button>
+          </button>
         )}
-        <Button variant="ghost" size="xs" onClick={() => setTopicPoolOpen(true)} aria-label="选题池">
-          选题池
-        </Button>
       </div>
-      <TopicPoolDialog channel={channel} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
     </div>
   )
 }

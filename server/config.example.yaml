@@ -113,6 +113,16 @@ image_api:
       key: "" # OpenAI API key
       model: "gpt-image-2"
       credits: 2400 # Per-image credit cost
+    wangcai:
+      alias: "GPT 设计师"
+      enable: true
+      provider: "openai"
+      key: "" # wangcai API key (e.g. sk-xxxx)
+      base_url: "https://api.wangcai.cloud/v1"
+      model: "gpt-image-2"
+      size: "3840x2160" # Raw pixel size, passed through for GPT-image models
+      response_format: "url"
+      credits: 2400 # Per-image credit cost
     gemini:
       alias: "Gemini"
       enable: true

@@ -19,6 +19,16 @@ const badgeVariants = cva(
         ghost:
           "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         link: "text-primary underline-offset-4 hover:underline",
+        success:
+          "bg-[oklch(var(--success)/0.1)] text-[oklch(var(--success))] ring-1 ring-[oklch(var(--success)/0.2)] [a]:hover:bg-[oklch(var(--success)/0.2)]",
+        danger:
+          "bg-[oklch(var(--danger)/0.1)] text-[oklch(var(--danger))] ring-1 ring-[oklch(var(--danger)/0.2)] [a]:hover:bg-[oklch(var(--danger)/0.2)]",
+        warning:
+          "bg-[oklch(var(--warning)/0.1)] text-[oklch(var(--warning))] ring-1 ring-[oklch(var(--warning)/0.2)] [a]:hover:bg-[oklch(var(--warning)/0.2)]",
+        info:
+          "bg-[oklch(var(--info)/0.1)] text-[oklch(var(--info))] ring-1 ring-[oklch(var(--info)/0.2)] [a]:hover:bg-[oklch(var(--info)/0.2)]",
+        neutral:
+          "bg-muted text-muted-foreground [a]:hover:bg-muted/80",
       },
     },
     defaultVariants: {
@@ -50,3 +60,4 @@ function Badge({
 }
 
 export { Badge, badgeVariants }
+export default Badge

@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useAuth } from '@/contexts/AuthContext'
-import { Card, CardContent } from '@/components/ui/Card'
+import { Card, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
@@ -100,7 +100,7 @@ export default function SettingsPage() {
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">个人资料</h2>
         </div>
-        <CardContent className="space-y-3">
+        <CardBody className="space-y-3">
           <div>
             <p className="text-xs text-muted-foreground">邮箱</p>
             <p className="text-sm text-foreground">{user?.email || '--'}</p>
@@ -121,7 +121,7 @@ export default function SettingsPage() {
                 : '--'}
             </p>
           </div>
-        </CardContent>
+        </CardBody>
       </Card>
 
       {/* Account Quota Card */}
@@ -131,7 +131,7 @@ export default function SettingsPage() {
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">账号与配额</h2>
         </div>
-        <CardContent className="space-y-3">
+        <CardBody className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">当前等级</p>
@@ -149,7 +149,7 @@ export default function SettingsPage() {
             <p className="text-xs text-muted-foreground">配额说明</p>
             <p className="text-sm text-muted-foreground">{tierDescriptions[user?.tier || 'free'] || tierDescriptions.free}</p>
           </div>
-        </CardContent>
+        </CardBody>
       </Card>
 
       {/* Change Password Card */}
@@ -158,7 +158,7 @@ export default function SettingsPage() {
           <h2 className="text-sm font-semibold text-foreground">修改密码</h2>
           <p className="text-xs text-muted-foreground mt-0.5">修改你的登录密码。</p>
         </div>
-        <CardContent>
+        <CardBody>
           <Form {...passwordForm}>
             <form onSubmit={passwordForm.handleSubmit(handleChangePassword)} className="space-y-3">
               <FormField
@@ -210,7 +210,7 @@ export default function SettingsPage() {
               </div>
             </form>
           </Form>
-        </CardContent>
+        </CardBody>
       </Card>
 
       {/* API Keys Card */}
@@ -227,7 +227,7 @@ export default function SettingsPage() {
             创建密钥
           </Button>
         </div>
-        <CardContent className="space-y-3">
+        <CardBody className="space-y-3">
           {/* New key display */}
           {newKeyData && (
             <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 space-y-2">
@@ -304,7 +304,7 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
-        </CardContent>
+        </CardBody>
       </Card>
 
       {/* Revoke confirmation */}
@@ -316,7 +316,7 @@ export default function SettingsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={revokeMutation.isPending} onClick={() => { if (revokeTarget) submit(async () => revokeMutation.mutateAsync(revokeTarget)) }}>
+            <AlertDialogAction variant="destructive" loading={revokeMutation.isPending} onClick={() => { if (revokeTarget) submit(async () => revokeMutation.mutateAsync(revokeTarget)) }}>
               吊销
             </AlertDialogAction>
           </AlertDialogFooter>

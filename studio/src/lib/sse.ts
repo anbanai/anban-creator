@@ -46,20 +46,13 @@ export async function* streamTaskProgress(
   token: string,
   signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-  const response = await fetch(`${apiBaseUrl}/tasks/${taskId}/stream`, {
+  const response = await fetch(`/api/v1/tasks/${taskId}/stream`, {
     headers: { Authorization: `Bearer ${token}` },
     signal,
   })
 
   if (!response.ok) {
-    const body = await response.text().catch(() => '')
-    let detail = body
-    try {
-      const parsed = JSON.parse(body)
-      detail = parsed.msg || parsed.error || parsed.message || body
-    } catch {}
-    throw new Error(`SSE connection failed: ${response.status}${detail ? ` — ${detail}` : ''}`)
+    throw new Error(`SSE connection failed: ${response.status}`)
   }
 
   if (!response.body) {

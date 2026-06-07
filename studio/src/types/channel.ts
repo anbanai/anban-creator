@@ -1,4 +1,4 @@
-export type ChannelPlatform = 'article' | 'seednote'
+export type ChannelPlatform = 'article' | 'seednote' | 'rednote' | 'xls'
 export type ChannelStatus = 'active' | 'archived'
 
 export interface ChannelConfig {
@@ -14,6 +14,7 @@ export interface Channel {
   name: string
   avatar_url: string
   profile_url: string
+  description?: string
   positioning: string
   keywords: string
   style: string

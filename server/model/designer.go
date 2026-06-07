@@ -16,6 +16,7 @@ type ImageGeneration struct {
 	Prompt         string    `gorm:"type:text;not null" json:"prompt"`
 	RevisedPrompt  string    `gorm:"type:text" json:"revised_prompt,omitempty"`
 	Provider       string    `gorm:"type:varchar(32);not null" json:"provider"`
+	ProviderID     string    `gorm:"type:varchar(64)" json:"provider_id,omitempty"`
 	Model          string    `gorm:"type:varchar(64);not null" json:"model"`
 	Quality        string    `gorm:"type:varchar(16)" json:"quality,omitempty"`
 	Size           string    `gorm:"type:varchar(32)" json:"size,omitempty"`

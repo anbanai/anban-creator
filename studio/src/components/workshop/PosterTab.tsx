@@ -236,7 +236,7 @@ export default function PosterTab() {
               </div>
             )}
 
-            <Button onClick={handleGenerate} disabled={createMutation.isPending} className="w-full">
+            <Button onClick={handleGenerate} loading={createMutation.isPending} className="w-full">
               <Wand2 className="h-4 w-4" />
               生成海报
             </Button>

@@ -9,7 +9,6 @@ interface AuthState {
   refreshToken: string | null
   user: User | null
   isAuthenticated: boolean
-  isBootstrapping: boolean
 }
 
 interface AuthContextValue extends AuthState {
@@ -48,7 +47,6 @@ function loadStoredState(): AuthState {
     refreshToken,
     user,
     isAuthenticated: !!token && !!user,
-    isBootstrapping: !!token,
   }
 }
 
@@ -66,8 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Listen for token expiration events dispatched by the API interceptor
   useEffect(() => {
     const handler = () => {
-      clearStoredState()
-      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
+      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
     }
     window.addEventListener('auth:token-expired', handler)
     return () => window.removeEventListener('auth:token-expired', handler)
@@ -77,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(TOKEN_KEY, token)
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
     localStorage.setItem(USER_KEY, JSON.stringify(user))
-    setState({ token, refreshToken, user, isAuthenticated: true, isBootstrapping: false })
+    setState({ token, refreshToken, user, isAuthenticated: true })
   }, [])
 
   const logout = useCallback(async () => {
@@ -87,14 +84,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Ignore logout API errors
     }
     clearStoredState()
-    setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
+    setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
   }, [])
 
   const refreshAuthToken = useCallback(async () => {
     const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY)
     if (!storedRefresh) {
       clearStoredState()
-      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
+      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
       return
     }
 
@@ -103,31 +100,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login(response.token, response.refresh_token, response.user)
     } catch {
       clearStoredState()
-      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
+      setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
     }
   }, [login])
 
   const setUser = useCallback((user: User) => {
     localStorage.setItem(USER_KEY, JSON.stringify(user))
-    setState((prev) => ({ ...prev, user, isAuthenticated: prev.isAuthenticated, isBootstrapping: false }))
+    setState((prev) => ({ ...prev, user, isAuthenticated: prev.isAuthenticated }))
   }, [])
 
-  // Fetch current user on mount to ensure data is fresh.
-  // DEV mode: skip /auth/me to avoid blocking UI when backend is not running.
-  // The user data from localStorage is used directly; expired tokens will
-  // still be caught by API 401 responses on subsequent requests.
+  // Verify token on mount by fetching current user
   useEffect(() => {
-    if (state.token && !import.meta.env.DEV) {
+    if (state.token && !state.user) {
       api.auth.me().then((user) => {
         setUser(user)
       }).catch(() => {
         clearStoredState()
-        setState({ token: null, refreshToken: null, user: null, isAuthenticated: false, isBootstrapping: false })
+        setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
       })
-    } else if (import.meta.env.DEV && state.token) {
-      setState((prev) => ({ ...prev, isBootstrapping: false }))
     }
-  }, [state.token, setUser])
+  }, [state.token, state.user, setUser])
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout, refreshAuthToken, setUser }}>

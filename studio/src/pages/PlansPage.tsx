@@ -1,17 +1,16 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText, ImageIcon } from 'lucide-react'
+import { Plus, FileText } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { Channel, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
+import type { Channel, Plan, PlanType, CreatePlanRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
-import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -36,8 +35,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     type: plan.type,
     cron_expr: plan.cron_expr,
     prompt: plan.prompt || '',
-    skip_reference_image: plan.skip_reference_image ?? false,
-    reference_image_url: plan.reference_image_url || '',
+    skip_reference_image: plan.skip_reference_image || false,
   }
 }
 
@@ -56,7 +54,7 @@ export default function PlansPage() {
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
     defaultValues: {
       channel_id: '',
-      type: 'seednote',
+      type: 'rednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
     },
@@ -109,9 +107,6 @@ export default function PlansPage() {
     return map
   }, [allChannels])
 
-  const watchedChannelId = useWatch({ control: form.control, name: 'channel_id' })
-  const selectedChannel = useMemo(() => allChannels?.find((c) => c.id === watchedChannelId), [allChannels, watchedChannelId])
-
   const createMutation = useMutation({
     mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
     onSuccess: () => {
@@ -125,7 +120,7 @@ export default function PlansPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: UpdatePlanRequest }) => api.plans.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: CreatePlanRequest }) => api.plans.update(id, data),
     onSuccess: () => {
       toast.success('计划更新成功')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
@@ -165,11 +160,9 @@ export default function PlansPage() {
     setEditingPlan(null)
     form.reset({
       channel_id: '',
-      type: 'seednote',
+      type: 'rednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
-      skip_reference_image: false,
-      reference_image_url: '',
     })
     setModalOpen(true)
   }
@@ -194,11 +187,9 @@ export default function PlansPage() {
     setEditingPlan(null)
     form.reset({
       channel_id: '',
-      type: 'seednote',
+      type: 'rednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
-      skip_reference_image: false,
-      reference_image_url: '',
     })
   }
 
@@ -208,18 +199,10 @@ export default function PlansPage() {
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id || undefined,
-      skip_reference_image: values.skip_reference_image,
-      reference_image_url: values.reference_image_url || undefined,
     }
 
     if (editingPlan) {
-      const updatePayload: UpdatePlanRequest = {
-        cron_expr: payload.cron_expr,
-        prompt: payload.prompt,
-        skip_reference_image: payload.skip_reference_image,
-        reference_image_url: values.reference_image_url || undefined,
-      }
-      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: updatePayload }))
+      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: payload }))
     } else {
       await submit(async () => createMutation.mutateAsync(payload))
     }
@@ -319,12 +302,12 @@ export default function PlansPage() {
                 </div>
                 <div className="mt-2 flex justify-end gap-1.5 border-t border-border pt-2">
                   {plan.status === 'active' && (
-                    <Button variant="ghost" size="xs" disabled={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
+                    <Button variant="ghost" size="xs" loading={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
                       暂停
                     </Button>
                   )}
                   {plan.status === 'paused' && (
-                    <Button variant="ghost" size="xs" disabled={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
+                    <Button variant="ghost" size="xs" loading={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
                       恢复
                     </Button>
                   )}
@@ -370,19 +353,12 @@ export default function PlansPage() {
                   <FormControl>
                     <ChannelSelector
                       value={field.value || ''}
-                      disabled={!!editingPlan}
                       onChange={(id, platform) => {
                         field.onChange(id)
-                        form.setValue('skip_reference_image', false)
-                        if (id) {
-                          form.setValue('type', platform as PlanType)
-                        }
+                        if (id) form.setValue('type', platform as PlanType)
                       }}
                     />
                   </FormControl>
-                  {editingPlan && (
-                    <FormDescription>计划创建后不可更换账号</FormDescription>
-                  )}
                   <FormMessage />
                 </FormItem>
               )} />
@@ -428,51 +404,11 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />
-
-              <FormField control={form.control} name="reference_image_url" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>参考图片（可选）</FormLabel>
-                  <FormControl>
-                    <ReferenceImageUpload
-                      value={field.value || ''}
-                      onChange={field.onChange}
-                      purpose="reference"
-                    />
-                  </FormControl>
-                  <FormDescription>上传商品照片等参考图，生成配图时作为风格参考</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              {/* Use reference image toggle */}
-              {selectedChannel?.reference_image_url && (
-                <FormField control={form.control} name="skip_reference_image" render={({ field }) => (
-                  <button
-                    type="button"
-                    onClick={() => field.onChange(!field.value)}
-                    className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                      !field.value
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-foreground/20'
-                    }`}
-                  >
-                    <ImageIcon className={`mt-0.5 h-5 w-5 shrink-0 ${!field.value ? 'text-primary' : 'text-muted-foreground'}`} />
-                    <div className="min-w-0">
-                      <p className={`text-sm font-medium ${!field.value ? 'text-foreground' : 'text-muted-foreground'}`}>
-                        使用参考图
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        使用账号配置的品牌参考图保持视觉一致性
-                      </p>
-                    </div>
-                  </button>
-                )} />
-              )}
             </form>
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="plan-form" disabled={isSubmitting}>
+            <Button type="submit" form="plan-form" loading={isSubmitting}>
               {editingPlan ? '更新' : '创建'}
             </Button>
           </DialogFooter>
@@ -488,7 +424,7 @@ export default function PlansPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
+            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
               删除
             </AlertDialogAction>
           </AlertDialogFooter>

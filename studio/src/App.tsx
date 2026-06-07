@@ -27,7 +27,6 @@ const UsagePage = React.lazy(() => import('@/pages/UsagePage'))
 const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
 const TemplatesPage = React.lazy(() => import('@/pages/TemplatesPage'))
 const WorkshopPage = React.lazy(() => import('@/pages/WorkshopPage'))
-const DesignerPage = React.lazy(() => import('@/pages/DesignerPage'))
 const ClaudeCodeGuidePage = React.lazy(() => import('@/pages/ConnectGuidePage'))
 const OpenClawGuidePage = React.lazy(() => import('@/pages/OpenClawGuidePage'))
 
@@ -67,12 +66,8 @@ function NotFoundPage() {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isBootstrapping } = useAuth()
+  const { isAuthenticated } = useAuth()
   const location = useLocation()
-
-  if (isBootstrapping) {
-    return <LoadingSpinner />
-  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />
@@ -82,11 +77,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isBootstrapping } = useAuth()
-
-  if (isBootstrapping) {
-    return <LoadingSpinner />
-  }
+  const { isAuthenticated } = useAuth()
 
   if (isAuthenticated) {
     return <Navigate to="/" replace />
@@ -140,7 +131,6 @@ function AppRoutes() {
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />
           <Route path="templates" element={<LazyPage component={TemplatesPage} />} />
           <Route path="workshop" element={<LazyPage component={WorkshopPage} />} />
-          <Route path="designer" element={<LazyPage component={DesignerPage} />} />
           <Route path="credits" element={<LazyPage component={CreditsPage} />} />
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />

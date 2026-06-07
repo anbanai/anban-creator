@@ -56,6 +56,17 @@ func ParseSize(size string) (ratio, tier string) {
 	return "1:1", "2K"
 }
 
+// IsPixelSize returns true if the size string is in raw pixel format (e.g., "3840x2160").
+func IsPixelSize(size string) bool {
+	parts := strings.SplitN(size, "x", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	_, err1 := strconv.Atoi(parts[0])
+	_, err2 := strconv.Atoi(parts[1])
+	return err1 == nil && err2 == nil
+}
+
 // parseRatioNumbers splits a ratio string like "16:9" into integer w and h.
 // Returns (0, 0) if the format is invalid.
 func parseRatioNumbers(ratio string) (w, h int) {

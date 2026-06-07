@@ -4,15 +4,14 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, ImageIcon, BookOpen, FileText, FlaskConical } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Film, Download, Square, CheckSquare } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { TaskType, TaskStatus, CreateTaskRequest, CreateViralAnalysisRequest, Channel, WorkflowStatus } from '@/types'
+import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
-import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -37,19 +36,6 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已完成', value: 'completed' },
   { label: '失败', value: 'failed' },
   { label: '已取消', value: 'cancelled' },
-]
-
-type CreationTaskType = TaskType | 'viral_analysis'
-
-const creationOptions: Array<{
-  value: CreationTaskType
-  label: string
-  description: string
-  icon: typeof BookOpen
-}> = [
-  { value: 'seednote', label: '创建种草笔记', description: '生成小红书风格内容与配图规划', icon: BookOpen },
-  { value: 'viral_analysis', label: '爆文拆解', description: '拆解爆款笔记，生成可复用模板', icon: FlaskConical },
-  { value: 'article', label: '创建公众号', description: '生成公众号文章和发布素材', icon: FileText },
 ]
 
 function workflowReadinessLabel(workflow: WorkflowStatus | string | null | undefined) {
@@ -82,6 +68,7 @@ export default function TasksPage() {
   const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
   const [quantity, setQuantity] = useState(1)
+  const [generateVideo, setGenerateVideo] = useState(false)
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
@@ -112,18 +99,14 @@ export default function TasksPage() {
     queryFn: () => api.credits.pricing(),
   })
 
-  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? (type === 'viral_analysis' ? 800 : 3200)
+  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3200
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '' },
+    defaultValues: { type: 'rednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
-  const watchedChannelId = useWatch({ control: form.control, name: 'channel_id' })
-  const isViralAnalysis = watchedType === 'viral_analysis'
-
-  const selectedChannel = useMemo(() => channels.find((c) => c.id === watchedChannelId), [channels, watchedChannelId])
 
   // Auto-focus prompt field when dialog opens
   useEffect(() => {
@@ -141,6 +124,15 @@ export default function TasksPage() {
     openCreate()
     setSearchParams({}, { replace: true })
   }, [shouldCreate, channelsLoading, setSearchParams])
+
+  useEffect(() => {
+    if (!modalOpen) return
+    if (channels.length > 0) return
+
+    setModalOpen(false)
+    toast.error('请先创建一个账号，再开始新建任务。')
+    navigate('/channels')
+  }, [channels.length, modalOpen, navigate])
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['tasks', statusFilter, channelFilter, page],
@@ -194,21 +186,6 @@ export default function TasksPage() {
     },
   })
 
-  const createViralAnalysisMutation = useMutation({
-    mutationFn: (data: CreateViralAnalysisRequest) => api.viralAnalyses.create(data),
-    onSuccess: (analysis) => {
-      queryClient.invalidateQueries({ queryKey: ['viral-analyses'] })
-      toast.success('爆文拆解任务已创建')
-      setTimeout(() => {
-        resetModal()
-        navigate(`/workshop?tab=analysis&analysisId=${analysis.id}`)
-      }, 800)
-    },
-    onError: () => {
-      toast.error('创建爆文拆解失败，请检查链接后重试')
-    },
-  })
-
   const togglePublished = useMutation({
     mutationFn: ({ id, published }: { id: string; published: boolean }) =>
       api.tasks.markPublished(id, published),
@@ -233,10 +210,15 @@ export default function TasksPage() {
   })
 
   function openCreate() {
-    const requestedType = searchParams.get('type')
-    const defaultType: CreationTaskType = requestedType === 'article' || requestedType === 'viral_analysis' ? requestedType : 'seednote'
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', skip_reference_image: false, reference_image_url: '' })
+    if (channels.length === 0) {
+      toast.error('请先创建一个账号，再开始新建任务。')
+      navigate('/channels')
+      return
+    }
+    const defaultType = (searchParams.get('type') || 'rednote') as TaskType
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
+    setGenerateVideo(false)
     setChannelImageRatio('')
     setModalOpen(true)
   }
@@ -252,40 +234,21 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', skip_reference_image: false, reference_image_url: '' })
+    form.reset({ type: 'rednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
+    setGenerateVideo(false)
     setChannelImageRatio('')
   }
 
   async function onSubmit(values: CreateTaskFormValues) {
-    if (values.type === 'viral_analysis') {
-      const sourceUrl = extractUrl(values.prompt || '')
-      if (!sourceUrl) {
-        form.setError('prompt', { type: 'manual', message: '请粘贴种草笔记链接或分享文本' })
-        return
-      }
-      await submit(async () => createViralAnalysisMutation.mutateAsync({
-        source_type: 'note',
-        source_url: sourceUrl,
-      }))
-      return
-    }
-
     await submit(async () => createMutation.mutateAsync({
-      type: values.type as TaskType,
+      type: values.type as import('@/types').TaskType,
       prompt: values.prompt?.trim() || undefined,
-      channel_id: values.channel_id || '',
+      channel_id: values.channel_id,
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
-      skip_reference_image: values.skip_reference_image || undefined,
-      reference_image_url: values.reference_image_url || undefined,
+      generate_video: generateVideo || undefined,
     }))
-  }
-
-  function extractUrl(text: string): string | null {
-    const match = text.match(/https?:\/\/[^\s]+/)
-    if (!match) return null
-    return match[0].replace(/[.,，。！!？?;；:：]+$/, '')
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -441,7 +404,8 @@ export default function TasksPage() {
               <Button
                 size="sm"
                 onClick={handleBulkDownload}
-                disabled={selectedCompletedTasks.length === 0 || bulkDownloadMutation.isPending}
+                loading={bulkDownloadMutation.isPending}
+                disabled={selectedCompletedTasks.length === 0}
               >
                 <Download className="h-4 w-4" />
                 下载选中文件
@@ -519,7 +483,7 @@ export default function TasksPage() {
                           {contentTypeLabel[task.type] || task.type}
                         </Badge>
                         {task.status === 'running' && (task.progress ?? 0) > 0 && (
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="warning" className="text-[10px]">
                             {task.progress ?? 0}%
                           </Badge>
                         )}
@@ -564,107 +528,58 @@ export default function TasksPage() {
           </DialogHeader>
           <Form {...form}>
             <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
-              <FormField control={form.control} name="type" render={({ field }) => (
+              <FormField control={form.control} name="channel_id" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>任务类型</FormLabel>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {creationOptions.map((option) => {
-                      const Icon = option.icon
-                      const selected = watchedType === option.value
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => {
-                            field.onChange(option.value)
-                            form.setValue('skip_reference_image', false)
-                            if (option.value === 'viral_analysis') {
-                              form.setValue('channel_id', '')
-                              form.setValue('image_ratio', '')
-                              setQuantity(1)
-                              setChannelImageRatio('')
-                            }
-                          }}
-                          className={`flex min-h-24 flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors ${
-                            selected
-                              ? 'border-primary bg-primary/5 text-foreground'
-                              : 'border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground'
-                          }`}
-                        >
-                          <Icon className={selected ? 'h-5 w-5 text-primary' : 'h-5 w-5 text-muted-foreground'} />
-                          <span className="text-sm font-medium">{option.label}</span>
-                          <span className="text-xs leading-relaxed text-muted-foreground">{option.description}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              {!isViralAnalysis && (
-                <FormField control={form.control} name="channel_id" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>账号</FormLabel>
-                    <FormControl>
-                      <ChannelSelector
-                        value={field.value || ''}
-                        onChange={(id, platform) => {
-                          field.onChange(id)
-                          form.setValue('skip_reference_image', false)
-                          if (id) {
-                            form.setValue('type', platform as TaskType)
-                            form.setValue('image_ratio', '')
-                            const ch = channels.find((c) => c.id === id)
-                            setChannelImageRatio(ch?.image_ratio || platformDefaultRatio[platform] || '3:4')
-                          } else {
-                            setChannelImageRatio('')
-                          }
-                        }}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              )}
-
-              <FormField control={form.control} name="prompt" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{isViralAnalysis ? '种草笔记链接' : '创作要求（可选）'}</FormLabel>
+                  <FormLabel>账号</FormLabel>
                   <FormControl>
-                    <Textarea
-                      placeholder={isViralAnalysis
-                        ? '粘贴笔记链接或分享文本，例如 http://xhslink.com/...'
-                        : '描述你的创作要求，留空则根据账号信息自动生成'}
-                      {...field}
+                    <ChannelSelector
+                      value={field.value || ''}
+                      onChange={(id, platform) => {
+                        field.onChange(id)
+                        if (id) {
+                          form.setValue('type', platform as TaskType)
+                          form.setValue('image_ratio', '')
+                          const ch = channels.find((c) => c.id === id)
+                          setChannelImageRatio(ch?.image_ratio || platformDefaultRatio[platform] || '3:4')
+                        } else {
+                          setChannelImageRatio('')
+                        }
+                      }}
                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
 
+              <FormField control={form.control} name="prompt" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>创作要求（可选）</FormLabel>
+                  <FormControl>
+                    <Textarea placeholder="描述你的创作要求，留空则根据账号信息自动生成" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
               {/* Quantity selector */}
-              {!isViralAnalysis && (
-                <div className="space-y-2">
-                  <FormLabel>数量</FormLabel>
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <Button
-                        key={n}
-                        type="button"
-                        variant={quantity === n ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setQuantity(n)}
-                      >
-                        {n}
-                      </Button>
-                    ))}
-                  </div>
+              <div className="space-y-2">
+                <FormLabel>数量</FormLabel>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Button
+                      key={n}
+                      type="button"
+                      variant={quantity === n ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setQuantity(n)}
+                    >
+                      {n}
+                    </Button>
+                  ))}
                 </div>
-              )}
+              </div>
 
               {/* Image ratio selector */}
-              {!isViralAnalysis && (
               <FormField control={form.control} name="image_ratio" render={({ field }) => {
                 const defaultRatio = channelImageRatio || platformDefaultRatio[watchedType] || '3:4'
                 const defaultLabel = platformRatioLabel[watchedType] || `${defaultRatio}（默认）`
@@ -696,48 +611,26 @@ export default function TasksPage() {
                 </FormItem>
                 )
               }} />
-              )}
 
-              {/* Task reference image */}
-              {!isViralAnalysis && (
-              <FormField control={form.control} name="reference_image_url" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>参考图片（可选）</FormLabel>
-                  <FormControl>
-                    <ReferenceImageUpload
-                      value={field.value || ''}
-                      onChange={field.onChange}
-                      purpose="reference"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              )}
-
-              {/* Use reference image toggle */}
-              {!isViralAnalysis && selectedChannel?.reference_image_url && (
-                <FormField control={form.control} name="skip_reference_image" render={({ field }) => (
-                  <button
-                    type="button"
-                    onClick={() => field.onChange(!field.value)}
-                    className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                      !field.value
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-foreground/20'
-                    }`}
-                  >
-                    <ImageIcon className={`mt-0.5 h-5 w-5 shrink-0 ${!field.value ? 'text-primary' : 'text-muted-foreground'}`} />
-                    <div className="min-w-0">
-                      <p className={`text-sm font-medium ${!field.value ? 'text-foreground' : 'text-muted-foreground'}`}>
-                        使用参考图
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        使用账号配置的品牌参考图保持视觉一致性
-                      </p>
-                    </div>
-                  </button>
-                )} />
+              {/* Generate video toggle — only for image-heavy types */}
+              {(watchedType === 'rednote' || watchedType === 'xls') && (
+                <button
+                  type="button"
+                  onClick={() => setGenerateVideo(!generateVideo)}
+                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                    generateVideo
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-foreground/20'
+                  }`}
+                >
+                  <Film className={`mt-0.5 h-5 w-5 shrink-0 ${generateVideo ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <div className="min-w-0">
+                    <p className={`text-sm font-medium ${generateVideo ? 'text-foreground' : 'text-muted-foreground'}`}>
+                      生成视频
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">开启后将自动合成视频</p>
+                  </div>
+                </button>
               )}
 
               {/* Cost display */}
@@ -770,11 +663,12 @@ export default function TasksPage() {
             <Button
               type="submit"
               form="task-create-form"
+              loading={createMutation.isPending}
               disabled={(() => {
                 const cost = taskCostFor(watchedType)
                 const totalCost = cost * quantity
                 const balance = creditsBalance?.balance ?? 0
-                return balance - totalCost < 0 || createMutation.isPending || createViralAnalysisMutation.isPending
+                return balance - totalCost < 0
               })()}
             >
               创建

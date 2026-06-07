@@ -15,7 +15,7 @@ import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/Card'
+import { Card, CardBody } from '@/components/ui/Card'
 import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
@@ -44,10 +44,9 @@ export default function TaskDetailPage() {
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
-  const [sseProgress, setSseProgress] = useState<number | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const logContainerRef = useRef<HTMLDivElement | null>(null)
-  const { submit, isSubmitting } = useSubmitLock()
+  const { submit } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
 
@@ -85,24 +84,15 @@ export default function TaskDetailPage() {
   const persistedLogs = (task?.progress_log
     ?.split('\n')
     .map((line) => line.trimEnd())
-    ?? [])
+    .filter(Boolean) ?? [])
     .slice(-MAX_PERSISTED_LOGS)
   const displayLogs = sseLogs.length > 0 ? sseLogs : persistedLogs
-  // Single newline preserves markdown block structures (tables, lists, code fences)
-  // that would break with double-newline paragraph separation.
   const logMarkdown = displayLogs.join('\n')
   const showLogs = displayLogs.length > 0 || Boolean(sseError) || task?.status === 'running'
   const latestPersistedProgressMessage = [...persistedLogs].reverse()
     .map((line) => line.replace(/^\[\d+%]\s*/, '').trim())
     .find(Boolean)
-  const latestLogProgress = (() => {
-    for (let i = persistedLogs.length - 1; i >= 0; i--) {
-      const match = persistedLogs[i].match(/^\[(\d+)%\]/)
-      if (match) return Number(match[1])
-    }
-    return null
-  })()
-  const progressValue = Math.max(0, Math.min(100, sseProgress ?? latestLogProgress ?? task?.progress ?? 0))
+  const progressValue = Math.max(0, Math.min(100, task?.progress ?? 0))
   const progressMessage = currentProgressMessage || latestPersistedProgressMessage ||
     (task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...')
 
@@ -183,12 +173,9 @@ export default function TaskDetailPage() {
       case 'progress': {
         if (typeof parsed === 'string') {
           setSseLogs((prev) => appendLog(prev, parsed))
-          const match = parsed.match(/^\[(\d+)%\]/)
-          if (match) setSseProgress(Number(match[1]))
         } else {
           const data = parsed as { progress: number; message: string }
           if (data.progress != null) {
-            setSseProgress(data.progress)
             setSseLogs((prev) => appendLog(prev, `[${data.progress}%] ${data.message}`))
             setCurrentProgressMessage(data.message || null)
           }
@@ -234,7 +221,6 @@ export default function TaskDetailPage() {
       setSseLogs(persistedLogs)
       setSseError(null)
       setCurrentProgressMessage(null)
-      setSseProgress(null)
       connectSSE()
     }
     return () => {
@@ -306,24 +292,16 @@ export default function TaskDetailPage() {
 
   async function handleRetry() {
     await submit(async () => {
-      if (!currentTask.channel_id) {
-        toast.error('无法重新生成：任务缺少关联账号')
-        return
-      }
-      try {
-        const nextTask = await api.tasks.create({
-          type: currentTask.type,
-          prompt: currentTask.prompt || undefined,
-          channel_id: currentTask.channel_id,
-          image_ratio: currentTask.image_ratio || undefined,
-          skip_reference_image: currentTask.skip_reference_image || undefined,
-        })
-        toast.success('已重新创建任务')
-        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-        navigate(`/tasks/${nextTask.id}`)
-      } catch {
-        toast.error('重新创建任务失败，请稍后重试')
-      }
+      const nextTask = await api.tasks.create({
+        type: currentTask.type,
+        prompt: currentTask.prompt || undefined,
+        channel_id: currentTask.channel_id,
+        image_ratio: currentTask.image_ratio || undefined,
+        generate_video: currentTask.generate_video || undefined,
+      })
+      toast.success('已重新创建任务')
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+      navigate(`/tasks/${nextTask.id}`)
     })
   }
 
@@ -376,32 +354,21 @@ export default function TaskDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           {task.status === 'completed' && (
-            <>
             <Button
               variant={task.published ? 'outline' : 'default'}
               size="sm"
-              disabled={togglePublished.isPending}
+              loading={togglePublished.isPending}
               onClick={() => submit(async () => togglePublished.mutateAsync({ published: !task.published }))}
             >
               <Eye className="h-4 w-4" />
               {task.published ? '已发布' : '标记已发布'}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isSubmitting}
-              onClick={() => void handleRetry()}
-            >
-              <RefreshCw className="h-4 w-4" />
-              重新生成
-            </Button>
-            </>
           )}
           {canCancel && (
             <Button
               variant="destructive"
               size="sm"
-              disabled={cancelMutation.isPending}
+              loading={cancelMutation.isPending}
               onClick={() => setShowCancelDialog(true)}
             >
               取消任务
@@ -411,7 +378,7 @@ export default function TaskDetailPage() {
             <Button
               variant="ghost"
               size="sm"
-              disabled={deleteMutation.isPending}
+              loading={deleteMutation.isPending}
               onClick={() => setShowDeleteDialog(true)}
               className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
             >
@@ -431,38 +398,38 @@ export default function TaskDetailPage() {
       {/* Details (stats) */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <CardContent>
+          <CardBody>
             <p className="text-xs text-muted-foreground">创建时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.created_at)}</p>
-          </CardContent>
+          </CardBody>
         </Card>
         <Card>
-          <CardContent>
+          <CardBody>
             <p className="text-xs text-muted-foreground">开始时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.started_at)}</p>
-          </CardContent>
+          </CardBody>
         </Card>
         <Card>
-          <CardContent>
+          <CardBody>
             <p className="text-xs text-muted-foreground">完成时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.completed_at)}</p>
-          </CardContent>
+          </CardBody>
         </Card>
         <Card>
-          <CardContent>
+          <CardBody>
             <p className="text-xs text-muted-foreground">来源</p>
             <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
-          </CardContent>
+          </CardBody>
         </Card>
       </div>
 
-      {task.type === 'seednote' && task.published && (
+      {task.type === 'rednote' && task.published && (
         <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
       {task.status !== 'completed' && (
         <Card>
-          <CardContent>
+          <CardBody>
             {task.status === 'failed' ? (
             <div className="space-y-3">
               <p className="text-sm text-red-400">任务失败</p>
@@ -502,7 +469,7 @@ export default function TaskDetailPage() {
                 <p className="w-full text-sm text-muted-foreground">{progressMessage}</p>
               </div>
             )}
-          </CardContent>
+          </CardBody>
         </Card>
       )}
 
@@ -638,7 +605,7 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={cancelMutation.isPending} onClick={() => submit(async () => cancelMutation.mutateAsync())}>
+            <AlertDialogAction variant="destructive" loading={cancelMutation.isPending} onClick={() => submit(async () => cancelMutation.mutateAsync())}>
               确定取消
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -656,7 +623,7 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => submit(async () => deleteMutation.mutateAsync())}>
+            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => submit(async () => deleteMutation.mutateAsync())}>
               确定删除
             </AlertDialogAction>
           </AlertDialogFooter>

@@ -9,9 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import { queryKeys } from '@/lib/query-keys'
 import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig, Template } from '@/types'
-import type { ResourceEntry } from '@/types/resource'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
 import { TemplateRecommend } from '@/components/channels/TemplateRecommend'
@@ -22,7 +20,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
-import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
+import { FileUpload } from '@/components/ui/FileUpload'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -32,17 +30,31 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
-import { Badge } from '@/components/ui/badge'
 
 const platformOptions = [
-  { value: 'seednote', label: '种草笔记' },
+  { value: 'rednote', label: '小红书' },
   { value: 'article', label: '公众号' },
+  { value: 'xls', label: '小绿书' },
 ]
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
   { label: '活跃', value: 'active' },
   { label: '已归档', value: 'archived' },
+]
+
+const styleOptions = [
+  { value: '', label: '不设置' },
+  { value: 'casual-science', label: '轻松科普风格' },
+  { value: 'dan-koe', label: 'Dan Koe 风格' },
+  { value: 'cultural-depth', label: '深度文化风格' },
+]
+
+const themeOptions = [
+  { value: '', label: '不设置' },
+  { value: 'autumn-warm', label: '秋日暖光' },
+  { value: 'spring-fresh', label: '春日清新' },
+  { value: 'ocean-calm', label: '深海静谧' },
 ]
 
 const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
@@ -59,8 +71,6 @@ const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   author: '',
   reference_image_url: '',
   image_ratio: '',
-  layout: '',
-  image_preset: '',
   enable_publishing: false,
 }
 
@@ -79,8 +89,6 @@ function channelToForm(ch: Channel): ChannelFormValues {
     author: ch.author || '',
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
-    layout: ch.layout || '',
-    image_preset: ch.image_preset || '',
     enable_publishing: ch.config?.enable_publishing ?? false,
   }
 }
@@ -98,8 +106,6 @@ export default function ChannelsPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [recommendedTemplates, setRecommendedTemplates] = useState<Template[]>([])
-  const [analyzingStyle, setAnalyzingStyle] = useState(false)
-  const styleManuallyEditedRef = useRef(false)
   const { submit } = useSubmitLock()
 
   const form = useForm<ChannelFormValues>({
@@ -108,63 +114,8 @@ export default function ChannelsPage() {
   })
 
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
-  const isSeednote = selectedPlatform === 'seednote'
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
-  const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
-
-  const { data: writerResources } = useQuery({
-    queryKey: queryKeys.resources.writers,
-    queryFn: () => api.resources.list('writers'),
-    staleTime: Infinity,
-  })
-  const { data: themeResources } = useQuery({
-    queryKey: queryKeys.resources.themes,
-    queryFn: () => api.resources.list('themes'),
-    staleTime: Infinity,
-  })
-  const { data: layoutResources } = useQuery({
-    queryKey: queryKeys.resources.layouts,
-    queryFn: () => api.resources.list('layouts'),
-    staleTime: Infinity,
-  })
-  const { data: presetResources } = useQuery({
-    queryKey: queryKeys.resources.imagePresets,
-    queryFn: () => api.resources.list('image_presets'),
-    staleTime: Infinity,
-  })
-
-  const styleOptions = useMemo(() => [
-    { value: '', label: '不设置' },
-    ...(writerResources?.items || []).map((w: ResourceEntry) => ({
-      value: w.english_name,
-      label: w.display_name || w.description || w.english_name,
-    })),
-  ], [writerResources])
-
-  const themeOptions = useMemo(() => [
-    { value: '', label: '不设置' },
-    ...(themeResources?.items || []).map((t: ResourceEntry) => ({
-      value: t.name,
-      label: t.description || t.name,
-    })),
-  ], [themeResources])
-
-  const layoutOptions = useMemo(() => [
-    { value: '', label: '不设置' },
-    ...(layoutResources?.items || []).map((l: ResourceEntry) => ({
-      value: l.name,
-      label: l.description || l.name,
-    })),
-  ], [layoutResources])
-
-  const presetOptions = useMemo(() => [
-    { value: '', label: '不设置' },
-    ...(presetResources?.items || []).map((p: ResourceEntry) => ({
-      value: p.name,
-      label: p.description || p.name,
-    })),
-  ], [presetResources])
 
   // Auto-focus profile_url field when dialog opens
   useEffect(() => {
@@ -220,36 +171,10 @@ export default function ChannelsPage() {
     return () => clearTimeout(timer)
   }, [modalOpen, profileUrl, selectedPlatform, platformConfigMap])
 
-  // Auto-analyze reference image to fill visual style
-  useEffect(() => {
-    if (!modalOpen || !referenceImageUrl || !isSeednote) return
-    if (styleManuallyEditedRef.current) return
-    const timer = setTimeout(async () => {
-      setAnalyzingStyle(true)
-      try {
-        const result = await api.channels.analyzeImage(referenceImageUrl)
-        if (result.style && !styleManuallyEditedRef.current) {
-          form.setValue('style', result.style)
-          styleManuallyEditedRef.current = false
-        }
-      } catch {
-        // Silent fail - user can still fill style manually
-      } finally {
-        setAnalyzingStyle(false)
-      }
-    }, 1000)
-    return () => clearTimeout(timer)
-  }, [modalOpen, referenceImageUrl, isSeednote, form])
-
-  // Reset manual edit flag when style is cleared or dialog reopens
-  useEffect(() => {
-    styleManuallyEditedRef.current = false
-  }, [modalOpen])
-
   async function handleFetchProfile(url: string, options?: { silent?: boolean }) {
     if (!url || !selectedPlatform) return
     if (!hasSupportedProfileUrl(url)) {
-      setProfileFetchHint('请先输入包含种草笔记链接的主页链接或分享文本')
+      setProfileFetchHint('请先输入包含小红书链接的主页链接或分享文本')
       return
     }
     setFetchingProfile(true)
@@ -308,9 +233,9 @@ export default function ChannelsPage() {
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
-      // Show template recommendations for seednote channels
+      // Show template recommendations for rednote channels
       const channel = result.channel
-      if (channel.platform === 'seednote' && result.recommended_templates && result.recommended_templates.length > 0) {
+      if (channel.platform === 'rednote' && result.recommended_templates && result.recommended_templates.length > 0) {
         setRecommendedTemplates(result.recommended_templates)
       }
     },
@@ -359,9 +284,8 @@ export default function ChannelsPage() {
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       setDeleteTarget(null)
     },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '删除账号失败'))
-      setDeleteTarget(null)
+    onError: () => {
+      toast.error('删除账号失败，请重试')
     },
   })
 
@@ -412,8 +336,6 @@ export default function ChannelsPage() {
       author: values.author?.trim() || undefined,
       reference_image_url: values.reference_image_url?.trim() || undefined,
       image_ratio: values.image_ratio || undefined,
-      layout: values.layout?.trim() || undefined,
-      image_preset: values.image_preset?.trim() || undefined,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
       enable_publishing: values.enable_publishing || undefined,
@@ -423,7 +345,7 @@ export default function ChannelsPage() {
     if (!payload.image_ratio) {
       if (payload.platform === 'article') {
         payload.image_ratio = '16:9'
-      } else if (payload.platform === 'seednote') {
+      } else if (payload.platform === 'rednote' || payload.platform === 'xls') {
         payload.image_ratio = '3:4'
       }
     }
@@ -444,14 +366,8 @@ export default function ChannelsPage() {
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
-  const isWechat = selectedPlatform === 'article'
-
-  const { data: seednoteStatus } = useQuery({
-    queryKey: queryKeys.channels.seednoteLoginStatus,
-    queryFn: () => api.channels.seednoteLoginStatus(),
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  })
+  const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
+  const isRednote = selectedPlatform === 'rednote'
 
   return (
     <div className="space-y-6">
@@ -461,13 +377,6 @@ export default function ChannelsPage() {
           新建账号
         </Button>
       </PageHeader>
-
-      {/* Seednote login status indicator */}
-      {seednoteStatus && (
-        <Badge variant={seednoteStatus.available && seednoteStatus.logged_in ? 'default' : 'secondary'} className="text-xs">
-          种草笔记 {seednoteStatus.available ? (seednoteStatus.logged_in ? '已连接' : '未登录') : '未配置'}
-        </Badge>
-      )}
 
       {/* Status filter tabs */}
       <ToggleGroup
@@ -589,13 +498,13 @@ export default function ChannelsPage() {
 
               {hasProfileField && <FormField control={form.control} name="profile_url" render={({ field }) => (
                 <FormItem>
-                  <div className="flex items-start gap-3 min-w-0">
+                  <div className="flex items-start gap-3">
                     <FormLabel className="shrink-0 w-20 text-right pt-2">账号主页</FormLabel>
                     <FormControl>
-                      <div className="flex gap-2 flex-1 min-w-0 overflow-hidden">
+                      <div className="flex gap-2 flex-1">
                         <Textarea
-                          className="flex-1 min-w-0 break-all"
-                          placeholder="粘贴种草笔记主页链接或分享文本..."
+                          className="flex-1 min-w-0"
+                          placeholder="粘贴小红书主页链接或分享文本..."
                           {...field}
                         />
                         {currentPlatformConfig?.supports_auto_fetch && (
@@ -603,7 +512,8 @@ export default function ChannelsPage() {
                             type="button"
                             variant="secondary"
                             size="sm"
-                            disabled={!field.value || !hasSupportedProfileUrl(field.value || '') || fetchingProfile}
+                            loading={fetchingProfile}
+                            disabled={!field.value || !hasSupportedProfileUrl(field.value || '')}
                             onClick={() => void handleFetchProfile(field.value || '')}
                           >
                             获取
@@ -614,7 +524,7 @@ export default function ChannelsPage() {
                   </div>
                   {currentPlatformConfig?.supports_auto_fetch && (
                     <FormDescription>
-                      {profileFetchHint || '粘贴种草笔记分享文本后会自动提取链接、分析账号和代表作品。'}
+                      {profileFetchHint || '粘贴小红书分享文本后会自动提取链接、分析账号和代表作品。'}
                     </FormDescription>
                   )}
                   <FormMessage />
@@ -749,44 +659,15 @@ export default function ChannelsPage() {
                     </FormItem>
                   )} />
 
-                  <FormField control={form.control} name="reference_image_url" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>视觉参考图</FormLabel>
-                      <FormControl>
-                        <ReferenceImageUpload
-                          value={field.value}
-                          onChange={field.onChange}
-                        />
-                      </FormControl>
-                      <FormDescription>用于 AI 图片生成的视觉风格参考，保持品牌一致性</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
                   <FormField control={form.control} name="style" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{isSeednote ? '视觉风格' : '写作风格'}</FormLabel>
-                      {isSeednote ? (
+                      <FormLabel>{isRednote ? '视觉风格' : '写作风格'}</FormLabel>
+                      {isRednote ? (
                         <FormControl>
-                          <div className="relative">
-                            <Textarea
-                              placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
-                              className={analyzingStyle ? 'pr-10' : ''}
-                              {...field}
-                              onChange={(e) => {
-                                styleManuallyEditedRef.current = true
-                                field.onChange(e)
-                              }}
-                            />
-                            {analyzingStyle && (
-                              <div className="absolute right-2 top-2">
-                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                              </div>
-                            )}
-                          </div>
-                          {analyzingStyle && (
-                            <p className="text-xs text-muted-foreground">正在分析参考图...</p>
-                          )}
+                          <Textarea
+                            placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
+                            {...field}
+                          />
                         </FormControl>
                       ) : (
                         <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
@@ -802,12 +683,12 @@ export default function ChannelsPage() {
                           </SelectContent>
                         </Select>
                       )}
-                      <FormDescription>{isSeednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
+                      <FormDescription>{isRednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />
 
-                  {!isSeednote && <FormField control={form.control} name="theme" render={({ field }) => (
+                  {!isRednote && <FormField control={form.control} name="theme" render={({ field }) => (
                     <FormItem>
                       <FormLabel>主题</FormLabel>
                       <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
@@ -827,46 +708,6 @@ export default function ChannelsPage() {
                     </FormItem>
                   )} />}
 
-                  {!isSeednote && (
-                    <FormField control={form.control} name="layout" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>默认布局</FormLabel>
-                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="选择默认布局" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {layoutOptions.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormDescription>文章默认使用的排版布局模块（仅 article 平台）</FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  )}
-
-                  {!isSeednote && (
-                    <FormField control={form.control} name="image_preset" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>图片预设</FormLabel>
-                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="选择图片预设" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {presetOptions.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormDescription>封面图和内容图的默认生成预设模板</FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  )}
-
                   <FormField control={form.control} name="author" render={({ field }) => (
                     <FormItem className="flex items-center gap-3 space-y-0">
                       <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>
@@ -877,13 +718,27 @@ export default function ChannelsPage() {
                     </FormItem>
                   )} />
 
+                  <FormField control={form.control} name="reference_image_url" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>品牌视觉参考图</FormLabel>
+                      <FormControl>
+                        <FileUpload
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
+                      </FormControl>
+                      <FormDescription>用于 AI 图片生成的视觉风格参考，保持品牌一致性</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
                 </>
               )}
             </form>
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="channel-form" disabled={isSubmitting}>
+            <Button type="submit" form="channel-form" loading={isSubmitting}>
               {editingChannel ? '更新' : '创建'}
             </Button>
           </DialogFooter>
@@ -899,7 +754,7 @@ export default function ChannelsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
+            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
               删除
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -920,7 +775,7 @@ export default function ChannelsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Template recommendation after seednote channel creation */}
+      {/* Template recommendation after rednote channel creation */}
       {recommendedTemplates.length > 0 && (
         <TemplateRecommend
           templates={recommendedTemplates}

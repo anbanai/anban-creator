@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import TimePicker from '@/components/TimePicker'
 
@@ -49,34 +49,11 @@ export default function SchedulePicker({ value, onChange }: SchedulePickerProps)
   const [frequency, setFrequency] = useState<Frequency>(parsed.frequency)
   const [days, setDays] = useState<number[]>(parsed.days)
   const [time, setTime] = useState(`${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`)
-  const syncRef = useRef(false)
-
-  const onChangeRef = useRef(onChange)
-  onChangeRef.current = onChange
 
   useEffect(() => {
-    const next = parseCron(value)
-    const nextTime = `${String(next.hour).padStart(2, '0')}:${String(next.minute).padStart(2, '0')}`
-    const sameDays = next.days.length === days.length && next.days.every((day, index) => day === days[index])
-
-    if (frequency === next.frequency && sameDays && time === nextTime) {
-      return
-    }
-
-    syncRef.current = true
-    setFrequency(next.frequency)
-    setDays(next.days)
-    setTime(nextTime)
-  }, [value])
-
-  useEffect(() => {
-    if (syncRef.current) {
-      syncRef.current = false
-      return
-    }
     const [h, m] = time.split(':').map(Number)
-    onChangeRef.current(toCron(frequency, days, h || 0, m || 0))
-  }, [frequency, days, time])
+    onChange(toCron(frequency, days, h || 0, m || 0))
+  }, [frequency, days, time, onChange])
 
   function handleFrequencyChange(val: string[]) {
     const freq = (val[0] || 'daily') as Frequency

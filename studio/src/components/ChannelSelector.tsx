@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { platformLabels } from '@/lib/labels'
@@ -8,10 +7,9 @@ interface ChannelSelectorProps {
   value: string
   onChange: (channelId: string, platform: string) => void
   platform?: string
-  disabled?: boolean
 }
 
-export function ChannelSelector({ value, onChange, platform, disabled }: ChannelSelectorProps) {
+export function ChannelSelector({ value, onChange, platform }: ChannelSelectorProps) {
   const { data: channels = [], isLoading } = useQuery({
     queryKey: ['channels', 'active', platform],
     queryFn: () => api.channels.list({ status: 'active', platform }),
@@ -19,7 +17,7 @@ export function ChannelSelector({ value, onChange, platform, disabled }: Channel
 
   const options: ComboboxOption[] = channels.map((ch) => ({
     value: ch.id,
-    label: ch.name || `${platformLabels[ch.platform] || ch.platform} 账号`,
+    label: ch.name,
     group: platformLabels[ch.platform] || ch.platform,
   }))
 
@@ -28,31 +26,20 @@ export function ChannelSelector({ value, onChange, platform, disabled }: Channel
   }
 
   return (
-    <div className="space-y-2">
-      <Combobox
-        options={options}
-        value={value}
-        onChange={(id) => {
-          if (!id) {
-            onChange('', '')
-            return
-          }
-          const ch = channels.find((c) => c.id === id)
-          if (ch) onChange(ch.id, ch.platform)
-        }}
-        placeholder="选择账号..."
-        searchPlaceholder="搜索账号..."
-        emptyText="没有找到账号"
-        disabled={disabled}
-      />
-      {channels.length === 0 && (
-        <p className="text-xs text-muted-foreground">
-          还没有可用账号。
-          <Link to="/channels" className="ml-1 text-primary hover:underline">
-            去创建账号
-          </Link>
-        </p>
-      )}
-    </div>
+    <Combobox
+      options={options}
+      value={value}
+      onChange={(id) => {
+        if (!id) {
+          onChange('', '')
+          return
+        }
+        const ch = channels.find((c) => c.id === id)
+        if (ch) onChange(ch.id, ch.platform)
+      }}
+      placeholder="选择频道..."
+      searchPlaceholder="搜索频道..."
+      emptyText="没有找到频道"
+    />
   )
 }

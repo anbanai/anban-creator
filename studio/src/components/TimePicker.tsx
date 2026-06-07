@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Clock } from 'lucide-react'
 import {
   Popover,
@@ -26,15 +26,13 @@ export default function TimePicker({ value, onChange, className, disabled }: Tim
   const [open, setOpen] = useState(false)
 
   // Snap non-5-minute values to nearest 5-minute interval
-  const onChangeRef = useRef(onChange)
-  onChangeRef.current = onChange
   useEffect(() => {
     const raw = parseInt(value.split(':')[1]) || 0
     const snapped = Math.round(raw / 5) * 5
     if (snapped !== raw) {
-      onChangeRef.current(formatTime(parseInt(value.split(':')[0]) || 0, snapped))
+      onChange(formatTime(parseInt(value.split(':')[0]) || 0, snapped))
     }
-  }, [value])
+  }, [value, onChange])
 
   const [hour, minute] = useMemo(() => {
     const parts = value.split(':').map(Number)

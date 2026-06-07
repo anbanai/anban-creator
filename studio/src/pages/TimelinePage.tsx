@@ -30,7 +30,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Card } from '@/components/ui/Card'
 import EmptyState from '@/components/EmptyState'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { CalendarRangePicker } from '@/components/CalendarRangePicker'
+import { CalendarRangePicker } from '@/components/ui/Calendar'
 import { ChannelSelector } from '@/components/ChannelSelector'
 
 // --- Helpers ---
@@ -370,7 +370,7 @@ export default function TimelinePage() {
                                       </Badge>
                                     )}
                                     {item.type === 'task' && item.status === 'running' && (
-                                      <Badge variant="outline" className="text-[10px]">
+                                      <Badge variant="warning" className="text-[10px]">
                                         {item.progress ?? 0}%
                                       </Badge>
                                     )}
