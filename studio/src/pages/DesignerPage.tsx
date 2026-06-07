@@ -23,8 +23,8 @@ const DEFAULT_SETTINGS: DesignerSettings = {
 }
 
 const POLL_INTERVAL = 2000
-const MAX_POLLS = 90 // 3 minutes at 2s interval
-const MAX_CONSECUTIVE_ERRORS = 3
+const MAX_POLLS = 180 // 6 minutes at 2s interval (backend default is 5 min)
+const MAX_CONSECUTIVE_ERRORS = 5
 
 function resultsToImages(results?: ImageGenerationResult[]): GenerateImage[] {
   if (!results || results.length === 0) return []
