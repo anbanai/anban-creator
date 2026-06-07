@@ -15,6 +15,7 @@ import type { GenerateImage, ImageGeneration, ImageGenerationResult, DesignerPro
 const DEFAULT_SETTINGS: DesignerSettings = {
   quality: 'auto',
   size: '1:1',
+  resolution: '2K',
   n: 1,
   outputFormat: 'png',
   referenceFiles: [],
@@ -104,12 +105,13 @@ export default function DesignerPage() {
       }
 
       // Start async generation
+      const sizeWithTier = settings.resolution === '2K' ? settings.size : `${settings.size}:${settings.resolution}`
       const { generation_id } = await designerApi.generate({
         channel_id: '',
         prompt,
         provider: effectiveProvider.provider,
         quality: settings.quality !== 'auto' ? settings.quality : undefined,
-        size: settings.size,
+        size: sizeWithTier,
         n: settings.n > 1 ? settings.n : undefined,
         output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
         reference_file_ids: refFileIds.length > 0 ? refFileIds : undefined,

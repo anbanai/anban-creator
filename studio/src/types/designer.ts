@@ -59,6 +59,7 @@ export interface DesignerProvider {
 export interface DesignerSettings {
   quality: string
   size: string
+  resolution: string
   n: number
   outputFormat: string
   referenceFiles: File[]

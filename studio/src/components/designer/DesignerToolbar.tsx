@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import {
   Proportions,
   Layers,
@@ -8,6 +8,7 @@ import {
   X,
   Upload,
   Sparkles,
+  Maximize,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { Button } from '@/components/ui/button'
@@ -21,6 +22,12 @@ const SIZE_OPTIONS = [
   { value: '9:16', label: '9:16', desc: '竖屏' },
   { value: '4:3', label: '4:3', desc: '横屏' },
   { value: '3:4', label: '3:4', desc: '竖屏' },
+]
+
+const RESOLUTION_OPTIONS = [
+  { value: '1K', label: '1K', desc: '1024' },
+  { value: '2K', label: '2K', desc: '2048' },
+  { value: '4K', label: '4K', desc: '4096' },
 ]
 
 interface DesignerToolbarProps {
@@ -73,6 +80,14 @@ export default function DesignerToolbar({
   const showFormat = (caps?.outputFormats.length ?? 0) > 1
   const showRefs = (caps?.maxRefImages ?? 0) > 0
   const showMask = caps?.inpainting
+
+  // Generate object URLs for reference image previews
+  const [refPreviewUrls, setRefPreviewUrls] = useState<string[]>([])
+  useEffect(() => {
+    const urls = settings.referenceFiles.map((f) => URL.createObjectURL(f))
+    setRefPreviewUrls(urls)
+    return () => urls.forEach((u) => URL.revokeObjectURL(u))
+  }, [settings.referenceFiles])
 
   const headerClass = 'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50'
 
@@ -164,6 +179,34 @@ export default function DesignerToolbar({
               </div>
             </div>
 
+            {/* Resolution — only for providers with flexible size support */}
+            {caps?.flexibleSize && (
+            <div className="space-y-2">
+              <h4 className={headerClass}>
+                <Maximize className="h-3 w-3" />
+                分辨率
+              </h4>
+              <div className="grid grid-cols-3 gap-1">
+                {RESOLUTION_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => update({ resolution: opt.value })}
+                    className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+                      settings.resolution === opt.value
+                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                        : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                    }`}
+                    style={settings.resolution === opt.value ? { boxShadow: '0 0 10px -4px var(--color-primary)' } : undefined}
+                  >
+                    <span className="font-medium">{opt.label}</span>
+                    <span className="text-[10px] opacity-60">{opt.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            )}
+
             {/* Count */}
             {showCount && (
               <div className="space-y-2">
@@ -239,18 +282,22 @@ export default function DesignerToolbar({
                   参考图 ({settings.referenceFiles.length}/{caps!.maxRefImages})
                 </h4>
                 <div className="space-y-1.5">
-                  {settings.referenceFiles.map((file, i) => (
-                    <div key={i} className="flex items-center gap-1.5 rounded-lg bg-muted/20 px-2.5 py-1.5">
-                      <span className="flex-1 truncate text-[11px] text-foreground">{file.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeRefFile(i)}
-                        className="shrink-0 text-muted-foreground/60 transition-colors hover:text-destructive"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                  {refPreviewUrls.length > 0 && (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {refPreviewUrls.map((url, i) => (
+                        <div key={url} className="group relative aspect-square overflow-hidden rounded-lg bg-muted/20 ring-1 ring-border/30">
+                          <img src={url} alt={settings.referenceFiles[i]?.name} className="h-full w-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => removeRefFile(i)}
+                            className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                   {settings.referenceFiles.length < (caps?.maxRefImages ?? 0) && (
                     <Button
                       variant="ghost"

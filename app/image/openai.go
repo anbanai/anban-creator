@@ -447,6 +447,12 @@ func (p *OpenAIProvider) buildEditParams(prompt string, opts *GenerateOptions, s
 	if opts.OutputFormat != "" {
 		params.OutputFormat = openai.ImageEditParamsOutputFormat(opts.OutputFormat)
 	}
+	switch p.responseFormat {
+	case "url":
+		params.ResponseFormat = openai.ImageEditParamsResponseFormatURL
+	default:
+		params.ResponseFormat = openai.ImageEditParamsResponseFormatB64JSON
+	}
 	if opts.N > 1 {
 		params.N = param.NewOpt(int64(opts.N))
 	}
