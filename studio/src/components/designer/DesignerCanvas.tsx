@@ -3,17 +3,17 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { GenerateImage } from '@/types/designer'
 import EmptyState from '@/components/EmptyState'
 
-interface GenerationGridProps {
+interface DesignerCanvasProps {
   images: GenerateImage[]
   isGenerating: boolean
   onImageClick: (image: GenerateImage) => void
 }
 
-export default function GenerationGrid({ images, isGenerating, onImageClick }: GenerationGridProps) {
+export default function DesignerCanvas({ images, isGenerating, onImageClick }: DesignerCanvasProps) {
   if (isGenerating) {
     return (
-      <div className="grid grid-cols-2 gap-3">
-        {Array.from({ length: 2 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
           <Skeleton key={i} className="aspect-square w-full rounded-lg" />
         ))}
       </div>
@@ -22,11 +22,13 @@ export default function GenerationGrid({ images, isGenerating, onImageClick }: G
 
   if (images.length === 0) {
     return (
-      <EmptyState
-        icon={ImageIcon}
-        title="图片工作室"
-        description="输入提示词，调整参数，生成你想要的图片。"
-      />
+      <div className="flex h-full items-center justify-center">
+        <EmptyState
+          icon={ImageIcon}
+          title="图片工作室"
+          description="输入提示词，调整参数，生成你想要的图片。"
+        />
+      </div>
     )
   }
 
@@ -42,7 +44,7 @@ export default function GenerationGrid({ images, isGenerating, onImageClick }: G
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
       {images.map((img, i) => (
         <div
           key={`${img.url}-${i}`}

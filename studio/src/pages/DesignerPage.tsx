@@ -1,14 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import PageHeader from '@/components/layout/PageHeader'
-import ModelSelector from '@/components/designer/ModelSelector'
-import SettingsPanel from '@/components/designer/SettingsPanel'
-import type { DesignerSettings } from '@/components/designer/SettingsPanel'
-import GenerationGrid from '@/components/designer/GenerationGrid'
-import PromptInput from '@/components/designer/PromptInput'
-import HistorySidebar from '@/components/designer/HistorySidebar'
+import DesignerTopBar from '@/components/designer/DesignerTopBar'
+import DesignerToolbar from '@/components/designer/DesignerToolbar'
+import DesignerCanvas from '@/components/designer/DesignerCanvas'
+import DesignerPromptBar from '@/components/designer/DesignerPromptBar'
+import HistoryDrawer from '@/components/designer/HistoryDrawer'
 import ImagePreview from '@/components/designer/ImagePreview'
+import type { DesignerSettings } from '@/types/designer'
 import { api } from '@/lib/api'
 import { designerApi } from '@/lib/api/designer'
 import { getApiErrorMessage } from '@/lib/http-client'
@@ -47,6 +46,7 @@ export default function DesignerPage() {
   const [selectedGenerationId, setSelectedGenerationId] = useState<string>()
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortedRef = useRef(false)
 
@@ -185,51 +185,57 @@ export default function DesignerPage() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <PageHeader title="设计师" description="AI 图片生成工作室，支持多种模型和风格。" />
-
-      {/* Model selector */}
-      <ModelSelector
+    // Full-bleed: negate AppLayout padding (px-4 py-6 md:px-8 md:py-8)
+    <div className="-mx-4 -my-6 flex flex-col overflow-hidden md:-mx-8 md:-my-8" style={{ height: '100dvh' }}>
+      {/* Top bar */}
+      <DesignerTopBar
         providers={providerList}
-        selectedId={effectiveProvider?.id ?? ''}
+        selectedProviderId={effectiveProvider?.id ?? ''}
         onModelChange={handleModelChange}
+        provider={effectiveProvider?.provider ?? ''}
+        settings={settings}
+        onSettingsChange={setSettings}
       />
 
-      {/* Main content area */}
-      <div className="flex min-h-0 flex-1 gap-4">
-        {/* Left: Settings */}
-        <div className="hidden md:block">
-          <SettingsPanel
+      {/* Main content: flex-col on mobile, flex-row on desktop */}
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        {/* Toolbar: order-2 on mobile (bottom), order-first on desktop (left) */}
+        <div className="order-2 md:order-first">
+          <DesignerToolbar
             provider={effectiveProvider?.provider ?? ''}
             settings={settings}
             onSettingsChange={setSettings}
+            onHistoryToggle={() => setHistoryOpen(true)}
           />
         </div>
 
-        {/* Center: Generation grid */}
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <div className="flex-1">
-            <GenerationGrid
+        {/* Center: Canvas + PromptBar */}
+        <div className="order-1 flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 overflow-y-auto p-4">
+            <DesignerCanvas
               images={currentImages}
               isGenerating={isGenerating}
               onImageClick={(img) => setPreviewImage(img.url)}
             />
           </div>
-          <PromptInput
+          <DesignerPromptBar
             onSubmit={handleGenerate}
             isGenerating={isGenerating}
             onCancel={handleCancel}
-          />
-        </div>
-
-        {/* Right: History */}
-        <div className="hidden lg:block">
-          <HistorySidebar
-            onSelect={handleHistorySelect}
-            selectedId={selectedGenerationId}
+            providers={providerList}
+            selectedProviderId={effectiveProvider?.id ?? ''}
+            onModelChange={handleModelChange}
           />
         </div>
       </div>
+
+      {/* History drawer (portal-based, no layout impact) */}
+      <HistoryDrawer
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onSelect={handleHistorySelect}
+        selectedId={selectedGenerationId}
+      />
 
       {/* Image preview modal */}
       {previewImage && (

@@ -56,6 +56,15 @@ export interface DesignerProvider {
   description?: string
 }
 
+export interface DesignerSettings {
+  quality: string
+  size: string
+  n: number
+  outputFormat: string
+  referenceFiles: File[]
+  maskFile: File | null
+}
+
 export interface GenerateRequest {
   channel_id: string
   prompt: string
