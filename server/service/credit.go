@@ -370,3 +370,31 @@ func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType s
 	s.logger.Info().Str("user_id", userID).Str("op_type", opType).Int("amount", totalCost).Int("balance", newBalance).Msg("credits deducted for operation")
 	return newBalance, nil
 }
+
+// RefundForOperation refunds credits for a failed operation.
+func (s *CreditService) RefundForOperation(ctx context.Context, userID, opType string, amount int, description string) error {
+	if amount <= 0 {
+		return nil
+	}
+
+	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		newBalance, err := txRepo.Users().AdjustBalance(ctx, userID, amount)
+		if err != nil {
+			return fmt.Errorf("adjust balance: %w", err)
+		}
+
+		tx := &model.CreditTransaction{
+			UserID:       userID,
+			Type:         opType,
+			Amount:       amount,
+			BalanceAfter: newBalance,
+			Description:  description,
+		}
+		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
+			return fmt.Errorf("create refund transaction: %w", err)
+		}
+
+		s.logger.Info().Str("user_id", userID).Str("op_type", opType).Int("refund", amount).Int("balance", newBalance).Msg("credits refunded for operation")
+		return nil
+	})
+}

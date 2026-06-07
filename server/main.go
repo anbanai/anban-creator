@@ -380,7 +380,7 @@ func main() {
 			}
 		}
 		if mysqlDB != nil && imageSvc != nil {
-			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, &cfg.ImageAPI, store, log)
+			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, &cfg.Credits, &cfg.ImageAPI, store, log)
 			designerHandler = handler.NewDesignerHandler(designerSvc, log)
 		}
 		if repo != nil {

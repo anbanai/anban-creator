@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/royalrick/anbanwriter/app/config"
@@ -22,29 +23,32 @@ import (
 )
 
 type DesignerService struct {
-	db       *gorm.DB
-	imageSvc *ImageService
-	creditSvc *CreditService
-	imageCfg *srvconfig.ImageAPIConfig
-	storage  storage.Provider
-	logger   *zerolog.Logger
+	db         *gorm.DB
+	imageSvc   *ImageService
+	creditSvc  *CreditService
+	creditsCfg *srvconfig.CreditsConfig
+	imageCfg   *srvconfig.ImageAPIConfig
+	storage    storage.Provider
+	logger     *zerolog.Logger
 }
 
 func NewDesignerService(
 	db *gorm.DB,
 	imageSvc *ImageService,
 	creditSvc *CreditService,
+	creditsCfg *srvconfig.CreditsConfig,
 	imageCfg *srvconfig.ImageAPIConfig,
 	store storage.Provider,
 	logger *zerolog.Logger,
 ) *DesignerService {
 	return &DesignerService{
-		db:        db,
-		imageSvc:  imageSvc,
-		creditSvc: creditSvc,
-		imageCfg:  imageCfg,
-		storage:   store,
-		logger:    logger,
+		db:         db,
+		imageSvc:   imageSvc,
+		creditSvc:  creditSvc,
+		creditsCfg: creditsCfg,
+		imageCfg:   imageCfg,
+		storage:    store,
+		logger:     logger,
 	}
 }
 
@@ -103,6 +107,19 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		}
 	}
 
+	// Billing: look up per-image cost from config and deduct before creating record.
+	var totalCost int
+	if s.creditsCfg != nil {
+		if unitCost, ok := s.creditsCfg.ModelCost(model.CreditTypeImageGen, provider, modelName); ok && unitCost > 0 {
+			totalCost = unitCost * req.N
+		}
+	}
+	if totalCost > 0 {
+		if _, err := s.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, totalCost); err != nil {
+			return "", fmt.Errorf("deduct credits: %w", err)
+		}
+	}
+
 	genID := uuid.New().String()
 	refFilesJSON, _ := json.Marshal(req.ReferenceFileIDs)
 	gen := &model.ImageGeneration{
@@ -119,9 +136,16 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		Status:         model.ImageGenerationStatusGenerating,
 		ReferenceFiles: string(refFilesJSON),
 		MaskFileID:     req.MaskFileID,
+		Cost:           totalCost,
 	}
 
 	if err := s.db.Create(gen).Error; err != nil {
+		// Refund on DB create failure to avoid losing credits.
+		if totalCost > 0 && s.creditSvc != nil {
+			if refundErr := s.creditSvc.RefundForOperation(ctx, userID, model.CreditTypeImageGen, totalCost, "生成记录创建失败退还"); refundErr != nil {
+				s.logger.Error().Err(refundErr).Int("cost", totalCost).Msg("failed to refund after DB create failure")
+			}
+		}
 		return "", fmt.Errorf("create generation record: %w", err)
 	}
 
@@ -137,18 +161,30 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 // goroutine will not be interrupted on server shutdown, but will complete
 // naturally. A server-level lifecycle context could be added later.
 func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
-	defer func() {
-		if r := recover(); r != nil {
-			s.logger.Error().Str("gen_id", genID).Any("panic", r).Msg("generation panicked")
-			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, fmt.Sprintf("internal error: %v", r))
-		}
-	}()
-
 	var gen model.ImageGeneration
 	if err := s.db.Where("id = ?", genID).First(&gen).Error; err != nil {
 		s.logger.Error().Err(err).Str("gen_id", genID).Msg("generation record not found")
 		return
 	}
+
+	var refundOnce sync.Once
+	refund := func() {
+		refundOnce.Do(func() {
+			if gen.Cost > 0 && s.creditSvc != nil {
+				if err := s.creditSvc.RefundForOperation(ctx, gen.UserID, model.CreditTypeImageGen, gen.Cost, fmt.Sprintf("设计师生成失败退还 +%d", gen.Cost)); err != nil {
+					s.logger.Error().Err(err).Str("gen_id", genID).Int("cost", gen.Cost).Msg("failed to refund designer generation")
+				}
+			}
+		})
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error().Str("gen_id", genID).Any("panic", r).Msg("generation panicked")
+			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, fmt.Sprintf("internal error: %v", r))
+			refund()
+		}
+	}()
 
 	provider := gen.Provider
 	modelName := gen.Model
@@ -184,6 +220,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	if err != nil {
 		s.logger.Error().Err(err).Str("provider", provider).Msg("designer: failed to create image provider")
 		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
+		refund()
 		return
 	}
 
@@ -197,6 +234,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		if err != nil {
 			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed,
 				fmt.Sprintf("resolve reference file %s: %v", fileID, err))
+			refund()
 			return
 		}
 		refPaths = append(refPaths, path)
@@ -208,6 +246,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		if err != nil {
 			s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed,
 				fmt.Sprintf("resolve mask file %s: %v", gen.MaskFileID, err))
+			refund()
 			return
 		}
 		maskPath = path
@@ -230,6 +269,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 			Str("prompt_preview", truncate(gen.Prompt, 100)).
 			Msg("designer: image generation failed")
 		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
+		refund()
 		return
 	}
 

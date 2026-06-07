@@ -109,8 +109,9 @@ export async function unwrap<T>(request: Promise<{ data: ApiResponse<T> }>): Pro
 /** Extract user-friendly error message from an unknown error */
 export function getApiErrorMessage(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'response' in err) {
-    const resp = (err as { response?: { data?: { msg?: string } } }).response
+    const resp = (err as { response?: { data?: { msg?: string; error?: string } } }).response
     if (resp?.data?.msg) return resp.data.msg
+    if (resp?.data?.error) return resp.data.error
   }
   if (err instanceof Error) return err.message || fallback
   return fallback

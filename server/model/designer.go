@@ -27,6 +27,7 @@ type ImageGeneration struct {
 	OutputTokens   int       `json:"output_tokens,omitempty"`
 	ReferenceFiles string    `gorm:"type:text" json:"reference_files,omitempty"`
 	MaskFileID     string    `gorm:"type:char(36)" json:"mask_file_id,omitempty"`
+	Cost           int       `gorm:"default:0" json:"cost,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Results        []ImageGenerationResult `gorm:"foreignKey:GenerationID" json:"results,omitempty"`

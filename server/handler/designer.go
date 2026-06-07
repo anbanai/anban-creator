@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -58,6 +59,9 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 
 	genID, err := h.svc.CreateGenerationRecord(c.Context(), userID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrInsufficientCredits) {
+			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{"error": "积分不足，请充值后重试"})
+		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("designer create generation record failed")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
