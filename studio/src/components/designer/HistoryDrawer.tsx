@@ -81,7 +81,7 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, selectedId
                     }}
                     className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-all duration-200 ${
                       isSelected
-                        ? 'bg-primary/10 text-foreground ring-1 ring-primary/20'
+                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
                         : 'text-foreground hover:bg-accent/50'
                     }`}
                   >
@@ -96,7 +96,7 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, selectedId
                       <p className="line-clamp-2 text-xs leading-relaxed text-foreground/90">
                         {gen.prompt}
                       </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground/60">
+                      <p className="mt-1 text-[10px] text-muted-foreground/80">
                         {formatTime(gen.created_at)}
                       </p>
                     </div>

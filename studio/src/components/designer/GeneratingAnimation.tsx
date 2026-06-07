@@ -209,7 +209,7 @@ export default function GeneratingAnimation() {
 
     // Pulse the overlay text
     gsap.to('.gen-fluid-text', {
-      opacity: 0.4,
+      opacity: 0.6,
       duration: 2,
       ease: 'sine.inOut',
       repeat: -1,

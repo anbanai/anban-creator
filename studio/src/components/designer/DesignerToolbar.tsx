@@ -103,7 +103,7 @@ export default function DesignerToolbar({
     return () => urls.forEach((u) => URL.revokeObjectURL(u))
   }, [settings.referenceFiles])
 
-  const sectionHeader = 'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50'
+  const sectionHeader = 'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70'
 
   return (
     <>
@@ -126,7 +126,7 @@ export default function DesignerToolbar({
                 </span>
               </div>
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Badge variant="secondary" className="gap-1 text-[11px] font-medium">
                     <Coins className="h-3 w-3" />
                     {balanceLoading ? <Skeleton className="h-3 w-8" /> : balance.toLocaleString()}
@@ -155,7 +155,7 @@ export default function DesignerToolbar({
                           ? 'bg-primary/[0.07] ring-1 ring-primary/20 dark:bg-primary/[0.12]'
                           : 'hover:bg-muted/40'
                     }`}
-                    style={isActive ? { boxShadow: '0 0 20px -6px var(--color-primary)' } : undefined}
+                    style={isActive ? { boxShadow: '0 0 12px -4px var(--color-primary)' } : undefined}
                   >
                     <div className="flex items-center gap-2">
                       <span className="text-[13px] font-medium">{p.name}</span>
@@ -170,7 +170,7 @@ export default function DesignerToolbar({
                       )}
                       {!isDisabled && p.credits > 0 && (
                         <Tooltip>
-                          <TooltipTrigger asChild>
+                          <TooltipTrigger>
                             <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
                               {p.credits}
                             </Badge>

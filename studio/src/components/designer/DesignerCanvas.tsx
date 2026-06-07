@@ -34,7 +34,6 @@ export default function DesignerCanvas({ images, isGenerating, onImageClick }: D
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
         <div className="relative">
-          <div className="absolute -inset-4 rounded-full bg-primary/5 blur-xl" />
           <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-muted/50">
             <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
           </div>
