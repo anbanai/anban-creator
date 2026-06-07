@@ -9,15 +9,21 @@ interface DesignerCanvasProps {
 }
 
 export default function DesignerCanvas({ images, isGenerating, onImageClick }: DesignerCanvasProps) {
-  function handleDownload(url: string, index: number) {
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `designer-${index + 1}.png`
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+  async function handleDownload(url: string, index: number) {
+    try {
+      const res = await fetch(url)
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = `designer-${index + 1}.png`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+    } catch {
+      window.open(url, '_blank')
+    }
   }
 
   if (isGenerating) {

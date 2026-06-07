@@ -16,15 +16,21 @@ export default function ImagePreview({ imageUrl, onClose }: ImagePreviewProps) {
     return () => document.removeEventListener('keydown', handleKey)
   }, [onClose])
 
-  function handleDownload() {
-    const a = document.createElement('a')
-    a.href = imageUrl
-    a.download = 'designer-image.png'
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+  async function handleDownload() {
+    try {
+      const res = await fetch(imageUrl)
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = 'designer-image.png'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+    } catch {
+      window.open(imageUrl, '_blank')
+    }
   }
 
   return (
