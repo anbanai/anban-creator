@@ -38,7 +38,18 @@ func NewOSSProvider(cfg config.StorageConfig, logger *zerolog.Logger) (*OSSProvi
 		}
 	}
 
-	client, err := oss.New(cfg.Endpoint, cfg.AccessKeyID, cfg.AccessKeySecret)
+	// Ensure endpoint uses HTTPS so signed URLs use https:// scheme.
+	// The OSS SDK defaults to http:// when no scheme prefix is provided,
+	// which causes mixed-content errors on HTTPS pages.
+	endpoint := cfg.Endpoint
+	switch {
+	case strings.HasPrefix(endpoint, "http://"):
+		endpoint = "https://" + strings.TrimPrefix(endpoint, "http://")
+	case !strings.HasPrefix(endpoint, "https://"):
+		endpoint = "https://" + endpoint
+	}
+
+	client, err := oss.New(endpoint, cfg.AccessKeyID, cfg.AccessKeySecret)
 	if err != nil {
 		return nil, fmt.Errorf("create OSS client: %w", err)
 	}
@@ -48,10 +59,13 @@ func NewOSSProvider(cfg config.StorageConfig, logger *zerolog.Logger) (*OSSProvi
 		return nil, fmt.Errorf("get OSS bucket %s: %w", cfg.BucketName, err)
 	}
 
+	// Store bare hostname (strip scheme) so GetURL() constructs correct URLs.
+	bareEndpoint := strings.TrimPrefix(endpoint, "https://")
+
 	return &OSSProvider{
 		client:       client,
 		bucket:       bucket,
-		endpoint:     cfg.Endpoint,
+		endpoint:     bareEndpoint,
 		bucketName:   cfg.BucketName,
 		customDomain: cfg.CustomDomain,
 		logger:       logger,
