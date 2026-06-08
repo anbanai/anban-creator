@@ -241,18 +241,18 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 
 	service.SanitizeChannel(created)
 
-	// For Seednote channels with profile data, return recommended templates.
+	// For Seednote channels, include recommended templates.
+	recommended := []*model.Template{}
 	if created.Platform == model.PlatformSeednote && h.templateSvc != nil {
-		recommended := h.getRecommendedTemplates(c.Context(), created)
-		if len(recommended) > 0 {
-			return Success(c, fiber.Map{
-				"channel":               created,
-				"recommended_templates": recommended,
-			})
+		if rec := h.getRecommendedTemplates(c.Context(), created); rec != nil {
+			recommended = rec
 		}
 	}
 
-	return Success(c, created)
+	return Success(c, fiber.Map{
+		"channel":               created,
+		"recommended_templates": recommended,
+	})
 }
 
 // Get handles GET /channels/:id.

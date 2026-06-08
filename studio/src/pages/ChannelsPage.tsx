@@ -233,7 +233,6 @@ export default function ChannelsPage() {
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
-      // Show template recommendations for seednote channels
       const channel = result.channel
       if (channel.platform === 'seednote' && result.recommended_templates && result.recommended_templates.length > 0) {
         setRecommendedTemplates(result.recommended_templates)

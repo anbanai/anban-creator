@@ -244,7 +244,7 @@ export default function DesignerToolbar({
             </div>
 
             {/* Watermark */}
-            <button
+            {caps?.watermark && <button
               type="button"
               onClick={() => update({ watermark: !settings.watermark })}
               className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
@@ -258,9 +258,9 @@ export default function DesignerToolbar({
                 <p className={`text-xs font-medium ${settings.watermark ? 'text-foreground' : 'text-muted-foreground'}`}>
                   水印
                 </p>
-                <p className="text-[10px] text-muted-foreground">仅火山引擎支持</p>
+                <p className="text-[10px] text-muted-foreground">添加水印</p>
               </div>
-            </button>
+            </button>}
 
             {/* Count */}
             {showCount && (

@@ -7,6 +7,7 @@ export interface ModelCapabilities {
   qualityLevels: string[]
   outputFormats: string[]
   flexibleSize: boolean
+  watermark: boolean
 }
 
 // Capabilities keyed by provider name (matches config designer.*.provider)
@@ -20,6 +21,7 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
     qualityLevels: ['auto', 'low', 'medium', 'high'],
     outputFormats: ['png', 'jpeg', 'webp'],
     flexibleSize: false,
+    watermark: false,
   },
   gemini: {
     maxRefImages: 10,
@@ -30,6 +32,7 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
     qualityLevels: [],
     outputFormats: ['png'],
     flexibleSize: false,
+    watermark: false,
   },
   volcengine: {
     maxRefImages: 1,
@@ -40,6 +43,7 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
     qualityLevels: [],
     outputFormats: ['png', 'jpeg'],
     flexibleSize: true,
+    watermark: true,
   },
 }
 
