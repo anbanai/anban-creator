@@ -26,6 +26,14 @@ func isValidImageMIME(ct string) bool {
 	return validImageMIMETypes[ct]
 }
 
+func truncate(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
+}
+
 type DesignerHandler struct {
 	svc    *service.DesignerService
 	logger *zerolog.Logger
@@ -67,6 +75,16 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 	}
 
 	go h.svc.ExecuteGeneration(context.Background(), genID)
+
+	h.logger.Info().
+		Str("user_id", userID).
+		Str("gen_id", genID).
+		Str("prompt_preview", truncate(req.Prompt, 80)).
+		Str("provider", req.Provider).
+		Str("model", req.Model).
+		Str("size", req.Size).
+		Int("n", req.N).
+		Msg("designer: generation request accepted")
 
 	return c.JSON(fiber.Map{
 		"data": fiber.Map{

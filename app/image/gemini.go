@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/rs/zerolog"
 	"google.golang.org/genai"
 )
 
@@ -20,10 +21,11 @@ type GeminiProvider struct {
 	model       string
 	aspectRatio string
 	client      *genai.Client
+	log         *zerolog.Logger
 }
 
 // NewGeminiProvider 创建 Gemini Provider
-func NewGeminiProvider(apiCfg *config.ImageAPI) (*GeminiProvider, error) {
+func NewGeminiProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*GeminiProvider, error) {
 	model := apiCfg.Model
 	if model == "" {
 		model = DefaultGeminiModel
@@ -59,6 +61,7 @@ func NewGeminiProvider(apiCfg *config.ImageAPI) (*GeminiProvider, error) {
 		model:       model,
 		aspectRatio: aspectRatio,
 		client:      client,
+		log:         log,
 	}, nil
 }
 
@@ -83,6 +86,26 @@ func (p *GeminiProvider) Capabilities() *ProviderCapabilities {
 
 // Generate 生成图片
 func (p *GeminiProvider) Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error) {
+	start := time.Now()
+
+	refCount := 0
+	hasMask := false
+	if opts != nil {
+		refCount = len(opts.RefImagePaths)
+		if opts.RefImagePath != "" {
+			refCount++
+		}
+		hasMask = opts.MaskPath != ""
+	}
+
+	p.log.Debug().
+		Str("prompt_preview", truncateRunes(prompt, 80)).
+		Str("model", p.model).
+		Str("size", p.aspectRatio).
+		Int("ref_count", refCount).
+		Bool("has_mask", hasMask).
+		Msg("gemini: generating image")
+
 	// 构建请求内容
 	parts := []*genai.Part{
 		genai.NewPartFromText(prompt),
@@ -132,6 +155,7 @@ func (p *GeminiProvider) Generate(ctx context.Context, prompt string, opts *Gene
 	// 调用 Gemini API
 	resp, err := p.client.Models.GenerateContent(ctx, p.model, contents, genCfg)
 	if err != nil {
+		p.log.Error().Err(err).Str("model", p.model).Dur("elapsed", time.Since(start)).Msg("gemini: image generation failed")
 		return nil, p.handleError(err)
 	}
 
@@ -140,6 +164,11 @@ func (p *GeminiProvider) Generate(ctx context.Context, prompt string, opts *Gene
 	if err != nil {
 		return nil, err
 	}
+
+	p.log.Info().
+		Str("model", p.model).
+		Dur("elapsed", time.Since(start)).
+		Msg("gemini: image generation completed")
 
 	return &GenerateResult{
 		URL:             filePath, // 返回本地文件路径

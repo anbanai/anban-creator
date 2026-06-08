@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/royalrick/anbanwriter/app/config"
@@ -175,6 +176,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 // goroutine will not be interrupted on server shutdown, but will complete
 // naturally. A server-level lifecycle context could be added later.
 func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
+	start := time.Now()
 	var gen model.ImageGeneration
 	if err := s.db.Where("id = ?", genID).First(&gen).Error; err != nil {
 		s.logger.Error().Err(err).Str("gen_id", genID).Msg("generation record not found")
@@ -238,14 +240,29 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		keyPreview = "**"
 	}
 
+	var refFileIDs []string
+	if gen.ReferenceFiles != "" {
+		_ = json.Unmarshal([]byte(gen.ReferenceFiles), &refFileIDs)
+	}
+
 	s.logger.Info().
+		Str("gen_id", genID).
+		Str("user_id", gen.UserID).
+		Str("prompt_preview", truncate(gen.Prompt, 80)).
 		Str("provider", provider).
 		Str("provider_id", providerID).
 		Str("model", modelName).
 		Str("base_url", baseURL).
 		Str("key_preview", keyPreview).
+		Str("response_format", responseFormat).
 		Str("size", gen.Size).
+		Str("quality", gen.Quality).
+		Str("output_format", gen.OutputFormat).
+		Bool("watermark", gen.Watermark).
 		Int("n", gen.N).
+		Int("ref_count", len(refFileIDs)).
+		Bool("has_mask", gen.MaskFileID != "").
+		Int("cost", gen.Cost).
 		Msg("designer: starting image generation")
 
 	apiCfg := &config.ImageAPI{
@@ -259,16 +276,12 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 
 	providerInst, err := image.NewProvider(apiCfg, s.logger)
 	if err != nil {
-		s.logger.Error().Err(err).Str("provider", provider).Msg("designer: failed to create image provider")
+		s.logger.Error().Err(err).Str("gen_id", genID).Str("provider", provider).Msg("designer: failed to create image provider")
 		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
 		refund()
 		return
 	}
 
-	var refFileIDs []string
-	if gen.ReferenceFiles != "" {
-		_ = json.Unmarshal([]byte(gen.ReferenceFiles), &refFileIDs)
-	}
 	refPaths := make([]string, 0, len(refFileIDs))
 	for _, fileID := range refFileIDs {
 		path, err := s.resolveFilePath(fileID)
@@ -306,9 +319,12 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	result, err := providerInst.Generate(ctx, gen.Prompt, genOpts)
 	if err != nil {
 		s.logger.Error().Err(err).
+			Str("gen_id", genID).
+			Str("user_id", gen.UserID).
 			Str("provider", provider).
 			Str("model", modelName).
 			Str("prompt_preview", truncate(gen.Prompt, 100)).
+			Dur("elapsed", time.Since(start)).
 			Msg("designer: image generation failed")
 		s.updateGenerationStatus(genID, model.ImageGenerationStatusFailed, err.Error())
 		refund()
@@ -316,11 +332,15 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	}
 
 	s.logger.Info().
+		Str("gen_id", genID).
+		Str("user_id", gen.UserID).
 		Str("provider", provider).
 		Str("model", modelName).
+		Str("prompt_preview", truncate(gen.Prompt, 80)).
 		Str("result_type", result.ResponseType).
 		Int("image_count", len(result.Images)).
 		Str("url_preview", truncate(result.URL, 80)).
+		Dur("elapsed", time.Since(start)).
 		Msg("designer: image generation completed")
 
 	s.processResults(ctx, gen.UserID, genID, result)

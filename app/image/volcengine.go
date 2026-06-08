@@ -98,10 +98,39 @@ func (p *VolcengineProvider) Capabilities() *ProviderCapabilities {
 
 // Generate 生成图片
 func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error) {
+	start := time.Now()
+
 	wm := false
 	if opts != nil && opts.Watermark != nil {
 		wm = *opts.Watermark
 	}
+
+	refCount := 0
+	if opts != nil {
+		refCount = len(opts.RefImagePaths)
+		if opts.RefImagePath != "" {
+			refCount++
+		}
+	}
+
+	outputFmt := ""
+	if opts != nil {
+		outputFmt = opts.OutputFormat
+	}
+	vcOutputFmt := ""
+	if p.volcConfig != nil && p.volcConfig.OutputFormat != "" {
+		vcOutputFmt = p.volcConfig.OutputFormat
+	}
+
+	p.log.Debug().
+		Str("prompt_preview", truncateRunes(prompt, 80)).
+		Str("model", p.model).
+		Str("size_pixel", p.sizePixel).
+		Str("output_format", outputFmt).
+		Str("volcengine_output_format", vcOutputFmt).
+		Bool("watermark", wm).
+		Int("ref_count", refCount).
+		Msg("volcengine: generating image")
 
 	respFmt := model.GenerateImagesResponseFormatURL
 	req := model.GenerateImagesRequest{
@@ -154,7 +183,7 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 
 	resp, err := p.client.GenerateImages(ctx, req)
 	if err != nil {
-		p.log.Error().Err(err).Str("model", p.model).Msg("volcengine batch image generation failed")
+		p.log.Error().Err(err).Str("model", p.model).Dur("elapsed", time.Since(start)).Msg("volcengine: image generation failed")
 		return nil, p.convertSDKError(err)
 	}
 
@@ -169,6 +198,12 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 
 	// Return ratio (not pixel size) for consistent GenerateResult.Size format
 	ratio, _ := ParseSize(p.sizePixel)
+
+	p.log.Info().
+		Str("model", p.model).
+		Dur("elapsed", time.Since(start)).
+		Msg("volcengine: image generation completed")
+
 	return &GenerateResult{
 		URL:             *resp.Data[0].Url,
 		Model:           p.model,

@@ -137,6 +137,15 @@ func isContentSafetyError(errMsg string) bool {
 	return false
 }
 
+// truncateRunes returns s truncated to maxRunes runes, with "..." appended if truncated.
+func truncateRunes(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
+}
+
 // NewProvider 根据 ImageAPI 配置创建对应的 Provider
 func NewProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (Provider, error) {
 	switch apiCfg.Provider {
@@ -144,9 +153,9 @@ func NewProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (Provider, error)
 		if err := validateOpenAIConfig(apiCfg); err != nil {
 			return nil, err
 		}
-		return NewOpenAIProvider(apiCfg)
+		return NewOpenAIProvider(apiCfg, log)
 	case "gemini", "google":
-		return NewGeminiProvider(apiCfg)
+		return NewGeminiProvider(apiCfg, log)
 	case "volcengine", "volc", "seedream":
 		return NewVolcengineProvider(apiCfg, log)
 	default:

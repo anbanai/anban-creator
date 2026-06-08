@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,7 +13,13 @@ import (
 	"testing"
 
 	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/rs/zerolog"
 )
+
+func testLogger() *zerolog.Logger {
+	l := zerolog.New(io.Discard)
+	return &l
+}
 
 func TestMapToDALLESize(t *testing.T) {
 	tests := []struct {
@@ -75,7 +82,7 @@ func TestOpenAIGenerateClassifiesHTMLResponseAsEndpointProtocolError(t *testing.
 		BaseURL:  srv.URL,
 		Provider: "openai",
 		Model:    "dall-e-3",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -122,7 +129,7 @@ func TestOpenAIGenerateSavesBase64Image(t *testing.T) {
 		BaseURL:  srv.URL,
 		Provider: "openai",
 		Model:    "dall-e-3",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -176,7 +183,7 @@ func TestOpenAIGenerateForcesGPTImageBase64ResponseFormat(t *testing.T) {
 		Provider: "openai",
 		Model:    "gpt-image-1",
 		Size:     "16:9",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -209,7 +216,7 @@ func TestOpenAIGenerateAcceptsDataURLBase64Result(t *testing.T) {
 		BaseURL:  srv.URL,
 		Provider: "openai",
 		Model:    "gpt-image-1",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -260,7 +267,7 @@ func TestOpenAIGenerateDownloadsURLOnlyResult(t *testing.T) {
 		BaseURL:  srv.URL,
 		Provider: "openai",
 		Model:    "dall-e-3",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -304,7 +311,7 @@ func TestOpenAIGenerateReturnsErrorForEmptyImagePayload(t *testing.T) {
 		BaseURL:  srv.URL,
 		Provider: "openai",
 		Model:    "dall-e-3",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -353,7 +360,7 @@ func TestOpenAIProviderUsesCustomBaseURLAndKey(t *testing.T) {
 		Provider: "openai",
 		Model:    "gpt-image-1",
 		Size:     "16:9",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -411,7 +418,7 @@ func TestOpenAIProviderManualSmoke(t *testing.T) {
 		Provider: "openai",
 		Model:    model,
 		Size:     size,
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -483,7 +490,7 @@ func TestOpenAIGenerateClassifies5xxAsServerError(t *testing.T) {
 		BaseURL:  srv.URL,
 		Provider: "openai",
 		Model:    "gpt-image-2",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -518,7 +525,7 @@ func TestOpenAIGenerateClassifies401AsUnauthorized(t *testing.T) {
 		BaseURL:  srv.URL,
 		Provider: "openai",
 		Model:    "gpt-image-2",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -553,7 +560,7 @@ func TestOpenAIGenerateClassifies429AsRateLimit(t *testing.T) {
 		BaseURL:  srv.URL,
 		Provider: "openai",
 		Model:    "gpt-image-2",
-	})
+	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}

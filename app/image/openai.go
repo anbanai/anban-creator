@@ -17,6 +17,7 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/app/wechat"
+	"github.com/rs/zerolog"
 )
 
 // OpenAIProvider OpenAI 图片生成服务提供者
@@ -26,10 +27,11 @@ type OpenAIProvider struct {
 	size           string // DALL-E pixel size for API calls
 	sizeRatio      string // ratio string for GenerateResult.Size
 	responseFormat string // "b64_json" | "url" | "" (auto → b64_json)
+	log            *zerolog.Logger
 }
 
 // NewOpenAIProvider 创建 OpenAI Provider
-func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
+func NewOpenAIProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*OpenAIProvider, error) {
 	model := apiCfg.Model
 	if model == "" {
 		model = DefaultOpenAIModel
@@ -68,6 +70,7 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI) (*OpenAIProvider, error) {
 		size:           size,
 		sizeRatio:      sizeRatio,
 		responseFormat: apiCfg.ResponseFormat,
+		log:            log,
 	}, nil
 }
 
@@ -146,6 +149,26 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 		opts = &GenerateOptions{}
 	}
 
+	start := time.Now()
+
+	refCount := len(opts.RefImagePaths)
+	if opts.RefImagePath != "" {
+		refCount++
+	}
+
+	p.log.Debug().
+		Str("prompt_preview", truncateRunes(prompt, 80)).
+		Str("model", p.model).
+		Str("size", p.size).
+		Str("quality", opts.Quality).
+		Str("output_format", opts.OutputFormat).
+		Str("response_format", p.responseFormat).
+		Int("n", opts.N).
+		Int("ref_count", refCount).
+		Bool("has_mask", opts.MaskPath != "").
+		Bool("streaming", opts.StreamCB != nil && isGPTImageModel(p.model)).
+		Msg("openai: generating image")
+
 	// Determine effective size
 	size := p.size
 	if opts.Size != "" {
@@ -156,21 +179,40 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 	hasMask := opts.MaskPath != ""
 	useStreaming := opts.StreamCB != nil && isGPTImageModel(p.model)
 
-	// Edit mode: reference images or mask provided
+	var result *GenerateResult
+	var err error
+
 	if hasRefImages || hasMask {
 		if useStreaming {
-			return p.generateEditStreaming(ctx, prompt, opts, size)
+			result, err = p.generateEditStreaming(ctx, prompt, opts, size)
+		} else {
+			result, err = p.generateEdit(ctx, prompt, opts, size)
 		}
-		return p.generateEdit(ctx, prompt, opts, size)
+	} else if useStreaming {
+		result, err = p.generateStreaming(ctx, prompt, opts, size)
+	} else {
+		result, err = p.generateStandard(ctx, prompt, opts, size)
 	}
 
-	// Streaming generation
-	if useStreaming {
-		return p.generateStreaming(ctx, prompt, opts, size)
+	if err != nil {
+		p.log.Error().Err(err).
+			Str("model", p.model).
+			Dur("elapsed", time.Since(start)).
+			Msg("openai: image generation failed")
+		return nil, err
 	}
 
-	// Standard generation
-	return p.generateStandard(ctx, prompt, opts, size)
+	imgCount := 1
+	if len(result.Images) > 0 {
+		imgCount = len(result.Images)
+	}
+	p.log.Info().
+		Str("model", p.model).
+		Int("image_count", imgCount).
+		Dur("elapsed", time.Since(start)).
+		Msg("openai: image generation completed")
+
+	return result, nil
 }
 
 // Capabilities returns OpenAI provider capabilities
