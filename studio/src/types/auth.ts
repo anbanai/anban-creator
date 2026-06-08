@@ -10,6 +10,7 @@ export interface User {
   invite_code: string
   invite_count: number
   max_invites: number
+  has_password: boolean
   created_at: string
   updated_at: string
 }
@@ -19,6 +20,8 @@ export interface AuthResponse {
   refresh_token: string
   expires_at: number
   user: User
+  has_password: boolean
+  max_invites: number
 }
 
 export interface ApiResponse<T = unknown> {

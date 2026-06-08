@@ -114,3 +114,9 @@ export const changePasswordSchema = z.object({
   path: ['confirm_password'],
 })
 export type ChangePasswordFormValues = z.infer<typeof changePasswordSchema>
+
+export const codeLoginSchema = z.object({
+  email: z.string().min(1, '邮箱不能为空').email('请输入有效的邮箱地址'),
+  code: z.string().min(1, '请输入验证码'),
+})
+export type CodeLoginFormValues = z.infer<typeof codeLoginSchema>

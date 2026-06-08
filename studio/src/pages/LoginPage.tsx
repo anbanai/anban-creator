@@ -1,31 +1,79 @@
+import { useState, useEffect, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { useAuth } from '@/contexts/AuthContext'
-import { loginSchema, type LoginFormValues } from '@/lib/schemas'
+import { loginSchema, codeLoginSchema, type LoginFormValues, type CodeLoginFormValues } from '@/lib/schemas'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Button } from '@/components/ui/button'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import AuthLayout from '@/components/auth/AuthLayout'
+
+const COUNTDOWN_SECONDS = 60
 
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/'
-  const form = useForm<LoginFormValues>({
+  const [searchParams] = useSearchParams()
+  const inviteCode = searchParams.get('invite')?.toUpperCase() || undefined
+
+  const passwordForm = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: '', password: '' },
   })
 
-  async function onSubmit(values: LoginFormValues) {
+  const codeForm = useForm<CodeLoginFormValues>({
+    resolver: zodResolver(codeLoginSchema),
+    defaultValues: { email: '', code: '' },
+  })
+
+  const [countdown, setCountdown] = useState(0)
+  const [sendingCode, setSendingCode] = useState(false)
+
+  const codeEmail = codeForm.watch('email')
+  const codeEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(codeEmail)
+
+  useEffect(() => {
+    if (countdown <= 0) return
+    const timer = setInterval(() => setCountdown((c) => c - 1), 1000)
+    return () => clearInterval(timer)
+  }, [countdown])
+
+  const handleSendCode = useCallback(async () => {
+    if (!codeEmailValid || countdown > 0 || sendingCode) return
+    setSendingCode(true)
+    try {
+      await api.auth.sendVerificationCode(codeEmail)
+      setCountdown(COUNTDOWN_SECONDS)
+      toast.success('验证码已发送')
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '发送验证码失败，请稍后重试'))
+    } finally {
+      setSendingCode(false)
+    }
+  }, [codeEmail, codeEmailValid, countdown, sendingCode])
+
+  async function onPasswordSubmit(values: LoginFormValues) {
     try {
       const response = await api.auth.login(values.email, values.password)
-      login(response.token, response.refresh_token, response.user)
+      login(response.token, response.refresh_token, { ...response.user, has_password: response.has_password, max_invites: response.max_invites })
+      navigate(from, { replace: true })
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '登录失败，请重试。'))
+    }
+  }
+
+  async function onCodeSubmit(values: CodeLoginFormValues) {
+    try {
+      const response = await api.auth.codeLogin(values.email, values.code, inviteCode)
+      login(response.token, response.refresh_token, { ...response.user, has_password: response.has_password, max_invites: response.max_invites })
       navigate(from, { replace: true })
     } catch (err) {
       toast.error(getApiErrorMessage(err, '登录失败，请重试。'))
@@ -40,39 +88,97 @@ export default function LoginPage() {
       footerLinkText="立即注册"
       footerLinkTo="/register"
     >
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          <FormField
-            control={form.control}
-            name="email"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>邮箱</FormLabel>
-                <FormControl>
-                  <Input type="email" placeholder="请输入邮箱地址" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="password"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>密码</FormLabel>
-                <FormControl>
-                  <PasswordInput placeholder="请输入密码" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>
-            登 录
-          </Button>
-        </form>
-      </Form>
+      <Tabs defaultValue="password" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="password">密码登录</TabsTrigger>
+          <TabsTrigger value="code">验证码登录</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="password">
+          <Form {...passwordForm}>
+            <form onSubmit={passwordForm.handleSubmit(onPasswordSubmit)} className="space-y-4">
+              <FormField
+                control={passwordForm.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>邮箱</FormLabel>
+                    <FormControl>
+                      <Input type="email" placeholder="请输入邮箱地址" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={passwordForm.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>密码</FormLabel>
+                    <FormControl>
+                      <PasswordInput placeholder="请输入密码" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" className="w-full" loading={passwordForm.formState.isSubmitting}>
+                登 录
+              </Button>
+            </form>
+          </Form>
+        </TabsContent>
+
+        <TabsContent value="code">
+          <Form {...codeForm}>
+            <form onSubmit={codeForm.handleSubmit(onCodeSubmit)} className="space-y-4">
+              <FormField
+                control={codeForm.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>邮箱</FormLabel>
+                    <FormControl>
+                      <Input type="email" placeholder="请输入邮箱地址" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={codeForm.control}
+                name="code"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>验证码</FormLabel>
+                    <div className="flex gap-2">
+                      <FormControl>
+                        <Input placeholder="请输入验证码" className="flex-1" {...field} />
+                      </FormControl>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="default"
+                        disabled={!codeEmailValid || countdown > 0 || sendingCode}
+                        loading={sendingCode}
+                        onClick={handleSendCode}
+                        className="shrink-0 whitespace-nowrap"
+                      >
+                        {countdown > 0 ? `${countdown}s` : '发送验证码'}
+                      </Button>
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" className="w-full" loading={codeForm.formState.isSubmitting}>
+                登 录
+              </Button>
+            </form>
+          </Form>
+        </TabsContent>
+      </Tabs>
 
       {/* Divider */}
       <div className="my-4 flex items-center gap-3">

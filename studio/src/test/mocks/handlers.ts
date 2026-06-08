@@ -27,6 +27,7 @@ export const mockUser: User = {
   invite_code: 'AB2C4D6E',
   invite_count: 0,
   max_invites: 3,
+  has_password: true,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 }

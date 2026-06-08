@@ -97,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const response: AuthResponse = await api.auth.refresh(storedRefresh)
-      login(response.token, response.refresh_token, response.user)
+      login(response.token, response.refresh_token, { ...response.user, has_password: response.has_password, max_invites: response.max_invites })
     } catch {
       clearStoredState()
       setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })

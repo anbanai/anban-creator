@@ -163,6 +163,7 @@ func NewRouter(svc *Services) *fiber.App {
 		authPublic.Post("/send-code", sendCodeRateLimit, svc.AuthHandler.SendCode)
 		authPublic.Post("/register", svc.AuthHandler.Register)
 		authPublic.Post("/login", svc.AuthHandler.Login)
+		authPublic.Post("/code-login", svc.AuthHandler.CodeLogin)
 		authPublic.Post("/refresh", svc.AuthHandler.Refresh)
 		authPublic.Post("/logout", svc.AuthHandler.Logout)
 		authPublic.Post("/wx-login", svc.AuthHandler.WXLogin)
@@ -209,6 +210,7 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.AuthHandler != nil {
 		apiV1.Get("/auth/me", svc.AuthHandler.Me)
 		apiV1.Put("/auth/password", svc.AuthHandler.ChangePassword)
+		apiV1.Post("/auth/set-password", svc.AuthHandler.SetPassword)
 	}
 
 	// ---------------------------------------------------------------------------

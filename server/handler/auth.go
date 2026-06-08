@@ -109,6 +109,16 @@ type changePasswordRequest struct {
 	NewPassword string `json:"new_password"`
 }
 
+type codeLoginRequest struct {
+	Email      string `json:"email"`
+	Code       string `json:"code"`
+	InviteCode string `json:"invite_code,omitempty"`
+}
+
+type setPasswordRequest struct {
+	Password string `json:"password"`
+}
+
 type generateQRCodeRequest struct {
 	Width     int `json:"width,omitempty"`
 	LineColor *struct {
@@ -142,6 +152,8 @@ type tokenResponse struct {
 	RefreshToken string      `json:"refresh_token"`
 	ExpiresAt    int64       `json:"expires_at"`
 	User         *model.User `json:"user"`
+	HasPassword  bool        `json:"has_password"`
+	MaxInvites   int         `json:"max_invites"`
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +187,19 @@ func generateInviteCode() (string, error) {
 // generateTokenPair creates an access token, a refresh token, and a LoginSession.
 // Precondition: h.repo must be non-nil (callers must check via requireDB).
 func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse, error) {
+	fiberCtx, ok := ctx.(fiber.Ctx)
+
+	// Single-device login: invalidate all previous sessions for this user.
+	if ok {
+		if err := h.repo.Sessions().DeleteByUserID(fiberCtx.Context(), userID); err != nil {
+			h.logger.Error().Err(err).Str("user_id", userID).Msg("failed to delete old sessions")
+		}
+	} else {
+		if err := h.repo.Sessions().DeleteByUserID(nil, userID); err != nil {
+			h.logger.Error().Err(err).Str("user_id", userID).Msg("failed to delete old sessions")
+		}
+	}
+
 	accessToken, err := h.jwtSvc.GenerateAccessToken(userID)
 	if err != nil {
 		return nil, err
@@ -194,7 +219,6 @@ func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse,
 		ExpiresAt:    expiresAt,
 	}
 
-	fiberCtx, ok := ctx.(fiber.Ctx)
 	var errCtx error
 	if ok {
 		errCtx = h.repo.Sessions().Create(fiberCtx.Context(), session)
@@ -217,12 +241,17 @@ func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse,
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("failed to find user for token response")
 	}
 
-	return &tokenResponse{
+	resp := &tokenResponse{
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 		ExpiresAt:    expiresAt.Unix(),
 		User:         user,
-	}, nil
+		MaxInvites:   h.maxInvitePerUser,
+	}
+	if user != nil {
+		resp.HasPassword = user.Password != ""
+	}
+	return resp, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +473,10 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "invalid email or password")
 	}
 
+	if user.Password == "" {
+		return Error(c, fiber.StatusBadRequest, "该账号未设置密码，请使用验证码登录或先设置密码")
+	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		return Error(c, fiber.StatusUnauthorized, "invalid email or password")
 	}
@@ -454,6 +487,205 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 	}
 
 	return Success(c, resp)
+}
+
+// CodeLogin handles POST /api/v1/auth/code-login.
+func (h *AuthHandler) CodeLogin(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
+	var req codeLoginRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	req.Email = strings.TrimSpace(req.Email)
+	req.Code = strings.TrimSpace(req.Code)
+	req.InviteCode = strings.TrimSpace(strings.ToUpper(req.InviteCode))
+
+	if req.Email == "" || req.Code == "" {
+		return Error(c, fiber.StatusBadRequest, "email and code are required")
+	}
+
+	if !strings.Contains(req.Email, "@") {
+		return Error(c, fiber.StatusBadRequest, "invalid email format")
+	}
+
+	if h.emailSvc == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "邮件服务未启用")
+	}
+
+	// Verify the email verification code.
+	ok, err := h.emailSvc.VerifyCode(c.Context(), req.Email, req.Code)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("email", req.Email).Msg("verification failed")
+		return Error(c, fiber.StatusTooManyRequests, err.Error())
+	}
+	if !ok {
+		return Error(c, fiber.StatusBadRequest, "验证码错误或已过期")
+	}
+
+	ctx := c.Context()
+
+	// Find or auto-create user.
+	user, err := h.repo.Users().FindByEmail(ctx, req.Email)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to find user")
+		return Error(c, fiber.StatusInternalServerError, "internal error")
+	}
+
+	if user == nil {
+		// Validate invite code when invitation is enabled.
+		var inviter *model.User
+		if h.inviteEnabled {
+			if req.InviteCode == "" {
+				return Error(c, fiber.StatusBadRequest, "请输入邀请码")
+			}
+			var err error
+			inviter, err = h.repo.Users().FindByInviteCode(ctx, req.InviteCode)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return Error(c, fiber.StatusBadRequest, "邀请码无效")
+				}
+				h.logger.Error().Err(err).Str("invite_code", req.InviteCode).Msg("failed to look up invite code")
+				return Error(c, fiber.StatusInternalServerError, "internal error")
+			}
+			if inviter.InviteCount >= h.maxInvitePerUser {
+				return Error(c, fiber.StatusForbidden, "该邀请码已达使用上限")
+			}
+		}
+
+		inviteCode, err := generateInviteCode()
+		if err != nil {
+			h.logger.Error().Err(err).Msg("failed to generate invite code")
+			return Error(c, fiber.StatusInternalServerError, "internal error")
+		}
+
+		nickname := strings.Split(req.Email, "@")[0]
+		user = &model.User{
+			ID:         uuid.New().String(),
+			Email:      req.Email,
+			Nickname:   nickname,
+			Password:   "",
+			InviteCode: inviteCode,
+		}
+		if inviter != nil {
+			user.InvitedBy = inviter.ID
+		}
+
+		// Use transaction for user creation + invite count increment.
+		if inviter != nil {
+			if err := h.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+				if err := txRepo.Users().Create(ctx, user); err != nil {
+					return err
+				}
+				ok, err := txRepo.Users().IncrementInviteCount(ctx, inviter.ID, h.maxInvitePerUser)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return errors.New("invite limit reached")
+				}
+				return nil
+			}); err != nil {
+				if err.Error() == "invite limit reached" {
+					return Error(c, fiber.StatusForbidden, "该邀请码已达使用上限")
+				}
+				h.logger.Error().Err(err).Msg("failed to create user in transaction")
+				return Error(c, fiber.StatusInternalServerError, "failed to create user")
+			}
+		} else {
+			if err := h.repo.Users().Create(ctx, user); err != nil {
+				if errors.Is(err, gorm.ErrDuplicatedKey) {
+					user, err = h.repo.Users().FindByEmail(ctx, req.Email)
+					if err != nil {
+						h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to find user after duplicate key")
+						return Error(c, fiber.StatusInternalServerError, "internal error")
+					}
+				} else {
+					h.logger.Error().Err(err).Msg("failed to create user from code login")
+					return Error(c, fiber.StatusInternalServerError, "failed to create user")
+				}
+			}
+		}
+
+		// Grant registration bonus (best-effort, don't fail registration if this fails).
+		if h.creditSvc != nil && h.creditsCfg != nil && h.creditsCfg.RegisterBonus > 0 {
+			if err := h.creditSvc.GrantBonus(ctx, user.ID, h.creditsCfg.RegisterBonus,
+				model.CreditTypeRegisterBonus, fmt.Sprintf("注册赠送 +%d", h.creditsCfg.RegisterBonus)); err != nil {
+				h.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to grant registration bonus")
+			}
+		}
+
+		// Grant invite reward to inviter (best-effort).
+		if inviter != nil && h.creditSvc != nil && h.creditsCfg != nil && h.creditsCfg.InviteReward > 0 {
+			if err := h.creditSvc.GrantBonus(ctx, inviter.ID, h.creditsCfg.InviteReward,
+				model.CreditTypeInviteReward, fmt.Sprintf("邀请用户注册奖励 +%d", h.creditsCfg.InviteReward)); err != nil {
+				h.logger.Error().Err(err).Str("inviter_id", inviter.ID).Str("invitee_id", user.ID).Msg("failed to grant invite reward")
+			}
+		}
+	}
+
+	// generateTokenPair handles single-device login (deletes old sessions first).
+	resp, err := h.generateTokenPair(c, user.ID)
+	if err != nil {
+		return Error(c, fiber.StatusInternalServerError, "failed to generate tokens")
+	}
+
+	return Success(c, resp)
+}
+
+// SetPassword handles POST /api/v1/auth/set-password.
+// For users created via code login or WeChat who don't have a password yet.
+func (h *AuthHandler) SetPassword(c fiber.Ctx) error {
+	if err := h.requireDB(c); err != nil {
+		return err
+	}
+
+	var req setPasswordRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	req.Password = strings.TrimSpace(req.Password)
+
+	if len(req.Password) < 8 {
+		return Error(c, fiber.StatusBadRequest, "密码至少需要 8 个字符")
+	}
+
+	if len(req.Password) > 128 {
+		return Error(c, fiber.StatusBadRequest, "密码不能超过 128 个字符")
+	}
+
+	user, ok := c.Locals("user").(*model.User)
+	if !ok || user == nil {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Reload user from DB to get the latest state.
+	user, err := h.repo.Users().FindByID(c.Context(), user.ID)
+	if err != nil {
+		return Error(c, fiber.StatusInternalServerError, "internal error")
+	}
+
+	if user.Password != "" {
+		return Error(c, fiber.StatusBadRequest, "密码已设置，请使用修改密码功能")
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to hash password")
+		return Error(c, fiber.StatusInternalServerError, "internal error")
+	}
+
+	user.Password = string(hashed)
+	if err := h.repo.Users().Update(c.Context(), user); err != nil {
+		h.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to set password")
+		return Error(c, fiber.StatusInternalServerError, "密码设置失败，请重试")
+	}
+
+	return Success(c, fiber.Map{"message": "密码设置成功"})
 }
 
 // Refresh handles POST /api/v1/auth/refresh.
@@ -498,11 +730,6 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 	resp, err := h.generateTokenPair(c, claims.UserID)
 	if err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to generate tokens")
-	}
-
-	// Delete old session.
-	if err := h.repo.Sessions().Delete(ctx, session.Token); err != nil {
-		h.logger.Error().Err(err).Msg("failed to delete old session during refresh")
 	}
 
 	return Success(c, resp)
@@ -576,6 +803,7 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 		"invite_code":          user.InviteCode,
 		"invite_count":         user.InviteCount,
 		"max_invites":          h.maxInvitePerUser,
+		"has_password":         user.Password != "",
 		"created_at":           user.CreatedAt,
 		"updated_at":           user.UpdatedAt,
 	})
@@ -700,7 +928,7 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
 	}
 
 	if user.Password == "" {
-		return Error(c, fiber.StatusBadRequest, "该账号未设置密码，无法修改")
+		return Error(c, fiber.StatusBadRequest, "该账号未设置密码，请先设置密码")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)); err != nil {

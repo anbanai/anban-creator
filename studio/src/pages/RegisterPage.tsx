@@ -57,7 +57,7 @@ export default function RegisterPage() {
   async function onSubmit(values: RegisterFormValues) {
     try {
       const response = await api.auth.register(values.email, values.password, values.code, values.invite_code, values.nickname || undefined)
-      login(response.token, response.refresh_token, response.user)
+      login(response.token, response.refresh_token, { ...response.user, has_password: response.has_password, max_invites: response.max_invites })
       navigate(from, { replace: true })
     } catch (err) {
       toast.error(getApiErrorMessage(err, '注册失败，请重试。'))

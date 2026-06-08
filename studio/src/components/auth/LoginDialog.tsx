@@ -1,6 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import { useAuth } from '@/contexts/AuthContext'
+import { PasswordInput } from '@/components/ui/PasswordInput'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
+const COUNTDOWN_SECONDS = 60
 
 interface LoginDialogProps {
   open: boolean
@@ -9,34 +15,74 @@ interface LoginDialogProps {
 
 export default function LoginDialog({ open, onClose }: LoginDialogProps) {
   const { login } = useAuth()
+  const [tab, setTab] = useState('password')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [countdown, setCountdown] = useState(0)
+  const [sendingCode, setSendingCode] = useState(false)
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+
+  useEffect(() => {
+    if (countdown <= 0) return
+    const timer = setInterval(() => setCountdown((c) => c - 1), 1000)
+    return () => clearInterval(timer)
+  }, [countdown])
+
+  const handleSendCode = useCallback(async () => {
+    if (!emailValid || countdown > 0 || sendingCode) return
+    setSendingCode(true)
+    try {
+      await api.auth.sendVerificationCode(email)
+      setCountdown(COUNTDOWN_SECONDS)
+    } catch (err) {
+      setError(getApiErrorMessage(err, '发送验证码失败'))
+    } finally {
+      setSendingCode(false)
+    }
+  }, [email, emailValid, countdown, sendingCode])
 
   if (!open) return null
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
-
     try {
       const response = await api.auth.login(email, password)
-      login(response.token, response.refresh_token, response.user)
+      login(response.token, response.refresh_token, { ...response.user, has_password: response.has_password, max_invites: response.max_invites })
       onClose()
       setEmail('')
       setPassword('')
     } catch (err) {
-      if (err instanceof Error) {
-        setError(err.message || '凭证无效')
-      } else {
-        setError('登录失败，请重试。')
-      }
+      setError(getApiErrorMessage(err, '登录失败'))
     } finally {
       setLoading(false)
     }
   }
+
+  const handleCodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const response = await api.auth.codeLogin(email, code)
+      login(response.token, response.refresh_token, { ...response.user, has_password: response.has_password, max_invites: response.max_invites })
+      onClose()
+      setEmail('')
+      setCode('')
+    } catch (err) {
+      setError(getApiErrorMessage(err, '登录失败'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const inputClassName =
+    'w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -53,51 +99,109 @@ export default function LoginDialog({ open, onClose }: LoginDialogProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="login-email" className="mb-1 block text-sm font-medium text-foreground">
-              邮箱
-            </label>
-            <input
-              id="login-email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-              placeholder="请输入邮箱地址"
-            />
-          </div>
+        <Tabs value={tab} onValueChange={(v) => { setTab(v); setError('') }}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="password">密码登录</TabsTrigger>
+            <TabsTrigger value="code">验证码登录</TabsTrigger>
+          </TabsList>
 
-          <div>
-            <label htmlFor="login-password" className="mb-1 block text-sm font-medium text-foreground">
-              密码
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-              placeholder="请输入密码"
-            />
-          </div>
+          <TabsContent value="password">
+            <form onSubmit={handlePasswordSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="login-email" className="mb-1 block text-sm font-medium text-foreground">
+                  邮箱
+                </label>
+                <input
+                  id="login-email"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={inputClassName}
+                  placeholder="请输入邮箱地址"
+                />
+              </div>
+              <div>
+                <label htmlFor="login-password" className="mb-1 block text-sm font-medium text-foreground">
+                  密码
+                </label>
+                <PasswordInput
+                  id="login-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={inputClassName}
+                  placeholder="请输入密码"
+                />
+              </div>
+              {error && (
+                <div className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>
+              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-lg bg-primary px-4 py-2 font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? '登录中...' : '登录'}
+              </button>
+            </form>
+          </TabsContent>
 
-          {error && (
-            <div className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-primary px-4 py-2 font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? '登录中...' : '登录'}
-          </button>
-        </form>
+          <TabsContent value="code">
+            <form onSubmit={handleCodeSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="code-email" className="mb-1 block text-sm font-medium text-foreground">
+                  邮箱
+                </label>
+                <input
+                  id="code-email"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={inputClassName}
+                  placeholder="请输入邮箱地址"
+                />
+              </div>
+              <div>
+                <label htmlFor="code-input" className="mb-1 block text-sm font-medium text-foreground">
+                  验证码
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="code-input"
+                    required
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    className={inputClassName}
+                    placeholder="请输入验证码"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="default"
+                    disabled={!emailValid || countdown > 0 || sendingCode}
+                    loading={sendingCode}
+                    onClick={handleSendCode}
+                    className="shrink-0 whitespace-nowrap"
+                  >
+                    {countdown > 0 ? `${countdown}s` : '发送验证码'}
+                  </Button>
+                </div>
+              </div>
+              {error && (
+                <div className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>
+              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-lg bg-primary px-4 py-2 font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? '登录中...' : '登录'}
+              </button>
+            </form>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   )
