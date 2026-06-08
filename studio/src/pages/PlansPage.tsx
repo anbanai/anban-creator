@@ -54,7 +54,7 @@ export default function PlansPage() {
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
     defaultValues: {
       channel_id: '',
-      type: 'rednote',
+      type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
     },
@@ -160,7 +160,7 @@ export default function PlansPage() {
     setEditingPlan(null)
     form.reset({
       channel_id: '',
-      type: 'rednote',
+      type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
     })
@@ -187,7 +187,7 @@ export default function PlansPage() {
     setEditingPlan(null)
     form.reset({
       channel_id: '',
-      type: 'rednote',
+      type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
     })

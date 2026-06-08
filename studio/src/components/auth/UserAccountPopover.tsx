@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 
-export default function UserAccountPopover() {
+export default function UserAccountPopover({ collapsed }: { collapsed?: boolean }) {
   const { user, logout } = useAuth()
   const [open, setOpen] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -27,7 +27,9 @@ export default function UserAccountPopover() {
     <div className="relative" ref={popoverRef}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        className={`flex items-center rounded-lg text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground ${
+          collapsed ? "justify-center p-2" : "gap-2 px-3 py-1.5"
+        }`}
       >
         {user.avatar ? (
           <img
@@ -40,11 +42,13 @@ export default function UserAccountPopover() {
             {initials}
           </span>
         )}
-        <span className="hidden sm:inline max-w-[120px] truncate">{user.nickname || user.email}</span>
+        {!collapsed && <span className="hidden sm:inline max-w-[120px] truncate">{user.nickname || user.email}</span>}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-popover py-1 shadow-lg">
+        <div className={`absolute top-full mt-1 w-48 rounded-lg border border-border bg-popover py-1 shadow-lg ${
+          collapsed ? "left-0" : "right-0"
+        }`}>
           <div className="border-b border-border px-4 py-2">
             <p className="truncate text-sm font-medium text-popover-foreground">{user.nickname || '用户'}</p>
             <p className="truncate text-xs text-muted-foreground">{user.email}</p>

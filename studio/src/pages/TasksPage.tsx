@@ -103,7 +103,7 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'rednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '' },
+    defaultValues: { type: 'seednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
@@ -215,7 +215,7 @@ export default function TasksPage() {
       navigate('/channels')
       return
     }
-    const defaultType = (searchParams.get('type') || 'rednote') as TaskType
+    const defaultType = (searchParams.get('type') || 'seednote') as TaskType
     form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
     setGenerateVideo(false)
@@ -234,7 +234,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'rednote', prompt: '', channel_id: '', image_ratio: '' })
+    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
     setGenerateVideo(false)
     setChannelImageRatio('')
@@ -613,7 +613,7 @@ export default function TasksPage() {
               }} />
 
               {/* Generate video toggle — only for image-heavy types */}
-              {(watchedType === 'rednote' || watchedType === 'xls') && (
+              {(watchedType === 'seednote' || watchedType === 'xls') && (
                 <button
                   type="button"
                   onClick={() => setGenerateVideo(!generateVideo)}

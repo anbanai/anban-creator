@@ -14,13 +14,13 @@ interface ChannelCardProps {
 const platformLabels: Record<string, string> = {
   article: '公众号',
   xls: '小绿书',
-  rednote: '小红书',
+  seednote: '种草笔记',
 }
 
 const platformColors: Record<string, string> = {
   article: 'bg-green-500/15 text-green-700 dark:text-green-400',
   xls: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
-  rednote: 'bg-red-500/15 text-red-700 dark:text-red-400',
+  seednote: 'bg-red-500/15 text-red-700 dark:text-red-400',
 }
 
 export function ChannelCard({ channel, stats, onEdit, archiving: _archiving, restoring: _restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {

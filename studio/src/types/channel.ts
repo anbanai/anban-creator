@@ -1,4 +1,4 @@
-export type ChannelPlatform = 'article' | 'seednote' | 'rednote' | 'xls'
+export type ChannelPlatform = 'article' | 'seednote' | 'xls'
 export type ChannelStatus = 'active' | 'archived'
 
 export interface ChannelConfig {

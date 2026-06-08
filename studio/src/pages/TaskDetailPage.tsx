@@ -423,7 +423,7 @@ export default function TaskDetailPage() {
         </Card>
       </div>
 
-      {task.type === 'rednote' && task.published && (
+      {task.type === 'seednote' && task.published && (
         <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 

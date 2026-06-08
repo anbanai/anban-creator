@@ -190,7 +190,9 @@ export default function Sidebar() {
         </div>
 
         {/* Bottom: Collapse toggle + User + Theme */}
-        <div className="flex items-center gap-1 border-t border-sidebar-border px-3 py-3">
+        <div className={`flex items-center border-t border-sidebar-border py-3 ${
+          collapsed ? "flex-col gap-2 px-0" : "flex-row gap-1 px-3"
+        }`}>
           <Button
             variant="ghost"
             size="icon-xs"
@@ -200,7 +202,7 @@ export default function Sidebar() {
           >
             {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>
-          <UserAccountPopover />
+          <UserAccountPopover collapsed={collapsed} />
           <ThemeToggle />
         </div>
       </aside>

@@ -32,7 +32,7 @@ import EmptyState from '@/components/EmptyState'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 
 const platformOptions = [
-  { value: 'rednote', label: '小红书' },
+  { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
   { value: 'xls', label: '小绿书' },
 ]
@@ -174,7 +174,7 @@ export default function ChannelsPage() {
   async function handleFetchProfile(url: string, options?: { silent?: boolean }) {
     if (!url || !selectedPlatform) return
     if (!hasSupportedProfileUrl(url)) {
-      setProfileFetchHint('请先输入包含小红书链接的主页链接或分享文本')
+      setProfileFetchHint('请先输入包含种草笔记链接的主页链接或分享文本')
       return
     }
     setFetchingProfile(true)
@@ -233,9 +233,9 @@ export default function ChannelsPage() {
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
-      // Show template recommendations for rednote channels
+      // Show template recommendations for seednote channels
       const channel = result.channel
-      if (channel.platform === 'rednote' && result.recommended_templates && result.recommended_templates.length > 0) {
+      if (channel.platform === 'seednote' && result.recommended_templates && result.recommended_templates.length > 0) {
         setRecommendedTemplates(result.recommended_templates)
       }
     },
@@ -345,7 +345,7 @@ export default function ChannelsPage() {
     if (!payload.image_ratio) {
       if (payload.platform === 'article') {
         payload.image_ratio = '16:9'
-      } else if (payload.platform === 'rednote' || payload.platform === 'xls') {
+      } else if (payload.platform === 'seednote' || payload.platform === 'xls') {
         payload.image_ratio = '3:4'
       }
     }
@@ -367,7 +367,7 @@ export default function ChannelsPage() {
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
-  const isRednote = selectedPlatform === 'rednote'
+  const isSeednote = selectedPlatform === 'seednote'
 
   return (
     <div className="space-y-6">
@@ -504,7 +504,7 @@ export default function ChannelsPage() {
                       <div className="flex gap-2 flex-1">
                         <Textarea
                           className="flex-1 min-w-0"
-                          placeholder="粘贴小红书主页链接或分享文本..."
+                          placeholder="粘贴种草笔记主页链接或分享文本..."
                           {...field}
                         />
                         {currentPlatformConfig?.supports_auto_fetch && (
@@ -524,7 +524,7 @@ export default function ChannelsPage() {
                   </div>
                   {currentPlatformConfig?.supports_auto_fetch && (
                     <FormDescription>
-                      {profileFetchHint || '粘贴小红书分享文本后会自动提取链接、分析账号和代表作品。'}
+                      {profileFetchHint || '粘贴种草笔记分享文本后会自动提取链接、分析账号和代表作品。'}
                     </FormDescription>
                   )}
                   <FormMessage />
@@ -661,8 +661,8 @@ export default function ChannelsPage() {
 
                   <FormField control={form.control} name="style" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{isRednote ? '视觉风格' : '写作风格'}</FormLabel>
-                      {isRednote ? (
+                      <FormLabel>{isSeednote ? '视觉风格' : '写作风格'}</FormLabel>
+                      {isSeednote ? (
                         <FormControl>
                           <Textarea
                             placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
@@ -683,12 +683,12 @@ export default function ChannelsPage() {
                           </SelectContent>
                         </Select>
                       )}
-                      <FormDescription>{isRednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
+                      <FormDescription>{isSeednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />
 
-                  {!isRednote && <FormField control={form.control} name="theme" render={({ field }) => (
+                  {!isSeednote && <FormField control={form.control} name="theme" render={({ field }) => (
                     <FormItem>
                       <FormLabel>主题</FormLabel>
                       <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
@@ -775,7 +775,7 @@ export default function ChannelsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Template recommendation after rednote channel creation */}
+      {/* Template recommendation after seednote channel creation */}
       {recommendedTemplates.length > 0 && (
         <TemplateRecommend
           templates={recommendedTemplates}

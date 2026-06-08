@@ -1,4 +1,4 @@
-export type PlanType = 'seednote' | 'rednote' | 'article' | 'xls'
+export type PlanType = 'seednote' | 'article' | 'xls'
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
 export interface Plan {
