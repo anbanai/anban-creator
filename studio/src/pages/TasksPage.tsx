@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Film, Download, Square, CheckSquare } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Film, Download, Square, CheckSquare, Stamp } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -69,6 +69,7 @@ export default function TasksPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [quantity, setQuantity] = useState(1)
   const [generateVideo, setGenerateVideo] = useState(false)
+  const [watermark, setWatermark] = useState(false)
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
@@ -219,6 +220,7 @@ export default function TasksPage() {
     form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
     setGenerateVideo(false)
+    setWatermark(false)
     setChannelImageRatio('')
     setModalOpen(true)
   }
@@ -237,6 +239,7 @@ export default function TasksPage() {
     form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
     setGenerateVideo(false)
+    setWatermark(false)
     setChannelImageRatio('')
   }
 
@@ -247,6 +250,7 @@ export default function TasksPage() {
       channel_id: values.channel_id,
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
+      watermark: watermark || undefined,
       generate_video: generateVideo || undefined,
     }))
   }
@@ -611,6 +615,25 @@ export default function TasksPage() {
                 </FormItem>
                 )
               }} />
+
+              {/* Watermark toggle */}
+              <button
+                type="button"
+                onClick={() => setWatermark(!watermark)}
+                className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                  watermark
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-foreground/20'
+                }`}
+              >
+                <Stamp className={`mt-0.5 h-5 w-5 shrink-0 ${watermark ? 'text-primary' : 'text-muted-foreground'}`} />
+                <div className="min-w-0">
+                  <p className={`text-sm font-medium ${watermark ? 'text-foreground' : 'text-muted-foreground'}`}>
+                    水印
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">开启后生成的图片将带有水印（仅火山引擎支持）</p>
+                </div>
+              </button>
 
               {/* Generate video toggle — only for image-heavy types */}
               {(watchedType === 'seednote' || watchedType === 'xls') && (

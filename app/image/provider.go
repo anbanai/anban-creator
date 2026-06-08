@@ -29,6 +29,7 @@ type GenerateOptions struct {
 	OutputFormat  string   // 输出格式: "png", "jpeg", "webp"（可选）
 	N             int      // 批量生成数量，1-10（默认 1）
 	Size          string   // 自定义尺寸或比例（覆盖默认尺寸）
+	Watermark     *bool    // 是否启用水印（仅 Volcengine 支持此选项）
 	StreamCB      StreamCallback // 流式回调（nil 表示不启用流式）
 }
 

@@ -98,9 +98,14 @@ func (p *VolcengineProvider) Capabilities() *ProviderCapabilities {
 
 // Generate 生成图片
 func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *GenerateOptions) (*GenerateResult, error) {
+	wm := false
+	if opts != nil && opts.Watermark != nil {
+		wm = *opts.Watermark
+	}
+
 	respFmt := model.GenerateImagesResponseFormatURL
 	req := model.GenerateImagesRequest{
-		Watermark:      new(false),
+		Watermark:      &wm,
 		Model:          p.model,
 		Prompt:         prompt,
 		Size:           new(p.sizePixel),

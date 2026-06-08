@@ -24,6 +24,7 @@ func registerImageTools(server *mcp.Server) {
 				"size":           map[string]any{"type": "string", "description": "Image size/aspect ratio (e.g., '3:4', '16:9', '1:1'). Overrides channel default when provided."},
 				"ref_image_path": map[string]any{"type": "string", "description": "Path to a reference image for style consistency (optional)"},
 				"task_id":        map[string]any{"type": "string", "description": "Task ID (for logging and credit tracking)"},
+					"watermark":      map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
 			},
 			"required": []any{"channel_id", "prompt"},
 		},
@@ -94,13 +95,23 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	size, _ := args["size"].(string)
 	refPath, _ := args["ref_image_path"].(string)
 	taskID, _ := args["task_id"].(string)
+	var watermark *bool
+	if v, ok := args["watermark"].(bool); ok {
+		watermark = &v
+	} else if taskID != "" {
+		// Fall back to task-level watermark setting.
+		if t, err := svcs.TaskSvc.GetByID(context.Background(), taskID); err == nil && t.Watermark {
+			wm := true
+			watermark = &wm
+		}
+	}
 
 	provider, mdl := resolveImageModel(ctx, userID)
 	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, provider, mdl, 1); err != nil {
 		return billingError("generate image", err), nil
 	}
 
-	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID, size)
+	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID, size, watermark)
 	if err != nil {
 		return billingError("generate image", err), nil
 	}

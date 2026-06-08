@@ -53,6 +53,7 @@ type createTaskRequest struct {
 	GenerateVideo      bool   `json:"generate_video"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
+	Watermark          *bool  `json:"watermark"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -100,7 +101,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "video generation is no longer supported")
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.SkipReferenceImage, req.ReferenceImageURL)
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {

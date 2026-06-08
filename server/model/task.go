@@ -15,6 +15,7 @@ type Task struct {
 	ImageRatio          string     `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ReferenceImageURL   string     `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
 	SkipReferenceImage  bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
+	Watermark           bool       `gorm:"default:false" json:"watermark,omitempty"`
 	ProgressLog         string     `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Result              *string    `gorm:"type:json" json:"result,omitempty"`
 	InputTokens         *int64     `json:"input_tokens,omitempty"`

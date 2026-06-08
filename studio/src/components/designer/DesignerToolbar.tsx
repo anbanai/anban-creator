@@ -12,6 +12,7 @@ import {
   Maximize,
   Coins,
   Lock,
+  Stamp,
 } from 'lucide-react'
 import { Slider } from '@/components/ui/slider'
 import { Button } from '@/components/ui/button'
@@ -218,31 +219,48 @@ export default function DesignerToolbar({
             </div>
 
             {/* Resolution */}
-            {caps?.flexibleSize && (
-              <div className="space-y-2">
-                <h4 className={sectionHeader}>
-                  <Maximize className="h-3 w-3" />
-                  分辨率
-                </h4>
-                <div className="grid grid-cols-3 gap-1">
-                  {RESOLUTION_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => update({ resolution: opt.value })}
-                      className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
-                        settings.resolution === opt.value
-                          ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                          : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-                      }`}
-                    >
-                      <span className="font-medium">{opt.label}</span>
-                      <span className="text-[10px] opacity-60">{opt.desc}</span>
-                    </button>
-                  ))}
-                </div>
+            <div className="space-y-2">
+              <h4 className={sectionHeader}>
+                <Maximize className="h-3 w-3" />
+                分辨率
+              </h4>
+              <div className="grid grid-cols-3 gap-1">
+                {RESOLUTION_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => update({ resolution: opt.value })}
+                    className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+                      settings.resolution === opt.value
+                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                        : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                    }`}
+                  >
+                    <span className="font-medium">{opt.label}</span>
+                    <span className="text-[10px] opacity-60">{opt.desc}</span>
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
+
+            {/* Watermark */}
+            <button
+              type="button"
+              onClick={() => update({ watermark: !settings.watermark })}
+              className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                settings.watermark
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:border-foreground/20'
+              }`}
+            >
+              <Stamp className={`mt-0.5 h-4 w-4 shrink-0 ${settings.watermark ? 'text-primary' : 'text-muted-foreground'}`} />
+              <div className="min-w-0">
+                <p className={`text-xs font-medium ${settings.watermark ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  水印
+                </p>
+                <p className="text-[10px] text-muted-foreground">仅火山引擎支持</p>
+              </div>
+            </button>
 
             {/* Count */}
             {showCount && (

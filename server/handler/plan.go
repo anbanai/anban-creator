@@ -44,6 +44,7 @@ type createPlanRequest struct {
 	Prompt             string `json:"prompt"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
+	Watermark          *bool  `json:"watermark"`
 }
 
 type updatePlanRequest struct {
@@ -51,6 +52,7 @@ type updatePlanRequest struct {
 	Prompt             string `json:"prompt"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
+	Watermark          *bool  `json:"watermark"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -73,7 +75,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.SkipReferenceImage, req.ReferenceImageURL)
+	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
@@ -163,7 +165,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this plan")
 	}
 
-	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.SkipReferenceImage, req.ReferenceImageURL)
+	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")

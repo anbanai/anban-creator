@@ -54,6 +54,7 @@ export interface CreateTaskRequest {
   skip_reference_image?: boolean
   reference_image_url?: string
   generate_video?: boolean
+  watermark?: boolean
 }
 
 export interface WorkflowStatus {

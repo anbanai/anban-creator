@@ -15,6 +15,7 @@ type Plan struct {
 	Status             string     `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
 	ReferenceImageURL  string     `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
 	SkipReferenceImage bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
+	Watermark          bool       `gorm:"default:false" json:"watermark,omitempty"`
 	NextRunAt          *time.Time `gorm:"index" json:"next_run_at"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`

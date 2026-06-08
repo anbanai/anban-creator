@@ -31,6 +31,7 @@ func (s *PlanService) Create(
 	userID, channelID, cronExpr, prompt string,
 	skipRefImage *bool,
 	referenceImageURL string,
+	watermark *bool,
 ) (*model.Plan, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
@@ -67,6 +68,7 @@ func (s *PlanService) Create(
 		NextRunAt:          nextRun,
 		ReferenceImageURL:  referenceImageURL,
 		SkipReferenceImage: skipRefImage != nil && *skipRefImage,
+		Watermark:          watermark != nil && *watermark,
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -107,6 +109,7 @@ func (s *PlanService) Update(
 	id, cronExpr, prompt string,
 	skipRefImage *bool,
 	referenceImageURL string,
+	watermark *bool,
 ) (*model.Plan, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, id)
 	if err != nil {
@@ -117,6 +120,9 @@ func (s *PlanService) Update(
 	plan.ReferenceImageURL = referenceImageURL
 	if skipRefImage != nil {
 		plan.SkipReferenceImage = *skipRefImage
+	}
+	if watermark != nil {
+		plan.Watermark = *watermark
 	}
 
 	// If cron expression changed, validate and recompute next run.

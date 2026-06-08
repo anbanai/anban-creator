@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS: DesignerSettings = {
   outputFormat: 'png',
   referenceFiles: [],
   maskFile: null,
+  watermark: false,
 }
 
 const POLL_INTERVAL = 2000
@@ -115,6 +116,7 @@ export default function DesignerPage() {
         output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
         reference_file_ids: refFileIds.length > 0 ? refFileIds : undefined,
         mask_file_id: maskFileId,
+        watermark: settings.watermark || undefined,
       })
 
       setSelectedGenerationId(generation_id)

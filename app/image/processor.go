@@ -32,6 +32,7 @@ type Processor struct {
 	provider     Provider
 	stylePrompt  string
 	refImagePath string // 参考图本地路径（可选）
+	watermark    *bool  // 是否启用水印
 }
 
 // NewProcessor 创建图片处理器
@@ -86,6 +87,11 @@ func (p *Processor) SetStylePrompt(prompt string) {
 // SetRefImage 设置参考图路径（CLI --ref 传入）
 func (p *Processor) SetRefImage(path string) {
 	p.refImagePath = path
+}
+
+// SetWatermark 设置水印开关
+func (p *Processor) SetWatermark(wm *bool) {
+	p.watermark = wm
 }
 
 // 优先级：CLI --style > config style_prompt > preset prompt > 无风格（原样返回）
@@ -238,7 +244,7 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 	}
 
 	ctx := context.Background()
-	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, Watermark: p.watermark}
 	finalPrompt := p.buildPrompt(prompt)
 	result, err := p.provider.Generate(ctx, finalPrompt, genOpts)
 	if err != nil {
@@ -287,7 +293,7 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 	}
 
 	ctx := context.Background()
-	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, Watermark: p.watermark}
 	finalPrompt := p.buildPrompt(prompt)
 	result, err := activeProvider.Generate(ctx, finalPrompt, genOpts)
 	if err != nil {
@@ -443,7 +449,7 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 
 	// 调用图片生成 API
 	ctx := context.Background()
-	genOpts := &GenerateOptions{RefImagePath: p.refImagePath}
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, Watermark: p.watermark}
 	result, err := activeProvider.Generate(ctx, p.buildPrompt(prompt), genOpts)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)

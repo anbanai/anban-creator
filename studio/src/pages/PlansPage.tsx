@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText } from 'lucide-react'
+import { Plus, FileText, Stamp } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -36,6 +36,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     cron_expr: plan.cron_expr,
     prompt: plan.prompt || '',
     skip_reference_image: plan.skip_reference_image || false,
+    watermark: plan.watermark || false,
   }
 }
 
@@ -199,6 +200,7 @@ export default function PlansPage() {
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id || undefined,
+      watermark: values.watermark || undefined,
     }
 
     if (editingPlan) {
@@ -401,6 +403,29 @@ export default function PlansPage() {
                   <FormControl>
                     <Input placeholder="留空则根据账号信息自动生成" {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="watermark" render={({ field }) => (
+                <FormItem>
+                  <button
+                    type="button"
+                    onClick={() => field.onChange(!field.value)}
+                    className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      field.value
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-foreground/20'
+                    }`}
+                  >
+                    <Stamp className={`mt-0.5 h-5 w-5 shrink-0 ${field.value ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <div className="min-w-0">
+                      <p className={`text-sm font-medium ${field.value ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        水印
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">开启后生成的图片将带有水印（仅火山引擎支持）</p>
+                    </div>
+                  </button>
                   <FormMessage />
                 </FormItem>
               )} />

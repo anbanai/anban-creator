@@ -14,6 +14,7 @@ export interface Plan {
   channel_id: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  watermark?: boolean
   created_at: string
   updated_at: string
 }
@@ -25,6 +26,7 @@ export interface CreatePlanRequest {
   channel_id?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  watermark?: boolean
 }
 
 export interface UpdatePlanRequest {
@@ -32,4 +34,5 @@ export interface UpdatePlanRequest {
   prompt?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  watermark?: boolean
 }

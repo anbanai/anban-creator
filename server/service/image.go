@@ -190,6 +190,7 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, im
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
 	userID, channelID, prompt, imageType, outputPath, refPath, taskID, size string,
+	watermark *bool,
 ) (*ImageResult, error) {
 	ch, err := s.repo.Channels().FindByID(ctx, channelID)
 	if err != nil {
@@ -204,6 +205,7 @@ func (s *ImageService) GenerateImage(
 	if refPath != "" {
 		processor.SetRefImage(refPath)
 	}
+	processor.SetWatermark(watermark)
 
 	var rawResult *image.GenerateRawResult
 	if size != "" {

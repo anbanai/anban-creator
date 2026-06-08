@@ -61,6 +61,7 @@ type DesignerGenerateRequest struct {
 	OutputFormat     string   `json:"output_format,omitempty"`
 	ReferenceFileIDs []string `json:"reference_file_ids,omitempty"`
 	MaskFileID       string   `json:"mask_file_id,omitempty"`
+	Watermark        *bool    `json:"watermark,omitempty"`
 }
 
 // CreateGenerationRecord validates the request, resolves config, and creates
@@ -129,6 +130,10 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	}
 
 	refFilesJSON, _ := json.Marshal(req.ReferenceFileIDs)
+	watermark := false
+	if req.Watermark != nil {
+		watermark = *req.Watermark
+	}
 	gen := &model.ImageGeneration{
 		ID:             genID,
 		UserID:         userID,
@@ -141,6 +146,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		Size:           req.Size,
 		N:              req.N,
 		OutputFormat:   req.OutputFormat,
+		Watermark:      watermark,
 		Status:         model.ImageGenerationStatusGenerating,
 		ReferenceFiles: string(refFilesJSON),
 		MaskFileID:     req.MaskFileID,
@@ -294,6 +300,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		Size:          gen.Size,
 		RefImagePaths: refPaths,
 		MaskPath:      maskPath,
+		Watermark:     &gen.Watermark,
 	}
 
 	result, err := providerInst.Generate(ctx, gen.Prompt, genOpts)

@@ -36,6 +36,7 @@ export const createTaskSchema = z.object({
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
+  watermark: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -69,6 +70,7 @@ export const planSchema = z.object({
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
+  watermark: z.boolean().optional(),
 })
 export type PlanFormValues = z.infer<typeof planSchema>
 

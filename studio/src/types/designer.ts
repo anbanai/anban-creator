@@ -66,6 +66,7 @@ export interface DesignerSettings {
   outputFormat: string
   referenceFiles: File[]
   maskFile: File | null
+  watermark: boolean
 }
 
 export interface GenerateRequest {
@@ -79,6 +80,7 @@ export interface GenerateRequest {
   output_format?: string
   reference_file_ids?: string[]
   mask_file_id?: string
+  watermark?: boolean
 }
 
 export interface GenerateImage {
