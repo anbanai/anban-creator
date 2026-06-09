@@ -6,10 +6,13 @@ import DesignerCanvas from '@/components/designer/DesignerCanvas'
 import DesignerPromptBar from '@/components/designer/DesignerPromptBar'
 import HistoryDrawer from '@/components/designer/HistoryDrawer'
 import ImagePreview from '@/components/designer/ImagePreview'
+import ImageEditor from '@/components/designer/ImageEditor'
 import type { DesignerSettings } from '@/types/designer'
 import { designerApi } from '@/lib/api/designer'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { GenerateImage, ImageGeneration, ImageGenerationResult, DesignerProvider } from '@/types/designer'
+import type { GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types/designer'
+import { getModelCapabilities } from '@/types/designer'
+import { saveActiveGeneration, loadActiveGeneration, clearActiveGeneration } from '@/lib/designer-session'
 
 const DEFAULT_SETTINGS: DesignerSettings = {
   quality: 'auto',
@@ -45,8 +48,11 @@ export default function DesignerPage() {
   const [currentImages, setCurrentImages] = useState<GenerateImage[]>([])
   const [selectedGenerationId, setSelectedGenerationId] = useState<string>()
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [prefillPrompt, setPrefillPrompt] = useState<string>('')
+  const [prefillKey, setPrefillKey] = useState<string>('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [editingImage, setEditingImage] = useState<GenerateImage | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortedRef = useRef(false)
 
@@ -68,6 +74,8 @@ export default function DesignerPage() {
   // Auto-select first enabled provider if none selected or current selection is unavailable/disabled
   const activeProvider = providerList.find((p) => p.id === selectedProviderId && p.enabled)
   const effectiveProvider = activeProvider ?? providerList.find((p) => p.enabled)
+  const effectiveCaps = getModelCapabilities(effectiveProvider?.provider ?? '', effectiveProvider?.model)
+  const canInpaint = effectiveCaps?.inpainting ?? false
 
   function stopPolling() {
     if (pollingRef.current) {
@@ -76,16 +84,92 @@ export default function DesignerPage() {
     }
   }
 
+  function startPolling(generationId: string) {
+    stopPolling()
+    abortedRef.current = false
+    let pollCount = 0
+    let consecutiveErrors = 0
+
+    pollingRef.current = setInterval(async () => {
+      if (abortedRef.current) {
+        stopPolling()
+        setIsGenerating(false)
+        clearActiveGeneration()
+        return
+      }
+
+      pollCount++
+      if (pollCount >= MAX_POLLS) {
+        stopPolling()
+        setIsGenerating(false)
+        clearActiveGeneration()
+        toast.error('生成超时，请稍后在历史记录中查看结果')
+        return
+      }
+
+      try {
+        const gen = await designerApi.getGeneration(generationId)
+        consecutiveErrors = 0
+
+        if (gen.status === 'completed') {
+          stopPolling()
+          setIsGenerating(false)
+          setCurrentImages(resultsToImages(gen.results))
+          clearActiveGeneration()
+          toast.success('图片生成成功')
+          queryClient.invalidateQueries({ queryKey: ['designer', 'history'] })
+        } else if (gen.status === 'failed') {
+          stopPolling()
+          setIsGenerating(false)
+          toast.error(gen.error || '图片生成失败')
+          clearActiveGeneration()
+        }
+      } catch {
+        consecutiveErrors++
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          stopPolling()
+          setIsGenerating(false)
+          clearActiveGeneration()
+          toast.error('查询生成状态失败')
+        }
+      }
+    }, POLL_INTERVAL)
+  }
+
+  // Resume polling for active generation on mount
+  useEffect(() => {
+    const active = loadActiveGeneration()
+    if (!active) return
+
+    const { generationId } = active
+
+    designerApi.getGeneration(generationId).then((gen) => {
+      if (gen.status === 'completed') {
+        setCurrentImages(resultsToImages(gen.results))
+        setSelectedGenerationId(generationId)
+        clearActiveGeneration()
+      } else if (gen.status === 'failed') {
+        toast.error(gen.error || '图片生成失败')
+        clearActiveGeneration()
+      } else {
+        setSelectedGenerationId(generationId)
+        setIsGenerating(true)
+        startPolling(generationId)
+      }
+    }).catch(() => {
+      clearActiveGeneration()
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleGenerate = useCallback(async (prompt: string) => {
     if (!effectiveProvider) {
       toast.error('没有可用的图片模型')
       return
     }
 
-    // Cancel any in-progress polling
     stopPolling()
     abortedRef.current = false
-
     setIsGenerating(true)
     setCurrentImages([])
 
@@ -120,54 +204,13 @@ export default function DesignerPage() {
       })
 
       setSelectedGenerationId(generation_id)
-
-      // Poll for completion
-      let pollCount = 0
-      let consecutiveErrors = 0
-
-      pollingRef.current = setInterval(async () => {
-        if (abortedRef.current) {
-          stopPolling()
-          setIsGenerating(false)
-          return
-        }
-
-        pollCount++
-        if (pollCount >= MAX_POLLS) {
-          stopPolling()
-          setIsGenerating(false)
-          toast.error('生成超时，请稍后在历史记录中查看结果')
-          return
-        }
-
-        try {
-          const gen = await designerApi.getGeneration(generation_id)
-          consecutiveErrors = 0
-
-          if (gen.status === 'completed') {
-            stopPolling()
-            setIsGenerating(false)
-            setCurrentImages(resultsToImages(gen.results))
-            toast.success('图片生成成功')
-            queryClient.invalidateQueries({ queryKey: ['designer', 'history'] })
-          } else if (gen.status === 'failed') {
-            stopPolling()
-            setIsGenerating(false)
-            toast.error(gen.error || '图片生成失败')
-          }
-        } catch {
-          consecutiveErrors++
-          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-            stopPolling()
-            setIsGenerating(false)
-            toast.error('查询生成状态失败')
-          }
-        }
-      }, POLL_INTERVAL)
+      saveActiveGeneration(generation_id)
+      startPolling(generation_id)
     } catch (err) {
       setIsGenerating(false)
       toast.error(getApiErrorMessage(err, '图片生成失败，请重试'))
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveProvider, settings, queryClient])
 
   const handleHistorySelect = useCallback((gen: ImageGeneration) => {
@@ -175,15 +218,26 @@ export default function DesignerPage() {
     setCurrentImages(resultsToImages(gen.results))
   }, [])
 
+  const handleRegenerate = useCallback((gen: ImageGeneration) => {
+    setPrefillPrompt(gen.prompt)
+    setPrefillKey(gen.id)
+  }, [])
+
   function handleModelChange(providerId: string) {
     setSelectedProviderId(providerId)
-    setSettings(DEFAULT_SETTINGS)
+    const newProvider = providerList.find((p) => p.id === providerId)
+    const caps = getModelCapabilities(newProvider?.provider ?? '', newProvider?.model)
+    setSettings({
+      ...DEFAULT_SETTINGS,
+      ...(caps?.batch ? {} : { n: 1 }),
+    })
   }
 
   function handleCancel() {
     abortedRef.current = true
     stopPolling()
     setIsGenerating(false)
+    clearActiveGeneration()
   }
 
   return (
@@ -195,6 +249,7 @@ export default function DesignerPage() {
         selectedProviderId={effectiveProvider?.id ?? ''}
         onModelChange={handleModelChange}
         provider={effectiveProvider?.provider ?? ''}
+        model={effectiveProvider?.model ?? ''}
         settings={settings}
         onSettingsChange={setSettings}
         onHistoryToggle={() => setHistoryOpen(true)}
@@ -216,13 +271,18 @@ export default function DesignerPage() {
           <DesignerCanvas
             images={currentImages}
             isGenerating={isGenerating}
+            canInpaint={canInpaint}
             onImageClick={(img) => setPreviewImage(img.url)}
+            onEdit={(img) => setEditingImage(img)}
           />
         </div>
         <DesignerPromptBar
           onSubmit={handleGenerate}
           isGenerating={isGenerating}
           onCancel={handleCancel}
+          initialPrompt={prefillPrompt}
+          initialPromptKey={prefillKey}
+          onInitialPromptConsumed={() => { setPrefillPrompt(''); setPrefillKey('') }}
         />
       </div>
 
@@ -231,6 +291,7 @@ export default function DesignerPage() {
         open={historyOpen}
         onOpenChange={setHistoryOpen}
         onSelect={handleHistorySelect}
+        onRegenerate={handleRegenerate}
         selectedId={selectedGenerationId}
       />
 
@@ -238,7 +299,30 @@ export default function DesignerPage() {
       {previewImage && (
         <ImagePreview
           imageUrl={previewImage}
+          canInpaint={canInpaint}
+          onEdit={() => {
+            const img = currentImages.find((i) => i.url === previewImage)
+            if (img) {
+              setPreviewImage(null)
+              setEditingImage(img)
+            }
+          }}
           onClose={() => setPreviewImage(null)}
+        />
+      )}
+
+      {/* Image editor modal */}
+      {editingImage && effectiveProvider && (
+        <ImageEditor
+          imageUrl={editingImage.url}
+          provider={effectiveProvider.provider}
+          onClose={() => setEditingImage(null)}
+          onGenerating={(generationId) => {
+            setSelectedGenerationId(generationId)
+            setIsGenerating(true)
+            setEditingImage(null)
+            startPolling(generationId)
+          }}
         />
       )}
     </div>

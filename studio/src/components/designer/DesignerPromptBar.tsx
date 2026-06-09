@@ -6,15 +6,30 @@ interface DesignerPromptBarProps {
   onSubmit: (prompt: string) => void
   isGenerating: boolean
   onCancel?: () => void
+  initialPrompt?: string
+  initialPromptKey?: string
+  onInitialPromptConsumed?: () => void
 }
 
 export default function DesignerPromptBar({
   onSubmit,
   isGenerating,
   onCancel,
+  initialPrompt,
+  initialPromptKey,
+  onInitialPromptConsumed,
 }: DesignerPromptBarProps) {
   const [prompt, setPrompt] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    if (initialPromptKey && initialPrompt) {
+      setPrompt(initialPrompt)
+      textareaRef.current?.focus()
+      onInitialPromptConsumed?.()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPromptKey])
 
   useEffect(() => {
     const el = textareaRef.current

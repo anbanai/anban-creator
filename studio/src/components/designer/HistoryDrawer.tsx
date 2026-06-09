@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Clock, ImageIcon } from 'lucide-react'
+import { Clock, ImageIcon, RefreshCw } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -15,10 +15,11 @@ interface HistoryDrawerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSelect: (generation: ImageGeneration) => void
+  onRegenerate?: (generation: ImageGeneration) => void
   selectedId?: string
 }
 
-export default function HistoryDrawer({ open, onOpenChange, onSelect, selectedId }: HistoryDrawerProps) {
+export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenerate, selectedId }: HistoryDrawerProps) {
   const { data, isLoading } = useQuery({
     queryKey: ['designer', 'history'],
     queryFn: () => api.designer.getHistory({ page_size: 50 }),
@@ -72,35 +73,54 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, selectedId
                 const thumbnail = getThumbnail(gen)
                 const isSelected = selectedId === gen.id
                 return (
-                  <button
+                  <div
                     key={gen.id}
-                    type="button"
-                    onClick={() => {
-                      onSelect(gen)
-                      onOpenChange(false)
-                    }}
-                    className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-all duration-200 ${
+                    className={`group relative flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-all duration-200 ${
                       isSelected
                         ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
                         : 'text-foreground hover:bg-accent/50'
                     }`}
                   >
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50">
-                      {thumbnail ? (
-                        <img src={thumbnail} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        <ImageIcon className="h-4 w-4 text-muted-foreground/40" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1 pt-0.5">
-                      <p className="line-clamp-2 text-xs leading-relaxed text-foreground/90">
-                        {gen.prompt}
-                      </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground/80">
-                        {formatTime(gen.created_at)}
-                      </p>
-                    </div>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelect(gen)
+                        onOpenChange(false)
+                      }}
+                      className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                    >
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50">
+                        {thumbnail ? (
+                          <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <ImageIcon className="h-4 w-4 text-muted-foreground/40" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1 pt-0.5">
+                        <p className="line-clamp-2 text-xs leading-relaxed text-foreground/90">
+                          {gen.prompt}
+                        </p>
+                        <p className="mt-1 text-[10px] text-muted-foreground/80">
+                          {formatTime(gen.created_at)}
+                        </p>
+                      </div>
+                    </button>
+                    {onRegenerate && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onRegenerate(gen)
+                          onOpenChange(false)
+                        }}
+                        className="absolute right-2 top-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 max-sm:opacity-50"
+                        title="重新生成"
+                        aria-label="重新生成"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                 )
               })}
             </div>
