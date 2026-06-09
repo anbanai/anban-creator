@@ -46,7 +46,7 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
       </button>
 
       {open && (
-        <div className={`absolute top-full mt-1 w-48 rounded-lg border border-border bg-popover py-1 shadow-lg ${
+        <div className={`absolute bottom-full mb-1 w-48 rounded-lg border border-border bg-popover py-1 shadow-lg ${
           collapsed ? "left-0" : "right-0"
         }`}>
           <div className="border-b border-border px-4 py-2">

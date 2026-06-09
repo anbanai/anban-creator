@@ -190,21 +190,39 @@ export default function Sidebar() {
         </div>
 
         {/* Bottom: Collapse toggle + User + Theme */}
-        <div className={`flex items-center border-t border-sidebar-border py-3 ${
-          collapsed ? "flex-col gap-2 px-0" : "flex-row gap-1 px-3"
-        }`}>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="hidden md:flex text-muted-foreground hover:text-sidebar-foreground"
-            onClick={() => setCollapsed(!collapsed)}
-            aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
-          >
-            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          </Button>
-          <UserAccountPopover collapsed={collapsed} />
-          <ThemeToggle />
-        </div>
+        {collapsed ? (
+          <div className="border-t border-sidebar-border py-3 px-0">
+            <div className="flex justify-center mb-2">
+              <UserAccountPopover collapsed={collapsed} />
+            </div>
+            <div className="flex items-center justify-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="hidden md:flex text-muted-foreground hover:text-sidebar-foreground"
+                onClick={() => setCollapsed(!collapsed)}
+                aria-label="展开侧边栏"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <ThemeToggle />
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center border-t border-sidebar-border py-3 flex-row gap-1 px-3">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="hidden md:flex text-muted-foreground hover:text-sidebar-foreground"
+              onClick={() => setCollapsed(!collapsed)}
+              aria-label="收起侧边栏"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <UserAccountPopover collapsed={collapsed} />
+            <ThemeToggle />
+          </div>
+        )}
       </aside>
     </>
   );
