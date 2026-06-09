@@ -11,9 +11,9 @@ import {
   Sparkles,
   Maximize,
   Coins,
-  Lock,
   Stamp,
 } from 'lucide-react'
+import ModelSelector from '@/components/designer/ModelSelector'
 import { Slider } from '@/components/ui/slider'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -140,58 +140,11 @@ export default function DesignerToolbar({
             </div>
 
             {/* Model selector */}
-            <div className="space-y-1">
-              {providers.map((p) => {
-                const isActive = selectedProviderId === p.id && p.enabled
-                const isDisabled = !p.enabled
-                const pCaps = getModelCapabilities(p.provider, p.model)
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    disabled={isDisabled}
-                    onClick={() => !isDisabled && onModelChange(p.id)}
-                    className={`group relative flex w-full flex-col items-start gap-0.5 rounded-xl px-3 py-2.5 text-left transition-all duration-300 ${
-                      isDisabled
-                        ? 'cursor-not-allowed opacity-40'
-                        : isActive
-                          ? 'bg-primary/[0.07] ring-1 ring-primary/20 dark:bg-primary/[0.12]'
-                          : 'hover:bg-muted/40'
-                    }`}
-                    style={isActive ? { boxShadow: '0 0 12px -4px var(--color-primary)' } : undefined}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-medium">{p.name}</span>
-                      {isActive && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-glow-pulse" style={{ boxShadow: '0 0 6px var(--color-primary)' }} />
-                      )}
-                      {isDisabled && (
-                        <Badge variant="outline" className="h-4 gap-0.5 px-1.5 text-[9px] text-muted-foreground">
-                          <Lock className="h-2.5 w-2.5" />
-                          未启用
-                        </Badge>
-                      )}
-                      {!isDisabled && p.credits > 0 && (
-                        <Tooltip>
-                          <TooltipTrigger>
-                            <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
-                              {p.credits}
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent>每次生成消耗 {p.credits} 积分</TooltipContent>
-                        </Tooltip>
-                      )}
-                    </div>
-                    {pCaps && !isDisabled && (
-                      <div className="mt-0.5 flex gap-1">
-                        {pCaps.batch && <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">批量</Badge>}
-                        {pCaps.inpainting && <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">局部编辑</Badge>}
-                      </div>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
+            <ModelSelector
+              providers={providers}
+              selectedProviderId={selectedProviderId}
+              onChange={onModelChange}
+            />
 
             <Separator />
 
@@ -439,28 +392,11 @@ export default function DesignerToolbar({
       <div className="flex max-h-48 shrink-0 overflow-y-auto border-t border-border/50 bg-card/60 px-3 py-2 backdrop-blur-sm md:hidden">
         <div className="w-full space-y-2">
           {/* Mobile model selector */}
-          {providers.length > 1 && (
-            <div className="flex gap-1 overflow-x-auto pb-1">
-              {providers.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  disabled={!p.enabled}
-                  onClick={() => p.enabled && onModelChange(p.id)}
-                  className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                    !p.enabled
-                      ? 'cursor-not-allowed opacity-40'
-                      : selectedProviderId === p.id
-                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                        : 'bg-muted/30 text-muted-foreground'
-                  }`}
-                >
-                  {p.name}
-                  {!p.enabled && <Lock className="ml-1 inline h-2.5 w-2.5" />}
-                </button>
-              ))}
-            </div>
-          )}
+          <ModelSelector
+            providers={providers}
+            selectedProviderId={selectedProviderId}
+            onChange={onModelChange}
+          />
 
           {/* Mobile settings row */}
           <div className="flex gap-1 overflow-x-auto">
