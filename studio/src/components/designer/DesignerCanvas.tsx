@@ -1,14 +1,16 @@
-import { Download, Maximize2, ImageIcon } from 'lucide-react'
+import { Download, Maximize2, ImageIcon, Paintbrush } from 'lucide-react'
 import GeneratingAnimation from '@/components/designer/GeneratingAnimation'
 import type { GenerateImage } from '@/types/designer'
 
 interface DesignerCanvasProps {
   images: GenerateImage[]
   isGenerating: boolean
+  canInpaint: boolean
   onImageClick: (image: GenerateImage) => void
+  onEdit?: (image: GenerateImage) => void
 }
 
-export default function DesignerCanvas({ images, isGenerating, onImageClick }: DesignerCanvasProps) {
+export default function DesignerCanvas({ images, isGenerating, canInpaint, onImageClick, onEdit }: DesignerCanvasProps) {
   async function handleDownload(url: string, index: number) {
     try {
       const res = await fetch(url)
@@ -72,6 +74,19 @@ export default function DesignerCanvas({ images, isGenerating, onImageClick }: D
           </span>
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition-all duration-300 group-hover:opacity-100">
             <div className="absolute bottom-3 left-0 right-0 flex items-center justify-center gap-2">
+              {canInpaint && onEdit && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onEdit(img)
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-background/60 text-foreground backdrop-blur-sm transition-all duration-200 hover:bg-background/80"
+                  title="局部编辑"
+                >
+                  <Paintbrush className="h-3.5 w-3.5" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={(e) => {

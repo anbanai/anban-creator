@@ -1,13 +1,15 @@
 import { useEffect } from 'react'
-import { X, Download } from 'lucide-react'
+import { X, Download, Paintbrush } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface ImagePreviewProps {
   imageUrl: string
+  canInpaint?: boolean
+  onEdit?: () => void
   onClose: () => void
 }
 
-export default function ImagePreview({ imageUrl, onClose }: ImagePreviewProps) {
+export default function ImagePreview({ imageUrl, canInpaint, onEdit, onClose }: ImagePreviewProps) {
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
@@ -45,6 +47,17 @@ export default function ImagePreview({ imageUrl, onClose }: ImagePreviewProps) {
           className="max-h-[90vh] max-w-[90vw] rounded-xl object-contain shadow-2xl shadow-black/60 ring-1 ring-white/10"
         />
         <div className="absolute top-4 right-4 flex gap-2">
+          {canInpaint && onEdit && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onEdit}
+              className="rounded-lg bg-black/40 text-white/80 backdrop-blur-sm hover:bg-black/60 hover:text-white"
+              title="局部编辑"
+            >
+              <Paintbrush className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon-sm"
