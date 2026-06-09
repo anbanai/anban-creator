@@ -190,6 +190,9 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		return
 	}
 
+	now := time.Now()
+	s.db.Model(&model.ImageGeneration{}).Where("id = ?", genID).Update("started_at", &now)
+
 	var refundOnce sync.Once
 	refund := func() {
 		refundOnce.Do(func() {
@@ -345,9 +348,11 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 
 	s.processResults(ctx, gen.UserID, genID, result)
 
+	completedAt := time.Now()
 	s.db.Model(&model.ImageGeneration{}).Where("id = ?", genID).Updates(map[string]any{
 		"status":         model.ImageGenerationStatusCompleted,
 		"revised_prompt": result.RevisedPrompt,
+		"completed_at":   &completedAt,
 	})
 }
 
@@ -558,6 +563,10 @@ func (s *DesignerService) updateGenerationStatus(genID, status, errMsg string) {
 	updates := map[string]any{"status": status}
 	if errMsg != "" {
 		updates["error"] = errMsg
+	}
+	if status == model.ImageGenerationStatusFailed {
+		now := time.Now()
+		updates["completed_at"] = &now
 	}
 	s.db.Model(&model.ImageGeneration{}).Where("id = ?", genID).Updates(updates)
 }
