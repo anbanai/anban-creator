@@ -39,13 +39,26 @@ func (d *Downloader) HandleToolResult(ctx context.Context, call trackedToolCall,
 		return nil
 	}
 
-	switch call.Name {
+	switch toolBaseName(call.Name) {
 	case "generate_image":
 		target := d.singleTargetPath(call, payloads[0])
 		return d.downloadToPath(ctx, payloads[0].DownloadURL, target)
 	}
 
 	return nil
+}
+
+// toolBaseName extracts the base tool name from a potentially namespaced name.
+// "mcp__anbanwriter__generate_image" → "generate_image"
+// "generate_image" → "generate_image"
+func toolBaseName(name string) string {
+	if strings.HasPrefix(name, "mcp__") {
+		parts := strings.SplitN(name, "__", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	}
+	return name
 }
 
 type downloadPayload struct {
