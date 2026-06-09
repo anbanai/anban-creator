@@ -251,7 +251,13 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
 
-	p.log.Debug().Str("provider", result.Model).Str("size", result.Size).Msg("image generated (raw)")
+	p.log.Info().
+		Str("provider", p.provider.Name()).
+		Str("model", result.Model).
+		Str("size", result.Size).
+		Str("response_type", result.ResponseType).
+		Str("response_preview", result.ResponsePreview).
+		Msg("image generated (raw)")
 
 	url, err := p.resolveRawURL(result.URL)
 	if err != nil {
@@ -300,7 +306,13 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
 
-	p.log.Debug().Str("provider", result.Model).Str("size", result.Size).Msg("image generated (raw with size)")
+	p.log.Info().
+		Str("provider", activeProvider.Name()).
+		Str("model", result.Model).
+		Str("size", result.Size).
+		Str("response_type", result.ResponseType).
+		Str("response_preview", result.ResponsePreview).
+		Msg("image generated (raw with size)")
 
 	url, err := p.resolveRawURL(result.URL)
 	if err != nil {
@@ -454,7 +466,13 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
-	p.log.Debug().Str("provider", result.Model).Str("size", result.Size).Msg("image generated")
+	p.log.Info().
+		Str("provider", activeProvider.Name()).
+		Str("model", result.Model).
+		Str("size", result.Size).
+		Str("response_type", result.ResponseType).
+		Str("response_preview", result.ResponsePreview).
+		Msg("image generated")
 
 	return p.processRawResult(result, outputPath)
 }

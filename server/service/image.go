@@ -219,6 +219,15 @@ func (s *ImageService) GenerateImage(
 
 	result := buildImageResult(rawResult, imageType)
 
+	s.logger.Info().
+		Str("channel_id", channelID).
+		Str("provider", result.Provider).
+		Str("model", result.Model).
+		Str("size", result.Size).
+		Str("response_type", result.ResponseType).
+		Str("response_preview", result.ResponsePreview).
+		Msg("image generated")
+
 	// If outputPath provided, download and save the image there.
 	if outputPath != "" {
 		localPath, dlErr := s.resolveToLocalFile(rawResult.URL)
