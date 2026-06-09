@@ -19,14 +19,22 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
   useEffect(() => setMounted(true), [])
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    if (!open) return
+    const handleClick = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setOpen(false)
       }
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [open])
 
   if (!user) return null
 
@@ -66,10 +74,12 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
             <p className="truncate text-sm font-medium text-popover-foreground">{user.nickname || '用户'}</p>
             <p className="truncate text-xs text-muted-foreground">{user.email}</p>
           </div>
-          <div className="border-b border-border py-1">
+          <div className="border-b border-border py-1" role="radiogroup" aria-label="主题模式">
             {themeOptions.map((option) => (
               <button
                 key={option.value}
+                role="radio"
+                aria-checked={currentTheme === option.value}
                 onClick={() => setTheme(option.value)}
                 className={`flex w-full items-center gap-2 px-4 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-foreground ${
                   currentTheme === option.value ? 'text-popover-foreground' : 'text-muted-foreground'
