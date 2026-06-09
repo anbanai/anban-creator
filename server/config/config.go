@@ -25,6 +25,7 @@ type Config struct {
 	MCP        MCPConfig        `yaml:"mcp"`
 	ImageAPI   ImageAPIConfig   `yaml:"image_api"`
 	Writing    WritingConfig    `yaml:"writing"`
+	Vision     VisionConfig    `yaml:"vision"`
 	TingWu     TingWuConfig     `yaml:"tingwu"`
 	Claude     ClaudeConfig     `yaml:"claude"`
 	Credits    CreditsConfig    `yaml:"credits"`
@@ -131,6 +132,16 @@ type WritingConfig struct {
 	Model          string        `yaml:"model"`           // Model name
 	Timeout        time.Duration `yaml:"timeout"`         // LLM request timeout (default 5m)
 	ConvertTimeout time.Duration `yaml:"convert_timeout"` // Markdown-to-HTML convert timeout (default 2x Timeout)
+}
+
+// VisionConfig holds LLM API configuration for vision/image analysis services.
+// Uses OpenAI-compatible /chat/completions with image content blocks.
+// Falls back to Writing config when not configured.
+type VisionConfig struct {
+	BaseURL string        `yaml:"base_url"` // Vision LLM API endpoint (OpenAI-compatible)
+	Key     string        `yaml:"key"`      // API key
+	Model   string        `yaml:"model"`    // Model name (must support vision/image input)
+	Timeout time.Duration `yaml:"timeout"`  // Request timeout (default 60s)
 }
 
 // TingWuConfig holds Alibaba TingWu speech analysis configuration.

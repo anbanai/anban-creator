@@ -280,6 +280,22 @@ func main() {
 		}
 	}
 
+	// Initialize vision LLM client (falls back to writing config if not configured).
+	var visionLLMClient service.LLMClient
+	{
+		vBaseURL := cfg.Vision.BaseURL
+		vAPIKey := cfg.Vision.Key
+		vModel := cfg.Vision.Model
+		vTimeout := cfg.Vision.Timeout
+		if vTimeout == 0 {
+			vTimeout = 60 * time.Second
+		}
+		if vBaseURL != "" && vAPIKey != "" && vModel != "" {
+			visionLLMClient = service.NewOpenAILLMClient(vBaseURL, vAPIKey, vModel, vTimeout)
+			log.Info().Str("endpoint", vBaseURL).Str("model", vModel).Msg("vision LLM client initialized")
+		}
+	}
+
 	if repo != nil && seednoteClient != nil {
 		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), writingLLMClient, asynqClient, log)
 		log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("SeedNote tracking service initialized")
@@ -390,6 +406,9 @@ func main() {
 					writersDir = filepath.Join(cfg.Claude.PluginDir, "writers")
 				}
 				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, cfg.Writing.Timeout, cfg.Writing.ConvertTimeout, log)
+				if visionLLMClient != nil {
+					writingSvc.SetVisionClient(visionLLMClient)
+				}
 				if modelConfigSvc != nil {
 					writingSvc.SetModelConfigService(modelConfigSvc)
 				}

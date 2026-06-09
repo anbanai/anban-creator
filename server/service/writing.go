@@ -200,6 +200,7 @@ type WritingService struct {
 	modelConfigSvc *ModelConfigService
 	writersDir     string
 	logger         *zerolog.Logger
+	visionClient   LLMClient // dedicated vision model client (nil = use llmClient)
 }
 
 // NewWritingService creates a new WritingService.
@@ -219,6 +220,12 @@ func (s *WritingService) SetModelConfigService(svc *ModelConfigService) {
 	s.modelConfigSvc = svc
 }
 
+// SetVisionClient sets a dedicated LLM client for vision/image analysis.
+// If not called, AnalyzeImage falls back to the default writing LLM client.
+func (s *WritingService) SetVisionClient(client LLMClient) {
+	s.visionClient = client
+}
+
 // getLLMClient returns the default or per-user LLM client for the given user.
 func (s *WritingService) getLLMClient(ctx context.Context, userID string) LLMClient {
 	if s.modelConfigSvc != nil {
@@ -235,9 +242,13 @@ func (s *WritingService) getLLMClient(ctx context.Context, userID string) LLMCli
 }
 
 // AnalyzeImage sends an image to a vision LLM with the user's prompt and returns
-// the analysis text. The imageURLOrData can be an HTTPS URL or a base64 data URL.
+// the analysis text. Uses the dedicated vision client if configured, otherwise
+// falls back to the writing LLM client.
 func (s *WritingService) AnalyzeImage(ctx context.Context, userID, imageSource, prompt string) (string, error) {
-	llm := s.getLLMClient(ctx, userID)
+	llm := s.visionClient
+	if llm == nil {
+		llm = s.getLLMClient(ctx, userID)
+	}
 	if llm == nil {
 		return "", fmt.Errorf("LLM service is not configured")
 	}
