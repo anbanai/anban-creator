@@ -1,6 +1,6 @@
-# AnbanWriter 智能创作平台
+# Anban 智能创作助手
 
-AnbanWriter is a Studio-first content creation platform for WeChat articles and Seednote-oriented creation workflows. It combines a Web Studio, MCP tools, Claude/OpenClaw agent execution, AI image generation, publishing helpers, task tracking, and credits into one repeatable creator workspace.
+Anban is a Studio-first content creation platform for WeChat articles and Seednote-oriented creation workflows. It combines a Web Studio, MCP tools, Claude/OpenClaw agent execution, AI image generation, publishing helpers, task tracking, and credits into one repeatable creator workspace.
 
 ## Product Surfaces
 
