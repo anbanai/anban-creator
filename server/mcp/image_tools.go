@@ -2,7 +2,14 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -69,6 +76,21 @@ func registerImageTools(server *mcp.Server) {
 			"required": []any{"channel_id", "url"},
 		},
 	}, downloadImageHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "analyze_image",
+		Description: "Analyze an image using a vision AI model. Accepts a remote image URL (https://) or a server-local file path (from generate_image file_path). Returns the AI's analysis as text. Use this for: identifying entities in line art, evaluating coloring quality, auditing cross-image color consistency, verifying line art preservation. No credit deduction.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"channel_id": map[string]any{"type": "string", "description": "Channel ID (determines vision model config)"},
+				"image_url":  map[string]any{"type": "string", "description": "Remote HTTPS URL of the image to analyze"},
+				"file_path":  map[string]any{"type": "string", "description": "Server-local file path (from generate_image file_path result)"},
+				"prompt":     map[string]any{"type": "string", "description": "Detailed analysis prompt describing what to analyze"},
+			},
+			"required": []any{"channel_id", "prompt"},
+		},
+	}, analyzeImageHandler)
 }
 
 func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -197,4 +219,148 @@ func downloadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	}
 
 	return textResult(result)
+}
+
+func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.WritingSvc == nil {
+		return errorResult("writing/vision service not available"), nil
+	}
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+
+	channelID, _ := args["channel_id"].(string)
+	prompt, _ := args["prompt"].(string)
+	if channelID == "" {
+		return errorResult("channel_id is required"), nil
+	}
+	if prompt == "" {
+		return errorResult("prompt is required"), nil
+	}
+
+	imageURL, _ := args["image_url"].(string)
+	filePath, _ := args["file_path"].(string)
+
+	var imageSource string
+
+	if filePath != "" {
+		info, err := os.Stat(filePath)
+		if err != nil {
+			return errorResult(fmt.Sprintf("read image file: %v", err)), nil
+		}
+		if info.Size() > 10<<20 {
+			return errorResult("image file is too large for analysis (max 10MB)"), nil
+		}
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return errorResult(fmt.Sprintf("read image file: %v", err)), nil
+		}
+		mimeType := http.DetectContentType(data)
+		if !strings.HasPrefix(mimeType, "image/") {
+			return errorResult("file is not an image"), nil
+		}
+		imageSource = fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
+	} else if imageURL != "" {
+		if !strings.HasPrefix(imageURL, "https://") {
+			return errorResult("image_url must be an HTTPS URL"), nil
+		}
+		data, err := downloadHTTPSImage(ctx, imageURL, 10<<20)
+		if err != nil {
+			return errorResult(fmt.Sprintf("download image: %v", err)), nil
+		}
+		mimeType := http.DetectContentType(data)
+		if !strings.HasPrefix(mimeType, "image/") {
+			return errorResult("downloaded file is not an image"), nil
+		}
+		imageSource = fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
+	} else {
+		return errorResult("either image_url or file_path is required"), nil
+	}
+
+	result, err := svcs.WritingSvc.AnalyzeImage(ctx, userID, imageSource, prompt)
+	if err != nil {
+		return errorResult(fmt.Sprintf("analyze image: %v", err)), nil
+	}
+
+	return textResult(map[string]any{
+		"analysis": result,
+	})
+}
+
+// downloadHTTPSImage downloads an image from a public HTTPS URL.
+func downloadHTTPSImage(ctx context.Context, imageURL string, maxSize int64) ([]byte, error) {
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			DialContext: publicOnlyDialContext,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("too many redirects")
+			}
+			if req.URL.Scheme != "https" {
+				return fmt.Errorf("external image redirects must use https")
+			}
+			return nil
+		},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if req.URL.Scheme != "https" || req.URL.Hostname() == "" || req.URL.User != nil {
+		return nil, fmt.Errorf("invalid external image URL")
+	}
+	req.Header.Set("Accept", "image/*")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download external image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download external image: unexpected status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("read external image: %w", err)
+	}
+	if int64(len(data)) > maxSize {
+		return nil, fmt.Errorf("external image exceeds max size")
+	}
+	return data, nil
+}
+
+// publicOnlyDialContext prevents SSRF by only connecting to public IP addresses.
+func publicOnlyDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("invalid address: %w", err)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve host: %w", err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("host did not resolve")
+	}
+	for _, addr := range ips {
+		if !isPublicIP(addr.IP) {
+			return nil, fmt.Errorf("external image host resolves to a non-public address")
+		}
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+}
+
+func isPublicIP(ip net.IP) bool {
+	return ip.IsGlobalUnicast() &&
+		!ip.IsPrivate() &&
+		!ip.IsLoopback() &&
+		!ip.IsLinkLocalUnicast() &&
+		!ip.IsLinkLocalMulticast() &&
+		!ip.IsUnspecified() &&
+		!ip.IsMulticast()
 }

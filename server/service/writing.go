@@ -234,6 +234,22 @@ func (s *WritingService) getLLMClient(ctx context.Context, userID string) LLMCli
 	return s.llmClient
 }
 
+// AnalyzeImage sends an image to a vision LLM with the user's prompt and returns
+// the analysis text. The imageURLOrData can be an HTTPS URL or a base64 data URL.
+func (s *WritingService) AnalyzeImage(ctx context.Context, userID, imageSource, prompt string) (string, error) {
+	llm := s.getLLMClient(ctx, userID)
+	if llm == nil {
+		return "", fmt.Errorf("LLM service is not configured")
+	}
+
+	systemPrompt := "You are a precise visual analysis assistant. Describe exactly what you see in the image. Be specific and detailed."
+	result, err := llm.CompleteWithImage(ctx, systemPrompt, prompt, imageSource)
+	if err != nil {
+		return "", fmt.Errorf("image analysis: %w", err)
+	}
+	return strings.TrimSpace(result), nil
+}
+
 // ---------------------------------------------------------------------------
 // Result types
 // ---------------------------------------------------------------------------
