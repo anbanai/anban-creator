@@ -1,12 +1,23 @@
 import { useState, useRef, useEffect } from 'react'
+import { useTheme } from 'next-themes'
+import { Sun, Moon, Monitor } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+
+const themeOptions = [
+  { value: 'light', label: '亮色模式', icon: Sun },
+  { value: 'dark', label: '暗色模式', icon: Moon },
+  { value: 'system', label: '跟随系统', icon: Monitor },
+] as const
 
 export default function UserAccountPopover({ collapsed }: { collapsed?: boolean }) {
   const { user, logout } = useAuth()
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
 
-  // Close on outside click
+  useEffect(() => setMounted(true), [])
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
@@ -22,6 +33,8 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
   const initials = user.nickname
     ? user.nickname.slice(0, 1).toUpperCase()
     : user.email.slice(0, 1).toUpperCase()
+
+  const currentTheme = mounted && theme ? theme : 'system'
 
   return (
     <div className="relative" ref={popoverRef}>
@@ -52,6 +65,21 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
           <div className="border-b border-border px-4 py-2">
             <p className="truncate text-sm font-medium text-popover-foreground">{user.nickname || '用户'}</p>
             <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+          </div>
+          <div className="border-b border-border py-1">
+            {themeOptions.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setTheme(option.value)}
+                className={`flex w-full items-center gap-2 px-4 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-foreground ${
+                  currentTheme === option.value ? 'text-popover-foreground' : 'text-muted-foreground'
+                }`}
+              >
+                <option.icon className="h-4 w-4" />
+                {option.label}
+                {currentTheme === option.value && <span className="ml-auto text-xs">✓</span>}
+              </button>
+            ))}
           </div>
           <button
             onClick={() => {

@@ -1,11 +1,7 @@
 import { NavLink } from "react-router-dom";
-import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import {
   Settings,
-  Sun,
-  Moon,
-  Monitor,
   Menu,
   X,
   Workflow,
@@ -15,13 +11,6 @@ import {
   ChevronRight,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -29,67 +18,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { workflowItems, analyticsItems, platformItems } from "@/lib/navigation";
-
-const themeOptions = [
-  { value: "light", label: "亮色", icon: Sun },
-  { value: "dark", label: "暗色", icon: Moon },
-  { value: "system", label: "系统", icon: Monitor },
-] as const;
-
-type ThemePreference = (typeof themeOptions)[number]["value"];
-
-function isThemePreference(value: string): value is ThemePreference {
-  return themeOptions.some((option) => option.value === value);
-}
-
-function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
-
-  if (!mounted) {
-    return <div className="h-8 w-8" />;
-  }
-
-  const currentTheme = isThemePreference(theme ?? "") ? theme : "system";
-  const currentOption = themeOptions.find((option) => option.value === currentTheme) ?? themeOptions[2];
-  const CurrentIcon = currentOption.icon;
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-            title={`主题模式：${currentOption.label}`}
-            aria-label={`主题模式：${currentOption.label}`}
-          />
-        }
-      >
-        <CurrentIcon className="h-4 w-4" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="w-32">
-        <DropdownMenuRadioGroup
-          value={currentTheme}
-          onValueChange={(value) => {
-            if (isThemePreference(value)) {
-              setTheme(value);
-            }
-          }}
-        >
-          {themeOptions.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value}>
-              <option.icon className="h-4 w-4" />
-              {option.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
 
 function useCollapsedState() {
   const [collapsed, setCollapsed] = useState(() => {
@@ -195,7 +123,7 @@ export default function Sidebar() {
             <div className="flex justify-center mb-2">
               <UserAccountPopover collapsed={collapsed} />
             </div>
-            <div className="flex items-center justify-center gap-1">
+            <div className="flex items-center justify-center">
               <Button
                 variant="ghost"
                 size="icon-xs"
@@ -205,7 +133,6 @@ export default function Sidebar() {
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>
-              <ThemeToggle />
             </div>
           </div>
         ) : (
@@ -220,7 +147,6 @@ export default function Sidebar() {
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <UserAccountPopover collapsed={collapsed} />
-            <ThemeToggle />
           </div>
         )}
       </aside>
