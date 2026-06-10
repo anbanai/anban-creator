@@ -98,20 +98,6 @@ func registerChannelTools(server *mcp.Server) {
 
 func registerTaskTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
-		Name:        "create_task",
-		Description: "Create one or more content creation tasks for a channel. The task type is derived from the channel's platform (article/seednote). Credits are deducted automatically.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID to create task for"},
-				"prompt":     map[string]any{"type": "string", "description": "Optional prompt/instructions for content creation"},
-				"quantity":   map[string]any{"type": "integer", "description": "Number of tasks (1-5, default 1)", "minimum": 1, "maximum": 5, "default": 1},
-			},
-			"required": []any{"channel_id"},
-		},
-	}, taskCreateHandler)
-
-	server.AddTool(&mcp.Tool{
 		Name:        "list_tasks",
 		Description: "List tasks for the authenticated user with optional filters.",
 		InputSchema: map[string]any{
@@ -337,36 +323,6 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	}
 
 	return textResult(info)
-}
-
-func taskCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	userID := getUserID(ctx)
-	args := parseArgs(req.Params.Arguments)
-	channelID, _ := args["channel_id"].(string)
-	prompt, _ := args["prompt"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
-	}
-	quantity := 1
-	if v, ok := args["quantity"].(float64); ok && int(v) > 0 {
-		quantity = int(v)
-	}
-
-	tasks, err := svcs.TaskSvc.CreateManual(context.Background(), userID, channelID, prompt, quantity, "", nil, "", nil)
-	if err != nil {
-		return billingError("create task", err), nil
-	}
-
-	ids := make([]string, len(tasks))
-	for i, t := range tasks {
-		ids[i] = t.ID
-	}
-	return textResult(map[string]any{
-		"task_ids": ids,
-		"count":    len(tasks),
-		"status":   "pending",
-		"message":  fmt.Sprintf("Created %d task(s). Tasks will execute asynchronously.", len(tasks)),
-	})
 }
 
 func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

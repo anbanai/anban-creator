@@ -177,10 +177,8 @@ export default function TasksPage() {
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       toast.success('任务创建成功')
-      setTimeout(() => {
-        resetModal()
-        navigate(`/tasks/${task.id}`)
-      }, 800)
+      resetModal()
+      navigate(`/tasks/${task.id}`)
     },
     onError: () => {
       toast.error('创建任务失败，请重试')
