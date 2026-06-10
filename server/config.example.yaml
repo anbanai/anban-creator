@@ -159,6 +159,19 @@ writing:
   model: "" # Model name (e.g. "glm-5-turbo")
 
 # ---------------------------------------------------------------------------
+# Vision: LLM API configuration for image analysis (analyze_image MCP tool).
+# Uses OpenAI-compatible /chat/completions with image content blocks.
+# Model must support vision/image input (e.g. gpt-4o, gpt-4o-mini, gemini-2.0-flash).
+# Falls back to writing config when not configured.
+# Override via ANBANWRITER_VISION_* env vars.
+# ---------------------------------------------------------------------------
+vision:
+  base_url: "" # Vision API endpoint (e.g. "https://api.openai.com/v1")
+  key: "" # API key
+  model: "" # Model name (e.g. "gpt-4o-mini")
+  timeout: 60s # Request timeout
+
+# ---------------------------------------------------------------------------
 # TingWu: Alibaba Cloud speech transcription/analysis for live-slice workflows
 # Optional. Configure this plus OSS storage to let MCP create/query live
 # analysis tasks directly. All fields can be overridden with:
