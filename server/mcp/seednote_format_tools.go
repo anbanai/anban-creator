@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -48,6 +49,7 @@ func exportSeednoteHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 			Title:   title,
 			Content: cleanSeednoteContent(content),
 			Tags:    []string{},
+			Images:  []SeednoteImage{},
 		}
 		// Extract tags from arguments.
 		if tagArr, ok := args["tags"].([]any); ok {
@@ -73,11 +75,19 @@ func exportSeednoteHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 // Seednote content types
 // ---------------------------------------------------------------------------
 
+// SeednoteImage represents an extracted image from seednote content.
+type SeednoteImage struct {
+	Alt      string `json:"alt"`
+	URL      string `json:"url"`
+	Position int    `json:"position"`
+}
+
 // SeednoteExportResult contains formatted seednote publishing content.
 type SeednoteExportResult struct {
-	Title   string   `json:"title"`
-	Content string   `json:"content"`
-	Tags    []string `json:"tags"`
+	Title   string          `json:"title"`
+	Content string          `json:"content"`
+	Tags    []string        `json:"tags"`
+	Images  []SeednoteImage `json:"images"`
 }
 
 // ---------------------------------------------------------------------------
@@ -87,7 +97,6 @@ type SeednoteExportResult struct {
 // Pre-compiled regexps for seednote content processing.
 var (
 	reSeednoteTag          = regexp.MustCompile(`#([^#\s][^\s#]*)`)
-	reSeednoteImage        = regexp.MustCompile(`!\[([^\]]*)\]\([^\)]+\)`)
 	reSeednoteLink         = regexp.MustCompile(`\[([^\]]+)\]\([^\)]+\)`)
 	reSeednoteBold         = regexp.MustCompile(`\*\*([^\*]+)\*\*|__([^_]+)__`)
 	reSeednoteItalic       = regexp.MustCompile(`\*([^\*]+)\*|_([^_]+)_`)
@@ -96,12 +105,15 @@ var (
 	reSeednoteList         = regexp.MustCompile(`^[\s]*[-\*\d]+[\.\)]?\s*`)
 	reSeednoteMultiSpace   = regexp.MustCompile(`\s+`)
 	reSeednoteMultiNewline = regexp.MustCompile(`\n{3,}`)
+	// reSeednoteImageFull matches ![alt](url) with two capture groups for alt and url.
+	reSeednoteImageFull = regexp.MustCompile(`!\[([^\]]*)\]\(([^\)]+)\)`)
 )
 
 // parseSeednoteContent parses Markdown content into structured seednote publishing data.
 func parseSeednoteContent(markdown string) *SeednoteExportResult {
 	result := &SeednoteExportResult{
-		Tags: []string{},
+		Tags:   []string{},
+		Images: []SeednoteImage{},
 	}
 
 	lines := strings.Split(markdown, "\n")
@@ -146,7 +158,7 @@ func parseSeednoteContent(markdown string) *SeednoteExportResult {
 		}
 
 		// Convert Markdown to plain text.
-		trimmed = seednoteMarkdownToPlain(trimmed)
+		trimmed = seednoteMarkdownToPlain(trimmed, &result.Images)
 
 		// Skip empty lines but preserve paragraph spacing.
 		if trimmed == "" {
@@ -166,6 +178,7 @@ func parseSeednoteContent(markdown string) *SeednoteExportResult {
 
 	result.Content = cleanSeednoteContent(strings.Join(contentLines, "\n"))
 	result.Tags = uniqueStrings(result.Tags)
+	result.Images = filterImagesByContent(result.Content, result.Images)
 
 	return result
 }
@@ -190,9 +203,26 @@ func removeSeednoteTags(text string) string {
 	return strings.TrimSpace(reSeednoteTag.ReplaceAllString(text, ""))
 }
 
+// parseImageMarkdown extracts alt text and URL from a markdown image syntax.
+func parseImageMarkdown(match string) (alt, url string) {
+	sub := reSeednoteImageFull.FindStringSubmatch(match)
+	if len(sub) > 2 {
+		alt = sub[1]
+		url = sub[2]
+	}
+	return
+}
+
 // seednoteMarkdownToPlain converts Markdown formatting to plain text.
-func seednoteMarkdownToPlain(text string) string {
-	text = reSeednoteImage.ReplaceAllString(text, "")
+// Images are extracted into the images slice and replaced with [图片:N] placeholders.
+func seednoteMarkdownToPlain(text string, images *[]SeednoteImage) string {
+	pos := len(*images)
+	text = reSeednoteImageFull.ReplaceAllStringFunc(text, func(match string) string {
+		pos++
+		alt, url := parseImageMarkdown(match)
+		*images = append(*images, SeednoteImage{Alt: alt, URL: url, Position: pos})
+		return fmt.Sprintf("[图片:%d]", pos)
+	})
 	text = reSeednoteLink.ReplaceAllString(text, "$1")
 	text = reSeednoteBold.ReplaceAllString(text, "$1$2")
 	text = reSeednoteItalic.ReplaceAllString(text, "$1$2")
@@ -236,6 +266,20 @@ func uniqueStrings(slice []string) []string {
 	return result
 }
 
+// filterImagesByContent keeps only images whose [图片:N] placeholder still exists in content.
+func filterImagesByContent(content string, images []SeednoteImage) []SeednoteImage {
+	var filtered []SeednoteImage
+	for _, img := range images {
+		if strings.Contains(content, fmt.Sprintf("[图片:%d]", img.Position)) {
+			filtered = append(filtered, img)
+		}
+	}
+	if len(filtered) == 0 {
+		return []SeednoteImage{}
+	}
+	return filtered
+}
+
 // formatSeednoteMarkdown formats a SeednoteExportResult as a Markdown string.
 func formatSeednoteMarkdown(r *SeednoteExportResult) map[string]any {
 	var sb strings.Builder
@@ -252,6 +296,13 @@ func formatSeednoteMarkdown(r *SeednoteExportResult) map[string]any {
 		sb.WriteString("(none)")
 	}
 	sb.WriteString("\n")
+
+	if len(r.Images) > 0 {
+		sb.WriteString("\n## Images\n\n")
+		for _, img := range r.Images {
+			fmt.Fprintf(&sb, "%d. ![%s](%s)\n", img.Position, img.Alt, img.URL)
+		}
+	}
 
 	return map[string]any{
 		"format":  "markdown",
