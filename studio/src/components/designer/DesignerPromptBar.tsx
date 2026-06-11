@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, X } from 'lucide-react'
+import { Send, X, Paintbrush } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface DesignerPromptBarProps {
@@ -9,6 +9,7 @@ interface DesignerPromptBarProps {
   initialPrompt?: string
   initialPromptKey?: string
   onInitialPromptConsumed?: () => void
+  editMode?: boolean
 }
 
 export default function DesignerPromptBar({
@@ -18,6 +19,7 @@ export default function DesignerPromptBar({
   initialPrompt,
   initialPromptKey,
   onInitialPromptConsumed,
+  editMode,
 }: DesignerPromptBarProps) {
   const [prompt, setPrompt] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -62,7 +64,7 @@ export default function DesignerPromptBar({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="描述你想要生成的图片..."
+            placeholder={editMode ? '描述你想修改的区域...' : '描述你想要生成的图片...'}
             rows={1}
             className="min-h-[36px] flex-1 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/50"
           />
@@ -84,8 +86,8 @@ export default function DesignerPromptBar({
               disabled={!prompt.trim() || isGenerating}
               className="rounded-xl bg-primary px-4 font-medium shadow-md shadow-primary/20 transition-all hover:shadow-lg hover:shadow-primary/30 disabled:opacity-40"
             >
-              <Send className="h-3.5 w-3.5" />
-              生成
+              {editMode ? <Paintbrush className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+              {editMode ? '编辑' : '生成'}
             </Button>
           )}
         </div>

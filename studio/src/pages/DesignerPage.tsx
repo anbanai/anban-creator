@@ -4,10 +4,11 @@ import { toast } from 'sonner'
 import DesignerToolbar from '@/components/designer/DesignerToolbar'
 import DesignerCanvas from '@/components/designer/DesignerCanvas'
 import DesignerPromptBar from '@/components/designer/DesignerPromptBar'
+import InlineMaskEditor from '@/components/designer/InlineMaskEditor'
 import HistoryDrawer from '@/components/designer/HistoryDrawer'
 import ImagePreview from '@/components/designer/ImagePreview'
-import ImageEditor from '@/components/designer/ImageEditor'
 import type { DesignerSettings, DesignerProvider } from '@/types/designer'
+import type { InlineMaskEditorHandle } from '@/components/designer/InlineMaskEditor'
 import { designerApi } from '@/lib/api/designer'
 import { getApiErrorMessage } from '@/lib/http-client'
 import type { GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types/designer'
@@ -55,6 +56,7 @@ export default function DesignerPage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [editingImage, setEditingImage] = useState<GenerateImage | null>(null)
+  const maskEditorRef = useRef<InlineMaskEditorHandle>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortedRef = useRef(false)
 
@@ -239,11 +241,56 @@ export default function DesignerPage() {
   }
 
   function handleCancel() {
+    if (editingImage) {
+      setEditingImage(null)
+      return
+    }
     abortedRef.current = true
     stopPolling()
     setIsGenerating(false)
     clearActiveGeneration()
   }
+
+  const handleEditSubmit = useCallback(async (prompt: string) => {
+    if (!effectiveProvider || !editingImage) return
+
+    const maskFile = await maskEditorRef.current?.exportMask()
+    if (!maskFile) {
+      toast.error('请先涂抹需要编辑的区域')
+      return
+    }
+
+    stopPolling()
+    abortedRef.current = false
+    setIsGenerating(true)
+    setEditingImage(null)
+
+    try {
+      const [sourceRes, maskRes] = await Promise.all([
+        fetch(editingImage.url).then((r) => r.blob()).then((blob) => {
+          const file = new File([blob], 'source.png', { type: 'image/png' })
+          return designerApi.uploadReference(file)
+        }),
+        designerApi.uploadReference(maskFile),
+      ])
+
+      const { generation_id } = await designerApi.generate({
+        channel_id: '',
+        prompt: prompt.trim(),
+        provider: effectiveProvider.provider,
+        reference_file_ids: [sourceRes.file_id],
+        mask_file_id: maskRes.file_id,
+      })
+
+      setSelectedGenerationId(generation_id)
+      saveActiveGeneration(generation_id)
+      startPolling(generation_id)
+    } catch (err) {
+      setIsGenerating(false)
+      toast.error(getApiErrorMessage(err, '编辑图片失败，请重试'))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveProvider, editingImage])
 
   return (
     // Full-bleed: negate AppLayout padding
@@ -271,23 +318,38 @@ export default function DesignerPage() {
         </div>
         <div
           className="relative flex-1 overflow-y-auto rounded-2xl border border-border/30 bg-background/40 p-4 backdrop-blur-sm md:p-6"
-          style={{ backgroundImage: 'radial-gradient(circle, var(--color-border) 0.4px, transparent 0.4px)', backgroundSize: '20px 20px' }}
+          style={editingImage ? undefined : { backgroundImage: 'radial-gradient(circle, var(--color-border) 0.4px, transparent 0.4px)', backgroundSize: '20px 20px' }}
         >
-          <DesignerCanvas
-            images={currentImages}
-            isGenerating={isGenerating}
-            canInpaint={canInpaint}
-            onImageClick={(img) => setPreviewImage(img.url)}
-            onEdit={(img) => setEditingImage(img)}
-          />
+          {editingImage ? (
+            <InlineMaskEditor
+              ref={maskEditorRef}
+              imageUrl={editingImage.url}
+              onClose={() => setEditingImage(null)}
+            />
+          ) : (
+            <DesignerCanvas
+              images={currentImages}
+              isGenerating={isGenerating}
+              canInpaint={canInpaint}
+              onImageClick={(img) => {
+                if (canInpaint) {
+                  setEditingImage(img)
+                } else {
+                  setPreviewImage(img.url)
+                }
+              }}
+              onEdit={(img) => setEditingImage(img)}
+            />
+          )}
         </div>
         <DesignerPromptBar
-          onSubmit={handleGenerate}
+          onSubmit={editingImage ? handleEditSubmit : handleGenerate}
           isGenerating={isGenerating}
           onCancel={handleCancel}
           initialPrompt={prefillPrompt}
           initialPromptKey={prefillKey}
           onInitialPromptConsumed={() => { setPrefillPrompt(''); setPrefillKey('') }}
+          editMode={!!editingImage}
         />
       </div>
 
@@ -313,21 +375,6 @@ export default function DesignerPage() {
             }
           }}
           onClose={() => setPreviewImage(null)}
-        />
-      )}
-
-      {/* Image editor modal */}
-      {editingImage && effectiveProvider && (
-        <ImageEditor
-          imageUrl={editingImage.url}
-          provider={effectiveProvider.provider}
-          onClose={() => setEditingImage(null)}
-          onGenerating={(generationId) => {
-            setSelectedGenerationId(generationId)
-            setIsGenerating(true)
-            setEditingImage(null)
-            startPolling(generationId)
-          }}
         />
       )}
     </div>
