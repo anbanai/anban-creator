@@ -8,6 +8,9 @@ export interface ModelCapabilities {
   outputFormats: string[]
   flexibleSize: boolean
   watermark: boolean
+  sizePresets: string[]
+  hasCompression: boolean
+  hasBackground: boolean
 }
 
 // Capabilities keyed by provider name (matches config designer.*.provider)
@@ -22,6 +25,9 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
     outputFormats: ['png', 'jpeg', 'webp'],
     flexibleSize: false,
     watermark: false,
+    sizePresets: ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x1152', '2048x2048', '3840x2160', '2160x3840'],
+    hasCompression: true,
+    hasBackground: true,
   },
   gemini: {
     maxRefImages: 10,
@@ -33,6 +39,9 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
     outputFormats: ['png'],
     flexibleSize: false,
     watermark: false,
+    sizePresets: [],
+    hasCompression: false,
+    hasBackground: false,
   },
   volcengine: {
     maxRefImages: 1,
@@ -44,6 +53,9 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
     outputFormats: ['png', 'jpeg'],
     flexibleSize: true,
     watermark: true,
+    sizePresets: [],
+    hasCompression: false,
+    hasBackground: false,
   },
 }
 
@@ -66,6 +78,9 @@ export function getModelCapabilities(provider: string, model?: string): ModelCap
         maxRefImages: 1,
         qualityLevels: ['standard', 'hd'],
         outputFormats: ['png'],
+        sizePresets: [],
+        hasCompression: false,
+        hasBackground: false,
       }
     }
   }
@@ -90,6 +105,8 @@ export interface DesignerSettings {
   resolution: string
   n: number
   outputFormat: string
+  compression: number
+  background: string
   referenceFiles: File[]
   maskFile: File | null
   watermark: boolean
@@ -104,6 +121,8 @@ export interface GenerateRequest {
   size?: string
   n?: number
   output_format?: string
+  output_compression?: number
+  background?: string
   reference_file_ids?: string[]
   mask_file_id?: string
   watermark?: boolean

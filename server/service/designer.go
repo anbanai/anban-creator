@@ -51,18 +51,20 @@ func NewDesignerService(
 }
 
 type DesignerGenerateRequest struct {
-	ChannelID        string   `json:"channel_id"`
-	Prompt           string   `json:"prompt"`
-	Provider         string   `json:"provider"`
-	ProviderID       string   `json:"provider_id,omitempty"`
-	Model            string   `json:"model"`
-	Quality          string   `json:"quality,omitempty"`
-	Size             string   `json:"size,omitempty"`
-	N                int      `json:"n,omitempty"`
-	OutputFormat     string   `json:"output_format,omitempty"`
-	ReferenceFileIDs []string `json:"reference_file_ids,omitempty"`
-	MaskFileID       string   `json:"mask_file_id,omitempty"`
-	Watermark        *bool    `json:"watermark,omitempty"`
+	ChannelID         string   `json:"channel_id"`
+	Prompt            string   `json:"prompt"`
+	Provider          string   `json:"provider"`
+	ProviderID        string   `json:"provider_id,omitempty"`
+	Model             string   `json:"model"`
+	Quality           string   `json:"quality,omitempty"`
+	Size              string   `json:"size,omitempty"`
+	N                 int      `json:"n,omitempty"`
+	OutputFormat      string   `json:"output_format,omitempty"`
+	OutputCompression int      `json:"output_compression,omitempty"`
+	Background        string   `json:"background,omitempty"`
+	ReferenceFileIDs  []string `json:"reference_file_ids,omitempty"`
+	MaskFileID        string   `json:"mask_file_id,omitempty"`
+	Watermark         *bool    `json:"watermark,omitempty"`
 }
 
 // CreateGenerationRecord validates the request, resolves config, and creates
@@ -136,22 +138,24 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		watermark = *req.Watermark
 	}
 	gen := &model.ImageGeneration{
-		ID:             genID,
-		UserID:         userID,
-		ChannelID:      req.ChannelID,
-		Prompt:         req.Prompt,
-		Provider:       provider,
-		ProviderID:     req.ProviderID,
-		Model:          modelName,
-		Quality:        req.Quality,
-		Size:           req.Size,
-		N:              req.N,
-		OutputFormat:   req.OutputFormat,
-		Watermark:      watermark,
-		Status:         model.ImageGenerationStatusGenerating,
-		ReferenceFiles: string(refFilesJSON),
-		MaskFileID:     req.MaskFileID,
-		Cost:           totalCost,
+		ID:                genID,
+		UserID:            userID,
+		ChannelID:         req.ChannelID,
+		Prompt:            req.Prompt,
+		Provider:          provider,
+		ProviderID:        req.ProviderID,
+		Model:             modelName,
+		Quality:           req.Quality,
+		Size:              req.Size,
+		N:                 req.N,
+		OutputFormat:      req.OutputFormat,
+		OutputCompression: req.OutputCompression,
+		Background:        req.Background,
+		Watermark:         watermark,
+		Status:            model.ImageGenerationStatusGenerating,
+		ReferenceFiles:    string(refFilesJSON),
+		MaskFileID:        req.MaskFileID,
+		Cost:              totalCost,
 	}
 
 	if err := s.db.Create(gen).Error; err != nil {
@@ -310,13 +314,15 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	}
 
 	genOpts := &image.GenerateOptions{
-		Quality:       gen.Quality,
-		OutputFormat:  gen.OutputFormat,
-		N:             gen.N,
-		Size:          gen.Size,
-		RefImagePaths: refPaths,
-		MaskPath:      maskPath,
-		Watermark:     &gen.Watermark,
+		Quality:           gen.Quality,
+		OutputFormat:      gen.OutputFormat,
+		OutputCompression: gen.OutputCompression,
+		Background:        gen.Background,
+		N:                 gen.N,
+		Size:              gen.Size,
+		RefImagePaths:     refPaths,
+		MaskPath:          maskPath,
+		Watermark:         &gen.Watermark,
 	}
 
 	result, err := providerInst.Generate(ctx, gen.Prompt, genOpts)

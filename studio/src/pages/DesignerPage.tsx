@@ -16,10 +16,12 @@ import { saveActiveGeneration, loadActiveGeneration, clearActiveGeneration } fro
 
 const DEFAULT_SETTINGS: DesignerSettings = {
   quality: 'auto',
-  size: '1:1',
+  size: 'auto',
   resolution: '2K',
   n: 1,
   outputFormat: 'png',
+  compression: 100,
+  background: 'auto',
   referenceFiles: [],
   maskFile: null,
   watermark: false,
@@ -198,6 +200,8 @@ export default function DesignerPage() {
         size: sizeWithTier,
         n: settings.n > 1 ? settings.n : undefined,
         output_format: settings.outputFormat !== 'png' ? settings.outputFormat : undefined,
+        output_compression: effectiveCaps?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
+        background: effectiveCaps?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
         reference_file_ids: refFileIds.length > 0 ? refFileIds : undefined,
         mask_file_id: maskFileId,
         watermark: settings.watermark || undefined,
@@ -230,6 +234,7 @@ export default function DesignerPage() {
     setSettings({
       ...DEFAULT_SETTINGS,
       ...(caps?.batch ? {} : { n: 1 }),
+      ...(caps?.sizePresets?.length ? {} : { size: '1:1' }),
     })
   }
 

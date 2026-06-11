@@ -21,8 +21,10 @@ type ImageGeneration struct {
 	Quality        string    `gorm:"type:varchar(16)" json:"quality,omitempty"`
 	Size           string    `gorm:"type:varchar(32)" json:"size,omitempty"`
 	N              int       `gorm:"default:1" json:"n"`
-	OutputFormat   string    `gorm:"type:varchar(16)" json:"output_format,omitempty"`
-	Watermark      bool      `gorm:"default:false" json:"watermark,omitempty"`
+	OutputFormat       string    `gorm:"type:varchar(16)" json:"output_format,omitempty"`
+	OutputCompression  int       `gorm:"default:0" json:"output_compression,omitempty"`
+	Background         string    `gorm:"type:varchar(16);default:''" json:"background,omitempty"`
+	Watermark          bool      `gorm:"default:false" json:"watermark,omitempty"`
 	Status         string    `gorm:"type:varchar(16);index;not null;default:'generating'" json:"status"`
 	Error          string    `gorm:"type:text" json:"error,omitempty"`
 	InputTokens    int       `json:"input_tokens,omitempty"`

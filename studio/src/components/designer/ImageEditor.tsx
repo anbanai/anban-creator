@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
-import { X, Eraser, Paintbrush, RotateCcw, Send } from 'lucide-react'
+import { X, Eraser, Paintbrush, RotateCcw, Send, Square, Circle, ZoomIn, ZoomOut, Maximize } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Textarea } from '@/components/ui/textarea'
@@ -8,6 +8,37 @@ import { designerApi } from '@/lib/api/designer'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { saveActiveGeneration } from '@/lib/designer-session'
 
+type ToolType = 'brush' | 'rect' | 'circle' | 'eraser'
+
+interface BrushPoint {
+  x: number
+  y: number
+  size: number
+}
+
+interface ShapeBounds {
+  startX: number
+  startY: number
+  endX: number
+  endY: number
+}
+
+interface BrushStroke {
+  type: 'brush' | 'eraser'
+  points: BrushPoint[]
+}
+
+interface ShapeStroke {
+  type: 'rect' | 'circle'
+  bounds: ShapeBounds
+}
+
+type AnyStroke = BrushStroke | ShapeStroke
+
+function isShapeStroke(s: AnyStroke): s is ShapeStroke {
+  return s.type === 'rect' || s.type === 'circle'
+}
+
 interface ImageEditorProps {
   imageUrl: string
   provider: string
@@ -15,19 +46,30 @@ interface ImageEditorProps {
   onGenerating: (generationId: string) => void
 }
 
+const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4]
+
 export default function ImageEditor({ imageUrl, provider, onClose, onGenerating }: ImageEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
+  const [tool, setTool] = useState<ToolType>('brush')
   const [brushSize, setBrushSize] = useState(30)
-  const [isEraser, setIsEraser] = useState(false)
+  const [feather, setFeather] = useState(0)
   const [prompt, setPrompt] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [imageLoaded, setImageLoaded] = useState(false)
   const [hasStrokes, setHasStrokes] = useState(false)
+  const [zoom, setZoom] = useState(1)
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const [spaceHeld, setSpaceHeld] = useState(false)
+  const panStartRef = useRef({ x: 0, y: 0 })
+  const panOffsetStartRef = useRef({ x: 0, y: 0 })
+
   const paintingRef = useRef(false)
-  const strokesRef = useRef<{ x: number; y: number; size: number; eraser: boolean }[][]>([])
-  const currentStrokeRef = useRef<{ x: number; y: number; size: number; eraser: boolean }[]>([])
+  const strokesRef = useRef<AnyStroke[]>([])
+  const currentStrokeRef = useRef<BrushPoint[]>([])
+  const currentShapeRef = useRef<ShapeBounds | null>(null)
 
   // Draw mask strokes on the canvas
   const redrawCanvas = useCallback(() => {
@@ -42,33 +84,67 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
     canvas.height = img.naturalHeight
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Draw all strokes
-    const allStrokes = [...strokesRef.current]
+    const allStrokes: AnyStroke[] = [...strokesRef.current]
+    // Include current brush stroke
     if (currentStrokeRef.current.length > 0) {
-      allStrokes.push(currentStrokeRef.current)
+      allStrokes.push({ type: 'brush', points: currentStrokeRef.current })
+    }
+    // Include current shape
+    if (currentShapeRef.current && (tool === 'rect' || tool === 'circle')) {
+      allStrokes.push({ type: tool, bounds: currentShapeRef.current })
     }
 
     for (const stroke of allStrokes) {
-      if (stroke.length === 0) continue
-      const first = stroke[0]
-
-      if (first.eraser) {
+      if (stroke.type === 'eraser') {
         ctx.globalCompositeOperation = 'destination-out'
       } else {
         ctx.globalCompositeOperation = 'source-over'
         ctx.fillStyle = 'rgba(255, 100, 50, 0.45)'
       }
 
-      ctx.beginPath()
-      for (const point of stroke) {
-        ctx.moveTo(point.x + point.size / 2, point.y)
-        ctx.arc(point.x, point.y, point.size / 2, 0, Math.PI * 2)
+      if (!isShapeStroke(stroke)) {
+        // Brush/eraser points
+        const points = stroke.points
+        if (points.length === 0) continue
+
+        if (feather > 0 && stroke.type === 'brush') {
+          ctx.shadowBlur = feather
+          ctx.shadowColor = 'rgba(255, 100, 50, 0.3)'
+        } else {
+          ctx.shadowBlur = 0
+        }
+
+        ctx.beginPath()
+        for (const point of points) {
+          ctx.moveTo(point.x + point.size / 2, point.y)
+          ctx.arc(point.x, point.y, point.size / 2, 0, Math.PI * 2)
+        }
+        ctx.fill()
+        ctx.shadowBlur = 0
+      } else {
+        // Shape (rect or circle)
+        const { startX, startY, endX, endY } = stroke.bounds
+        if (stroke.type === 'rect') {
+          ctx.fillRect(
+            Math.min(startX, endX),
+            Math.min(startY, endY),
+            Math.abs(endX - startX),
+            Math.abs(endY - startY),
+          )
+        } else {
+          const cx = (startX + endX) / 2
+          const cy = (startY + endY) / 2
+          const rx = Math.abs(endX - startX) / 2
+          const ry = Math.abs(endY - startY) / 2
+          ctx.beginPath()
+          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+          ctx.fill()
+        }
       }
-      ctx.fill()
     }
 
     ctx.globalCompositeOperation = 'source-over'
-  }, [imageLoaded])
+  }, [imageLoaded, tool, feather])
 
   // Get canvas coordinates from mouse/touch event
   function getCanvasPoint(e: React.MouseEvent | React.TouchEvent) {
@@ -87,45 +163,91 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
       clientY = e.clientY
     }
 
-    // Scale from display size to actual canvas size
     const scaleX = canvas.width / rect.width
     const scaleY = canvas.height / rect.height
-    const brushScale = scaleX // scale brush size proportionally
 
     return {
       x: (clientX - rect.left) * scaleX,
       y: (clientY - rect.top) * scaleY,
-      size: brushSize * brushScale,
-      eraser: isEraser,
+      size: (brushSize / zoom) * scaleX,
     }
   }
 
   function handlePointerDown(e: React.MouseEvent | React.TouchEvent) {
+    // Panning with space held
+    if (spaceHeld) {
+      e.preventDefault()
+      setIsPanning(true)
+      const clientX = 'touches' in e ? (e.touches[0]?.clientX ?? 0) : e.clientX
+      const clientY = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY
+      panStartRef.current = { x: clientX, y: clientY }
+      panOffsetStartRef.current = { ...panOffset }
+      return
+    }
+
     e.preventDefault()
     const point = getCanvasPoint(e)
     if (!point) return
+
     paintingRef.current = true
-    currentStrokeRef.current = [point]
+
+    if (tool === 'brush' || tool === 'eraser') {
+      currentStrokeRef.current = [point]
+    } else {
+      currentShapeRef.current = { startX: point.x, startY: point.y, endX: point.x, endY: point.y }
+    }
     redrawCanvas()
   }
 
   function handlePointerMove(e: React.MouseEvent | React.TouchEvent) {
+    if (isPanning) {
+      const clientX = 'touches' in e ? (e.touches[0]?.clientX ?? 0) : e.clientX
+      const clientY = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY
+      setPanOffset({
+        x: panOffsetStartRef.current.x + (clientX - panStartRef.current.x),
+        y: panOffsetStartRef.current.y + (clientY - panStartRef.current.y),
+      })
+      return
+    }
+
     if (!paintingRef.current) return
     e.preventDefault()
     const point = getCanvasPoint(e)
     if (!point) return
-    currentStrokeRef.current.push(point)
+
+    if (tool === 'brush' || tool === 'eraser') {
+      currentStrokeRef.current.push(point)
+    } else if (currentShapeRef.current) {
+      currentShapeRef.current = { ...currentShapeRef.current, endX: point.x, endY: point.y }
+    }
     redrawCanvas()
   }
 
   function handlePointerUp() {
+    if (isPanning) {
+      setIsPanning(false)
+      return
+    }
+
     if (!paintingRef.current) return
     paintingRef.current = false
-    if (currentStrokeRef.current.length > 0) {
-      strokesRef.current.push(currentStrokeRef.current)
-      currentStrokeRef.current = []
-      setHasStrokes(true)
+
+    if (tool === 'brush' || tool === 'eraser') {
+      if (currentStrokeRef.current.length > 0) {
+        strokesRef.current.push({
+          type: tool === 'eraser' ? 'eraser' : 'brush',
+          points: [...currentStrokeRef.current],
+        })
+        currentStrokeRef.current = []
+      }
+    } else if (currentShapeRef.current) {
+      strokesRef.current.push({
+        type: tool as 'rect' | 'circle',
+        bounds: currentShapeRef.current,
+      })
+      currentShapeRef.current = null
     }
+    setHasStrokes(strokesRef.current.length > 0)
   }
 
   function handleUndo() {
@@ -137,8 +259,31 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
   function handleClear() {
     strokesRef.current = []
     currentStrokeRef.current = []
+    currentShapeRef.current = null
     setHasStrokes(false)
     redrawCanvas()
+  }
+
+  function handleZoomIn() {
+    const idx = ZOOM_LEVELS.findIndex((z: number) => z > zoom)
+    if (idx >= 0) setZoom(ZOOM_LEVELS[idx])
+  }
+
+  function handleZoomOut() {
+    // ES2020-compatible reverse find
+    let idx = -1
+    for (let i = ZOOM_LEVELS.length - 1; i >= 0; i--) {
+      if (ZOOM_LEVELS[i] < zoom) {
+        idx = i
+        break
+      }
+    }
+    if (idx >= 0) setZoom(ZOOM_LEVELS[idx])
+  }
+
+  function handleZoomFit() {
+    setZoom(1)
+    setPanOffset({ x: 0, y: 0 })
   }
 
   // Export the mask as a PNG File (alpha channel: painted = transparent, unpainted = opaque)
@@ -155,21 +300,46 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
     maskCanvas.height = h
     const ctx = maskCanvas.getContext('2d')!
 
-    // Fill with opaque white (alpha = 255)
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, w, h)
-
-    // Cut out painted areas (make transparent)
     ctx.globalCompositeOperation = 'destination-out'
 
     for (const stroke of strokesRef.current) {
-      if (stroke.length === 0) continue
-      ctx.beginPath()
-      for (const point of stroke) {
-        ctx.moveTo(point.x + point.size / 2, point.y)
-        ctx.arc(point.x, point.y, point.size / 2, 0, Math.PI * 2)
+      if (!isShapeStroke(stroke)) {
+        const points = stroke.points
+        if (points.length === 0) continue
+
+        if (feather > 0 && stroke.type === 'brush') {
+          ctx.shadowBlur = feather
+          ctx.shadowColor = 'rgba(0, 0, 0, 1)'
+        }
+
+        ctx.beginPath()
+        for (const point of points) {
+          ctx.moveTo(point.x + point.size / 2, point.y)
+          ctx.arc(point.x, point.y, point.size / 2, 0, Math.PI * 2)
+        }
+        ctx.fill()
+        ctx.shadowBlur = 0
+      } else {
+        const { startX, startY, endX, endY } = stroke.bounds
+        if (stroke.type === 'rect') {
+          ctx.fillRect(
+            Math.min(startX, endX),
+            Math.min(startY, endY),
+            Math.abs(endX - startX),
+            Math.abs(endY - startY),
+          )
+        } else {
+          const cx = (startX + endX) / 2
+          const cy = (startY + endY) / 2
+          const rx = Math.abs(endX - startX) / 2
+          const ry = Math.abs(endY - startY) / 2
+          ctx.beginPath()
+          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+          ctx.fill()
+        }
       }
-      ctx.fill()
     }
 
     ctx.globalCompositeOperation = 'source-over'
@@ -195,7 +365,6 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
     setIsSubmitting(true)
 
     try {
-      // Export mask
       const maskFile = await exportMask()
       if (!maskFile) {
         toast.error('导出蒙版失败')
@@ -203,7 +372,6 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
         return
       }
 
-      // Download source image and upload both files in parallel
       const [sourceRes, maskRes] = await Promise.all([
         fetch(imageUrl).then((r) => r.blob()).then((blob) => {
           const file = new File([blob], 'source.png', { type: 'image/png' })
@@ -212,7 +380,6 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
         designerApi.uploadReference(maskFile),
       ])
 
-      // Start inpainting generation
       const { generation_id } = await designerApi.generate({
         channel_id: '',
         prompt: prompt.trim(),
@@ -231,14 +398,27 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
     }
   }
 
-  // ESC to close
+  // Keyboard shortcuts
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
+      if (e.key === ' ') {
+        e.preventDefault()
+        setSpaceHeld(true)
+      }
+    }
+    function handleKeyUp(e: KeyboardEvent) {
+      if (e.key === ' ') setSpaceHeld(false)
     }
     document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
+    document.addEventListener('keyup', handleKeyUp)
+    return () => {
+      document.removeEventListener('keydown', handleKey)
+      document.removeEventListener('keyup', handleKeyUp)
+    }
   }, [onClose])
+
+  const cursorStyle = spaceHeld ? 'cursor-grab' : isPanning ? 'cursor-grabbing' : 'cursor-crosshair'
 
   return (
     <div
@@ -266,41 +446,88 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
           </Button>
         </div>
 
-        {/* Canvas area */}
-        <div className="relative overflow-hidden rounded-xl ring-1 ring-white/10">
-          <img
-            ref={imgRef}
-            src={imageUrl}
-            alt="编辑图片"
-            className="block max-h-[60vh] max-w-[80vw] object-contain"
-            crossOrigin="anonymous"
-            onLoad={() => setImageLoaded(true)}
-          />
-          {imageLoaded && (
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 h-full w-full cursor-crosshair touch-none"
-              style={{ mixBlendMode: 'multiply' }}
-              onMouseDown={handlePointerDown}
-              onMouseMove={handlePointerMove}
-              onMouseUp={handlePointerUp}
-              onMouseLeave={handlePointerUp}
-              onTouchStart={handlePointerDown}
-              onTouchMove={handlePointerMove}
-              onTouchEnd={handlePointerUp}
+        {/* Canvas area with zoom/pan */}
+        <div className="relative overflow-hidden rounded-xl ring-1 ring-white/10" style={{ maxHeight: '60vh' }}>
+          <div
+            style={{
+              transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+              transformOrigin: 'center center',
+              transition: isPanning ? 'none' : 'transform 0.15s ease-out',
+            }}
+          >
+            <img
+              ref={imgRef}
+              src={imageUrl}
+              alt="编辑图片"
+              className="block max-h-[60vh] max-w-[80vw] object-contain"
+              crossOrigin="anonymous"
+              onLoad={() => setImageLoaded(true)}
+              draggable={false}
             />
-          )}
+            {imageLoaded && (
+              <canvas
+                ref={canvasRef}
+                className={`absolute inset-0 h-full w-full touch-none ${cursorStyle}`}
+                style={{ mixBlendMode: 'multiply' }}
+                onMouseDown={handlePointerDown}
+                onMouseMove={handlePointerMove}
+                onMouseUp={handlePointerUp}
+                onMouseLeave={handlePointerUp}
+                onTouchStart={handlePointerDown}
+                onTouchMove={handlePointerMove}
+                onTouchEnd={handlePointerUp}
+              />
+            )}
+          </div>
+
+          {/* Zoom controls overlay */}
+          <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg bg-black/50 px-2 py-1 backdrop-blur-sm">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={handleZoomOut}
+              className="h-6 w-6 text-white/60 hover:text-white"
+            >
+              <ZoomOut className="h-3 w-3" />
+            </Button>
+            <button
+              type="button"
+              onClick={handleZoomFit}
+              className="px-1.5 text-[10px] tabular-nums text-white/70 hover:text-white"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={handleZoomIn}
+              className="h-6 w-6 text-white/60 hover:text-white"
+            >
+              <ZoomIn className="h-3 w-3" />
+            </Button>
+            <div className="mx-0.5 h-4 w-px bg-white/10" />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={handleZoomFit}
+              className="h-6 w-6 text-white/60 hover:text-white"
+              title="适应窗口"
+            >
+              <Maximize className="h-3 w-3" />
+            </Button>
+          </div>
         </div>
 
         {/* Toolbar + prompt */}
         <div className="flex items-end gap-3">
-          {/* Brush tools */}
+          {/* Drawing tools */}
           <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 backdrop-blur-sm">
+            {/* Tool selector */}
             <Button
               variant="ghost"
               size="icon-sm"
-              onClick={() => setIsEraser(false)}
-              className={`rounded-lg ${!isEraser ? 'bg-primary/20 text-primary' : 'text-white/50 hover:text-white/80'}`}
+              onClick={() => setTool('brush')}
+              className={`rounded-lg ${tool === 'brush' ? 'bg-primary/20 text-primary' : 'text-white/50 hover:text-white/80'}`}
               title="画笔"
             >
               <Paintbrush className="h-3.5 w-3.5" />
@@ -308,22 +535,65 @@ export default function ImageEditor({ imageUrl, provider, onClose, onGenerating 
             <Button
               variant="ghost"
               size="icon-sm"
-              onClick={() => setIsEraser(true)}
-              className={`rounded-lg ${isEraser ? 'bg-primary/20 text-primary' : 'text-white/50 hover:text-white/80'}`}
+              onClick={() => setTool('rect')}
+              className={`rounded-lg ${tool === 'rect' ? 'bg-primary/20 text-primary' : 'text-white/50 hover:text-white/80'}`}
+              title="矩形"
+            >
+              <Square className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setTool('circle')}
+              className={`rounded-lg ${tool === 'circle' ? 'bg-primary/20 text-primary' : 'text-white/50 hover:text-white/80'}`}
+              title="圆形"
+            >
+              <Circle className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setTool('eraser')}
+              className={`rounded-lg ${tool === 'eraser' ? 'bg-primary/20 text-primary' : 'text-white/50 hover:text-white/80'}`}
               title="橡皮擦"
             >
               <Eraser className="h-3.5 w-3.5" />
             </Button>
+
             <div className="mx-1 h-5 w-px bg-white/10" />
-            <Slider
-              value={[brushSize]}
-              onValueChange={(v) => setBrushSize(Array.isArray(v) ? v[0] : v)}
-              min={5}
-              max={100}
-              step={1}
-              className="w-20"
-            />
-            <span className="w-6 text-center text-[11px] tabular-nums text-white/50">{brushSize}</span>
+
+            {/* Brush size */}
+            {(tool === 'brush' || tool === 'eraser') && (
+              <>
+                <Slider
+                  value={[brushSize]}
+                  onValueChange={(v) => setBrushSize(Array.isArray(v) ? v[0] : v)}
+                  min={5}
+                  max={100}
+                  step={1}
+                  className="w-16"
+                />
+                <span className="w-5 text-center text-[10px] tabular-nums text-white/50">{brushSize}</span>
+              </>
+            )}
+
+            {/* Feather (soft edge) — only for brush */}
+            {tool === 'brush' && (
+              <>
+                <div className="mx-0.5 h-5 w-px bg-white/10" />
+                <Slider
+                  value={[feather]}
+                  onValueChange={(v) => setFeather(Array.isArray(v) ? v[0] : v)}
+                  min={0}
+                  max={50}
+                  step={1}
+                  className="w-12"
+                  title="羽化"
+                />
+                <span className="w-4 text-center text-[10px] tabular-nums text-white/50" title="羽化">{feather}</span>
+              </>
+            )}
+
             <div className="mx-1 h-5 w-px bg-white/10" />
             <Button
               variant="ghost"

@@ -12,6 +12,7 @@ import {
   Maximize,
   Coins,
   Stamp,
+  SlidersHorizontal,
 } from 'lucide-react'
 import ModelSelector from '@/components/designer/ModelSelector'
 import { Slider } from '@/components/ui/slider'
@@ -37,6 +38,139 @@ const RESOLUTION_OPTIONS = [
   { value: '2K', label: '2K', desc: '高清' },
   { value: '4K', label: '4K', desc: '超清' },
 ]
+
+// Size preset labels for GPT-Image pixel sizes
+const SIZE_PRESET_LABELS: Record<string, { label: string; desc: string }> = {
+  'auto': { label: '自动', desc: '智能选择' },
+  '1024x1024': { label: '1K', desc: '方形' },
+  '1536x1024': { label: '1.5K', desc: '横屏' },
+  '1024x1536': { label: '1.5K', desc: '竖屏' },
+  '2048x1152': { label: '2K', desc: '横屏' },
+  '2048x2048': { label: '2K', desc: '方形' },
+  '3840x2160': { label: '4K', desc: '横屏' },
+  '2160x3840': { label: '4K', desc: '竖屏' },
+}
+
+function validateCustomSize(w: number, h: number): string | null {
+  if (w < 256 || h < 256) return '最小边长 256px'
+  if (w > 3840 || h > 3840) return '最大边长 3840px'
+  if (w % 16 !== 0 || h % 16 !== 0) return '必须是 16 的倍数'
+  if (Math.max(w, h) / Math.min(w, h) > 3) return '长宽比不能超过 3:1'
+  if (w * h < 655360) return '总像素数不能少于 655,360'
+  if (w * h > 8294400) return '总像素数不能超过 8,294,400'
+  return null
+}
+
+// Size preset section for GPT-Image models with pixel-size presets and custom input
+function SizePresetSection({ presets, value, onChange }: {
+  presets: string[]
+  value: string
+  onChange: (size: string) => void
+}) {
+  const [customW, setCustomW] = useState(1024)
+  const [customH, setCustomH] = useState(1024)
+  const isCustom = value === 'custom' || (value !== 'auto' && !presets.includes(value))
+
+  const customError = isCustom ? validateCustomSize(customW, customH) : null
+
+  function handleCustomApply() {
+    if (!customError) {
+      onChange(`${customW}x${customH}`)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+        <Proportions className="h-3 w-3" />
+        尺寸
+      </h4>
+      <div className="grid grid-cols-3 gap-1">
+        {presets.map((preset) => {
+          const info = SIZE_PRESET_LABELS[preset]
+          return (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => onChange(preset)}
+              className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+                value === preset
+                  ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                  : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+              }`}
+            >
+              <span className="font-medium">{info?.label ?? preset}</span>
+              <span className="text-[10px] opacity-60">{info?.desc ?? ''}</span>
+            </button>
+          )
+        })}
+        {/* Custom size button */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!isCustom) onChange(`${customW}x${customH}`)
+          }}
+          className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+            isCustom
+              ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+              : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+          }`}
+        >
+          <span className="font-medium">自定义</span>
+          <span className="text-[10px] opacity-60">W×H</span>
+        </button>
+      </div>
+
+      {/* Custom size inputs */}
+      {isCustom && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              value={customW}
+              onChange={(e) => {
+                const v = parseInt(e.target.value) || 256
+                setCustomW(Math.round(v / 16) * 16)
+              }}
+              min={256}
+              max={3840}
+              step={16}
+              className="w-full rounded-md border border-border/50 bg-muted/20 px-2 py-1 text-center text-xs tabular-nums focus:border-primary/50 focus:outline-none"
+              placeholder="宽度"
+            />
+            <span className="text-[10px] text-muted-foreground">×</span>
+            <input
+              type="number"
+              value={customH}
+              onChange={(e) => {
+                const v = parseInt(e.target.value) || 256
+                setCustomH(Math.round(v / 16) * 16)
+              }}
+              min={256}
+              max={3840}
+              step={16}
+              className="w-full rounded-md border border-border/50 bg-muted/20 px-2 py-1 text-center text-xs tabular-nums focus:border-primary/50 focus:outline-none"
+              placeholder="高度"
+            />
+          </div>
+          {customError && (
+            <p className="text-[10px] text-destructive">{customError}</p>
+          )}
+          {!customError && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-[11px] text-primary"
+              onClick={handleCustomApply}
+            >
+              应用 {customW}×{customH}
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface DesignerToolbarProps {
   providers: DesignerProvider[]
@@ -148,55 +282,66 @@ export default function DesignerToolbar({
 
             <Separator />
 
-            {/* Size */}
-            <div className="space-y-2">
-              <h4 className={sectionHeader}>
-                <Proportions className="h-3 w-3" />
-                尺寸
-              </h4>
-              <div className="grid grid-cols-3 gap-1">
-                {SIZE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => update({ size: opt.value })}
-                    className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
-                      settings.size === opt.value
-                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                        : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-                    }`}
-                  >
-                    <span className="font-medium">{opt.label}</span>
-                    <span className="text-[10px] opacity-60">{opt.desc}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Size — pixel presets for GPT-Image, ratio grid for others */}
+            {caps && caps.sizePresets.length > 0 ? (
+              <SizePresetSection
+                presets={caps.sizePresets}
+                value={settings.size}
+                onChange={(size) => update({ size })}
+              />
+            ) : (
+              <>
+                {/* Ratio grid */}
+                <div className="space-y-2">
+                  <h4 className={sectionHeader}>
+                    <Proportions className="h-3 w-3" />
+                    尺寸
+                  </h4>
+                  <div className="grid grid-cols-3 gap-1">
+                    {SIZE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => update({ size: opt.value })}
+                        className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+                          settings.size === opt.value
+                            ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                            : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                        }`}
+                      >
+                        <span className="font-medium">{opt.label}</span>
+                        <span className="text-[10px] opacity-60">{opt.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            {/* Resolution */}
-            <div className="space-y-2">
-              <h4 className={sectionHeader}>
-                <Maximize className="h-3 w-3" />
-                分辨率
-              </h4>
-              <div className="grid grid-cols-3 gap-1">
-                {RESOLUTION_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => update({ resolution: opt.value })}
-                    className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
-                      settings.resolution === opt.value
-                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                        : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-                    }`}
-                  >
-                    <span className="font-medium">{opt.label}</span>
-                    <span className="text-[10px] opacity-60">{opt.desc}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+                {/* Resolution */}
+                <div className="space-y-2">
+                  <h4 className={sectionHeader}>
+                    <Maximize className="h-3 w-3" />
+                    分辨率
+                  </h4>
+                  <div className="grid grid-cols-3 gap-1">
+                    {RESOLUTION_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => update({ resolution: opt.value })}
+                        className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
+                          settings.resolution === opt.value
+                            ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                            : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                        }`}
+                      >
+                        <span className="font-medium">{opt.label}</span>
+                        <span className="text-[10px] opacity-60">{opt.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Watermark */}
             {caps?.watermark && <button
@@ -278,6 +423,50 @@ export default function DesignerToolbar({
                       }`}
                     >
                       {fmt.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Compression — only for JPEG/WebP */}
+            {caps?.hasCompression && (settings.outputFormat === 'jpeg' || settings.outputFormat === 'webp') && (
+              <div className="space-y-2">
+                <h4 className={sectionHeader}>
+                  <SlidersHorizontal className="h-3 w-3" />
+                  压缩率
+                </h4>
+                <div className="flex items-center gap-3">
+                  <Slider
+                    value={[settings.compression]}
+                    onValueChange={(val) => update({ compression: Array.isArray(val) ? val[0] : val })}
+                    min={0}
+                    max={100}
+                    step={1}
+                    className="flex-1"
+                  />
+                  <span className="w-8 text-center text-xs font-bold tabular-nums text-foreground">{settings.compression}%</span>
+                </div>
+              </div>
+            )}
+
+            {/* Background */}
+            {caps?.hasBackground && (
+              <div className="space-y-2">
+                <h4 className={sectionHeader}>背景</h4>
+                <div className="flex flex-wrap gap-1">
+                  {(['auto', 'opaque'] as const).map((bg) => (
+                    <button
+                      key={bg}
+                      type="button"
+                      onClick={() => update({ background: bg })}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
+                        settings.background === bg
+                          ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                          : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                      }`}
+                    >
+                      {bg === 'auto' ? '自动' : '不透明'}
                     </button>
                   ))}
                 </div>
@@ -400,20 +589,40 @@ export default function DesignerToolbar({
 
           {/* Mobile settings row */}
           <div className="flex gap-1 overflow-x-auto">
-            {SIZE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => update({ size: opt.value })}
-                className={`shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all ${
-                  settings.size === opt.value
-                    ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                    : 'bg-muted/30 text-muted-foreground'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+            {caps && caps.sizePresets.length > 0 ? (
+              caps.sizePresets.map((preset) => {
+                const info = SIZE_PRESET_LABELS[preset]
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => update({ size: preset })}
+                    className={`shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all ${
+                      settings.size === preset
+                        ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                        : 'bg-muted/30 text-muted-foreground'
+                    }`}
+                  >
+                    {info?.label ?? preset}
+                  </button>
+                )
+              })
+            ) : (
+              SIZE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => update({ size: opt.value })}
+                  className={`shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all ${
+                    settings.size === opt.value
+                      ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
+                      : 'bg-muted/30 text-muted-foreground'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))
+            )}
           </div>
 
           <button

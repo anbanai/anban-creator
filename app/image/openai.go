@@ -237,6 +237,8 @@ func (p *OpenAIProvider) Capabilities() *ProviderCapabilities {
 		caps.QualityLevels = []string{"auto", "low", "medium", "high"}
 		caps.OutputFormats = []string{"png", "jpeg", "webp"}
 		caps.FlexibleSize = true
+		caps.HasCompression = true
+		caps.HasBackground = true
 	}
 
 	return caps
@@ -268,6 +270,12 @@ func (p *OpenAIProvider) generateStandard(ctx context.Context, prompt string, op
 	}
 	if opts.OutputFormat != "" {
 		params.OutputFormat = openai.ImageGenerateParamsOutputFormat(opts.OutputFormat)
+	}
+	if opts.OutputCompression > 0 && opts.OutputCompression < 100 {
+		params.OutputCompression = param.NewOpt(int64(opts.OutputCompression))
+	}
+	if opts.Background != "" {
+		params.Background = openai.ImageGenerateParamsBackground(opts.Background)
 	}
 
 	resp, err := p.client.Images.Generate(ctx, params)
@@ -307,6 +315,12 @@ func (p *OpenAIProvider) generateStreaming(ctx context.Context, prompt string, o
 	}
 	if opts.OutputFormat != "" {
 		params.OutputFormat = openai.ImageGenerateParamsOutputFormat(opts.OutputFormat)
+	}
+	if opts.OutputCompression > 0 && opts.OutputCompression < 100 {
+		params.OutputCompression = param.NewOpt(int64(opts.OutputCompression))
+	}
+	if opts.Background != "" {
+		params.Background = openai.ImageGenerateParamsBackground(opts.Background)
 	}
 
 	stream := p.client.Images.GenerateStreaming(ctx, params)
@@ -499,6 +513,12 @@ func (p *OpenAIProvider) buildEditParams(prompt string, opts *GenerateOptions, s
 	}
 	if opts.OutputFormat != "" {
 		params.OutputFormat = openai.ImageEditParamsOutputFormat(opts.OutputFormat)
+	}
+	if opts.OutputCompression > 0 && opts.OutputCompression < 100 {
+		params.OutputCompression = param.NewOpt(int64(opts.OutputCompression))
+	}
+	if opts.Background != "" {
+		params.Background = openai.ImageEditParamsBackground(opts.Background)
 	}
 	switch p.responseFormat {
 	case "url":
