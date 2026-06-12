@@ -162,6 +162,50 @@ func TestLineArtColoringVerificationReferenceDocumentsBestEffortLimits(t *testin
 	}
 }
 
+func TestLineArtColoringDocsMatchAnalyzeImageSingleImageSemantics(t *testing.T) {
+	root := repoRoot(t)
+	paths := []string{
+		filepath.Join(root, "claudecode", "agents", "designer.md"),
+		filepath.Join(root, "claudecode", "skills", "line-art-coloring", "SKILL.md"),
+		filepath.Join(root, "claudecode", "skills", "line-art-coloring", "references", "verification.md"),
+	}
+
+	var body strings.Builder
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		body.Write(data)
+		body.WriteByte('\n')
+	}
+	all := body.String()
+
+	required := []string{
+		"analyze_image 一次只分析一张图片",
+		"先为原始线稿生成线稿指纹",
+		"将上色图审计结果与线稿指纹逐项比对",
+		"同时传 `file_path` 和 `image_url` 时服务端只会使用 `file_path`",
+		"不能把 `download_image` 当作写入 `$DIR/colored_NN.png` 的本地归档步骤",
+		"下载 `download_url` 到 `$DIR/colored_NN.png`",
+	}
+	for _, term := range required {
+		if !strings.Contains(all, term) {
+			t.Fatalf("line-art-coloring docs missing single-image analyze semantics term %q", term)
+		}
+	}
+
+	banned := []string{
+		"file_path=上色图服务器端路径, image_url=原始线稿CDN_URL",
+		"用 `download_image` 或返回的 `download_url` 下载到 `$DIR/colored_NN.png`",
+	}
+	for _, term := range banned {
+		if strings.Contains(all, term) {
+			t.Fatalf("line-art-coloring docs still contain non-executable term %q", term)
+		}
+	}
+}
+
 func TestDesignerMCPToolDescriptionsDocumentPathAndSizeSemantics(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
