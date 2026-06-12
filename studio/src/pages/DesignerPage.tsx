@@ -198,6 +198,7 @@ export default function DesignerPage() {
         channel_id: '',
         prompt,
         provider: effectiveProvider.provider,
+        provider_id: effectiveProvider.id,
         quality: settings.quality !== 'auto' ? settings.quality : undefined,
         size: sizeWithTier,
         n: settings.n > 1 ? settings.n : undefined,
@@ -278,6 +279,7 @@ export default function DesignerPage() {
         channel_id: '',
         prompt: prompt.trim(),
         provider: effectiveProvider.provider,
+        provider_id: effectiveProvider.id,
         reference_file_ids: [sourceRes.file_id],
         mask_file_id: maskRes.file_id,
       })

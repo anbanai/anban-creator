@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -18,6 +19,16 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
 )
+
+type noopTaskEnqueuer struct{}
+
+func (noopTaskEnqueuer) Enqueue(string, []byte) error {
+	return nil
+}
+
+func (noopTaskEnqueuer) EnqueueIn(string, []byte, time.Duration) error {
+	return nil
+}
 
 func setupTaskHandlerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -62,7 +73,7 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
-	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
 	handler := NewTaskHandler(taskSvc, &logger)
 
 	app := fiber.New()

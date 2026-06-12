@@ -90,6 +90,10 @@ assertContains('src/types/index.ts', [
   "from './designer'",
 ])
 
+assertContains('src/types/designer.ts', [
+  'provider_id?: string',
+])
+
 assertContains('src/pages/channels/detail.vue', [
   "resourcesApi.list('themes'",
   "resourcesApi.list('layouts'",
@@ -117,6 +121,7 @@ assertContains('src/pages/designer/index.vue', [
   'canInpaint',
   'startEdit',
   'mask_file_id',
+  'provider_id: selectedProvider.value.id',
   'chooseMask',
   'generateEdit',
 ])

@@ -99,6 +99,7 @@ export interface GenerateRequest {
   channel_id: string
   prompt: string
   provider: string
+  provider_id?: string
   model?: string
   quality?: string
   size?: string
