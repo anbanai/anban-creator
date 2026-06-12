@@ -11,7 +11,7 @@ import (
 func registerWorkspaceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_workspace",
-		Description: "Returns the canonical working directory path for the given content type and task. Does NOT create directories — the agent must run mkdir -p locally. When task_id is provided, returns 'output' (relative to the task workspace root). Otherwise, returns the base output directory for the content type (e.g. 'output/seednote').",
+		Description: "Returns the canonical working directory path for the given content type and task. Does NOT create directories — the agent must run mkdir -p locally. When task_id is provided, returns 'output', a relative path rooted at the agent task workspace/current working directory. Otherwise, returns the base output directory for the content type (e.g. 'output/seednote').",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

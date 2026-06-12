@@ -12,6 +12,8 @@ export interface Plan {
   next_run_at: string
   channel_id: string
   skip_reference_image?: boolean
+  reference_image_url?: string
+  watermark?: boolean
   created_at: string
   updated_at: string
 }
@@ -22,10 +24,14 @@ export interface CreatePlanRequest {
   prompt?: string
   channel_id?: string
   skip_reference_image?: boolean
+  reference_image_url?: string
+  watermark?: boolean
 }
 
 export interface UpdatePlanRequest {
   cron_expr?: string
   prompt?: string
   skip_reference_image?: boolean
+  reference_image_url?: string
+  watermark?: boolean
 }

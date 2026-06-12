@@ -78,6 +78,25 @@
         </view>
       </view>
 
+      <!-- Generated files -->
+      <view v-if="taskFiles.length > 0" class="task-detail__section">
+        <view class="section-header">
+          <text class="section-title">生成文件 ({{ taskFiles.length }})</text>
+          <text class="section-action" @tap="downloadZip">下载 ZIP</text>
+        </view>
+        <view
+          v-for="file in taskFiles"
+          :key="file.id"
+          class="file-row"
+        >
+          <view class="file-row__body" @tap="previewFile(file)">
+            <text class="file-row__name">{{ file.file_name }}</text>
+            <text class="file-row__meta">{{ file.mime_type || '文件' }} · {{ formatFileSize(file.file_size) }}</text>
+          </view>
+          <AbButton type="ghost" size="sm" @click="downloadFile(file)">下载</AbButton>
+        </view>
+      </view>
+
       <!-- Content preview -->
       <view
         v-if="task.result?.output"
@@ -157,6 +176,41 @@
         </view>
       </view>
 
+      <!-- Seednote analytics -->
+      <view v-if="seednoteAnalytics" class="task-detail__section">
+        <view class="section-header">
+          <text class="section-title">种草笔记数据</text>
+          <AbBadge v-if="seednoteAnalytics.tracking" variant="info" size="sm">
+            {{ seednoteTrackingLabel }}
+          </AbBadge>
+        </view>
+        <view v-if="seednoteAnalytics.tracking" class="analytics-card">
+          <text class="analytics-card__title">{{ seednoteAnalytics.tracking.note_title || '等待绑定公开笔记' }}</text>
+          <text v-if="seednoteAnalytics.tracking.note_url" class="analytics-card__link" @tap="copyText(seednoteAnalytics.tracking.note_url)">
+            {{ seednoteAnalytics.tracking.note_url }}
+          </text>
+          <view v-if="seednoteAnalytics.tracking.note_cover_url" class="analytics-card__cover-wrap">
+            <image :src="seednoteAnalytics.tracking.note_cover_url" class="analytics-card__cover" mode="aspectFill" />
+          </view>
+          <view class="metrics-grid">
+            <view v-for="metric in analyticsMetrics" :key="metric.label" class="metric-tile">
+              <text class="metric-tile__label">{{ metric.label }}</text>
+              <text class="metric-tile__value">{{ metric.value }}</text>
+              <text v-if="metric.delta" class="metric-tile__delta">+{{ metric.delta }}</text>
+            </view>
+          </view>
+          <view class="analytics-card__meta">
+            <text>最近采集: {{ formatFullDateTimeCN(seednoteAnalytics.tracking.last_run_at || '') || '--' }}</text>
+            <text>下次采集: {{ formatFullDateTimeCN(seednoteAnalytics.tracking.next_run_at || '') || '--' }}</text>
+            <text>采集次数: {{ seednoteAnalytics.tracking.run_count }}</text>
+          </view>
+          <text v-if="seednoteAnalytics.tracking.last_error" class="analytics-card__error">
+            {{ seednoteAnalytics.tracking.last_error }}
+          </text>
+        </view>
+        <text v-else class="analytics-card__empty">追踪任务正在准备中</text>
+      </view>
+
       <!-- Bottom actions -->
       <view class="task-detail__bottom">
         <!-- Running: cancel -->
@@ -228,7 +282,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
-import type { Task, TaskStatus, WorkflowStage, WorkflowReview } from '@/types'
+import type { SeednoteAnalytics, Task, TaskFile, TaskStatus, WorkflowStage, WorkflowReview } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import { taskStatusLabel } from '@/utils/labels'
 import { formatDateTimeCN, formatFullDateTimeCN, sanitizeHtml } from '@/utils/format'
@@ -245,6 +299,8 @@ const initialLoading = ref(true)
 const actionLoading = ref(false)
 const contentExpanded = ref(false)
 const logScrollTop = ref(0)
+const taskFiles = ref<TaskFile[]>([])
+const seednoteAnalytics = ref<SeednoteAnalytics | null>(null)
 
 const {
   task,
@@ -286,10 +342,35 @@ const review = computed<WorkflowReview | null>(() => {
 })
 
 const imageUrls = computed(() => {
-  if (!task.value?.result?.files) return []
-  return task.value.result.files
+  const files = taskFiles.value.length > 0 ? taskFiles.value : task.value?.result?.files
+  if (!files) return []
+  return files
     .filter((f) => f.mime_type?.startsWith('image/'))
     .map((f) => f.url)
+})
+
+const seednoteTrackingLabel = computed(() => {
+  const status = seednoteAnalytics.value?.tracking?.status
+  const map: Record<string, string> = {
+    waiting_discovery: '等待识别',
+    tracking: '追踪中',
+    stopped: '已停止',
+    failed: '采集失败',
+  }
+  return status ? map[status] || status : ''
+})
+
+const analyticsMetrics = computed(() => {
+  const latest = seednoteAnalytics.value?.latest
+  const deltas = seednoteAnalytics.value?.deltas
+  if (!latest) return []
+  return [
+    { label: '点赞', value: formatNumber(latest.like_count), delta: deltas?.like_count ? formatNumber(deltas.like_count) : '' },
+    { label: '收藏', value: formatNumber(latest.collect_count), delta: deltas?.collect_count ? formatNumber(deltas.collect_count) : '' },
+    { label: '评论', value: formatNumber(latest.comment_count), delta: deltas?.comment_count ? formatNumber(deltas.comment_count) : '' },
+    { label: '分享', value: formatNumber(latest.share_count), delta: deltas?.share_count ? formatNumber(deltas.share_count) : '' },
+    { label: '曝光', value: latest.view_count == null ? '暂无' : formatNumber(latest.view_count), delta: '' },
+  ]
 })
 
 function stageIcon(stageStatus: string): string {
@@ -311,6 +392,96 @@ function onPreviewImage(index: number) {
   }
 }
 
+function formatNumber(value?: number | null): string {
+  return value == null ? '0' : value.toLocaleString()
+}
+
+function formatFileSize(bytes?: number): string {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function copyText(text: string) {
+  uni.setClipboardData({ data: text })
+}
+
+function downloadByUrl(url: string, fileName: string, openAfterDownload = false) {
+  uni.showLoading({ title: '下载中' })
+  uni.downloadFile({
+    url,
+    header: tasksApi.downloadHeaders(),
+    success(res) {
+      if (res.statusCode !== 200) {
+        uni.showToast({ title: '下载失败', icon: 'none' })
+        return
+      }
+      if (openAfterDownload) {
+        uni.openDocument({
+          filePath: res.tempFilePath,
+          showMenu: true,
+          fail() {
+            uni.showToast({ title: '无法预览，请用右上角菜单转发或保存', icon: 'none' })
+          },
+        })
+        return
+      }
+      uni.saveFile({
+        tempFilePath: res.tempFilePath,
+        success() {
+          uni.showToast({ title: '已保存', icon: 'success' })
+        },
+        fail() {
+          uni.showToast({ title: `${fileName} 已下载`, icon: 'success' })
+        },
+      })
+    },
+    fail() {
+      uni.showToast({ title: '下载失败', icon: 'none' })
+    },
+    complete() {
+      uni.hideLoading()
+    },
+  })
+}
+
+function previewFile(file: TaskFile) {
+  if (file.mime_type?.startsWith('image/')) {
+    const imageFileUrls = taskFiles.value
+      .filter((item) => item.mime_type?.startsWith('image/'))
+      .map((item) => item.url)
+    uni.previewImage({ current: file.url, urls: imageFileUrls })
+    return
+  }
+  downloadByUrl(tasksApi.fileDownloadUrl(taskId.value, file.id), file.file_name, true)
+}
+
+function downloadFile(file: TaskFile) {
+  downloadByUrl(tasksApi.fileDownloadUrl(taskId.value, file.id), file.file_name)
+}
+
+function downloadZip() {
+  downloadByUrl(tasksApi.zipDownloadUrl(taskId.value), `task_${taskId.value}_files.zip`)
+}
+
+async function loadCompletedDetails() {
+  if (!taskId.value || task.value?.status !== 'completed') return
+  try {
+    taskFiles.value = await tasksApi.getFiles(taskId.value)
+  } catch (err) {
+    console.error('Failed to load task files:', err)
+  }
+  if (task.value?.type === 'seednote') {
+    try {
+      seednoteAnalytics.value = await tasksApi.getSeednoteAnalytics(taskId.value)
+    } catch (err) {
+      console.error('Failed to load seednote analytics:', err)
+      seednoteAnalytics.value = null
+    }
+  }
+}
+
 // Auto-scroll logs to bottom when new entries arrive
 watch(
   () => logs.value.length,
@@ -319,6 +490,13 @@ watch(
       // Use a very large scrollTop to ensure it scrolls to bottom
       logScrollTop.value = 99999
     })
+  },
+)
+
+watch(
+  () => task.value?.status,
+  () => {
+    void loadCompletedDetails()
   },
 )
 
@@ -376,8 +554,12 @@ async function onRetry() {
     const newTask = await tasksApi.create({
       type: task.value.type,
       channel_id: task.value.channel_id,
+      topic: task.value.topic,
       prompt: task.value.prompt,
       image_ratio: task.value.image_ratio || undefined,
+      skip_reference_image: task.value.skip_reference_image,
+      reference_image_url: task.value.reference_image_url,
+      watermark: task.value.watermark,
     })
 
     uni.showToast({ title: '已重新创建任务', icon: 'success' })
@@ -397,6 +579,7 @@ onLoad((query) => {
     taskId.value = query.id
     startPolling(query.id).finally(() => {
       initialLoading.value = false
+      void loadCompletedDetails()
     })
   } else {
     initialLoading.value = false
@@ -513,6 +696,24 @@ onShareAppMessage(() => ({
   margin-bottom: $ab-space-md;
 }
 
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $ab-space-sm;
+  margin-bottom: $ab-space-md;
+
+  .section-title {
+    margin-bottom: 0;
+  }
+}
+
+.section-action {
+  font-size: $ab-text-sm;
+  color: $ab-primary;
+  font-weight: $ab-font-medium;
+}
+
 // Polling dot animation
 .polling-dot {
   display: inline-block;
@@ -596,6 +797,43 @@ onShareAppMessage(() => ({
     aspect-ratio: 1;
     border-radius: $ab-radius-sm;
     background-color: $ab-divider;
+  }
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: $ab-space-sm;
+  padding: $ab-space-sm 0;
+  border-bottom: 2rpx solid $ab-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__name,
+  &__meta {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__name {
+    font-size: $ab-text-sm;
+    color: $ab-text;
+    font-weight: $ab-font-medium;
+  }
+
+  &__meta {
+    margin-top: 4rpx;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
   }
 }
 
@@ -716,6 +954,95 @@ onShareAppMessage(() => ({
 
     &--positive { color: $ab-success; }
     &--negative { color: $ab-warning; }
+  }
+}
+
+.analytics-card {
+  &__title {
+    display: block;
+    font-size: $ab-text-base;
+    color: $ab-text;
+    font-weight: $ab-font-medium;
+    line-height: 1.5;
+  }
+
+  &__link {
+    display: block;
+    margin-top: $ab-space-xs;
+    font-size: $ab-text-xs;
+    color: $ab-primary;
+    word-break: break-all;
+  }
+
+  &__cover-wrap {
+    margin-top: $ab-space-sm;
+  }
+
+  &__cover {
+    width: 100%;
+    height: 260rpx;
+    border-radius: $ab-radius-sm;
+    background-color: $ab-divider;
+  }
+
+  &__meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4rpx;
+    margin-top: $ab-space-sm;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__error {
+    display: block;
+    margin-top: $ab-space-sm;
+    padding: $ab-space-sm;
+    border-radius: $ab-radius-sm;
+    background-color: $ab-warning-bg;
+    color: $ab-warning;
+    font-size: $ab-text-xs;
+    line-height: 1.5;
+  }
+
+  &__empty {
+    display: block;
+    font-size: $ab-text-sm;
+    color: $ab-text-tertiary;
+  }
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: $ab-space-sm;
+  margin-top: $ab-space-sm;
+}
+
+.metric-tile {
+  padding: $ab-space-sm;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-sm;
+
+  &__label {
+    display: block;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__value {
+    display: block;
+    margin-top: 4rpx;
+    font-size: $ab-text-lg;
+    color: $ab-text;
+    font-weight: $ab-font-semibold;
+  }
+
+  &__delta {
+    display: block;
+    margin-top: 2rpx;
+    font-size: $ab-text-xs;
+    color: $ab-success;
   }
 }
 </style>

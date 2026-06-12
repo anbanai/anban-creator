@@ -704,7 +704,11 @@ func TestLoadAgentDefinition(t *testing.T) {
 				if def.Prompt == "" {
 					t.Error("prompt is empty")
 				}
-				if len(def.Tools) == 0 {
+				if agentName == "designer" {
+					if len(def.Tools) != 0 {
+						t.Error("designer must omit tools to inherit MCP tools")
+					}
+				} else if len(def.Tools) == 0 {
 					t.Error("no tools specified")
 				}
 			})

@@ -189,7 +189,7 @@ import { ref, computed, onMounted } from 'vue'
 import { onShareAppMessage } from '@dcloudio/uni-app'
 import { useAuthStore } from '@/stores/auth'
 import { creditsApi } from '@/api/credits'
-import { post } from '@/api/index'
+import { post } from '@/api/request'
 import { tierLabels } from '@/utils/labels'
 import AbBadge from '@/components/common/AbBadge.vue'
 import AbCard from '@/components/common/AbCard.vue'
@@ -241,6 +241,7 @@ interface MenuItem {
 }
 
 const creativeTools: MenuItem[] = [
+  { icon: '🖌️', title: '设计师', path: '/pages/designer/index' },
   { icon: '🔬', title: '爆文拆解', path: '/pages/workshop/index?tab=viral-analysis' },
   { icon: '🎨', title: '海报制作', path: '/pages/workshop/index?tab=poster' },
   { icon: '📋', title: '爆款复刻', path: '/pages/workshop/index?tab=clone' },
@@ -258,6 +259,9 @@ const showRecharge = ref(false)
 
 const otherItems: MenuItem[] = [
   { icon: '⚙️', title: '设置', path: '/pages/settings/index' },
+  { icon: '🔑', title: '平台密钥', path: '/pages/settings/api-keys' },
+  { icon: '🧩', title: 'Claude Code 接入', path: '/pages/connect/claude-code' },
+  { icon: '🪄', title: 'OpenClaw 接入', path: '/pages/connect/openclaw' },
   { icon: '💬', title: '意见反馈', action: () => { showFeedback.value = true } },
   { icon: '📤', title: '分享给好友', action: () => { /* handled by onShareAppMessage */ } },
 ]

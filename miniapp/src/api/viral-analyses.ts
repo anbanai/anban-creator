@@ -1,4 +1,4 @@
-import { get, post } from './index'
+import { get, post } from './request'
 import type { ViralAnalysis, CreateViralAnalysisRequest, PaginatedResponse } from '@/types'
 
 export const viralAnalysesApi = {

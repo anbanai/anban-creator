@@ -1,4 +1,4 @@
-import { get, post, patch, del } from './index'
+import { get, post, patch, del } from './request'
 import type {
   Task,
   TaskFile,
@@ -6,6 +6,7 @@ import type {
   PaginatedResponse,
   SeednoteAnalytics,
 } from '@/types'
+import { API_BASE_URL, TOKEN_KEY } from '@/utils/constants'
 
 export const tasksApi = {
   create: async (data: CreateTaskRequest): Promise<Task> => {
@@ -37,4 +38,15 @@ export const tasksApi = {
   /** Request a zip download URL for multiple tasks */
   downloadZip: (taskIds: string[]) =>
     post<{ url: string }>('/tasks/files/zip', { task_ids: taskIds }),
+
+  fileDownloadUrl: (taskId: string, fileId: string) =>
+    `${API_BASE_URL}/tasks/${taskId}/files/${fileId}/download`,
+
+  zipDownloadUrl: (taskId: string) =>
+    `${API_BASE_URL}/tasks/${taskId}/files/zip`,
+
+  downloadHeaders: () => {
+    const token = uni.getStorageSync(TOKEN_KEY)
+    return token ? { Authorization: `Bearer ${token}` } : undefined
+  },
 }

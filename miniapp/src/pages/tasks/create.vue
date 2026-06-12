@@ -72,6 +72,33 @@
       </view>
     </view>
 
+    <!-- Image generation options -->
+    <view class="task-create__section">
+      <view class="switch-row">
+        <view class="switch-row__text">
+          <text class="field-label switch-row__label">跳过参考图</text>
+          <text class="field-hint">不使用账号默认视觉参考图生成图片</text>
+        </view>
+        <AbSwitch v-model="form.skip_reference_image" />
+      </view>
+
+      <view class="field-spacer">
+        <text class="field-label">本次参考图片</text>
+        <AbInput
+          v-model="form.reference_image_url"
+          placeholder="可选，输入图片 URL 覆盖账号默认参考图"
+        />
+      </view>
+
+      <view class="switch-row field-spacer">
+        <view class="switch-row__text">
+          <text class="field-label switch-row__label">图片水印</text>
+          <text class="field-hint">生成支持水印的图片时添加平台水印</text>
+        </view>
+        <AbSwitch v-model="form.watermark" />
+      </view>
+    </view>
+
     <!-- Credit info -->
     <view class="task-create__section">
       <view class="credit-info">
@@ -117,6 +144,8 @@ import { creditsApi } from '@/api/credits'
 import { TASK_QUANTITIES, IMAGE_RATIOS } from '@/utils/constants'
 import { contentTypeLabel } from '@/utils/labels'
 import AbButton from '@/components/common/AbButton.vue'
+import AbInput from '@/components/common/AbInput.vue'
+import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import ChannelSelector from '@/components/business/ChannelSelector.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
@@ -139,6 +168,9 @@ const form = reactive({
   prompt: '',
   quantity: 1,
   image_ratio: '3:4',
+  skip_reference_image: false,
+  reference_image_url: '',
+  watermark: false,
 })
 
 const errors = reactive<Record<string, string>>({})
@@ -215,6 +247,9 @@ async function onSubmit() {
       prompt: form.prompt.trim(),
       quantity: form.quantity,
       image_ratio: form.image_ratio,
+      skip_reference_image: form.skip_reference_image || undefined,
+      reference_image_url: form.reference_image_url.trim() || undefined,
+      watermark: form.watermark || undefined,
     })
 
     uni.showToast({ title: '任务已创建', icon: 'success' })
@@ -400,6 +435,27 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: $ab-space-md;
+
+  &__text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__label {
+    margin-bottom: 4rpx;
+  }
+}
+
+.field-spacer {
+  margin-top: $ab-space-md;
+}
+
+.field-hint {
+  display: block;
+  font-size: $ab-text-xs;
+  color: $ab-text-tertiary;
+  line-height: 1.4;
 }
 
 // Credit info

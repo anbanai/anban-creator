@@ -1,4 +1,4 @@
-import { get, post, put, patch, del } from './index'
+import { get, post, put, patch, del } from './request'
 import type {
   Channel,
   ChannelDetail,

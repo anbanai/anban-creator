@@ -20,18 +20,18 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream). The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and if output_path is provided also saves the image to that path and returns file_path.",
+		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and if output_path is provided also saves the image to that server-local path and returns file_path.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id":     map[string]any{"type": "string", "description": "Channel ID (determines which image API config to use)"},
 				"prompt":         map[string]any{"type": "string", "description": "Image generation prompt"},
 				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
-				"output_path":    map[string]any{"type": "string", "description": "Local file path to save the generated image (optional, server will download and save)"},
-				"size":           map[string]any{"type": "string", "description": "Image size/aspect ratio (e.g., '3:4', '16:9', '1:1'). Overrides channel default when provided."},
-				"ref_image_path": map[string]any{"type": "string", "description": "Path to a reference image for style consistency (optional)"},
+				"output_path":    map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, server will download and save). Use a writable server path such as /tmp/...; this is not the agent client's current working directory."},
+				"size":           map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides channel default when provided; providers may still return a different crop/ratio."},
+				"ref_image_path": map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
 				"task_id":        map[string]any{"type": "string", "description": "Task ID (for logging and credit tracking)"},
-					"watermark":      map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
+				"watermark":      map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
 			},
 			"required": []any{"channel_id", "prompt"},
 		},
@@ -79,13 +79,13 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "analyze_image",
-		Description: "Analyze an image using a vision AI model. Accepts a remote image URL (https://) or a server-local file path (from generate_image file_path). Returns the AI's analysis as text. Use this for: identifying entities in line art, evaluating coloring quality, auditing cross-image color consistency, verifying line art preservation. No credit deduction.",
+		Description: "Analyze an image using a vision AI model. Accepts a remote image URL (https://) or a server-local file path (from generate_image/download_image file_path). Returns the AI's analysis as text. Use this for: identifying entities in line art, evaluating coloring quality, auditing cross-image color consistency, verifying line art preservation. file_path analysis is limited to 10MB; for larger images compress_image first or upload_image and retry with image_url. No credit deduction.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id": map[string]any{"type": "string", "description": "Channel ID (determines vision model config)"},
 				"image_url":  map[string]any{"type": "string", "description": "Remote HTTPS URL of the image to analyze"},
-				"file_path":  map[string]any{"type": "string", "description": "Server-local file path (from generate_image file_path result)"},
+				"file_path":  map[string]any{"type": "string", "description": "Server-local file path (from generate_image/download_image file_path result), max 10MB"},
 				"prompt":     map[string]any{"type": "string", "description": "Detailed analysis prompt describing what to analyze"},
 			},
 			"required": []any{"channel_id", "prompt"},

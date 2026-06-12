@@ -68,8 +68,33 @@
 
     <!-- Other Settings -->
     <view class="section">
-      <text class="section__title">其他</text>
+      <text class="section__title">账号与接入</text>
       <AbCard :padding="0">
+        <view class="list-item" @tap="navigateTo('/pages/settings/model-config')">
+          <text class="list-item__icon">🤖</text>
+          <text class="list-item__title">模型配置</text>
+          <text class="list-item__arrow">&#8250;</text>
+        </view>
+        <view class="list-item" @tap="navigateTo('/pages/settings/api-keys')">
+          <text class="list-item__icon">🔑</text>
+          <text class="list-item__title">平台密钥</text>
+          <text class="list-item__arrow">&#8250;</text>
+        </view>
+        <view class="list-item" @tap="navigateTo('/pages/settings/password')">
+          <text class="list-item__icon">🔒</text>
+          <text class="list-item__title">{{ authStore.user?.has_password ? '修改密码' : '设置密码' }}</text>
+          <text class="list-item__arrow">&#8250;</text>
+        </view>
+        <view class="list-item" @tap="navigateTo('/pages/connect/claude-code')">
+          <text class="list-item__icon">🧩</text>
+          <text class="list-item__title">Claude Code 接入</text>
+          <text class="list-item__arrow">&#8250;</text>
+        </view>
+        <view class="list-item" @tap="navigateTo('/pages/connect/openclaw')">
+          <text class="list-item__icon">🪄</text>
+          <text class="list-item__title">OpenClaw 接入</text>
+          <text class="list-item__arrow">&#8250;</text>
+        </view>
         <view class="list-item" @tap="showFeedback = true">
           <text class="list-item__icon">💬</text>
           <text class="list-item__title">意见反馈</text>
@@ -78,11 +103,6 @@
         <view class="list-item">
           <text class="list-item__icon">📜</text>
           <text class="list-item__title">用户协议</text>
-          <text class="list-item__arrow">&#8250;</text>
-        </view>
-        <view class="list-item">
-          <text class="list-item__icon">🔒</text>
-          <text class="list-item__title">隐私政策</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
       </AbCard>
@@ -161,7 +181,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import { post } from '@/api/index'
+import { post } from '@/api/request'
 import { tierLabels, tierDescriptions } from '@/utils/labels'
 import { formatDateYMD } from '@/utils/format'
 import AbCard from '@/components/common/AbCard.vue'
@@ -251,6 +271,10 @@ function copyInviteCode() {
       uni.showToast({ title: '已复制邀请码', icon: 'success' })
     },
   })
+}
+
+function navigateTo(url: string) {
+  uni.navigateTo({ url })
 }
 
 // --- Logout ---

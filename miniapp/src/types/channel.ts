@@ -14,6 +14,7 @@ export interface Channel {
   name: string
   avatar_url: string
   profile_url: string
+  description?: string
   positioning: string
   keywords: string
   style: string
@@ -21,6 +22,8 @@ export interface Channel {
   author: string
   reference_image_url: string
   image_ratio: string
+  layout: string
+  image_preset: string
   max_concurrent_tasks: number
   config: ChannelConfig
   status: ChannelStatus
@@ -56,6 +59,8 @@ export interface CreateChannelRequest {
   author?: string
   reference_image_url?: string
   image_ratio?: string
+  layout?: string
+  image_preset?: string
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string

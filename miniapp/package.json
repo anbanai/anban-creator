@@ -34,6 +34,7 @@
     "build:quickapp-webview": "uni build -p quickapp-webview",
     "build:quickapp-webview-huawei": "uni build -p quickapp-webview-huawei",
     "build:quickapp-webview-union": "uni build -p quickapp-webview-union",
+    "test": "node scripts/parity-test.mjs",
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {

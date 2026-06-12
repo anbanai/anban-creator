@@ -81,17 +81,38 @@ export type {
   CreatePosterRequest,
 } from './poster'
 
+// Resource
+export type { ResourceEntry, ResourceListResponse } from './resource'
+
+// Topic Pool
+export type { TopicPoolStatus, TopicPool } from './topic-pool'
+
 // Viral Analysis
 export type {
   ViralAnalysisStatus,
   ViralAnalysisSourceType,
-  TitleAnalysis,
-  CoverAnalysis,
-  CopywritingAnalysis,
-  TagAnalysis,
-  InteractionAnalysis,
-  ViralFactors,
+  AnalysisConfidence,
+  CloneDepth,
+  Transferability,
+  AnalysisDimensionName,
   AnalysisResult,
+  ScoreResult,
+  EvidenceTableItem,
+  EvidenceDrivenDimension,
+  CloneSuggestions,
+  ViralTemplate,
+  ViralTemplateMeta,
   ViralAnalysis,
   CreateViralAnalysisRequest,
 } from './viral-analysis'
+
+// Designer
+export type {
+  ModelCapabilities,
+  DesignerProvider,
+  GenerateRequest,
+  GenerateImage,
+  ImageGeneration,
+  ImageGenerationResult,
+  HistoryResponse,
+} from './designer'

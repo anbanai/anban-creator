@@ -1,4 +1,4 @@
-import { get } from './index'
+import { get } from './request'
 import type { UsageStats } from '@/types'
 
 export const usageApi = {

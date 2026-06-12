@@ -1,4 +1,4 @@
-import { get, post } from './index'
+import { get, post } from './request'
 import type { PosterTask, CreatePosterRequest, PaginatedResponse } from '@/types'
 
 export const postersApi = {

@@ -195,9 +195,31 @@
           <!-- Theme -->
           <view class="field-group">
             <text class="field-label">主题</text>
-            <AbInput
+            <AbSelect
               v-model="form.theme"
-              placeholder="选择主题"
+              :options="themeOptions"
+              :disabled="resourcesLoading"
+              placeholder="选择转换主题"
+            />
+          </view>
+
+          <view class="field-group">
+            <text class="field-label">文章版式</text>
+            <AbSelect
+              v-model="form.layout"
+              :options="layoutOptions"
+              :disabled="resourcesLoading"
+              placeholder="选择版式布局"
+            />
+          </view>
+
+          <view class="field-group">
+            <text class="field-label">图片预设</text>
+            <AbSelect
+              v-model="form.image_preset"
+              :options="imagePresetOptions"
+              :disabled="resourcesLoading"
+              placeholder="选择封面/配图预设"
             />
           </view>
 
@@ -208,6 +230,76 @@
               v-model="form.author"
               placeholder="署名"
             />
+          </view>
+        </view>
+      </view>
+
+      <!-- Topic pool (edit mode only) -->
+      <view v-if="!isNew" class="channel-detail__content">
+        <view class="channel-detail__collapsible-header" @tap="sections.topics = !sections.topics">
+          <text class="channel-detail__collapsible-title">选题池</text>
+          <text class="channel-detail__collapsible-arrow">{{ sections.topics ? '收起' : '展开' }}</text>
+        </view>
+
+        <view v-if="sections.topics" class="channel-detail__fields">
+          <view class="field-group">
+            <text class="field-label">批量添加选题</text>
+            <AbTextarea
+              v-model="newTopics"
+              placeholder="每行一个选题"
+              :rows="4"
+            />
+            <AbButton
+              type="primary"
+              size="md"
+              :loading="topicSaving"
+              :disabled="!newTopics.trim()"
+              @click="addTopics"
+            >
+              添加选题
+            </AbButton>
+          </view>
+
+          <view class="field-group">
+            <text class="field-label">筛选</text>
+            <AbSelect
+              v-model="topicStatus"
+              :options="topicStatusOptions"
+              placeholder="筛选选题状态"
+            />
+          </view>
+
+          <AbLoading v-if="topicsLoading" size="sm" text="加载选题" />
+
+          <view v-else-if="topics.length === 0" class="topic-empty">
+            <text>暂无选题</text>
+          </view>
+
+          <view v-else class="topic-list">
+            <view v-for="topic in topics" :key="topic.id" class="topic-item">
+              <view class="topic-item__body">
+                <text class="topic-item__title">{{ topic.topic }}</text>
+                <view class="topic-item__meta">
+                  <AbBadge :variant="topic.status === 'unused' ? 'info' : 'neutral'" size="sm">
+                    {{ topic.status === 'unused' ? '未使用' : '已使用' }}
+                  </AbBadge>
+                  <text v-if="topic.used_at" class="topic-item__time">{{ topic.used_at.slice(0, 10) }}</text>
+                </view>
+              </view>
+              <view class="topic-item__actions">
+                <AbButton
+                  v-if="topic.status === 'used'"
+                  type="ghost"
+                  size="sm"
+                  @click="resetTopic(topic)"
+                >
+                  重置
+                </AbButton>
+                <AbButton type="danger" size="sm" @click="deleteTopic(topic)">
+                  删除
+                </AbButton>
+              </view>
+            </view>
           </view>
         </view>
       </view>
@@ -276,14 +368,18 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import type { Channel, CreateChannelRequest } from '@/types'
+import type { Channel, CreateChannelRequest, ResourceEntry, TopicPool } from '@/types'
 import { channelsApi } from '@/api/channels'
+import { resourcesApi } from '@/api/resources'
+import { topicPoolApi } from '@/api/topic-pool'
 import { IMAGE_RATIOS } from '@/utils/constants'
 import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
+import AbSelect from '@/components/common/AbSelect.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbLoading from '@/components/common/AbLoading.vue'
+import AbBadge from '@/components/common/AbBadge.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
 import TagInput from '@/components/business/TagInput.vue'
 
@@ -311,6 +407,8 @@ const form = reactive({
   keywords: '',
   style: '',
   theme: '',
+  layout: '',
+  image_preset: '',
   author: '',
   reference_image_url: '',
   image_ratio: '3:4',
@@ -320,6 +418,15 @@ const form = reactive({
 })
 
 const keywordList = ref<string[]>([])
+const themes = ref<ResourceEntry[]>([])
+const layouts = ref<ResourceEntry[]>([])
+const imagePresets = ref<ResourceEntry[]>([])
+const resourcesLoading = ref(false)
+const topics = ref<TopicPool[]>([])
+const topicStatus = ref<'unused' | 'used' | ''>('unused')
+const topicsLoading = ref(false)
+const topicSaving = ref(false)
+const newTopics = ref('')
 
 const errors = reactive<Record<string, string>>({})
 
@@ -327,9 +434,18 @@ const sections = reactive({
   basic: true,
   publishing: false,
   advanced: false,
+  topics: false,
 })
 
 const isSeednote = computed(() => form.platform === 'seednote')
+const themeOptions = computed(() => resourceOptions(themes.value))
+const layoutOptions = computed(() => resourceOptions(layouts.value))
+const imagePresetOptions = computed(() => resourceOptions(imagePresets.value))
+const topicStatusOptions = [
+  { value: 'unused', label: '未使用' },
+  { value: 'used', label: '已使用' },
+  { value: '', label: '全部' },
+]
 const maxStep = computed(() => {
   // Skip step 3 (publishing) for seednote
   return isSeednote.value ? 2 : 3
@@ -354,7 +470,49 @@ watch(() => form.platform, (val) => {
   if (val && defaults[val]) {
     form.image_ratio = defaults[val]
   }
+  void loadResources(val)
 })
+
+watch(topicStatus, () => {
+  if (!isNew.value && editId.value) {
+    void loadTopics()
+  }
+})
+
+function resourceOptions(items: ResourceEntry[]) {
+  return [
+    { value: '', label: '不设置' },
+    ...items.map((item) => ({
+      value: item.name,
+      label: item.display_name || item.english_name || item.name,
+    })),
+  ]
+}
+
+async function loadResources(platform?: string) {
+  if (!platform) {
+    themes.value = []
+    layouts.value = []
+    imagePresets.value = []
+    return
+  }
+  resourcesLoading.value = true
+  try {
+    const [themeRes, layoutRes, presetRes] = await Promise.all([
+      resourcesApi.list('themes', platform),
+      resourcesApi.list('layouts', platform),
+      resourcesApi.list('image_presets', platform),
+    ])
+    themes.value = themeRes.items || []
+    layouts.value = layoutRes.items || []
+    imagePresets.value = presetRes.items || []
+  } catch (err) {
+    console.error('Failed to load resources:', err)
+    uni.showToast({ title: '加载资源配置失败', icon: 'none' })
+  } finally {
+    resourcesLoading.value = false
+  }
+}
 
 async function loadChannel(id: string) {
   pageLoading.value = true
@@ -369,6 +527,8 @@ async function loadChannel(id: string) {
     form.keywords = ch.keywords || ''
     form.style = ch.style || ''
     form.theme = ch.theme || ''
+    form.layout = ch.layout || ''
+    form.image_preset = ch.image_preset || ''
     form.author = ch.author || ''
     form.reference_image_url = ch.reference_image_url || ''
     form.image_ratio = ch.image_ratio || '3:4'
@@ -379,12 +539,80 @@ async function loadChannel(id: string) {
     if (ch.keywords) {
       keywordList.value = ch.keywords.split(',').filter(Boolean)
     }
+    await loadResources(form.platform)
+    await loadTopics()
   } catch (err) {
     console.error('Failed to load channel:', err)
     uni.showToast({ title: '加载失败', icon: 'none' })
   } finally {
     pageLoading.value = false
   }
+}
+
+async function loadTopics() {
+  if (!editId.value) return
+  topicsLoading.value = true
+  try {
+    const res = await topicPoolApi.list(editId.value, {
+      status: topicStatus.value || undefined,
+      limit: 50,
+    })
+    topics.value = res.items || []
+  } catch (err) {
+    console.error('Failed to load topic pool:', err)
+    uni.showToast({ title: '加载选题池失败', icon: 'none' })
+  } finally {
+    topicsLoading.value = false
+  }
+}
+
+async function addTopics() {
+  const entries = newTopics.value
+    .split('\n')
+    .map((topic) => topic.trim())
+    .filter(Boolean)
+  if (entries.length === 0 || topicSaving.value || !editId.value) return
+  topicSaving.value = true
+  try {
+    await topicPoolApi.create(editId.value, { topics: entries })
+    newTopics.value = ''
+    uni.showToast({ title: '已添加选题', icon: 'success' })
+    await loadTopics()
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '添加失败', icon: 'none' })
+  } finally {
+    topicSaving.value = false
+  }
+}
+
+async function resetTopic(topic: TopicPool) {
+  if (!editId.value) return
+  try {
+    await topicPoolApi.reset(editId.value, topic.id)
+    uni.showToast({ title: '已重置', icon: 'success' })
+    await loadTopics()
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '重置失败', icon: 'none' })
+  }
+}
+
+function deleteTopic(topic: TopicPool) {
+  if (!editId.value) return
+  uni.showModal({
+    title: '删除选题',
+    content: `确定删除「${topic.topic}」吗？`,
+    confirmColor: '#DC2626',
+    success: async (res) => {
+      if (!res.confirm) return
+      try {
+        await topicPoolApi.delete(editId.value, topic.id)
+        uni.showToast({ title: '已删除', icon: 'success' })
+        await loadTopics()
+      } catch (err: any) {
+        uni.showToast({ title: err?.message || '删除失败', icon: 'none' })
+      }
+    },
+  })
 }
 
 async function onFetchProfile() {
@@ -434,6 +662,8 @@ function buildPayload(): CreateChannelRequest {
     keywords: form.keywords || undefined,
     style: form.style || undefined,
     theme: form.theme || undefined,
+    layout: form.layout || undefined,
+    image_preset: form.image_preset || undefined,
     author: form.author || undefined,
     reference_image_url: form.reference_image_url || undefined,
     image_ratio: form.image_ratio || undefined,
@@ -744,6 +974,61 @@ onLoad((query) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.topic-empty {
+  padding: $ab-space-lg 0;
+  text-align: center;
+  font-size: $ab-text-sm;
+  color: $ab-text-tertiary;
+}
+
+.topic-list {
+  display: flex;
+  flex-direction: column;
+  gap: $ab-space-sm;
+}
+
+.topic-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $ab-space-sm;
+  padding: $ab-space-sm;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-sm;
+  background-color: $ab-surface;
+
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title {
+    display: block;
+    font-size: $ab-text-sm;
+    color: $ab-text;
+    line-height: 1.5;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    gap: $ab-space-xs;
+    margin-top: $ab-space-xs;
+  }
+
+  &__time {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__actions {
+    display: flex;
+    flex-direction: column;
+    gap: $ab-space-xs;
+    flex-shrink: 0;
+  }
 }
 
 // Ratio button group

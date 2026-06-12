@@ -40,10 +40,10 @@
         <view class="va-history-item__meta">
           <AbBadge
             v-if="item.analysis_result"
-            :variant="scoreVariant(item.analysis_result.overall_score)"
+            :variant="scoreVariant(item.analysis_result.overall_score.score)"
             size="sm"
           >
-            {{ item.analysis_result.overall_score }}分
+            {{ item.analysis_result.overall_score.score }}分
           </AbBadge>
           <AbBadge v-else :variant="statusBadgeVariant(item.status)" size="sm">
             {{ statusLabel(item.status) }}
@@ -55,174 +55,104 @@
 
     <!-- Analysis result display -->
     <view v-if="result" class="va-result">
-      <!-- Overall score -->
       <view class="va-score-card">
         <text class="va-score-card__label">🔥 爆文指数</text>
         <view class="va-score-card__number">
-          <text class="va-score-card__score">{{ result.overall_score }}</text>
+          <text class="va-score-card__score">{{ result.overall_score.score }}</text>
           <text class="va-score-card__max">/100</text>
         </view>
+        <text class="va-score-card__confidence">
+          置信度 {{ confidenceLabel(result.overall_score.confidence) }} · {{ result.overall_score.evidence_count }} 条证据
+        </text>
       </view>
 
-      <!-- Five dimension bars -->
-      <view class="va-dimensions">
-        <view class="va-dimension" v-for="dim in dimensions" :key="dim.key">
-          <view class="va-dimension__header">
-            <text class="va-dimension__label">{{ dim.label }}</text>
-            <text class="va-dimension__score">{{ dim.score }}</text>
+      <view v-if="result.summary?.length" class="va-summary-card">
+        <text class="section-title">核心结论</text>
+        <text v-for="(item, i) in result.summary" :key="i" class="va-summary-card__item">
+          {{ i + 1 }}. {{ item }}
+        </text>
+      </view>
+
+      <view v-if="result.overall_score.why_not_higher" class="va-summary-card">
+        <text class="section-title">为什么没有更高分</text>
+        <text class="va-detail-card__text">{{ result.overall_score.why_not_higher }}</text>
+      </view>
+
+      <view v-if="result.evidence_table?.length" class="va-detail-card">
+        <view class="va-detail-card__header" @tap="toggleDetail('evidence')">
+          <text class="va-detail-card__title">证据表</text>
+          <text class="va-detail-card__toggle">{{ expandedDetails.evidence ? '收起 ▲' : '展开 ▼' }}</text>
+        </view>
+        <view v-if="expandedDetails.evidence" class="va-detail-card__body">
+          <view v-for="(item, i) in result.evidence_table" :key="i" class="va-evidence-item">
+            <text class="va-detail-card__tag">{{ sourceLabel(item.source) }}</text>
+            <text class="va-detail-card__text">{{ item.claim }}</text>
+            <text class="va-evidence-item__evidence">{{ item.evidence }}</text>
           </view>
-          <AbProgress :percent="dim.score" :height="'12rpx'" />
         </view>
       </view>
 
-      <!-- Dimension detail cards -->
       <view class="va-detail-cards">
-        <!-- Title analysis -->
-        <view class="va-detail-card" v-if="result.title_analysis">
-          <view class="va-detail-card__header" @tap="toggleDetail('title')">
-            <text class="va-detail-card__title">标题分析</text>
+        <view
+          v-for="dim in result.dimensions"
+          :key="dim.name"
+          class="va-detail-card"
+        >
+          <view class="va-detail-card__header" @tap="toggleDetail(dim.name)">
+            <text class="va-detail-card__title">{{ dimensionLabel(dim.name) }}</text>
             <view class="va-detail-card__header-right">
-              <AbBadge :variant="scoreVariant(result.title_analysis.score)" size="sm">
-                {{ result.title_analysis.score }}分
+              <AbBadge :variant="transferabilityVariant(dim.transferability)" size="sm">
+                {{ transferabilityLabel(dim.transferability) }}
               </AbBadge>
-              <text class="va-detail-card__toggle">{{ expandedDetails.title ? '收起 ▲' : '展开 ▼' }}</text>
+              <text class="va-detail-card__toggle">{{ expandedDetails[dim.name] ? '收起 ▲' : '展开 ▼' }}</text>
             </view>
           </view>
-          <view v-if="expandedDetails.title" class="va-detail-card__body">
-            <text v-if="result.title_analysis.technique" class="va-detail-card__text">
-              <text class="va-detail-card__tag">技巧:</text> {{ result.title_analysis.technique }}
+          <view v-if="expandedDetails[dim.name]" class="va-detail-card__body">
+            <text class="va-detail-card__text">
+              <text class="va-detail-card__tag">观察:</text> {{ dim.observation }}
             </text>
-            <text v-if="result.title_analysis.breakdown" class="va-detail-card__text">
-              {{ result.title_analysis.breakdown }}
+            <text class="va-detail-card__text">
+              <text class="va-detail-card__tag">机制:</text> {{ dim.mechanism }}
             </text>
-            <view v-if="result.title_analysis.rewrite_suggestions?.length" class="va-detail-card__suggestions">
-              <text class="va-detail-card__tag">改写建议:</text>
-              <text
-                v-for="(s, i) in result.title_analysis.rewrite_suggestions"
-                :key="i"
-                class="va-detail-card__text"
-              >
-                {{ i + 1 }}. {{ s }}
-              </text>
-            </view>
-          </view>
-        </view>
-
-        <!-- Cover analysis -->
-        <view class="va-detail-card" v-if="result.cover_analysis">
-          <view class="va-detail-card__header" @tap="toggleDetail('cover')">
-            <text class="va-detail-card__title">封面分析</text>
-            <view class="va-detail-card__header-right">
-              <AbBadge :variant="scoreVariant(result.cover_analysis.score)" size="sm">
-                {{ result.cover_analysis.score }}分
-              </AbBadge>
-              <text class="va-detail-card__toggle">{{ expandedDetails.cover ? '收起 ▲' : '展开 ▼' }}</text>
-            </view>
-          </view>
-          <view v-if="expandedDetails.cover" class="va-detail-card__body">
-            <text v-if="result.cover_analysis.style" class="va-detail-card__text">
-              <text class="va-detail-card__tag">风格:</text> {{ result.cover_analysis.style }}
+            <text class="va-detail-card__text">
+              <text class="va-detail-card__tag">迁移行动:</text> {{ dim.action }}
             </text>
-            <text v-if="result.cover_analysis.breakdown" class="va-detail-card__text">
-              {{ result.cover_analysis.breakdown }}
-            </text>
-            <view v-if="result.cover_analysis.key_elements?.length" class="va-detail-card__tags">
-              <text class="va-detail-card__tag">关键元素:</text>
-              <text v-for="(el, i) in result.cover_analysis.key_elements" :key="i" class="va-tag-chip">{{ el }}</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- Copywriting analysis -->
-        <view class="va-detail-card" v-if="result.copywriting_analysis">
-          <view class="va-detail-card__header" @tap="toggleDetail('copywriting')">
-            <text class="va-detail-card__title">文案分析</text>
-            <view class="va-detail-card__header-right">
-              <AbBadge :variant="scoreVariant(result.copywriting_analysis.score)" size="sm">
-                {{ result.copywriting_analysis.score }}分
-              </AbBadge>
-              <text class="va-detail-card__toggle">{{ expandedDetails.copywriting ? '收起 ▲' : '展开 ▼' }}</text>
-            </view>
-          </view>
-          <view v-if="expandedDetails.copywriting" class="va-detail-card__body">
-            <text v-if="result.copywriting_analysis.structure" class="va-detail-card__text">
-              <text class="va-detail-card__tag">结构:</text> {{ result.copywriting_analysis.structure }}
-            </text>
-            <text v-if="result.copywriting_analysis.breakdown" class="va-detail-card__text">
-              {{ result.copywriting_analysis.breakdown }}
-            </text>
-            <text v-if="result.copywriting_analysis.word_count" class="va-detail-card__text">
-              <text class="va-detail-card__tag">字数:</text> {{ result.copywriting_analysis.word_count }}
-            </text>
-            <view v-if="result.copywriting_analysis.formulas_used?.length" class="va-detail-card__tags">
-              <text class="va-detail-card__tag">写作公式:</text>
-              <text v-for="(f, i) in result.copywriting_analysis.formulas_used" :key="i" class="va-tag-chip">{{ f }}</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- Tag analysis -->
-        <view class="va-detail-card" v-if="result.tag_analysis">
-          <view class="va-detail-card__header" @tap="toggleDetail('tag')">
-            <text class="va-detail-card__title">标签分析</text>
-            <view class="va-detail-card__header-right">
-              <AbBadge :variant="scoreVariant(result.tag_analysis.score)" size="sm">
-                {{ result.tag_analysis.score }}分
-              </AbBadge>
-              <text class="va-detail-card__toggle">{{ expandedDetails.tag ? '收起 ▲' : '展开 ▼' }}</text>
-            </view>
-          </view>
-          <view v-if="expandedDetails.tag" class="va-detail-card__body">
-            <text v-if="result.tag_analysis.breakdown" class="va-detail-card__text">
-              {{ result.tag_analysis.breakdown }}
-            </text>
-            <view v-if="result.tag_analysis.tags?.length" class="va-detail-card__tags">
-              <text class="va-detail-card__tag">使用标签:</text>
-              <text v-for="(t, i) in result.tag_analysis.tags" :key="i" class="va-tag-chip">{{ t }}</text>
-            </view>
-            <view v-if="result.tag_analysis.suggested_tags?.length" class="va-detail-card__tags">
-              <text class="va-detail-card__tag">推荐标签:</text>
-              <text v-for="(t, i) in result.tag_analysis.suggested_tags" :key="i" class="va-tag-chip va-tag-chip--highlight">{{ t }}</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- Interaction analysis -->
-        <view class="va-detail-card" v-if="result.interaction_analysis">
-          <view class="va-detail-card__header" @tap="toggleDetail('interaction')">
-            <text class="va-detail-card__title">互动分析</text>
-            <view class="va-detail-card__header-right">
-              <AbBadge :variant="scoreVariant(result.interaction_analysis.score)" size="sm">
-                {{ result.interaction_analysis.score }}分
-              </AbBadge>
-              <text class="va-detail-card__toggle">{{ expandedDetails.interaction ? '收起 ▲' : '展开 ▼' }}</text>
-            </view>
-          </view>
-          <view v-if="expandedDetails.interaction" class="va-detail-card__body">
-            <text v-if="result.interaction_analysis.breakdown" class="va-detail-card__text">
-              {{ result.interaction_analysis.breakdown }}
-            </text>
-            <text v-if="result.interaction_analysis.cta_type" class="va-detail-card__text">
-              <text class="va-detail-card__tag">引导类型:</text> {{ result.interaction_analysis.cta_type }}
-            </text>
-            <view v-if="result.interaction_analysis.techniques?.length" class="va-detail-card__tags">
-              <text class="va-detail-card__tag">互动技巧:</text>
-              <text v-for="(t, i) in result.interaction_analysis.techniques" :key="i" class="va-tag-chip">{{ t }}</text>
-            </view>
           </view>
         </view>
       </view>
 
-      <!-- Optimization suggestions -->
-      <view v-if="result.suggestions?.length" class="va-suggestions">
-        <text class="section-title">💡 优化建议</text>
+      <view class="va-detail-card">
+        <view class="va-detail-card__header" @tap="toggleDetail('template')">
+          <text class="va-detail-card__title">爆款模板</text>
+          <text class="va-detail-card__toggle">{{ expandedDetails.template ? '收起 ▲' : '展开 ▼' }}</text>
+        </view>
+        <view v-if="expandedDetails.template" class="va-detail-card__body">
+          <text class="va-detail-card__text"><text class="va-detail-card__tag">标题:</text> {{ result.viral_template.title_template }}</text>
+          <text class="va-detail-card__text"><text class="va-detail-card__tag">封面:</text> {{ result.viral_template.cover_template }}</text>
+          <text class="va-detail-card__text"><text class="va-detail-card__tag">正文:</text> {{ result.viral_template.body_template }}</text>
+          <text class="va-detail-card__text"><text class="va-detail-card__tag">互动:</text> {{ result.viral_template.interaction_template }}</text>
+          <text class="va-detail-card__text"><text class="va-detail-card__tag">人群洞察:</text> {{ result.viral_template.audience_insight }}</text>
+          <text class="va-detail-card__text"><text class="va-detail-card__tag">爆款机制:</text> {{ result.viral_template.viral_mechanism }}</text>
+        </view>
+      </view>
+
+      <view v-if="cloneSuggestionGroups.length" class="va-suggestions">
+        <text class="section-title">复刻建议</text>
         <view
-          v-for="(suggestion, i) in result.suggestions"
-          :key="i"
+          v-for="group in cloneSuggestionGroups"
+          :key="group.key"
           class="va-suggestion-item"
         >
+          <text class="va-suggestion-item__number">{{ group.label }}</text>
+          <text class="va-suggestion-item__text">{{ group.items.join('；') }}</text>
+        </view>
+      </view>
+
+      <view v-if="result.risks?.length" class="va-suggestions">
+        <text class="section-title">风险提醒</text>
+        <view v-for="(risk, i) in result.risks" :key="i" class="va-suggestion-item">
           <text class="va-suggestion-item__number">{{ i + 1 }}</text>
-          <text class="va-suggestion-item__text">{{ suggestion }}</text>
+          <text class="va-suggestion-item__text">{{ risk }}</text>
         </view>
       </view>
     </view>
@@ -253,7 +183,6 @@ import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
 import AbBadge from '@/components/common/AbBadge.vue'
 import AbLoading from '@/components/common/AbLoading.vue'
-import AbProgress from '@/components/common/AbProgress.vue'
 import AbEmpty from '@/components/common/AbEmpty.vue'
 
 const url = ref('')
@@ -265,30 +194,30 @@ const historyList = ref<ViralAnalysis[]>([])
 const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
 const expandedDetails = reactive<Record<string, boolean>>({
-  title: false,
-  cover: false,
-  copywriting: false,
-  tag: false,
-  interaction: false,
+  evidence: false,
+  template: false,
 })
 
 const result = computed<AnalysisResult | null>(() => currentAnalysis.value?.analysis_result ?? null)
 
-const dimensions = computed(() => {
-  if (!result.value) return []
-  const vf = result.value.viral_factors
-  return [
-    { key: 'topic', label: '选题', score: vf?.topic ?? 0 },
-    { key: 'title', label: '标题', score: vf?.title ?? 0 },
-    { key: 'content', label: '内容', score: vf?.content ?? 0 },
-    { key: 'visual', label: '视觉', score: vf?.visual ?? 0 },
-    { key: 'interaction', label: '互动', score: vf?.interaction ?? 0 },
+const cloneSuggestionGroups = computed(() => {
+  if (!result.value?.clone_suggestions) return []
+  const groups = [
+    { key: 'title', label: '标题', items: result.value.clone_suggestions.title },
+    { key: 'body', label: '正文', items: result.value.clone_suggestions.body },
+    { key: 'cover', label: '封面', items: result.value.clone_suggestions.cover },
+    { key: 'tags', label: '标签', items: result.value.clone_suggestions.tags },
+    { key: 'interaction', label: '互动', items: result.value.clone_suggestions.interaction },
   ]
+  return groups.filter(group => group.items.length > 0)
 })
 
 function extractTitle(analysis: ViralAnalysis): string {
-  if (analysis.analysis_result?.title_analysis?.technique) {
-    return analysis.analysis_result.title_analysis.technique.slice(0, 30)
+  if (analysis.analysis_result?.viral_template?.title_template) {
+    return analysis.analysis_result.viral_template.title_template.slice(0, 30)
+  }
+  if (analysis.analysis_result?.template_meta?.name) {
+    return analysis.analysis_result.template_meta.name
   }
   if (analysis.source_url) {
     return '种草笔记'
@@ -321,6 +250,56 @@ function scoreVariant(score: number): 'success' | 'warning' | 'danger' | 'info' 
   if (score >= 70) return 'info'
   if (score >= 50) return 'warning'
   return 'danger'
+}
+
+function dimensionLabel(name: string): string {
+  const map: Record<string, string> = {
+    topic_angle: '选题角度',
+    title: '标题',
+    cover: '封面',
+    body: '正文',
+    interaction: '互动',
+    tags: '标签',
+    comment_signals: '评论信号',
+  }
+  return map[name] || name
+}
+
+function confidenceLabel(confidence: string): string {
+  const map: Record<string, string> = {
+    high: '高',
+    medium: '中',
+    low: '低',
+  }
+  return map[confidence] || confidence
+}
+
+function transferabilityLabel(value: string): string {
+  const map: Record<string, string> = {
+    high: '高迁移',
+    medium: '中迁移',
+    low: '低迁移',
+  }
+  return map[value] || value
+}
+
+function transferabilityVariant(value: string): 'success' | 'warning' | 'danger' | 'info' {
+  if (value === 'high') return 'success'
+  if (value === 'medium') return 'info'
+  if (value === 'low') return 'warning'
+  return 'info'
+}
+
+function sourceLabel(source: string): string {
+  const map: Record<string, string> = {
+    title: '标题',
+    cover: '封面',
+    body: '正文',
+    tags: '标签',
+    metrics: '数据',
+    comments: '评论',
+  }
+  return map[source] || source
 }
 
 function toggleDetail(key: string) {

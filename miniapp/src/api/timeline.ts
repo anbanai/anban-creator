@@ -1,4 +1,4 @@
-import { get } from './index'
+import { get } from './request'
 import type { TimelineResponse } from '@/types'
 
 export const timelineApi = {

@@ -69,6 +69,33 @@
           :rows="3"
         />
       </view>
+
+      <!-- Image generation options -->
+      <view class="form-section">
+        <view class="switch-row">
+          <view class="switch-row__text">
+            <text class="form-section__label switch-row__label">跳过参考图</text>
+            <text class="form-section__hint">执行计划时不使用账号默认视觉参考图</text>
+          </view>
+          <AbSwitch v-model="form.skipReferenceImage" />
+        </view>
+
+        <view class="field-spacer">
+          <text class="form-section__label">参考图片</text>
+          <AbInput
+            v-model="form.referenceImageUrl"
+            placeholder="可选，输入图片 URL 覆盖账号默认参考图"
+          />
+        </view>
+
+        <view class="switch-row field-spacer">
+          <view class="switch-row__text">
+            <text class="form-section__label switch-row__label">图片水印</text>
+            <text class="form-section__hint">生成支持水印的图片时添加平台水印</text>
+          </view>
+          <AbSwitch v-model="form.watermark" />
+        </view>
+      </view>
     </view>
 
     <!-- Fixed bottom button -->
@@ -93,6 +120,7 @@ import ChannelSelector from '@/components/business/ChannelSelector.vue'
 import SchedulePicker from '@/components/business/SchedulePicker.vue'
 import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
+import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import AbLoading from '@/components/common/AbLoading.vue'
 
@@ -103,6 +131,9 @@ const form = reactive({
   cronExpr: '0 9 * * *',
   prompt: '',
   weekdays: [] as number[],
+  skipReferenceImage: false,
+  referenceImageUrl: '',
+  watermark: false,
 })
 
 const selectedTime = ref('09:00')
@@ -213,6 +244,9 @@ async function handleSubmit() {
       await plansApi.update(editingId.value, {
         cron_expr: cronExpr,
         prompt: form.prompt || undefined,
+        skip_reference_image: form.skipReferenceImage || undefined,
+        reference_image_url: form.referenceImageUrl.trim() || undefined,
+        watermark: form.watermark || undefined,
       })
       uni.showToast({ title: '修改成功', icon: 'none' })
     } else {
@@ -221,6 +255,9 @@ async function handleSubmit() {
         type: 'seednote',
         cron_expr: cronExpr,
         prompt: form.prompt || undefined,
+        skip_reference_image: form.skipReferenceImage || undefined,
+        reference_image_url: form.referenceImageUrl.trim() || undefined,
+        watermark: form.watermark || undefined,
       })
       uni.showToast({ title: '创建成功', icon: 'none' })
     }
@@ -246,6 +283,9 @@ async function loadPlan(planId: string) {
     form.title = plan.title || ''
     form.cronExpr = plan.cron_expr || '0 9 * * *'
     form.prompt = plan.prompt || ''
+    form.skipReferenceImage = plan.skip_reference_image || false
+    form.referenceImageUrl = plan.reference_image_url || ''
+    form.watermark = plan.watermark || false
 
     // Extract time from cron
     const parts = plan.cron_expr.trim().split(/\s+/)
@@ -310,6 +350,33 @@ onLoad((query) => {
   &__required {
     color: $ab-danger;
   }
+
+  &__hint {
+    display: block;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+    line-height: 1.4;
+  }
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $ab-space-md;
+
+  &__text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__label {
+    margin-bottom: 4rpx;
+  }
+}
+
+.field-spacer {
+  margin-top: $ab-space-md;
 }
 
 // Time picker

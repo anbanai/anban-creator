@@ -1,4 +1,4 @@
-import { get, post } from './index'
+import { get, post, put } from './request'
 import type { AuthResponse, User } from '@/types'
 
 export const authApi = {
@@ -17,4 +17,12 @@ export const authApi = {
   /** Logout */
   logout: () =>
     post<void>('/auth/logout'),
+
+  /** Change existing password */
+  changePassword: (oldPassword: string, newPassword: string) =>
+    put<null>('/auth/password', { old_password: oldPassword, new_password: newPassword }),
+
+  /** Set initial password for WeChat-created accounts */
+  setPassword: (password: string) =>
+    post<null>('/auth/set-password', { password }),
 }

@@ -43,8 +43,8 @@
         @tap="navigateTo('viral-analysis')"
       >
         <text class="history-item__title">{{ extractTitle(item) }}</text>
-        <AbBadge v-if="item.analysis_result" :variant="scoreVariant(item.analysis_result.overall_score)" size="sm">
-          {{ item.analysis_result.overall_score }}分
+        <AbBadge v-if="item.analysis_result" :variant="scoreVariant(item.analysis_result.overall_score.score)" size="sm">
+          {{ item.analysis_result.overall_score.score }}分
         </AbBadge>
         <AbBadge v-else variant="neutral" size="sm">
           {{ statusLabel(item.status) }}
@@ -106,8 +106,11 @@ const recentPosters = ref<PosterTask[]>([])
 const hasData = computed(() => recentAnalyses.value.length > 0 || recentPosters.value.length > 0)
 
 function extractTitle(analysis: ViralAnalysis): string {
-  if (analysis.analysis_result?.title_analysis?.technique) {
-    return analysis.analysis_result.title_analysis.technique
+  if (analysis.analysis_result?.viral_template?.title_template) {
+    return analysis.analysis_result.viral_template.title_template
+  }
+  if (analysis.analysis_result?.template_meta?.name) {
+    return analysis.analysis_result.template_meta.name
   }
   if (analysis.source_url) {
     return analysis.source_url.replace(/https?:\/\/[^/]+\/.*/, '种草笔记')

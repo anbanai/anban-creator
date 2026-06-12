@@ -5,11 +5,16 @@ export interface Task {
   id: string
   type: TaskType
   title?: string
+  topic?: string
   prompt: string
   status: TaskStatus
   progress?: number
   progress_log?: string
   image_ratio?: string
+  skip_reference_image?: boolean
+  reference_image_url?: string
+  watermark?: boolean
+  error: string | null
   error_message: string | null
   plan_id: string | null
   channel_id: string
@@ -42,10 +47,14 @@ export interface TaskFile {
 
 export interface CreateTaskRequest {
   type: TaskType
+  topic?: string
   prompt?: string
   channel_id: string
   quantity?: number
   image_ratio?: string
+  skip_reference_image?: boolean
+  reference_image_url?: string
+  watermark?: boolean
 }
 
 export interface WorkflowStatus {

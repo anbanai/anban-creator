@@ -1,4 +1,4 @@
-import { get, post, put, del } from './index'
+import { get, post, put, del } from './request'
 import type { Plan, CreatePlanRequest, UpdatePlanRequest, PaginatedResponse } from '@/types'
 
 export const plansApi = {
