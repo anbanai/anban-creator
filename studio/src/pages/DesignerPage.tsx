@@ -296,7 +296,7 @@ export default function DesignerPage() {
 
   return (
     // Full-bleed: negate AppLayout padding
-    <div className="-mx-4 -my-6 flex overflow-hidden bg-muted/20 md:-mx-8 md:-my-8" style={{ height: '100dvh' }}>
+    <div className="-mx-4 -my-6 flex overflow-hidden bg-background md:-mx-8 md:-my-8" style={{ height: '100dvh' }}>
       {/* Sidebar: full-height floating panel */}
       <DesignerToolbar
         providers={providerList}
@@ -311,16 +311,9 @@ export default function DesignerPage() {
 
       {/* Main area: canvas + prompt */}
       <div className="relative flex min-h-0 flex-1 flex-col p-3 pl-0">
-        {/* Ambient accent orbs */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute top-12 left-1/4 h-3 w-3 rounded-full bg-chart-2/10 blur-[6px] dark:bg-chart-2/5" />
-          <div className="absolute top-1/4 right-10 h-4 w-4 rounded-full bg-primary/10 blur-[8px] dark:bg-primary/5" />
-          <div className="absolute bottom-1/4 left-1/3 h-4 w-4 rounded-full bg-chart-4/10 blur-[8px] dark:bg-chart-4/5" />
-          <div className="absolute bottom-10 right-1/4 h-3 w-3 rounded-full bg-primary/8 blur-[6px] dark:bg-primary/4" />
-        </div>
         <div
-          className="relative flex-1 overflow-y-auto rounded-2xl border border-border/30 bg-background/40 p-4 backdrop-blur-sm md:p-6"
-          style={editingImage ? undefined : { backgroundImage: 'radial-gradient(circle, var(--color-border) 0.4px, transparent 0.4px)', backgroundSize: '20px 20px' }}
+          className="relative flex-1 overflow-y-auto rounded-2xl border border-border/70 bg-card/35 p-4 shadow-inner md:p-6"
+          style={editingImage ? undefined : { backgroundImage: 'radial-gradient(circle, color-mix(in oklch, var(--color-border) 55%, transparent) 0.5px, transparent 0.5px)', backgroundSize: '20px 20px' }}
         >
           {editingImage ? (
             <InlineMaskEditor

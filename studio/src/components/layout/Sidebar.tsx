@@ -77,7 +77,7 @@ export default function Sidebar() {
       {mobileOpen && (
         <button
           onClick={() => setMobileOpen(false)}
-          className="fixed left-[196px] top-4 z-50 flex h-8 w-8 items-center justify-center rounded-md bg-sidebar text-muted-foreground transition-colors hover:text-sidebar-foreground md:hidden"
+          className="fixed left-[196px] top-4 z-50 flex h-8 w-8 items-center justify-center rounded-md bg-sidebar text-sidebar-foreground/75 transition-colors hover:text-sidebar-foreground md:hidden"
           aria-label="关闭菜单"
         >
           <X className="h-4 w-4" />
@@ -127,7 +127,7 @@ export default function Sidebar() {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                className="hidden md:flex text-muted-foreground hover:text-sidebar-foreground"
+                className="hidden md:flex text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                 onClick={() => setCollapsed(!collapsed)}
                 aria-label="展开侧边栏"
               >
@@ -140,7 +140,7 @@ export default function Sidebar() {
             <Button
               variant="ghost"
               size="icon-xs"
-              className="hidden md:flex text-muted-foreground hover:text-sidebar-foreground"
+              className="hidden md:flex text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
               onClick={() => setCollapsed(!collapsed)}
               aria-label="收起侧边栏"
             >
@@ -176,7 +176,7 @@ function SidebarSection({
               <div className="flex items-center justify-center py-2 cursor-pointer" />
             }
           >
-            <Icon className="h-4 w-4 text-muted-foreground/70" />
+            <Icon className="h-4 w-4 text-sidebar-foreground/65" />
           </TooltipTrigger>
           <TooltipContent side="right">{label}</TooltipContent>
         </Tooltip>
@@ -191,7 +191,7 @@ function SidebarSection({
 
   return (
     <div className="mb-4">
-      <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+      <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/62">
         <span className="inline-flex items-center gap-2">
           <Icon className="h-3.5 w-3.5" />
           {label}
@@ -230,7 +230,7 @@ function SidebarBottomSection({
 
   return (
     <>
-      <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+      <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/62">
         <span className="inline-flex items-center gap-2">
           <PlugZap className="h-3.5 w-3.5" />
           接入配置
@@ -261,7 +261,7 @@ function SidebarNavLink({
         `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 ${
           isActive
             ? "border-l-2 border-primary bg-sidebar-accent text-sidebar-foreground -ml-[2px] pl-[calc(0.75rem+2px)]"
-            : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
         } ${collapsed ? "justify-center px-0" : ""}`
       }
     >

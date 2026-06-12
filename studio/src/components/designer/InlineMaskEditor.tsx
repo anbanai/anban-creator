@@ -379,18 +379,18 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="gap-1.5 rounded-lg bg-background/60 text-foreground/80 backdrop-blur-sm hover:bg-background/80 hover:text-foreground"
+            className="gap-1.5 rounded-lg bg-card/90 text-foreground shadow-sm hover:bg-card hover:text-foreground"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             返回
           </Button>
 
-          <div className="flex items-center gap-1.5 rounded-xl bg-background/60 px-2 py-1.5 backdrop-blur-sm">
+          <div className="flex items-center gap-1.5 rounded-xl border border-border/70 bg-card/90 px-2 py-1.5 shadow-sm">
             <Button
               variant="ghost"
               size="icon-sm"
               onClick={() => setTool('brush')}
-              className={`rounded-lg ${tool === 'brush' ? 'bg-primary/20 text-primary' : 'text-foreground/50 hover:text-foreground/80'}`}
+              className={`rounded-lg ${tool === 'brush' ? 'bg-primary/20 text-primary' : 'text-foreground/70 hover:text-foreground'}`}
               title="画笔"
             >
               <Paintbrush className="h-3.5 w-3.5" />
@@ -399,7 +399,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
               variant="ghost"
               size="icon-sm"
               onClick={() => setTool('rect')}
-              className={`rounded-lg ${tool === 'rect' ? 'bg-primary/20 text-primary' : 'text-foreground/50 hover:text-foreground/80'}`}
+              className={`rounded-lg ${tool === 'rect' ? 'bg-primary/20 text-primary' : 'text-foreground/70 hover:text-foreground'}`}
               title="矩形"
             >
               <Square className="h-3.5 w-3.5" />
@@ -408,7 +408,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
               variant="ghost"
               size="icon-sm"
               onClick={() => setTool('circle')}
-              className={`rounded-lg ${tool === 'circle' ? 'bg-primary/20 text-primary' : 'text-foreground/50 hover:text-foreground/80'}`}
+              className={`rounded-lg ${tool === 'circle' ? 'bg-primary/20 text-primary' : 'text-foreground/70 hover:text-foreground'}`}
               title="圆形"
             >
               <Circle className="h-3.5 w-3.5" />
@@ -417,7 +417,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
               variant="ghost"
               size="icon-sm"
               onClick={() => setTool('eraser')}
-              className={`rounded-lg ${tool === 'eraser' ? 'bg-primary/20 text-primary' : 'text-foreground/50 hover:text-foreground/80'}`}
+              className={`rounded-lg ${tool === 'eraser' ? 'bg-primary/20 text-primary' : 'text-foreground/70 hover:text-foreground'}`}
               title="橡皮擦"
             >
               <Eraser className="h-3.5 w-3.5" />
@@ -435,7 +435,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
                   step={1}
                   className="w-20"
                 />
-                <span className="w-5 text-center text-[10px] tabular-nums text-foreground/50">{brushSize}</span>
+                <span className="w-5 text-center text-[10px] tabular-nums text-foreground/75">{brushSize}</span>
               </>
             )}
 
@@ -451,7 +451,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
                   className="w-14"
                   title="羽化"
                 />
-                <span className="w-4 text-center text-[10px] tabular-nums text-foreground/50" title="羽化">{feather}</span>
+                <span className="w-4 text-center text-[10px] tabular-nums text-foreground/75" title="羽化">{feather}</span>
               </>
             )}
 
@@ -461,7 +461,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
               size="icon-sm"
               onClick={handleUndo}
               disabled={!hasStrokes}
-              className="rounded-lg text-foreground/50 hover:text-foreground/80"
+              className="rounded-lg text-foreground/70 hover:text-foreground"
               title="撤销"
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -471,14 +471,14 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
               size="sm"
               onClick={handleClear}
               disabled={!hasStrokes}
-              className="text-[11px] text-foreground/50 hover:text-foreground/80"
+              className="text-[11px] text-foreground/70 hover:text-foreground"
             >
               清除
             </Button>
           </div>
 
           {/* Hint */}
-          <span className="hidden text-[11px] text-muted-foreground/50 md:block">
+          <span className="hidden text-[11px] text-muted-foreground md:block">
             涂抹需要修改的区域，在下方描述变化
           </span>
         </div>
@@ -520,19 +520,19 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
         </div>
 
         {/* Zoom controls */}
-        <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg bg-background/60 px-2 py-1 backdrop-blur-sm">
+        <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg border border-border/70 bg-card/90 px-2 py-1 shadow-sm">
           <Button
             variant="ghost"
             size="icon-sm"
             onClick={handleZoomOut}
-            className="h-6 w-6 text-foreground/50 hover:text-foreground/80"
+            className="h-6 w-6 text-foreground/70 hover:text-foreground"
           >
             <ZoomOut className="h-3 w-3" />
           </Button>
           <button
             type="button"
             onClick={handleZoomFit}
-            className="px-1.5 text-[10px] tabular-nums text-foreground/60 hover:text-foreground/80"
+            className="px-1.5 text-[10px] tabular-nums text-foreground/75 hover:text-foreground"
           >
             {Math.round(zoom * 100)}%
           </button>
@@ -540,7 +540,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
             variant="ghost"
             size="icon-sm"
             onClick={handleZoomIn}
-            className="h-6 w-6 text-foreground/50 hover:text-foreground/80"
+            className="h-6 w-6 text-foreground/70 hover:text-foreground"
           >
             <ZoomIn className="h-3 w-3" />
           </Button>
@@ -549,7 +549,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
             variant="ghost"
             size="icon-sm"
             onClick={handleZoomFit}
-            className="h-6 w-6 text-foreground/50 hover:text-foreground/80"
+            className="h-6 w-6 text-foreground/70 hover:text-foreground"
             title="适应窗口"
           >
             <Maximize className="h-3 w-3" />

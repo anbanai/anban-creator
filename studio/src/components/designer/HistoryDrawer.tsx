@@ -49,8 +49,8 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenera
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-80 border-l-border/30 bg-popover/95 p-0 backdrop-blur-xl sm:max-w-md">
-        <SheetHeader className="border-b border-border/30 px-4 pt-4 pb-2">
+      <SheetContent side="right" className="w-80 border-l-border/70 bg-popover p-0 sm:max-w-md">
+        <SheetHeader className="border-b border-border/70 px-4 pt-4 pb-2">
           <SheetTitle className="text-sm font-medium">历史记录</SheetTitle>
         </SheetHeader>
         <ScrollArea className="flex-1">
@@ -62,10 +62,10 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenera
             </div>
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center gap-3 px-4 py-16 text-center">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted/30">
-                <Clock className="h-4 w-4 text-muted-foreground/40" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted/50">
+                <Clock className="h-4 w-4 text-muted-foreground" />
               </div>
-              <p className="text-xs text-muted-foreground/60">暂无历史记录</p>
+              <p className="text-xs text-muted-foreground">暂无历史记录</p>
             </div>
           ) : (
             <div className="space-y-1 p-3">
@@ -93,7 +93,7 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenera
                         {thumbnail ? (
                           <img src={thumbnail} alt="" className="h-full w-full object-cover" />
                         ) : (
-                          <ImageIcon className="h-4 w-4 text-muted-foreground/40" />
+                          <ImageIcon className="h-4 w-4 text-muted-foreground" />
                         )}
                       </div>
                       <div className="min-w-0 flex-1 pt-0.5">
@@ -113,7 +113,7 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenera
                           onRegenerate(gen)
                           onOpenChange(false)
                         }}
-                        className="absolute right-2 top-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 max-sm:opacity-50"
+                        className="absolute right-2 top-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 max-sm:opacity-70"
                         title="重新生成"
                         aria-label="重新生成"
                       >

@@ -81,7 +81,7 @@ function SizePresetSection({ presets, value, onChange }: {
 
   return (
     <div className="space-y-2">
-      <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+      <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         <Proportions className="h-3 w-3" />
         尺寸
       </h4>
@@ -96,7 +96,7 @@ function SizePresetSection({ presets, value, onChange }: {
               className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
                 value === preset
                   ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                  : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                  : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
               }`}
             >
               <span className="font-medium">{info?.label ?? preset}</span>
@@ -113,7 +113,7 @@ function SizePresetSection({ presets, value, onChange }: {
           className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
             isCustom
               ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-              : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+              : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
           }`}
         >
           <span className="font-medium">自定义</span>
@@ -240,13 +240,13 @@ export default function DesignerToolbar({
     return () => urls.forEach((u) => URL.revokeObjectURL(u))
   }, [settings.referenceFiles])
 
-  const sectionHeader = 'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70'
+  const sectionHeader = 'flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
 
   return (
     <>
       {/* Desktop: floating glass sidebar */}
       <div className="hidden w-[280px] shrink-0 p-3 md:block">
-        <aside className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-background/50 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.05)] backdrop-blur-2xl dark:border-white/[0.04] dark:bg-background/40 dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]">
+        <aside className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-border/75 bg-card/80 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.32)]">
           {/* Top accent line */}
           <div className="relative h-px shrink-0 bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
 
@@ -306,7 +306,7 @@ export default function DesignerToolbar({
                         className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
                           settings.size === opt.value
                             ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                            : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                            : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
                         }`}
                       >
                         <span className="font-medium">{opt.label}</span>
@@ -331,7 +331,7 @@ export default function DesignerToolbar({
                         className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
                           settings.resolution === opt.value
                             ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                            : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                            : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
                         }`}
                       >
                         <span className="font-medium">{opt.label}</span>
@@ -396,7 +396,7 @@ export default function DesignerToolbar({
                       className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
                         settings.quality === level
                           ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                          : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                          : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
                       }`}
                     >
                       {level === 'auto' ? '自动' : level === 'low' ? '低' : level === 'medium' ? '中' : '高'}
@@ -419,7 +419,7 @@ export default function DesignerToolbar({
                       className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
                         settings.outputFormat === fmt
                           ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                          : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                          : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
                       }`}
                     >
                       {fmt.toUpperCase()}
@@ -463,7 +463,7 @@ export default function DesignerToolbar({
                       className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
                         settings.background === bg
                           ? 'bg-primary/10 text-primary ring-1 ring-primary/20'
-                          : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                          : 'bg-muted/35 text-muted-foreground hover:bg-muted/55 hover:text-foreground'
                       }`}
                     >
                       {bg === 'auto' ? '自动' : '不透明'}
@@ -534,7 +534,7 @@ export default function DesignerToolbar({
                       <button
                         type="button"
                         onClick={() => update({ maskFile: null })}
-                        className="shrink-0 text-muted-foreground/60 transition-colors hover:text-destructive"
+                        className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -568,7 +568,7 @@ export default function DesignerToolbar({
             <button
               type="button"
               onClick={onHistoryToggle}
-              className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-xs text-muted-foreground/60 transition-all duration-200 hover:bg-muted/40 hover:text-foreground"
+              className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-xs text-muted-foreground transition-all duration-200 hover:bg-muted/55 hover:text-foreground"
             >
               <History className="h-3.5 w-3.5" />
               历史记录

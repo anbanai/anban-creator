@@ -86,7 +86,7 @@ export default function GeneratingAnimation() {
       </div>
 
       {/* Loading text */}
-      <p className="gen-loading-text mt-6 text-sm font-medium text-muted-foreground/60">
+      <p className="gen-loading-text mt-6 text-sm font-medium text-muted-foreground">
         正在生成图片...
       </p>
     </div>
