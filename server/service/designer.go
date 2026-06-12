@@ -46,7 +46,7 @@ func NewDesignerService(
 		creditSvc: creditSvc,
 		imageCfg:  imageCfg,
 		storage:   store,
-		logger:     logger,
+		logger:    logger,
 	}
 }
 

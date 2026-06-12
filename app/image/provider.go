@@ -22,16 +22,16 @@ const (
 
 // GenerateOptions 图片生成选项
 type GenerateOptions struct {
-	RefImagePath      string   // 本地参考图文件路径（单张，可选）
-	RefImagePaths     []string // 多张参考图路径（组图模式，可选）
-	MaskPath          string   // inpainting mask 文件路径（PNG with alpha，可选）
-	Quality           string   // 图片质量: "low", "medium", "high", "auto"（可选）
-	OutputFormat      string   // 输出格式: "png", "jpeg", "webp"（可选）
-	OutputCompression int      // 压缩率 0-100（仅 JPEG/WebP，0 表示使用 API 默认值）
-	Background        string   // 背景: "auto", "opaque", "transparent"（可选）
-	N                 int      // 批量生成数量，1-10（默认 1）
-	Size              string   // 自定义尺寸或比例（覆盖默认尺寸）
-	Watermark         *bool    // 是否启用水印（仅 Volcengine 支持此选项）
+	RefImagePath      string         // 本地参考图文件路径（单张，可选）
+	RefImagePaths     []string       // 多张参考图路径（组图模式，可选）
+	MaskPath          string         // inpainting mask 文件路径（PNG with alpha，可选）
+	Quality           string         // 图片质量: "low", "medium", "high", "auto"（可选）
+	OutputFormat      string         // 输出格式: "png", "jpeg", "webp"（可选）
+	OutputCompression int            // 压缩率 0-100（仅 JPEG/WebP，0 表示使用 API 默认值）
+	Background        string         // 背景: "auto", "opaque", "transparent"（可选）
+	N                 int            // 批量生成数量，1-10（默认 1）
+	Size              string         // 自定义尺寸或比例（覆盖默认尺寸）
+	Watermark         *bool          // 是否启用水印（仅 Volcengine 支持此选项）
 	StreamCB          StreamCallback // 流式回调（nil 表示不启用流式）
 }
 
@@ -81,16 +81,16 @@ type GeneratedImage struct {
 
 // ProviderCapabilities 图片生成提供者的能力描述
 type ProviderCapabilities struct {
-	MaxRefImages     int      // 最大参考图数量
-	Batch            bool     // 是否支持批量生成
-	MaxBatch         int      // 最大批量数量
-	Streaming        bool     // 是否支持流式生成
-	Inpainting       bool     // 是否支持 mask inpainting
-	QualityLevels    []string // 支持的质量级别
-	OutputFormats    []string // 支持的输出格式
-	FlexibleSize     bool     // 是否支持自定义尺寸
-	HasCompression   bool     // 是否支持压缩率设置
-	HasBackground    bool     // 是否支持背景设置
+	MaxRefImages   int      // 最大参考图数量
+	Batch          bool     // 是否支持批量生成
+	MaxBatch       int      // 最大批量数量
+	Streaming      bool     // 是否支持流式生成
+	Inpainting     bool     // 是否支持 mask inpainting
+	QualityLevels  []string // 支持的质量级别
+	OutputFormats  []string // 支持的输出格式
+	FlexibleSize   bool     // 是否支持自定义尺寸
+	HasCompression bool     // 是否支持压缩率设置
+	HasBackground  bool     // 是否支持背景设置
 }
 
 // GenerateError 图片生成错误

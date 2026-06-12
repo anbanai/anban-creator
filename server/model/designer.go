@@ -10,33 +10,33 @@ const (
 
 // ImageGeneration 图片生成任务记录
 type ImageGeneration struct {
-	ID             string    `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID         string    `gorm:"type:char(36);index;not null" json:"user_id"`
-	ChannelID      string    `gorm:"type:char(36);index;not null" json:"channel_id"`
-	Prompt         string    `gorm:"type:text;not null" json:"prompt"`
-	RevisedPrompt  string    `gorm:"type:text" json:"revised_prompt,omitempty"`
-	Provider       string    `gorm:"type:varchar(32);not null" json:"provider"`
-	ProviderID     string    `gorm:"type:varchar(64)" json:"provider_id,omitempty"`
-	Model          string    `gorm:"type:varchar(64);not null" json:"model"`
-	Quality        string    `gorm:"type:varchar(16)" json:"quality,omitempty"`
-	Size           string    `gorm:"type:varchar(32)" json:"size,omitempty"`
-	N              int       `gorm:"default:1" json:"n"`
-	OutputFormat       string    `gorm:"type:varchar(16)" json:"output_format,omitempty"`
-	OutputCompression  int       `gorm:"default:0" json:"output_compression,omitempty"`
-	Background         string    `gorm:"type:varchar(16);default:''" json:"background,omitempty"`
-	Watermark          bool      `gorm:"default:false" json:"watermark,omitempty"`
-	Status         string    `gorm:"type:varchar(16);index;not null;default:'generating'" json:"status"`
-	Error          string    `gorm:"type:text" json:"error,omitempty"`
-	InputTokens    int       `json:"input_tokens,omitempty"`
-	OutputTokens   int       `json:"output_tokens,omitempty"`
-	ReferenceFiles string    `gorm:"type:text" json:"reference_files,omitempty"`
-	MaskFileID     string    `gorm:"type:char(36)" json:"mask_file_id,omitempty"`
-	Cost           int       `gorm:"default:0" json:"cost,omitempty"`
-	StartedAt      *time.Time `json:"started_at,omitempty"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	Results        []ImageGenerationResult `gorm:"foreignKey:GenerationID" json:"results,omitempty"`
+	ID                string                  `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID            string                  `gorm:"type:char(36);index;not null" json:"user_id"`
+	ChannelID         string                  `gorm:"type:char(36);index;not null" json:"channel_id"`
+	Prompt            string                  `gorm:"type:text;not null" json:"prompt"`
+	RevisedPrompt     string                  `gorm:"type:text" json:"revised_prompt,omitempty"`
+	Provider          string                  `gorm:"type:varchar(32);not null" json:"provider"`
+	ProviderID        string                  `gorm:"type:varchar(64)" json:"provider_id,omitempty"`
+	Model             string                  `gorm:"type:varchar(64);not null" json:"model"`
+	Quality           string                  `gorm:"type:varchar(16)" json:"quality,omitempty"`
+	Size              string                  `gorm:"type:varchar(32)" json:"size,omitempty"`
+	N                 int                     `gorm:"default:1" json:"n"`
+	OutputFormat      string                  `gorm:"type:varchar(16)" json:"output_format,omitempty"`
+	OutputCompression int                     `gorm:"default:0" json:"output_compression,omitempty"`
+	Background        string                  `gorm:"type:varchar(16);default:''" json:"background,omitempty"`
+	Watermark         bool                    `gorm:"default:false" json:"watermark,omitempty"`
+	Status            string                  `gorm:"type:varchar(16);index;not null;default:'generating'" json:"status"`
+	Error             string                  `gorm:"type:text" json:"error,omitempty"`
+	InputTokens       int                     `json:"input_tokens,omitempty"`
+	OutputTokens      int                     `json:"output_tokens,omitempty"`
+	ReferenceFiles    string                  `gorm:"type:text" json:"reference_files,omitempty"`
+	MaskFileID        string                  `gorm:"type:char(36)" json:"mask_file_id,omitempty"`
+	Cost              int                     `gorm:"default:0" json:"cost,omitempty"`
+	StartedAt         *time.Time              `json:"started_at,omitempty"`
+	CompletedAt       *time.Time              `json:"completed_at,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	Results           []ImageGenerationResult `gorm:"foreignKey:GenerationID" json:"results,omitempty"`
 }
 
 func (ImageGeneration) TableName() string { return "image_generations" }

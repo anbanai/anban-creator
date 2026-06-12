@@ -25,7 +25,7 @@ type Config struct {
 	MCP        MCPConfig        `yaml:"mcp"`
 	ImageAPI   ImageAPIConfig   `yaml:"image_api"`
 	Writing    WritingConfig    `yaml:"writing"`
-	Vision     VisionConfig    `yaml:"vision"`
+	Vision     VisionConfig     `yaml:"vision"`
 	TingWu     TingWuConfig     `yaml:"tingwu"`
 	Claude     ClaudeConfig     `yaml:"claude"`
 	Credits    CreditsConfig    `yaml:"credits"`
@@ -118,10 +118,10 @@ type SizesConfig struct {
 // ImageAPIConfig holds global image generation API configuration.
 // All channels share this server-level config.
 type ImageAPIConfig struct {
-	Cover     *appconfig.ImageAPI            `yaml:"cover"`
-	Content   *appconfig.ImageAPI            `yaml:"content"`
-	Designer  map[string]*appconfig.ImageAPI `yaml:"designer"`
-	Sizes     SizesConfig                    `yaml:"sizes"`
+	Cover    *appconfig.ImageAPI            `yaml:"cover"`
+	Content  *appconfig.ImageAPI            `yaml:"content"`
+	Designer map[string]*appconfig.ImageAPI `yaml:"designer"`
+	Sizes    SizesConfig                    `yaml:"sizes"`
 }
 
 // WritingConfig holds LLM API configuration for writing services

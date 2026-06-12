@@ -20,16 +20,33 @@ export function manualChunks(id: string) {
     normalizedId.includes('/react-remove-scroll/') ||
     normalizedId.includes('/react-remove-scroll-bar/') ||
     normalizedId.includes('/aria-hidden/') ||
+    normalizedId.includes('/use-callback-ref/') ||
+    normalizedId.includes('/use-sidecar/') ||
+    normalizedId.includes('/react-style-singleton/') ||
+    normalizedId.includes('/get-nonce/') ||
     normalizedId.includes('/@radix-ui/')
   ) {
     return 'vendor-ui'
   }
 
   if (
+    normalizedId.includes('/motion/') ||
+    normalizedId.includes('/motion-dom/') ||
+    normalizedId.includes('/motion-utils/') ||
+    normalizedId.includes('/framer-motion/') ||
+    normalizedId.includes('/gsap/') ||
+    normalizedId.includes('/@gsap/react/')
+  ) {
+    return 'vendor-animation'
+  }
+
+  if (
     normalizedId.includes('/react/') ||
     normalizedId.includes('/react-dom/') ||
+    normalizedId.includes('/react-router/') ||
     normalizedId.includes('/react-router-dom/') ||
     normalizedId.includes('/react-is/') ||
+    normalizedId.includes('/scheduler/') ||
     normalizedId.includes('/use-sync-external-store/')
   ) {
     return 'vendor-react'
@@ -43,14 +60,26 @@ export function manualChunks(id: string) {
     return 'vendor-data'
   }
 
-  if (normalizedId.includes('/react-hook-form/') || normalizedId.includes('/zod/')) {
+  if (
+    normalizedId.includes('/react-hook-form/') ||
+    normalizedId.includes('/@hookform/resolvers/') ||
+    normalizedId.includes('/zod/')
+  ) {
     return 'vendor-forms'
   }
 
   if (
     normalizedId.includes('/recharts/') ||
     normalizedId.includes('/d3-') ||
-    normalizedId.includes('/victory-vendor/')
+    normalizedId.includes('/victory-vendor/') ||
+    normalizedId.includes('/@reduxjs/toolkit/') ||
+    normalizedId.includes('/react-redux/') ||
+    normalizedId.includes('/redux/') ||
+    normalizedId.includes('/reselect/') ||
+    normalizedId.includes('/immer/') ||
+    normalizedId.includes('/decimal.js-light/') ||
+    normalizedId.includes('/eventemitter3/') ||
+    normalizedId.includes('/tiny-invariant/')
   ) {
     return 'vendor-charts'
   }
@@ -59,11 +88,16 @@ export function manualChunks(id: string) {
     normalizedId.includes('/streamdown/') ||
     normalizedId.includes('/react-markdown/') ||
     normalizedId.includes('/remark-gfm/') ||
+    normalizedId.includes('/remark-') ||
+    normalizedId.includes('/rehype-') ||
     normalizedId.includes('/mdast-util-') ||
     normalizedId.includes('/hast-util-') ||
     normalizedId.includes('/micromark') ||
+    normalizedId.includes('/unist-util-') ||
     normalizedId.includes('/property-information/') ||
     normalizedId.includes('/vfile/') ||
+    normalizedId.includes('/unified/') ||
+    normalizedId.includes('/marked/') ||
     normalizedId.includes('/hastscript/') ||
     normalizedId.includes('/@ungap/structured-clone/')
   ) {
@@ -72,17 +106,6 @@ export function manualChunks(id: string) {
 
   if (normalizedId.includes('/mermaid/') || normalizedId.includes('/ai/')) {
     return 'vendor-ai'
-  }
-
-  if (
-    normalizedId.includes('/motion/') ||
-    normalizedId.includes('/motion-dom/') ||
-    normalizedId.includes('/motion-utils/') ||
-    normalizedId.includes('/framer-motion/') ||
-    normalizedId.includes('/gsap/') ||
-    normalizedId.includes('/@gsap/react/')
-  ) {
-    return 'vendor-animation'
   }
 
   if (normalizedId.includes('/lucide-react/')) {

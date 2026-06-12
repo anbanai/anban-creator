@@ -41,10 +41,10 @@ make web-build
 go test ./...
 
 # Frontend tests
-cd studio && npm test -- --run
+cd studio && bun run test
 
 # Frontend production build
-cd studio && npm run build
+cd studio && bun run build
 
 # Format and vet Go code
 make fmt
@@ -111,8 +111,8 @@ Run full backend and frontend verification before shipping:
 
 ```bash
 go test ./...
-cd studio && npm test -- --run
-cd studio && npm run build
+cd studio && bun run test
+cd studio && bun run build
 ```
 
 ## License

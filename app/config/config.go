@@ -52,18 +52,18 @@ type VolcengineConfig struct {
 
 // ImageAPI 图片生成 API 配置（cover 和 content 各自独立）
 type ImageAPI struct {
-	Alias      string            `json:"alias,omitempty"    yaml:"alias,omitempty"`
-	Enable     *bool             `json:"enable,omitempty"   yaml:"enable,omitempty"`
-	Key        string            `json:"key,omitempty"      yaml:"key,omitempty"`
-	BaseURL    string            `json:"base_url,omitempty" yaml:"base_url,omitempty"`
-	Provider   string            `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Model      string            `json:"model,omitempty"    yaml:"model,omitempty"`
-	Size       string            `json:"size,omitempty"     yaml:"size,omitempty"`
-	Refer      string            `json:"refer,omitempty"    yaml:"refer,omitempty"`
-	Compress   bool              `json:"compress,omitempty" yaml:"compress,omitempty"`
-	MaxWidth   int               `json:"max_width,omitempty" yaml:"max_width,omitempty"`
-	MaxSizeMB  int               `json:"max_size_mb,omitempty" yaml:"max_size_mb,omitempty"`
-	TimeoutSec int               `json:"timeout_sec,omitempty" yaml:"timeout_sec,omitempty"`
+	Alias          string            `json:"alias,omitempty"    yaml:"alias,omitempty"`
+	Enable         *bool             `json:"enable,omitempty"   yaml:"enable,omitempty"`
+	Key            string            `json:"key,omitempty"      yaml:"key,omitempty"`
+	BaseURL        string            `json:"base_url,omitempty" yaml:"base_url,omitempty"`
+	Provider       string            `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Model          string            `json:"model,omitempty"    yaml:"model,omitempty"`
+	Size           string            `json:"size,omitempty"     yaml:"size,omitempty"`
+	Refer          string            `json:"refer,omitempty"    yaml:"refer,omitempty"`
+	Compress       bool              `json:"compress,omitempty" yaml:"compress,omitempty"`
+	MaxWidth       int               `json:"max_width,omitempty" yaml:"max_width,omitempty"`
+	MaxSizeMB      int               `json:"max_size_mb,omitempty" yaml:"max_size_mb,omitempty"`
+	TimeoutSec     int               `json:"timeout_sec,omitempty" yaml:"timeout_sec,omitempty"`
 	ResponseFormat string            `json:"response_format,omitempty" yaml:"response_format,omitempty"` // "b64_json" | "url" | ""
 	Volcengine     *VolcengineConfig `json:"volcengine,omitempty" yaml:"volcengine,omitempty"`
 	Credits        int               `json:"credits,omitempty" yaml:"credits,omitempty"`

@@ -248,12 +248,12 @@ func (r *repository) SeednoteTrackings() SeednoteTrackingRepository { return r.s
 func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
 }
-func (r *repository) Templates() TemplateRepository          { return r.templates }
-func (r *repository) ViralAnalyses() ViralAnalysisRepository { return r.viralAnalyses }
-func (r *repository) PosterTasks() PosterTaskRepository      { return r.posterTasks }
+func (r *repository) Templates() TemplateRepository           { return r.templates }
+func (r *repository) ViralAnalyses() ViralAnalysisRepository  { return r.viralAnalyses }
+func (r *repository) PosterTasks() PosterTaskRepository       { return r.posterTasks }
 func (r *repository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
-func (r *repository) TopicPools() TopicPoolRepository        { return r.topicPools }
+func (r *repository) TopicPools() TopicPoolRepository { return r.topicPools }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -336,12 +336,12 @@ func (r *txRepository) SeednoteTrackings() SeednoteTrackingRepository { return r
 func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository {
 	return r.seednoteMetricSnapshots
 }
-func (r *txRepository) Templates() TemplateRepository          { return r.templates }
-func (r *txRepository) ViralAnalyses() ViralAnalysisRepository { return r.viralAnalyses }
-func (r *txRepository) PosterTasks() PosterTaskRepository      { return r.posterTasks }
+func (r *txRepository) Templates() TemplateRepository           { return r.templates }
+func (r *txRepository) ViralAnalyses() ViralAnalysisRepository  { return r.viralAnalyses }
+func (r *txRepository) PosterTasks() PosterTaskRepository       { return r.posterTasks }
 func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
-func (r *txRepository) TopicPools() TopicPoolRepository        { return r.topicPools }
+func (r *txRepository) TopicPools() TopicPoolRepository { return r.topicPools }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.
