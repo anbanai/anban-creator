@@ -1,379 +1,172 @@
 # AGENTS.md
 
-This file provides guidance to AI coding assistants when working with code in this repository.
+This file provides guidance to AI coding assistants when working in this repository.
 
 ## Project Overview
 
-**Anban 智能创作助手** (anbanwriter) is a Go CLI tool that transforms Markdown articles into WeChat-formatted HTML with professional styling, AI-powered writing assistance, humanization features, and direct publishing to WeChat draft box.
+**Anban 智能创作助手** is a Studio-first content creation platform for WeChat articles, Seednote-style notes, live slicing, AI image work, and agent-assisted publishing workflows.
 
-- **Language**: Go 1.26.0
-- **CLI Framework**: Cobra
-- **Logging**: Zap (structured logging)
-- **WeChat SDK**: silenceper/wechat/v2
-- **Architecture**: Modular CLI with separate concerns for conversion, image processing, draft management, and writing assistance
+The current repository is not a standalone Cobra CLI. It has four main surfaces:
 
-## Build & Test Commands
+- `server/`: Go Fiber v3 API server, MCP endpoint, scheduler, storage, publishing, and business services.
+- `agent/`: Go runner used for local or Docker-based agent execution.
+- `app/`: Shared Go library for content conversion, image generation, humanization, WeChat draft helpers, and writer styles.
+- `studio/`: React 19 + TypeScript + Vite 8 Web Studio.
 
-### Building
+Plugin assets live in two distributions:
 
-```bash
-# Quick build for current platform (development)
-make fast
+- `claudecode/`: Claude Code agents, skills, hooks, themes, and writer styles.
+- `openclaw/`: OpenClaw plugin distribution assets.
 
-# Build for current platform (outputs to bin/anbanwriter)
-make build
+Keep `claudecode/skills/*` and matching `openclaw/skills/*` files synchronized when tests assert distribution parity.
 
-# Build for all platforms (release)
-make release
+## Build And Test Commands
 
-# Build via go directly
-go build -o anbanwriter ./app
-```
-
-### Testing
+### Go
 
 ```bash
-# Run all tests
+# Run all Go tests
+go test ./...
+
+# Run package-specific tests
+go test ./server/mcp
+go test ./app/image
+
+# Build binaries without colliding with existing directories
+go build -o /tmp/abwriter-server ./server
+go build -o /tmp/abwriter-agent ./agent
+
+# Repository Make targets
 make test
-# or
-go test -v ./...
-
-# Run specific package tests
-go test -v ./app/config
-go test -v ./app/image
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run specific test
-go test -v -run TestConfig_Validate ./app/config
-```
-
-### Code Quality
-
-```bash
-# Format code
-make fmt
-
-# Static analysis
+make server-build
 make vet
-
-# Lint (requires golangci-lint)
-make lint
-
-# Download/update dependencies
-make deps
+make fmt
 ```
 
-### Installation
+Avoid `go build ./server` or `go build ./agent` from the repository root because Go will try to write `server` or `agent` binaries where same-named directories already exist.
+
+### Studio
+
+Use Bun for the Studio app.
 
 ```bash
-# Install to GOPATH/bin
-make install
-# or
-go install ./app
+cd studio && bun install
+cd studio && bun run test
+cd studio && bun run build
+```
+
+The Studio build runs `tsc -b && vite build`.
+
+### Docker
+
+```bash
+make docker-up
+make docker-down
+make docker-agent-image
+make docker-server-image
 ```
 
 ## Architecture
 
-### Core Module Structure
+### Server
 
-The project follows a layered architecture with clear separation of concerns:
+The server follows a layered structure:
 
-```
-app/
-├── main.go                 # CLI entry point, command routing
-├── {command}.go            # Individual command implementations (convert, write, humanize, etc.)
-├── errors.go               # Hinter interface, AppError type
-├── doctor.go               # Diagnostic checks (config, env, network)
-│
-├── ai/                    # AI text generation client
-│   └── client.go          # OpenAI-compatible chat completions (default model: claude-sonnet-4-6)
-│
-├── config/                 # Configuration management
-│   └── config.go          # Single-account config (JSON only)
-│
-├── converter/             # Markdown → WeChat HTML conversion
-│   ├── converter.go       # Core conversion interface & orchestration
-│   ├── ai.go             # AI mode implementation (Claude-based)
-│   ├── image.go          # Image reference extraction & placeholder handling
-│   ├── prompt.go         # AI prompt building with theme support
-│   └── theme.go          # Theme management system
-│
-├── writer/               # Styled writing assistance
-│   ├── assistant.go      # Writing style orchestration
-│   ├── generator.go      # Content generation
-│   ├── cover_generator.go # Cover image prompt generation
-│   ├── style.go          # Style definition loading (YAML-based)
-│   └── types.go          # Data structures
-│
-├── humanizer/            # AI writing trace removal
-│   ├── humanizer.go      # Detection & removal of AI patterns
-│   ├── prompt.go         # Humanization prompts
-│   └── result.go         # Quality scoring (5 dimensions)
-│
-├── image/                # Image processing & generation
-│   ├── processor.go      # Unified image handling (upload, compress, generate)
-│   ├── compress.go       # Image compression (max 1920px, preserves aspect ratio)
-│   ├── provider.go       # Provider interface
-│   ├── openai.go         # OpenAI DALL-E provider
-│   ├── gemini.go         # Google Gemini provider (google.golang.org/genai)
-│   └── volcengine.go     # Volcengine Seedream provider (async polling)
-│
-├── draft/                # WeChat draft management
-│   └── service.go        # Draft creation & publishing
-│
-└── wechat/               # WeChat API wrapper
-    ├── service.go        # Material upload, access token management
-    └── errors.go         # WechatAPIError with retryable detection
-```
+- `server/handler`: HTTP handlers and request/response glue.
+- `server/service`: business logic for tasks, channels, credits, publishing, model config, live slicing, and writing.
+- `server/repository`: GORM persistence layer.
+- `server/model`: database models.
+- `server/mcp`: MCP tools exposed to connected agents.
+- `server/agent`: Claude/OpenClaw execution support and config builders.
+- `server/resources`: embedded themes, layouts, writer configs, and image presets.
+- `server/scheduler`: Asynq/cron-style plan checking.
+- `server/storage`: local and OSS storage implementations.
 
-### Configuration System
+Keep handlers thin. Put behavior in services, persistence in repositories, and cross-agent tool contracts in `server/mcp`.
 
-**Single Account Support**: The config system supports one WeChat account configured via the config file (`.anbanwriter/settings.json`).
+### Agent Runner
 
-**Config Search Priority**: CWD → `CLAUDE_PLUGIN_ROOT` → `~/.config/anbanwriter/` → `~/.anbanwriter/` → executable-relative
+`agent/` is a standalone Go binary that downloads workspaces, runs the agent CLI process, and reports results back to the server.
 
-**Two Loading Modes**:
-- `Load()` / `LoadWithDefaults()`: Full validation including WeChat AppID/Secret
-- `LoadMinimal()`: Skips WeChat validation, used by commands that don't need WeChat API (write, doctor)
+Important files:
 
-### Conversion Flow
+- `agent/main.go`: run lifecycle entry point.
+- `agent/runner.go`: subprocess execution.
+- `agent/downloader.go`: workspace downloads.
+- `agent/reporter.go`: result reporting.
+- `agent/config.go`: environment/config parsing.
 
-The converter module orchestrates a multi-step process:
+### App Library
 
-1. **Image Extraction**: Parse Markdown for image references (local/online/AI-generated)
-2. **Markdown → HTML**: Generate WeChat-compatible HTML with theme styling
-   - **AI Mode**: Uses Claude with theme-specific prompts (autumn-warm, spring-fresh, ocean-calm, custom)
-   - All CSS must be inlined (no external stylesheets)
-   - Safe HTML tags only (no script, iframe, form elements)
-3. **Image Placeholders**: Replace image references with `<!-- IMG:0 -->` format
-4. **Image Processing** (if enabled):
-   - Local: compress → upload to WeChat CDN
-   - Online: download → compress → upload
-   - AI: generate → download → compress → upload
-5. **Placeholder Replacement**: Replace placeholders with WeChat CDN URLs
-6. **Draft Publishing** (optional): Create draft in WeChat backend
+`app/` contains reusable content functionality. It is a library, not the main product entry point.
 
-### Image Generation Providers
+Key packages:
 
-**OpenAI**:
+- `app/converter`: Markdown to WeChat-safe inline HTML.
+- `app/image`: image compression and OpenAI/Gemini/Volcengine generation providers.
+- `app/writer`: style-based writing helpers.
+- `app/humanizer`: AI writing trace detection/removal.
+- `app/draft` and `app/wechat`: WeChat draft/material helpers.
+- `app/config`: JSON config loading for plugin/local workflows.
 
-- Synchronous API
-- Models: dall-e-2, dall-e-3
-- Provider value: `openai` (or empty, default)
-- Requires paid API key
+### Studio
 
-**Google Gemini** (provider: `gemini` or `google`):
+`studio/` is a React 19 application using TypeScript, Vite 8, Tailwind CSS v4, TanStack Query, React Router, and shadcn/Base UI components.
 
-- Uses official `google.golang.org/genai` Go SDK
-- Returns inline image data (no URL download needed)
-- Default model: `gemini-3-pro-image-preview`
-- Supports image size via `size` field in WIDTHxHEIGHT format (e.g., `2560x1440`, `1728x2304`)
-- Temp file prefix: `anbanwriter_gemini_`
+Common locations:
 
-**Volcengine/Seedream** (provider: `volcengine`, `volc`, or `seedream`):
+- `studio/src/pages`: route pages.
+- `studio/src/components`: shared UI and business components.
+- `studio/src/lib/api`: typed API clients.
+- `studio/src/lib/schemas.ts`: Zod validation.
+- `studio/src/hooks`: reusable hooks.
+- `studio/src/test`: Vitest setup and mocks.
 
-- Bytedance's image generation model with async task polling
-- Default model: `doubao-seedream-4-5-251128`
-- Default base URL: `https://ark.cn-beijing.volces.com/api/v3`
-- Temp file prefix: `anbanwriter_volcengine_`
+Prefer route-level lazy loading and explicit vendor chunking for heavy dependencies. Keep operational pages dense, scannable, and task-oriented.
 
-### Writing Styles
+## Skills And Agents
 
-Located in `claudecode/writers/*.yaml`, each style defines:
+The project ships agent-facing workflows in `claudecode/agents` and `claudecode/skills`, with OpenClaw mirrors under `openclaw/skills`.
 
-- **Core Traits**: Distinctive voice characteristics
-- **Structure Patterns**: Preferred content organization
-- **Language Usage**: Vocabulary, sentence rhythm, formatting preferences
-- **Domain Knowledge**: Specialized knowledge to incorporate
+Current major agents:
 
-Built-in styles:
+- `wechatarticle`: end-to-end WeChat article creation.
+- `seednote`: Seednote-style note creation, clone/rewrite, visual generation, and archival.
+- `designer`: line-art coloring and visual consistency workflows.
+- `live-slicer`: live video transcription, segmentation, ffmpeg export, and optional CapCut draft generation.
 
-- `dan-koe`: Concise, punchy, philosophical depth with practical insights
-- `cultural-depth`: Rich cultural references, literary style
-- `casual-science`: Accessible explanations with engaging examples
+Development rules:
 
-### AI Humanization
+- Agents must use MCP tools directly, not ad hoc HTTP clients.
+- Local media work in live-slicer uses `ffmpeg` and `ffprobe`.
+- Do not reintroduce legacy Python helper scripts for live slicing.
+- Keep generated task artifacts explicit and file-backed, especially JSON returned by MCP tools.
+- When a skill exists in both `claudecode/skills` and `openclaw/skills`, update both unless the intended distribution difference is backed by tests.
 
-Detects and removes 5 categories of AI patterns:
+## Testing Patterns
 
-1. **Content Patterns**: Over-emphasis, vague attribution, promotional language
-2. **Language Patterns**: AI vocabulary, negative parallelism, three-part structures
-3. **Style Patterns**: Excessive dashes, bold overuse, emoji patterns
-4. **Filler Patterns**: Filler phrases, over-qualification, generic conclusions
-5. **Collaboration Traces**: Dialogue-style fillers, knowledge cutoff disclaimers
+Use table-driven Go tests for behavior with multiple cases. Prefer `httptest` for external API providers.
 
-Intensity levels: `gentle`, `medium`, `aggressive`
+Useful targeted commands:
 
-Quality scoring (5 dimensions, 10 points each):
-
-- Directness: Gets to the point quickly
-- Rhythm: Varied sentence length
-- Trust: Respects reader intelligence
-- Authenticity: Sounds human-written
-- Precision: No redundant content
-
-## Development Patterns
-
-### Adding New Commands
-
-1. Create `app/{command}.go` with cobra command definition
-2. Add command to `rootCmd` in `main.go`
-3. Use `initConfig()` for lazy config loading (allows --help without config)
-4. Return JSON responses via `responseSuccess()` or `responseError()`
-
-### Adding New Image Providers
-
-1. Implement `Provider` interface in `app/image/{provider}.go`:
-
-   ```go
-   type Provider interface {
-       Name() string
-       Generate(ctx context.Context, prompt string) (*GenerateResult, error)
-   }
-   ```
-
-2. Register in `app/image/provider.go` factory
-3. Add tests following `modelscope_test.go` pattern (use httptest for mocking)
-
-### Adding New Themes
-
-1. Create YAML file in `server/resources/themes/{name}.yaml`
-2. Themes are embedded at compile time via `go:embed` and served via MCP and REST API
-3. Theme structure includes: core_traits, structure_patterns, language_usage, domain_knowledge
-
-### Writing Tests
-
-Follow the established patterns in `app/config/config_test.go`:
-
-- Use table-driven tests for multiple scenarios
-- Create temp files/dirs with `t.TempDir()`
-- Mock HTTP calls with `httptest.NewServer`
-- Test both success and error paths
-- Use custom error types for better error handling
-
-Example test structure:
-
-```go
-func TestFeature(t *testing.T) {
-    tests := []struct {
-        name    string
-        input   string
-        want    string
-        wantErr bool
-    }{
-        {"valid case", "input", "expected", false},
-        {"error case", "bad", "", true},
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            // Test implementation
-        })
-    }
-}
+```bash
+go test ./server/mcp -run TestLiveSliceSkillFiles -count=1
+go test ./server/service -run TestBuildLive -count=1
+cd studio && bun run test -- src/lib/vite-config.test.ts
 ```
 
-### Error Handling
+Before claiming completion, run fresh verification that matches the changed surface:
 
-- `Hinter` interface (`app/errors.go`): cross-cutting pattern for user-friendly error hints, implemented by `AppError`, `ConfigError`, `GenerateError`, `WechatAPIError`
-- `WechatAPIError` (`app/wechat/errors.go`): parses WeChat error codes into messages with hints; `IsRetryable()` identifies transient errors
-- Log errors with zap structured logging: `log.Error("msg", zap.Error(err), zap.String("field", value))`
-- Return errors via JSON response in CLI commands using `responseError()`
-- Mask sensitive values in logs (see `maskMediaID()` pattern)
+- Go changes: `go test ./...` and relevant `go build -o /tmp/...`.
+- Studio changes: `cd studio && bun run test` and `cd studio && bun run build`.
+- Skill/agent contract changes: targeted `server/mcp` tests plus full Go tests.
 
-### WeChat API Integration
+## Implementation Guidance
 
-**Access Token Management**:
-
-- Automatically cached and refreshed by wechat SDK
-- No manual token management needed
-
-**Material Upload**:
-
-- Images must be < 10MB (enforced by compression)
-- Returns media_id and CDN URL
-- Retry logic handles transient failures
-
-**Draft Creation**:
-
-- Content size limit: < 20,000 characters or 1MB
-- API mode generates larger HTML due to inline CSS (use sparingly for long articles)
-- HTML must use safe tags only
-
-## Important Constraints
-
-1. **WeChat HTML Requirements**:
-   - All CSS must be inlined (style attributes)
-   - No external resources (fonts, scripts, stylesheets)
-   - Safe tags only: section, p, span, strong, em, h1-h6, ul, ol, li, blockquote, pre, code, table, img, br, hr
-   - No: script, iframe, form, input, style, link
-
-2. **Image Processing**:
-   - Max width: 1920px (configurable)
-   - Max size: 10MB for WeChat upload
-   - Compression preserves aspect ratio
-   - Supported formats: JPG, JPEG, PNG, GIF, BMP, WebP
-
-3. **Configuration**:
-   - Config is JSON only (`.anbanwriter/settings.json`)
-
-4. **AI Generation**:
-   - Prompts must be in Chinese for better results with Chinese content
-   - Theme prompts define complete styling system (colors, typography, spacing)
-   - Image generation prompts should be descriptive but concise
-
-## CLI Commands Overview
-
-- `./bin/anbanwriter account init` - Create config file with guided setup
-- `./bin/anbanwriter account history` - View unified history of drafts and published articles
-- `./bin/anbanwriter convert <file>` - Convert Markdown to WeChat HTML
-- `./bin/anbanwriter write` - Style-based writing assistance
-- `./bin/anbanwriter humanize <file>` - Remove AI writing traces
-- `./bin/anbanwriter score <file>` - Evaluate article quality (viral potential scoring)
-- `./bin/anbanwriter outline` - Generate article outline
-- `./bin/anbanwriter draft` - Manage WeChat drafts
-- `./bin/anbanwriter draft article <json_file>` - Create 图文文章 (news article) draft from JSON
-- `./bin/anbanwriter image generate <prompt>` - Generate AI images
-- `./bin/anbanwriter image upload <file>` - Upload image to WeChat CDN
-- `./bin/anbanwriter image download <url>` - Download image
-- `./bin/anbanwriter doctor` - Diagnose config and connection issues
-
-## Skills Integration
-
-The project includes Claude Code skills in `claudecode/skills/` directory:
-
-- `content-writing` - Article writing workflow
-- `visual-design` - Image and theme management
-- `topic-research` - Research and scoring
-- `seo-optimization` - SEO best practices
-- `article-publishing` - Article draft publishing workflows
-- `content-analysis` - Content quality analysis
-- `seednote-research` - 种草笔记热门内容研究与评分
-- `seednote-writing` - 种草笔记文案写作、标题优化、爆款改写
-
-Skills are auto-loaded via the [anbanwriter-plugins](https://github.com/anbanai/anbanwriter-plugins) submodule or marketplace.
-
-## Notes for Development
-
-- The codebase uses Go 1.26 features - ensure compatibility when adding new code
-- Log structured data with zap, not fmt.Printf
-- JSON responses should use `printJSON()` helper for consistent formatting
-- Two Cobra command patterns coexist: package-level var with `init()` (older) and factory functions returning `*cobra.Command` (preferred for new commands)
-- Image processing is performance-sensitive - consider adding concurrency for batch operations
-- WeChat API calls have rate limits - implement backoff/retry where needed
-
-## Plugin & Agent Ecosystem
-
-The Claude Code plugin lives in a separate repo ([anbanai/anbanwriter-claudecode](https://github.com/anbanai/anbanwriter-claudecode)) as a git submodule at `claudecode/`.
-
-```
-claudecode/                        # git submodule
-├── .claude-plugin/                # Plugin manifest
-├── agents/                        # Agent definitions
-├── skills/                        # Claude Code skills
-├── hooks/                         # Lifecycle hooks
-├── themes/                        # Conversion themes (YAML)
-└── writers/                       # Writing styles (YAML)
-```
+- Prefer current project patterns over introducing new frameworks.
+- Keep behavior changes covered by tests.
+- Do not preserve obsolete compatibility paths in this new project unless a current product path depends on them.
+- Do not revert user or submodule changes you did not make.
+- Avoid writing secrets or API keys into logs, fixtures, docs, or generated artifacts.
+- Use structured errors and user-facing hints where existing code already does.
+- For WeChat HTML, keep CSS inline and avoid unsafe tags such as `script`, `iframe`, `form`, `input`, `style`, and `link`.

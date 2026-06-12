@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -165,33 +166,62 @@ func checkAndTriggerPlans(ctx context.Context, repo repository.Repository, taskS
 	logger.Info().Int("count", len(plans)).Msg("found due plans, triggering tasks")
 
 	for _, plan := range plans {
-		planLogger := logger.With().
-			Str("plan_id", plan.ID).
-			Str("type", plan.Type).
-			Str("user_id", plan.UserID).
-			Logger()
-
-		// Create a task linked to this plan.
-		task, err := taskSvc.CreateFromPlan(ctx, plan)
-		if err != nil {
-			planLogger.Error().Err(err).Msg("failed to create task from plan")
-			continue
-		}
-
-		if task == nil {
-			continue
-		}
-
-		planLogger.Info().Str("task_id", task.ID).Msg("task created from plan")
-
-		// Advance next_run_at to the next cron occurrence.
-		nextRun, err := advancePlanNextRun(ctx, repo, plan)
-		if err != nil {
-			planLogger.Error().Err(err).Msg("failed to advance plan next_run_at")
-		} else if nextRun != nil {
-			planLogger.Info().Time("next_run", *nextRun).Msg("plan next_run_at advanced")
+		if err := triggerPlan(ctx, repo, taskSvc, plan, logger); err != nil {
+			logger.Error().Err(err).Str("plan_id", plan.ID).Msg("failed to trigger due plan")
 		}
 	}
+}
+
+// TriggerPlanNow creates a task from an active plan and advances its next run
+// time. It is used by explicit async plan trigger jobs.
+func TriggerPlanNow(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, planID string, logger *zerolog.Logger) error {
+	planID = strings.TrimSpace(planID)
+	if planID == "" {
+		return fmt.Errorf("plan_id is required")
+	}
+
+	plan, err := repo.Plans().FindByID(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("find plan %s: %w", planID, err)
+	}
+	if plan.Status != model.PlanStatusActive {
+		logger.Info().
+			Str("plan_id", plan.ID).
+			Str("status", plan.Status).
+			Msg("skipping inactive plan trigger")
+		return nil
+	}
+
+	return triggerPlan(ctx, repo, taskSvc, plan, logger)
+}
+
+func triggerPlan(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, plan *model.Plan, logger *zerolog.Logger) error {
+	planLogger := logger.With().
+		Str("plan_id", plan.ID).
+		Str("type", plan.Type).
+		Str("user_id", plan.UserID).
+		Logger()
+
+	task, err := taskSvc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		return fmt.Errorf("create task from plan %s: %w", plan.ID, err)
+	}
+
+	if task == nil {
+		planLogger.Info().Msg("plan task not created")
+		return nil
+	}
+
+	planLogger.Info().Str("task_id", task.ID).Msg("task created from plan")
+
+	nextRun, err := advancePlanNextRun(ctx, repo, plan)
+	if err != nil {
+		return fmt.Errorf("advance plan %s next_run_at: %w", plan.ID, err)
+	}
+	if nextRun != nil {
+		planLogger.Info().Time("next_run", *nextRun).Msg("plan next_run_at advanced")
+	}
+	return nil
 }
 
 // advancePlanNextRun advances the plan's next_run_at to the next cron occurrence

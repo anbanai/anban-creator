@@ -48,6 +48,58 @@ func TestTaskProcessor_SeednoteHandlers(t *testing.T) {
 	}
 }
 
+func TestTaskProcessor_PlanTriggerHandler(t *testing.T) {
+	logger := zerolog.Nop()
+	var triggered []string
+	processor := NewTaskProcessor(
+		func(ctx context.Context, taskID, userID string) error { return nil },
+		func(ctx context.Context, planID string) error {
+			triggered = append(triggered, planID)
+			return nil
+		},
+		func(ctx context.Context) error { return nil },
+		nil,
+		nil,
+		nil,
+		"127.0.0.1:6379",
+		"",
+		0,
+		1,
+		&logger,
+	)
+
+	if err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypePlanTrigger, []byte(`{"plan_id":"plan-1"}`))); err != nil {
+		t.Fatalf("process plan trigger: %v", err)
+	}
+
+	if len(triggered) != 1 || triggered[0] != "plan-1" {
+		t.Fatalf("triggered = %#v, want plan-1", triggered)
+	}
+}
+
+func TestTaskProcessor_PlanTriggerHandlerErrorsPropagate(t *testing.T) {
+	logger := zerolog.Nop()
+	wantErr := errors.New("plan trigger failed")
+	processor := NewTaskProcessor(
+		func(ctx context.Context, taskID, userID string) error { return nil },
+		func(ctx context.Context, planID string) error { return wantErr },
+		func(ctx context.Context) error { return nil },
+		nil,
+		nil,
+		nil,
+		"127.0.0.1:6379",
+		"",
+		0,
+		1,
+		&logger,
+	)
+
+	err := processor.mux.ProcessTask(context.Background(), asynq.NewTask(TypePlanTrigger, []byte(`{"plan_id":"plan-1"}`)))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+}
+
 func TestTaskProcessor_SeednoteHandlerErrorsPropagate(t *testing.T) {
 	logger := zerolog.Nop()
 	wantErr := errors.New("capture failed")

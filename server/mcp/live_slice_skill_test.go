@@ -202,3 +202,36 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		}
 	}
 }
+
+func TestCapCutDraftSkillUsesShellJSONValidation(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(wd, "..", ".."))
+
+	referencePath := filepath.Join(root, "claudecode", "skills", "capcut-draft", "references", "operations.md")
+	raw, err := os.ReadFile(referencePath)
+	if err != nil {
+		t.Fatalf("capcut-draft operations reference missing: %v", err)
+	}
+	body := string(raw)
+
+	for _, want := range []string{
+		"jq empty \"<filePath>\"",
+		"Valid JSON",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("capcut-draft operations reference missing %q", want)
+		}
+	}
+
+	for _, banned := range []string{
+		"python" + "3",
+		"import json",
+	} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("capcut-draft operations reference should not mention %q", banned)
+		}
+	}
+}

@@ -433,17 +433,17 @@ func main() {
 		}
 
 		mcp.SetServices(&mcp.Services{
-			ChannelSvc:     channelSvc,
-			TaskSvc:        taskSvc,
-			CreditSvc:      creditSvc,
-			PlanSvc:        planSvc,
-			ImageSvc:       imageSvc,
-			WritingSvc:     writingSvc,
-			PublishingSvc:  publishingSvc,
-			WorkspaceSvc:   workspaceSvc,
-			TemplateSvc:    templateSvc,
-			LiveSliceSvc:   liveSliceSvc,
-			SeednoteClient: seednoteClient,
+			ChannelSvc:       channelSvc,
+			TaskSvc:          taskSvc,
+			CreditSvc:        creditSvc,
+			PlanSvc:          planSvc,
+			ImageSvc:         imageSvc,
+			WritingSvc:       writingSvc,
+			PublishingSvc:    publishingSvc,
+			WorkspaceSvc:     workspaceSvc,
+			TemplateSvc:      templateSvc,
+			LiveSliceSvc:     liveSliceSvc,
+			SeednoteClient:   seednoteClient,
 			TopicPoolSvc:     topicPoolSvc,
 			AgentFeedbackSvc: agentFeedbackSvc,
 		})
@@ -465,7 +465,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(taskSvc, seednoteTrackingSvc, viralAnalysisSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, seednoteTrackingSvc, viralAnalysisSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -513,7 +513,7 @@ func main() {
 		PosterHandler:            posterHandler,
 		ResourceHandler:          resourceHandler,
 		TopicPoolHandler:         topicPoolHandler,
-			DesignerHandler:          designerHandler,
+		DesignerHandler:          designerHandler,
 		MCPHandler:               mcpHandler,
 		StorageProvider:          store,
 	}
@@ -677,7 +677,7 @@ func connectRedis(ctx context.Context, cfg *config.Config, log *zerolog.Logger) 
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, viralAnalysisSvc *service.ViralAnalysisService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, seednoteTrackingSvc *service.SeednoteTrackingService, viralAnalysisSvc *service.ViralAnalysisService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteDiscoverHandler scheduler.SeednoteTrackingHandler
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
@@ -701,8 +701,7 @@ func startAsynqServer(taskSvc *service.TaskService, seednoteTrackingSvc *service
 			return taskSvc.HandleExecutionFromPayload(ctx, taskID, userID)
 		},
 		func(ctx context.Context, planID string) error {
-			log.Info().Str("plan_id", planID).Msg("plan trigger: placeholder")
-			return nil
+			return scheduler.TriggerPlanNow(ctx, repo, taskSvc, planID, log)
 		},
 		func(ctx context.Context) error {
 			return taskSvc.CleanupExpiredWorkspaces(ctx)

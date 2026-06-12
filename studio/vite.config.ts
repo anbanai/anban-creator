@@ -3,6 +3,115 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
+export function manualChunks(id: string) {
+  const normalizedId = id.replace(/\\/g, '/')
+
+  if (!normalizedId.includes('node_modules')) {
+    return undefined
+  }
+
+  if (
+    normalizedId.includes('/@base-ui/react/') ||
+    normalizedId.includes('/@base-ui/utils/') ||
+    normalizedId.includes('/@floating-ui/') ||
+    normalizedId.includes('/cmdk/') ||
+    normalizedId.includes('/vaul/') ||
+    normalizedId.includes('/sonner/') ||
+    normalizedId.includes('/react-remove-scroll/') ||
+    normalizedId.includes('/react-remove-scroll-bar/') ||
+    normalizedId.includes('/aria-hidden/') ||
+    normalizedId.includes('/@radix-ui/')
+  ) {
+    return 'vendor-ui'
+  }
+
+  if (
+    normalizedId.includes('/react/') ||
+    normalizedId.includes('/react-dom/') ||
+    normalizedId.includes('/react-router-dom/') ||
+    normalizedId.includes('/react-is/') ||
+    normalizedId.includes('/use-sync-external-store/')
+  ) {
+    return 'vendor-react'
+  }
+
+  if (
+    normalizedId.includes('/@tanstack/react-query/') ||
+    normalizedId.includes('/@tanstack/query-core/') ||
+    normalizedId.includes('/axios/')
+  ) {
+    return 'vendor-data'
+  }
+
+  if (normalizedId.includes('/react-hook-form/') || normalizedId.includes('/zod/')) {
+    return 'vendor-forms'
+  }
+
+  if (
+    normalizedId.includes('/recharts/') ||
+    normalizedId.includes('/d3-') ||
+    normalizedId.includes('/victory-vendor/')
+  ) {
+    return 'vendor-charts'
+  }
+
+  if (
+    normalizedId.includes('/streamdown/') ||
+    normalizedId.includes('/react-markdown/') ||
+    normalizedId.includes('/remark-gfm/') ||
+    normalizedId.includes('/mdast-util-') ||
+    normalizedId.includes('/hast-util-') ||
+    normalizedId.includes('/micromark') ||
+    normalizedId.includes('/property-information/') ||
+    normalizedId.includes('/vfile/') ||
+    normalizedId.includes('/hastscript/') ||
+    normalizedId.includes('/@ungap/structured-clone/')
+  ) {
+    return 'vendor-markdown'
+  }
+
+  if (normalizedId.includes('/mermaid/') || normalizedId.includes('/ai/')) {
+    return 'vendor-ai'
+  }
+
+  if (
+    normalizedId.includes('/motion/') ||
+    normalizedId.includes('/motion-dom/') ||
+    normalizedId.includes('/motion-utils/') ||
+    normalizedId.includes('/framer-motion/') ||
+    normalizedId.includes('/gsap/') ||
+    normalizedId.includes('/@gsap/react/')
+  ) {
+    return 'vendor-animation'
+  }
+
+  if (normalizedId.includes('/lucide-react/')) {
+    return 'vendor-icons'
+  }
+
+  if (
+    normalizedId.includes('/embla-carousel/') ||
+    normalizedId.includes('/embla-carousel-react/') ||
+    normalizedId.includes('/react-resizable-panels/') ||
+    normalizedId.includes('/input-otp/') ||
+    normalizedId.includes('/next-themes/')
+  ) {
+    return 'vendor-interaction'
+  }
+
+  if (
+    normalizedId.includes('/date-fns/') ||
+    normalizedId.includes('/es-toolkit/') ||
+    normalizedId.includes('/clsx/') ||
+    normalizedId.includes('/tailwind-merge/') ||
+    normalizedId.includes('/class-variance-authority/')
+  ) {
+    return 'vendor-utils'
+  }
+
+  return 'vendor'
+}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -20,6 +129,13 @@ export default defineConfig({
       '/ws': {
         target: 'ws://localhost:8080',
         ws: true,
+      },
+    },
+  },
+  build: {
+    rolldownOptions: {
+      output: {
+        manualChunks,
       },
     },
   },
