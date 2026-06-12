@@ -1,4 +1,4 @@
-export type TaskType = 'seednote' | 'article' | 'xls'
+export type TaskType = 'seednote' | 'article'
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface Task {
@@ -13,7 +13,6 @@ export interface Task {
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image_url?: string
-  generate_video?: boolean
   error: string | null
   plan_id: string | null
   channel_id: string
@@ -53,7 +52,6 @@ export interface CreateTaskRequest {
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image_url?: string
-  generate_video?: boolean
   watermark?: boolean
 }
 

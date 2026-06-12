@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Film, Download, Square, CheckSquare, Stamp } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -68,7 +68,6 @@ export default function TasksPage() {
   const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
   const [quantity, setQuantity] = useState(1)
-  const [generateVideo, setGenerateVideo] = useState(false)
   const [watermark, setWatermark] = useState(false)
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
@@ -217,7 +216,6 @@ export default function TasksPage() {
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
     form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
-    setGenerateVideo(false)
     setWatermark(false)
     setChannelImageRatio('')
     setModalOpen(true)
@@ -236,7 +234,6 @@ export default function TasksPage() {
     setShowDirtyDialog(false)
     form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '' })
     setQuantity(1)
-    setGenerateVideo(false)
     setWatermark(false)
     setChannelImageRatio('')
   }
@@ -249,7 +246,6 @@ export default function TasksPage() {
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
       watermark: watermark || undefined,
-      generate_video: generateVideo || undefined,
     }))
   }
 
@@ -632,27 +628,6 @@ export default function TasksPage() {
                   <p className="mt-0.5 text-xs text-muted-foreground">开启后生成的图片将带有水印（仅火山引擎支持）</p>
                 </div>
               </button>
-
-              {/* Generate video toggle — only for image-heavy types */}
-              {(watchedType === 'seednote' || watchedType === 'xls') && (
-                <button
-                  type="button"
-                  onClick={() => setGenerateVideo(!generateVideo)}
-                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                    generateVideo
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-foreground/20'
-                  }`}
-                >
-                  <Film className={`mt-0.5 h-5 w-5 shrink-0 ${generateVideo ? 'text-primary' : 'text-muted-foreground'}`} />
-                  <div className="min-w-0">
-                    <p className={`text-sm font-medium ${generateVideo ? 'text-foreground' : 'text-muted-foreground'}`}>
-                      生成视频
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">开启后将自动合成视频</p>
-                  </div>
-                </button>
-              )}
 
               {/* Cost display */}
               {(() => {

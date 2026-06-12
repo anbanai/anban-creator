@@ -7,7 +7,6 @@ const typeBadgeMap: Record<TemplateType, { label: string; className: string }> =
   poster: { label: '海报', className: 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' },
   seednote: { label: '种草笔记', className: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20' },
   article: { label: '公众号', className: 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20' },
-  xls: { label: '小绿书', className: 'bg-purple-500/10 text-purple-400 ring-1 ring-purple-500/20' },
 }
 
 interface TemplateCardProps {

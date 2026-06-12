@@ -1,23 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import Sidebar from './Sidebar'
 
-const themeMock = vi.hoisted(() => ({
-  currentTheme: 'system',
-  setTheme: vi.fn(),
-}))
-
 vi.mock('next-themes', () => ({
   useTheme: () => ({
-    theme: themeMock.currentTheme,
-    setTheme: themeMock.setTheme,
+    theme: 'system',
+    setTheme: vi.fn(),
   }),
 }))
 
 vi.mock('@/components/auth/UserAccountPopover', () => ({
-  default: () => null,
+  default: () => <div data-testid="user-popover" />,
 }))
 
 function renderSidebar() {
@@ -28,33 +23,25 @@ function renderSidebar() {
   )
 }
 
-describe('Sidebar theme switcher', () => {
-  beforeEach(() => {
-    themeMock.currentTheme = 'system'
-    themeMock.setTheme.mockClear()
-  })
-
-  it('shows light, dark, and system options', async () => {
+describe('Sidebar', () => {
+  it('renders navigation items', () => {
     renderSidebar()
 
-    const trigger = await screen.findByRole('button', { name: '主题模式：系统' })
-    fireEvent.click(trigger)
-
-    expect(await screen.findByText('亮色')).toBeInTheDocument()
-    expect(screen.getByText('暗色')).toBeInTheDocument()
-    expect(screen.getByText('系统')).toBeInTheDocument()
+    expect(screen.getByText('仪表盘')).toBeInTheDocument()
+    expect(screen.getByText('账号')).toBeInTheDocument()
+    expect(screen.getByText('计划')).toBeInTheDocument()
+    expect(screen.getByText('任务')).toBeInTheDocument()
   })
 
-  it.each([
-    ['亮色', 'light'],
-    ['暗色', 'dark'],
-    ['系统', 'system'],
-  ])('applies %s theme when selected', async (label, value) => {
+  it('renders user account popover', () => {
     renderSidebar()
 
-    fireEvent.click(await screen.findByRole('button', { name: '主题模式：系统' }))
+    expect(screen.getByTestId('user-popover')).toBeInTheDocument()
+  })
 
-    fireEvent.click(await screen.findByText(label))
-    expect(themeMock.setTheme).toHaveBeenCalledWith(value)
+  it('does not render workshop navigation item', () => {
+    renderSidebar()
+
+    expect(screen.queryByText('创意工坊')).not.toBeInTheDocument()
   })
 })

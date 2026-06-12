@@ -27,6 +27,7 @@ type Repository interface {
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
+	AgentFeedbacks() AgentFeedbackRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -160,6 +161,12 @@ type TopicPoolRepository interface {
 	Delete(ctx context.Context, id uint) error
 }
 
+// AgentFeedbackRepository provides access to the agent_feedbacks table.
+type AgentFeedbackRepository interface {
+	Create(ctx context.Context, feedback *model.AgentFeedback) error
+	FindByTaskID(ctx context.Context, taskID string) ([]*model.AgentFeedback, error)
+}
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
@@ -182,6 +189,7 @@ type repository struct {
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
+	agentFeedbacks          AgentFeedbackRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -202,6 +210,7 @@ func New(db *gorm.DB) Repository {
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
+	agentFeedbacks := newAgentFeedbackRepository(db)
 
 	return &repository{
 		db:                      db,
@@ -221,6 +230,7 @@ func New(db *gorm.DB) Repository {
 		viralAnalyses:           viralAnalyses,
 		posterTasks:             posterTasks,
 		topicPools:              topicPools,
+		agentFeedbacks:          agentFeedbacks,
 	}
 }
 
@@ -241,6 +251,8 @@ func (r *repository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepository 
 func (r *repository) Templates() TemplateRepository          { return r.templates }
 func (r *repository) ViralAnalyses() ViralAnalysisRepository { return r.viralAnalyses }
 func (r *repository) PosterTasks() PosterTaskRepository      { return r.posterTasks }
+func (r *repository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
+
 func (r *repository) TopicPools() TopicPoolRepository        { return r.topicPools }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
@@ -284,6 +296,7 @@ type txRepository struct {
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
+	agentFeedbacks          AgentFeedbackRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -305,6 +318,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		viralAnalyses:           newViralAnalysisRepository(tx),
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
+		agentFeedbacks:          newAgentFeedbackRepository(tx),
 	}
 }
 
@@ -325,6 +339,8 @@ func (r *txRepository) SeednoteMetricSnapshots() SeednoteMetricSnapshotRepositor
 func (r *txRepository) Templates() TemplateRepository          { return r.templates }
 func (r *txRepository) ViralAnalyses() ViralAnalysisRepository { return r.viralAnalyses }
 func (r *txRepository) PosterTasks() PosterTaskRepository      { return r.posterTasks }
+func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
+
 func (r *txRepository) TopicPools() TopicPoolRepository        { return r.topicPools }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {

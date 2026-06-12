@@ -16,18 +16,19 @@ import (
 
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ChannelSvc     *service.ChannelService
-	TaskSvc        *service.TaskService
-	CreditSvc      *service.CreditService
-	PlanSvc        *service.PlanService
-	ImageSvc       *service.ImageService
-	WritingSvc     *service.WritingService
-	PublishingSvc  *service.PublishingService
-	WorkspaceSvc   *service.WorkspaceService
-	TemplateSvc    *service.TemplateService
-	LiveSliceSvc   *service.LiveSliceService
-	SeednoteClient *seednote.Client
-	TopicPoolSvc   *service.TopicPoolService
+	ChannelSvc       *service.ChannelService
+	TaskSvc          *service.TaskService
+	CreditSvc        *service.CreditService
+	PlanSvc          *service.PlanService
+	ImageSvc         *service.ImageService
+	WritingSvc       *service.WritingService
+	PublishingSvc    *service.PublishingService
+	WorkspaceSvc     *service.WorkspaceService
+	TemplateSvc      *service.TemplateService
+	LiveSliceSvc     *service.LiveSliceService
+	SeednoteClient   *seednote.Client
+	TopicPoolSvc     *service.TopicPoolService
+	AgentFeedbackSvc *service.AgentFeedbackService
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -46,6 +47,8 @@ func RegisterTools(server *mcp.Server) {
 	registerSeednoteTools(server)
 	registerLiveSliceTools(server)
 	registerTopicPoolTools(server)
+	registerProgressTools(server)
+	registerAgentFeedbackTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.

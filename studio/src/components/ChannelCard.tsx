@@ -13,13 +13,11 @@ interface ChannelCardProps {
 
 const platformLabels: Record<string, string> = {
   article: '公众号',
-  xls: '小绿书',
   seednote: '种草笔记',
 }
 
 const platformColors: Record<string, string> = {
   article: 'bg-green-500/15 text-green-700 dark:text-green-400',
-  xls: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
   seednote: 'bg-red-500/15 text-red-700 dark:text-red-400',
 }
 

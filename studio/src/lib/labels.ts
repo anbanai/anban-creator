@@ -185,7 +185,6 @@ export const operationLabel: Record<string, string> = {
 export const taskTypeLabelCN: Record<string, string> = {
   article: '公众号',
   seednote: '种草笔记',
-  xls: '小绿书',
   viral_analysis: '爆文拆解',
 }
 
@@ -194,31 +193,26 @@ export const taskTypeLabelCN: Record<string, string> = {
 export const contentTypeLabel: Record<string, string> = {
   seednote: '种草笔记',
   article: '公众号文章',
-  xls: '小绿书',
 }
 
 export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
-  { value: 'xls', label: '小绿书' },
 ]
 
 export const platformLabels: Record<string, string> = {
   seednote: '种草笔记',
   article: '公众号',
-  xls: '小绿书',
 }
 
 export const platformDefaultRatio: Record<string, string> = {
   article: '16:9',
   seednote: '3:4',
-  xls: '1:1',
 }
 
 export const platformRatioLabel: Record<string, string> = {
   article: '16:9（公众号默认）',
   seednote: '3:4（种草笔记默认）',
-  xls: '1:1（小绿书默认）',
 }
 
 // --- Option Arrays ---

@@ -18,7 +18,6 @@ const typeBadgeMap: Record<TemplateType, { label: string; className: string }> =
   poster: { label: '海报', className: 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' },
   seednote: { label: '种草笔记', className: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20' },
   article: { label: '公众号', className: 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20' },
-  xls: { label: '小绿书', className: 'bg-purple-500/10 text-purple-400 ring-1 ring-purple-500/20' },
 }
 
 function JsonDisplay({ data, title }: { data: Record<string, unknown>; title: string }) {
@@ -148,7 +147,7 @@ export function TemplatePreview({ template, open, onOpenChange }: TemplatePrevie
 
         {/* Action buttons */}
         <div className="flex gap-2 pt-2">
-          {(data.type === 'poster' || data.type === 'article' || data.type === 'xls') && (
+          {(data.type === 'poster' || data.type === 'article') && (
             <Button size="sm" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=article') }}>
               用于公众号
             </Button>
@@ -156,11 +155,6 @@ export function TemplatePreview({ template, open, onOpenChange }: TemplatePrevie
           {(data.type === 'seednote' || data.type === 'poster') && (
             <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=seednote') }}>
               用于种草笔记
-            </Button>
-          )}
-          {data.type === 'xls' && (
-            <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=xls') }}>
-              用于小绿书
             </Button>
           )}
         </div>

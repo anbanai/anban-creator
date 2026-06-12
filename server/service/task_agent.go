@@ -42,6 +42,25 @@ func (s *TaskService) AppendProgressLog(ctx context.Context, taskID, message str
 	return nil
 }
 
+// UpdateProgress records a structured progress update for a task stage.
+func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, description string, percent int) error {
+	payload := map[string]any{
+		"stage": stage,
+		"title": title,
+	}
+	if description != "" {
+		payload["description"] = description
+	}
+	if percent > 0 {
+		payload["percent"] = percent
+	}
+	msg, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal progress: %w", err)
+	}
+	return s.AppendProgressLog(ctx, taskID, string(msg))
+}
+
 // UpdateExecutionResult stores the latest execution result JSON for a task.
 func (s *TaskService) UpdateExecutionResult(ctx context.Context, taskID string, result *serveragent.ExecutionResult) error {
 	if result == nil {

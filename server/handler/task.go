@@ -50,7 +50,6 @@ type createTaskRequest struct {
 	Prompt             string `json:"prompt"`
 	Quantity           int    `json:"quantity"`
 	ImageRatio         string `json:"image_ratio"`
-	GenerateVideo      bool   `json:"generate_video"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
 	Watermark          *bool  `json:"watermark"`
@@ -95,10 +94,6 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 
 	if !validReferenceImageURL(req.ReferenceImageURL) {
 		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
-	}
-
-	if req.GenerateVideo {
-		return Error(c, fiber.StatusBadRequest, "video generation is no longer supported")
 	}
 
 	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)

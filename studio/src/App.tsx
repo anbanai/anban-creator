@@ -26,7 +26,7 @@ const CreditsPage = React.lazy(() => import('@/pages/CreditsPage'))
 const UsagePage = React.lazy(() => import('@/pages/UsagePage'))
 const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
 const TemplatesPage = React.lazy(() => import('@/pages/TemplatesPage'))
-const WorkshopPage = React.lazy(() => import('@/pages/WorkshopPage'))
+
 const DesignerPage = React.lazy(() => import('@/pages/DesignerPage'))
 const ClaudeCodeGuidePage = React.lazy(() => import('@/pages/ConnectGuidePage'))
 const OpenClawGuidePage = React.lazy(() => import('@/pages/OpenClawGuidePage'))
@@ -131,7 +131,7 @@ function AppRoutes() {
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />
           <Route path="templates" element={<LazyPage component={TemplatesPage} />} />
-          <Route path="workshop" element={<LazyPage component={WorkshopPage} />} />
+
           <Route path="designer" element={<LazyPage component={DesignerPage} />} />
           <Route path="credits" element={<LazyPage component={CreditsPage} />} />
           <Route path="usage" element={<LazyPage component={UsagePage} />} />

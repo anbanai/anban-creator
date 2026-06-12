@@ -327,6 +327,7 @@ func main() {
 	var resourceHandler *handler.ResourceHandler
 	var topicPoolHandler *handler.TopicPoolHandler
 	var topicPoolSvc *service.TopicPoolService
+	var agentFeedbackSvc *service.AgentFeedbackService
 	var designerSvc *service.DesignerService
 	var designerHandler *handler.DesignerHandler
 
@@ -375,6 +376,7 @@ func main() {
 		if taskSvc != nil {
 			taskSvc.SetTopicPoolService(topicPoolSvc)
 		}
+		agentFeedbackSvc = service.NewAgentFeedbackService(repo, log)
 	}
 	resourceHandler = handler.NewResourceHandler(log)
 	if modelConfigSvc != nil {
@@ -442,7 +444,8 @@ func main() {
 			TemplateSvc:    templateSvc,
 			LiveSliceSvc:   liveSliceSvc,
 			SeednoteClient: seednoteClient,
-			TopicPoolSvc:   topicPoolSvc,
+			TopicPoolSvc:     topicPoolSvc,
+			AgentFeedbackSvc: agentFeedbackSvc,
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcp.SetLogger(log)

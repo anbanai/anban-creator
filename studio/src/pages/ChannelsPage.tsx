@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Plus, Inbox, ChevronDown } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -34,7 +33,6 @@ import { renderPlatformIcon } from '@/lib/PlatformIcon'
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
-  { value: 'xls', label: '小绿书' },
 ]
 
 const statusTabs: { label: string; value: string }[] = [
@@ -95,7 +93,6 @@ function channelToForm(ch: Channel): ChannelFormValues {
 
 export default function ChannelsPage() {
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState('all')
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
@@ -344,7 +341,7 @@ export default function ChannelsPage() {
     if (!payload.image_ratio) {
       if (payload.platform === 'article') {
         payload.image_ratio = '16:9'
-      } else if (payload.platform === 'seednote' || payload.platform === 'xls') {
+      } else if (payload.platform === 'seednote') {
         payload.image_ratio = '3:4'
       }
     }
@@ -365,7 +362,7 @@ export default function ChannelsPage() {
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
-  const isWechat = selectedPlatform === 'article' || selectedPlatform === 'xls'
+  const isWechat = selectedPlatform === 'article'
   const isSeednote = selectedPlatform === 'seednote'
 
   return (
@@ -779,9 +776,8 @@ export default function ChannelsPage() {
         <TemplateRecommend
           templates={recommendedTemplates}
           onClose={() => setRecommendedTemplates([])}
-          onUseTemplate={(template: Template) => {
+          onUseTemplate={() => {
             setRecommendedTemplates([])
-            navigate(`/workshop?tab=clone&templateId=${template.id}`)
           }}
         />
       )}
