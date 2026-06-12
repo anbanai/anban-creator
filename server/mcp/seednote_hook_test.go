@@ -14,7 +14,8 @@ func TestSeednoteFinalTitleOwnership(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 
-	// The agent should own finalize_task_title (D2: moved from hook to agent).
+	// The agent should own save_template (conditional business logic).
+	// The agent should NOT own finalize_task_title (that belongs to the hook).
 	agentPath := filepath.Join(root, "claudecode", "agents", "seednote.md")
 	raw, err := os.ReadFile(agentPath)
 	if err != nil {
@@ -22,8 +23,6 @@ func TestSeednoteFinalTitleOwnership(t *testing.T) {
 	}
 	agentBody := string(raw)
 	for _, want := range []string{
-		"finalize_task_title",
-		"重复标题错误",
 		"save_template",
 		"save_eligible",
 	} {
@@ -31,8 +30,12 @@ func TestSeednoteFinalTitleOwnership(t *testing.T) {
 			t.Fatalf("seednote agent missing %q", want)
 		}
 	}
+	// finalize_task_title should NOT be in the agent
+	if strings.Contains(agentBody, "finalize_task_title") {
+		t.Fatalf("seednote agent should NOT contain finalize_task_title (belongs to hook)")
+	}
 
-	// The hook should NOT contain business logic for title finalization or template saving.
+	// The hook should own finalize_task_title (post-condition guarantee).
 	hooksPath := filepath.Join(root, "claudecode", "hooks", "hooks.json")
 	hooksRaw, err := os.ReadFile(hooksPath)
 	if err != nil {
@@ -41,6 +44,7 @@ func TestSeednoteFinalTitleOwnership(t *testing.T) {
 	hooks := string(hooksRaw)
 	for _, want := range []string{
 		`"matcher": "seednote"`,
+		"finalize_task_title",
 		"submit_agent_feedback",
 	} {
 		if !strings.Contains(hooks, want) {

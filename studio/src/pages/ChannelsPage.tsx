@@ -8,10 +8,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig, Template } from '@/types'
+import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
-import { TemplateRecommend } from '@/components/channels/TemplateRecommend'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -102,7 +101,6 @@ export default function ChannelsPage() {
   const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
-  const [recommendedTemplates, setRecommendedTemplates] = useState<Template[]>([])
   const { submit } = useSubmitLock()
 
   const form = useForm<ChannelFormValues>({
@@ -225,15 +223,11 @@ export default function ChannelsPage() {
 
   const createMutation = useMutation({
     mutationFn: (data: CreateChannelRequest) => api.channels.create(data),
-    onSuccess: (result) => {
+    onSuccess: () => {
       toast.success('账号创建成功')
       queryClient.invalidateQueries({ queryKey: ['channels'] })
       queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
       resetModal()
-      const channel = result.channel
-      if (channel.platform === 'seednote' && result.recommended_templates && result.recommended_templates.length > 0) {
-        setRecommendedTemplates(result.recommended_templates)
-      }
     },
     onError: (err) => {
       toast.error(getApiErrorMessage(err, '创建账号失败，请重试'))
@@ -771,16 +765,6 @@ export default function ChannelsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Template recommendation after seednote channel creation */}
-      {recommendedTemplates.length > 0 && (
-        <TemplateRecommend
-          templates={recommendedTemplates}
-          onClose={() => setRecommendedTemplates([])}
-          onUseTemplate={() => {
-            setRecommendedTemplates([])
-          }}
-        />
-      )}
     </div>
   )
 }

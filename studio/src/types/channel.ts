@@ -69,7 +69,6 @@ export interface CreateChannelRequest {
 
 export interface CreateChannelResponse {
   channel: Channel
-  recommended_templates?: import('./template').Template[]
 }
 
 export interface PlatformFieldConfig {
