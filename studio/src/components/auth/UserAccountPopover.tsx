@@ -80,7 +80,7 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
         <DropdownMenuSeparator />
         <DropdownMenuItem
           variant="destructive"
-          onSelect={() => void logout()}
+          onClick={() => void logout()}
         >
           <LogOut className="h-4 w-4" />
           退出登录
