@@ -68,6 +68,10 @@ func (f *fakeStorageProvider) DownloadURL(context.Context, string, int) (string,
 
 func (f *fakeStorageProvider) HasCustomDomain() bool { return false }
 
+func (f *fakeStorageProvider) IsOwnedURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "/api/v1/files/")
+}
+
 func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {
 	llm := &fakeChannelLLM{response: `{
 		"positioning": "面向职场人的高效生活方式账号",

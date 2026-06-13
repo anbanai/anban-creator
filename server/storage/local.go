@@ -166,3 +166,10 @@ func (p *LocalProvider) DownloadURL(_ context.Context, key string, _ int) (strin
 func (p *LocalProvider) HasCustomDomain() bool {
 	return false
 }
+
+// IsOwnedURL reports whether the given URL is a local-storage file URL served
+// by this backend. Local URLs are relative paths under /api/v1/files/. Absolute
+// URLs are rejected to prevent SSRF.
+func (p *LocalProvider) IsOwnedURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "/api/v1/files/")
+}

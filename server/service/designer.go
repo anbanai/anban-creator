@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +24,11 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )
+
+// ErrURLNotOwned is returned by UploadReferenceFromURL when the supplied URL
+// does not point at this backend's storage or is not owned by the calling user.
+// Handlers should map this to a 4xx response.
+var ErrURLNotOwned = errors.New("url not allowed")
 
 type DesignerService struct {
 	db        *gorm.DB
@@ -493,6 +500,13 @@ func isLocalFilePath(url string) bool {
 }
 
 func (s *DesignerService) UploadReference(ctx context.Context, userID string, filename string, data []byte) (string, error) {
+	return s.registerReferenceFile(ctx, userID, filename, data)
+}
+
+// registerReferenceFile saves the bytes to a temp file with the canonical
+// "anbanwriter_ref_{fileID}_{filename}" naming (which resolveFilePath globs
+// against), mirrors them to remote storage when configured, and returns the fileID.
+func (s *DesignerService) registerReferenceFile(ctx context.Context, userID, filename string, data []byte) (string, error) {
 	fileID := uuid.New().String()
 
 	// Always save locally so providers can read file paths
@@ -520,6 +534,65 @@ func (s *DesignerService) UploadReference(ctx context.Context, userID string, fi
 	}
 
 	return fileID, nil
+}
+
+// UploadReferenceFromURL downloads an image from a storage URL owned by this
+// backend and by the calling user, then registers it as a reference file. Used
+// to avoid CORS errors when the client needs to re-upload an image it has
+// loaded from a cross-origin signed OSS URL. Returns the same fileID shape as
+// UploadReference. Returns ErrURLNotOwned if the URL fails the bucket or
+// per-user ownership checks.
+func (s *DesignerService) UploadReferenceFromURL(ctx context.Context, userID, rawURL string) (string, error) {
+	if s.storage == nil {
+		return "", fmt.Errorf("storage not configured")
+	}
+	if !s.storage.IsOwnedURL(rawURL) {
+		return "", ErrURLNotOwned
+	}
+
+	var data []byte
+	var ext string
+
+	// Local storage URLs are relative paths served by this backend — read
+	// directly via the storage abstraction instead of an HTTP fetch.
+	if key, ok := strings.CutPrefix(rawURL, "/api/v1/files/"); ok {
+		if !strings.HasPrefix(key, userID+"/") {
+			return "", ErrURLNotOwned
+		}
+		var err error
+		data, err = s.storage.Read(ctx, key)
+		if err != nil {
+			return "", fmt.Errorf("read local reference: %w", err)
+		}
+		ext = filepath.Ext(key)
+	} else {
+		// Remote OSS URL: enforce per-user ownership on the path, then download
+		// via the shared helper (limits to 10MB, infers extension from
+		// Content-Type). OSS object keys for designer results are shaped
+		// "{userID}/designer/{genID}/{index}{ext}" (see uploadGeneratedImage).
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return "", fmt.Errorf("invalid url: %w", err)
+		}
+		if !strings.HasPrefix(u.Path, "/"+userID+"/") {
+			return "", ErrURLNotOwned
+		}
+		tmpPath, err := downloadToTempFile(ctx, rawURL, 0)
+		if err != nil {
+			return "", fmt.Errorf("download reference: %w", err)
+		}
+		defer os.Remove(tmpPath)
+		data, err = os.ReadFile(tmpPath)
+		if err != nil {
+			return "", fmt.Errorf("read downloaded reference: %w", err)
+		}
+		ext = filepath.Ext(tmpPath)
+	}
+
+	if ext == "" {
+		ext = ".png"
+	}
+	return s.registerReferenceFile(ctx, userID, "source"+ext, data)
 }
 
 func (s *DesignerService) GetHistory(ctx context.Context, userID, channelID string, page, pageSize int) ([]model.ImageGeneration, int64, error) {

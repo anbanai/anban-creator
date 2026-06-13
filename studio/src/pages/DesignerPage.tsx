@@ -268,10 +268,7 @@ export default function DesignerPage() {
 
     try {
       const [sourceRes, maskRes] = await Promise.all([
-        fetch(editingImage.url).then((r) => r.blob()).then((blob) => {
-          const file = new File([blob], 'source.png', { type: 'image/png' })
-          return designerApi.uploadReference(file)
-        }),
+        designerApi.uploadReferenceFromUrl(editingImage.url),
         designerApi.uploadReference(maskFile),
       ])
 

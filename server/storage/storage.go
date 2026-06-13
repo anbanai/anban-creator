@@ -23,4 +23,7 @@ type Provider interface {
 	Delete(ctx context.Context, key string) error
 	DownloadURL(ctx context.Context, key string, expirySeconds int) (string, error)
 	HasCustomDomain() bool
+	// IsOwnedURL reports whether the given URL points at this storage backend.
+	// Used as an SSRF guard before server-side fetches of user-supplied URLs.
+	IsOwnedURL(rawURL string) bool
 }

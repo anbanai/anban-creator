@@ -18,6 +18,11 @@ export const designerApi = {
     )
   },
 
+  uploadReferenceFromUrl: (url: string) =>
+    unwrap<{ file_id: string; filename: string; size: number }>(
+      http.post('/designer/upload-reference-from-url', { url }),
+    ),
+
   getHistory: (params: { channel_id?: string; page?: number; page_size?: number } = {}) =>
     unwrap<HistoryResponse>(http.get('/designer/history', { params })),
 

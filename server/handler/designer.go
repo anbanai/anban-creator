@@ -138,6 +138,47 @@ func (h *DesignerHandler) UploadReference(c fiber.Ctx) error {
 	})
 }
 
+// UploadReferenceFromURL handles POST /api/v1/designer/upload-reference-from-url
+//
+// Downloads an image from a storage URL owned by this backend and registers it
+// as a reference file. Used by the designer edit flow to avoid CORS errors when
+// the client would otherwise need to fetch() a signed OSS URL in order to
+// re-upload it.
+func (h *DesignerHandler) UploadReferenceFromURL(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := c.Bind().JSON(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if req.URL == "" {
+		return Error(c, fiber.StatusBadRequest, "url is required")
+	}
+	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") && !strings.HasPrefix(req.URL, "/api/v1/files/") {
+		return Error(c, fiber.StatusBadRequest, "invalid url")
+	}
+
+	fileID, err := h.svc.UploadReferenceFromURL(c.Context(), userID, req.URL)
+	if err != nil {
+		if errors.Is(err, service.ErrURLNotOwned) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("designer upload reference from url failed")
+		return Error(c, fiber.StatusInternalServerError, err.Error())
+	}
+
+	return Success(c, fiber.Map{
+		"file_id":  fileID,
+		"filename": "source",
+		"size":     0,
+	})
+}
+
 // GetHistory handles GET /api/v1/designer/history
 func (h *DesignerHandler) GetHistory(c fiber.Ctx) error {
 	userID := GetUserID(c)

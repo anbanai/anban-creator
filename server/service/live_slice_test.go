@@ -77,6 +77,10 @@ func (s *fakeLiveStorage) DownloadURL(_ context.Context, key string, _ int) (str
 
 func (s *fakeLiveStorage) HasCustomDomain() bool { return true }
 
+func (s *fakeLiveStorage) IsOwnedURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "https://cdn.example.com/") || strings.HasPrefix(rawURL, "https://signed.example.com/")
+}
+
 func (f *fakeLiveSliceTingWu) CreateTask(_ context.Context, req LiveAnalysisTaskRequest) (string, error) {
 	f.createReq = req
 	return "tw-task-1", nil

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -209,4 +210,30 @@ func (p *OSSProvider) DownloadURL(_ context.Context, key string, expirySeconds i
 // HasCustomDomain reports whether a custom CDN domain is configured for public access.
 func (p *OSSProvider) HasCustomDomain() bool {
 	return p.customDomain != ""
+}
+
+// IsOwnedURL reports whether the given URL points at this OSS bucket.
+// Used as an SSRF guard before server-side fetches of user-supplied URLs.
+// The scheme must be http/https, the host (case-insensitive, port-insensitive)
+// must match either the configured custom domain or the default
+// "{bucket}.{endpoint}" form.
+func (p *OSSProvider) IsOwnedURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if p.customDomain != "" {
+		domain := strings.TrimPrefix(strings.TrimPrefix(p.customDomain, "https://"), "http://")
+		if i := strings.Index(domain, "/"); i >= 0 {
+			domain = domain[:i]
+		}
+		domain = strings.ToLower(strings.TrimRight(domain, "/"))
+		return host == domain
+	}
+	expected := strings.ToLower(fmt.Sprintf("%s.%s", p.bucketName, p.endpoint))
+	return host == expected
 }
