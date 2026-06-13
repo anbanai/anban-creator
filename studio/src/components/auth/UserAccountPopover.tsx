@@ -8,6 +8,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuGroup,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu'
@@ -54,10 +55,12 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
         align={collapsed ? "end" : "start"}
         className="w-56"
       >
-        <DropdownMenuLabel>
-          <p className="truncate text-sm font-medium text-popover-foreground">{user.nickname || '用户'}</p>
-          <p className="truncate text-xs font-normal text-muted-foreground">{user.email}</p>
-        </DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>
+            <p className="truncate text-sm font-medium text-popover-foreground">{user.nickname || '用户'}</p>
+            <p className="truncate text-xs font-normal text-muted-foreground">{user.email}</p>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup
           value={theme || 'system'}
