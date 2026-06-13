@@ -83,7 +83,7 @@ export const channelSchema = z.object({
   wechat_app_id: z.string().optional(),
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
-  positioning: z.string().max(300, "账号定位不能超过 300 个字符").optional(),
+  positioning: z.string().max(1024, "账号定位不能超过 1024 个字符").optional(),
   style: z.string().max(1024, "风格描述不能超过 1024 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
   author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
