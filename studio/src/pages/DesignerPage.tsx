@@ -24,7 +24,6 @@ const DEFAULT_SETTINGS: DesignerSettings = {
   compression: 100,
   background: 'auto',
   referenceFiles: [],
-  maskFile: null,
   watermark: false,
 }
 
@@ -185,13 +184,6 @@ export default function DesignerPage() {
           )).map((r) => r.file_id)
         : []
 
-      // Upload mask if present
-      let maskFileId: string | undefined
-      if (settings.maskFile) {
-        const result = await designerApi.uploadReference(settings.maskFile)
-        maskFileId = result.file_id
-      }
-
       // Start async generation
       const sizeWithTier = settings.resolution === '2K' ? settings.size : `${settings.size}:${settings.resolution}`
       const { generation_id } = await designerApi.generate({
@@ -206,7 +198,6 @@ export default function DesignerPage() {
         output_compression: effectiveCaps?.hasCompression && settings.compression < 100 ? settings.compression : undefined,
         background: effectiveCaps?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
         reference_file_ids: refFileIds.length > 0 ? refFileIds : undefined,
-        mask_file_id: maskFileId,
         watermark: settings.watermark || undefined,
       })
 
@@ -323,13 +314,7 @@ export default function DesignerPage() {
               images={currentImages}
               isGenerating={isGenerating}
               canInpaint={canInpaint}
-              onImageClick={(img) => {
-                if (canInpaint) {
-                  setEditingImage(img)
-                } else {
-                  setPreviewImage(img.url)
-                }
-              }}
+              onImageClick={(img) => setPreviewImage(img.url)}
               onEdit={(img) => setEditingImage(img)}
             />
           )}

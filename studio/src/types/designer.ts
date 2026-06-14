@@ -25,7 +25,7 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
     outputFormats: ['png', 'jpeg', 'webp'],
     flexibleSize: false,
     watermark: false,
-    sizePresets: ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x1152', '2048x2048', '3840x2160', '2160x3840'],
+    sizePresets: ['auto', '1024x1024', '1536x1024', '1024x1536'],
     hasCompression: true,
     hasBackground: true,
   },
@@ -108,7 +108,6 @@ export interface DesignerSettings {
   compression: number
   background: string
   referenceFiles: File[]
-  maskFile: File | null
   watermark: boolean
 }
 

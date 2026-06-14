@@ -34,6 +34,43 @@ function isShapeStroke(s: AnyStroke): s is ShapeStroke {
   return s.type === 'rect' || s.type === 'circle'
 }
 
+// Draw a brush stroke as a continuous line connecting all sampled points.
+// Without this, fast pointer movement produces sparse pointermove events
+// and the stroke looks like disconnected dots.
+function paintBrushStroke(ctx: CanvasRenderingContext2D, points: BrushPoint[]) {
+  if (points.length === 0) return
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+
+  if (points.length === 1) {
+    const p = points[0]
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2)
+    ctx.fill()
+    return
+  }
+
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]
+    const b = points[i]
+    ctx.beginPath()
+    ctx.lineWidth = (a.size + b.size) / 2
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+  }
+
+  // Cap both ends with circles so the stroke keeps its diameter at the endpoints.
+  const first = points[0]
+  const last = points[points.length - 1]
+  ctx.beginPath()
+  ctx.arc(first.x, first.y, first.size / 2, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(last.x, last.y, last.size / 2, 0, Math.PI * 2)
+  ctx.fill()
+}
+
 export interface InlineMaskEditorHandle {
   exportMask: () => Promise<File | null>
 }
@@ -108,12 +145,9 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
             ctx.shadowBlur = 0
           }
 
-          ctx.beginPath()
-          for (const point of points) {
-            ctx.moveTo(point.x + point.size / 2, point.y)
-            ctx.arc(point.x, point.y, point.size / 2, 0, Math.PI * 2)
-          }
-          ctx.fill()
+          ctx.strokeStyle = 'rgba(255, 100, 50, 0.45)'
+          ctx.fillStyle = 'rgba(255, 100, 50, 0.45)'
+          paintBrushStroke(ctx, points)
           ctx.shadowBlur = 0
         } else {
           const { startX, startY, endX, endY } = stroke.bounds
@@ -310,12 +344,9 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
             ctx.shadowColor = 'rgba(0, 0, 0, 1)'
           }
 
-          ctx.beginPath()
-          for (const point of points) {
-            ctx.moveTo(point.x + point.size / 2, point.y)
-            ctx.arc(point.x, point.y, point.size / 2, 0, Math.PI * 2)
-          }
-          ctx.fill()
+          ctx.strokeStyle = '#000000'
+          ctx.fillStyle = '#000000'
+          paintBrushStroke(ctx, points)
           ctx.shadowBlur = 0
         } else {
           const { startX, startY, endX, endY } = stroke.bounds

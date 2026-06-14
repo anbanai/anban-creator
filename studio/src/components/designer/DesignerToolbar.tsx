@@ -4,7 +4,6 @@ import {
   Proportions,
   Layers,
   ImagePlus,
-  Paintbrush,
   History,
   X,
   Upload,
@@ -42,13 +41,9 @@ const RESOLUTION_OPTIONS = [
 // Size preset labels for GPT-Image pixel sizes
 const SIZE_PRESET_LABELS: Record<string, { label: string; desc: string }> = {
   'auto': { label: '自动', desc: '智能选择' },
-  '1024x1024': { label: '1K', desc: '方形' },
-  '1536x1024': { label: '1.5K', desc: '横屏' },
-  '1024x1536': { label: '1.5K', desc: '竖屏' },
-  '2048x1152': { label: '2K', desc: '横屏' },
-  '2048x2048': { label: '2K', desc: '方形' },
-  '3840x2160': { label: '4K', desc: '横屏' },
-  '2160x3840': { label: '4K', desc: '竖屏' },
+  '1024x1024': { label: '1:1', desc: '1024×1024' },
+  '1536x1024': { label: '3:2', desc: '1536×1024 · 横屏' },
+  '1024x1536': { label: '2:3', desc: '1024×1536 · 竖屏' },
 }
 
 function validateCustomSize(w: number, h: number): string | null {
@@ -67,8 +62,8 @@ function SizePresetSection({ presets, value, onChange }: {
   value: string
   onChange: (size: string) => void
 }) {
-  const [customW, setCustomW] = useState(1024)
-  const [customH, setCustomH] = useState(1024)
+  const [customW, setCustomW] = useState(1280)
+  const [customH, setCustomH] = useState(1280)
   const isCustom = value === 'custom' || (value !== 'auto' && !presets.includes(value))
 
   const customError = isCustom ? validateCustomSize(customW, customH) : null
@@ -195,7 +190,6 @@ export default function DesignerToolbar({
 }: DesignerToolbarProps) {
   const caps = getModelCapabilities(provider, model)
   const refInputRef = useRef<HTMLInputElement>(null)
-  const maskInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch user credit balance
   const { data: balanceData, isLoading: balanceLoading } = useQuery({
@@ -220,17 +214,10 @@ export default function DesignerToolbar({
     update({ referenceFiles: settings.referenceFiles.filter((_, i) => i !== index) })
   }
 
-  function handleMaskFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null
-    update({ maskFile: file })
-    e.target.value = ''
-  }
-
   const showCount = caps?.batch
   const showQuality = (caps?.qualityLevels.length ?? 0) > 0
   const showFormat = (caps?.outputFormats.length ?? 0) > 1
   const showRefs = (caps?.maxRefImages ?? 0) > 0
-  const showMask = caps?.inpainting
 
   // Generate object URLs for reference image previews
   const [refPreviewUrls, setRefPreviewUrls] = useState<string[]>([])
@@ -515,47 +502,6 @@ export default function DesignerToolbar({
                     multiple
                     className="hidden"
                     onChange={handleRefFiles}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Mask */}
-            {showMask && (
-              <div className="space-y-2">
-                <h4 className={sectionHeader}>
-                  <Paintbrush className="h-3 w-3" />
-                  蒙版
-                </h4>
-                <div className="space-y-1.5">
-                  {settings.maskFile ? (
-                    <div className="flex items-center gap-1.5 rounded-lg bg-muted/20 px-2.5 py-1.5">
-                      <span className="flex-1 truncate text-[11px] text-foreground">{settings.maskFile.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => update({ maskFile: null })}
-                        className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full border border-dashed border-border/50 text-[11px] text-muted-foreground hover:border-primary/30 hover:text-primary"
-                      onClick={() => maskInputRef.current?.click()}
-                    >
-                      <Upload className="h-3 w-3" />
-                      上传蒙版
-                    </Button>
-                  )}
-                  <input
-                    ref={maskInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleMaskFile}
                   />
                 </div>
               </div>
