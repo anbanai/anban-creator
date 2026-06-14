@@ -53,7 +53,7 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenera
         <SheetHeader className="border-b border-border/70 px-4 pt-4 pb-2">
           <SheetTitle className="text-sm font-medium">历史记录</SheetTitle>
         </SheetHeader>
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           {isLoading ? (
             <div className="space-y-2 p-3">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -87,7 +87,7 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenera
                         onSelect(gen)
                         onOpenChange(false)
                       }}
-                      className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                      className="flex min-w-0 flex-1 items-start gap-3 pr-7 text-left"
                     >
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50">
                         {thumbnail ? (

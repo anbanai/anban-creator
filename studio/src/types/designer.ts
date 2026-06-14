@@ -96,6 +96,7 @@ export interface DesignerProvider {
   model: string
   credits: number
   enabled: boolean
+  idx: number
   description?: string
 }
 

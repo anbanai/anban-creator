@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Check, ChevronsUpDown, Coins, Lock } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -28,7 +28,11 @@ export default function ModelSelector({
   className,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false)
-  const selected = providers.find((p) => p.id === selectedProviderId && p.enabled)
+  const sortedProviders = useMemo(
+    () => [...providers].sort((a, b) => a.idx - b.idx),
+    [providers],
+  )
+  const selected = sortedProviders.find((p) => p.id === selectedProviderId && p.enabled)
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -68,10 +72,12 @@ export default function ModelSelector({
             value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
           }
         >
-          <CommandInput placeholder="搜索模型..." />
+          <div className="border-b border-border/50 px-1 pb-1">
+            <CommandInput placeholder="搜索模型..." />
+          </div>
           <CommandList>
             <CommandEmpty>没有找到模型</CommandEmpty>
-            {providers.map((p) => {
+            {sortedProviders.map((p) => {
               const isSelected = p.id === selectedProviderId && p.enabled
               const isDisabled = !p.enabled
               const caps = getModelCapabilities(p.provider, p.model)

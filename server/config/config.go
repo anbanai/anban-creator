@@ -122,6 +122,41 @@ type ImageAPIConfig struct {
 	Content  *appconfig.ImageAPI            `yaml:"content"`
 	Designer map[string]*appconfig.ImageAPI `yaml:"designer"`
 	Sizes    SizesConfig                    `yaml:"sizes"`
+
+	// designerOrder preserves the insertion order of Designer keys as written
+	// in the YAML file. Populated by UnmarshalYAML; not serialized.
+	designerOrder []string
+}
+
+// UnmarshalYAML decodes the YAML node and additionally captures the
+// insertion order of the designer mapping so callers can iterate in a
+// deterministic, file-order sequence.
+func (c *ImageAPIConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain ImageAPIConfig
+	if err := value.Decode((*plain)(c)); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value != "designer" {
+			continue
+		}
+		mapping := value.Content[i+1]
+		if mapping == nil || mapping.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(mapping.Content); j += 2 {
+			c.designerOrder = append(c.designerOrder, mapping.Content[j].Value)
+		}
+	}
+	return nil
+}
+
+// DesignerOrder returns the designer keys in YAML insertion order.
+func (c *ImageAPIConfig) DesignerOrder() []string {
+	if c == nil {
+		return nil
+	}
+	return c.designerOrder
 }
 
 // WritingConfig holds LLM API configuration for writing services

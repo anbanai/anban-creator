@@ -78,6 +78,9 @@ func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
 	if len(providers) != 1 || providers[0].ID != "test-openai" {
 		t.Fatalf("providers = %+v", providers)
 	}
+	if providers[0].Idx != 0 {
+		t.Fatalf("providers[0].Idx = %d, want 0", providers[0].Idx)
+	}
 }
 
 func mustMarshalJSON(t *testing.T, v any) []byte {

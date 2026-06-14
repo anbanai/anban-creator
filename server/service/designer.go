@@ -657,14 +657,33 @@ type DesignerProviderInfo struct {
 	Model    string `json:"model"`
 	Credits  int    `json:"credits"`
 	Enabled  bool   `json:"enabled"`
+	Idx      int    `json:"idx"`
 }
 
 func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 	if s.imageCfg == nil || s.imageCfg.Designer == nil {
 		return nil
 	}
-	var providers []DesignerProviderInfo
-	for id, cfg := range s.imageCfg.Designer {
+
+	// Build the ordered key list: YAML insertion order first, then any
+	// extra keys present in the map but missing from the order snapshot
+	// (defensive — should not happen in practice).
+	order := s.imageCfg.DesignerOrder()
+	seen := make(map[string]struct{}, len(order))
+	for _, id := range order {
+		seen[id] = struct{}{}
+	}
+	for id := range s.imageCfg.Designer {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		order = append(order, id)
+		seen[id] = struct{}{}
+	}
+
+	providers := make([]DesignerProviderInfo, 0, len(order))
+	for i, id := range order {
+		cfg := s.imageCfg.Designer[id]
 		if cfg == nil {
 			continue
 		}
@@ -679,6 +698,7 @@ func (s *DesignerService) GetProviders() []DesignerProviderInfo {
 			Model:    cfg.Model,
 			Credits:  cfg.Credits,
 			Enabled:  cfg.IsEnabled(),
+			Idx:      i,
 		})
 	}
 	return providers
