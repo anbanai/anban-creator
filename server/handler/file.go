@@ -144,8 +144,11 @@ func (h *FileHandler) ServeFile(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid file path")
 	}
 
-	// Verify ownership: key format is uploads/{channels|references}/{userID}/...
-	if !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") && !strings.HasPrefix(cleanKey, "uploads/references/"+userID+"/") {
+	// Verify ownership: allow user's uploads AND user's designer-generated images
+	// (OSS object keys for designer results are shaped "{userID}/designer/{genID}/{index}{ext}").
+	if !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") &&
+		!strings.HasPrefix(cleanKey, "uploads/references/"+userID+"/") &&
+		!strings.HasPrefix(cleanKey, userID+"/designer/") {
 		return Forbidden(c, "you do not have access to this file")
 	}
 

@@ -1,7 +1,8 @@
 import { useRef, useState, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react'
-import { ArrowLeft, Eraser, Paintbrush, RotateCcw, Square, Circle, ZoomIn, ZoomOut, Maximize } from 'lucide-react'
+import { ArrowLeft, Eraser, Paintbrush, RotateCcw, Square, Circle, ZoomIn, ZoomOut, Maximize, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
+import http from '@/lib/http-client'
 
 type ToolType = 'brush' | 'rect' | 'circle' | 'eraser'
 
@@ -91,6 +92,9 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
     const [brushSize, setBrushSize] = useState(30)
     const [feather, setFeather] = useState(0)
     const [imageLoaded, setImageLoaded] = useState(false)
+    const [imgSrc, setImgSrc] = useState<string>('')
+    const [imgError, setImgError] = useState(false)
+    const blobUrlRef = useRef<string>('')
     const [hasStrokes, setHasStrokes] = useState(false)
     const [zoom, setZoom] = useState(1)
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
@@ -105,6 +109,65 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
     const featherRef = useRef(0)
 
     featherRef.current = feather
+
+    // Load image via authenticated backend proxy when it's a remote OSS URL,
+    // to avoid CORS on <img crossOrigin="anonymous"> + canvas export. For
+    // same-origin / blob URLs, use them directly.
+    useEffect(() => {
+      let cancelled = false
+      setImgError(false)
+      setImageLoaded(false)
+
+      if (!imageUrl) {
+        setImgSrc('')
+        return
+      }
+
+      if (imageUrl.startsWith('/files/') ||
+          imageUrl.startsWith('/api/v1/files/') ||
+          imageUrl.startsWith('blob:') ||
+          imageUrl.startsWith('data:')) {
+        setImgSrc(imageUrl)
+        return
+      }
+
+      let normalized = imageUrl
+      try {
+        const u = new URL(imageUrl)
+        if (u.hostname.endsWith('.aliyuncs.com')) {
+          normalized = '/files/' + decodeURIComponent(u.pathname).slice(1)
+        }
+      } catch {
+        // not a parseable URL — fall through and try as-is
+      }
+
+      http.get(normalized, { responseType: 'blob' })
+        .then((res) => {
+          if (cancelled) return
+          if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
+          const blobUrl = URL.createObjectURL(res.data)
+          blobUrlRef.current = blobUrl
+          setImgSrc(blobUrl)
+        })
+        .catch(() => {
+          if (cancelled) return
+          setImgError(true)
+          setImgSrc('')
+        })
+
+      return () => {
+        cancelled = true
+      }
+    }, [imageUrl])
+
+    useEffect(() => {
+      return () => {
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current)
+          blobUrlRef.current = ''
+        }
+      }
+    }, [])
 
     const redrawCanvas = useCallback(() => {
       const canvas = canvasRef.current
@@ -524,28 +587,42 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
               transition: isPanning ? 'none' : 'transform 0.15s ease-out',
             }}
           >
-            <img
-              ref={imgRef}
-              src={imageUrl}
-              alt="编辑图片"
-              className="block max-h-[60vh] max-w-full rounded-xl shadow-lg object-contain"
-              crossOrigin="anonymous"
-              onLoad={() => setImageLoaded(true)}
-              draggable={false}
-            />
-            {imageLoaded && (
-              <canvas
-                ref={canvasRef}
-                className={`absolute inset-0 h-full w-full touch-none rounded-xl ${cursorStyle}`}
-                style={{ mixBlendMode: 'multiply' }}
-                onMouseDown={handlePointerDown}
-                onMouseMove={handlePointerMove}
-                onMouseUp={handlePointerUp}
-                onMouseLeave={handlePointerUp}
-                onTouchStart={handlePointerDown}
-                onTouchMove={handlePointerMove}
-                onTouchEnd={handlePointerUp}
-              />
+            {imgError ? (
+              <div className="flex max-h-[60vh] min-w-[280px] max-w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-destructive/50 p-8 text-center text-sm text-destructive">
+                <span>图片加载失败</span>
+                <span className="text-xs text-muted-foreground">请关闭后重试</span>
+              </div>
+            ) : imgSrc ? (
+              <>
+                <img
+                  ref={imgRef}
+                  src={imgSrc}
+                  alt="编辑图片"
+                  className="block max-h-[60vh] max-w-full rounded-xl shadow-lg object-contain"
+                  onLoad={() => setImageLoaded(true)}
+                  onError={() => setImgError(true)}
+                  draggable={false}
+                />
+                {imageLoaded && (
+                  <canvas
+                    ref={canvasRef}
+                    className={`absolute inset-0 h-full w-full touch-none rounded-xl ${cursorStyle}`}
+                    style={{ mixBlendMode: 'multiply' }}
+                    onMouseDown={handlePointerDown}
+                    onMouseMove={handlePointerMove}
+                    onMouseUp={handlePointerUp}
+                    onMouseLeave={handlePointerUp}
+                    onTouchStart={handlePointerDown}
+                    onTouchMove={handlePointerMove}
+                    onTouchEnd={handlePointerUp}
+                  />
+                )}
+              </>
+            ) : (
+              <div className="flex h-32 w-64 items-center justify-center gap-2 rounded-xl border border-border/50 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>加载图片中…</span>
+              </div>
             )}
           </div>
         </div>
