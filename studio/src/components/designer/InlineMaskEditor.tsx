@@ -134,9 +134,10 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
       let normalized = imageUrl
       try {
         const u = new URL(imageUrl)
-        if (u.hostname.endsWith('.aliyuncs.com')) {
-          normalized = '/files/' + decodeURIComponent(u.pathname).slice(1)
-        }
+        // Strip protocol + host from any HTTP URL (default OSS, OSS custom
+        // domain, etc.) and route through the backend /files/* proxy so we
+        // get same-origin, JWT-authenticated bytes for the canvas.
+        normalized = '/files/' + decodeURIComponent(u.pathname).slice(1)
       } catch {
         // not a parseable URL — fall through and try as-is
       }

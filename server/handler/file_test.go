@@ -103,3 +103,30 @@ func TestServeFile_RejectsReferenceFilePath(t *testing.T) {
 		t.Fatalf("status = %d, want 403 (reference files should not be served directly)", resp.StatusCode)
 	}
 }
+
+func TestServeFile_RejectsPathTraversalAttempt(t *testing.T) {
+	// filepath.Clean collapses ".." segments before the ownership check runs,
+	// and ServeFile also rejects paths containing ".." outright. Any traversal
+	// attempt must be rejected with 400/403 (blocked at security layer) OR 404
+	// (literal percent-encoded path doesn't match a real storage key). The key
+	// invariant: no 200, no access to another user's file.
+	app := setupFileHandlerTest("user-1")
+
+	for _, path := range []string{
+		"/files/user-1/designer/../../user-2/designer/gen-2/0.png",
+		"/files/user-1/designer/%2e%2e/%2e%2e/user-2/designer/gen-2/0.png",
+		"/files/uploads/references/user-1/../../../etc/passwd",
+	} {
+		resp, err := app.Test(httptest.NewRequest("GET", path, nil))
+		if err != nil {
+			t.Fatalf("request %s failed: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == fiber.StatusOK {
+			t.Fatalf("traversal path %s: status = 200, must be rejected", path)
+		}
+		if resp.StatusCode < 400 {
+			t.Fatalf("traversal path %s: status = %d, must be 4xx", path, resp.StatusCode)
+		}
+	}
+}
