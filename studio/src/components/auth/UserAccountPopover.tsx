@@ -12,12 +12,20 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu'
+import { Badge } from '@/components/ui/badge'
+import { tierLabels } from '@/lib/labels'
 
 const themeOptions = [
   { value: 'light', label: '亮色模式', icon: Sun },
   { value: 'dark', label: '暗色模式', icon: Moon },
   { value: 'system', label: '跟随系统', icon: Monitor },
 ] as const
+
+const tierBadgeVariant: Record<string, 'neutral' | 'info' | 'warning'> = {
+  free: 'neutral',
+  pro: 'info',
+  enterprise: 'warning',
+}
 
 export default function UserAccountPopover({ collapsed }: { collapsed?: boolean }) {
   const { user, logout } = useAuth()
@@ -57,7 +65,12 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
       >
         <DropdownMenuGroup>
           <DropdownMenuLabel>
-            <p className="truncate text-sm font-medium text-popover-foreground">{user.nickname || '用户'}</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="min-w-0 truncate text-sm font-medium text-popover-foreground">{user.nickname || '用户'}</p>
+              <Badge variant={tierBadgeVariant[user.tier] ?? 'neutral'} className="shrink-0">
+                {tierLabels[user.tier] ?? '免费版'}
+              </Badge>
+            </div>
             <p className="truncate text-xs font-normal text-muted-foreground">{user.email}</p>
           </DropdownMenuLabel>
         </DropdownMenuGroup>
