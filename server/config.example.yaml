@@ -149,6 +149,29 @@ image_api:
     seednote_content: "3:4" # 种草笔记正文配图
 
 # ---------------------------------------------------------------------------
+# Image presets: 任务/计划创建时可选的图像模型清单（按用户等级过滤）
+# 每个预设声明所需最低等级 (min_tier: free / pro / enterprise)。
+# Free 用户只能选 min_tier=free 的预设；Pro 增加 min_tier=pro；
+# Enterprise 全部可选并额外获得 "custom"（自带密钥，复用 /api/v1/model-config）。
+# 留空 image_presets 时所有用户只能用系统默认（即 image_api 配置）。
+# ---------------------------------------------------------------------------
+image_presets:
+  - key: "volcengine-standard"           # 唯一标识（≤50 字符，不含空格，不能为 "custom"）
+    display_name: "豆包 Seedream (标准画质)" # 前端展示名
+    provider: "volcengine"               # volcengine / gemini / openai
+    model: "doubao-seedream-5-0-260128"  # 具体模型 ID
+    endpoint: "https://ark.cn-beijing.volces.com/api/v3"
+    api_key: ""                          # TODO: 填入 Volcengine API key
+    min_tier: "free"                     # free / pro / enterprise
+  - key: "gemini-pro"
+    display_name: "Gemini Pro (高质量)"
+    provider: "gemini"
+    model: "gemini-3-pro-image-preview"
+    endpoint: "https://generativelanguage.googleapis.com"
+    api_key: ""                          # TODO: 填入 Gemini API key 后对 Pro 用户开放
+    min_tier: "pro"
+
+# ---------------------------------------------------------------------------
 # Writing: LLM API configuration for writing services
 # Used by article writing, humanization, topic research, SEO, outlines.
 # Falls back to ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL env vars.
