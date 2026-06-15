@@ -267,7 +267,7 @@ Both plugins connect to the same `anbanwriter` MCP server and share themes/write
 Codex-native port of `claudecode/`. Plugin bundle includes skills + MCP + hooks; the five subagents are installed separately (Codex plugins cannot bundle subagents — see GitHub issue #18988).
 
 ```
-codex/                             # git submodule → anbanai/anbanwriter-codex (planned)
+codex/                             # git submodule → anbanai/anbanwriter-codex
 ├── .codex-plugin/                 # Codex plugin manifest (camelCase fields)
 ├── .mcp.json                      # MCP server config (identical to claudecode)
 ├── skills/                        # 18 SKILL.md skills (aligned with claudecode, init adjusted for ~/.codex/config.toml)
