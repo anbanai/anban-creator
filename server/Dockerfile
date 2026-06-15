@@ -15,8 +15,11 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /abwriter-server ./server/
 FROM node:25-slim
 
 # Install CA certificates for Go binary TLS verification (slim images lack these)
+# jq is required by claudecode/hooks/seednote-quality-gate.sh — under the default
+# `executor: local` config the Claude Code CLI subprocess runs in this container,
+# so the SubagentStop hook fires here and needs jq to parse stdin JSON.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates && \
+    apt-get install -y --no-install-recommends ca-certificates jq && \
     rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code
