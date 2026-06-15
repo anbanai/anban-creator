@@ -1,0 +1,19 @@
+{
+  "id": "__ANIMATION_ID__",
+  "type": "sticker_animation",
+  "animations": [
+    {
+      "category_id": "__ANIM_CATEGORY_ID__",
+      "category_name": "__ANIM_CATEGORY_NAME__",
+      "duration": __ANIM_DURATION__,
+      "id": "__ANIM_PRESET_ID__",
+      "material_type": "video",
+      "name": "__ANIM_NAME__",
+      "panel": "video",
+      "platform": "all",
+      "resource_id": "__ANIM_RESOURCE_ID__",
+      "start": 0,
+      "type": "__ANIM_TYPE__"
+    }
+  ]
+}

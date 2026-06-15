@@ -1,0 +1,15 @@
+{
+  "draft_cloud_materials": [],
+  "draft_cover": "__DRAFT_FOLDER__/draft_cover.jpg",
+  "draft_fold_path": "__DRAFT_FOLDER__",
+  "draft_id": "__DRAFT_ID__",
+  "draft_deeplink_url": "false",
+  "draft_materials": [],
+  "draft_name": "__DRAFT_NAME__",
+  "draft_root_path": "__DRAFT_FOLDER__",
+  "draft_segment_extra_info": [],
+  "draft_timeline_materials_size_": 53362227,
+  "tm_draft_create": __TIMESTAMP_MS__,
+  "tm_draft_modified": __TIMESTAMP_MS__,
+  "tm_duration": __TOTAL_DURATION_US__
+}

@@ -1,0 +1,13 @@
+{
+  "category_id": "__TRANS_CATEGORY_ID__",
+  "category_name": "__TRANS_CATEGORY_NAME__",
+  "duration": 466666,
+  "effect_id": "__TRANS_EFFECT_ID__",
+  "id": "__TRANS_INSTANCE_ID__",
+  "is_overlap": __TRANS_IS_OVERLAP__,
+  "name": "__TRANS_NAME__",
+  "platform": "all",
+  "request_id": "20230813073044A16DAD0CF7A7CBFD8ADA",
+  "resource_id": "__TRANS_RESOURCE_ID__",
+  "type": "transition"
+}

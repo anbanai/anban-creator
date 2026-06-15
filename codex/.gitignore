@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Local Codex state (do not commit user-specific overrides)
+.codex-local/
+
+# Generated output (subagent working dirs)
+output/

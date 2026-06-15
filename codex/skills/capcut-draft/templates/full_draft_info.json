@@ -1,0 +1,112 @@
+{
+  "canvas_config": {
+    "height": __CANVAS_HEIGHT__,
+    "ratio": "__CANVAS_RATIO__",
+    "width": __CANVAS_WIDTH__
+  },
+  "config": {
+    "adjust_max_index": 1,
+    "attachment_info": [],
+    "combination_max_index": 1,
+    "extract_audio_last_index": 1,
+    "lyrics_sync": true,
+    "lyrics_taskinfo": [],
+    "maintrack_adsorb": true,
+    "original_sound_last_index": 1,
+    "record_audio_last_index": 1,
+    "sticker_max_index": 1,
+    "subtitle_sync": true,
+    "subtitle_taskinfo": [],
+    "system_font_list": [],
+    "zoom_info_params": {
+      "zoom_ratio": 1.0
+    }
+  },
+  "cover": {
+    "cover_draft_id": "__COVER_DRAFT_ID__",
+    "sub_type": "local",
+    "type": "image"
+  },
+  "duration": __TOTAL_DURATION_US__,
+  "fps": __FPS__,
+  "id": "__DRAFT_ID__",
+  "materials": {
+    "audios": [
+      __AUDIO_MATERIALS__
+    ],
+    "canvases": [
+      __CANVAS_MATERIALS__
+    ],
+    "drafts": [
+      {
+        "id": "__COVER_DRAFT_ID__",
+        "draft": {
+          "canvas_config": {
+            "height": __CANVAS_HEIGHT__,
+            "ratio": "__CANVAS_RATIO__",
+            "width": __CANVAS_WIDTH__
+          },
+          "color_space": -1,
+          "materials": {
+            "videos": [
+              {
+                "id": "__COVER_VIDEO_ID__",
+                "path": "__DRAFT_FOLDER__/draft_cover.jpg"
+              }
+            ]
+          }
+        },
+        "type": "composition"
+      }
+    ],
+    "effects": [],
+    "material_animations": [],
+    "sound_channel_mappings": [
+      __SOUND_CHANNEL_MAPPINGS__
+    ],
+    "speeds": [
+      __SPEED_MATERIALS__
+    ],
+    "texts": [
+      __TEXT_MATERIALS__
+    ],
+    "transitions": [],
+    "video_effects": [],
+    "videos": [
+      __VIDEO_MATERIALS__
+    ]
+  },
+  "new_version": "79.0.0",
+  "source": "default",
+  "tracks": [
+    {
+      "attribute": 0,
+      "flag": __VIDEO_SEGMENT_COUNT__,
+      "id": "__VIDEO_TRACK_ID__",
+      "segments": [__VIDEO_SEGMENTS__],
+      "type": "video"
+    },
+    {
+      "attribute": 0,
+      "flag": __EFFECT_SEGMENT_COUNT__,
+      "id": "__EFFECT_TRACK_ID__",
+      "segments": [__EFFECT_SEGMENTS__],
+      "type": "effect"
+    },
+    {
+      "attribute": 0,
+      "flag": __AUDIO_SEGMENT_COUNT__,
+      "id": "__AUDIO_TRACK_ID__",
+      "segments": [__AUDIO_SEGMENTS__],
+      "type": "audio"
+    },
+    {
+      "attribute": 0,
+      "flag": __TEXT_SEGMENT_COUNT__,
+      "id": "__TEXT_TRACK_ID__",
+      "segments": [__TEXT_SEGMENTS__],
+      "type": "text"
+    }
+  ],
+  "version": 360000
+}

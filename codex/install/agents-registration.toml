@@ -1,0 +1,38 @@
+# Codex subagent registration — append (or merge) into ~/.codex/config.toml
+#
+# This file is consumed by install-subagents.sh. It registers the five anbanwriter
+# subagents and enables the multi-agent feature flag.
+#
+# WARNING: do NOT paste this verbatim if your ~/.codex/config.toml already declares
+# any of these tables. Run install-subagents.sh instead — it is idempotent.
+
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 6
+
+[agents.wechatarticle]
+description = "微信公众号图文全自动创作引擎（选题 → 草稿）"
+config_file = "~/.codex/agents/wechatarticle.toml"
+nickname_candidates = ["Writer", "ArticleBot", "公众号写手"]
+
+[agents.seednote]
+description = "种草笔记全自动创作引擎（原创 + 复刻）"
+config_file = "~/.codex/agents/seednote.toml"
+nickname_candidates = ["NoteBot", "Seeder", "种草机器"]
+
+[agents.designer]
+description = "线稿批量上色与一致性审计引擎"
+config_file = "~/.codex/agents/designer.toml"
+nickname_candidates = ["Colorist", "Designer", "上色师"]
+
+[agents.live-slicer]
+description = "直播视频智能切片引擎（ffmpeg + 听悟 + 剪映草稿）"
+config_file = "~/.codex/agents/live-slicer.toml"
+nickname_candidates = ["Slicer", "Cutter", "切片机"]
+
+[agents.short-video-studio]
+description = "短视频封面复刻与人像姿态变体引擎"
+config_file = "~/.codex/agents/short-video-studio.toml"
+nickname_candidates = ["CoverArt", "ShortVideo", "短视频工坊"]

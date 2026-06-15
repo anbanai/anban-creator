@@ -1,0 +1,27 @@
+{
+  "check_flag": 63487,
+  "crop": {
+    "lower_left_y": 1.0,
+    "lower_right_x": 1.0,
+    "lower_right_y": 1.0,
+    "upper_right_x": 1.0
+  },
+  "has_audio": false,
+  "crop_ratio": "free",
+  "crop_scale": 1.0,
+  "duration": __SEGMENT_DURATION_US__,
+  "height": __IMAGE_HEIGHT__,
+  "width": __IMAGE_WIDTH__,
+  "id": "__VIDEO_ID__",
+  "material_name": "__FILE_NAME__",
+  "matting": {
+    "interactiveTime": [],
+    "strokes": []
+  },
+  "path": "__FILE_PATH__",
+  "picture_from": "none",
+  "type": "photo",
+  "video_algorithm": {
+    "algorithms": []
+  }
+}

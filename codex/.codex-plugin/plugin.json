@@ -1,0 +1,38 @@
+{
+  "name": "anbanwriter",
+  "version": "2.10.0",
+  "description": "Professional WeChat and Seednote (种草笔记) content creation toolkit for OpenAI Codex — MCP server with AI-powered writing, visual design, and multi-platform publishing",
+  "author": {
+    "name": "Rick",
+    "email": "medivhzhan@gmail.com",
+    "url": "https://github.com/royalrick"
+  },
+  "homepage": "https://github.com/anbanai/anbanwriter-codex",
+  "repository": "https://github.com/anbanai/anbanwriter-codex",
+  "license": "MIT",
+  "keywords": [
+    "wechat",
+    "weixin",
+    "content-creation",
+    "ai-writing",
+    "visual-design",
+    "seo-optimization",
+    "publishing",
+    "mcp-server",
+    "codex",
+    "chinese-content",
+    "social-media",
+    "official-account",
+    "seednote",
+    "种草笔记",
+    "cover-image",
+    "line-art",
+    "coloring",
+    "color-consistency",
+    "design",
+    "designer"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json"
+}

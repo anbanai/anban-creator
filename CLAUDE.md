@@ -262,6 +262,26 @@ openclaw/                          # git submodule → anbanai/anbanwriter-openc
 
 Both plugins connect to the same `anbanwriter` MCP server and share themes/writers.
 
+### Codex Plugin (`codex/`)
+
+Codex-native port of `claudecode/`. Plugin bundle includes skills + MCP + hooks; the five subagents are installed separately (Codex plugins cannot bundle subagents — see GitHub issue #18988).
+
+```
+codex/                             # git submodule → anbanai/anbanwriter-codex (planned)
+├── .codex-plugin/                 # Codex plugin manifest (camelCase fields)
+├── .mcp.json                      # MCP server config (identical to claudecode)
+├── skills/                        # 18 SKILL.md skills (aligned with claudecode, init adjusted for ~/.codex/config.toml)
+├── agents/                        # 5 subagent TOMLs (wechatarticle, seednote, designer, live-slicer, short-video-studio)
+├── install/                       # install-subagents.sh + agents-registration.toml
+├── hooks/                         # SubagentStop + Stop (Stop replaces Claude Code's TaskCompleted)
+├── CODEX.md                       # Codex-specific developer guide
+└── README.md                      # End-user install/usage guide
+```
+
+Install flow: `codex plugin marketplace add ./codex && codex plugin install anbanwriter`, then `bash codex/install/install-subagents.sh` to register the subagents in `~/.codex/config.toml`.
+
+All three plugins (`claudecode/`, `openclaw/`, `codex/`) connect to the same `anbanwriter` MCP server and share themes/writers/skill content.
+
 ## Notes
 
 - CLI uses zerolog logging — all components use zerolog, never mix with zap

@@ -1,0 +1,68 @@
+{
+  "description": "Anban 智能创作助手 plugin lifecycle hooks for Codex (mirrors claudecode/hooks/hooks.json with TaskCompleted → Stop substitution). Plugin-bundled hooks require explicit user trust review on install — if hooks do not fire, delivery summaries still run via developer_instructions embedded in each subagent TOML.",
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "wechatarticle",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "wechatarticle agent 已完成执行。请检查 output/ 目录下的产出文件，生成结构化交付摘要：\n\n1. **产出文件**：列出所有生成的文件（HTML、draft.json、图片）及其路径\n2. **文章概要**：标题、字数、章节数\n3. **草稿状态**：是否成功创建草稿，draft_url 是什么\n4. **问题检查**：文件是否完整、HTML 是否符合微信规范\n\n如发现问题请明确指出并建议修复方案。\n\n最后，调用 submit_agent_feedback(task_id=$TASK_ID, agent_name=\"wechatarticle\", scores={quality:N, completeness:N, efficiency:N}, errors=\"<errors>\", optimizations=\"<optimizations>\", summary=\"<brief summary>\") 提交本次 agent 执行反馈。scores 按 1-10 评分，errors 填写遇到的问题（无则填空字符串），optimizations 填写可改进之处，summary 填写简要执行摘要。"
+          }
+        ]
+      },
+      {
+        "matcher": "seednote",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PLUGIN_ROOT}/hooks/seednote-quality-gate.sh",
+            "timeout": 30
+          },
+          {
+            "type": "prompt",
+            "prompt": "seednote agent 已完成执行。请先执行标题入库，然后检查产出文件，生成结构化交付摘要：\n\n**步骤 1：标题入库**\n确定笔记最终标题：优先读取 content.md 首行正式标题，或从归档目录名中提取真实发布标题。不得使用「图片内容规划」「标题候选与评分」「选题研究报告」「违禁词合规检查报告」等内部产物标题。调用 finalize_task_title(task_id=$TASK_ID, title=最终标题)。若返回重复标题错误，修改标题（加后缀或调整措辞），更新 content.md 首行后重试，最多 3 次。失败则记录错误并继续后续检查。\n\n**步骤 2：产出文件检查**\n1. **内容文件**：检查 content.md 路径及正文字数。\n2. **图片列表**：列出所有生成的图片文件（封面 + 内容图），共 N 张。\n3. **决策记录**：topic-analysis.md 或 source-analysis.md 是否已生成；复刻模式还要检查 source-note.md、viral-template.json、template-meta.json。\n4. **问题检查**：图片数量是否 ≥3、content.md 是否包含话题标签；复刻模式下 source-analysis.md 是否包含证据驱动拆解。\n\n如发现问题请明确指出并建议修复方案。\n\n最后，调用 submit_agent_feedback(task_id=$TASK_ID, agent_name=\"seednote\", scores={quality:N, completeness:N, efficiency:N}, errors=\"<errors>\", optimizations=\"<optimizations>\", summary=\"<brief summary>\") 提交本次 agent 执行反馈。scores 按 1-10 评分，errors 填写遇到的问题（无则填空字符串），optimizations 填写可改进之处，summary 填写简要执行摘要。"
+          }
+        ]
+      },
+      {
+        "matcher": "designer",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "designer agent 已完成执行。请检查工作目录下的产出文件，生成结构化交付摘要：\n\n1. **上色图列表**：列出所有 colored_NN.png 文件，确认总数与输入线稿数一致\n2. **Color Bible**：检查 color-bible.md 是否包含所有识别到的实体及颜色规格\n3. **一致性报告**：检查 consistency-report.md 是否已生成，逐实体确认状态（PASS/MINOR/FAIL）\n4. **修正记录**：如果进行了收敛修正，报告修正轮次和结果\n5. **人工复核项**：列出所有标记为 needs_manual_review 的项（如有）\n6. **线稿完整性**：抽查 2-3 张上色图，确认线条与原始线稿一致（无修改、模糊、重绘）\n7. **问题检查**：是否存在缺失图片、空文件、颜色明显偏差、线稿被修改等问题\n\n如发现问题请明确指出并建议修复方案。\n\n最后，调用 submit_agent_feedback(task_id=$TASK_ID, agent_name=\"designer\", scores={quality:N, completeness:N, efficiency:N}, errors=\"<errors>\", optimizations=\"<optimizations>\", summary=\"<brief summary>\") 提交本次 agent 执行反馈。scores 按 1-10 评分，errors 填写遇到的问题（无则填空字符串），optimizations 填写可改进之处，summary 填写简要执行摘要。"
+          }
+        ]
+      },
+      {
+        "matcher": "live-slicer",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "live-slicer agent 已完成执行。请检查 output/live-slice/ 目录下的产出文件，生成结构化交付摘要：\n\n1. **成果目录**：本次任务对应的 output/live-slice/<task>/ 路径\n2. **核心文件**：metadata.json、audio.mp3、cover.jpg、analysis.json、invalid-sentences.json、segments.json、clip-plan.json 或 subject-clip-plan.json、clip_results.json、clip-manifest.json、transcript.md、summary.md 是否存在\n3. **切片结果**：读取 clip-manifest.json，统计成功/失败切片数量，确认每条成功结果包含 actual_duration_seconds，并列出 exports/ 下的视频文件和 exports/*.md\n4. **方案检查**：segments.json 或 subject-clip-plan.json 的句子范围是否能对应 analysis.json 的 sentences；检查 warnings、rejected，并确认 summary.md 是否列出「需人工复核片段」\n5. **问题检查**：是否存在空视频、失败命令、duration mismatch、part_results 缺失、听悟未完成、无效句过滤后素材不足等问题\n\n如发现问题请明确指出并建议从哪个步骤继续修复。\n\n最后，调用 submit_agent_feedback(task_id=$TASK_ID, agent_name=\"live-slicer\", scores={quality:N, completeness:N, efficiency:N}, errors=\"<errors>\", optimizations=\"<optimizations>\", summary=\"<brief summary>\") 提交本次 agent 执行反馈。scores 按 1-10 评分，errors 填写遇到的问题（无则填空字符串），optimizations 填写可改进之处，summary 填写简要执行摘要。"
+          }
+        ]
+      },
+      {
+        "matcher": "short-video-studio",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "short-video-studio agent 已完成执行。请先读取工作目录下的 input-manifest.md 确定本次运行的模式（replication 或 pose-variants），然后按对应模式检查产出文件，生成结构化交付摘要。\n\n**步骤 1：确定模式**\n读取 $DIR/input-manifest.md 的 Mode Decision.selected_mode 字段。若无法读取或字段缺失，检查文件存在情况并报告问题。\n\n**步骤 2：模式相关产出检查**\n\n**复刻模式（replication）**：\n1. 输入清单：input-manifest.md 是否包含 mode_decision 依据\n2. 参考分析：reference-analysis.md 是否包含 8 维度拆解\n3. 迁移规划：cover-plan.md 是否包含标题分行、放大词、主体位置、背景决策\n4. 主交付：cover.png 是否存在且文件大小 > 0；如重试则检查 cover_v2.png\n5. Prompt 备份：cover-prompts.md 是否记录实际 prompt 和生成参数\n6. 审计报告：cover-review.md 是否包含 5 项 PASS/MINOR/FAIL 评级\n\n**姿态模式（pose-variants）**：\n1. 输入清单：input-manifest.md 是否包含 mode_decision 依据\n2. 身份锁：identity-lock.md 是否包含 12 维度描述\n3. 姿态规划：selected-poses.md 是否包含 N 个姿态模板（每个含表情、手势、情绪基调、prompt 段落）\n4. 主交付：variant_01.png ~ variant_0N.png 是否全部存在且大小 > 0；检查是否有 variant_0N_v2.png（重试产物）\n5. Prompt 备份：image-prompts.md 是否记录每张变体的实际 prompt 和生成参数\n6. 一致性审计：consistency-report.md 是否包含 12 维度逐张评级汇总和综合评级\n\n**步骤 3：问题检查**\n1. 主交付文件缺失或大小为 0 → 标记关键问题\n2. 复刻模式 5 项审计中有未处理的 FAIL（无重试记录、无 needs_manual_edit 标注）→ 标记质量问题\n3. 姿态模式关键维度（脸型/五官比例/发型发色）FAIL 但无重试记录或 needs_img2img 标注 → 标记质量问题\n4. 手势畸形（多指、缺指、关节扭曲）未在审计中提及但视觉可见 → 提醒人工复核\n5. input-manifest.md 中 mode_decision 缺乏关键词或文件类型证据 → 标记决策透明度问题\n\n如发现问题请明确指出并建议从哪个步骤继续修复。\n\n最后，调用 submit_agent_feedback(task_id=$TASK_ID, agent_name=\"short-video-studio\", scores={quality:N, completeness:N, efficiency:N}, errors=\"<errors>\", optimizations=\"<optimizations>\", summary=\"<brief summary with selected mode>\") 提交本次 agent 执行反馈。scores 按 1-10 评分，errors 填写遇到的问题（无则填空字符串），optimizations 填写可改进之处，summary 填写简要执行摘要（必须包含本次运行的模式）。"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "任务已完成。请执行以下验证步骤：\n\n**步骤 1：产出文件收集**\n调用 list_task_files(task_id=$TASK_ID) 获取文件清单。报告文件总数、各角色分类（cover/html/markdown/image）及各文件大小。如未找到任何文件，标记为质量问题并提醒用户。\n\n**步骤 2：质量验证**\n1. 产出文件是否存在且内容完整\n2. 命令执行是否有报错\n3. 格式是否符合目标平台规范（微信 HTML / 种草笔记文案）\n如发现问题请提醒用户并建议修复方案。\n\n**步骤 3：反馈提交**\n调用 submit_agent_feedback(task_id=$TASK_ID, agent_name=\"general\", scores={quality:N, completeness:N, efficiency:N}, errors=\"<errors>\", optimizations=\"<optimizations>\", summary=\"<brief summary>\") 提交任务反馈。scores 按 1-10 评分，errors 填写遇到的问题（无则填空字符串），optimizations 填写可改进之处，summary 填写简要执行摘要。"
+          }
+        ]
+      }
+    ]
+  }
+}
