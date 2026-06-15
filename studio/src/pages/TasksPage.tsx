@@ -11,6 +11,7 @@ import { api } from '@/lib/api'
 import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
+import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -74,7 +75,7 @@ export default function TasksPage() {
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const { submit } = useSubmitLock()
-  const { items: imageModelOptions } = useImageModels()
+  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
 
   useEffect(() => { setPage(1) }, [statusFilter, channelFilter, searchFilter])
 
@@ -614,38 +615,23 @@ export default function TasksPage() {
               }} />
 
               {/* Image model selector */}
-              <FormField control={form.control} name="image_model_key" render={({ field }) => {
-                const systemDefault = imageModelOptions.find((opt) => opt.key === '')
-                const presets = imageModelOptions.filter((opt) => opt.key !== '' && !opt.is_custom)
-                const custom = imageModelOptions.find((opt) => opt.is_custom)
-                return (
+              <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
                   <FormLabel>图像模型</FormLabel>
-                  <Select
-                    value={field.value || undefined}
-                    onValueChange={(v) => field.onChange(v === '__system_default__' ? '' : v)}
-                  >
-                    <FormControl>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder={systemDefault?.display_name || '系统默认'} />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="__system_default__">
-                        {systemDefault?.display_name || '系统默认'}
-                      </SelectItem>
-                      {presets.map((opt) => (
-                        <SelectItem key={opt.key} value={opt.key}>{opt.display_name}</SelectItem>
-                      ))}
-                      {custom && (
-                        <SelectItem value={custom.key}>{custom.display_name}</SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
+                  <FormControl>
+                    {imageModelsLoading ? (
+                      <Skeleton className="h-10 w-full rounded-xl" />
+                    ) : (
+                      <ImageModelSelector
+                        options={imageModelOptions}
+                        value={field.value || ''}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
-                )
-              }} />
+              )} />
 
               {/* Watermark toggle */}
               <button
