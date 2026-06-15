@@ -4,3 +4,6 @@
 [submodule "openclaw"]
 	path = openclaw
 	url = https://github.com/anbanai/anbanwriter-openclaw.git
+[submodule "codex"]
+	path = codex
+	url = https://github.com/anbanai/anbanwriter-codex.git
