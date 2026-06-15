@@ -15,6 +15,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
@@ -98,6 +99,99 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 			req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+		})
+	}
+}
+
+// TestCreateTask_ImageModelKeyTierForbidden verifies that the handler returns
+// 403 when a Free-tier user tries to create a task with a Pro-tier image preset,
+// or with "custom" (Enterprise-only). Also covers the fail-closed path:
+// Free users CAN still create tasks with Free-tier or empty keys.
+func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      "tier-forbidden@example.com",
+		Password:   "hashed",
+		InviteCode: "tierforbidden",
+		Tier:       model.TierFree,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Channels().Create(ctx, &model.Channel{
+		ID:       channelID,
+		UserID:   userID,
+		Platform: model.PlatformSeednote,
+		Name:     "Seednote",
+		Status:   model.ChannelStatusActive,
+	}); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	presets := []config.ImageModelPreset{
+		{Key: "volcengine-standard", Provider: "volcengine", Model: "doubao-seedream", MinTier: "free"},
+		{Key: "gemini-pro", Provider: "gemini", Model: "gemini-3-pro", MinTier: "pro"},
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetImagePresets(presets)
+	h.SetRepository(repo)
+
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "free tier + free preset accepted",
+			body:       `{"channel_id":"` + channelID + `","image_model_key":"volcengine-standard"}`,
+			wantStatus: fiber.StatusOK,
+		},
+		{
+			name:       "free tier + empty key accepted",
+			body:       `{"channel_id":"` + channelID + `"}`,
+			wantStatus: fiber.StatusOK,
+		},
+		{
+			name:       "free tier + pro preset rejected",
+			body:       `{"channel_id":"` + channelID + `","image_model_key":"gemini-pro"}`,
+			wantStatus: fiber.StatusForbidden,
+		},
+		{
+			name:       "free tier + custom rejected",
+			body:       `{"channel_id":"` + channelID + `","image_model_key":"custom"}`,
+			wantStatus: fiber.StatusForbidden,
+		},
+		{
+			name:       "free tier + unknown key rejected",
+			body:       `{"channel_id":"` + channelID + `","image_model_key":"made-up"}`,
+			wantStatus: fiber.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/tasks", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
 			if err != nil {
 				t.Fatalf("request failed: %v", err)

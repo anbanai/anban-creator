@@ -24,14 +24,15 @@ func registerImageTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id":     map[string]any{"type": "string", "description": "Channel ID (determines which image API config to use)"},
-				"prompt":         map[string]any{"type": "string", "description": "Image generation prompt"},
-				"image_type":     map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
-				"output_path":    map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, server will download and save). Use a writable server path such as /tmp/...; this is not the agent client's current working directory."},
-				"size":           map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides channel default when provided; providers may still return a different crop/ratio."},
-				"ref_image_path": map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
-				"task_id":        map[string]any{"type": "string", "description": "Task ID (for logging and credit tracking)"},
-				"watermark":      map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
+				"channel_id":      map[string]any{"type": "string", "description": "Channel ID (determines which image API config to use)"},
+				"prompt":          map[string]any{"type": "string", "description": "Image generation prompt"},
+				"image_type":      map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
+				"output_path":     map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, server will download and save). Use a writable server path such as /tmp/...; this is not the agent client's current working directory."},
+				"size":            map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides channel default when provided; providers may still return a different crop/ratio."},
+				"ref_image_path":  map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
+				"task_id":         map[string]any{"type": "string", "description": "Task ID (for logging, credit tracking, and per-task image model lookup)"},
+				"image_model_key": map[string]any{"type": "string", "description": "Optional image model key selected at task creation time. When provided, overrides user/server defaults for this single call. Resolution: '' = server default; 'custom' = user model-config override (Enterprise only); any other value must match a server-managed image preset key. If task_id is also provided and task_id has its own image_model_key, the explicit image_model_key parameter takes precedence."},
+				"watermark":       map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
 			},
 			"required": []any{"channel_id", "prompt"},
 		},
@@ -117,14 +118,21 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	size, _ := args["size"].(string)
 	refPath, _ := args["ref_image_path"].(string)
 	taskID, _ := args["task_id"].(string)
+	imageModelKey, _ := args["image_model_key"].(string)
 	var watermark *bool
 	if v, ok := args["watermark"].(bool); ok {
 		watermark = &v
-	} else if taskID != "" {
-		// Fall back to task-level watermark setting.
-		if t, err := svcs.TaskSvc.GetByID(context.Background(), taskID); err == nil && t.Watermark {
-			wm := true
-			watermark = &wm
+	}
+
+	// Resolve image_model_key: explicit parameter wins, else fall back to task-level setting.
+	if imageModelKey == "" && taskID != "" {
+		if t, err := svcs.TaskSvc.GetByID(context.Background(), taskID); err == nil {
+			imageModelKey = t.ImageModelKey
+			// Fall back to task-level watermark if not explicitly set.
+			if watermark == nil && t.Watermark {
+				wm := true
+				watermark = &wm
+			}
 		}
 	}
 
@@ -133,7 +141,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		return billingError("generate image", err), nil
 	}
 
-	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID, size, watermark)
+	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID, size, imageModelKey, watermark)
 	if err != nil {
 		return billingError("generate image", err), nil
 	}

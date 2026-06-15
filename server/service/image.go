@@ -158,10 +158,25 @@ func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *a
 }
 
 // buildProcessor creates a new image.Processor for the given channel and image type.
-func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, imageType string) (*image.Processor, error) {
-	// Use per-user image config if available, otherwise fall back to server config.
+// imageModelKey (optional) routes through ResolveImageConfigForKey so that per-task
+// model selection takes effect: empty = server default / user override;
+// "custom" = user override; preset key = system-managed preset.
+func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, imageType, imageModelKey string) (*image.Processor, error) {
+	// Resolve the effective image config: per-task key → user override → server default.
 	effectiveCfg := s.imageCfg
-	if s.modelConfigSvc != nil {
+	if s.modelConfigSvc != nil && imageModelKey != "" {
+		resolved, source := s.modelConfigSvc.ResolveImageConfigForKey(ctx, ch.UserID, imageModelKey)
+		if resolved != nil {
+			s.logger.Info().
+				Str("user_id", ch.UserID).
+				Str("image_type", imageType).
+				Str("image_model_key", imageModelKey).
+				Str("source", source).
+				Msg("using task-selected image config")
+			effectiveCfg = resolved
+		}
+	} else if s.modelConfigSvc != nil {
+		// No per-task key: walk user override → server default.
 		if userCfg := s.modelConfigSvc.GetEffectiveImageConfig(ctx, ch.UserID); userCfg != nil {
 			s.logger.Info().
 				Str("user_id", ch.UserID).
@@ -187,9 +202,13 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, im
 // GenerateImage generates a single image using the channel's image provider.
 // Returns the download URL (remote CDN URL or data URL) for the agent to download.
 // If outputPath is provided, also saves the image to that path and returns file_path.
+//
+// imageModelKey (optional) controls which image provider/model is used for this
+// generation, overriding the user-level and server-level defaults. The caller is
+// responsible for having validated that the user's tier permits this key.
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
-	userID, channelID, prompt, imageType, outputPath, refPath, taskID, size string,
+	userID, channelID, prompt, imageType, outputPath, refPath, taskID, size, imageModelKey string,
 	watermark *bool,
 ) (*ImageResult, error) {
 	ch, err := s.repo.Channels().FindByID(ctx, channelID)
@@ -197,7 +216,7 @@ func (s *ImageService) GenerateImage(
 		return nil, fmt.Errorf("find channel: %w", err)
 	}
 
-	processor, err := s.buildProcessor(ctx, ch, imageType)
+	processor, err := s.buildProcessor(ctx, ch, imageType, imageModelKey)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +287,7 @@ func (s *ImageService) UploadImage(
 	}
 
 	// WeChat platforms: upload to WeChat CDN.
-	processor, err := s.buildProcessor(ctx, ch, "content")
+	processor, err := s.buildProcessor(ctx, ch, "content", "")
 	if err != nil {
 		return nil, err
 	}
@@ -362,7 +381,7 @@ func (s *ImageService) DownloadImage(
 	if strings.EqualFold(upload, "true") || strings.EqualFold(upload, "wechat") {
 		// WeChat platforms: download and upload to WeChat CDN.
 		if ch.Platform == model.PlatformArticle {
-			processor, err := s.buildProcessor(ctx, ch, "content")
+			processor, err := s.buildProcessor(ctx, ch, "content", "")
 			if err != nil {
 				return nil, err
 			}
@@ -384,7 +403,7 @@ func (s *ImageService) DownloadImage(
 	}
 
 	// Download only (all platforms).
-	processor, err := s.buildProcessor(ctx, ch, "content")
+	processor, err := s.buildProcessor(ctx, ch, "content", "")
 	if err != nil {
 		return nil, err
 	}

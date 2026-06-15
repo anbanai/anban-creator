@@ -25,6 +25,7 @@ import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
+import { useImageModels } from '@/hooks/useImageModels'
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
@@ -35,6 +36,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     type: plan.type,
     cron_expr: plan.cron_expr,
     prompt: plan.prompt || '',
+    image_model_key: plan.image_model_key || '',
     skip_reference_image: plan.skip_reference_image || false,
     watermark: plan.watermark || false,
   }
@@ -50,6 +52,7 @@ export default function PlansPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const { submit } = useSubmitLock()
+  const { items: imageModelOptions } = useImageModels()
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
@@ -58,6 +61,7 @@ export default function PlansPage() {
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
+      image_model_key: '',
     },
   })
 
@@ -164,6 +168,7 @@ export default function PlansPage() {
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
+      image_model_key: '',
     })
     setModalOpen(true)
   }
@@ -191,15 +196,21 @@ export default function PlansPage() {
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
+      image_model_key: '',
     })
   }
 
   async function onSubmit(values: PlanFormValues) {
+    // For edit (PUT), image_model_key is a *string on the backend: nil = leave
+    // unchanged, "" = clear to system default. Always send it so explicit
+    // "system default" selection actually clears the previously saved value.
+    // For create (POST), "" is also valid (means system default).
     const payload: CreatePlanRequest = {
       type: values.type,
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id || undefined,
+      image_model_key: values.image_model_key,
       watermark: values.watermark || undefined,
     }
 
@@ -406,6 +417,39 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              <FormField control={form.control} name="image_model_key" render={({ field }) => {
+                const systemDefault = imageModelOptions.find((opt) => opt.key === '')
+                const presets = imageModelOptions.filter((opt) => opt.key !== '' && !opt.is_custom)
+                const custom = imageModelOptions.find((opt) => opt.is_custom)
+                return (
+                <FormItem>
+                  <FormLabel>图像模型</FormLabel>
+                  <Select
+                    value={field.value || undefined}
+                    onValueChange={(v) => field.onChange(v === '__system_default__' ? '' : v)}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={systemDefault?.display_name || '系统默认'} />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="__system_default__">
+                        {systemDefault?.display_name || '系统默认'}
+                      </SelectItem>
+                      {presets.map((opt) => (
+                        <SelectItem key={opt.key} value={opt.key}>{opt.display_name}</SelectItem>
+                      ))}
+                      {custom && (
+                        <SelectItem value={custom.key}>{custom.display_name}</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+                )
+              }} />
 
               <FormField control={form.control} name="watermark" render={({ field }) => (
                 <FormItem>

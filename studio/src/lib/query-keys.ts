@@ -58,4 +58,7 @@ export const queryKeys = {
       ['designer', 'history', params] as const,
     generation: (id: string) => ['designer', 'generation', id] as const,
   },
+  imageModels: {
+    all: ['image-models'] as const,
+  },
 } as const

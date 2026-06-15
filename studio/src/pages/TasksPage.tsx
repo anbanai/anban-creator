@@ -28,6 +28,7 @@ import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
+import { useImageModels } from '@/hooks/useImageModels'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -73,6 +74,7 @@ export default function TasksPage() {
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const { submit } = useSubmitLock()
+  const { items: imageModelOptions } = useImageModels()
 
   useEffect(() => { setPage(1) }, [statusFilter, channelFilter, searchFilter])
 
@@ -103,7 +105,7 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '' },
+    defaultValues: { type: 'seednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '', image_model_key: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
@@ -214,7 +216,7 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '' })
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '' })
     setQuantity(1)
     setWatermark(false)
     setChannelImageRatio('')
@@ -232,7 +234,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '' })
+    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '' })
     setQuantity(1)
     setWatermark(false)
     setChannelImageRatio('')
@@ -245,6 +247,7 @@ export default function TasksPage() {
       channel_id: values.channel_id,
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
+      image_model_key: values.image_model_key || undefined,
       watermark: watermark || undefined,
     }))
   }
@@ -603,6 +606,40 @@ export default function TasksPage() {
                       {ratioOptions.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                       ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+                )
+              }} />
+
+              {/* Image model selector */}
+              <FormField control={form.control} name="image_model_key" render={({ field }) => {
+                const systemDefault = imageModelOptions.find((opt) => opt.key === '')
+                const presets = imageModelOptions.filter((opt) => opt.key !== '' && !opt.is_custom)
+                const custom = imageModelOptions.find((opt) => opt.is_custom)
+                return (
+                <FormItem>
+                  <FormLabel>图像模型</FormLabel>
+                  <Select
+                    value={field.value || undefined}
+                    onValueChange={(v) => field.onChange(v === '__system_default__' ? '' : v)}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={systemDefault?.display_name || '系统默认'} />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="__system_default__">
+                        {systemDefault?.display_name || '系统默认'}
+                      </SelectItem>
+                      {presets.map((opt) => (
+                        <SelectItem key={opt.key} value={opt.key}>{opt.display_name}</SelectItem>
+                      ))}
+                      {custom && (
+                        <SelectItem value={custom.key}>{custom.display_name}</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                   <FormMessage />

@@ -15,25 +15,38 @@ import (
 
 // Config holds all server configuration.
 type Config struct {
-	Server     ServerConfig     `yaml:"server"`
-	Logging    LoggingConfig    `yaml:"logging"`
-	Database   DatabaseConfig   `yaml:"database"`
-	Redis      RedisConfig      `yaml:"redis"`
-	JWT        JWTConfig        `yaml:"jwt"`
-	WeChat     WeChatConfig     `yaml:"wechat"`
-	Storage    StorageConfig    `yaml:"storage"`
-	MCP        MCPConfig        `yaml:"mcp"`
-	ImageAPI   ImageAPIConfig   `yaml:"image_api"`
-	Writing    WritingConfig    `yaml:"writing"`
-	Vision     VisionConfig     `yaml:"vision"`
-	TingWu     TingWuConfig     `yaml:"tingwu"`
-	Claude     ClaudeConfig     `yaml:"claude"`
-	Credits    CreditsConfig    `yaml:"credits"`
-	CORS       CORSConfig       `yaml:"cors"`
-	Asynq      AsynqConfig      `yaml:"asynq"`
-	Email      EmailConfig      `yaml:"email"`
-	Invitation InvitationConfig `yaml:"invitation"`
-	Seednote   SeednoteConfig   `yaml:"seednote"`
+	Server       ServerConfig       `yaml:"server"`
+	Logging      LoggingConfig      `yaml:"logging"`
+	Database     DatabaseConfig     `yaml:"database"`
+	Redis        RedisConfig        `yaml:"redis"`
+	JWT          JWTConfig          `yaml:"jwt"`
+	WeChat       WeChatConfig       `yaml:"wechat"`
+	Storage      StorageConfig      `yaml:"storage"`
+	MCP          MCPConfig          `yaml:"mcp"`
+	ImageAPI     ImageAPIConfig     `yaml:"image_api"`
+	ImagePresets []ImageModelPreset `yaml:"image_presets"`
+	Writing      WritingConfig      `yaml:"writing"`
+	Vision       VisionConfig       `yaml:"vision"`
+	TingWu       TingWuConfig       `yaml:"tingwu"`
+	Claude       ClaudeConfig       `yaml:"claude"`
+	Credits      CreditsConfig      `yaml:"credits"`
+	CORS         CORSConfig         `yaml:"cors"`
+	Asynq        AsynqConfig        `yaml:"asynq"`
+	Email        EmailConfig        `yaml:"email"`
+	Invitation   InvitationConfig   `yaml:"invitation"`
+	Seednote     SeednoteConfig     `yaml:"seednote"`
+}
+
+// ImageModelPreset defines a system-managed image model that users can select
+// when creating tasks or plans. Each preset has a minimum tier that gates access.
+type ImageModelPreset struct {
+	Key         string `yaml:"key"`          // unique identifier, e.g. "volcengine-standard"
+	DisplayName string `yaml:"display_name"` // user-facing label
+	Provider    string `yaml:"provider"`     // volcengine / gemini / openai
+	Model       string `yaml:"model"`        // concrete model id
+	Endpoint    string `yaml:"endpoint"`
+	APIKey      string `yaml:"api_key"`
+	MinTier     string `yaml:"min_tier"` // free / pro / enterprise
 }
 
 // SeednoteConfig holds Seednote (种草笔记) sidecar configuration.

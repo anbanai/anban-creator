@@ -8,18 +8,35 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
+	"github.com/royalrick/anbanwriter/server/config"
+	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
 // PlanHandler handles plan-related HTTP endpoints.
 type PlanHandler struct {
-	service *service.PlanService
-	logger  *zerolog.Logger
+	service      *service.PlanService
+	logger       *zerolog.Logger
+	imagePresets []config.ImageModelPreset
+	repo         repository.Repository
 }
 
 // NewPlanHandler creates a new PlanHandler.
 func NewPlanHandler(svc *service.PlanService, logger *zerolog.Logger) *PlanHandler {
 	return &PlanHandler{service: svc, logger: logger}
+}
+
+// SetImagePresets wires the system-managed image model presets for tier-gated
+// validation of createPlanRequest/updatePlanRequest.ImageModelKey.
+func (h *PlanHandler) SetImagePresets(presets []config.ImageModelPreset) {
+	h.imagePresets = presets
+}
+
+// SetRepository wires the user repository so the handler can resolve the caller's
+// tier for image-model validation.
+func (h *PlanHandler) SetRepository(repo repository.Repository) {
+	h.repo = repo
 }
 
 // validReferenceImageURL checks that a reference image URL is empty, an internal
@@ -42,17 +59,19 @@ type createPlanRequest struct {
 	ChannelID          string `json:"channel_id"`
 	CronExpr           string `json:"cron_expr"`
 	Prompt             string `json:"prompt"`
+	ImageModelKey      string `json:"image_model_key"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
 	Watermark          *bool  `json:"watermark"`
 }
 
 type updatePlanRequest struct {
-	CronExpr           string `json:"cron_expr"`
-	Prompt             string `json:"prompt"`
-	SkipReferenceImage *bool  `json:"skip_reference_image"`
-	ReferenceImageURL  string `json:"reference_image_url"`
-	Watermark          *bool  `json:"watermark"`
+	CronExpr           string  `json:"cron_expr"`
+	Prompt             string  `json:"prompt"`
+	ImageModelKey      *string `json:"image_model_key"`
+	SkipReferenceImage *bool   `json:"skip_reference_image"`
+	ReferenceImageURL  string  `json:"reference_image_url"`
+	Watermark          *bool   `json:"watermark"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -75,7 +94,12 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
+	// Validate image_model_key against the caller's tier.
+	if err := h.validateImageModelKeyForUser(c, userID, req.ImageModelKey); err != nil {
+		return Error(c, fiber.StatusForbidden, err.Error())
+	}
+
+	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
@@ -165,7 +189,15 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this plan")
 	}
 
-	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
+	// Validate image_model_key against the caller's tier.
+	// nil/unset ImageModelKey in the request body means "leave unchanged" — no validation needed.
+	if req.ImageModelKey != nil {
+		if err := h.validateImageModelKeyForUser(c, userID, *req.ImageModelKey); err != nil {
+			return Error(c, fiber.StatusForbidden, err.Error())
+		}
+	}
+
+	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")
@@ -230,6 +262,24 @@ func (h *PlanHandler) Pause(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{"message": "plan paused"})
+}
+
+// validateImageModelKeyForUser resolves the user's tier and validates image_model_key.
+// Returns nil if the key is acceptable for this user, an error otherwise.
+// Fail-closed: if the user's tier cannot be determined (repo unavailable or
+// lookup error), default to Free so a DB hiccup cannot accidentally widen
+// access to Pro/Enterprise-only models.
+func (h *PlanHandler) validateImageModelKeyForUser(c fiber.Ctx, userID, key string) error {
+	if key == "" {
+		return nil
+	}
+	tier := model.TierFree
+	if h.repo != nil {
+		if user, err := h.repo.Users().FindByID(c.Context(), userID); err == nil && user != nil {
+			tier = model.ResolveTier(user.Tier)
+		}
+	}
+	return ValidateImageModelKey(key, tier, h.imagePresets)
 }
 
 // Resume handles POST /api/v1/plans/:id/resume.

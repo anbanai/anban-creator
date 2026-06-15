@@ -11,6 +11,7 @@ export interface Task {
   progress?: number
   progress_log?: string
   image_ratio?: string
+  image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
   error: string | null
@@ -50,6 +51,7 @@ export interface CreateTaskRequest {
   channel_id: string
   quantity?: number
   image_ratio?: string
+  image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
   watermark?: boolean

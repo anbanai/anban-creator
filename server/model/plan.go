@@ -13,6 +13,7 @@ type Plan struct {
 	CronExpr           string     `gorm:"type:varchar(100)" json:"cron_expr"`
 	Prompt             string     `gorm:"column:topic_hint;type:text" json:"prompt"`
 	Status             string     `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
+	ImageModelKey      string     `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL  string     `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
 	SkipReferenceImage bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
 	Watermark          bool       `gorm:"default:false" json:"watermark,omitempty"`

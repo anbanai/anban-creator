@@ -26,9 +26,10 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 
 // Create validates the cron expression, resolves the channel, computes the next run
 // time, and persists the plan. The task type is derived from the channel's platform.
+// imageModelKey optionally selects a per-plan image model (validated upstream by the handler).
 func (s *PlanService) Create(
 	ctx context.Context,
-	userID, channelID, cronExpr, prompt string,
+	userID, channelID, cronExpr, prompt, imageModelKey string,
 	skipRefImage *bool,
 	referenceImageURL string,
 	watermark *bool,
@@ -66,6 +67,7 @@ func (s *PlanService) Create(
 		Prompt:             prompt,
 		Status:             model.PlanStatusActive,
 		NextRunAt:          nextRun,
+		ImageModelKey:      imageModelKey,
 		ReferenceImageURL:  referenceImageURL,
 		SkipReferenceImage: skipRefImage != nil && *skipRefImage,
 		Watermark:          watermark != nil && *watermark,
@@ -104,9 +106,12 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 }
 
 // Update modifies a plan's fields. If the cron expression changed, next_run_at is recomputed.
+// imageModelKey of nil means "leave unchanged"; empty string "" means "clear to system default".
+// Use the model.ImageModelKeySystemDefault / ImageModelKeyCustom constants for clarity.
 func (s *PlanService) Update(
 	ctx context.Context,
 	id, cronExpr, prompt string,
+	imageModelKey *string,
 	skipRefImage *bool,
 	referenceImageURL string,
 	watermark *bool,
@@ -118,6 +123,9 @@ func (s *PlanService) Update(
 
 	plan.Prompt = prompt
 	plan.ReferenceImageURL = referenceImageURL
+	if imageModelKey != nil {
+		plan.ImageModelKey = *imageModelKey
+	}
 	if skipRefImage != nil {
 		plan.SkipReferenceImage = *skipRefImage
 	}

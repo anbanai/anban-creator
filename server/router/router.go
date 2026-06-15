@@ -52,6 +52,7 @@ type Services struct {
 	FileHandler              *handler.FileHandler
 	FeedbackHandler          *handler.FeedbackHandler
 	ModelConfigHandler       *handler.ModelConfigHandler
+	ImageModelHandler        *handler.ImageModelHandler
 	TemplateHandler          *handler.TemplateHandler
 	ViralAnalysisHandler     *handler.ViralAnalysisHandler
 	PosterHandler            *handler.PosterHandler
@@ -367,6 +368,11 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/model-config", svc.ModelConfigHandler.Get)
 		apiV1.Put("/model-config", svc.ModelConfigHandler.Update)
 		apiV1.Delete("/model-config", svc.ModelConfigHandler.Delete)
+	}
+
+	// Image model options endpoint (tier-gated listing for create-task/plan dropdowns).
+	if svc.ImageModelHandler != nil {
+		apiV1.Get("/image-models", svc.ImageModelHandler.List)
 	}
 
 	// ---------------------------------------------------------------------------

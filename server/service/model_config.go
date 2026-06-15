@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	appconfig "github.com/royalrick/anbanwriter/app/config"
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
@@ -280,6 +281,131 @@ func (s *ModelConfigService) GetImageProxy(ctx context.Context, userID string) s
 		return ""
 	}
 	return uc.Proxy
+}
+
+// ResolveImageConfigForKey decides which image configuration to use for a given
+// task/plan image_model_key. Returns the resolved config and a source label
+// ("system_default" / "user_custom" / "preset:<key>") for logging.
+//
+// Resolution rules:
+//   - key == "" or "system_default": walk GetEffectiveImageConfig (user override
+//     or nil), do NOT enforce tier.
+//   - key == "custom": require user override; if none exists, fall back to nil
+//     (system default) with a warning. Caller is responsible for enforcing that
+//     the user's tier is Enterprise at request time; we re-check tier here as a
+//     defense-in-depth (Enterprise downgrade scenario).
+//   - any other key: look up in cfg.ImagePresets, re-check tier at runtime
+//     (handles tier downgrade after task creation), fall back if missing.
+//
+// Returns nil cfg with source "system_default" when no override/preset applies
+// — callers must then use their own server default (s.imageCfg).
+func (s *ModelConfigService) ResolveImageConfigForKey(
+	ctx context.Context, userID, imageModelKey string,
+) (*config.ImageAPIConfig, string) {
+	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
+		if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
+			return cfg, "user_custom"
+		}
+		return nil, "system_default"
+	}
+
+	if imageModelKey == model.ImageModelKeyCustom {
+		// Defense-in-depth: re-check tier in case user downgraded after creating the task.
+		if !s.userTierIsEnterprise(ctx, userID) {
+			s.logger.Warn().
+				Str("user_id", userID).
+				Str("image_model_key", imageModelKey).
+				Msg("custom image model requested but user tier is no longer enterprise, fallback to system default")
+			return nil, "system_default"
+		}
+		cfg := s.GetEffectiveImageConfig(ctx, userID)
+		if cfg == nil {
+			s.logger.Warn().
+				Str("user_id", userID).
+				Msg("custom image model requested but user has no override, fallback to system default")
+			return nil, "system_default"
+		}
+		return cfg, "user_custom"
+	}
+
+	// Look up preset by key.
+	for i := range s.cfg.ImagePresets {
+		p := &s.cfg.ImagePresets[i]
+		if p.Key != imageModelKey {
+			continue
+		}
+		// Re-check tier at execution time (handles downgrade).
+		userTier := s.lookupUserTier(ctx, userID)
+		requiredTier := model.NormalizeTier(p.MinTier)
+		if !model.TierSatisfies(userTier, requiredTier) {
+			s.logger.Warn().
+				Str("user_id", userID).
+				Str("preset_key", p.Key).
+				Str("user_tier", string(userTier)).
+				Str("required_tier", string(requiredTier)).
+				Msg("user tier no longer satisfies preset, fallback to system default")
+			return nil, "system_default"
+		}
+		return presetToImageAPIConfig(p, s.cfg), "preset:" + p.Key
+	}
+
+	s.logger.Warn().
+		Str("user_id", userID).
+		Str("image_model_key", imageModelKey).
+		Msg("image preset not found, fallback to system default")
+	return nil, "system_default"
+}
+
+// userTierIsEnterprise returns true if the user's tier resolves to Enterprise.
+// Returns false on lookup failure (fail-closed for "custom" access).
+func (s *ModelConfigService) userTierIsEnterprise(ctx context.Context, userID string) bool {
+	return s.lookupUserTier(ctx, userID) == model.TierEnterprise
+}
+
+// lookupUserTier fetches the user's resolved tier. Returns TierFree on error.
+func (s *ModelConfigService) lookupUserTier(ctx context.Context, userID string) model.Tier {
+	if userID == "" {
+		return model.TierFree
+	}
+	user, err := s.repo.Users().FindByID(ctx, userID)
+	if err != nil || user == nil {
+		return model.TierFree
+	}
+	return model.ResolveTier(user.Tier)
+}
+
+// presetToImageAPIConfig converts a single ImageModelPreset into a fully-formed
+// ImageAPIConfig where both Cover and Content use the same provider/model/key.
+// Other fields (Size, Volcengine tuning, MaxWidth, MaxSizeMB, etc.) are inherited
+// from the server's base ImageAPI config so callers don't lose those defaults.
+func presetToImageAPIConfig(p *config.ImageModelPreset, base *config.Config) *config.ImageAPIConfig {
+	if p == nil || base == nil {
+		return nil
+	}
+
+	// Start from base cover/content as templates to preserve Size/Volcengine/etc.
+	var cover, content appconfig.ImageAPI
+	if base.ImageAPI.Cover != nil {
+		cover = *base.ImageAPI.Cover
+	}
+	if base.ImageAPI.Content != nil {
+		content = *base.ImageAPI.Content
+	}
+
+	// Override provider/model/endpoint/key with preset values.
+	for _, dst := range []*appconfig.ImageAPI{&cover, &content} {
+		dst.Provider = p.Provider
+		dst.Model = p.Model
+		dst.BaseURL = p.Endpoint
+		dst.Key = p.APIKey
+	}
+
+	return &config.ImageAPIConfig{
+		Cover:          &cover,
+		Content:        &content,
+		Designer:       base.ImageAPI.Designer,
+		Sizes:          base.ImageAPI.Sizes,
+	}
 }
 
 // GetTextProxy returns the user's configured text model proxy, if any.

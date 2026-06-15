@@ -123,6 +123,47 @@ func ResolveTier(tier Tier) Tier {
 	return tier
 }
 
+// Image model key constants stored on Task/Plan.ImageModelKey.
+//
+// ImageModelKeySystemDefault ("") means: use the server default image provider/model.
+// ImageModelKeyCustom ("custom") means: use the user's per-account model-config
+// override (only allowed for Enterprise tier).
+// Any other value must match an ImageModelPreset.Key configured on the server.
+const (
+	ImageModelKeySystemDefault = ""
+	ImageModelKeyCustom        = "custom"
+)
+
+// TierRank returns the ordinal rank of a tier for privilege comparison
+// (higher = more privileged). Unknown tiers map to free.
+func TierRank(t Tier) int {
+	switch t {
+	case TierFree:
+		return 0
+	case TierPro:
+		return 1
+	case TierEnterprise:
+		return 2
+	}
+	return 0
+}
+
+// TierSatisfies reports whether userTier meets or exceeds requiredTier.
+// Used to gate per-tier image model selection.
+func TierSatisfies(userTier, requiredTier Tier) bool {
+	return TierRank(userTier) >= TierRank(requiredTier)
+}
+
+// NormalizeTier converts a raw string (e.g. from config or JSON) into a valid
+// Tier. Invalid values default to TierFree.
+func NormalizeTier(s string) Tier {
+	t := Tier(s)
+	if !ValidTiers[t] {
+		return TierFree
+	}
+	return t
+}
+
 // Per-operation credit type constants (for MCP tool billing).
 const (
 	CreditTypeImageGen         = "image_gen"

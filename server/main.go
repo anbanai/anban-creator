@@ -321,6 +321,7 @@ func main() {
 	var fileHandler *handler.FileHandler
 	var feedbackHandler *handler.FeedbackHandler
 	var modelConfigHandler *handler.ModelConfigHandler
+	var imageModelHandler *handler.ImageModelHandler
 	var templateHandler *handler.TemplateHandler
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
@@ -381,6 +382,22 @@ func main() {
 	resourceHandler = handler.NewResourceHandler(log)
 	if modelConfigSvc != nil {
 		modelConfigHandler = handler.NewModelConfigHandler(modelConfigSvc, log)
+	}
+	// Image model options handler (tier-gated listing). Always available so the
+	// frontend can render the create-task/plan dropdown even without presets.
+	imageModelHandler = handler.NewImageModelHandler(cfg.ImagePresets, repo, log)
+	// Wire image presets + repo into task/plan handlers for tier-gated validation.
+	if taskHandler != nil {
+		taskHandler.SetImagePresets(cfg.ImagePresets)
+		if repo != nil {
+			taskHandler.SetRepository(repo)
+		}
+	}
+	if planHandler != nil {
+		planHandler.SetImagePresets(cfg.ImagePresets)
+		if repo != nil {
+			planHandler.SetRepository(repo)
+		}
 	}
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
@@ -508,6 +525,7 @@ func main() {
 		FileHandler:              fileHandler,
 		FeedbackHandler:          feedbackHandler,
 		ModelConfigHandler:       modelConfigHandler,
+		ImageModelHandler:        imageModelHandler,
 		TemplateHandler:          templateHandler,
 		ViralAnalysisHandler:     viralAnalysisHandler,
 		PosterHandler:            posterHandler,

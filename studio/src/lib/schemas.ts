@@ -31,6 +31,7 @@ export const createTaskSchema = z.object({
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).default(""),
+  image_model_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
   reference_image_url: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
@@ -65,6 +66,7 @@ export const planSchema = z.object({
   type: z.enum(["seednote", "article"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
+  image_model_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
   reference_image_url: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),

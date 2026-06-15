@@ -15,6 +15,7 @@ import { viralAnalysesApi } from './viral-analyses'
 import { resourcesApi } from './resources'
 import { topicPoolApi } from './topic-pool'
 import { designerApi } from './designer'
+import { imageModelsApi } from './image-models'
 
 export const api = {
   auth: authApi,
@@ -34,4 +35,5 @@ export const api = {
   resources: resourcesApi,
   topicPool: topicPoolApi,
   designer: designerApi,
+  imageModels: imageModelsApi,
 }

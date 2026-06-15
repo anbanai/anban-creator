@@ -17,7 +17,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
@@ -25,13 +27,19 @@ const maxTaskPromptCharacters = 5120
 
 // TaskHandler handles task-related HTTP endpoints.
 type TaskHandler struct {
-	service    *service.TaskService
-	logger     *zerolog.Logger
-	dataDir    string // local storage data directory (for ServeLocalFile)
-	taskLogDir string // task log directory (for GetLog)
+	service     *service.TaskService
+	logger      *zerolog.Logger
+	dataDir     string // local storage data directory (for ServeLocalFile)
+	taskLogDir  string // task log directory (for GetLog)
+	imagePresets []config.ImageModelPreset
+	repo        repository.Repository
 }
 
 // NewTaskHandler creates a new TaskHandler.
+//
+// Optional variadic options:
+//   - first string arg: local data directory (for ServeLocalFile).
+//   - WithImagePresets / WithRepository: configure tier-gated image model validation.
 func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...string) *TaskHandler {
 	h := &TaskHandler{service: svc, logger: logger}
 	if svc != nil {
@@ -43,6 +51,18 @@ func NewTaskHandler(svc *service.TaskService, logger *zerolog.Logger, dirs ...st
 	return h
 }
 
+// SetImagePresets wires the system-managed image model presets for tier-gated
+// validation of createTaskRequest.ImageModelKey.
+func (h *TaskHandler) SetImagePresets(presets []config.ImageModelPreset) {
+	h.imagePresets = presets
+}
+
+// SetRepository wires the user repository so the handler can resolve the caller's
+// tier for image-model validation.
+func (h *TaskHandler) SetRepository(repo repository.Repository) {
+	h.repo = repo
+}
+
 // Request types.
 
 type createTaskRequest struct {
@@ -50,6 +70,7 @@ type createTaskRequest struct {
 	Prompt             string `json:"prompt"`
 	Quantity           int    `json:"quantity"`
 	ImageRatio         string `json:"image_ratio"`
+	ImageModelKey      string `json:"image_model_key"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
 	Watermark          *bool  `json:"watermark"`
@@ -96,7 +117,12 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
+	// Validate image_model_key against the caller's tier.
+	if err := h.validateImageModelKeyForUser(c, userID, req.ImageModelKey); err != nil {
+		return Error(c, fiber.StatusForbidden, err.Error())
+	}
+
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {
@@ -743,6 +769,24 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 	}
 
 	return c.SendFile(absPath)
+}
+
+// validateImageModelKeyForUser resolves the user's tier and validates image_model_key.
+// Returns nil if the key is acceptable for this user, an error otherwise.
+// Fail-closed: if the user's tier cannot be determined (repo unavailable or
+// lookup error), default to Free so a DB hiccup cannot accidentally widen
+// access to Pro/Enterprise-only models.
+func (h *TaskHandler) validateImageModelKeyForUser(c fiber.Ctx, userID, key string) error {
+	if key == "" {
+		return nil
+	}
+	tier := model.TierFree
+	if h.repo != nil {
+		if user, err := h.repo.Users().FindByID(c.Context(), userID); err == nil && user != nil {
+			tier = model.ResolveTier(user.Tier)
+		}
+	}
+	return ValidateImageModelKey(key, tier, h.imagePresets)
 }
 
 // validateUUIDParam extracts and validates that a path parameter is a valid UUID.
