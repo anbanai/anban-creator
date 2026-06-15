@@ -77,6 +77,12 @@ func main() {
 		Int("asynq_concurrency", cfg.Asynq.Concurrency).
 		Msg("config loaded")
 
+	// 3.5. Validate image_presets config (key length, uniqueness, reserved words).
+	// Fail fast so a malformed config surfaces immediately instead of as 500s on first task create.
+	if err := config.ValidateImagePresets(cfg.ImagePresets); err != nil {
+		log.Fatal().Err(err).Msg("invalid image_presets configuration")
+	}
+
 	// 4. Connect MySQL.
 	mysqlDB := connectMySQL(context.Background(), cfg, log)
 

@@ -125,8 +125,13 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	}
 
 	// Resolve image_model_key: explicit parameter wins, else fall back to task-level setting.
+	// Ownership check prevents leaking another user's task existence via timing/error
+	// differences; also stops a caller from inheriting another user's watermark flag.
 	if imageModelKey == "" && taskID != "" {
-		if t, err := svcs.TaskSvc.GetByID(context.Background(), taskID); err == nil {
+		if t, err := svcs.TaskSvc.GetByID(ctx, taskID); err == nil {
+			if t.UserID != userID {
+				return errorResult("task not found"), nil
+			}
 			imageModelKey = t.ImageModelKey
 			// Fall back to task-level watermark if not explicitly set.
 			if watermark == nil && t.Watermark {

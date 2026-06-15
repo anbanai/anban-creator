@@ -49,6 +49,36 @@ type ImageModelPreset struct {
 	MinTier     string `yaml:"min_tier"` // free / pro / enterprise
 }
 
+// maxImageModelKeyLen matches the varchar(50) column size on Task/Plan.ImageModelKey.
+const maxImageModelKeyLen = 50
+
+// ValidateImagePresets checks that preset keys fit the Task/Plan ImageModelKey
+// column (varchar(50)) and are globally unique. Returns the first error found.
+// Call this at startup so a malformed config fails fast instead of surfacing
+// as a 500 on first task create.
+func ValidateImagePresets(presets []ImageModelPreset) error {
+	seen := make(map[string]bool, len(presets))
+	for i, p := range presets {
+		if p.Key == "" {
+			return fmt.Errorf("image_presets[%d]: key is required", i)
+		}
+		if len(p.Key) > maxImageModelKeyLen {
+			return fmt.Errorf("image_presets[%d]: key %q exceeds %d characters (DB column varchar(50))", i, p.Key, maxImageModelKeyLen)
+		}
+		if strings.ContainsAny(p.Key, " \t\n\r") {
+			return fmt.Errorf("image_presets[%d]: key %q must not contain whitespace", i, p.Key)
+		}
+		if p.Key == "custom" {
+			return fmt.Errorf("image_presets[%d]: key %q is reserved", i, p.Key)
+		}
+		if seen[p.Key] {
+			return fmt.Errorf("image_presets[%d]: duplicate key %q", i, p.Key)
+		}
+		seen[p.Key] = true
+	}
+	return nil
+}
+
 // SeednoteConfig holds Seednote (种草笔记) sidecar configuration.
 type SeednoteConfig struct {
 	BaseURL string `yaml:"base_url"` // default "http://localhost:18060"
