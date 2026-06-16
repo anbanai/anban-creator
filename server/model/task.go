@@ -1,6 +1,19 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/datatypes"
+)
+
+// GoalEvaluationEntry is one record in Task.GoalEvaluationLog.
+type GoalEvaluationEntry struct {
+	Attempt     int    `json:"attempt"`
+	Achieved    bool   `json:"achieved"`
+	Reason      string `json:"reason"`
+	Error       string `json:"error,omitempty"`
+	EvaluatedAt string `json:"evaluated_at"`
+}
 
 // Task represents a content generation task.
 type Task struct {
@@ -48,7 +61,7 @@ type Task struct {
 	GoalMaxAttempts   int     `gorm:"default:3" json:"goal_max_attempts"`
 	GoalAttempts      int     `gorm:"default:0" json:"goal_attempts"`
 	GoalAchieved      *bool   `json:"goal_achieved,omitempty"`
-	GoalEvaluationLog string  `gorm:"type:json" json:"goal_evaluation_log,omitempty"`
+	GoalEvaluationLog datatypes.JSONSlice[GoalEvaluationEntry] `gorm:"type:json" json:"goal_evaluation_log,omitempty"`
 
 	Published           bool       `gorm:"default:false" json:"published"`
 	PublishedAt         *time.Time `gorm:"index" json:"published_at,omitempty"`

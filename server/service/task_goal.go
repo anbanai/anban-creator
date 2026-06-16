@@ -6,18 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	"gorm.io/datatypes"
+
 	"github.com/royalrick/anbanwriter/server/agent"
 	"github.com/royalrick/anbanwriter/server/model"
 )
-
-// goalEvaluationEntry is one record in the GoalEvaluationLog JSON array.
-type goalEvaluationEntry struct {
-	Attempt      int    `json:"attempt"`
-	Achieved     bool   `json:"achieved"`
-	Reason       string `json:"reason"`
-	Error        string `json:"error,omitempty"`
-	EvaluatedAt  string `json:"evaluated_at"`
-}
 
 // evaluateGoalAndMaybeRetry runs the post-execution goal evaluation.
 //
@@ -61,7 +54,7 @@ func (s *TaskService) evaluateGoalAndMaybeRetry(ctx context.Context, task *model
 	attempt := task.GoalAttempts + 1
 
 	// Append a log entry regardless of success/failure so users can see what happened.
-	entry := goalEvaluationEntry{
+	entry := model.GoalEvaluationEntry{
 		Attempt:     attempt,
 		EvaluatedAt: timeNowUTC(),
 	}
@@ -216,7 +209,7 @@ func pickGoalFile(files []*model.TaskFile, preferredRoles []string) *model.TaskF
 
 // appendGoalEvaluationLog serialises an entry and appends it to the task's
 // goal_evaluation_log JSON array via the repository helper.
-func (s *TaskService) appendGoalEvaluationLog(ctx context.Context, taskID string, entry goalEvaluationEntry) {
+func (s *TaskService) appendGoalEvaluationLog(ctx context.Context, taskID string, entry model.GoalEvaluationEntry) {
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to marshal goal evaluation entry")
@@ -242,20 +235,11 @@ func (s *TaskService) LastGoalFailureReason(ctx context.Context, taskID string) 
 }
 
 // parseLastGoalFailureReason extracts the most recent failed-evaluation reason
-// from a task's goal_evaluation_log JSON. Empty when no failed evaluation
-// exists yet, the log is empty, or the log is unparseable.
-func parseLastGoalFailureReason(rawLog string) string {
-	raw := strings.TrimSpace(rawLog)
-	if raw == "" {
-		return ""
-	}
-	var entries []goalEvaluationEntry
-	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
-		return ""
-	}
-	for i := len(entries) - 1; i >= 0; i-- {
-		if !entries[i].Achieved {
-			return entries[i].Reason
+// from a task's goal_evaluation_log. Empty when no failed evaluation exists yet.
+func parseLastGoalFailureReason(log datatypes.JSONSlice[model.GoalEvaluationEntry]) string {
+	for i := len(log) - 1; i >= 0; i-- {
+		if !log[i].Achieved {
+			return log[i].Reason
 		}
 	}
 	return ""

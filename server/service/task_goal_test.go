@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -294,20 +295,28 @@ func TestGoalOrchestration_EvaluatorNotWired_DefaultsToAchieved(t *testing.T) {
 func TestParseLastGoalFailureReason_MostRecentFailed(t *testing.T) {
 	cases := []struct {
 		name string
-		log  string
+		log  datatypes.JSONSlice[model.GoalEvaluationEntry]
 		want string
 	}{
-		{name: "empty", log: "", want: ""},
-		{name: "all achieved", log: `[{"attempt":1,"achieved":true,"reason":"ok"}]`, want: ""},
-		{name: "last failed", log: `[{"attempt":1,"achieved":true,"reason":"ok"},{"attempt":2,"achieved":false,"reason":"字数不足"}]`, want: "字数不足"},
-		{name: "middle failed", log: `[{"attempt":1,"achieved":false,"reason":"foo"},{"attempt":2,"achieved":true,"reason":"ok"}]`, want: "foo"},
-		{name: "garbage", log: `not json`, want: ""},
+		{name: "nil", log: nil, want: ""},
+		{name: "empty", log: datatypes.JSONSlice[model.GoalEvaluationEntry]{}, want: ""},
+		{name: "all achieved", log: datatypes.JSONSlice[model.GoalEvaluationEntry]{
+			{Attempt: 1, Achieved: true, Reason: "ok"},
+		}, want: ""},
+		{name: "last failed", log: datatypes.JSONSlice[model.GoalEvaluationEntry]{
+			{Attempt: 1, Achieved: true, Reason: "ok"},
+			{Attempt: 2, Achieved: false, Reason: "字数不足"},
+		}, want: "字数不足"},
+		{name: "middle failed", log: datatypes.JSONSlice[model.GoalEvaluationEntry]{
+			{Attempt: 1, Achieved: false, Reason: "foo"},
+			{Attempt: 2, Achieved: true, Reason: "ok"},
+		}, want: "foo"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := parseLastGoalFailureReason(tc.log)
 			if got != tc.want {
-				t.Errorf("parseLastGoalFailureReason(%q) = %q, want %q", tc.log, got, tc.want)
+				t.Errorf("parseLastGoalFailureReason(%+v) = %q, want %q", tc.log, got, tc.want)
 			}
 		})
 	}

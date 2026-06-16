@@ -35,7 +35,7 @@ export interface Task {
   goal_max_attempts?: number
   goal_attempts?: number
   goal_achieved?: boolean
-  goal_evaluation_log?: string
+  goal_evaluation_log?: GoalEvaluationEntry[]
   created_at: string
   started_at: string
   completed_at: string

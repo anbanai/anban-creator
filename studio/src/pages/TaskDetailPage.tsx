@@ -332,34 +332,24 @@ export default function TaskDetailPage() {
                   已达最大尝试次数仍未达成目标。可点击「重新创建」调整目标后重试。
                 </p>
               )}
-              {task.goal_evaluation_log && (() => {
-                try {
-                  const entries = JSON.parse(task.goal_evaluation_log) as Array<{
-                    attempt: number; achieved: boolean; reason: string; error?: string; evaluated_at: string
-                  }>
-                  if (!Array.isArray(entries) || entries.length === 0) return null
-                  return (
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-xs font-medium text-amber-700 dark:text-amber-300">
-                        查看评估历史（{entries.length} 条）
-                      </summary>
-                      <ul className="mt-2 space-y-1.5">
-                        {entries.map((e, i) => (
-                          <li key={i} className="text-xs text-amber-800 dark:text-amber-200">
-                            <span className="font-medium">第 {e.attempt} 次</span>
-                            <span className={`ml-2 ${e.achieved ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                              {e.achieved ? '已达成' : '未达成'}
-                            </span>
-                            <span className="ml-2">— {e.reason}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )
-                } catch {
-                  return null
-                }
-              })()}
+              {task.goal_evaluation_log && task.goal_evaluation_log.length > 0 && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs font-medium text-amber-700 dark:text-amber-300">
+                    查看评估历史（{task.goal_evaluation_log.length} 条）
+                  </summary>
+                  <ul className="mt-2 space-y-1.5">
+                    {task.goal_evaluation_log.map((e, i) => (
+                      <li key={i} className="text-xs text-amber-800 dark:text-amber-200">
+                        <span className="font-medium">第 {e.attempt} 次</span>
+                        <span className={`ml-2 ${e.achieved ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {e.achieved ? '已达成' : '未达成'}
+                        </span>
+                        <span className="ml-2">— {e.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </div>
           </div>
         </div>
