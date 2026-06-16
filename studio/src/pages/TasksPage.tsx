@@ -11,6 +11,7 @@ import { api } from '@/lib/api'
 import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
+import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/ui/button'
@@ -217,7 +218,7 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '' })
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', reference_image_url: '' })
     setQuantity(1)
     setWatermark(false)
     setChannelImageRatio('')
@@ -235,7 +236,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '' })
+    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', reference_image_url: '' })
     setQuantity(1)
     setWatermark(false)
     setChannelImageRatio('')
@@ -249,6 +250,7 @@ export default function TasksPage() {
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
       image_model_key: values.image_model_key || undefined,
+      reference_image_url: values.reference_image_url || undefined,
       watermark: watermark || undefined,
     }))
   }
@@ -632,6 +634,22 @@ export default function TasksPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {watchedType !== 'viral_analysis' && (
+                <FormField control={form.control} name="reference_image_url" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>参考图片（可选）</FormLabel>
+                    <FormControl>
+                      <ReferenceImageUpload
+                        value={field.value || ''}
+                        onChange={field.onChange}
+                        purpose="reference"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              )}
 
               {/* Watermark toggle */}
               <button

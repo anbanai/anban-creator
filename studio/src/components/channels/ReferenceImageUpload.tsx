@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, ZoomIn } from 'lucide-react'
+import { Loader2, ZoomIn, Upload } from 'lucide-react'
 import http from '@/lib/http-client'
 import { FileUpload } from '@/components/ui/FileUpload'
 import {
@@ -11,7 +11,11 @@ interface ReferenceImageUploadProps {
   value?: string
   onChange?: (url: string) => void
   purpose?: "channel" | "reference"
+  compact?: boolean
 }
+
+const MAX_SIZE_MB = 10
+const ACCEPTED = "image/jpeg,image/png,image/webp,image/gif"
 
 function isInternalUrl(url: string) {
   return url.startsWith('/files/')
@@ -31,12 +35,15 @@ function normalizeUrl(url: string): string {
   return url
 }
 
-export function ReferenceImageUpload({ value, onChange, purpose }: ReferenceImageUploadProps) {
+export function ReferenceImageUpload({ value, onChange, purpose, compact }: ReferenceImageUploadProps) {
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
   const [enlargeOpen, setEnlargeOpen] = useState(false)
   const blobUrlRef = useRef('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!value) {
@@ -79,6 +86,38 @@ export function ReferenceImageUpload({ value, onChange, purpose }: ReferenceImag
     }
   }, [value])
 
+  const uploadFile = async (file: File) => {
+    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+      setUploadError(`文件大小不能超过 ${MAX_SIZE_MB}MB`)
+      return
+    }
+    setUploadError('')
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      if (purpose) formData.append('purpose', purpose)
+      const res = await http.post('/files/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      const data = res.data as { data?: { url?: string } }
+      const url = data.data?.url
+      if (url) onChange?.(url)
+    } catch (err: any) {
+      setUploadError(err?.response?.data?.msg || '上传失败，请重试')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) void uploadFile(file)
+    e.target.value = ''
+  }
+
+  const thumbSize = compact ? 'h-7 w-7' : 'h-32 w-32'
+
   return (
     <>
       {previewUrl ? (
@@ -90,36 +129,65 @@ export function ReferenceImageUpload({ value, onChange, purpose }: ReferenceImag
             <img
               src={previewUrl}
               alt="参考图"
-              className="h-32 w-32 rounded-lg border object-cover"
+              className={`${thumbSize} rounded-lg border object-cover`}
               onError={() => setPreviewError(true)}
             />
             <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/0 transition-colors group-hover:bg-black/30">
-              <ZoomIn className="h-5 w-5 text-white opacity-0 transition-opacity group-hover:opacity-100" />
+              <ZoomIn className={`${compact ? 'h-3 w-3' : 'h-5 w-5'} text-white opacity-0 transition-opacity group-hover:opacity-100`} />
             </div>
           </div>
           <button
             type="button"
             onClick={() => onChange?.('')}
-            className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-sm transition-colors hover:bg-destructive/90"
+            className={`absolute -right-2 -top-2 flex ${compact ? 'h-4 w-4' : 'h-5 w-5'} items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-sm transition-colors hover:bg-destructive/90`}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
       ) : previewLoading ? (
-        <div className="flex h-32 w-32 items-center justify-center rounded-lg border border-dashed">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <div className={`${thumbSize} flex items-center justify-center rounded-lg border border-dashed`}>
+          <Loader2 className={`${compact ? 'h-3 w-3' : 'h-5 w-5'} animate-spin text-muted-foreground`} />
         </div>
       ) : previewError ? (
-        <div className="flex h-32 w-32 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-destructive/50 text-xs text-destructive">
-          <span>加载失败</span>
+        <div className={`${thumbSize} flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-destructive/50 text-destructive`} style={{ minWidth: compact ? 28 : undefined }}>
+          <span className="text-[10px]">加载失败</span>
           <button
             type="button"
             onClick={() => onChange?.('')}
-            className="text-muted-foreground hover:text-foreground"
+            className="text-[10px] text-muted-foreground hover:text-foreground"
           >
             重新上传
           </button>
         </div>
+      ) : compact ? (
+        <>
+          <button
+            type="button"
+            onClick={() => !uploading && fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-1 rounded-md border border-input bg-transparent px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
+          >
+            {uploading ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                上传中
+              </>
+            ) : (
+              <>
+                <Upload className="h-3 w-3" />
+                上传图片识别
+              </>
+            )}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPTED}
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          {uploadError && <span className="text-[10px] text-destructive">{uploadError}</span>}
+        </>
       ) : (
         <FileUpload value={value} onChange={onChange} purpose={purpose} />
       )}

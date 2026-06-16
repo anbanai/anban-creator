@@ -187,6 +187,7 @@ All implement `Provider` interface (`app/image/provider.go`).
 2. **Image Processing**: Max 1920px width, < 10MB for upload, preserves aspect ratio. Formats: JPG, JPEG, PNG, GIF, BMP, WebP.
 3. **AI Generation**: Prompts in Chinese for better results. Theme prompts define complete styling.
 4. **Studio**: Uses Bun (not npm). Use `bun install`, `bun run dev`, `bun run test`.
+5. **大型重构必须验证字段完整性**：在重构 studio 页面、表单对话框、API handler 或任何用户可见的功能时，必须**逐项检查原有功能**（表单字段、按钮、交互、API endpoint）是否被完整保留。禁止以"代码净化"、"简化"、"cleanup"等名义删除已发布的用户可见功能。若确需移除某个功能，必须在 commit message 中**明确列出被删除的功能并说明原因**。重构前建议：① 列出受影响的所有表单字段/交互/按钮；② `git diff` 后逐项核对；③ 不确定的功能一律保留。
 
 ## Development Patterns
 

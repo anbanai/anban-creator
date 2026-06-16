@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import SchedulePicker from '@/components/SchedulePicker'
+import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
@@ -39,6 +40,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     prompt: plan.prompt || '',
     image_model_key: plan.image_model_key || '',
     skip_reference_image: plan.skip_reference_image || false,
+    reference_image_url: plan.reference_image_url || '',
     watermark: plan.watermark || false,
   }
 }
@@ -63,6 +65,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
+      reference_image_url: '',
     },
   })
 
@@ -170,6 +173,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
+      reference_image_url: '',
     })
     setModalOpen(true)
   }
@@ -198,6 +202,7 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
+      reference_image_url: '',
     })
   }
 
@@ -212,6 +217,7 @@ export default function PlansPage() {
       prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id || undefined,
       image_model_key: values.image_model_key,
+      reference_image_url: values.reference_image_url || undefined,
       watermark: values.watermark || undefined,
     }
 
@@ -433,6 +439,21 @@ export default function PlansPage() {
                       />
                     )}
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="reference_image_url" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>参考图片（可选）</FormLabel>
+                  <FormControl>
+                    <ReferenceImageUpload
+                      value={field.value || ''}
+                      onChange={field.onChange}
+                      purpose="reference"
+                    />
+                  </FormControl>
+                  <FormDescription>上传商品照片等参考图，生成配图时作为风格参考</FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />
