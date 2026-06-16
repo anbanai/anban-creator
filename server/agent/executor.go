@@ -15,6 +15,7 @@ import (
 
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/storage"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
@@ -146,13 +147,14 @@ type LocalExecutor struct {
 	maxTurnsOverrides map[string]int
 	workspaceDir      string
 	serverBaseURL     string // server base URL for MCP (e.g. "http://localhost:8080")
+	store             storage.Provider
 }
 
 // Compile-time interface check.
 var _ TaskExecutor = (*LocalExecutor)(nil)
 
 // NewLocalExecutor creates a new LocalExecutor.
-func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int, workspaceDir string, serverBaseURL string) *LocalExecutor {
+func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int, workspaceDir string, serverBaseURL string, store storage.Provider) *LocalExecutor {
 	return &LocalExecutor{
 		logger:            logger,
 		imageAPICfg:       imageAPICfg,
@@ -164,6 +166,7 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 		maxTurnsOverrides: maxTurnsOverrides,
 		workspaceDir:      workspaceDir,
 		serverBaseURL:     serverBaseURL,
+		store:             store,
 	}
 }
 
@@ -301,14 +304,14 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		// Task-level image takes priority over channel brand image.
 		// SkipReferenceImage only controls the channel brand image, not task-level.
 		if opts.Task.ReferenceImageURL != "" {
-			if err := DownloadReferenceImage(ctx, workDir, opts.Task.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
 					Str("task_id", opts.Task.ID).
 					Str("url", opts.Task.ReferenceImageURL).
 					Msg("failed to download task reference image, continuing without it")
 			}
 		} else if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Channel.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
 					Str("task_id", opts.Task.ID).
 					Str("url", opts.Channel.ReferenceImageURL).

@@ -5,15 +5,23 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	appconfig "github.com/royalrick/anbanwriter/app/config"
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
+
+// maxReferenceImageBytes caps downloaded reference image size to prevent
+// unbounded memory/disk usage. Mirrors the upload limit in handler/file.go.
+const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 
 // BuildAppConfig constructs an app/config.Config from a Channel DB record.
 // This bridges the multi-user server config to the single-account app config
@@ -153,13 +161,48 @@ func TaskTypeToAgent(taskType string) string {
 // DownloadReferenceImage downloads a channel's brand reference image to the
 // workspace's .anbanwriter directory. The image is saved as reference.png for
 // use by both Claude Code (visual context) and abwriter CLI (--ref flag).
-func DownloadReferenceImage(ctx context.Context, workDir, imageURL string) error {
+//
+// Resolution order:
+//  1. If store is non-nil and imageURL is server-owned (OSS or local storage),
+//     read bytes via store.Read. This works for both private OSS buckets
+//     (OSSProvider.Read signs the URL internally) and local files
+//     (LocalProvider.Read reads from disk), avoiding the 403 that the raw
+//     public URL stored in the database would hit on a private bucket.
+//  2. Otherwise (external URL, or store.Read failed), fall back to direct
+//     HTTP GET. imageURL must be an absolute http(s) URL in this path.
+//
+// logger may be nil; when non-nil, fallbacks from path (1) are logged at warn.
+func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir, imageURL string) error {
 	destDir := filepath.Join(workDir, appconfig.ConfigDir)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-
 	destPath := filepath.Join(destDir, "reference.png")
+
+	if store != nil && store.IsOwnedURL(imageURL) {
+		if key, ok := storageKeyFromURL(imageURL); ok {
+			data, err := store.Read(ctx, key)
+			if err == nil {
+				if int64(len(data)) > maxReferenceImageBytes {
+					return fmt.Errorf("download: file too large (%d bytes)", len(data))
+				}
+				if err := os.WriteFile(destPath, data, 0o644); err != nil {
+					return fmt.Errorf("write file: %w", err)
+				}
+				return nil
+			}
+			if logger != nil {
+				logger.Warn().Err(err).
+					Str("url", imageURL).
+					Str("key", key).
+					Msg("storage.Read failed for reference image, falling back to direct HTTP")
+			}
+		} else if logger != nil {
+			logger.Warn().
+				Str("url", imageURL).
+				Msg("could not extract storage key from owned URL, falling back to direct HTTP")
+		}
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
@@ -183,11 +226,22 @@ func DownloadReferenceImage(ctx context.Context, workDir, imageURL string) error
 	}
 	defer f.Close()
 
-	// Limit download size to 20MB.
-	if _, err := io.Copy(f, io.LimitReader(resp.Body, 20*1024*1024)); err != nil {
+	if _, err := io.Copy(f, io.LimitReader(resp.Body, maxReferenceImageBytes)); err != nil {
 		os.Remove(destPath)
 		return fmt.Errorf("write file: %w", err)
 	}
-
 	return nil
+}
+
+// storageKeyFromURL extracts the storage backend key from a server-owned URL.
+// Handles both relative "/api/v1/files/<key>" (LocalProvider) and absolute
+// "https://<host>/<key>" (OSSProvider, with or without custom domain).
+func storageKeyFromURL(imageURL string) (string, bool) {
+	if key, ok := strings.CutPrefix(imageURL, "/api/v1/files/"); ok {
+		return key, true
+	}
+	if u, err := url.Parse(imageURL); err == nil && u.Path != "" {
+		return strings.TrimPrefix(u.Path, "/"), true
+	}
+	return "", false
 }

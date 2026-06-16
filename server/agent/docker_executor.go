@@ -19,6 +19,7 @@ import (
 	"github.com/rs/zerolog"
 
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
 
 var _ TaskExecutor = (*DockerExecutor)(nil)
@@ -40,6 +41,7 @@ type DockerExecutor struct {
 	defaultModel      string
 	keyProvider       UserKeyProvider
 	maxTurnsOverrides map[string]int
+	store             storage.Provider
 }
 
 // NewDockerExecutor creates a new DockerExecutor.
@@ -52,6 +54,7 @@ func NewDockerExecutor(
 	defaultModel string,
 	keyProvider UserKeyProvider,
 	maxTurnsOverrides map[string]int,
+	store storage.Provider,
 ) (*DockerExecutor, error) {
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
 	if os.Getenv("DOCKER_HOST") == "" {
@@ -78,6 +81,7 @@ func NewDockerExecutor(
 		defaultModel:      defaultModel,
 		keyProvider:       keyProvider,
 		maxTurnsOverrides: maxTurnsOverrides,
+		store:             store,
 	}, nil
 }
 
@@ -158,11 +162,11 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		// Download effective reference image.
 		// Task-level image takes priority over channel brand image.
 		if opts.Task.ReferenceImageURL != "" {
-			if err := DownloadReferenceImage(ctx, workDir, opts.Task.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download task reference image")
 			}
 		} else if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, workDir, opts.Channel.ReferenceImageURL); err != nil {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Channel.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download reference image")
 			}
 		}

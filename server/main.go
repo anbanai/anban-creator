@@ -187,7 +187,7 @@ func main() {
 	var agentExecutor agent.TaskExecutor
 	switch cfg.Claude.Executor {
 	case "docker":
-		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns)
+		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, store)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker executor")
 		}
@@ -201,7 +201,7 @@ func main() {
 			Bool("per_user_mcp", apiKeySvc != nil).
 			Msg("docker agent executor created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL())
+		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store)
 		log.Info().
 			Str("plugin_dir", cfg.Claude.PluginDir).
 			Bool("sandbox", cfg.Claude.Sandbox).
