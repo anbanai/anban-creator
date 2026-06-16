@@ -85,7 +85,10 @@ export function TemplateCreateDialog({
       .analyzeImage(thumbnailUrl)
       .then((res) => {
         if (cancelled) return
-        if (res.style) setStylePrompt(res.style)
+        // Only auto-fill when the user hasn't typed anything — respect their input.
+        if (res.style && !stylePrompt.trim()) {
+          setStylePrompt(res.style)
+        }
       })
       .catch(() => {
         if (cancelled) return
@@ -97,7 +100,7 @@ export function TemplateCreateDialog({
     return () => {
       cancelled = true
     }
-  }, [thumbnailUrl, open, template])
+  }, [thumbnailUrl, open, template, stylePrompt])
 
   const createMutation = useMutation({
     mutationFn: (data: {

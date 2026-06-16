@@ -48,23 +48,7 @@ func (r *templateRepository) List(ctx context.Context, templateType string, cate
 	if tag != "" {
 		q = q.Where("tags LIKE ?", "%"+tag+"%")
 	}
-	// Visibility scoping (only meaningful when userID is provided).
-	//   scope=mine    → only templates owned by userID
-	//   scope=public  → only publicly visible templates
-	//   scope=all     → templates owned by userID OR publicly visible
-	// Unauthenticated callers (userID empty) only ever see public templates.
-	if userID == "" {
-		q = q.Where("visibility = ?", "public")
-	} else {
-		switch scope {
-		case "mine":
-			q = q.Where("user_id = ?", userID)
-		case "public":
-			q = q.Where("visibility = ?", "public")
-		default: // "all" or unspecified
-			q = q.Where("user_id = ? OR visibility = ?", userID, "public")
-		}
-	}
+	q = applyVisibilityScope(q, userID, scope)
 	q = q.Order("sort_order DESC, created_at DESC")
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
@@ -87,22 +71,34 @@ func (r *templateRepository) Count(ctx context.Context, templateType string, cat
 	if tag != "" {
 		q = q.Where("tags LIKE ?", "%"+tag+"%")
 	}
-	if userID == "" {
-		q = q.Where("visibility = ?", "public")
-	} else {
-		switch scope {
-		case "mine":
-			q = q.Where("user_id = ?", userID)
-		case "public":
-			q = q.Where("visibility = ?", "public")
-		default:
-			q = q.Where("user_id = ? OR visibility = ?", userID, "public")
-		}
-	}
+	q = applyVisibilityScope(q, userID, scope)
 	if err := q.Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
+}
+
+// applyVisibilityScope scopes a template query by ownership and visibility.
+//
+// userID=="" is for MCP and internal callers — the HTTP path always has a
+// JWT-mandated userID. MCP intentionally lists only public templates, see
+// server/mcp/template_tools.go.
+//
+//   scope=mine    → only templates owned by userID
+//   scope=public  → only publicly visible templates
+//   scope=all     → templates owned by userID OR publicly visible (default)
+func applyVisibilityScope(q *gorm.DB, userID, scope string) *gorm.DB {
+	if userID == "" {
+		return q.Where("visibility = ?", "public")
+	}
+	switch scope {
+	case "mine":
+		return q.Where("user_id = ?", userID)
+	case "public":
+		return q.Where("visibility = ?", "public")
+	default: // "all" or unspecified
+		return q.Where("user_id = ? OR visibility = ?", userID, "public")
+	}
 }
 
 func (r *templateRepository) ListByIDs(ctx context.Context, ids []string) ([]*model.Template, error) {

@@ -26,6 +26,13 @@ func NewTemplateService(repo repository.Repository, logger *zerolog.Logger) *Tem
 	return &TemplateService{repo: repo, logger: logger}
 }
 
+// Sentinel errors for template operations. Handlers should use errors.Is to
+// map these to appropriate HTTP status codes (404 vs 403 vs 500).
+var (
+	ErrTemplateNotFound  = errors.New("template not found")
+	ErrTemplateForbidden = errors.New("forbidden: not the owner")
+)
+
 // Create saves a new template to the database. When userID is non-empty the
 // template is owned by that user; when empty it is a system template (e.g.
 // seeded via MCP) that no end user can modify.
@@ -49,17 +56,19 @@ func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, user
 	return tmpl, nil
 }
 
-// Update modifies an existing template. Only the owner can update.
+// Update modifies an existing template. Only the owner can update. Returns
+// ErrTemplateNotFound if the id does not match a row, or ErrTemplateForbidden
+// if userID is not the owner.
 func (s *TemplateService) Update(ctx context.Context, id string, userID string, patch *model.Template) (*model.Template, error) {
 	existing, err := s.repo.Templates().FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("template not found: %s", id)
+			return nil, ErrTemplateNotFound
 		}
 		return nil, fmt.Errorf("find template: %w", err)
 	}
 	if existing.UserID != userID {
-		return nil, fmt.Errorf("not allowed: not the owner")
+		return nil, ErrTemplateForbidden
 	}
 
 	// Apply patch fields.
@@ -83,17 +92,18 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	return existing, nil
 }
 
-// Delete removes a template. Only the owner can delete.
+// Delete removes a template. Only the owner can delete. Returns
+// ErrTemplateNotFound or ErrTemplateForbidden with the same semantics as Update.
 func (s *TemplateService) Delete(ctx context.Context, id string, userID string) error {
 	existing, err := s.repo.Templates().FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("template not found: %s", id)
+			return ErrTemplateNotFound
 		}
 		return fmt.Errorf("find template: %w", err)
 	}
 	if existing.UserID != userID {
-		return fmt.Errorf("not allowed: not the owner")
+		return ErrTemplateForbidden
 	}
 	if err := s.repo.Templates().Delete(ctx, id); err != nil {
 		return fmt.Errorf("delete template: %w", err)

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
@@ -165,6 +166,15 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
+	// Empty type = leave unchanged (matches service PATCH semantics). Non-empty
+	// type must still be a known value.
+	if req.Type != "" {
+		switch req.Type {
+		case "poster", "seednote", "article":
+		default:
+			return Error(c, fiber.StatusBadRequest, "type must be one of: poster, seednote, article")
+		}
+	}
 
 	patch := &model.Template{
 		Name:         req.Name,
@@ -176,8 +186,15 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 
 	updated, err := h.service.Update(c.Context(), id, userID, patch)
 	if err != nil {
-		h.logger.Error().Err(err).Str("template_id", id).Str("user_id", userID).Msg("update template failed")
-		return Error(c, fiber.StatusForbidden, err.Error())
+		switch {
+		case errors.Is(err, service.ErrTemplateNotFound):
+			return Error(c, fiber.StatusNotFound, "template not found")
+		case errors.Is(err, service.ErrTemplateForbidden):
+			return Error(c, fiber.StatusForbidden, "forbidden")
+		default:
+			h.logger.Error().Err(err).Str("template_id", id).Str("user_id", userID).Msg("update template failed")
+			return Error(c, fiber.StatusInternalServerError, "failed to update template")
+		}
 	}
 
 	return Success(c, updated)
@@ -199,8 +216,15 @@ func (h *TemplateHandler) Delete(c fiber.Ctx) error {
 	}
 
 	if err := h.service.Delete(c.Context(), id, userID); err != nil {
-		h.logger.Error().Err(err).Str("template_id", id).Str("user_id", userID).Msg("delete template failed")
-		return Error(c, fiber.StatusForbidden, err.Error())
+		switch {
+		case errors.Is(err, service.ErrTemplateNotFound):
+			return Error(c, fiber.StatusNotFound, "template not found")
+		case errors.Is(err, service.ErrTemplateForbidden):
+			return Error(c, fiber.StatusForbidden, "forbidden")
+		default:
+			h.logger.Error().Err(err).Str("template_id", id).Str("user_id", userID).Msg("delete template failed")
+			return Error(c, fiber.StatusInternalServerError, "failed to delete template")
+		}
 	}
 
 	return Success(c, fiber.Map{"deleted": id})
