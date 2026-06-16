@@ -124,7 +124,7 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		IsActive:       true,
 	}
 
-	created, err := svcs.TemplateSvc.Create(ctx, &template)
+	created, err := svcs.TemplateSvc.Create(ctx, &template, "")
 	if err != nil {
 		return errorResult(fmt.Sprintf("save template: %v", err)), nil
 	}
@@ -151,7 +151,7 @@ func listTemplatesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		limit = int(v)
 	}
 
-	templates, total, err := svcs.TemplateSvc.List(ctx, tmplType, category, "", 0, limit)
+	templates, total, err := svcs.TemplateSvc.List(ctx, tmplType, category, "", "", "public", 0, limit)
 	if err != nil {
 		return errorResult(fmt.Sprintf("list templates: %v", err)), nil
 	}

@@ -71,7 +71,7 @@ export type { UsageStats, TypeStatEntry } from './usage'
 export type { PaginatedResponse } from './common'
 
 // Template
-export type { TemplateType, Template } from './template'
+export type { TemplateType, TemplateVisibility, TemplateScope, Template, CreateTemplateRequest, UpdateTemplateRequest } from './template'
 
 // Poster
 export type {

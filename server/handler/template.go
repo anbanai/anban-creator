@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
@@ -22,10 +23,20 @@ func NewTemplateHandler(svc *service.TemplateService, logger *zerolog.Logger) *T
 }
 
 // List handles GET /api/v1/templates.
+//
+// Query params:
+//   - type: filter by template type (poster|seednote|article)
+//   - category, tag: additional filters
+//   - scope: visibility scoping — "all" (default) | "mine" | "public"
+//   - pagination via offset/limit
+//
+// Unauthenticated callers only see public templates. Authenticated callers see
+// public templates plus their own private ones when scope=all or scope=mine.
 func (h *TemplateHandler) List(c fiber.Ctx) error {
 	templateType := c.Query("type", "")
 	category := c.Query("category", "")
 	tag := c.Query("tag", "")
+	scope := c.Query("scope", "all")
 	offset, _ := strconv.Atoi(c.Query("offset", "0"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
 
@@ -33,7 +44,16 @@ func (h *TemplateHandler) List(c fiber.Ctx) error {
 		limit = 20
 	}
 
-	templates, total, err := h.service.List(c.Context(), templateType, category, tag, offset, limit)
+	// Validate scope; reject unknown values rather than silently falling back.
+	switch scope {
+	case "all", "mine", "public":
+	default:
+		return Error(c, fiber.StatusBadRequest, "scope must be one of: all, mine, public")
+	}
+
+	userID := GetUserID(c)
+
+	templates, total, err := h.service.List(c.Context(), templateType, category, tag, userID, scope, offset, limit)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("list templates failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to list templates")
@@ -46,6 +66,8 @@ func (h *TemplateHandler) List(c fiber.Ctx) error {
 }
 
 // GetByID handles GET /api/v1/templates/:id.
+//
+// Private templates are only visible to their owner.
 func (h *TemplateHandler) GetByID(c fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
@@ -60,5 +82,126 @@ func (h *TemplateHandler) GetByID(c fiber.Ctx) error {
 		return Error(c, fiber.StatusNotFound, "template not found")
 	}
 
+	// Enforce visibility for private templates.
+	if tmpl.Visibility == "private" {
+		userID := GetUserID(c)
+		if tmpl.UserID != userID {
+			return Error(c, fiber.StatusNotFound, "template not found")
+		}
+	}
+
 	return Success(c, tmpl)
+}
+
+// createTemplateRequest is the body for POST /api/v1/templates.
+type createTemplateRequest struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	ThumbnailURL string `json:"thumbnail_url"`
+	StylePrompt  string `json:"style_prompt"`
+	Visibility   string `json:"visibility"`
+}
+
+// Create handles POST /api/v1/templates.
+func (h *TemplateHandler) Create(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	var req createTemplateRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if req.Name == "" {
+		return Error(c, fiber.StatusBadRequest, "name is required")
+	}
+	if req.Type == "" {
+		return Error(c, fiber.StatusBadRequest, "type is required")
+	}
+	switch req.Type {
+	case "poster", "seednote", "article":
+	default:
+		return Error(c, fiber.StatusBadRequest, "type must be one of: poster, seednote, article")
+	}
+	if req.Visibility != "public" && req.Visibility != "private" {
+		req.Visibility = "public"
+	}
+
+	tmpl := &model.Template{
+		Name:         req.Name,
+		Type:         req.Type,
+		ThumbnailURL: req.ThumbnailURL,
+		StylePrompt:  req.StylePrompt,
+		Visibility:   req.Visibility,
+		IsActive:     true,
+	}
+
+	created, err := h.service.Create(c.Context(), tmpl, userID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("create template failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to create template")
+	}
+
+	return Success(c, created)
+}
+
+// Update handles PUT /api/v1/templates/:id. Only the owner can update.
+func (h *TemplateHandler) Update(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "template id is required")
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid template id format")
+	}
+
+	var req createTemplateRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	patch := &model.Template{
+		Name:         req.Name,
+		Type:         req.Type,
+		ThumbnailURL: req.ThumbnailURL,
+		StylePrompt:  req.StylePrompt,
+		Visibility:   req.Visibility,
+	}
+
+	updated, err := h.service.Update(c.Context(), id, userID, patch)
+	if err != nil {
+		h.logger.Error().Err(err).Str("template_id", id).Str("user_id", userID).Msg("update template failed")
+		return Error(c, fiber.StatusForbidden, err.Error())
+	}
+
+	return Success(c, updated)
+}
+
+// Delete handles DELETE /api/v1/templates/:id. Only the owner can delete.
+func (h *TemplateHandler) Delete(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "template id is required")
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid template id format")
+	}
+
+	if err := h.service.Delete(c.Context(), id, userID); err != nil {
+		h.logger.Error().Err(err).Str("template_id", id).Str("user_id", userID).Msg("delete template failed")
+		return Error(c, fiber.StatusForbidden, err.Error())
+	}
+
+	return Success(c, fiber.Map{"deleted": id})
 }

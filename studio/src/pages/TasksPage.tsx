@@ -8,10 +8,11 @@ import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Sta
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus } from '@/types'
+import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus, Template } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
+import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/ui/button'
@@ -74,6 +75,7 @@ export default function TasksPage() {
   const [watermark, setWatermark] = useState(false)
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
@@ -218,10 +220,11 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', reference_image_url: '' })
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', reference_image_url: '', style: '' })
     setQuantity(1)
     setWatermark(false)
     setChannelImageRatio('')
+    setSelectedTemplate(null)
     setModalOpen(true)
   }
 
@@ -236,10 +239,11 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', reference_image_url: '' })
+    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', reference_image_url: '', style: '' })
     setQuantity(1)
     setWatermark(false)
     setChannelImageRatio('')
+    setSelectedTemplate(null)
   }
 
   async function onSubmit(values: CreateTaskFormValues) {
@@ -251,8 +255,28 @@ export default function TasksPage() {
       image_ratio: values.image_ratio || undefined,
       image_model_key: values.image_model_key || undefined,
       reference_image_url: values.reference_image_url || undefined,
+      style: values.style || undefined,
       watermark: watermark || undefined,
     }))
+  }
+
+  function handleTemplateSelect(template: Template) {
+    setSelectedTemplate(template)
+    form.setValue('reference_image_url', template.thumbnail_url, { shouldDirty: true })
+    form.setValue('style', template.style_prompt || '', { shouldDirty: true })
+  }
+
+  function handleTemplateClear() {
+    setSelectedTemplate(null)
+    form.setValue('reference_image_url', '', { shouldDirty: true })
+    form.setValue('style', '', { shouldDirty: true })
+  }
+
+  function handleManualImageChange(url: string) {
+    // Manual upload and template selection are mutually exclusive.
+    if (selectedTemplate) setSelectedTemplate(null)
+    form.setValue('reference_image_url', url, { shouldDirty: true })
+    if (!url) form.setValue('style', '', { shouldDirty: true })
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -638,11 +662,19 @@ export default function TasksPage() {
               {watchedType !== 'viral_analysis' && (
                 <FormField control={form.control} name="reference_image_url" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>参考图片（可选）</FormLabel>
+                    <div className="flex items-center justify-between">
+                      <FormLabel>参考图片（可选）</FormLabel>
+                      <TemplatePicker
+                        type={watchedType as import('@/types').TemplateType}
+                        selected={selectedTemplate}
+                        onSelect={handleTemplateSelect}
+                        onClear={handleTemplateClear}
+                      />
+                    </div>
                     <FormControl>
                       <ReferenceImageUpload
                         value={field.value || ''}
-                        onChange={field.onChange}
+                        onChange={handleManualImageChange}
                         purpose="reference"
                       />
                     </FormControl>

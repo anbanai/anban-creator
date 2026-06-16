@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import type { Template, TemplateType } from '@/types'
 import { api } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Loader2, ImageIcon } from 'lucide-react'
+import { Loader2, ImageIcon, Pencil, Trash2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -12,6 +15,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 
 const typeBadgeMap: Record<TemplateType, { label: string; className: string }> = {
@@ -50,12 +63,29 @@ interface TemplatePreviewProps {
   template: Template | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Current user id — when it matches template.user_id, edit/delete buttons are shown. */
+  currentUserId?: string
+  /** Called when user clicks "edit". Parent typically closes preview and opens the edit dialog. */
+  onEdit?: (template: Template) => void
 }
 
-export function TemplatePreview({ template, open, onOpenChange }: TemplatePreviewProps) {
+export function TemplatePreview({ template, open, onOpenChange, currentUserId, onEdit }: TemplatePreviewProps) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [fullTemplate, setFullTemplate] = useState<Template | null>(null)
   const [loading, setLoading] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.templates.remove(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.templates.all })
+      toast.success('模板已删除')
+      setDeleteOpen(false)
+      onOpenChange(false)
+    },
+    onError: () => toast.error('删除失败，请重试'),
+  })
 
   useEffect(() => {
     if (!open || !template) {
@@ -81,6 +111,7 @@ export function TemplatePreview({ template, open, onOpenChange }: TemplatePrevie
 
   const data = fullTemplate ?? template
   const typeInfo = typeBadgeMap[data.type]
+  const isOwner = !!currentUserId && !!data.user_id && data.user_id === currentUserId
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -146,7 +177,7 @@ export function TemplatePreview({ template, open, onOpenChange }: TemplatePrevie
         )}
 
         {/* Action buttons */}
-        <div className="flex gap-2 pt-2">
+        <div className="flex flex-wrap gap-2 pt-2">
           {(data.type === 'poster' || data.type === 'article') && (
             <Button size="sm" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=article') }}>
               用于公众号
@@ -157,8 +188,44 @@ export function TemplatePreview({ template, open, onOpenChange }: TemplatePrevie
               用于种草笔记
             </Button>
           )}
+          {isOwner && onEdit && (
+            <Button size="sm" variant="outline" onClick={() => onEdit(data)}>
+              <Pencil className="h-3.5 w-3.5" />
+              编辑
+            </Button>
+          )}
+          {isOwner && (
+            <Button size="sm" variant="outline" onClick={() => setDeleteOpen(true)} className="text-destructive hover:bg-destructive/5">
+              <Trash2 className="h-3.5 w-3.5" />
+              删除
+            </Button>
+          )}
         </div>
       </DialogContent>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除模板？</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除"{data.name}"吗？此操作无法撤销。已使用该模板创建的任务不受影响。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                deleteMutation.mutate(data.id)
+              }}
+              disabled={deleteMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? '删除中…' : '删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }

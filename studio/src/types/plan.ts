@@ -15,6 +15,7 @@ export interface Plan {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  style?: string
   watermark?: boolean
   created_at: string
   updated_at: string
@@ -28,6 +29,7 @@ export interface CreatePlanRequest {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  style?: string
   watermark?: boolean
 }
 
@@ -37,5 +39,6 @@ export interface UpdatePlanRequest {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  style?: string
   watermark?: boolean
 }

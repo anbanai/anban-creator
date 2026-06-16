@@ -73,6 +73,7 @@ type createTaskRequest struct {
 	ImageModelKey      string `json:"image_model_key"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
+	Style              string `json:"style"`
 	Watermark          *bool  `json:"watermark"`
 }
 
@@ -122,7 +123,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Style, req.Watermark)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {

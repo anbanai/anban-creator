@@ -54,6 +54,7 @@ export interface CreateTaskRequest {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
+  style?: string
   watermark?: boolean
 }
 

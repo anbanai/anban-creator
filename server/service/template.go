@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"github.com/royalrick/anbanwriter/server/model"
@@ -25,15 +26,83 @@ func NewTemplateService(repo repository.Repository, logger *zerolog.Logger) *Tem
 	return &TemplateService{repo: repo, logger: logger}
 }
 
-// Create saves a new template to the database.
-func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template) (*model.Template, error) {
+// Create saves a new template to the database. When userID is non-empty the
+// template is owned by that user; when empty it is a system template (e.g.
+// seeded via MCP) that no end user can modify.
+// visibility must be "public" or "private"; an empty value defaults to "public".
+func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, userID string) (*model.Template, error) {
+	if tmpl.Name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	if tmpl.Visibility != "public" && tmpl.Visibility != "private" {
+		tmpl.Visibility = "public"
+	}
+	if tmpl.ID == "" {
+		tmpl.ID = uuid.NewString()
+	}
+	tmpl.UserID = userID
+	tmpl.IsActive = true
+
 	if err := s.repo.Templates().Create(ctx, tmpl); err != nil {
 		return nil, fmt.Errorf("create template: %w", err)
 	}
 	return tmpl, nil
 }
 
-// GetByID returns a template by its ID.
+// Update modifies an existing template. Only the owner can update.
+func (s *TemplateService) Update(ctx context.Context, id string, userID string, patch *model.Template) (*model.Template, error) {
+	existing, err := s.repo.Templates().FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("template not found: %s", id)
+		}
+		return nil, fmt.Errorf("find template: %w", err)
+	}
+	if existing.UserID != userID {
+		return nil, fmt.Errorf("not allowed: not the owner")
+	}
+
+	// Apply patch fields.
+	if patch.Name != "" {
+		existing.Name = patch.Name
+	}
+	if patch.Type != "" {
+		existing.Type = patch.Type
+	}
+	if patch.ThumbnailURL != "" {
+		existing.ThumbnailURL = patch.ThumbnailURL
+	}
+	existing.StylePrompt = patch.StylePrompt
+	if patch.Visibility == "public" || patch.Visibility == "private" {
+		existing.Visibility = patch.Visibility
+	}
+
+	if err := s.repo.Templates().Update(ctx, existing); err != nil {
+		return nil, fmt.Errorf("update template: %w", err)
+	}
+	return existing, nil
+}
+
+// Delete removes a template. Only the owner can delete.
+func (s *TemplateService) Delete(ctx context.Context, id string, userID string) error {
+	existing, err := s.repo.Templates().FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("template not found: %s", id)
+		}
+		return fmt.Errorf("find template: %w", err)
+	}
+	if existing.UserID != userID {
+		return fmt.Errorf("not allowed: not the owner")
+	}
+	if err := s.repo.Templates().Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete template: %w", err)
+	}
+	return nil
+}
+
+// GetByID returns a template by its ID. Private templates are only visible to
+// their owner; callers should enforce visibility at the handler layer.
 func (s *TemplateService) GetByID(ctx context.Context, id string) (*model.Template, error) {
 	tmpl, err := s.repo.Templates().FindByID(ctx, id)
 	if err != nil {
@@ -45,14 +114,16 @@ func (s *TemplateService) GetByID(ctx context.Context, id string) (*model.Templa
 	return tmpl, nil
 }
 
-// List returns paginated templates filtered by type, category, and tag.
-func (s *TemplateService) List(ctx context.Context, templateType, category, tag string, offset, limit int) ([]*model.Template, int64, error) {
-	templates, err := s.repo.Templates().List(ctx, templateType, category, tag, offset, limit)
+// List returns paginated templates filtered by type, category, tag, and an
+// ownership/visibility scope (all|mine|public). When userID is empty, only
+// public templates are returned regardless of scope.
+func (s *TemplateService) List(ctx context.Context, templateType, category, tag, userID, scope string, offset, limit int) ([]*model.Template, int64, error) {
+	templates, err := s.repo.Templates().List(ctx, templateType, category, tag, userID, scope, offset, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list templates: %w", err)
 	}
 
-	total, err := s.repo.Templates().Count(ctx, templateType, category, tag)
+	total, err := s.repo.Templates().Count(ctx, templateType, category, tag, userID, scope)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count templates: %w", err)
 	}
@@ -70,12 +141,13 @@ func (s *TemplateService) ListByIDs(ctx context.Context, ids []string) ([]*model
 }
 
 // GetRecommended returns recommended templates based on a user's profile category and tags.
+// Recommendations only draw from the public template pool.
 func (s *TemplateService) GetRecommended(ctx context.Context, profileCategory string, profileTags []string, limit int) ([]*model.Template, error) {
 	seen := make(map[string]struct{})
 	var results []*model.Template
 
 	if profileCategory != "" {
-		categoryTemplates, err := s.repo.Templates().List(ctx, "", profileCategory, "", 0, limit)
+		categoryTemplates, err := s.repo.Templates().List(ctx, "", profileCategory, "", "", "public", 0, limit)
 		if err != nil {
 			return nil, fmt.Errorf("list templates by category %s: %w", profileCategory, err)
 		}
@@ -89,7 +161,7 @@ func (s *TemplateService) GetRecommended(ctx context.Context, profileCategory st
 
 	if len(profileTags) > 0 {
 		for _, tag := range profileTags {
-			tagTemplates, err := s.repo.Templates().List(ctx, "", "", tag, 0, limit)
+			tagTemplates, err := s.repo.Templates().List(ctx, "", "", tag, "", "public", 0, limit)
 			if err != nil {
 				return nil, fmt.Errorf("list templates by tag %s: %w", tag, err)
 			}

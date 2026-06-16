@@ -143,7 +143,8 @@ func (s *TaskService) StorageProviderName() string {
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The quantity parameter (1-5) determines how many tasks to create, each independently billed.
 // imageModelKey optionally selects a per-task image model (validated upstream by the handler).
-func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio, imageModelKey string, skipRefImage *bool, referenceImageURL string, watermark *bool) ([]*model.Task, error) {
+// style optionally overrides the channel's style (e.g. from a selected template).
+func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio, imageModelKey string, skipRefImage *bool, referenceImageURL, style string, watermark *bool) ([]*model.Task, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
 	}
@@ -215,6 +216,7 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 			ImageRatio:         imageRatio,
 			ImageModelKey:      imageModelKey,
 			ReferenceImageURL:  referenceImageURL,
+			Style:              style,
 			SkipReferenceImage: skipRefImage != nil && *skipRefImage,
 			Watermark:          watermark != nil && *watermark,
 		}
@@ -297,6 +299,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Prompt:             prompt,
 		ImageModelKey:      plan.ImageModelKey,
 		ReferenceImageURL:  plan.ReferenceImageURL,
+		Style:              plan.Style,
 		SkipReferenceImage: plan.SkipReferenceImage,
 		Watermark:          plan.Watermark,
 	}

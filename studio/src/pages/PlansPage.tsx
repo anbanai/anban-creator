@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -7,7 +7,7 @@ import { Plus, FileText, Stamp } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { Channel, Plan, PlanType, CreatePlanRequest } from '@/types'
+import type { Channel, Plan, PlanType, CreatePlanRequest, Template } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import SchedulePicker from '@/components/SchedulePicker'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
+import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
@@ -41,6 +42,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     image_model_key: plan.image_model_key || '',
     skip_reference_image: plan.skip_reference_image || false,
     reference_image_url: plan.reference_image_url || '',
+    style: plan.style || '',
     watermark: plan.watermark || false,
   }
 }
@@ -54,6 +56,7 @@ export default function PlansPage() {
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
 
@@ -66,6 +69,7 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       reference_image_url: '',
+      style: '',
     },
   })
 
@@ -75,6 +79,8 @@ export default function PlansPage() {
       setTimeout(() => form.setFocus('cron_expr'), 100)
     }
   }, [modalOpen, form])
+
+  const watchedType = useWatch({ control: form.control, name: 'type' })
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -174,13 +180,16 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       reference_image_url: '',
+      style: '',
     })
+    setSelectedTemplate(null)
     setModalOpen(true)
   }
 
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
     form.reset(planToFormValues(plan))
+    setSelectedTemplate(null)
     setModalOpen(true)
   }
 
@@ -203,7 +212,27 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       reference_image_url: '',
+      style: '',
     })
+    setSelectedTemplate(null)
+  }
+
+  function handleTemplateSelect(template: Template) {
+    setSelectedTemplate(template)
+    form.setValue('reference_image_url', template.thumbnail_url, { shouldDirty: true })
+    form.setValue('style', template.style_prompt || '', { shouldDirty: true })
+  }
+
+  function handleTemplateClear() {
+    setSelectedTemplate(null)
+    form.setValue('reference_image_url', '', { shouldDirty: true })
+    form.setValue('style', '', { shouldDirty: true })
+  }
+
+  function handleManualImageChange(url: string) {
+    if (selectedTemplate) setSelectedTemplate(null)
+    form.setValue('reference_image_url', url, { shouldDirty: true })
+    if (!url) form.setValue('style', '', { shouldDirty: true })
   }
 
   async function onSubmit(values: PlanFormValues) {
@@ -218,6 +247,7 @@ export default function PlansPage() {
       channel_id: values.channel_id || undefined,
       image_model_key: values.image_model_key,
       reference_image_url: values.reference_image_url || undefined,
+      style: values.style || undefined,
       watermark: values.watermark || undefined,
     }
 
@@ -445,11 +475,19 @@ export default function PlansPage() {
 
               <FormField control={form.control} name="reference_image_url" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>参考图片（可选）</FormLabel>
+                  <div className="flex items-center justify-between">
+                    <FormLabel>参考图片（可选）</FormLabel>
+                    <TemplatePicker
+                      type={watchedType as import('@/types').TemplateType}
+                      selected={selectedTemplate}
+                      onSelect={handleTemplateSelect}
+                      onClear={handleTemplateClear}
+                    />
+                  </div>
                   <FormControl>
                     <ReferenceImageUpload
                       value={field.value || ''}
-                      onChange={field.onChange}
+                      onChange={handleManualImageChange}
                       purpose="reference"
                     />
                   </FormControl>

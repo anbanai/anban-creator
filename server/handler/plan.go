@@ -62,6 +62,7 @@ type createPlanRequest struct {
 	ImageModelKey      string `json:"image_model_key"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
+	Style              string `json:"style"`
 	Watermark          *bool  `json:"watermark"`
 }
 
@@ -71,6 +72,7 @@ type updatePlanRequest struct {
 	ImageModelKey      *string `json:"image_model_key"`
 	SkipReferenceImage *bool   `json:"skip_reference_image"`
 	ReferenceImageURL  string  `json:"reference_image_url"`
+	Style              string  `json:"style"`
 	Watermark          *bool   `json:"watermark"`
 }
 
@@ -99,7 +101,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 
-	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
+	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Style, req.Watermark)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
@@ -197,7 +199,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 	}
 
-	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Watermark)
+	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Style, req.Watermark)
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")

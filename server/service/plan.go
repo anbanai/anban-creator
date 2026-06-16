@@ -31,7 +31,7 @@ func (s *PlanService) Create(
 	ctx context.Context,
 	userID, channelID, cronExpr, prompt, imageModelKey string,
 	skipRefImage *bool,
-	referenceImageURL string,
+	referenceImageURL, style string,
 	watermark *bool,
 ) (*model.Plan, error) {
 	if channelID == "" {
@@ -69,6 +69,7 @@ func (s *PlanService) Create(
 		NextRunAt:          nextRun,
 		ImageModelKey:      imageModelKey,
 		ReferenceImageURL:  referenceImageURL,
+		Style:              style,
 		SkipReferenceImage: skipRefImage != nil && *skipRefImage,
 		Watermark:          watermark != nil && *watermark,
 	}
@@ -113,7 +114,7 @@ func (s *PlanService) Update(
 	id, cronExpr, prompt string,
 	imageModelKey *string,
 	skipRefImage *bool,
-	referenceImageURL string,
+	referenceImageURL, style string,
 	watermark *bool,
 ) (*model.Plan, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, id)
@@ -123,6 +124,7 @@ func (s *PlanService) Update(
 
 	plan.Prompt = prompt
 	plan.ReferenceImageURL = referenceImageURL
+	plan.Style = style
 	if imageModelKey != nil {
 		plan.ImageModelKey = *imageModelKey
 	}
