@@ -8,10 +8,13 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
 import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig } from '@/types'
+import type { ResourceEntry } from '@/types/resource'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
 import { SearchInput } from '@/components/ui/SearchInput'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -40,20 +43,6 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已归档', value: 'archived' },
 ]
 
-const styleOptions = [
-  { value: '', label: '不设置' },
-  { value: 'casual-science', label: '轻松科普风格' },
-  { value: 'dan-koe', label: 'Dan Koe 风格' },
-  { value: 'cultural-depth', label: '深度文化风格' },
-]
-
-const themeOptions = [
-  { value: '', label: '不设置' },
-  { value: 'autumn-warm', label: '秋日暖光' },
-  { value: 'spring-fresh', label: '春日清新' },
-  { value: 'ocean-calm', label: '深海静谧' },
-]
-
 const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   platform: 'article',
   name: '',
@@ -65,6 +54,8 @@ const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   positioning: '',
   style: '',
   theme: '',
+  layout: '',
+  image_preset: '',
   author: '',
   reference_image_url: '',
   image_ratio: '',
@@ -83,6 +74,8 @@ function channelToForm(ch: Channel): ChannelFormValues {
     positioning: ch.positioning || '',
     style: ch.style || '',
     theme: ch.theme || '',
+    layout: ch.layout || '',
+    image_preset: ch.image_preset || '',
     author: ch.author || '',
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
@@ -143,6 +136,66 @@ export default function ChannelsPage() {
 
   const currentPlatformConfig = platformConfigMap[selectedPlatform]
   const hasProfileField = currentPlatformConfig?.fields?.some((field) => field.key === 'profile_url') ?? false
+
+  const { data: seednoteStatus } = useQuery({
+    queryKey: queryKeys.channels.seednoteLoginStatus,
+    queryFn: () => api.channels.seednoteLoginStatus(),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+
+  const { data: writerResources } = useQuery({
+    queryKey: queryKeys.resources.writers,
+    queryFn: () => api.resources.list('writers'),
+    staleTime: Infinity,
+  })
+  const { data: themeResources } = useQuery({
+    queryKey: queryKeys.resources.themes,
+    queryFn: () => api.resources.list('themes'),
+    staleTime: Infinity,
+  })
+  const { data: layoutResources } = useQuery({
+    queryKey: queryKeys.resources.layouts,
+    queryFn: () => api.resources.list('layouts'),
+    staleTime: Infinity,
+  })
+  const { data: presetResources } = useQuery({
+    queryKey: queryKeys.resources.imagePresets,
+    queryFn: () => api.resources.list('image_presets'),
+    staleTime: Infinity,
+  })
+
+  const styleOptions = useMemo(() => [
+    { value: '', label: '不设置' },
+    ...(writerResources?.items || []).map((w: ResourceEntry) => ({
+      value: w.english_name || w.name,
+      label: w.display_name || w.description || w.english_name || w.name,
+    })),
+  ], [writerResources])
+
+  const themeOptions = useMemo(() => [
+    { value: '', label: '不设置' },
+    ...(themeResources?.items || []).map((t: ResourceEntry) => ({
+      value: t.name,
+      label: t.description || t.name,
+    })),
+  ], [themeResources])
+
+  const layoutOptions = useMemo(() => [
+    { value: '', label: '不设置' },
+    ...(layoutResources?.items || []).map((l: ResourceEntry) => ({
+      value: l.name,
+      label: l.description || l.name,
+    })),
+  ], [layoutResources])
+
+  const presetOptions = useMemo(() => [
+    { value: '', label: '不设置' },
+    ...(presetResources?.items || []).map((p: ResourceEntry) => ({
+      value: p.name,
+      label: p.description || p.name,
+    })),
+  ], [presetResources])
 
   function extractSupportedProfileUrl(value: string) {
     const match = value.match(/https?:\/\/((m\.|www\.)?xiaohongshu\.com|xhslink\.com)\/[^\s"'<>，。！？；、]+/i)
@@ -358,6 +411,8 @@ export default function ChannelsPage() {
       keywords: values.keywords?.trim() || undefined,
       style: values.style?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
+      layout: values.layout?.trim() || undefined,
+      image_preset: values.image_preset?.trim() || undefined,
       author: values.author?.trim() || undefined,
       reference_image_url: values.reference_image_url?.trim() || undefined,
       image_ratio: values.image_ratio || undefined,
@@ -402,6 +457,13 @@ export default function ChannelsPage() {
           新建账号
         </Button>
       </PageHeader>
+
+      {/* Seednote login status indicator */}
+      {seednoteStatus && (
+        <Badge variant={seednoteStatus.available && seednoteStatus.logged_in ? 'default' : 'secondary'} className="text-xs">
+          种草笔记 {seednoteStatus.available ? (seednoteStatus.logged_in ? '已连接' : '未登录') : '未配置'}
+        </Badge>
+      )}
 
       {/* Status filter tabs */}
       <ToggleGroup
@@ -757,6 +819,46 @@ export default function ChannelsPage() {
                       <FormMessage />
                     </FormItem>
                   )} />}
+
+                  {!isSeednote && (
+                    <FormField control={form.control} name="layout" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>默认布局</FormLabel>
+                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="选择默认布局" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {layoutOptions.map((opt) => (
+                              <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>文章默认使用的排版布局模块（仅 article 平台）</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  )}
+
+                  {!isSeednote && (
+                    <FormField control={form.control} name="image_preset" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>图片预设</FormLabel>
+                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="选择图片预设" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {presetOptions.map((opt) => (
+                              <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>封面图和内容图的默认生成预设模板</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  )}
 
                   <FormField control={form.control} name="author" render={({ field }) => (
                     <FormItem className="flex items-center gap-3 space-y-0">
