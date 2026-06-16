@@ -84,6 +84,11 @@ type TaskRepository interface {
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
 	UpdateProgressLog(ctx context.Context, id, log string) error
 	AppendProgressLog(ctx context.Context, id, message string) error
+	UpdateProgressColumn(ctx context.Context, id string, percent int) error
+	// GetTypeAndProgress loads only the type and progress columns for a task.
+	// Used on hot paths (e.g. UpdateProgress) where loading the full row —
+	// including the longtext progress_log — would be wasteful.
+	GetTypeAndProgress(ctx context.Context, id string) (taskType string, progress int, err error)
 	UpdateResult(ctx context.Context, id, result string) error
 	Update(ctx context.Context, task *model.Task) error
 	UpdateTitle(ctx context.Context, id string, title string) error

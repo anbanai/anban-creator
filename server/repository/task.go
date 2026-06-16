@@ -148,6 +148,29 @@ func (r *taskRepository) AppendProgressLog(ctx context.Context, id, message stri
 		Error
 }
 
+// UpdateProgressColumn writes the numeric progress percentage (0-100) to the
+// progress column. Called by UpdateProgress when a stage-derived or explicit
+// percent is available.
+func (r *taskRepository) UpdateProgressColumn(ctx context.Context, id string, percent int) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("progress", percent).Error
+}
+
+// GetTypeAndProgress loads only the type and progress columns for a task,
+// avoiding the longtext progress_log transfer on hot paths.
+func (r *taskRepository) GetTypeAndProgress(ctx context.Context, id string) (string, int, error) {
+	var row struct {
+		Type     string
+		Progress int
+	}
+	if err := r.db.WithContext(ctx).Model(&model.Task{}).
+		Select("type, progress").
+		Where("id = ?", id).
+		Take(&row).Error; err != nil {
+		return "", 0, err
+	}
+	return row.Type, row.Progress, nil
+}
+
 func (r *taskRepository) UpdateResult(ctx context.Context, id, result string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("result", result).Error
 }

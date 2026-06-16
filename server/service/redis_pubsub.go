@@ -45,9 +45,18 @@ type CancelEvent struct {
 
 // ProgressEvent is published to Redis when task progress is updated,
 // allowing SSE handlers on any replica to push updates to clients.
+//
+// Stage/Title/Description/Percent are populated by UpdateProgress (structured
+// updates from update_task_progress MCP calls). Message carries the raw log
+// line for backward compat with string-only callers (e.g. agent.go:170,
+// task_execution.go:120 OnProgress).
 type ProgressEvent struct {
-	TaskID  string `json:"task_id"`
-	Message string `json:"message"`
+	TaskID      string `json:"task_id"`
+	Message     string `json:"message"`
+	Stage       string `json:"stage,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Percent     int    `json:"percent,omitempty"`
 }
 
 // ProgressSubscriber receives progress events for a specific task.
@@ -157,6 +166,32 @@ func (ps *RedisPubSub) PublishProgress(ctx context.Context, taskID, message stri
 	channel := progressChannelPrefix + taskID
 	if err := ps.rdb.Publish(ctx, channel, data).Err(); err != nil {
 		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to publish progress event")
+	}
+}
+
+// PublishProgressStructured publishes a structured progress event with stage,
+// title, description, and numeric percent. Used by UpdateProgress when an
+// MCP-driven progress update is reported. SSE clients render title and
+// description directly; no separate message payload is needed.
+func (ps *RedisPubSub) PublishProgressStructured(ctx context.Context, taskID, stage, title, description string, percent int) {
+	if ps.rdb == nil {
+		return
+	}
+	event := ProgressEvent{
+		TaskID:      taskID,
+		Stage:       stage,
+		Title:       title,
+		Description: description,
+		Percent:     percent,
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to marshal structured progress event")
+		return
+	}
+	channel := progressChannelPrefix + taskID
+	if err := ps.rdb.Publish(ctx, channel, data).Err(); err != nil {
+		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to publish structured progress event")
 	}
 }
 

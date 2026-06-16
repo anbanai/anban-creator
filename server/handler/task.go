@@ -407,9 +407,22 @@ func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID 
 			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
 				continue
 			}
-			escaped, _ := json.Marshal(event.Message)
-			if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", escaped); err != nil {
-				return nil
+			if event.Stage != "" || event.Percent > 0 {
+				payload := map[string]any{
+					"stage":       event.Stage,
+					"title":       event.Title,
+					"description": event.Description,
+					"percent":     event.Percent,
+				}
+				data, _ := json.Marshal(payload)
+				if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", data); err != nil {
+					return nil
+				}
+			} else {
+				escaped, _ := json.Marshal(event.Message)
+				if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", escaped); err != nil {
+					return nil
+				}
 			}
 		case <-fallbackTicker.C:
 			task, err := h.service.GetByID(ctx, taskID)

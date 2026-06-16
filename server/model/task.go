@@ -37,6 +37,7 @@ type Task struct {
 	SkipReferenceImage  bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
 	Watermark           bool       `gorm:"default:false" json:"watermark,omitempty"`
 	ProgressLog         string     `gorm:"type:longtext" json:"progress_log,omitempty"`
+	Progress            int        `gorm:"default:0" json:"progress,omitempty"`
 	Result              *string    `gorm:"type:json" json:"result,omitempty"`
 	InputTokens         *int64     `json:"input_tokens,omitempty"`
 	OutputTokens        *int64     `json:"output_tokens,omitempty"`

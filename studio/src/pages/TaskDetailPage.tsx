@@ -41,6 +41,7 @@ export default function TaskDetailPage() {
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
   const [currentProgressMessage, setCurrentProgressMessage] = useState<string | null>(null)
+  const [liveProgress, setLiveProgress] = useState<{ percent: number; title: string | null; description: string | null } | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
@@ -92,9 +93,11 @@ export default function TaskDetailPage() {
   const latestPersistedProgressMessage = [...persistedLogs].reverse()
     .map((line) => line.replace(/^\[\d+%]\s*/, '').trim())
     .find(Boolean)
-  const progressValue = Math.max(0, Math.min(100, task?.progress ?? 0))
-  const progressMessage = currentProgressMessage || latestPersistedProgressMessage ||
-    (task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...')
+  const progressValue = Math.max(0, Math.min(100, liveProgress?.percent ?? task?.progress ?? 0))
+  const progressMessage = liveProgress?.title
+    ? `${liveProgress.title}${liveProgress.description ? ' · ' + liveProgress.description : ''}`
+    : (currentProgressMessage || latestPersistedProgressMessage ||
+      (task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...'))
 
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
@@ -174,10 +177,29 @@ export default function TaskDetailPage() {
         if (typeof parsed === 'string') {
           setSseLogs((prev) => appendLog(prev, parsed))
         } else {
-          const data = parsed as { progress: number; message: string }
-          if (data.progress != null) {
-            setSseLogs((prev) => appendLog(prev, `[${data.progress}%] ${data.message}`))
-            setCurrentProgressMessage(data.message || null)
+          const data = parsed as {
+            stage?: string
+            title?: string
+            description?: string
+            percent?: number
+          }
+          const pct = typeof data.percent === 'number' ? data.percent : null
+          const hasPct = pct != null && pct > 0
+          if (hasPct) {
+            setLiveProgress({
+              percent: pct as number,
+              title: data.title ?? null,
+              description: data.description ?? null,
+            })
+          }
+          // Display priority: title (with description) → stage → bare percent.
+          // Structured events always carry title via the MCP tool contract.
+          const label = data.title
+            ? `${data.title}${data.description ? ' · ' + data.description : ''}`
+            : (data.stage || '')
+          if (label) {
+            const prefix = hasPct ? `[${pct as number}%] ` : ''
+            setSseLogs((prev) => appendLog(prev, `${prefix}${label}`))
           }
         }
         break
@@ -221,6 +243,7 @@ export default function TaskDetailPage() {
       setSseLogs(persistedLogs)
       setSseError(null)
       setCurrentProgressMessage(null)
+      setLiveProgress(null)
       connectSSE()
     }
     return () => {
