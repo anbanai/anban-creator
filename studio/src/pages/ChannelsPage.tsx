@@ -3,7 +3,7 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Inbox, ChevronDown } from 'lucide-react'
+import { Plus, Inbox } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -92,7 +92,6 @@ export default function ChannelsPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [fetchingProfile, setFetchingProfile] = useState(false)
   const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [analyzingStyle, setAnalyzingStyle] = useState(false)
   const styleManuallyEditedRef = useRef(false)
@@ -238,7 +237,7 @@ export default function ChannelsPage() {
           form.setValue('style', result.style)
         }
       } catch {
-        // Silent fail - user can still fill style manually
+        toast.error('风格识别失败，请手动填写或重试')
       } finally {
         if (!cancelled) setAnalyzingStyle(false)
       }
@@ -369,7 +368,6 @@ export default function ChannelsPage() {
 
   function openCreate() {
     setEditingChannel(null)
-    setAdvancedOpen(false)
     setProfileFetchHint(null)
     form.reset(CHANNEL_FORM_DEFAULTS)
     setModalOpen(true)
@@ -377,7 +375,6 @@ export default function ChannelsPage() {
 
   function openEdit(channel: Channel) {
     setEditingChannel(channel)
-    setAdvancedOpen(false)
     setProfileFetchHint(null)
     form.reset(channelToForm(channel))
     skipAutoFetchRef.current = true
@@ -396,7 +393,6 @@ export default function ChannelsPage() {
     setModalOpen(false)
     setShowDirtyDialog(false)
     setEditingChannel(null)
-    setAdvancedOpen(false)
     setProfileFetchHint(null)
     form.reset(CHANNEL_FORM_DEFAULTS)
   }
@@ -718,160 +714,148 @@ export default function ChannelsPage() {
                 </>
               )}
 
-              <div className="border-t border-border pt-2">
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={() => setAdvancedOpen(!advancedOpen)}
-                >
-                  高级设置
-                  <ChevronDown className={`h-4 w-4 transition-transform duration-150 ${advancedOpen ? 'rotate-180' : ''}`} />
-                </button>
+              <div className="border-t border-border pt-4">
+                <h4 className="mb-3 text-sm font-medium text-muted-foreground">高级设置</h4>
               </div>
 
-              {advancedOpen && (
-                <>
-                  <FormField control={form.control} name="keywords" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>关键词</FormLabel>
-                      <FormControl>
-                        <TagInput
-                          value={field.value}
-                          onChange={field.onChange}
-                          placeholder="输入后按回车添加标签"
-                        />
-                      </FormControl>
-                      <FormDescription>按回车或逗号添加标签，用于内容生成</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
+              <FormField control={form.control} name="keywords" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>关键词</FormLabel>
+                  <FormControl>
+                    <TagInput
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="输入后按回车添加标签"
+                    />
+                  </FormControl>
+                  <FormDescription>按回车或逗号添加标签，用于内容生成</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-                  <FormField control={form.control} name="style" render={({ field }) => (
-                    <FormItem>
-                      <div className="flex items-center justify-between gap-2">
-                        <FormLabel>{isSeednote ? '视觉风格' : '写作风格'}</FormLabel>
-                        {isSeednote && (
-                          <ReferenceImageUpload
-                            value={referenceImageUrl}
-                            onChange={(url) => form.setValue('reference_image_url', url, { shouldDirty: true })}
-                            purpose="channel"
-                            compact
-                          />
+              <FormField control={form.control} name="style" render={({ field }) => (
+                <FormItem>
+                  <div className="flex items-center justify-between gap-2">
+                    <FormLabel>{isSeednote ? '视觉风格' : '写作风格'}</FormLabel>
+                    {isSeednote && (
+                      <ReferenceImageUpload
+                        value={referenceImageUrl}
+                        onChange={(url) => form.setValue('reference_image_url', url, { shouldDirty: true })}
+                        purpose="channel"
+                        compact
+                      />
+                    )}
+                  </div>
+                  {isSeednote ? (
+                    <FormControl>
+                      <div className="relative">
+                        <Textarea
+                          placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
+                          className={analyzingStyle ? 'pr-10' : ''}
+                          {...field}
+                          onChange={(e) => {
+                            styleManuallyEditedRef.current = true
+                            field.onChange(e)
+                          }}
+                        />
+                        {analyzingStyle && (
+                          <div className="absolute right-2 top-2">
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                          </div>
                         )}
                       </div>
-                      {isSeednote ? (
-                        <FormControl>
-                          <div className="relative">
-                            <Textarea
-                              placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
-                              className={analyzingStyle ? 'pr-10' : ''}
-                              {...field}
-                              onChange={(e) => {
-                                styleManuallyEditedRef.current = true
-                                field.onChange(e)
-                              }}
-                            />
-                            {analyzingStyle && (
-                              <div className="absolute right-2 top-2">
-                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                              </div>
-                            )}
-                          </div>
-                          {analyzingStyle && (
-                            <p className="text-xs text-muted-foreground">正在分析参考图...</p>
-                          )}
-                        </FormControl>
-                      ) : (
-                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                          <FormControl>
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder="选择写作风格" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {styleOptions.map((opt) => (
-                              <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                      {analyzingStyle && (
+                        <p className="text-xs text-muted-foreground">正在分析参考图...</p>
                       )}
-                      <FormDescription>{isSeednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  {!isSeednote && <FormField control={form.control} name="theme" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>主题</FormLabel>
-                      <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="选择转换主题" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {themeOptions.map((opt) => (
-                            <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>选择内置转换主题模板</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />}
-
-                  {!isSeednote && (
-                    <FormField control={form.control} name="layout" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>默认布局</FormLabel>
-                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="选择默认布局" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {layoutOptions.map((opt) => (
-                              <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormDescription>文章默认使用的排版布局模块（仅 article 平台）</FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  )}
-
-                  {!isSeednote && (
-                    <FormField control={form.control} name="image_preset" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>图片预设</FormLabel>
-                        <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="选择图片预设" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {presetOptions.map((opt) => (
-                              <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormDescription>封面图和内容图的默认生成预设模板</FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  )}
-
-                  <FormField control={form.control} name="author" render={({ field }) => (
-                    <FormItem className="flex items-center gap-3 space-y-0">
-                      <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>
+                    </FormControl>
+                  ) : (
+                    <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
                       <FormControl>
-                        <Input className="flex-1 min-w-0" placeholder="例如 张三" {...field} />
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="选择写作风格" />
+                        </SelectTrigger>
                       </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
+                      <SelectContent>
+                        {styleOptions.map((opt) => (
+                          <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <FormDescription>{isSeednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
-                </>
+              {!isSeednote && <FormField control={form.control} name="theme" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>主题</FormLabel>
+                  <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择转换主题" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {themeOptions.map((opt) => (
+                        <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>选择内置转换主题模板</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />}
+
+              {!isSeednote && (
+                <FormField control={form.control} name="layout" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>默认布局</FormLabel>
+                    <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择默认布局" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {layoutOptions.map((opt) => (
+                          <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>文章默认使用的排版布局模块（仅 article 平台）</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )} />
               )}
+
+              {!isSeednote && (
+                <FormField control={form.control} name="image_preset" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>图片预设</FormLabel>
+                    <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择图片预设" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {presetOptions.map((opt) => (
+                          <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>封面图和内容图的默认生成预设模板</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              )}
+
+              <FormField control={form.control} name="author" render={({ field }) => (
+                <FormItem className="flex items-center gap-3 space-y-0">
+                  <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>
+                  <FormControl>
+                    <Input className="flex-1 min-w-0" placeholder="例如 张三" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
             </form>
           </Form>
           <DialogFooter>
