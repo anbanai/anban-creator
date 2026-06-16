@@ -33,7 +33,17 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
 // The agent definition is loaded via WithAgent() (system prompt), so the user
 // message only needs to provide the topic or an autonomous execution instruction.
-func BuildUserPrompt(taskType, topic, agentName string) string {
+//
+// style, when non-empty, is the effective visual style resolved at task creation
+// (task > plan > channel). It is injected into the prompt as the image-gen style
+// override; the agent picks this up naturally when composing image prompts and
+// calls generate_image with a full prompt string. This keeps BuildAppConfig pure
+// (channel-only) — task-specific overrides flow through the prompt, not config.
+//
+// goalFeedback, when non-empty, is appended as a "强目标模式反馈" block at the
+// end. The TaskService passes the most recent failed-evaluation reason so the
+// retry attempt can avoid repeating the same mistakes. Empty string is a no-op.
+func BuildUserPrompt(taskType, topic, agentName, style, goalFeedback string) string {
 	_ = taskType // reserved for future platform-specific prompt variations
 	var base string
 	if topic == "" {
@@ -44,6 +54,16 @@ func BuildUserPrompt(taskType, topic, agentName string) string {
 			agentName)
 	} else {
 		base = fmt.Sprintf("Use the %s agent to create content about: %s", agentName, topic)
+	}
+	if style != "" {
+		base += fmt.Sprintf(
+			"\n\n视觉风格要求（覆盖账号默认风格，请在生成图片时遵守）：%s",
+			style,
+		)
+	}
+	if strings.TrimSpace(goalFeedback) != "" {
+		base += "\n\n[强目标模式反馈]\n" + strings.TrimSpace(goalFeedback) +
+			"\n请避免重复上述问题，调整策略以达成目标。"
 	}
 	return base
 }
@@ -155,6 +175,10 @@ type ExecutionOptions struct {
 	OnProgress    func(taskID string, message string) // callback for SSE
 	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
+
+	// GoalFeedback is appended to the agent user prompt on goal-mode retry
+	// attempts. Empty string on first attempt or non-goal tasks.
+	GoalFeedback string
 }
 
 // TokenUsage captures LLM token consumption for a task execution.
@@ -259,6 +283,16 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
+		// Apply task-level style override at dispatch time (kept out of BuildAppConfig
+		// to preserve the channel→config mapping). When a task carries its own style
+		// (resolved at creation), clear the channel-level style in settings.json so the
+		// agent sees a single source of truth in the user prompt.
+		if opts.Task.Style != "" {
+			if cfg.Seednote != nil {
+				cfg.Seednote.Style = ""
+			}
+			cfg.Wechat.Article.Style = ""
+		}
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
@@ -329,7 +363,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	agentName := TaskTypeToAgent(opts.Task.Type)
 
 	// 5. Build user prompt that references the agent by name.
-	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName)
+	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.Style, opts.GoalFeedback)
 
 	// Load agent definition from plugin directory and pass via WithAgent()
 	// (SDK programmatic subagents) instead of --agent CLI flag lookup.

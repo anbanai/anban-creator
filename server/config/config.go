@@ -282,6 +282,32 @@ type CreditsConfig struct {
 	TaskCosts     map[string]int            `yaml:"task_costs"`     // per-task-type costs, e.g. {"article": 4000, "seednote": 3200}
 	ModelCosts    map[string]map[string]int `yaml:"model_costs"`    // per-model costs, key format: "provider/model"
 	AdminAPIKey   string                    `yaml:"admin_api_key"`  // API key for admin credit grant endpoint
+
+	// Goal mode (strong goal mode) pricing and limits.
+	// GoalModeMultiplier is the upfront credit multiplier applied when a task is
+	// created with goal_mode=true (default 3). GoalMaxAttempts is the maximum
+	// number of executions (including the first) before a goal-mode task enters
+	// goal_not_met state (default 3).
+	GoalModeMultiplier int `yaml:"goal_mode_multiplier"`
+	GoalMaxAttempts    int `yaml:"goal_max_attempts"`
+}
+
+// EffectiveGoalModeMultiplier returns the configured goal-mode credit multiplier,
+// defaulting to 3 when unset or invalid.
+func (c *CreditsConfig) EffectiveGoalModeMultiplier() int {
+	if c == nil || c.GoalModeMultiplier <= 0 {
+		return 3
+	}
+	return c.GoalModeMultiplier
+}
+
+// EffectiveGoalMaxAttempts returns the configured maximum goal-mode attempts,
+// defaulting to 3 when unset or invalid.
+func (c *CreditsConfig) EffectiveGoalMaxAttempts() int {
+	if c == nil || c.GoalMaxAttempts <= 0 {
+		return 3
+	}
+	return c.GoalMaxAttempts
 }
 
 // ModelCost returns the per-operation cost for a specific model.
@@ -413,6 +439,12 @@ func (c *Config) applyDefaults() {
 		}
 	} else if _, ok := c.Credits.TaskCosts["viral_analysis"]; !ok {
 		c.Credits.TaskCosts["viral_analysis"] = 800
+	}
+	if c.Credits.GoalModeMultiplier <= 0 {
+		c.Credits.GoalModeMultiplier = 3
+	}
+	if c.Credits.GoalMaxAttempts <= 0 {
+		c.Credits.GoalMaxAttempts = 3
 	}
 
 	// Asynq defaults.

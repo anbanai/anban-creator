@@ -15,13 +15,18 @@ type Plan struct {
 	Status             string     `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
 	ImageModelKey      string     `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL  string     `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
-	// Style is a free-form text description (typically from a selected template's
-	// style_prompt) used as provenance/metadata. The actual visual style override
-	// for image generation happens via ReferenceImageURL above, which is consumed
-	// by the agent's image-generation step.
+	// Style is the plan-level visual style, populated when a template is selected
+	// during plan creation. Copied to Task.Style (with task-level override winning)
+	// when CreateFromPlan runs; if empty, the channel's style is used as fallback.
 	Style              string     `gorm:"type:varchar(1024);default:''" json:"style,omitempty"`
 	SkipReferenceImage bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
 	Watermark          bool       `gorm:"default:false" json:"watermark,omitempty"`
+
+	// Goal mode configuration propagated to tasks created from this plan.
+	Goal            string `gorm:"type:text" json:"goal,omitempty"`
+	GoalMode        bool   `gorm:"default:false" json:"goal_mode"`
+	GoalMaxAttempts int    `gorm:"default:3" json:"goal_max_attempts"`
+
 	NextRunAt          *time.Time `gorm:"index" json:"next_run_at"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`

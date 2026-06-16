@@ -548,7 +548,9 @@ func TestBuildUserPrompt(t *testing.T) {
 		taskType     string
 		topic        string
 		agentName    string
+		style        string
 		wantContains []string
+		wantAbsence  []string
 	}{
 		{
 			name:         "seednote with topic references agent",
@@ -556,6 +558,7 @@ func TestBuildUserPrompt(t *testing.T) {
 			topic:        "春季穿搭",
 			agentName:    "seednote",
 			wantContains: []string{"Use the seednote agent", "春季穿搭"},
+			wantAbsence:  []string{"视觉风格要求"},
 		},
 		{
 			name:         "article with topic references agent",
@@ -563,6 +566,7 @@ func TestBuildUserPrompt(t *testing.T) {
 			topic:        "时间管理技巧",
 			agentName:    "wechatarticle",
 			wantContains: []string{"Use the wechatarticle agent", "时间管理技巧"},
+			wantAbsence:  []string{"视觉风格要求"},
 		},
 		{
 			name:         "unknown task type defaults to seednote agent",
@@ -585,20 +589,58 @@ func TestBuildUserPrompt(t *testing.T) {
 			agentName:    "",
 			wantContains: []string{"Use the  agent", "test topic"},
 		},
+		{
+			name:         "style appends 视觉风格要求 line",
+			taskType:     "seednote",
+			topic:        "春季穿搭",
+			agentName:    "seednote",
+			style:        "暖系生活感",
+			wantContains: []string{"视觉风格要求", "暖系生活感", "覆盖账号默认风格"},
+		},
+		{
+			name:         "empty style omits 视觉风格要求 line",
+			taskType:     "seednote",
+			topic:        "春季穿搭",
+			agentName:    "seednote",
+			style:        "",
+			wantAbsence:  []string{"视觉风格要求"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildUserPrompt(tt.taskType, tt.topic, tt.agentName)
+			got := BuildUserPrompt(tt.taskType, tt.topic, tt.agentName, tt.style, "")
 			for _, sub := range tt.wantContains {
 				if !strings.Contains(got, sub) {
 					t.Errorf("BuildUserPrompt() = %q, want to contain %q", got, sub)
+				}
+			}
+			for _, sub := range tt.wantAbsence {
+				if strings.Contains(got, sub) {
+					t.Errorf("BuildUserPrompt() = %q, should NOT contain %q", got, sub)
 				}
 			}
 			if strings.Contains(got, "video") || strings.Contains(got, "Merge the generated images") {
 				t.Errorf("BuildUserPrompt() = %q, should not mention video generation", got)
 			}
 		})
+	}
+}
+
+func TestBuildUserPrompt_GoalFeedback(t *testing.T) {
+	// Empty feedback — no block appended.
+	got := BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "")
+	if strings.Contains(got, "强目标模式反馈") {
+		t.Errorf("empty feedback should not include goal block; got %q", got)
+	}
+
+	// Non-empty feedback — block must appear with the reason quoted.
+	feedback := "字数不足 100，缺少具体案例"
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", feedback)
+	for _, sub := range []string{"强目标模式反馈", feedback} {
+		if !strings.Contains(got, sub) {
+			t.Errorf("BuildUserPrompt with feedback = %q, want to contain %q", got, sub)
+		}
 	}
 }
 

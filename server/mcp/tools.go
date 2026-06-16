@@ -106,7 +106,7 @@ func registerTaskTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"status":     map[string]any{"type": "string", "enum": []any{"pending", "running", "completed", "failed", "cancelled"}, "description": "Filter by status"},
+				"status":     map[string]any{"type": "string", "enum": []any{"pending", "running", "completed", "failed", "cancelled", "goal_not_met"}, "description": "Filter by status"},
 				"channel_id": map[string]any{"type": "string", "description": "Filter by channel ID"},
 				"limit":      map[string]any{"type": "integer", "description": "Max results (default 20, max 100)", "default": 20},
 			},
@@ -472,7 +472,7 @@ func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		return errorResult("channel_id and cron_expr are required"), nil
 	}
 
-	plan, err := svcs.PlanSvc.Create(context.Background(), userID, channelID, cronExpr, prompt, "", nil, "", "", nil)
+	plan, err := svcs.PlanSvc.Create(context.Background(), userID, channelID, cronExpr, prompt, "", nil, "", "", nil, "", false)
 	if err != nil {
 		return errorResult(fmt.Sprintf("create plan: %v", err)), nil
 	}

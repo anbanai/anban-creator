@@ -23,7 +23,10 @@ import (
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
-const maxTaskPromptCharacters = 5120
+const (
+	maxTaskPromptCharacters = 5120
+	maxGoalTextCharacters   = 4000
+)
 
 // TaskHandler handles task-related HTTP endpoints.
 type TaskHandler struct {
@@ -75,6 +78,8 @@ type createTaskRequest struct {
 	ReferenceImageURL  string `json:"reference_image_url"`
 	Style              string `json:"style"`
 	Watermark          *bool  `json:"watermark"`
+	Goal               string `json:"goal"`
+	GoalMode           bool   `json:"goal_mode"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -123,7 +128,18 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Style, req.Watermark)
+	// Validate goal text length when goal mode is enabled.
+	if req.GoalMode {
+		goalText := strings.TrimSpace(req.Goal)
+		if goalText == "" {
+			return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
+		}
+		if utf8.RuneCountInString(goalText) > maxGoalTextCharacters {
+			return Error(c, fiber.StatusBadRequest, "goal must not exceed 4000 characters")
+		}
+	}
+
+	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Style, req.Watermark, req.Goal, req.GoalMode)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {
@@ -410,7 +426,7 @@ func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID 
 				}
 			}
 			// Terminal state detection (reliable via DB).
-			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
+			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled || task.Status == model.TaskStatusGoalNotMet {
 				statusData, _ := json.Marshal(map[string]string{"status": task.Status})
 				fmt.Fprintf(c, "event: %s\ndata: %s\n\n", task.Status, statusData)
 				return nil
@@ -454,7 +470,7 @@ func (h *TaskHandler) streamWithPolling(c fiber.Ctx, ctx context.Context, taskID
 				}
 			}
 
-			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
+			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled || task.Status == model.TaskStatusGoalNotMet {
 				statusData, _ := json.Marshal(map[string]string{
 					"status": task.Status,
 				})

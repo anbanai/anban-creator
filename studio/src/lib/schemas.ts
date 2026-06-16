@@ -1,12 +1,18 @@
 import { z } from "zod"
 
 export const PROMPT_MAX_LENGTH = 5120
+export const GOAL_TEXT_MAX_LENGTH = 4000
 
 const unicodeLength = (value: string) => Array.from(value).length
 
 const promptSchema = z.string().refine(
   (value) => unicodeLength(value) <= PROMPT_MAX_LENGTH,
   `Prompt 不能超过 ${PROMPT_MAX_LENGTH} 个字符`,
+)
+
+const goalSchema = z.string().refine(
+  (value) => unicodeLength(value) <= GOAL_TEXT_MAX_LENGTH,
+  `目标条件不能超过 ${GOAL_TEXT_MAX_LENGTH} 个字符`,
 )
 
 export const loginSchema = z.object({
@@ -39,6 +45,8 @@ export const createTaskSchema = z.object({
   ).optional(),
   style: z.string().max(1024).optional(),
   watermark: z.boolean().optional(),
+  goal: goalSchema.optional(),
+  goal_mode: z.boolean().default(false),
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -59,6 +67,17 @@ export const createTaskSchema = z.object({
       path: ["channel_id"],
     })
   }
+
+  if (data.goal_mode) {
+    const goal = data.goal?.trim() || ""
+    if (!goal) {
+      ctx.addIssue({
+        code: "custom",
+        message: "开启强目标模式后必须填写目标条件",
+        path: ["goal"],
+      })
+    }
+  }
 })
 export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
@@ -75,6 +94,19 @@ export const planSchema = z.object({
   ).optional(),
   style: z.string().max(1024).optional(),
   watermark: z.boolean().optional(),
+  goal: goalSchema.optional(),
+  goal_mode: z.boolean().default(false),
+}).superRefine((data, ctx) => {
+  if (data.goal_mode) {
+    const goal = data.goal?.trim() || ""
+    if (!goal) {
+      ctx.addIssue({
+        code: "custom",
+        message: "开启强目标模式后必须填写目标条件",
+        path: ["goal"],
+      })
+    }
+  }
 })
 export type PlanFormValues = z.infer<typeof planSchema>
 

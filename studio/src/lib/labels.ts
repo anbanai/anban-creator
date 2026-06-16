@@ -141,6 +141,7 @@ export const taskStatusLabel: Record<string, string> = {
   completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
+  goal_not_met: '未达目标',
 }
 
 export const planStatusLabel: Record<string, string> = {
@@ -264,6 +265,7 @@ export function getBadgeVariant(status: string, type?: 'task' | 'plan'): BadgeVa
     case 'failed': return 'destructive'
     case 'running': return 'outline'
     case 'cancelled': return 'secondary'
+    case 'goal_not_met': return 'destructive'
     default: return 'secondary'
   }
 }

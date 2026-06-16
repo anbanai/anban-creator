@@ -17,6 +17,9 @@ export interface Plan {
   reference_image_url?: string
   style?: string
   watermark?: boolean
+  goal?: string
+  goal_mode?: boolean
+  goal_max_attempts?: number
   created_at: string
   updated_at: string
 }
@@ -31,6 +34,8 @@ export interface CreatePlanRequest {
   reference_image_url?: string
   style?: string
   watermark?: boolean
+  goal?: string
+  goal_mode?: boolean
 }
 
 export interface UpdatePlanRequest {
@@ -41,4 +46,6 @@ export interface UpdatePlanRequest {
   reference_image_url?: string
   style?: string
   watermark?: boolean
+  goal?: string
+  goal_mode?: boolean
 }

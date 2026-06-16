@@ -15,10 +15,11 @@ type Task struct {
 	ImageRatio          string     `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageModelKey       string     `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL   string     `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
-	// Style is a free-form text description (typically from a selected template's
-	// style_prompt) used as provenance/metadata. The actual visual style override
-	// for image generation happens via ReferenceImageURL above, which is consumed
-	// by the agent's image-generation step.
+	// Style is the effective visual style for this task's image generation,
+	// resolved at creation time with precedence task > plan > channel. Propagated
+	// to the agent via the user prompt (BuildUserPrompt); the channel-level style
+	// in settings.json is cleared by the executor when this is non-empty, so the
+	// agent has a single source of truth and no prompt-vs-config ambiguity.
 	Style              string     `gorm:"type:varchar(1024);default:''" json:"style,omitempty"`
 	SkipReferenceImage  bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
 	Watermark           bool       `gorm:"default:false" json:"watermark,omitempty"`
@@ -37,6 +38,18 @@ type Task struct {
 	RetryCount          int        `gorm:"default:0" json:"retry_count"`
 	MaxRetries          int        `gorm:"default:3" json:"max_retries"`
 	RateLimitRetryCount int        `gorm:"default:0" json:"rate_limit_retry_count"`
+
+	// Goal mode (strong goal mode, /goal-like): when GoalMode is true, the task
+	// is evaluated against Goal after each execution. If the goal is not met and
+	// GoalAttempts < GoalMaxAttempts, the task is re-enqueued with feedback.
+	// When attempts are exhausted without success, status becomes goal_not_met.
+	Goal              string  `gorm:"type:text" json:"goal,omitempty"`
+	GoalMode          bool    `gorm:"default:false" json:"goal_mode"`
+	GoalMaxAttempts   int     `gorm:"default:3" json:"goal_max_attempts"`
+	GoalAttempts      int     `gorm:"default:0" json:"goal_attempts"`
+	GoalAchieved      *bool   `json:"goal_achieved,omitempty"`
+	GoalEvaluationLog string  `gorm:"type:json" json:"goal_evaluation_log,omitempty"`
+
 	Published           bool       `gorm:"default:false" json:"published"`
 	PublishedAt         *time.Time `gorm:"index" json:"published_at,omitempty"`
 	WorkflowStatus      *string    `gorm:"type:json" json:"workflow_status,omitempty"`

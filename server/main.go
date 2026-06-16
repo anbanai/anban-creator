@@ -248,6 +248,9 @@ func main() {
 		} else if count > 0 {
 			log.Info().Int64("count", count).Msg("cleared artifact task titles")
 		}
+
+		// Wire goal-mode evaluator: reuse the writing LLM client when available.
+		// If writingLLMClient is nil at this point, we wire it later (see below).
 	}
 
 	// 12.1 Create per-user model config service.
@@ -310,6 +313,22 @@ func main() {
 			viralAnalysisSvc.SetCreditService(creditSvc)
 			taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
 			log.Info().Bool("llm_configured", writingLLMClient != nil).Msg("Viral analysis service initialized")
+		}
+	}
+
+	// Wire goal-mode evaluator on TaskService (after writingLLMClient is resolved).
+	// When no LLM is configured, goal mode silently degrades to "always achieved"
+	// so users aren't blocked; the upfront ×N charge is still kept.
+	if taskSvc != nil {
+		if writingLLMClient != nil {
+			goalEvaluator := service.NewGoalEvaluator(writingLLMClient, log)
+			taskSvc.SetGoalEvaluator(goalEvaluator, cfg.Credits.EffectiveGoalModeMultiplier(), cfg.Credits.EffectiveGoalMaxAttempts())
+			log.Info().
+				Int("multiplier", cfg.Credits.EffectiveGoalModeMultiplier()).
+				Int("max_attempts", cfg.Credits.EffectiveGoalMaxAttempts()).
+				Msg("goal evaluator wired")
+		} else {
+			log.Warn().Msg("goal evaluator not wired (writing LLM client not configured); goal mode will degrade to always-achieved")
 		}
 	}
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).

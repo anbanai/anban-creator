@@ -9,15 +9,17 @@ import (
 )
 
 type Config struct {
-	ServerURL string
-	APIKey    string
-	TaskID    string
-	TaskType  string
-	Topic     string
-	Workspace string
-	Model     string
-	AgentFlag string
-	MaxTurns  int
+	ServerURL     string
+	APIKey        string
+	TaskID        string
+	TaskType      string
+	Topic         string
+	Style         string
+	GoalFeedback  string
+	Workspace     string
+	Model         string
+	AgentFlag     string
+	MaxTurns      int
 }
 
 func ParseConfig() (*Config, error) {
@@ -27,6 +29,8 @@ func ParseConfig() (*Config, error) {
 	flag.StringVar(&cfg.TaskID, "task-id", "", "task ID")
 	flag.StringVar(&cfg.TaskType, "task-type", "", "task type")
 	flag.StringVar(&cfg.Topic, "topic", "", "task topic/prompt")
+	flag.StringVar(&cfg.Style, "style", "", "effective visual style for image generation (overrides channel default)")
+	flag.StringVar(&cfg.GoalFeedback, "goal-feedback", "", "feedback from previous goal-mode attempt (used when retrying to inform the model why the prior attempt failed)")
 	flag.StringVar(&cfg.Workspace, "workspace", "/workspace", "workspace directory")
 	flag.StringVar(&cfg.Model, "model", "", "Claude model override")
 	flag.StringVar(&cfg.AgentFlag, "agent-flag", "", "Claude Code --agent flag")
@@ -38,6 +42,8 @@ func ParseConfig() (*Config, error) {
 	cfg.TaskID = strings.TrimSpace(cfg.TaskID)
 	cfg.TaskType = strings.TrimSpace(cfg.TaskType)
 	cfg.Topic = strings.TrimSpace(cfg.Topic)
+	cfg.Style = strings.TrimSpace(cfg.Style)
+	cfg.GoalFeedback = strings.TrimSpace(cfg.GoalFeedback)
 	cfg.Workspace = strings.TrimSpace(cfg.Workspace)
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	cfg.AgentFlag = strings.TrimSpace(cfg.AgentFlag)
@@ -69,5 +75,5 @@ func ParseConfig() (*Config, error) {
 
 func (c *Config) UserPrompt() string {
 	agentName := serveragent.TaskTypeToAgent(c.TaskType)
-	return serveragent.BuildUserPrompt(c.TaskType, c.Topic, agentName)
+	return serveragent.BuildUserPrompt(c.TaskType, c.Topic, agentName, c.Style, c.GoalFeedback)
 }

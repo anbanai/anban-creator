@@ -178,17 +178,25 @@ func (s *CreditService) GrantBonus(ctx context.Context, userID string, amount in
 }
 
 // DeductForTask deducts credits for a single task creation.
-func (s *CreditService) DeductForTask(ctx context.Context, userID, taskType, taskID string) (int, error) {
+// The optional multiplier (defaults to 1 when omitted) scales the base task
+// cost — used by goal-mode tasks which charge goal_mode_multiplier × base cost
+// upfront to cover all retry attempts.
+func (s *CreditService) DeductForTask(ctx context.Context, userID, taskType, taskID string, multiplier ...int) (int, error) {
 	cost, ok := s.cfg.TaskCosts[taskType]
 	if !ok {
 		return 0, ErrUnknownTaskType
 	}
+	m := 1
+	if len(multiplier) > 0 && multiplier[0] > 0 {
+		m = multiplier[0]
+	}
+	totalCost := cost * m
 
 	var newBalance int
 	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
 		var ok bool
 		var err error
-		newBalance, ok, err = txRepo.Users().DeductCredits(ctx, userID, cost)
+		newBalance, ok, err = txRepo.Users().DeductCredits(ctx, userID, totalCost)
 		if err != nil {
 			return fmt.Errorf("deduct credits: %w", err)
 		}
@@ -197,13 +205,17 @@ func (s *CreditService) DeductForTask(ctx context.Context, userID, taskType, tas
 		}
 
 		taskIDCopy := taskID
+		desc := fmt.Sprintf("任务扣费 (%s) -%d", taskType, totalCost)
+		if m > 1 {
+			desc = fmt.Sprintf("强目标任务扣费 (%s, ×%d) -%d", taskType, m, totalCost)
+		}
 		tx := &model.CreditTransaction{
 			UserID:       userID,
 			Type:         model.CreditTypeTaskDeduct,
-			Amount:       -cost,
+			Amount:       -totalCost,
 			BalanceAfter: newBalance,
 			TaskID:       &taskIDCopy,
-			Description:  fmt.Sprintf("任务扣费 (%s) -%d", taskType, cost),
+			Description:  desc,
 		}
 		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 			return fmt.Errorf("create deduction transaction: %w", err)
@@ -214,8 +226,96 @@ func (s *CreditService) DeductForTask(ctx context.Context, userID, taskType, tas
 		return 0, err
 	}
 
-	s.logger.Info().Str("user_id", userID).Str("task_id", taskID).Int("cost", cost).Int("balance", newBalance).Msg("credits deducted for task")
+	s.logger.Info().Str("user_id", userID).Str("task_id", taskID).Int("cost", totalCost).Int("multiplier", m).Int("balance", newBalance).Msg("credits deducted for task")
 	return newBalance, nil
+}
+
+// RefundForGoalTask refunds the unused portion of a goal-mode task's upfront
+// ×N charge, proportional to the number of attempts remaining.
+//
+// Formula: refund = deductedAmount × (maxAttempts - attemptsUsed) / maxAttempts.
+//
+// Edge cases:
+//   - attemptsUsed <= 0            → full refund (no attempts consumed)
+//   - attemptsUsed >= maxAttempts  → zero refund (all attempts consumed)
+//   - maxAttempts <= 0             → treated as 1 (defensive; should not happen)
+//
+// Idempotent: a second call for the same task is a no-op (protected by
+// FindRefundByTaskID).
+func (s *CreditService) RefundForGoalTask(ctx context.Context, taskID string, attemptsUsed, maxAttempts int, reason string) error {
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	if attemptsUsed < 0 {
+		attemptsUsed = 0
+	}
+	if attemptsUsed > maxAttempts {
+		attemptsUsed = maxAttempts
+	}
+
+	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		// Idempotency check.
+		_, err := txRepo.Credits().FindRefundByTaskID(ctx, taskID)
+		if err == nil {
+			s.logger.Warn().Str("task_id", taskID).Msg("goal task refund already exists, skipping")
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("check existing refund: %w", err)
+		}
+
+		deduction, err := txRepo.Credits().FindDeductionByTaskID(ctx, taskID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				s.logger.Warn().Str("task_id", taskID).Msg("no deduction found for goal task, skipping refund")
+				return nil
+			}
+			return fmt.Errorf("find deduction: %w", err)
+		}
+
+		deductedAmount := -deduction.Amount
+		// Proportional refund: each attempt consumes 1/maxAttempts of the upfront charge.
+		remainingFraction := float64(maxAttempts-attemptsUsed) / float64(maxAttempts)
+		refundAmount := int(float64(deductedAmount) * remainingFraction)
+		if refundAmount <= 0 {
+			s.logger.Info().
+				Str("task_id", taskID).
+				Int("deducted", deductedAmount).
+				Int("attempts_used", attemptsUsed).
+				Int("max_attempts", maxAttempts).
+				Msg("goal task refund is zero, all attempts consumed")
+			return nil
+		}
+
+		newBalance, err := txRepo.Users().AdjustBalance(ctx, deduction.UserID, refundAmount)
+		if err != nil {
+			return fmt.Errorf("adjust balance: %w", err)
+		}
+
+		taskIDCopy := taskID
+		desc := fmt.Sprintf("强目标任务%s退还 (剩余 %d/%d 次) +%d", reason, maxAttempts-attemptsUsed, maxAttempts, refundAmount)
+		tx := &model.CreditTransaction{
+			UserID:       deduction.UserID,
+			Type:         model.CreditTypeTaskRefund,
+			Amount:       refundAmount,
+			BalanceAfter: newBalance,
+			TaskID:       &taskIDCopy,
+			Description:  desc,
+		}
+		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
+			return fmt.Errorf("create refund transaction: %w", err)
+		}
+
+		s.logger.Info().
+			Str("task_id", taskID).
+			Int("deducted", deductedAmount).
+			Int("refund", refundAmount).
+			Int("attempts_used", attemptsUsed).
+			Int("max_attempts", maxAttempts).
+			Str("reason", reason).
+			Msg("credits refunded for goal task")
+		return nil
+	})
 }
 
 // RefundForTask refunds credits for a failed or cancelled task.
@@ -313,6 +413,46 @@ func (s *CreditService) DeductBatch(ctx context.Context, userID, taskType string
 	}
 	// Otherwise, create our own transaction.
 	return s.repo.WithTx(ctx, deduct)
+}
+
+// DeductBatchWithMultiplier is a typed alternative to DeductBatch that records
+// a "强目标任务扣费" description with the multiplier. Callers must pre-multiply
+// totalCost to reflect the multiplier (e.g. cost * quantity * multiplier).
+func (s *CreditService) DeductBatchWithMultiplier(ctx context.Context, userID, taskType string, totalCost int, taskIDs []string, multiplier int) error {
+	if multiplier <= 1 {
+		return s.DeductBatch(ctx, userID, taskType, totalCost, taskIDs)
+	}
+	if totalCost <= 0 || len(taskIDs) == 0 {
+		return ErrInvalidAmount
+	}
+
+	costPerTask := totalCost / len(taskIDs)
+
+	return s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		newBalance, ok, err := txRepo.Users().DeductCredits(ctx, userID, totalCost)
+		if err != nil {
+			return fmt.Errorf("deduct credits: %w", err)
+		}
+		if !ok {
+			return ErrInsufficientCredits
+		}
+
+		for _, taskID := range taskIDs {
+			taskIDCopy := taskID
+			tx := &model.CreditTransaction{
+				UserID:       userID,
+				Type:         model.CreditTypeTaskDeduct,
+				Amount:       -costPerTask,
+				BalanceAfter: newBalance,
+				TaskID:       &taskIDCopy,
+				Description:  fmt.Sprintf("强目标任务扣费 (%s, ×%d) -%d", taskType, multiplier, costPerTask),
+			}
+			if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
+				return fmt.Errorf("create deduction transaction: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // TaskCost returns the credit cost for a given task type.

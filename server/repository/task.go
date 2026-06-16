@@ -1,8 +1,11 @@
 package repository
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/royalrick/anbanwriter/server/model"
@@ -106,12 +109,12 @@ func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string, c
 	return tasks, nil
 }
 
-// FindCompletedOlderThan finds completed or failed tasks whose completed_at
+// FindCompletedOlderThan finds tasks in a terminal state whose completed_at
 // is before the given time and which have not yet been cleaned up.
 func (r *taskRepository) FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.Task, error) {
 	var tasks []*model.Task
 	err := r.db.WithContext(ctx).
-		Where("status IN ?", []string{model.TaskStatusCompleted, model.TaskStatusFailed}).
+		Where("status IN ?", model.TerminalTaskStatuses).
 		Where("completed_at IS NOT NULL AND completed_at < ?", before).
 		Where("cleaned_up_at IS NULL").
 		Find(&tasks).Error
@@ -198,6 +201,66 @@ func (r *taskRepository) IncrementRetryAndSetPending(ctx context.Context, taskID
 func (r *taskRepository) UpdateHeartbeat(ctx context.Context, id string) error {
 	now := time.Now()
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("last_heartbeat_at", now).Error
+}
+
+// UpdateGoalFields updates goal-mode tracking columns atomically.
+// achieved: when non-nil, sets goal_achieved to the pointer value (nil leaves unchanged).
+// attemptsDelta: when non-zero, increments goal_attempts by this delta.
+// evaluationLog: when non-empty, replaces goal_evaluation_log.
+func (r *taskRepository) UpdateGoalFields(ctx context.Context, taskID string, achieved *bool, attemptsDelta int, evaluationLog string) error {
+	updates := map[string]interface{}{}
+	if achieved != nil {
+		updates["goal_achieved"] = *achieved
+	}
+	if attemptsDelta != 0 {
+		updates["goal_attempts"] = gorm.Expr("goal_attempts + ?", attemptsDelta)
+	}
+	if evaluationLog != "" {
+		updates["goal_evaluation_log"] = evaluationLog
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ?", taskID).
+		Updates(updates).Error
+}
+
+// AppendGoalEvaluation appends a single JSON-encoded evaluation entry to
+// goal_evaluation_log. The entry should be a complete JSON object passed as
+// raw bytes (no surrounding array). The column is treated as a JSON array.
+// Goal evaluations run single-threaded per task execution, so the
+// read-modify-write here is safe — concurrent writers on the same task_id
+// are not expected.
+func (r *taskRepository) AppendGoalEvaluation(ctx context.Context, taskID string, entry []byte) error {
+	entry = bytes.TrimSpace(entry)
+	if len(entry) == 0 {
+		return nil
+	}
+	var current string
+	row := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ?", taskID).
+		Select("COALESCE(goal_evaluation_log, '')").
+		Row()
+	if err := row.Scan(&current); err != nil {
+		return fmt.Errorf("read goal_evaluation_log: %w", err)
+	}
+
+	var arr []json.RawMessage
+	if strings.TrimSpace(current) != "" {
+		_ = json.Unmarshal([]byte(current), &arr) // tolerate malformed JSON → reset
+	}
+	arr = append(arr, json.RawMessage(entry))
+	merged, err := json.Marshal(arr)
+	if err != nil {
+		return fmt.Errorf("marshal goal evaluation log: %w", err)
+	}
+	return r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ?", taskID).
+		Update("goal_evaluation_log", string(merged)).Error
 }
 
 func (r *taskRepository) CountByUserID(ctx context.Context, userID string, channelID string) (int64, error) {
@@ -353,6 +416,15 @@ func (r *taskRepository) UpdateTokenUsage(ctx context.Context, id string, inputT
 		}).Error
 }
 
+// usageStatuses is the set of task statuses counted toward usage statistics.
+// Cancelled tasks are excluded because they may not have consumed meaningful
+// resources; goal_not_met tasks are included because they ran full attempts.
+var usageStatuses = []string{
+	model.TaskStatusCompleted,
+	model.TaskStatusFailed,
+	model.TaskStatusGoalNotMet,
+}
+
 // AggregateUsageByUser returns SQL-level SUM aggregates for token usage and cost.
 func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, channelID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error) {
 	type row struct {
@@ -375,7 +447,7 @@ func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string
 		).
 		Where("user_id = ?", userID).
 		Where("created_at >= ? AND created_at <= ?", from, to).
-		Where("status IN ?", []string{model.TaskStatusCompleted, model.TaskStatusFailed})
+		Where("status IN ?", usageStatuses)
 	if channelID != "" {
 		q = q.Where("channel_id = ?", channelID)
 	}
@@ -411,7 +483,7 @@ func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string
 		).
 		Where("user_id = ?", userID).
 		Where("created_at >= ? AND created_at <= ?", from, to).
-		Where("status IN ?", []string{model.TaskStatusCompleted, model.TaskStatusFailed})
+		Where("status IN ?", usageStatuses)
 	if channelID != "" {
 		q = q.Where("channel_id = ?", channelID)
 	}

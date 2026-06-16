@@ -47,6 +47,9 @@ type TaskService struct {
 	cancelFuncs         sync.Map           // taskID → context.CancelFunc
 	seednoteTrackingSvc PublishedTrackingService
 	topicPoolSvc        *TopicPoolService
+	goalEvaluator       *GoalEvaluator
+	goalMultiplier      int
+	goalMaxAttempts     int
 }
 
 // NewTaskService creates a new TaskService.
@@ -105,6 +108,39 @@ func (s *TaskService) SetTopicPoolService(svc *TopicPoolService) {
 	s.topicPoolSvc = svc
 }
 
+// SetGoalEvaluator wires the goal-mode evaluator used after task execution to
+// decide whether to auto-retry. Optional — when nil, goal-mode tasks skip the
+// evaluation step and behave like normal tasks (still charged at the goal rate).
+func (s *TaskService) SetGoalEvaluator(ev *GoalEvaluator, multiplier, maxAttempts int) {
+	s.goalEvaluator = ev
+	if multiplier > 0 {
+		s.goalMultiplier = multiplier
+	} else {
+		s.goalMultiplier = 3
+	}
+	if maxAttempts > 0 {
+		s.goalMaxAttempts = maxAttempts
+	} else {
+		s.goalMaxAttempts = 3
+	}
+}
+
+// GoalMultiplier returns the configured goal-mode credit multiplier (default 3).
+func (s *TaskService) GoalMultiplier() int {
+	if s.goalMultiplier <= 0 {
+		return 3
+	}
+	return s.goalMultiplier
+}
+
+// GoalMaxAttempts returns the configured maximum goal-mode attempts (default 3).
+func (s *TaskService) GoalMaxAttempts() int {
+	if s.goalMaxAttempts <= 0 {
+		return 3
+	}
+	return s.goalMaxAttempts
+}
+
 // listenCancelEvents subscribes to Redis cancel events and triggers local
 // context cancellation for tasks executing on this replica.
 func (s *TaskService) listenCancelEvents(ctx context.Context) {
@@ -144,7 +180,11 @@ func (s *TaskService) StorageProviderName() string {
 // The quantity parameter (1-5) determines how many tasks to create, each independently billed.
 // imageModelKey optionally selects a per-task image model (validated upstream by the handler).
 // style optionally overrides the channel's style (e.g. from a selected template).
-func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio, imageModelKey string, skipRefImage *bool, referenceImageURL, style string, watermark *bool) ([]*model.Task, error) {
+//
+// When goalMode is true, each task charges GoalMultiplier() × base cost upfront
+// (covers up to GoalMaxAttempts() execution attempts). The goal text and max
+// attempts are propagated to each created task.
+func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio, imageModelKey string, skipRefImage *bool, referenceImageURL, style string, watermark *bool, goal string, goalMode bool) ([]*model.Task, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
 	}
@@ -171,16 +211,31 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 
 	taskType := channel.Platform
 
+	// Resolve effective style: caller-provided (e.g. from a selected template) wins,
+	// otherwise fall back to the channel's style. From this point on task.Style is
+	// the single source of truth for image-gen style.
+	effectiveStyle := style
+	if effectiveStyle == "" {
+		effectiveStyle = channel.Style
+	}
+
 	// Pre-calculate total credit cost and deduct upfront to avoid race conditions.
 	var deductedTaskIDs []string
 	tasks := make([]*model.Task, 0, quantity)
+
+	multiplier := 1
+	maxAttempts := 0
+	if goalMode {
+		multiplier = s.GoalMultiplier()
+		maxAttempts = s.GoalMaxAttempts()
+	}
 
 	if s.creditSvc != nil {
 		cost, ok := s.creditSvc.TaskCost(taskType)
 		if !ok {
 			return nil, fmt.Errorf("unknown task type: %s", taskType)
 		}
-		totalCost := cost * quantity
+		totalCost := cost * quantity * multiplier
 
 		// Generate all task IDs upfront so we can create individual transactions.
 		taskIDs := make([]string, quantity)
@@ -189,11 +244,17 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 		}
 
 		// Deduct total cost in a single atomic transaction.
-		if err := s.creditSvc.DeductBatch(ctx, userID, taskType, totalCost, taskIDs); err != nil {
-			if errors.Is(err, ErrInsufficientCredits) {
-				return nil, fmt.Errorf("积分不足: %w", err)
+		var deductErr error
+		if multiplier > 1 {
+			deductErr = s.creditSvc.DeductBatchWithMultiplier(ctx, userID, taskType, totalCost, taskIDs, multiplier)
+		} else {
+			deductErr = s.creditSvc.DeductBatch(ctx, userID, taskType, totalCost, taskIDs)
+		}
+		if deductErr != nil {
+			if errors.Is(deductErr, ErrInsufficientCredits) {
+				return nil, fmt.Errorf("积分不足: %w", deductErr)
 			}
-			return nil, fmt.Errorf("deduct credits: %w", err)
+			return nil, fmt.Errorf("deduct credits: %w", deductErr)
 		}
 		deductedTaskIDs = taskIDs
 	}
@@ -216,9 +277,12 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 			ImageRatio:         imageRatio,
 			ImageModelKey:      imageModelKey,
 			ReferenceImageURL:  referenceImageURL,
-			Style:              style,
+			Style:              effectiveStyle,
 			SkipReferenceImage: skipRefImage != nil && *skipRefImage,
 			Watermark:          watermark != nil && *watermark,
+			Goal:               goal,
+			GoalMode:           goalMode,
+			GoalMaxAttempts:    maxAttempts,
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -266,21 +330,36 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	// Derive task type from the channel if ChannelID is set.
+	var ch *model.Channel
 	taskType := plan.Type
 	if plan.ChannelID != "" {
-		ch, err := s.repo.Channels().FindByID(ctx, plan.ChannelID)
-		if err == nil {
+		if found, err := s.repo.Channels().FindByID(ctx, plan.ChannelID); err == nil {
+			ch = found
 			taskType = ch.Platform
 		}
 	}
 
+	// Resolve effective style: plan-level wins, otherwise fall back to the channel.
+	effectiveStyle := plan.Style
+	if effectiveStyle == "" && ch != nil {
+		effectiveStyle = ch.Style
+	}
+
 	// Deduct credits for the plan task.
+	// Plan-level goal mode (plan.GoalMode) propagates to the task and scales
+	// the upfront charge by GoalMultiplier() to cover all retry attempts.
+	planGoalMode := plan.GoalMode && strings.TrimSpace(plan.Goal) != ""
+	planMultiplier := 1
+	if planGoalMode {
+		planMultiplier = s.GoalMultiplier()
+	}
+
 	if s.creditSvc != nil {
 		if _, costOK := s.creditSvc.TaskCost(taskType); !costOK {
 			s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task with unknown task type")
 			return nil, nil
 		}
-		if _, err := s.creditSvc.DeductForTask(ctx, plan.UserID, taskType, taskID); err != nil {
+		if _, err := s.creditSvc.DeductForTask(ctx, plan.UserID, taskType, taskID, planMultiplier); err != nil {
 			if errors.Is(err, ErrInsufficientCredits) {
 				s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task due to insufficient credits")
 				return nil, nil
@@ -288,6 +367,11 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 			s.logger.Error().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("failed to deduct credits for plan task")
 			return nil, nil
 		}
+	}
+
+	goalMaxAttempts := 0
+	if planGoalMode {
+		goalMaxAttempts = s.GoalMaxAttempts()
 	}
 
 	task := &model.Task{
@@ -299,9 +383,12 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Prompt:             prompt,
 		ImageModelKey:      plan.ImageModelKey,
 		ReferenceImageURL:  plan.ReferenceImageURL,
-		Style:              plan.Style,
+		Style:              effectiveStyle,
 		SkipReferenceImage: plan.SkipReferenceImage,
 		Watermark:          plan.Watermark,
+		Goal:               plan.Goal,
+		GoalMode:           planGoalMode,
+		GoalMaxAttempts:    goalMaxAttempts,
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -434,7 +521,13 @@ func normalizeTitleForDedup(title string) string {
 // Uses CompareAndSwapStatus to prevent cancelling already-completed or already-failed tasks.
 // If Redis pub/sub is available, it also publishes a cancel event so other replicas
 // can propagate the cancellation to their in-process execution contexts.
+//
+// Goal-mode tasks receive a proportional refund based on remaining attempts;
+// normal tasks receive a full refund.
 func (s *TaskService) Cancel(ctx context.Context, id string) error {
+	// Fetch task before CAS so we can decide refund strategy.
+	task, taskErr := s.repo.Tasks().FindByID(ctx, id)
+
 	// Atomically transition status: only pending or running can be cancelled.
 	swapped, err := s.repo.Tasks().CompareAndSwapStatus(
 		ctx, id, model.TaskStatusRunning, model.TaskStatusCancelled,
@@ -442,6 +535,7 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("cancel task: %w", err)
 	}
+	wasRunning := swapped
 	if !swapped {
 		// Also try pending → cancelled (task may not have started running yet).
 		swapped, err = s.repo.Tasks().CompareAndSwapStatus(
@@ -455,15 +549,19 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 		}
 	}
 	// Refund credits for the cancelled task (idempotent — double-refund protected).
-	if s.creditSvc != nil {
-		if refundErr := s.creditSvc.RefundForTask(ctx, id, "cancel"); refundErr != nil {
-			s.logger.Error().Err(refundErr).Str("task_id", id).Msg("failed to refund credits for cancelled task")
-		}
+	if s.creditSvc != nil && taskErr == nil && task != nil {
+		s.refundTaskByMode(ctx, task, wasRunning, "取消")
 	}
 	// Release concurrency slot.
 	if s.pubsub != nil {
-		if task, err := s.repo.Tasks().FindByID(ctx, id); err == nil && task.ChannelID != "" {
-			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		var channelID string
+		if taskErr == nil && task != nil {
+			channelID = task.ChannelID
+		} else if t, err := s.repo.Tasks().FindByID(ctx, id); err == nil {
+			channelID = t.ChannelID
+		}
+		if channelID != "" {
+			s.pubsub.ReleaseSlot(ctx, channelID)
 		}
 	}
 	// Signal the running execution (if any) to cancel via its context.
@@ -740,6 +838,40 @@ func (s *TaskService) RefundForTask(ctx context.Context, taskID string) error {
 		return nil
 	}
 	return s.creditSvc.RefundForTask(ctx, taskID)
+}
+
+// refundTaskByMode issues the correct refund for a task based on whether goal
+// mode is active. Goal-mode tasks get a proportional refund that accounts for
+// the attempts already consumed; non-goal tasks get the standard full refund.
+//
+// `includeInflightAttempt` should be true when the task was running when the
+// refund was triggered (cancel-during-execution, execution failure, etc.) —
+// the in-flight attempt counts as consumed even if it didn't complete.
+//
+// Both refund paths are idempotent (protected by FindRefundByTaskID), so it is
+// safe for multiple callers (Cancel, HandleExecution cancel-detection,
+// HandleExecutionFailure) to invoke this for the same task.
+func (s *TaskService) refundTaskByMode(ctx context.Context, task *model.Task, includeInflightAttempt bool, reason string) {
+	if s.creditSvc == nil || task == nil {
+		return
+	}
+	if !task.GoalMode {
+		if refundErr := s.creditSvc.RefundForTask(ctx, task.ID, reason); refundErr != nil {
+			s.logger.Error().Err(refundErr).Str("task_id", task.ID).Msg("failed to refund credits for task")
+		}
+		return
+	}
+	maxAttempts := task.GoalMaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = s.GoalMaxAttempts()
+	}
+	attemptsUsed := task.GoalAttempts
+	if includeInflightAttempt && attemptsUsed < maxAttempts {
+		attemptsUsed++
+	}
+	if refundErr := s.creditSvc.RefundForGoalTask(ctx, task.ID, attemptsUsed, maxAttempts, reason); refundErr != nil {
+		s.logger.Error().Err(refundErr).Str("task_id", task.ID).Msg("failed to refund credits for goal task")
+	}
 }
 
 // UsageStats holds aggregated LLM usage statistics.

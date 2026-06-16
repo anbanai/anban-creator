@@ -113,6 +113,9 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		Task:      task,
 		Channel:   channel,
 		LogWriter: taskLogWriter,
+		// For goal-mode retries, surface the most recent failed-evaluation
+		// reason so the next attempt can avoid repeating the same mistakes.
+		GoalFeedback: parseLastGoalFailureReason(task.GoalEvaluationLog),
 		OnProgress: func(id string, message string) {
 			if err := s.AppendProgressLog(ctx, id, message); err != nil {
 				s.logger.Error().Err(err).Str("task_id", id).Msg("failed to update progress log")
@@ -160,10 +163,13 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on cancelled task")
 			}
-			if s.creditSvc != nil {
-				if refundErr := s.creditSvc.RefundForTask(ctx, taskID, "cancel"); refundErr != nil {
-					s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits for cancelled task")
-				}
+			// Cancel-during-execution: in-flight attempt counts as consumed.
+			// Re-read the task to get the latest GoalAttempts in case the
+			// evaluator bumped it before the cancel signal arrived.
+			if t, err := s.repo.Tasks().FindByID(ctx, taskID); err == nil {
+				s.refundTaskByMode(ctx, t, true, "取消")
+			} else {
+				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to reload task for refund")
 			}
 			if task.ChannelID != "" && s.pubsub != nil {
 				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
@@ -312,6 +318,18 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		}
 	}
 
+	// Goal-mode evaluation: ask the evaluator if the produced content meets
+	// the user-defined goal. If not, either retry (status back to pending) or
+	// mark goal_not_met. When the evaluator is unset or the task is not in
+	// goal mode, fall through to normal completion.
+	if stop, err := s.evaluateGoalAndMaybeRetry(ctx, task, result); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("goal evaluation failed, proceeding to normal completion")
+	} else if stop {
+		// The task has been transitioned to pending (will retry) or goal_not_met
+		// (terminal). Either way, skip the normal completed-transition below.
+		return nil
+	}
+
 	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to completed")
 	}
@@ -454,11 +472,7 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
 			}
 
-			if s.creditSvc != nil {
-				if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
-					s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits")
-				}
-			}
+			s.refundTaskByMode(ctx, task, true, "rate_limit_exhausted")
 
 			// A slot opened on this channel — dispatch pending tasks.
 			if task.ChannelID != "" {
@@ -528,11 +542,7 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 		if task.ChannelID != "" && s.pubsub != nil {
 			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
 		}
-		if s.creditSvc != nil {
-			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
-				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits")
-			}
-		}
+		s.refundTaskByMode(ctx, task, true, "auth_error")
 		if task.ChannelID != "" {
 			if derr := s.DispatchPendingTasks(ctx, task.ChannelID); derr != nil {
 				s.logger.Warn().Err(derr).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after failure")
@@ -562,12 +572,8 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
 		}
 
-		// Refund credits for failed task.
-		if s.creditSvc != nil {
-			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
-				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits")
-			}
-		}
+		// Refund credits for failed task (proportional for goal-mode tasks).
+		s.refundTaskByMode(ctx, task, true, "execution_failed")
 
 		// A slot opened on this channel — dispatch pending tasks.
 		if task.ChannelID != "" {

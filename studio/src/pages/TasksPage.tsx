@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -73,6 +74,8 @@ export default function TasksPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [quantity, setQuantity] = useState(1)
   const [watermark, setWatermark] = useState(false)
+  const [goalMode, setGoalMode] = useState(false)
+  const [goalText, setGoalText] = useState('')
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
@@ -242,6 +245,8 @@ export default function TasksPage() {
     form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', reference_image_url: '', style: '' })
     setQuantity(1)
     setWatermark(false)
+    setGoalMode(false)
+    setGoalText('')
     setChannelImageRatio('')
     setSelectedTemplate(null)
   }
@@ -257,6 +262,8 @@ export default function TasksPage() {
       reference_image_url: values.reference_image_url || undefined,
       style: values.style || undefined,
       watermark: watermark || undefined,
+      goal_mode: goalMode || undefined,
+      goal: goalMode ? (goalText.trim() || undefined) : undefined,
     }))
   }
 
@@ -276,7 +283,9 @@ export default function TasksPage() {
     // Manual upload and template selection are mutually exclusive.
     if (selectedTemplate) setSelectedTemplate(null)
     form.setValue('reference_image_url', url, { shouldDirty: true })
-    if (!url) form.setValue('style', '', { shouldDirty: true })
+    // Always clear style — manual upload is mutually exclusive with template pick,
+    // and a previously-picked template's style must not leak into the new image.
+    form.setValue('style', '', { shouldDirty: true })
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -702,16 +711,69 @@ export default function TasksPage() {
                 </div>
               </button>
 
+              {/* Goal mode toggle */}
+              <div className={`rounded-lg border p-3 transition-colors ${
+                goalMode ? 'border-primary bg-primary/5' : 'border-border'
+              }`}>
+                <button
+                  type="button"
+                  onClick={() => setGoalMode(!goalMode)}
+                  className="flex w-full items-start gap-3 text-left"
+                >
+                  <Target className={`mt-0.5 h-5 w-5 shrink-0 ${goalMode ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-medium ${goalMode ? 'text-foreground' : 'text-muted-foreground'}`}>
+                      强目标模式
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      开启后扣费 ×3，最多尝试 3 次。任务执行后由 AI 评估产出是否满足「目标条件」，未达成自动重试。
+                    </p>
+                  </div>
+                  <Switch checked={goalMode} onCheckedChange={setGoalMode} />
+                </button>
+                {goalMode && (
+                  <div className="mt-3 space-y-2">
+                    <Textarea
+                      value={goalText}
+                      onChange={(e) => setGoalText(e.target.value)}
+                      placeholder="例：文章字数 ≥ 1500 字；必须包含 3 个真实案例；开头必须设置钩子；种草笔记必须包含具体使用感受…"
+                      className="min-h-[80px] resize-y text-sm"
+                      maxLength={4000}
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        '文章字数 ≥ 1500 字',
+                        '必须包含 3 个真实案例',
+                        '开头必须设置钩子，吸引读者继续阅读',
+                        '必须包含数据或引用来源',
+                      ].map((example) => (
+                        <button
+                          key={example}
+                          type="button"
+                          onClick={() => setGoalText(example)}
+                          className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                        >
+                          {example}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Cost display */}
               {(() => {
                 const cost = taskCostFor(watchedType)
-                const totalCost = cost * quantity
+                const multiplier = goalMode ? 3 : 1
+                const totalCost = cost * quantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
                 const remaining = balance - totalCost
                 return (
                   <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                     <p className="text-muted-foreground">
-                      预估消耗：{cost} x {quantity} = <span className="font-medium text-foreground">{totalCost}</span> 积分
+                      预估消耗：{cost} x {quantity}
+                      {multiplier > 1 && ` x ${multiplier}`} = <span className="font-medium text-foreground">{totalCost}</span> 积分
+                      {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
                     </p>
                     <p className="text-muted-foreground">
                       余额：{balance.toLocaleString()} →{' '}
@@ -735,9 +797,12 @@ export default function TasksPage() {
               loading={createMutation.isPending}
               disabled={(() => {
                 const cost = taskCostFor(watchedType)
-                const totalCost = cost * quantity
+                const multiplier = goalMode ? 3 : 1
+                const totalCost = cost * quantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
-                return balance - totalCost < 0
+                if (balance - totalCost < 0) return true
+                if (goalMode && !goalText.trim()) return true
+                return false
               })()}
             >
               创建

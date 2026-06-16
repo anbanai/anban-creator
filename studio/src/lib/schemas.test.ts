@@ -164,6 +164,38 @@ describe('createTaskSchema', () => {
     expect(result.quantity).toBe(1)
     expect(result.image_ratio).toBe('')
   })
+
+  it('accepts goal_mode with a non-empty goal', () => {
+    expect(createTaskSchema.safeParse({
+      channel_id: 'ch-1',
+      type: 'article',
+      prompt: '测试',
+      goal_mode: true,
+      goal: '字数 ≥ 1500',
+    }).success).toBe(true)
+  })
+
+  it('rejects goal_mode=true without a goal', () => {
+    const result = createTaskSchema.safeParse({
+      channel_id: 'ch-1',
+      type: 'article',
+      prompt: '测试',
+      goal_mode: true,
+      goal: '',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects goal longer than 4000 characters', () => {
+    const result = createTaskSchema.safeParse({
+      channel_id: 'ch-1',
+      type: 'article',
+      prompt: '测试',
+      goal_mode: true,
+      goal: 'a'.repeat(4001),
+    })
+    expect(result.success).toBe(false)
+  })
 })
 
 describe('planSchema', () => {

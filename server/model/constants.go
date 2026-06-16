@@ -1,13 +1,31 @@
 package model
 
+import "slices"
+
 // Task status constants.
 const (
-	TaskStatusPending   = "pending"
-	TaskStatusRunning   = "running"
-	TaskStatusCompleted = "completed"
-	TaskStatusFailed    = "failed"
-	TaskStatusCancelled = "cancelled"
+	TaskStatusPending     = "pending"
+	TaskStatusRunning     = "running"
+	TaskStatusCompleted   = "completed"
+	TaskStatusFailed      = "failed"
+	TaskStatusCancelled   = "cancelled"
+	TaskStatusGoalNotMet  = "goal_not_met" // goal-mode task exhausted all attempts without achieving the goal
 )
+
+// TerminalTaskStatuses is the set of task statuses that signal the end of
+// execution. UIs, SSE handlers, and cleanup queries should treat all of these
+// as final.
+var TerminalTaskStatuses = []string{
+	TaskStatusCompleted,
+	TaskStatusFailed,
+	TaskStatusCancelled,
+	TaskStatusGoalNotMet,
+}
+
+// IsTerminalTaskStatus reports whether s is a terminal task status.
+func IsTerminalTaskStatus(s string) bool {
+	return slices.Contains(TerminalTaskStatuses, s)
+}
 
 // Plan status constants.
 const (

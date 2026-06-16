@@ -61,3 +61,6 @@ data/
 # Node.js
 node_modules/
 studio/dist/
+
+# Playwright MCP debug artifacts
+.playwright-mcp/

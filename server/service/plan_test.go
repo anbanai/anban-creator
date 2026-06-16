@@ -166,7 +166,7 @@ func TestPlanService_Create(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := svc.Create(ctx, "user-1", tt.channelID, tt.cronExpr, "topic hint", "", nil, "", "", nil)
+			plan, err := svc.Create(ctx, "user-1", tt.channelID, tt.cronExpr, "topic hint", "", nil, "", "", nil, "", false)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -204,7 +204,7 @@ func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
 
 	skipRef := true
-	plan, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "topic hint", "", &skipRef, "", "", nil)
+	plan, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "topic hint", "", &skipRef, "", "", nil, "", false)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestPlanService_GetByID(t *testing.T) {
 
 	// Create a test channel and plan.
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, "", "", nil)
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, "", "", nil, "", false)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -251,14 +251,14 @@ func TestPlanService_List(t *testing.T) {
 
 	// Create multiple plans for user-1.
 	for i := 0; i < 5; i++ {
-		_, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, "", "", nil)
+		_, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, "", "", nil, "", false)
 		if err != nil {
 			t.Fatalf("create plan %d: %v", i, err)
 		}
 	}
 
 	// Create plans for another user.
-	_, err := svc.Create(ctx, "user-2", chID2, "0 10 * * *", "hint", "", nil, "", "", nil)
+	_, err := svc.Create(ctx, "user-2", chID2, "0 10 * * *", "hint", "", nil, "", "", nil, "", false)
 	if err != nil {
 		t.Fatalf("create plan for user-2: %v", err)
 	}
@@ -299,13 +299,13 @@ func TestPlanService_Update(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "old hint", "", nil, "", "", nil)
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "old hint", "", nil, "", "", nil, "", false)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
 
 	// Update title only.
-	updated, err := svc.Update(ctx, created.ID, "", "new hint", nil, nil, "", "", nil)
+	updated, err := svc.Update(ctx, created.ID, "", "new hint", nil, nil, "", nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update plan: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with new cron expression.
-	updated, err = svc.Update(ctx, created.ID, "0 18 * * *", "new hint", nil, nil, "", "", nil)
+	updated, err = svc.Update(ctx, created.ID, "0 18 * * *", "new hint", nil, nil, "", nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update plan cron: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with invalid cron.
-	_, err = svc.Update(ctx, created.ID, "bad cron", "hint", nil, nil, "", "", nil)
+	_, err = svc.Update(ctx, created.ID, "bad cron", "hint", nil, nil, "", nil, nil, "", nil)
 	if err == nil {
 		t.Error("expected error for invalid cron expression")
 	}
@@ -341,7 +341,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "old hint", "", nil, "", "", nil)
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "old hint", "", nil, "", "", nil, "", false)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	}
 
 	skipRef := true
-	updated, err := svc.Update(ctx, created.ID, "", "new hint", nil, &skipRef, "", "", nil)
+	updated, err := svc.Update(ctx, created.ID, "", "new hint", nil, &skipRef, "", nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update skip_reference_image true: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 		t.Fatal("expected skip_reference_image to update to true")
 	}
 
-	updated, err = svc.Update(ctx, created.ID, "", "unchanged hint", nil, nil, "", "", nil)
+	updated, err = svc.Update(ctx, created.ID, "", "unchanged hint", nil, nil, "", nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update without skip_reference_image: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	}
 
 	skipRef = false
-	updated, err = svc.Update(ctx, created.ID, "", "final hint", nil, &skipRef, "", "", nil)
+	updated, err = svc.Update(ctx, created.ID, "", "final hint", nil, &skipRef, "", nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update skip_reference_image false: %v", err)
 	}
@@ -376,12 +376,58 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	}
 }
 
+func TestPlanService_Update_Style(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+
+	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+
+	// Create with an initial style.
+	initialStyle := "暖色"
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, "", initialStyle, nil, "", false)
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	if created.Style != initialStyle {
+		t.Fatalf("expected initial style %q, got %q", initialStyle, created.Style)
+	}
+
+	// nil style = leave unchanged.
+	updated, err := svc.Update(ctx, created.ID, "", "hint", nil, nil, "", nil, nil, "", nil)
+	if err != nil {
+		t.Fatalf("update with nil style: %v", err)
+	}
+	if updated.Style != initialStyle {
+		t.Errorf("nil style should leave unchanged; got %q, want %q", updated.Style, initialStyle)
+	}
+
+	// &"" = clear.
+	emptyStyle := ""
+	updated, err = svc.Update(ctx, created.ID, "", "hint", nil, nil, "", &emptyStyle, nil, "", nil)
+	if err != nil {
+		t.Fatalf("update with empty style: %v", err)
+	}
+	if updated.Style != "" {
+		t.Errorf("empty &\"\" style should clear; got %q, want empty", updated.Style)
+	}
+
+	// &"new" = set.
+	newStyle := "冷色"
+	updated, err = svc.Update(ctx, created.ID, "", "hint", nil, nil, "", &newStyle, nil, "", nil)
+	if err != nil {
+		t.Fatalf("update with new style: %v", err)
+	}
+	if updated.Style != newStyle {
+		t.Errorf("new style should set; got %q, want %q", updated.Style, newStyle)
+	}
+}
+
 func TestPlanService_Pause_Resume(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, "", "", nil)
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, "", "", nil, "", false)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
@@ -424,7 +470,7 @@ func TestPlanService_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, "", "", nil)
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, "", "", nil, "", false)
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}

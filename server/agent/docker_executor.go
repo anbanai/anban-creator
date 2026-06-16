@@ -142,6 +142,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
+		// Apply task-level style override at dispatch time (kept out of BuildAppConfig
+		// to preserve the channel→config mapping). When a task carries its own style
+		// (resolved at creation), clear the channel-level style in settings.json so the
+		// agent sees a single source of truth in the user prompt.
+		if opts.Task.Style != "" {
+			if cfg.Seednote != nil {
+				cfg.Seednote.Style = ""
+			}
+			cfg.Wechat.Article.Style = ""
+		}
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
@@ -259,6 +269,12 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string,
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--workspace", workspace,
 		"--agent-flag", "anbanwriter:" + TaskTypeToAgent(opts.Task.Type),
+	}
+	if opts.Task.Style != "" {
+		cmd = append(cmd, "--style", opts.Task.Style)
+	}
+	if strings.TrimSpace(opts.GoalFeedback) != "" {
+		cmd = append(cmd, "--goal-feedback", opts.GoalFeedback)
 	}
 	if model != "" {
 		cmd = append(cmd, "--model", model)

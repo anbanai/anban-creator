@@ -27,12 +27,18 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 // Create validates the cron expression, resolves the channel, computes the next run
 // time, and persists the plan. The task type is derived from the channel's platform.
 // imageModelKey optionally selects a per-plan image model (validated upstream by the handler).
+//
+// goal and goalMode propagate to tasks spawned from this plan; when goalMode is
+// true, spawned tasks charge ×GoalMultiplier upfront and evaluate the goal
+// after each execution.
 func (s *PlanService) Create(
 	ctx context.Context,
 	userID, channelID, cronExpr, prompt, imageModelKey string,
 	skipRefImage *bool,
 	referenceImageURL, style string,
 	watermark *bool,
+	goal string,
+	goalMode bool,
 ) (*model.Plan, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
@@ -72,6 +78,8 @@ func (s *PlanService) Create(
 		Style:              style,
 		SkipReferenceImage: skipRefImage != nil && *skipRefImage,
 		Watermark:          watermark != nil && *watermark,
+		Goal:               goal,
+		GoalMode:           goalMode,
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -107,15 +115,27 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 }
 
 // Update modifies a plan's fields. If the cron expression changed, next_run_at is recomputed.
-// imageModelKey of nil means "leave unchanged"; empty string "" means "clear to system default".
-// Use the model.ImageModelKeySystemDefault / ImageModelKeyCustom constants for clarity.
+//
+// Pointer-typed fields use leave-unchanged semantics:
+//   - imageModelKey: nil = leave unchanged; &"" = clear to system default
+//     (use model.ImageModelKeySystemDefault / ImageModelKeyCustom for clarity)
+//   - skipRefImage:  nil = leave unchanged; &true/&false = set
+//   - style:         nil = leave unchanged; &"" = clear; &"value" = set
+//   - watermark:     nil = leave unchanged; &true/&false = set
+//   - goalMode:      nil = leave unchanged; &true/&false = set
+//
+// referenceImageURL, prompt, and goal are plain strings and always overwritten
+// (empty string is a valid value meaning "no prompt / no reference image / no goal").
 func (s *PlanService) Update(
 	ctx context.Context,
 	id, cronExpr, prompt string,
 	imageModelKey *string,
 	skipRefImage *bool,
-	referenceImageURL, style string,
+	referenceImageURL string,
+	style *string,
 	watermark *bool,
+	goal string,
+	goalMode *bool,
 ) (*model.Plan, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, id)
 	if err != nil {
@@ -124,7 +144,10 @@ func (s *PlanService) Update(
 
 	plan.Prompt = prompt
 	plan.ReferenceImageURL = referenceImageURL
-	plan.Style = style
+	plan.Goal = goal
+	if style != nil {
+		plan.Style = *style
+	}
 	if imageModelKey != nil {
 		plan.ImageModelKey = *imageModelKey
 	}
@@ -133,6 +156,9 @@ func (s *PlanService) Update(
 	}
 	if watermark != nil {
 		plan.Watermark = *watermark
+	}
+	if goalMode != nil {
+		plan.GoalMode = *goalMode
 	}
 
 	// If cron expression changed, validate and recompute next run.

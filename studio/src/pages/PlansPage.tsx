@@ -3,7 +3,7 @@ import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText, Stamp } from 'lucide-react'
+import { Plus, FileText, Stamp, Target } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -17,6 +17,8 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import SchedulePicker from '@/components/SchedulePicker'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
@@ -44,6 +46,8 @@ function planToFormValues(plan: Plan): PlanFormValues {
     reference_image_url: plan.reference_image_url || '',
     style: plan.style || '',
     watermark: plan.watermark || false,
+    goal: plan.goal || '',
+    goal_mode: plan.goal_mode || false,
   }
 }
 
@@ -232,7 +236,9 @@ export default function PlansPage() {
   function handleManualImageChange(url: string) {
     if (selectedTemplate) setSelectedTemplate(null)
     form.setValue('reference_image_url', url, { shouldDirty: true })
-    if (!url) form.setValue('style', '', { shouldDirty: true })
+    // Always clear style — manual upload is mutually exclusive with template pick,
+    // and a previously-picked template's style must not leak into the new image.
+    form.setValue('style', '', { shouldDirty: true })
   }
 
   async function onSubmit(values: PlanFormValues) {
@@ -249,6 +255,8 @@ export default function PlansPage() {
       reference_image_url: values.reference_image_url || undefined,
       style: values.style || undefined,
       watermark: values.watermark || undefined,
+      goal_mode: values.goal_mode || undefined,
+      goal: values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
     }
 
     if (editingPlan) {
@@ -515,6 +523,48 @@ export default function PlansPage() {
                       <p className="mt-0.5 text-xs text-muted-foreground">开启后生成的图片将带有水印（仅火山引擎支持）</p>
                     </div>
                   </button>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="goal_mode" render={({ field }) => (
+                <FormItem>
+                  <div className={`rounded-lg border p-3 transition-colors ${
+                    field.value ? 'border-primary bg-primary/5' : 'border-border'
+                  }`}>
+                    <button
+                      type="button"
+                      onClick={() => field.onChange(!field.value)}
+                      className="flex w-full items-start gap-3 text-left"
+                    >
+                      <Target className={`mt-0.5 h-5 w-5 shrink-0 ${field.value ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className={`text-sm font-medium ${field.value ? 'text-foreground' : 'text-muted-foreground'}`}>
+                          强目标模式
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          每次执行扣费 ×3，最多尝试 3 次。AI 自动评估产出是否满足目标条件，未达成自动重试。
+                        </p>
+                      </div>
+                      <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                    </button>
+                    {field.value && (
+                      <FormField control={form.control} name="goal" render={({ field: goalField }) => (
+                        <FormItem className="mt-3 space-y-2">
+                          <FormControl>
+                            <Textarea
+                              {...goalField}
+                              value={goalField.value ?? ''}
+                              placeholder="例：文章字数 ≥ 1500 字；必须包含 3 个真实案例；开头必须设置钩子…"
+                              className="min-h-[80px] resize-y text-sm"
+                              maxLength={4000}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    )}
+                  </div>
                   <FormMessage />
                 </FormItem>
               )} />
