@@ -42,8 +42,6 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
   const [uploadError, setUploadError] = useState('')
   const [enlargeOpen, setEnlargeOpen] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
-  const [showUrlInput, setShowUrlInput] = useState(false)
-  const [urlInput, setUrlInput] = useState('')
   const blobUrlRef = useRef('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -136,15 +134,6 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
     if (file) void uploadFile(file)
   }
 
-  const submitUrl = () => {
-    const url = urlInput.trim()
-    if (url) {
-      onChange?.(url)
-      setUrlInput('')
-      setShowUrlInput(false)
-    }
-  }
-
   const thumbSize = compact ? 'h-7 w-7' : 'h-32 w-32'
 
   return (
@@ -218,7 +207,7 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
               : 'border-muted-foreground/25 hover:border-muted-foreground/50'
           }`}
           onClick={() => {
-            if (uploading || showUrlInput) return
+            if (uploading) return
             fileInputRef.current?.click()
           }}
           onDragOver={handleDragOver}
@@ -230,42 +219,6 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               <span className="text-[10px] text-muted-foreground">上传中…</span>
             </>
-          ) : showUrlInput ? (
-            <div
-              className="flex w-full flex-col gap-1"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                type="url"
-                value={urlInput}
-                autoFocus
-                onChange={(e) => setUrlInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') submitUrl()
-                }}
-                placeholder="https://..."
-                className="h-7 w-full rounded border border-input bg-transparent px-1.5 text-[10px] outline-none focus:border-ring"
-              />
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={submitUrl}
-                  className="rounded bg-primary px-1.5 py-0.5 text-[9px] font-medium text-primary-foreground hover:bg-primary/90"
-                >
-                  确认
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowUrlInput(false)
-                    setUrlInput('')
-                  }}
-                  className="text-[9px] text-muted-foreground hover:text-foreground"
-                >
-                  取消
-                </button>
-              </div>
-            </div>
           ) : uploadError ? (
             <div className="flex flex-col items-center gap-0.5">
               <span className="text-[9px] text-destructive">{uploadError}</span>
@@ -285,16 +238,6 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
             <>
               <Upload className="h-5 w-5 text-muted-foreground" />
               <span className="text-[10px] font-medium text-foreground">点击上传</span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setShowUrlInput(true)
-                }}
-                className="text-[9px] text-muted-foreground hover:text-foreground"
-              >
-                或粘贴链接
-              </button>
               <span className="text-[8px] text-muted-foreground/70">JPG/PNG/WebP/GIF · ≤10MB</span>
             </>
           )}

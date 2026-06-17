@@ -88,7 +88,8 @@ export default function TaskDetailPage() {
     .filter(Boolean) ?? [])
     .slice(-MAX_PERSISTED_LOGS)
   const displayLogs = sseLogs.length > 0 ? sseLogs : persistedLogs
-  const logMarkdown = displayLogs.join('\n')
+  // 行尾两空格 + \n 是 Markdown 的硬换行语法（<br>），避免单 \n 被 marked 当作 soft break 塌缩成空格。
+  const logMarkdown = displayLogs.join('  \n')
   const showLogs = displayLogs.length > 0 || Boolean(sseError) || task?.status === 'running'
   const latestPersistedProgressMessage = [...persistedLogs].reverse()
     .map((line) => line.replace(/^\[\d+%]\s*/, '').trim())
