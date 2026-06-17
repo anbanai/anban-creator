@@ -74,14 +74,101 @@ func TestTemplateService_Create_AssignsDefaults(t *testing.T) {
 	}
 }
 
-func TestTemplateService_Create_RejectsEmptyName(t *testing.T) {
+func TestTemplateService_Create_DerivesNameFromStyle(t *testing.T) {
+	svc, _, _ := setupTemplateService(t)
+	ctx := context.Background()
+
+	// name 为空但 style_prompt 非空 → 从 style 截取前 20 字
+	created, err := svc.Create(ctx, &model.Template{
+		Name:        "",
+		Type:        "seednote",
+		StylePrompt: "治愈系水彩风格，柔和色调，手绘质感",
+	}, uuid.New().String())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.Name != "治愈系水彩风格" {
+		t.Errorf("Name = %q, want 治愈系水彩风格", created.Name)
+	}
+}
+
+func TestTemplateService_Create_RejectsEmptyNameAndStyle(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	_, err := svc.Create(context.Background(), &model.Template{Name: "", Type: "seednote"}, uuid.New().String())
 	if err == nil {
-		t.Fatalf("expected error for empty name, got nil")
+		t.Fatalf("expected error when both name and style_prompt are empty, got nil")
 	}
 	if !strings.Contains(err.Error(), "name") {
 		t.Errorf("expected name-related error, got %v", err)
+	}
+}
+
+func TestTemplateService_Create_InitializesEmptyTags(t *testing.T) {
+	svc, _, _ := setupTemplateService(t)
+	ctx := context.Background()
+
+	// Tags 未设置（nil）→ 返回时必须是非 nil 空 slice，避免前端 tags.length 崩
+	created, err := svc.Create(ctx, &model.Template{
+		Name: "无标签模板",
+		Type: "poster",
+	}, uuid.New().String())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.Tags == nil {
+		t.Fatalf("Tags = nil, want non-nil empty slice")
+	}
+	if len(created.Tags) != 0 {
+		t.Errorf("len(Tags) = %d, want 0", len(created.Tags))
+	}
+}
+
+func TestTemplateService_List_ReturnsNonNilTags(t *testing.T) {
+	svc, _, _ := setupTemplateService(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+
+	if _, err := svc.Create(ctx, &model.Template{
+		Name:       "test",
+		Type:       "seednote",
+		Visibility: "public",
+	}, userID); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	list, _, err := svc.List(ctx, "", "", "", userID, "all", 0, 100)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("len(list) = %d, want 1", len(list))
+	}
+	if list[0].Tags == nil {
+		t.Errorf("List[0].Tags = nil, want non-nil empty slice (otherwise frontend tags.length crashes)")
+	}
+}
+
+func TestDeriveNameFromStyle(t *testing.T) {
+	cases := []struct {
+		name  string
+		style string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"whitespace only", "   \n\t ", ""},
+		{"short", "治愈系水彩风格", "治愈系水彩风格"},
+		{"truncate at comma (Chinese)", "治愈系水彩风格，柔和色调", "治愈系水彩风格"},
+		{"truncate at period (English)", "Soft watercolor style. Pastel tones.", "Soft watercolor styl"},
+		{"truncate at newline", "第一行\n第二行", "第一行"},
+		{"cap at 20 runes", "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十", "一二三四五六七八九十一二三四五六七八九十"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveNameFromStyle(tc.style)
+			if got != tc.want {
+				t.Errorf("deriveNameFromStyle(%q) = %q, want %q", tc.style, got, tc.want)
+			}
+		})
 	}
 }
 

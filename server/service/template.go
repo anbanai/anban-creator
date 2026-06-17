@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -29,9 +30,37 @@ func NewTemplateService(repo repository.Repository, logger *zerolog.Logger) *Tem
 // Sentinel errors for template operations. Handlers should use errors.Is to
 // map these to appropriate HTTP status codes (404 vs 403 vs 500).
 var (
-	ErrTemplateNotFound  = errors.New("template not found")
-	ErrTemplateForbidden = errors.New("forbidden: not the owner")
+	ErrTemplateNotFound    = errors.New("template not found")
+	ErrTemplateForbidden   = errors.New("forbidden: not the owner")
+	ErrTemplateNameMissing = errors.New("name or style_prompt is required")
 )
+
+// ensureTagsNotNil 保证 Tags 字段在 JSON 序列化时输出 [] 而非 null。
+// Go 标准 json.Marshal(nil slice) 会输出 null，前端访问 tags.length 会崩。
+func ensureTagsNotNil(ts ...*model.Template) {
+	for _, t := range ts {
+		if t != nil && t.Tags == nil {
+			t.Tags = []string{}
+		}
+	}
+}
+
+// deriveNameFromStyle 从 style_prompt 截取第一段并限长 20 rune，作为默认 name。
+// 当调用方未提供 name 时使用，前后端语义保持一致。
+func deriveNameFromStyle(style string) string {
+	for _, sep := range []string{"\n", "。", "，", ",", "."} {
+		if i := strings.Index(style, sep); i > 0 {
+			style = style[:i]
+			break
+		}
+	}
+	style = strings.TrimSpace(style)
+	runes := []rune(style)
+	if len(runes) > 20 {
+		return string(runes[:20])
+	}
+	return string(runes)
+}
 
 // Create saves a new template to the database. When userID is non-empty the
 // template is owned by that user; when empty it is a system template (e.g.
@@ -39,7 +68,10 @@ var (
 // visibility must be "public" or "private"; an empty value defaults to "public".
 func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, userID string) (*model.Template, error) {
 	if tmpl.Name == "" {
-		return nil, fmt.Errorf("name is required")
+		tmpl.Name = deriveNameFromStyle(tmpl.StylePrompt)
+	}
+	if tmpl.Name == "" {
+		return nil, ErrTemplateNameMissing
 	}
 	if tmpl.Visibility != "public" && tmpl.Visibility != "private" {
 		tmpl.Visibility = "public"
@@ -49,6 +81,7 @@ func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, user
 	}
 	tmpl.UserID = userID
 	tmpl.IsActive = true
+	ensureTagsNotNil(tmpl)
 
 	if err := s.repo.Templates().Create(ctx, tmpl); err != nil {
 		return nil, fmt.Errorf("create template: %w", err)
@@ -86,6 +119,7 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 		existing.Visibility = patch.Visibility
 	}
 
+	ensureTagsNotNil(existing)
 	if err := s.repo.Templates().Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("update template: %w", err)
 	}
@@ -121,6 +155,7 @@ func (s *TemplateService) GetByID(ctx context.Context, id string) (*model.Templa
 		}
 		return nil, fmt.Errorf("find template by id: %w", err)
 	}
+	ensureTagsNotNil(tmpl)
 	return tmpl, nil
 }
 
@@ -138,6 +173,7 @@ func (s *TemplateService) List(ctx context.Context, templateType, category, tag,
 		return nil, 0, fmt.Errorf("count templates: %w", err)
 	}
 
+	ensureTagsNotNil(templates...)
 	return templates, total, nil
 }
 
@@ -147,6 +183,7 @@ func (s *TemplateService) ListByIDs(ctx context.Context, ids []string) ([]*model
 	if err != nil {
 		return nil, fmt.Errorf("list templates by ids: %w", err)
 	}
+	ensureTagsNotNil(templates...)
 	return templates, nil
 }
 
@@ -201,5 +238,6 @@ func (s *TemplateService) GetRecommended(ctx context.Context, profileCategory st
 		results = results[:limit]
 	}
 
+	ensureTagsNotNil(results...)
 	return results, nil
 }

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Sparkles } from 'lucide-react'
+import { Loader2, Sparkles, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -28,6 +28,12 @@ const TYPE_OPTIONS: { value: TemplateType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
 ]
+
+// 从风格描述截取第一段并限长 20 字，作为默认模板名。前后端语义保持一致。
+function deriveTemplateName(style: string): string {
+  const firstClause = style.trim().split(/[\n。，,.]/)[0]
+  return firstClause.slice(0, 20).trim()
+}
 
 interface TemplateCreateDialogProps {
   open: boolean
@@ -73,34 +79,32 @@ export function TemplateCreateDialog({
     }
   }, [open, template, defaultType])
 
-  // Auto-analyze style whenever a new image is uploaded (skip while editing initial load).
+  // Run analyzeImage and fill style + name when result arrives.
+  // force=true (manual "重新识别" button) overwrites existing style;
+  // force=false (auto on image upload) only fills empty fields to respect user input.
+  const analyzeStyle = useCallback(async (imageUrl: string, force = false) => {
+    if (!imageUrl) return
+    setAnalyzing(true)
+    try {
+      const res = await api.channels.analyzeImage(imageUrl)
+      if (!res.style) return
+      setStylePrompt((prev) => (force || !prev.trim()) ? res.style : prev)
+      setName((prev) => (prev.trim() ? prev : deriveTemplateName(res.style)))
+    } catch {
+      toast.error('风格识别失败，请手动填写或重试')
+    } finally {
+      setAnalyzing(false)
+    }
+  }, [])
+
+  // Auto-analyze style whenever a new image is uploaded.
   useEffect(() => {
     if (!open) return
     if (!thumbnailUrl) return
     // Skip if this URL was loaded from an existing template (avoid re-analyzing on edit open).
     if (template && thumbnailUrl === template.thumbnail_url) return
-    let cancelled = false
-    setAnalyzing(true)
-    api.channels
-      .analyzeImage(thumbnailUrl)
-      .then((res) => {
-        if (cancelled) return
-        // Only auto-fill when the user hasn't typed anything — respect their input.
-        if (res.style && !stylePrompt.trim()) {
-          setStylePrompt(res.style)
-        }
-      })
-      .catch(() => {
-        if (cancelled) return
-        // Silent failure — user can still type the style manually.
-      })
-      .finally(() => {
-        if (!cancelled) setAnalyzing(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [thumbnailUrl, open, template, stylePrompt])
+    void analyzeStyle(thumbnailUrl, false)
+  }, [thumbnailUrl, open, template, analyzeStyle])
 
   const createMutation = useMutation({
     mutationFn: (data: {
@@ -141,8 +145,10 @@ export function TemplateCreateDialog({
   })
 
   const handleSubmit = async () => {
-    if (!name.trim()) {
-      toast.error('请输入模板名称')
+    // name 可选；为空时从 style_prompt 兜底生成；两者皆空才阻止。
+    const finalName = name.trim() || deriveTemplateName(stylePrompt)
+    if (!finalName) {
+      toast.error('请上传图片或填写模板名称')
       return
     }
     if (!thumbnailUrl) {
@@ -152,7 +158,7 @@ export function TemplateCreateDialog({
     setSubmitting(true)
     try {
       const payload = {
-        name: name.trim(),
+        name: finalName,
         type,
         thumbnail_url: thumbnailUrl,
         style_prompt: stylePrompt.trim(),
@@ -180,7 +186,10 @@ export function TemplateCreateDialog({
         <div className="space-y-4">
           {/* Name */}
           <div className="space-y-1.5">
-            <Label htmlFor="tpl-name">名称</Label>
+            <Label htmlFor="tpl-name">
+              名称
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground">（可选，留空将根据识别的风格自动生成）</span>
+            </Label>
             <Input
               id="tpl-name"
               value={name}
@@ -211,11 +220,18 @@ export function TemplateCreateDialog({
           <div className="space-y-1.5">
             <Label>图片</Label>
             <div className="flex items-start gap-3">
-              <ReferenceImageUpload
-                value={thumbnailUrl}
-                onChange={setThumbnailUrl}
-                purpose="reference"
-              />
+              <div className="relative">
+                <ReferenceImageUpload
+                  value={thumbnailUrl}
+                  onChange={setThumbnailUrl}
+                  purpose="reference"
+                />
+                {analyzing && (
+                  <div className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  </div>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground pt-1">
                 上传后系统会自动识别视觉风格，你也可以在下面手动调整。
               </p>
@@ -226,21 +242,38 @@ export function TemplateCreateDialog({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label htmlFor="tpl-style">自动识别的风格</Label>
-              {analyzing && (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Sparkles className="h-3 w-3" />
-                  识别中…
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {analyzing && (
+                  <span className="flex items-center gap-1 text-xs text-primary">
+                    <Sparkles className="h-3 w-3 animate-pulse" />
+                    识别中…
+                  </span>
+                )}
+                {thumbnailUrl && !analyzing && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => void analyzeStyle(thumbnailUrl, true)}
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    重新识别
+                  </Button>
+                )}
+              </div>
             </div>
-            <Textarea
-              id="tpl-style"
-              value={stylePrompt}
-              onChange={(e) => setStylePrompt(e.target.value)}
-              placeholder="描述视觉风格（艺术流派、画面氛围、质感…）"
-              rows={3}
-              maxLength={1024}
-            />
+            <div className={`relative rounded-lg transition-all ${analyzing ? 'ring-2 ring-primary/40 ring-offset-1' : ''}`}>
+              <Textarea
+                id="tpl-style"
+                value={stylePrompt}
+                onChange={(e) => setStylePrompt(e.target.value)}
+                placeholder="描述视觉风格（艺术流派、画面氛围、质感…）"
+                rows={3}
+                maxLength={1024}
+                className={analyzing ? 'bg-muted/40' : ''}
+              />
+            </div>
           </div>
 
           {/* Visibility */}

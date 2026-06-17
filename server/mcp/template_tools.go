@@ -26,14 +26,14 @@ func registerTemplateTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"type":            map[string]any{"type": "string", "description": "Template type: poster, seednote, or article"},
-				"name":            map[string]any{"type": "string", "description": "Template name"},
+				"name":            map[string]any{"type": "string", "description": "Template name (optional, auto-derived from style_prompt if empty)"},
 				"category":        map[string]any{"type": "string", "description": "Industry/category tag (optional)"},
 				"structure":       map[string]any{"type": "string", "description": "JSON string of template structure (required)"},
 				"style_prompt":    map[string]any{"type": "string", "description": "AI style prompt (optional)"},
 				"example_content": map[string]any{"type": "string", "description": "JSON string of example content (optional)"},
 				"tags":            map[string]any{"type": "string", "description": "JSON array string of tags (optional)"},
 			},
-			"required": []any{"type", "name", "structure"},
+			"required": []any{"type", "structure"},
 		},
 	}, saveTemplateHandler)
 
@@ -84,9 +84,6 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	if !validTemplateTypes[tmplType] {
 		return errorResult(fmt.Sprintf("invalid type: %s (must be one of: poster, seednote, article)", tmplType)), nil
 	}
-	if name == "" {
-		return errorResult("name is required"), nil
-	}
 	if structure == "" {
 		return errorResult("structure is required"), nil
 	}
@@ -134,7 +131,7 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		"name":    created.Name,
 		"type":    created.Type,
 		"status":  "created",
-		"message": fmt.Sprintf("Template '%s' saved successfully.", name),
+		"message": fmt.Sprintf("Template '%s' saved successfully.", created.Name),
 	})
 }
 

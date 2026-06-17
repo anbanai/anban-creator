@@ -148,9 +148,9 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
         </div>
 
         {/* Tags */}
-        {data.tags.length > 0 && (
+        {(data.tags ?? []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {data.tags.map((tag) => (
+            {(data.tags ?? []).map((tag) => (
               <Badge key={tag} variant="secondary" className="text-xs">
                 {tag}
               </Badge>

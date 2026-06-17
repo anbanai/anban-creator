@@ -114,9 +114,6 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	if req.Name == "" {
-		return Error(c, fiber.StatusBadRequest, "name is required")
-	}
 	if req.Type == "" {
 		return Error(c, fiber.StatusBadRequest, "type is required")
 	}
@@ -140,6 +137,9 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), tmpl, userID)
 	if err != nil {
+		if errors.Is(err, service.ErrTemplateNameMissing) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create template failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create template")
 	}

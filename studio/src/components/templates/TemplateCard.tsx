@@ -56,16 +56,16 @@ export function TemplateCard({ template, onClick }: TemplateCardProps) {
         )}
 
         {/* Tags */}
-        {template.tags.length > 0 && (
+        {(template.tags ?? []).length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {template.tags.slice(0, 3).map((tag) => (
+            {(template.tags ?? []).slice(0, 3).map((tag) => (
               <Badge key={tag} variant="secondary" className="text-[10px] px-1.5">
                 {tag}
               </Badge>
             ))}
-            {template.tags.length > 3 && (
+            {(template.tags ?? []).length > 3 && (
               <Badge variant="secondary" className="text-[10px] px-1.5">
-                +{template.tags.length - 3}
+                +{(template.tags ?? []).length - 3}
               </Badge>
             )}
           </div>
