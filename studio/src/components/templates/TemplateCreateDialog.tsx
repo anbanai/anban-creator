@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Sparkles, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -60,9 +60,27 @@ export function TemplateCreateDialog({
   const [analyzing, setAnalyzing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  // Sync form state when opening.
+  // Session epoch: incremented every time the dialog opens. Captured at the
+  // start of handleSubmit and compared after the await — if the user closed
+  // and reopened while the request was in flight, the stale result's side
+  // effects (toast + invalidate + close) are dropped instead of leaking into
+  // the new session.
+  const sessionEpochRef = useRef(0)
   useEffect(() => {
-    if (!open) return
+    if (open) sessionEpochRef.current++
+  }, [open])
+
+  // Sync form state when opening. Reset loading flags unconditionally so a
+  // previous session's in-flight analyze/submit (closed via overlay/Esc) can't
+  // leak into the next open.
+  useEffect(() => {
+    if (!open) {
+      setAnalyzing(false)
+      setSubmitting(false)
+      return
+    }
+    setAnalyzing(false)
+    setSubmitting(false)
     if (template) {
       setName(template.name)
       setType(template.type)
@@ -81,18 +99,27 @@ export function TemplateCreateDialog({
   // Run analyzeImage and fill style + name when result arrives.
   // force=true (manual "重新识别" button) overwrites existing style;
   // force=false (auto on image upload) only fills empty fields to respect user input.
+  // A monotonic request id guards against stale results: if the user uploads a
+  // new image (or closes/reopens the dialog) while an older analyze is in
+  // flight, the older result is dropped instead of clobbering the newer state.
+  const analyzeReqIdRef = useRef(0)
   const analyzeStyle = useCallback(async (imageUrl: string, force = false) => {
     if (!imageUrl) return
+    const reqId = ++analyzeReqIdRef.current
     setAnalyzing(true)
     try {
       const res = await api.channels.analyzeImage(imageUrl)
+      if (reqId !== analyzeReqIdRef.current) return
       if (!res.style) return
       setStylePrompt((prev) => (force || !prev.trim()) ? res.style : prev)
       setName((prev) => (prev.trim() ? prev : deriveTemplateName(res.style)))
     } catch (err) {
+      if (reqId !== analyzeReqIdRef.current) return
       toast.error(getApiErrorMessage(err, '风格识别失败，请手动填写或重试'))
     } finally {
-      setAnalyzing(false)
+      if (reqId === analyzeReqIdRef.current) {
+        setAnalyzing(false)
+      }
     }
   }, [])
 
@@ -105,6 +132,12 @@ export function TemplateCreateDialog({
     void analyzeStyle(thumbnailUrl, false)
   }, [thumbnailUrl, open, template, analyzeStyle])
 
+  // Mutations intentionally have no onSuccess/onError — those side effects
+  // (toast, query invalidation, dialog close) are owned by handleSubmit so
+  // they can be guarded by the session epoch. Without this, a mutation
+  // initiated in session N that settles after the user closed and reopened
+  // for session N+1 would fire its onSuccess and toast/close the wrong
+  // session.
   const createMutation = useMutation({
     mutationFn: (data: {
       name: string
@@ -113,12 +146,6 @@ export function TemplateCreateDialog({
       style_prompt: string
       visibility: TemplateVisibility
     }) => api.templates.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.templates.all })
-      toast.success('模板已创建')
-      onOpenChange(false)
-    },
-    onError: () => toast.error('创建模板失败，请重试'),
   })
 
   const updateMutation = useMutation({
@@ -135,12 +162,6 @@ export function TemplateCreateDialog({
         visibility: TemplateVisibility
       }
     }) => api.templates.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.templates.all })
-      toast.success('模板已更新')
-      onOpenChange(false)
-    },
-    onError: () => toast.error('更新模板失败，请重试'),
   })
 
   const handleSubmit = async () => {
@@ -154,6 +175,7 @@ export function TemplateCreateDialog({
       toast.error('请上传一张图片')
       return
     }
+    const epoch = sessionEpochRef.current
     setSubmitting(true)
     try {
       const payload = {
@@ -168,12 +190,29 @@ export function TemplateCreateDialog({
       } else {
         await createMutation.mutateAsync(payload)
       }
+      // Drop side effects if the user closed and reopened while the request
+      // was in flight — the new session has its own intent.
+      if (epoch !== sessionEpochRef.current) return
+      queryClient.invalidateQueries({ queryKey: queryKeys.templates.all })
+      toast.success(isEditing ? '模板已更新' : '模板已创建')
+      onOpenChange(false)
+    } catch {
+      if (epoch !== sessionEpochRef.current) return
+      toast.error(isEditing ? '更新模板失败，请重试' : '创建模板失败，请重试')
     } finally {
-      setSubmitting(false)
+      if (epoch === sessionEpochRef.current) {
+        setSubmitting(false)
+      }
     }
   }
 
-  const busy = submitting || createMutation.isPending || updateMutation.isPending
+  // `submitting` alone drives the busy state. We don't include
+  // `createMutation.isPending` / `updateMutation.isPending` because those
+  // persist across close→reopen cycles (the dialog stays mounted) and would
+  // surface a phantom "保存中" for up to ~30s after the user closed mid-submit.
+  // `submitting` is owned by handleSubmit and guarded by the session epoch,
+  // so it always reflects the current session's intent.
+  const busy = submitting
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

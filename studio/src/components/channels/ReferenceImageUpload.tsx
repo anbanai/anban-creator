@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, ZoomIn, Upload } from 'lucide-react'
 import http from '@/lib/http-client'
-import { FileUpload } from '@/components/ui/FileUpload'
 import {
   Dialog,
   DialogContent,
@@ -42,6 +41,9 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [enlargeOpen, setEnlargeOpen] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [showUrlInput, setShowUrlInput] = useState(false)
+  const [urlInput, setUrlInput] = useState('')
   const blobUrlRef = useRef('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -116,6 +118,33 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
     e.target.value = ''
   }
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragging(false)
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) void uploadFile(file)
+  }
+
+  const submitUrl = () => {
+    const url = urlInput.trim()
+    if (url) {
+      onChange?.(url)
+      setUrlInput('')
+      setShowUrlInput(false)
+    }
+  }
+
   const thumbSize = compact ? 'h-7 w-7' : 'h-32 w-32'
 
   return (
@@ -179,18 +208,106 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
               </>
             )}
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={ACCEPTED}
-            onChange={handleFileChange}
-            className="hidden"
-          />
           {uploadError && <span className="text-[10px] text-destructive">{uploadError}</span>}
         </>
       ) : (
-        <FileUpload value={value} onChange={onChange} purpose={purpose} />
+        <div
+          className={`flex h-32 w-32 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-2 text-center transition-colors ${
+            isDragging
+              ? 'border-ring bg-muted/50'
+              : 'border-muted-foreground/25 hover:border-muted-foreground/50'
+          }`}
+          onClick={() => {
+            if (uploading || showUrlInput) return
+            fileInputRef.current?.click()
+          }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <span className="text-[10px] text-muted-foreground">上传中…</span>
+            </>
+          ) : showUrlInput ? (
+            <div
+              className="flex w-full flex-col gap-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="url"
+                value={urlInput}
+                autoFocus
+                onChange={(e) => setUrlInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitUrl()
+                }}
+                placeholder="https://..."
+                className="h-7 w-full rounded border border-input bg-transparent px-1.5 text-[10px] outline-none focus:border-ring"
+              />
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={submitUrl}
+                  className="rounded bg-primary px-1.5 py-0.5 text-[9px] font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  确认
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUrlInput(false)
+                    setUrlInput('')
+                  }}
+                  className="text-[9px] text-muted-foreground hover:text-foreground"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : uploadError ? (
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="text-[9px] text-destructive">{uploadError}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setUploadError('')
+                  fileInputRef.current?.click()
+                }}
+                className="text-[9px] text-muted-foreground hover:text-foreground"
+              >
+                重新上传
+              </button>
+            </div>
+          ) : (
+            <>
+              <Upload className="h-5 w-5 text-muted-foreground" />
+              <span className="text-[10px] font-medium text-foreground">点击上传</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowUrlInput(true)
+                }}
+                className="text-[9px] text-muted-foreground hover:text-foreground"
+              >
+                或粘贴链接
+              </button>
+              <span className="text-[8px] text-muted-foreground/70">JPG/PNG/WebP/GIF · ≤10MB</span>
+            </>
+          )}
+        </div>
       )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={ACCEPTED}
+        onChange={handleFileChange}
+        className="hidden"
+      />
 
       <Dialog open={enlargeOpen} onOpenChange={setEnlargeOpen}>
         <DialogContent className="sm:max-w-2xl">
