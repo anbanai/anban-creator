@@ -9,7 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -837,21 +837,26 @@ func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
 
 	var imageData []byte
 
-	// Always read the image server-side and convert to base64 to avoid SSRF.
-	if strings.HasPrefix(req.ImageURL, "/api/v1/files/") || strings.HasPrefix(req.ImageURL, "/files/") {
-		if h.store == nil {
-			return Error(c, fiber.StatusInternalServerError, "file storage is not available")
-		}
+	// Server-owned URLs (Local /api/v1/files/* or OSS bucket / custom domain):
+	// read via store.Read to avoid SSRF, signed-URL expiry, and private-bucket
+	// 403s. OSSProvider.Read signs the URL internally; LocalProvider.Read hits
+	// disk. Truly external URLs (e.g. Unsplash) fall through to getPublicHTTPSImage.
+	ownedPath := h.store != nil && h.store.IsOwnedURL(req.ImageURL)
+	h.logger.Debug().
+		Str("image_url", req.ImageURL).
+		Bool("owned", ownedPath).
+		Msg("analyze-image routing")
+	if ownedPath {
 		key, respondErr := cleanOwnedUploadKey(req.ImageURL, userID)
 		if respondErr != nil {
 			return respondErr(c)
 		}
-		var err error
-		imageData, err = h.store.Read(c.Context(), key)
+		data, err := h.store.Read(c.Context(), key)
 		if err != nil {
 			h.logger.Error().Err(err).Str("key", key).Msg("failed to read image for analysis")
 			return Error(c, fiber.StatusInternalServerError, "failed to read image file")
 		}
+		imageData = data
 	} else if strings.HasPrefix(req.ImageURL, "https://") {
 		resp, err := getPublicHTTPSImage(c.Context(), req.ImageURL, maxAnalysisImageSize)
 		if err != nil {
@@ -860,7 +865,7 @@ func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
 		}
 		imageData = resp
 	} else {
-		return Error(c, fiber.StatusBadRequest, "image_url must start with /api/v1/files/ or https://")
+		return Error(c, fiber.StatusBadRequest, "image_url must be a valid file URL")
 	}
 
 	if int64(len(imageData)) > maxAnalysisImageSize {
@@ -988,18 +993,31 @@ func isPublicIP(ip net.IP) bool {
 type fiberErrorFunc func(fiber.Ctx) error
 
 func cleanOwnedUploadKey(imageURL, userID string) (string, fiberErrorFunc) {
-	key := strings.TrimPrefix(imageURL, "/api/v1/files/")
-	key = strings.TrimPrefix(key, "/files/")
-	if key == "" {
+	key, ok := storage.StorageKeyFromURL(imageURL)
+	if !ok || key == "" {
 		return "", func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
 	}
 
-	cleanKey := path.Clean(key)
+	// filepath.Clean (not path.Clean) for parity with FileHandler.ServeFile.
+	// Storage keys are POSIX-style forward-slash paths on both Linux servers
+	// and OSS, so the OS-separator rewrite under non-POSIX builds is a no-op
+	// in production.
+	cleanKey := filepath.Clean(key)
 	if strings.Contains(cleanKey, "..") {
 		return "", func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
 	}
-	if !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") {
-		return "", func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }
+	// Align with FileHandler.ServeFile (file.go) ownership rules:
+	// channels/references are user uploads (purpose="channel" / "reference"),
+	// {userID}/designer/ are designer-generated images.
+	allowed := []string{
+		"uploads/channels/" + userID + "/",
+		"uploads/references/" + userID + "/",
+		userID + "/designer/",
 	}
-	return cleanKey, nil
+	for _, prefix := range allowed {
+		if strings.HasPrefix(cleanKey, prefix) {
+			return cleanKey, nil
+		}
+	}
+	return "", func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }
 }

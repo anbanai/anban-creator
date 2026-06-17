@@ -68,8 +68,14 @@ func (f *fakeStorageProvider) DownloadURL(context.Context, string, int) (string,
 
 func (f *fakeStorageProvider) HasCustomDomain() bool { return false }
 
+// IsOwnedURL is a plumbing fake: it accepts both the Local prefix and a
+// fixed OSS hostname so handler tests can exercise the OSS routing branch.
+// It does NOT replicate the real SSRF defenses (subdomain spoofing, scheme
+// rejection, case-insensitive host match) — those are exercised against the
+// production provider in server/storage/owned_url_test.go.
 func (f *fakeStorageProvider) IsOwnedURL(rawURL string) bool {
-	return strings.HasPrefix(rawURL, "/api/v1/files/")
+	return strings.HasPrefix(rawURL, "/api/v1/files/") ||
+		strings.HasPrefix(rawURL, "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/")
 }
 
 func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {
@@ -210,6 +216,128 @@ func TestAnalyzeImageAllowsOwnedInternalFile(t *testing.T) {
 	}
 	if llm.prompt == "" {
 		t.Fatal("expected image analysis prompt to be sent to LLM")
+	}
+}
+
+// Regression: template uploads use purpose="reference" → key prefix is
+// "uploads/references/{user}/". Previously cleanOwnedUploadKey only allowed
+// "uploads/channels/{user}/" so this path returned 403.
+func TestAnalyzeImageAllowsReferenceUploadPrefix(t *testing.T) {
+	key := "uploads/references/user-1/abc.png"
+	store := &fakeStorageProvider{
+		data: map[string][]byte{key: tinyPNG()},
+	}
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetLLMClient(&fakeChannelLLM{response: "风格"}, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/`+key+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusOK)
+	}
+	if len(store.read) != 1 || store.read[0] != key {
+		t.Fatalf("store.Read keys = %v, want [%s]", store.read, key)
+	}
+}
+
+// Regression (main reported bug): OSS-stored image URLs are HTTPS and look
+// external, but private buckets reject unsigned GETs with 403. The fix
+// routes server-owned HTTPS URLs through store.Read (which signs OSS URLs
+// internally) instead of the external download path.
+func TestAnalyzeImageAllowsOwnedOSSURL(t *testing.T) {
+	key := "uploads/references/user-1/abc.png"
+	store := &fakeStorageProvider{
+		data: map[string][]byte{key: tinyPNG()},
+	}
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetLLMClient(&fakeChannelLLM{response: "风格"}, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"`+imageURL+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d (OSS URL must be read via store.Read, not external download)", resp.StatusCode, fiber.StatusOK)
+	}
+	if len(store.read) != 1 || store.read[0] != key {
+		t.Fatalf("store.Read keys = %v, want [%s] (OSS URL key extraction)", store.read, key)
+	}
+}
+
+// Cross-user isolation on the Local references/ prefix (the new prefix
+// added by this fix). Mirrors TestAnalyzeImageRejectsInternalFileFromDifferentUser
+// which only covers uploads/channels/.
+func TestAnalyzeImageRejectsReferenceUploadFromDifferentUser(t *testing.T) {
+	key := "uploads/references/user-2/abc.png"
+	store := &fakeStorageProvider{
+		data: map[string][]byte{key: tinyPNG()},
+	}
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetLLMClient(&fakeChannelLLM{response: "风格"}, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/`+key+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusForbidden)
+	}
+	if len(store.read) != 0 {
+		t.Fatalf("store.Read should not be called for another user's file, got %v", store.read)
+	}
+}
+
+// Cross-user isolation also applies to OSS URLs: a URL pointing at another
+// user's storage key must be rejected before store.Read.
+func TestAnalyzeImageRejectsOwnedOSSURLFromDifferentUser(t *testing.T) {
+	key := "uploads/references/user-2/abc.png"
+	store := &fakeStorageProvider{
+		data: map[string][]byte{key: tinyPNG()},
+	}
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetLLMClient(&fakeChannelLLM{response: "风格"}, 0)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	imageURL := "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/" + key
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"`+imageURL+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusForbidden)
+	}
+	if len(store.read) != 0 {
+		t.Fatalf("store.Read should not be called for another user's file, got %v", store.read)
 	}
 }
 

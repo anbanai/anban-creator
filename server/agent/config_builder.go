@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,7 +179,7 @@ func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger 
 	destPath := filepath.Join(destDir, "reference.png")
 
 	if store != nil && store.IsOwnedURL(imageURL) {
-		if key, ok := storageKeyFromURL(imageURL); ok {
+		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
 			data, err := store.Read(ctx, key)
 			if err == nil {
 				if int64(len(data)) > maxReferenceImageBytes {
@@ -233,15 +232,3 @@ func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger 
 	return nil
 }
 
-// storageKeyFromURL extracts the storage backend key from a server-owned URL.
-// Handles both relative "/api/v1/files/<key>" (LocalProvider) and absolute
-// "https://<host>/<key>" (OSSProvider, with or without custom domain).
-func storageKeyFromURL(imageURL string) (string, bool) {
-	if key, ok := strings.CutPrefix(imageURL, "/api/v1/files/"); ok {
-		return key, true
-	}
-	if u, err := url.Parse(imageURL); err == nil && u.Path != "" {
-		return strings.TrimPrefix(u.Path, "/"), true
-	}
-	return "", false
-}

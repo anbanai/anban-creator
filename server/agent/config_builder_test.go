@@ -232,22 +232,3 @@ func TestDownloadReferenceImage_OversizedStoreReadReturnsError(t *testing.T) {
 		t.Fatalf("err = %v, want 'too large'", err)
 	}
 }
-
-func TestStorageKeyFromURL(t *testing.T) {
-	cases := []struct {
-		in  string
-		key string
-		ok  bool
-	}{
-		{"/api/v1/files/uploads/references/u/pic.jpg", "uploads/references/u/pic.jpg", true},
-		{"https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/references/u/pic.jpg", "uploads/references/u/pic.jpg", true},
-		{"https://cdn.example.com/u/pic.png", "u/pic.png", true},
-		{"", "", false},
-	}
-	for _, c := range cases {
-		got, ok := storageKeyFromURL(c.in)
-		if got != c.key || ok != c.ok {
-			t.Errorf("storageKeyFromURL(%q) = (%q, %v), want (%q, %v)", c.in, got, ok, c.key, c.ok)
-		}
-	}
-}
