@@ -116,7 +116,7 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {data.name}
@@ -129,79 +129,87 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
           )}
         </DialogHeader>
 
-        {/* Preview image */}
-        <div className="relative aspect-[3/4] w-full max-w-xs mx-auto overflow-hidden rounded-lg border border-border bg-muted">
-          {loading ? (
-            <div className="flex h-full w-full items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        {/* Body: 左右两栏 */}
+        <div className="flex flex-col gap-4 sm:flex-row">
+          {/* Left: image */}
+          <div className="sm:w-48 sm:flex-shrink-0">
+            <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-border bg-muted">
+              {loading ? (
+                <div className="flex h-full w-full items-center justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : data.thumbnail_url ? (
+                <SignedImage
+                  src={data.thumbnail_url}
+                  alt={data.name}
+                  className="h-full w-full object-cover"
+                  showLoading={false}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <ImageIcon className="h-10 w-10 text-muted-foreground/40" />
+                </div>
+              )}
             </div>
-          ) : data.thumbnail_url ? (
-            <SignedImage
-              src={data.thumbnail_url}
-              alt={data.name}
-              className="h-full w-full object-cover"
-              showLoading={false}
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <ImageIcon className="h-10 w-10 text-muted-foreground/40" />
+          </div>
+
+          {/* Right: text content */}
+          <div className="flex-1 space-y-3">
+            {/* Tags */}
+            {(data.tags ?? []).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {(data.tags ?? []).map((tag) => (
+                  <Badge key={tag} variant="secondary" className="text-xs">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {/* Style prompt */}
+            {data.style_prompt && (
+              <div className="rounded-lg border border-border px-3 py-2">
+                <p className="text-xs font-medium text-muted-foreground mb-1">风格提示</p>
+                <p className="text-sm text-foreground whitespace-pre-wrap">{data.style_prompt}</p>
+              </div>
+            )}
+
+            {/* Structure */}
+            {data.structure && Object.keys(data.structure).length > 0 && (
+              <JsonDisplay data={data.structure} title="模板结构" />
+            )}
+
+            {/* Example content */}
+            {data.example_content && Object.keys(data.example_content).length > 0 && (
+              <JsonDisplay data={data.example_content} title="示例内容" />
+            )}
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap gap-2 pt-2">
+              {(data.type === 'poster' || data.type === 'article') && (
+                <Button size="sm" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=article') }}>
+                  用于公众号
+                </Button>
+              )}
+              {(data.type === 'seednote' || data.type === 'poster') && (
+                <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=seednote') }}>
+                  用于种草笔记
+                </Button>
+              )}
+              {isOwner && onEdit && (
+                <Button size="sm" variant="outline" onClick={() => onEdit(data)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                  编辑
+                </Button>
+              )}
+              {isOwner && (
+                <Button size="sm" variant="outline" onClick={() => setDeleteOpen(true)} className="text-destructive hover:bg-destructive/5">
+                  <Trash2 className="h-3.5 w-3.5" />
+                  删除
+                </Button>
+              )}
             </div>
-          )}
-        </div>
-
-        {/* Tags */}
-        {(data.tags ?? []).length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {(data.tags ?? []).map((tag) => (
-              <Badge key={tag} variant="secondary" className="text-xs">
-                {tag}
-              </Badge>
-            ))}
           </div>
-        )}
-
-        {/* Style prompt */}
-        {data.style_prompt && (
-          <div className="rounded-lg border border-border px-3 py-2">
-            <p className="text-xs font-medium text-muted-foreground mb-1">风格提示</p>
-            <p className="text-sm text-foreground whitespace-pre-wrap">{data.style_prompt}</p>
-          </div>
-        )}
-
-        {/* Structure */}
-        {data.structure && Object.keys(data.structure).length > 0 && (
-          <JsonDisplay data={data.structure} title="模板结构" />
-        )}
-
-        {/* Example content */}
-        {data.example_content && Object.keys(data.example_content).length > 0 && (
-          <JsonDisplay data={data.example_content} title="示例内容" />
-        )}
-
-        {/* Action buttons */}
-        <div className="flex flex-wrap gap-2 pt-2">
-          {(data.type === 'poster' || data.type === 'article') && (
-            <Button size="sm" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=article') }}>
-              用于公众号
-            </Button>
-          )}
-          {(data.type === 'seednote' || data.type === 'poster') && (
-            <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=seednote') }}>
-              用于种草笔记
-            </Button>
-          )}
-          {isOwner && onEdit && (
-            <Button size="sm" variant="outline" onClick={() => onEdit(data)}>
-              <Pencil className="h-3.5 w-3.5" />
-              编辑
-            </Button>
-          )}
-          {isOwner && (
-            <Button size="sm" variant="outline" onClick={() => setDeleteOpen(true)} className="text-destructive hover:bg-destructive/5">
-              <Trash2 className="h-3.5 w-3.5" />
-              删除
-            </Button>
-          )}
         </div>
       </DialogContent>
 

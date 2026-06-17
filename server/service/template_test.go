@@ -160,6 +160,8 @@ func TestDeriveNameFromStyle(t *testing.T) {
 		{"truncate at comma (Chinese)", "治愈系水彩风格，柔和色调", "治愈系水彩风格"},
 		{"truncate at period (English)", "Soft watercolor style. Pastel tones.", "Soft watercolor styl"},
 		{"truncate at newline", "第一行\n第二行", "第一行"},
+		{"strip dimension prefix", "整体氛围：治愈系水彩\n色彩色调：暖色调", "治愈系水彩"},
+		{"strip ascii colon prefix", "Style: soft watercolor, pastel tones", "soft watercolor"},
 		{"cap at 20 runes", "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十", "一二三四五六七八九十一二三四五六七八九十"},
 	}
 	for _, tc := range cases {

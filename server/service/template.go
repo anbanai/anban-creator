@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -55,6 +56,12 @@ func deriveNameFromStyle(style string) string {
 		}
 	}
 	style = strings.TrimSpace(style)
+	// 去掉开头的维度前缀（如多行格式中的"整体氛围："）
+	if idx := strings.IndexAny(style, "：:"); idx > 0 {
+		// idx 是 byte index；全角"："占 3 字节，需按 rune 跳过整个匹配字符避免切坏 UTF-8
+		_, sz := utf8.DecodeRuneInString(style[idx:])
+		style = strings.TrimSpace(style[idx+sz:])
+	}
 	runes := []rune(style)
 	if len(runes) > 20 {
 		return string(runes[:20])

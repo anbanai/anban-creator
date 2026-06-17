@@ -25,7 +25,7 @@ export function TemplateCard({ template, onClick }: TemplateCardProps) {
       className="group flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition-all hover:border-primary/40 hover:shadow-md focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
     >
       {/* Thumbnail */}
-      <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
+      <div className="relative h-44 w-full overflow-hidden bg-muted sm:h-48">
         {template.thumbnail_url ? (
           <SignedImage
             src={template.thumbnail_url}
