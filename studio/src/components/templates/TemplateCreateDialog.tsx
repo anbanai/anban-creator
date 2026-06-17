@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Sparkles, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select,
   SelectTrigger,
@@ -87,8 +89,8 @@ export function TemplateCreateDialog({
       if (!res.style) return
       setStylePrompt((prev) => (force || !prev.trim()) ? res.style : prev)
       setName((prev) => (prev.trim() ? prev : deriveTemplateName(res.style)))
-    } catch {
-      toast.error('风格识别失败，请手动填写或重试')
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '风格识别失败，请手动填写或重试'))
     } finally {
       setAnalyzing(false)
     }
@@ -252,7 +254,7 @@ export function TemplateCreateDialog({
                 )}
               </div>
             </div>
-            <div className="flex items-start gap-3">
+            <div className="flex items-stretch gap-3">
               <div className="relative shrink-0">
                 <ReferenceImageUpload
                   value={thumbnailUrl}
@@ -260,20 +262,30 @@ export function TemplateCreateDialog({
                   purpose="reference"
                 />
                 {analyzing && (
-                  <div className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
-                    <Loader2 className="h-3 w-3 animate-spin" />
+                  <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-background/60 backdrop-blur-[1px]">
+                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
                   </div>
                 )}
               </div>
-              <Textarea
-                id="tpl-style"
-                value={stylePrompt}
-                onChange={(e) => setStylePrompt(e.target.value)}
-                placeholder="描述视觉风格（艺术流派、画面氛围、质感…）"
-                rows={4}
-                maxLength={1024}
-                className={`flex-1 resize-none ${analyzing ? 'bg-muted/40 ring-2 ring-primary/40 ring-offset-1' : ''}`}
-              />
+              {analyzing ? (
+                <div className="flex h-32 flex-1 items-center rounded-md border border-input p-3">
+                  <div className="w-full space-y-2">
+                    <Skeleton className="h-3.5 w-11/12" />
+                    <Skeleton className="h-3.5 w-full" />
+                    <Skeleton className="h-3.5 w-9/12" />
+                    <Skeleton className="h-3.5 w-10/12" />
+                  </div>
+                </div>
+              ) : (
+                <Textarea
+                  id="tpl-style"
+                  value={stylePrompt}
+                  onChange={(e) => setStylePrompt(e.target.value)}
+                  placeholder="描述视觉风格（艺术流派、画面氛围、质感…）"
+                  maxLength={1024}
+                  className="h-32 flex-1 resize-none"
+                />
+              )}
             </div>
             <p className="text-xs text-muted-foreground">
               上传后系统会自动识别视觉风格，你也可以手动调整。

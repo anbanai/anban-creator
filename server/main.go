@@ -363,6 +363,9 @@ func main() {
 		if writingLLMClient != nil {
 			channelHandler.SetLLMClient(writingLLMClient, cfg.Writing.Timeout)
 		}
+		if visionLLMClient != nil {
+			channelHandler.SetVisionClient(visionLLMClient)
+		}
 		if templateSvc != nil {
 			channelHandler.SetTemplateService(templateSvc)
 		}

@@ -33,6 +33,7 @@ type ChannelHandler struct {
 	logger         *zerolog.Logger
 	llm            service.LLMClient
 	llmTimeout     time.Duration
+	visionClient   service.LLMClient // dedicated vision model for AnalyzeImage; nil = fall back to llm
 	modelConfigSvc *service.ModelConfigService
 	templateSvc    *service.TemplateService
 	store          storage.Provider
@@ -48,6 +49,12 @@ func NewChannelHandler(svc *service.ChannelService, logger *zerolog.Logger) *Cha
 func (h *ChannelHandler) SetLLMClient(llm service.LLMClient, timeout time.Duration) {
 	h.llm = llm
 	h.llmTimeout = timeout
+}
+
+// SetVisionClient injects a dedicated vision-capable LLM client used by AnalyzeImage.
+// When nil or never called, AnalyzeImage falls back to the writing LLM client.
+func (h *ChannelHandler) SetVisionClient(client service.LLMClient) {
+	h.visionClient = client
 }
 
 // SetModelConfigService injects per-user model overrides for profile analysis.
@@ -828,7 +835,12 @@ func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_url is required")
 	}
 
-	llm := h.getLLMClient(c.Context(), userID)
+	// Prefer the dedicated vision client for image analysis; fall back to the
+	// writing LLM client (with per-user override) when no vision model is wired.
+	llm := h.visionClient
+	if llm == nil {
+		llm = h.getLLMClient(c.Context(), userID)
+	}
 	if llm == nil {
 		return Error(c, fiber.StatusServiceUnavailable, "LLM service is not configured")
 	}
@@ -897,6 +909,10 @@ func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
 
 	result, err := llm.CompleteWithImage(c.Context(), systemPrompt, userPrompt, imageURL)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			h.logger.Warn().Err(err).Str("user_id", userID).Msg("image style analysis canceled or timed out")
+			return Error(c, fiber.StatusServiceUnavailable, "analysis canceled or timed out")
+		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("image style analysis failed")
 		return Error(c, fiber.StatusInternalServerError, "image style analysis failed")
 	}

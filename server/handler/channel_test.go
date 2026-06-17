@@ -341,6 +341,126 @@ func TestAnalyzeImageRejectsOwnedOSSURLFromDifferentUser(t *testing.T) {
 	}
 }
 
+// When a dedicated vision client is wired, AnalyzeImage must route the image
+// to it instead of the writing LLM. This is the regression test for the bug
+// where Kimi (text-only writing model) was being asked to analyze images,
+// causing every recognition request to fail.
+func TestAnalyzeImagePrefersVisionClient(t *testing.T) {
+	key := "uploads/references/user-1/abc.png"
+	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
+	writingLLM := &fakeChannelLLM{response: "from-writing"}
+	visionLLM := &fakeChannelLLM{response: "from-vision"}
+
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetLLMClient(writingLLM, 0)
+	h.SetVisionClient(visionLLM)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/`+key+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusOK)
+	}
+	if visionLLM.prompt == "" {
+		t.Fatal("vision LLM should have been called when SetVisionClient was wired")
+	}
+	if writingLLM.prompt != "" {
+		t.Fatal("writing LLM should NOT be called when vision client is available")
+	}
+}
+
+// Without a vision client, AnalyzeImage falls back to the writing LLM so
+// existing deployments without a vision model configured still work.
+func TestAnalyzeImageFallsBackToWritingLLM(t *testing.T) {
+	key := "uploads/references/user-1/abc.png"
+	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
+	writingLLM := &fakeChannelLLM{response: "from-writing"}
+
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetLLMClient(writingLLM, 0)
+	// No SetVisionClient call.
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/`+key+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusOK)
+	}
+	if writingLLM.prompt == "" {
+		t.Fatal("writing LLM should be used as fallback when no vision client is configured")
+	}
+}
+
+// Server-side timeout (context.DeadlineExceeded) must surface as 503, not 500,
+// so the client can distinguish transient capacity issues from real failures.
+func TestAnalyzeImageReturns503OnDeadlineExceeded(t *testing.T) {
+	key := "uploads/references/user-1/abc.png"
+	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
+	visionLLM := &fakeChannelLLM{err: context.DeadlineExceeded}
+
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetVisionClient(visionLLM)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/`+key+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d (DeadlineExceeded → 503)", resp.StatusCode, fiber.StatusServiceUnavailable)
+	}
+}
+
+// Client cancellation (context.Canceled) must also surface as 503, not 500.
+// Although Fiber v3 does not currently propagate client disconnects as
+// context.Canceled, defensive handling keeps the log signal correct if the
+// upstream behavior ever changes.
+func TestAnalyzeImageReturns503OnCanceled(t *testing.T) {
+	key := "uploads/references/user-1/abc.png"
+	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
+	visionLLM := &fakeChannelLLM{err: context.Canceled}
+
+	h := NewChannelHandler(nil, testChannelLogger(t))
+	h.SetStore(store)
+	h.SetVisionClient(visionLLM)
+
+	app := fiber.New()
+	app.Post("/analyze", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.AnalyzeImage(c)
+	})
+
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/`+key+`"}`))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d (Canceled → 503)", resp.StatusCode, fiber.StatusServiceUnavailable)
+	}
+}
+
 func TestGetPublicHTTPSImageRejectsLoopbackHost(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
