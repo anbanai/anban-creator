@@ -16,6 +16,27 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 })
 
+// embla-carousel (used by shadcn Carousel) depends on IntersectionObserver
+// and ResizeObserver, neither of which jsdom provides. Minimal stubs so
+// carousel-driven components can render in component tests.
+class IntersectionObserverStub {
+  readonly root = null
+  readonly rootMargin = ''
+  readonly thresholds: ReadonlyArray<number> = []
+  observe = vi.fn()
+  unobserve = vi.fn()
+  disconnect = vi.fn()
+  takeRecords = vi.fn(() => [])
+}
+window.IntersectionObserver = IntersectionObserverStub as unknown as typeof IntersectionObserver
+
+class ResizeObserverStub {
+  observe = vi.fn()
+  unobserve = vi.fn()
+  disconnect = vi.fn()
+}
+window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))
 afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
