@@ -277,8 +277,8 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string,
 	if opts.Task.Style != "" {
 		cmd = append(cmd, "--style", opts.Task.Style)
 	}
-	if strings.TrimSpace(opts.GoalFeedback) != "" {
-		cmd = append(cmd, "--goal-feedback", opts.GoalFeedback)
+	if strings.TrimSpace(opts.Task.Goal) != "" {
+		cmd = append(cmd, "--goal", opts.Task.Goal)
 	}
 	if model != "" {
 		cmd = append(cmd, "--model", model)

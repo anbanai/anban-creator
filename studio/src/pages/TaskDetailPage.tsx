@@ -310,7 +310,7 @@ export default function TaskDetailPage() {
   }
 
   const canCancel = task.status === 'pending' || task.status === 'running'
-  const canRetry = task.status === 'failed' || task.status === 'cancelled' || task.status === 'goal_not_met'
+  const canRetry = task.status === 'failed' || task.status === 'cancelled'
   const currentTask = task
 
   async function handleRetry() {
@@ -334,7 +334,6 @@ export default function TaskDetailPage() {
         {task?.status === 'completed' && '任务已完成'}
         {task?.status === 'failed' && '任务失败'}
         {task?.status === 'cancelled' && '任务已取消'}
-        {task?.status === 'goal_not_met' && '任务未达目标'}
       </div>
 
       {/* Goal mode banner */}
@@ -344,35 +343,15 @@ export default function TaskDetailPage() {
             <Target className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
-                强目标模式 · 第 {task.goal_attempts || 0} / {task.goal_max_attempts || 3} 次尝试
+                强目标模式
               </p>
               <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
                 <span className="font-medium">目标条件：</span>
                 {task.goal || '(未设置)'}
               </p>
-              {task.status === 'goal_not_met' && (
-                <p className="mt-2 text-sm font-medium text-red-600 dark:text-red-400">
-                  已达最大尝试次数仍未达成目标。可点击「重新创建」调整目标后重试。
-                </p>
-              )}
-              {task.goal_evaluation_log && task.goal_evaluation_log.length > 0 && (
-                <details className="mt-2">
-                  <summary className="cursor-pointer text-xs font-medium text-amber-700 dark:text-amber-300">
-                    查看评估历史（{task.goal_evaluation_log.length} 条）
-                  </summary>
-                  <ul className="mt-2 space-y-1.5">
-                    {task.goal_evaluation_log.map((e, i) => (
-                      <li key={i} className="text-xs text-amber-800 dark:text-amber-200">
-                        <span className="font-medium">第 {e.attempt} 次</span>
-                        <span className={`ml-2 ${e.achieved ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                          {e.achieved ? '已达成' : '未达成'}
-                        </span>
-                        <span className="ml-2">— {e.reason}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                AI 会自动检查产出是否符合目标条件，未达成会继续修订直到符合（或达到最大尝试次数）。
+              </p>
             </div>
           </div>
         </div>

@@ -1,11 +1,8 @@
 package repository
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/royalrick/anbanwriter/server/model"
@@ -226,66 +223,6 @@ func (r *taskRepository) UpdateHeartbeat(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("last_heartbeat_at", now).Error
 }
 
-// UpdateGoalFields updates goal-mode tracking columns atomically.
-// achieved: when non-nil, sets goal_achieved to the pointer value (nil leaves unchanged).
-// attemptsDelta: when non-zero, increments goal_attempts by this delta.
-// evaluationLog: when non-empty, replaces goal_evaluation_log.
-func (r *taskRepository) UpdateGoalFields(ctx context.Context, taskID string, achieved *bool, attemptsDelta int, evaluationLog string) error {
-	updates := map[string]interface{}{}
-	if achieved != nil {
-		updates["goal_achieved"] = *achieved
-	}
-	if attemptsDelta != 0 {
-		updates["goal_attempts"] = gorm.Expr("goal_attempts + ?", attemptsDelta)
-	}
-	if evaluationLog != "" {
-		updates["goal_evaluation_log"] = evaluationLog
-	}
-	if len(updates) == 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("id = ?", taskID).
-		Updates(updates).Error
-}
-
-// AppendGoalEvaluation appends a single JSON-encoded evaluation entry to
-// goal_evaluation_log. The entry should be a complete JSON object passed as
-// raw bytes (no surrounding array). The column is treated as a JSON array.
-// Goal evaluations run single-threaded per task execution, so the
-// read-modify-write here is safe — concurrent writers on the same task_id
-// are not expected.
-func (r *taskRepository) AppendGoalEvaluation(ctx context.Context, taskID string, entry []byte) error {
-	entry = bytes.TrimSpace(entry)
-	if len(entry) == 0 {
-		return nil
-	}
-	var current string
-	row := r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("id = ?", taskID).
-		Select("COALESCE(goal_evaluation_log, '')").
-		Row()
-	if err := row.Scan(&current); err != nil {
-		return fmt.Errorf("read goal_evaluation_log: %w", err)
-	}
-
-	var arr []json.RawMessage
-	if strings.TrimSpace(current) != "" {
-		_ = json.Unmarshal([]byte(current), &arr) // tolerate malformed JSON → reset
-	}
-	arr = append(arr, json.RawMessage(entry))
-	merged, err := json.Marshal(arr)
-	if err != nil {
-		return fmt.Errorf("marshal goal evaluation log: %w", err)
-	}
-	return r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("id = ?", taskID).
-		Update("goal_evaluation_log", string(merged)).Error
-}
-
 func (r *taskRepository) CountByUserID(ctx context.Context, userID string, channelID string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ?", userID)
@@ -441,11 +378,10 @@ func (r *taskRepository) UpdateTokenUsage(ctx context.Context, id string, inputT
 
 // usageStatuses is the set of task statuses counted toward usage statistics.
 // Cancelled tasks are excluded because they may not have consumed meaningful
-// resources; goal_not_met tasks are included because they ran full attempts.
+// resources.
 var usageStatuses = []string{
 	model.TaskStatusCompleted,
 	model.TaskStatusFailed,
-	model.TaskStatusGoalNotMet,
 }
 
 // AggregateUsageByUser returns SQL-level SUM aggregates for token usage and cost.

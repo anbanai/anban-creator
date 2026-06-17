@@ -19,7 +19,6 @@ export interface Plan {
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
-  goal_max_attempts?: number
   created_at: string
   updated_at: string
 }

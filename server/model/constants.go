@@ -4,12 +4,11 @@ import "slices"
 
 // Task status constants.
 const (
-	TaskStatusPending     = "pending"
-	TaskStatusRunning     = "running"
-	TaskStatusCompleted   = "completed"
-	TaskStatusFailed      = "failed"
-	TaskStatusCancelled   = "cancelled"
-	TaskStatusGoalNotMet  = "goal_not_met" // goal-mode task exhausted all attempts without achieving the goal
+	TaskStatusPending   = "pending"
+	TaskStatusRunning   = "running"
+	TaskStatusCompleted = "completed"
+	TaskStatusFailed    = "failed"
+	TaskStatusCancelled = "cancelled"
 )
 
 // TerminalTaskStatuses is the set of task statuses that signal the end of
@@ -19,7 +18,6 @@ var TerminalTaskStatuses = []string{
 	TaskStatusCompleted,
 	TaskStatusFailed,
 	TaskStatusCancelled,
-	TaskStatusGoalNotMet,
 }
 
 // IsTerminalTaskStatus reports whether s is a terminal task status.

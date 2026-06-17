@@ -1,13 +1,5 @@
 export type TaskType = 'seednote' | 'article'
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'goal_not_met'
-
-export interface GoalEvaluationEntry {
-  attempt: number
-  achieved: boolean
-  reason: string
-  error?: string
-  evaluated_at: string
-}
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface Task {
   id: string
@@ -29,13 +21,10 @@ export interface Task {
   published: boolean
   published_at: string | null
   workflow_status?: WorkflowStatus | string | null
-  // Strong goal mode fields.
+  // Goal mode: condition is prepended to user prompt as /goal slash command;
+  // the loop runs entirely inside Claude Code, server observes only the result.
   goal?: string
   goal_mode?: boolean
-  goal_max_attempts?: number
-  goal_attempts?: number
-  goal_achieved?: boolean
-  goal_evaluation_log?: GoalEvaluationEntry[]
   created_at: string
   started_at: string
   completed_at: string

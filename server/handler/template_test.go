@@ -209,11 +209,11 @@ func TestTemplateHandler_Create_Success(t *testing.T) {
 	userID := uuid.New().String()
 
 	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
-		"name":         "新模板",
-		"type":         "seednote",
+		"name":          "新模板",
+		"type":          "seednote",
 		"thumbnail_url": "https://example.com/x.png",
-		"style_prompt": "暖色",
-		"visibility":   "private",
+		"style_prompt":  "暖色",
+		"visibility":    "private",
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -280,11 +280,11 @@ func TestTemplateHandler_Update_OwnerSucceeds(t *testing.T) {
 	tmpl := createTemplateRow(t, repo, owner, "public", "old name")
 
 	resp := doRequest(t, app, "PUT", "/api/v1/templates/"+tmpl.ID, owner, map[string]any{
-		"name":         "new name",
-		"type":         "seednote",
+		"name":          "new name",
+		"type":          "seednote",
 		"thumbnail_url": "https://example.com/new.png",
-		"style_prompt": "新风格",
-		"visibility":   "private",
+		"style_prompt":  "新风格",
+		"visibility":    "private",
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)

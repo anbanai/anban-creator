@@ -283,13 +283,12 @@ type CreditsConfig struct {
 	ModelCosts    map[string]map[string]int `yaml:"model_costs"`    // per-model costs, key format: "provider/model"
 	AdminAPIKey   string                    `yaml:"admin_api_key"`  // API key for admin credit grant endpoint
 
-	// Goal mode (strong goal mode) pricing and limits.
+	// Goal mode pricing.
 	// GoalModeMultiplier is the upfront credit multiplier applied when a task is
-	// created with goal_mode=true (default 3). GoalMaxAttempts is the maximum
-	// number of executions (including the first) before a goal-mode task enters
-	// goal_not_met state (default 3).
+	// created with goal_mode=true (default 3). The goal loop runs entirely
+	// inside Claude Code's /goal mechanism; the server cannot tell how many
+	// turns were consumed, so the upfront charge is never refunded.
 	GoalModeMultiplier int `yaml:"goal_mode_multiplier"`
-	GoalMaxAttempts    int `yaml:"goal_max_attempts"`
 }
 
 // EffectiveGoalModeMultiplier returns the configured goal-mode credit multiplier,
@@ -299,15 +298,6 @@ func (c *CreditsConfig) EffectiveGoalModeMultiplier() int {
 		return 3
 	}
 	return c.GoalModeMultiplier
-}
-
-// EffectiveGoalMaxAttempts returns the configured maximum goal-mode attempts,
-// defaulting to 3 when unset or invalid.
-func (c *CreditsConfig) EffectiveGoalMaxAttempts() int {
-	if c == nil || c.GoalMaxAttempts <= 0 {
-		return 3
-	}
-	return c.GoalMaxAttempts
 }
 
 // ModelCost returns the per-operation cost for a specific model.
@@ -442,9 +432,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Credits.GoalModeMultiplier <= 0 {
 		c.Credits.GoalModeMultiplier = 3
-	}
-	if c.Credits.GoalMaxAttempts <= 0 {
-		c.Credits.GoalMaxAttempts = 3
 	}
 
 	// Asynq defaults.

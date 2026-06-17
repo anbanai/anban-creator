@@ -49,10 +49,10 @@ func TestTemplateService_Create_AssignsDefaults(t *testing.T) {
 	ctx := context.Background()
 
 	tmpl := &model.Template{
-		Name:        "我的种草模板",
-		Type:        "seednote",
+		Name:         "我的种草模板",
+		Type:         "seednote",
 		ThumbnailURL: "https://example.com/x.png",
-		StylePrompt: "暖色调，柔和光线",
+		StylePrompt:  "暖色调，柔和光线",
 	}
 	userID := uuid.New().String()
 

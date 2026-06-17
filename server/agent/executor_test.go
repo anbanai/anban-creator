@@ -598,12 +598,12 @@ func TestBuildUserPrompt(t *testing.T) {
 			wantContains: []string{"视觉风格要求", "暖系生活感", "覆盖账号默认风格"},
 		},
 		{
-			name:         "empty style omits 视觉风格要求 line",
-			taskType:     "seednote",
-			topic:        "春季穿搭",
-			agentName:    "seednote",
-			style:        "",
-			wantAbsence:  []string{"视觉风格要求"},
+			name:        "empty style omits 视觉风格要求 line",
+			taskType:    "seednote",
+			topic:       "春季穿搭",
+			agentName:   "seednote",
+			style:       "",
+			wantAbsence: []string{"视觉风格要求"},
 		},
 	}
 
@@ -627,20 +627,54 @@ func TestBuildUserPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildUserPrompt_GoalFeedback(t *testing.T) {
-	// Empty feedback — no block appended.
+func TestBuildUserPrompt_Goal(t *testing.T) {
+	// Empty goal — no /goal prefix.
 	got := BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "")
-	if strings.Contains(got, "强目标模式反馈") {
-		t.Errorf("empty feedback should not include goal block; got %q", got)
+	if strings.Contains(got, "/goal ") {
+		t.Errorf("empty goal should not include /goal prefix; got %q", got)
 	}
 
-	// Non-empty feedback — block must appear with the reason quoted.
-	feedback := "字数不足 100，缺少具体案例"
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", feedback)
-	for _, sub := range []string{"强目标模式反馈", feedback} {
-		if !strings.Contains(got, sub) {
-			t.Errorf("BuildUserPrompt with feedback = %q, want to contain %q", got, sub)
+	// Non-empty goal — /goal prefix appears with the condition, followed by the base prompt.
+	goal := "文章字数不少于 1000 字"
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", goal)
+	if !strings.HasPrefix(got, "/goal "+goal) {
+		t.Errorf("BuildUserPrompt with goal should start with %q; got %q", "/goal "+goal, got[:min(len(got), 80)])
+	}
+	// Base prompt must still be present after the goal line.
+	if !strings.Contains(got, "春季穿搭") {
+		t.Errorf("BuildUserPrompt with goal lost the base prompt topic; got %q", got)
+	}
+
+	// Whitespace-only goal is treated as empty.
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "   \n\t  ")
+	if strings.Contains(got, "/goal ") {
+		t.Errorf("whitespace-only goal should not include /goal prefix; got %q", got)
+	}
+
+	// Surrounding whitespace is trimmed.
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "  含关键词 ABC  ")
+	wantPrefix := "/goal 含关键词 ABC"
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Errorf("goal should be trimmed; want prefix %q, got %q", wantPrefix, got[:min(len(got), 80)])
+	}
+
+	// Multi-line goal is flattened to a single /goal line (Claude Code's slash
+	// parser only registers the first line as the condition).
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "字数 ≥ 1000\n包含 3 个案例\n带封面图")
+	firstLine := got
+	if idx := strings.Index(got, "\n"); idx >= 0 {
+		firstLine = got[:idx]
+	}
+	if !strings.HasPrefix(firstLine, "/goal ") {
+		t.Errorf("first line should start with /goal; got %q", firstLine)
+	}
+	for _, frag := range []string{"字数 ≥ 1000", "包含 3 个案例", "带封面图"} {
+		if !strings.Contains(firstLine, frag) {
+			t.Errorf("multi-line goal fragment %q missing from /goal line %q", frag, firstLine)
 		}
+	}
+	if strings.Contains(firstLine, "\n") {
+		t.Errorf("goal line must be single-line; got %q", firstLine)
 	}
 }
 

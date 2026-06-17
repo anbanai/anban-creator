@@ -41,10 +41,17 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // calls generate_image with a full prompt string. This keeps BuildAppConfig pure
 // (channel-only) — task-specific overrides flow through the prompt, not config.
 //
-// goalFeedback, when non-empty, is appended as a "强目标模式反馈" block at the
-// end. The TaskService passes the most recent failed-evaluation reason so the
-// retry attempt can avoid repeating the same mistakes. Empty string is a no-op.
-func BuildUserPrompt(taskType, topic, agentName, style, goalFeedback string) string {
+// goal, when non-empty, is prepended as a /goal slash command so Claude Code's
+// built-in goal loop drives turn-by-turn evaluation inside the same session.
+// The CLI registers the condition as a prompt-based Stop hook and keeps working
+// across turns until a small fast model confirms the condition holds (or
+// max_turns is exhausted). Empty string is a no-op.
+//
+// Multi-line goal conditions are flattened to a single line (newlines →
+// spaces) because Claude Code's slash command parser only registers the first
+// line as the condition — anything after a newline would leak into the user
+// prompt body and silently drop from evaluation.
+func BuildUserPrompt(taskType, topic, agentName, style, goal string) string {
 	_ = taskType // reserved for future platform-specific prompt variations
 	var base string
 	if topic == "" {
@@ -62,11 +69,27 @@ func BuildUserPrompt(taskType, topic, agentName, style, goalFeedback string) str
 			style,
 		)
 	}
-	if strings.TrimSpace(goalFeedback) != "" {
-		base += "\n\n[强目标模式反馈]\n" + strings.TrimSpace(goalFeedback) +
-			"\n请避免重复上述问题，调整策略以达成目标。"
+	if trimmedGoal := normalizeGoalCondition(goal); trimmedGoal != "" {
+		return "/goal " + trimmedGoal + "\n\n" + base
 	}
 	return base
+}
+
+// normalizeGoalCondition trims surrounding whitespace and collapses internal
+// newlines into spaces so the condition fits on a single /goal command line.
+func normalizeGoalCondition(goal string) string {
+	goal = strings.TrimSpace(goal)
+	if goal == "" {
+		return ""
+	}
+	lines := strings.Split(goal, "\n")
+	parts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line = strings.TrimSpace(line); line != "" {
+			parts = append(parts, line)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // truncateKey returns the first 8 characters of a key for safe logging.
@@ -178,10 +201,6 @@ type ExecutionOptions struct {
 	OnProgress    func(taskID string, message string) // callback for SSE
 	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
-
-	// GoalFeedback is appended to the agent user prompt on goal-mode retry
-	// attempts. Empty string on first attempt or non-goal tasks.
-	GoalFeedback string
 }
 
 // TokenUsage captures LLM token consumption for a task execution.
@@ -366,7 +385,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	agentName := TaskTypeToAgent(opts.Task.Type)
 
 	// 5. Build user prompt that references the agent by name.
-	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.Style, opts.GoalFeedback)
+	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.Style, opts.Task.Goal)
 
 	// Load agent definition from plugin directory and pass via WithAgent()
 	// (SDK programmatic subagents) instead of --agent CLI flag lookup.

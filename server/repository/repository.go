@@ -104,8 +104,6 @@ type TaskRepository interface {
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
 	IncrementRetryAndSetPending(ctx context.Context, taskID string, field string) error
-	UpdateGoalFields(ctx context.Context, taskID string, achieved *bool, attemptsDelta int, evaluationLog string) error
-	AppendGoalEvaluation(ctx context.Context, taskID string, entry []byte) error
 	FindTitlesByChannelID(ctx context.Context, channelID string) ([]string, error)
 	FindTitleTasksByChannelID(ctx context.Context, channelID string) ([]*model.Task, error)
 	ClearTitles(ctx context.Context, titles []string) (int64, error)

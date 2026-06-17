@@ -23,10 +23,10 @@ import (
 // It records the keys it was asked to Read and can be configured to return
 // a specific byte slice, error, or ownedURL predicate.
 type fakeStore struct {
-	readKeys   []string
-	readData   map[string][]byte
-	readErr    error
-	ownedPred  func(string) bool
+	readKeys  []string
+	readData  map[string][]byte
+	readErr   error
+	ownedPred func(string) bool
 }
 
 var _ storage.Provider = (*fakeStore)(nil)
@@ -235,9 +235,9 @@ func TestDownloadReferenceImage_OversizedStoreReadReturnsError(t *testing.T) {
 
 func TestStorageKeyFromURL(t *testing.T) {
 	cases := []struct {
-		in   string
-		key  string
-		ok   bool
+		in  string
+		key string
+		ok  bool
 	}{
 		{"/api/v1/files/uploads/references/u/pic.jpg", "uploads/references/u/pic.jpg", true},
 		{"https://anbancreator.oss-cn-chengdu.aliyuncs.com/uploads/references/u/pic.jpg", "uploads/references/u/pic.jpg", true},

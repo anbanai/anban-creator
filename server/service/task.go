@@ -47,9 +47,7 @@ type TaskService struct {
 	cancelFuncs         sync.Map           // taskID → context.CancelFunc
 	seednoteTrackingSvc PublishedTrackingService
 	topicPoolSvc        *TopicPoolService
-	goalEvaluator       *GoalEvaluator
 	goalMultiplier      int
-	goalMaxAttempts     int
 }
 
 // NewTaskService creates a new TaskService.
@@ -108,37 +106,15 @@ func (s *TaskService) SetTopicPoolService(svc *TopicPoolService) {
 	s.topicPoolSvc = svc
 }
 
-// SetGoalEvaluator wires the goal-mode evaluator used after task execution to
-// decide whether to auto-retry. Optional — when nil, goal-mode tasks skip the
-// evaluation step and behave like normal tasks (still charged at the goal rate).
-func (s *TaskService) SetGoalEvaluator(ev *GoalEvaluator, multiplier, maxAttempts int) {
-	s.goalEvaluator = ev
-	if multiplier > 0 {
-		s.goalMultiplier = multiplier
-	} else {
-		s.goalMultiplier = 3
-	}
-	if maxAttempts > 0 {
-		s.goalMaxAttempts = maxAttempts
-	} else {
-		s.goalMaxAttempts = 3
-	}
-}
-
 // GoalMultiplier returns the configured goal-mode credit multiplier (default 3).
+// Goal mode is charged upfront at this rate and never refunded — the goal
+// evaluation loop runs inside Claude Code's built-in /goal mechanism, so the
+// server cannot tell how many turns were consumed.
 func (s *TaskService) GoalMultiplier() int {
 	if s.goalMultiplier <= 0 {
 		return 3
 	}
 	return s.goalMultiplier
-}
-
-// GoalMaxAttempts returns the configured maximum goal-mode attempts (default 3).
-func (s *TaskService) GoalMaxAttempts() int {
-	if s.goalMaxAttempts <= 0 {
-		return 3
-	}
-	return s.goalMaxAttempts
 }
 
 // listenCancelEvents subscribes to Redis cancel events and triggers local
@@ -182,8 +158,9 @@ func (s *TaskService) StorageProviderName() string {
 // style optionally overrides the channel's style (e.g. from a selected template).
 //
 // When goalMode is true, each task charges GoalMultiplier() × base cost upfront
-// (covers up to GoalMaxAttempts() execution attempts). The goal text and max
-// attempts are propagated to each created task.
+// and never refunds. The goal condition is propagated to the agent process and
+// prepended to the user prompt as a /goal slash command, letting Claude Code's
+// built-in goal loop drive turn-by-turn evaluation inside a single session.
 func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio, imageModelKey string, skipRefImage *bool, referenceImageURL, style string, watermark *bool, goal string, goalMode bool) ([]*model.Task, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
@@ -224,10 +201,8 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 	tasks := make([]*model.Task, 0, quantity)
 
 	multiplier := 1
-	maxAttempts := 0
 	if goalMode {
 		multiplier = s.GoalMultiplier()
-		maxAttempts = s.GoalMaxAttempts()
 	}
 
 	if s.creditSvc != nil {
@@ -282,7 +257,6 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 			Watermark:          watermark != nil && *watermark,
 			Goal:               goal,
 			GoalMode:           goalMode,
-			GoalMaxAttempts:    maxAttempts,
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -369,11 +343,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		}
 	}
 
-	goalMaxAttempts := 0
-	if planGoalMode {
-		goalMaxAttempts = s.GoalMaxAttempts()
-	}
-
 	task := &model.Task{
 		ID:                 taskID,
 		UserID:             plan.UserID,
@@ -388,7 +357,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Watermark:          plan.Watermark,
 		Goal:               plan.Goal,
 		GoalMode:           planGoalMode,
-		GoalMaxAttempts:    goalMaxAttempts,
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -535,7 +503,6 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("cancel task: %w", err)
 	}
-	wasRunning := swapped
 	if !swapped {
 		// Also try pending → cancelled (task may not have started running yet).
 		swapped, err = s.repo.Tasks().CompareAndSwapStatus(
@@ -550,7 +517,7 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	}
 	// Refund credits for the cancelled task (idempotent — double-refund protected).
 	if s.creditSvc != nil && taskErr == nil && task != nil {
-		s.refundTaskByMode(ctx, task, wasRunning, "取消")
+		s.refundTaskByMode(ctx, task, "取消")
 	}
 	// Release concurrency slot.
 	if s.pubsub != nil {
@@ -841,36 +808,24 @@ func (s *TaskService) RefundForTask(ctx context.Context, taskID string) error {
 }
 
 // refundTaskByMode issues the correct refund for a task based on whether goal
-// mode is active. Goal-mode tasks get a proportional refund that accounts for
-// the attempts already consumed; non-goal tasks get the standard full refund.
+// mode is active.
 //
-// `includeInflightAttempt` should be true when the task was running when the
-// refund was triggered (cancel-during-execution, execution failure, etc.) —
-// the in-flight attempt counts as consumed even if it didn't complete.
+// Goal-mode tasks never refund — the goal loop runs entirely inside Claude
+// Code's /goal mechanism, so the server cannot tell how many turns were
+// consumed. The upfront ×GoalMultiplier charge stands regardless of outcome.
 //
-// Both refund paths are idempotent (protected by FindRefundByTaskID), so it is
+// The refund path is idempotent (protected by FindRefundByTaskID), so it is
 // safe for multiple callers (Cancel, HandleExecution cancel-detection,
 // HandleExecutionFailure) to invoke this for the same task.
-func (s *TaskService) refundTaskByMode(ctx context.Context, task *model.Task, includeInflightAttempt bool, reason string) {
+func (s *TaskService) refundTaskByMode(ctx context.Context, task *model.Task, reason string) {
 	if s.creditSvc == nil || task == nil {
 		return
 	}
-	if !task.GoalMode {
-		if refundErr := s.creditSvc.RefundForTask(ctx, task.ID, reason); refundErr != nil {
-			s.logger.Error().Err(refundErr).Str("task_id", task.ID).Msg("failed to refund credits for task")
-		}
+	if task.GoalMode {
 		return
 	}
-	maxAttempts := task.GoalMaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = s.GoalMaxAttempts()
-	}
-	attemptsUsed := task.GoalAttempts
-	if includeInflightAttempt && attemptsUsed < maxAttempts {
-		attemptsUsed++
-	}
-	if refundErr := s.creditSvc.RefundForGoalTask(ctx, task.ID, attemptsUsed, maxAttempts, reason); refundErr != nil {
-		s.logger.Error().Err(refundErr).Str("task_id", task.ID).Msg("failed to refund credits for goal task")
+	if refundErr := s.creditSvc.RefundForTask(ctx, task.ID, reason); refundErr != nil {
+		s.logger.Error().Err(refundErr).Str("task_id", task.ID).Msg("failed to refund credits for task")
 	}
 }
 

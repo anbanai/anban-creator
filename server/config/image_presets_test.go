@@ -7,10 +7,10 @@ import (
 
 func TestValidateImagePresets(t *testing.T) {
 	tests := []struct {
-		name     string
-		presets  []ImageModelPreset
-		wantErr  bool
-		substr   string
+		name    string
+		presets []ImageModelPreset
+		wantErr bool
+		substr  string
 	}{
 		{
 			name:    "nil list is valid",

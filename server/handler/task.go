@@ -30,12 +30,12 @@ const (
 
 // TaskHandler handles task-related HTTP endpoints.
 type TaskHandler struct {
-	service     *service.TaskService
-	logger      *zerolog.Logger
-	dataDir     string // local storage data directory (for ServeLocalFile)
-	taskLogDir  string // task log directory (for GetLog)
+	service      *service.TaskService
+	logger       *zerolog.Logger
+	dataDir      string // local storage data directory (for ServeLocalFile)
+	taskLogDir   string // task log directory (for GetLog)
 	imagePresets []config.ImageModelPreset
-	repo        repository.Repository
+	repo         repository.Repository
 }
 
 // NewTaskHandler creates a new TaskHandler.
@@ -439,7 +439,7 @@ func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID 
 				}
 			}
 			// Terminal state detection (reliable via DB).
-			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled || task.Status == model.TaskStatusGoalNotMet {
+			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
 				statusData, _ := json.Marshal(map[string]string{"status": task.Status})
 				fmt.Fprintf(c, "event: %s\ndata: %s\n\n", task.Status, statusData)
 				return nil
@@ -483,7 +483,7 @@ func (h *TaskHandler) streamWithPolling(c fiber.Ctx, ctx context.Context, taskID
 				}
 			}
 
-			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled || task.Status == model.TaskStatusGoalNotMet {
+			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
 				statusData, _ := json.Marshal(map[string]string{
 					"status": task.Status,
 				})

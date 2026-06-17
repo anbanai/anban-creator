@@ -84,9 +84,9 @@ func (r *templateRepository) Count(ctx context.Context, templateType string, cat
 // JWT-mandated userID. MCP intentionally lists only public templates, see
 // server/mcp/template_tools.go.
 //
-//   scope=mine    → only templates owned by userID
-//   scope=public  → only publicly visible templates
-//   scope=all     → templates owned by userID OR publicly visible (default)
+//	scope=mine    → only templates owned by userID
+//	scope=public  → only publicly visible templates
+//	scope=all     → templates owned by userID OR publicly visible (default)
 func applyVisibilityScope(q *gorm.DB, userID, scope string) *gorm.DB {
 	if userID == "" {
 		return q.Where("visibility = ?", "public")

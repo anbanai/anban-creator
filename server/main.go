@@ -316,20 +316,12 @@ func main() {
 		}
 	}
 
-	// Wire goal-mode evaluator on TaskService (after writingLLMClient is resolved).
-	// When no LLM is configured, goal mode silently degrades to "always achieved"
-	// so users aren't blocked; the upfront ×N charge is still kept.
+	// Goal-mode configuration is purely a credit multiplier now — the actual
+	// evaluation loop runs inside Claude Code's built-in /goal mechanism.
 	if taskSvc != nil {
-		if writingLLMClient != nil {
-			goalEvaluator := service.NewGoalEvaluator(writingLLMClient, log)
-			taskSvc.SetGoalEvaluator(goalEvaluator, cfg.Credits.EffectiveGoalModeMultiplier(), cfg.Credits.EffectiveGoalMaxAttempts())
-			log.Info().
-				Int("multiplier", cfg.Credits.EffectiveGoalModeMultiplier()).
-				Int("max_attempts", cfg.Credits.EffectiveGoalMaxAttempts()).
-				Msg("goal evaluator wired")
-		} else {
-			log.Warn().Msg("goal evaluator not wired (writing LLM client not configured); goal mode will degrade to always-achieved")
-		}
+		log.Info().
+			Int("multiplier", cfg.Credits.EffectiveGoalModeMultiplier()).
+			Msg("goal mode configured (uses Claude Code native /goal)")
 	}
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
 	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits)

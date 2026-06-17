@@ -401,10 +401,10 @@ func presetToImageAPIConfig(p *config.ImageModelPreset, base *config.Config) *co
 	}
 
 	return &config.ImageAPIConfig{
-		Cover:          &cover,
-		Content:        &content,
-		Designer:       base.ImageAPI.Designer,
-		Sizes:          base.ImageAPI.Sizes,
+		Cover:    &cover,
+		Content:  &content,
+		Designer: base.ImageAPI.Designer,
+		Sizes:    base.ImageAPI.Sizes,
 	}
 }
 
