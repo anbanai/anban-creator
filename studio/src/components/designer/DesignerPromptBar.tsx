@@ -57,7 +57,7 @@ export default function DesignerPromptBar({
 
   return (
     <div className="relative z-10 shrink-0 px-3 pb-3 pt-2 md:px-4">
-      <div className="mx-auto max-w-2xl rounded-2xl border border-border/75 bg-card/85 p-2 shadow-[0_4px_24px_-8px_rgba(0,0,0,0.24)]">
+      <div className="mx-auto max-w-5xl rounded-2xl border border-border/75 bg-card/85 p-2 shadow-[0_4px_24px_-8px_rgba(0,0,0,0.24)]">
         <div className="flex items-end gap-2">
           <textarea
             ref={textareaRef}
@@ -93,7 +93,7 @@ export default function DesignerPromptBar({
         </div>
       </div>
       {isGenerating && (
-        <div className="mx-auto mt-1.5 flex max-w-2xl items-center gap-2 px-2">
+        <div className="mx-auto mt-1.5 flex max-w-5xl items-center gap-2 px-2">
           <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse-dot" />
           <span className="text-[11px] text-muted-foreground">正在生成...</span>
         </div>

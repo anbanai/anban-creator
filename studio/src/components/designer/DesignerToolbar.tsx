@@ -62,15 +62,17 @@ function SizePresetSection({ presets, value, onChange }: {
   value: string
   onChange: (size: string) => void
 }) {
-  const [customW, setCustomW] = useState(1280)
-  const [customH, setCustomH] = useState(1280)
+  const [customW, setCustomW] = useState('1280')
+  const [customH, setCustomH] = useState('1280')
   const isCustom = value === 'custom' || (value !== 'auto' && !presets.includes(value))
 
-  const customError = isCustom ? validateCustomSize(customW, customH) : null
+  const wNum = parseInt(customW, 10) || 0
+  const hNum = parseInt(customH, 10) || 0
+  const customError = isCustom ? validateCustomSize(wNum, hNum) : null
 
   function handleCustomApply() {
     if (!customError) {
-      onChange(`${customW}x${customH}`)
+      onChange(`${wNum}x${hNum}`)
     }
   }
 
@@ -103,7 +105,7 @@ function SizePresetSection({ presets, value, onChange }: {
         <button
           type="button"
           onClick={() => {
-            if (!isCustom) onChange(`${customW}x${customH}`)
+            if (!isCustom) onChange(`${wNum}x${hNum}`)
           }}
           className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-2 text-xs transition-all duration-200 ${
             isCustom
@@ -123,10 +125,7 @@ function SizePresetSection({ presets, value, onChange }: {
             <input
               type="number"
               value={customW}
-              onChange={(e) => {
-                const v = parseInt(e.target.value) || 256
-                setCustomW(Math.round(v / 16) * 16)
-              }}
+              onChange={(e) => setCustomW(e.target.value)}
               min={256}
               max={3840}
               step={16}
@@ -137,10 +136,7 @@ function SizePresetSection({ presets, value, onChange }: {
             <input
               type="number"
               value={customH}
-              onChange={(e) => {
-                const v = parseInt(e.target.value) || 256
-                setCustomH(Math.round(v / 16) * 16)
-              }}
+              onChange={(e) => setCustomH(e.target.value)}
               min={256}
               max={3840}
               step={16}
@@ -158,7 +154,7 @@ function SizePresetSection({ presets, value, onChange }: {
               className="w-full text-[11px] text-primary"
               onClick={handleCustomApply}
             >
-              应用 {customW}×{customH}
+              应用 {wNum}×{hNum}
             </Button>
           )}
         </div>
