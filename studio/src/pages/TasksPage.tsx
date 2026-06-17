@@ -11,7 +11,6 @@ import { api } from '@/lib/api'
 import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus, Template } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
-import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -223,7 +222,7 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', reference_image_url: '', style: '' })
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '' })
     setQuantity(1)
     setWatermark(false)
     setChannelImageRatio('')
@@ -242,7 +241,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', reference_image_url: '', style: '' })
+    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '' })
     setQuantity(1)
     setWatermark(false)
     setGoalMode(false)
@@ -259,7 +258,6 @@ export default function TasksPage() {
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
       image_model_key: values.image_model_key || undefined,
-      reference_image_url: values.reference_image_url || undefined,
       style: values.style || undefined,
       watermark: watermark || undefined,
       goal_mode: goalMode || undefined,
@@ -268,28 +266,13 @@ export default function TasksPage() {
   }
 
   function handleTemplateSelect(template: Template) {
+    // Clicking the already-active card is a no-op — preserves any edits the user
+    // has made to the style textarea. Switching to a different template refills.
+    if (selectedTemplate?.id === template.id) return
     setSelectedTemplate(template)
     // Template thumbnail is a UI preview only — it is not a generation reference image.
     // Only the style_prompt flows into the task; agent picks it up via get_channel_profile(task_id).
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
-    // Template path and manual upload are mutually exclusive. Clear any previously
-    // uploaded image so the template path stays the sole source of style.
-    form.setValue('reference_image_url', '', { shouldDirty: true })
-  }
-
-  function handleTemplateClear() {
-    setSelectedTemplate(null)
-    // Only clear template-derived style. Manual upload is an independent path and owns reference_image_url.
-    form.setValue('style', '', { shouldDirty: true })
-  }
-
-  function handleManualImageChange(url: string) {
-    // Manual upload and template selection are mutually exclusive.
-    if (selectedTemplate) setSelectedTemplate(null)
-    form.setValue('reference_image_url', url, { shouldDirty: true })
-    // Always clear style — manual upload is mutually exclusive with template pick,
-    // and a previously-picked template's style must not leak into the new image.
-    form.setValue('style', '', { shouldDirty: true })
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -677,19 +660,19 @@ export default function TasksPage() {
                   type={watchedType as import('@/types').TemplateType}
                   selected={selectedTemplate}
                   onSelect={handleTemplateSelect}
-                  onClear={handleTemplateClear}
                 />
               )}
 
               {watchedType !== 'viral_analysis' && (
-                <FormField control={form.control} name="reference_image_url" render={({ field }) => (
+                <FormField control={form.control} name="style" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>参考图片（可选）</FormLabel>
+                    <FormLabel>风格描述（可选）</FormLabel>
                     <FormControl>
-                      <ReferenceImageUpload
-                        value={field.value || ''}
-                        onChange={handleManualImageChange}
-                        purpose="reference"
+                      <Textarea
+                        {...field}
+                        placeholder="选择模板自动填充，或直接输入自定义风格"
+                        maxLength={1024}
+                        className="min-h-[72px] resize-y"
                       />
                     </FormControl>
                     <FormMessage />

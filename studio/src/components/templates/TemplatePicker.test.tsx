@@ -71,7 +71,6 @@ describe('TemplatePicker', () => {
         type="seednote"
         selected={null}
         onSelect={() => {}}
-        onClear={() => {}}
       />,
     )
 
@@ -92,7 +91,6 @@ describe('TemplatePicker', () => {
         type="seednote"
         selected={null}
         onSelect={() => {}}
-        onClear={() => {}}
       />,
     )
 
@@ -106,7 +104,7 @@ describe('TemplatePicker', () => {
     const onSelect = vi.fn()
 
     renderWithClient(
-      <TemplatePicker type="seednote" selected={null} onSelect={onSelect} onClear={() => {}} />,
+      <TemplatePicker type="seednote" selected={null} onSelect={onSelect} />,
     )
 
     await waitFor(() => {
@@ -117,47 +115,51 @@ describe('TemplatePicker', () => {
     expect(onSelect).toHaveBeenCalledWith(mockTemplates[0])
   })
 
-  it('selected 状态渲染紧凑条 + 清除按钮', () => {
+  it('selected 状态保持轮播常驻并在选中卡片上显示激活态', async () => {
+    vi.mocked(api.templates.list).mockResolvedValue({ items: mockTemplates, total: 2 })
+
     renderWithClient(
       <TemplatePicker
         type="seednote"
         selected={mockTemplates[0]}
         onSelect={() => {}}
-        onClear={() => {}}
       />,
     )
 
-    expect(screen.getByText('水彩治愈系')).toBeInTheDocument()
-    expect(screen.getByLabelText('清除模板')).toBeInTheDocument()
-    // 未选状态的轮播区块不应出现
-    expect(screen.queryByText('选择模板覆盖账号风格')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('水彩治愈系')).toBeInTheDocument()
+    })
+
+    // 轮播仍常驻 —— 标题和其他卡片都可见
+    expect(screen.getByText('选择模板覆盖账号风格')).toBeInTheDocument()
+    expect(screen.getByText('极简日系')).toBeInTheDocument()
+
+    // 选中卡片有 aria-pressed
+    const activeCard = screen.getByText('水彩治愈系').closest('button')
+    expect(activeCard).toHaveAttribute('aria-pressed', 'true')
+
+    // 未选中卡片没有 aria-pressed=true
+    const inactiveCard = screen.getByText('极简日系').closest('button')
+    expect(inactiveCard).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('点击清除按钮调用 onClear', () => {
-    const onClear = vi.fn()
+  it('点击已选中的卡片仍触发 onSelect', async () => {
+    vi.mocked(api.templates.list).mockResolvedValue({ items: mockTemplates, total: 2 })
+    const onSelect = vi.fn()
+
     renderWithClient(
       <TemplatePicker
         type="seednote"
         selected={mockTemplates[0]}
-        onSelect={() => {}}
-        onClear={onClear}
+        onSelect={onSelect}
       />,
     )
 
-    fireEvent.click(screen.getByLabelText('清除模板'))
-    expect(onClear).toHaveBeenCalled()
-  })
+    await waitFor(() => {
+      expect(screen.getByText('水彩治愈系')).toBeInTheDocument()
+    })
 
-  it('私有模板在 selected 状态显示「私」标识', () => {
-    renderWithClient(
-      <TemplatePicker
-        type="seednote"
-        selected={mockTemplates[1]}
-        onSelect={() => {}}
-        onClear={() => {}}
-      />,
-    )
-
-    expect(screen.getByText('私')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('水彩治愈系'))
+    expect(onSelect).toHaveBeenCalledWith(mockTemplates[0])
   })
 })

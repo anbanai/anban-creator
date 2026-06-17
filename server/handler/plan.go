@@ -73,7 +73,7 @@ type updatePlanRequest struct {
 	Prompt             string  `json:"prompt"`
 	ImageModelKey      *string `json:"image_model_key"`
 	SkipReferenceImage *bool   `json:"skip_reference_image"`
-	ReferenceImageURL  string  `json:"reference_image_url"`
+	ReferenceImageURL  *string `json:"reference_image_url"`
 	Style              *string `json:"style"`
 	Watermark          *bool   `json:"watermark"`
 	Goal               string  `json:"goal"`
@@ -186,7 +186,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
-	if !validReferenceImageURL(req.ReferenceImageURL) {
+	if req.ReferenceImageURL != nil && !validReferenceImageURL(*req.ReferenceImageURL) {
 		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
 	}
 

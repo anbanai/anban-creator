@@ -305,7 +305,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update title only.
-	updated, err := svc.Update(ctx, created.ID, "", "new hint", nil, nil, "", nil, nil, "", nil)
+	updated, err := svc.Update(ctx, created.ID, "", "new hint", nil, nil, nil, nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update plan: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with new cron expression.
-	updated, err = svc.Update(ctx, created.ID, "0 18 * * *", "new hint", nil, nil, "", nil, nil, "", nil)
+	updated, err = svc.Update(ctx, created.ID, "0 18 * * *", "new hint", nil, nil, nil, nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update plan cron: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestPlanService_Update(t *testing.T) {
 	}
 
 	// Update with invalid cron.
-	_, err = svc.Update(ctx, created.ID, "bad cron", "hint", nil, nil, "", nil, nil, "", nil)
+	_, err = svc.Update(ctx, created.ID, "bad cron", "hint", nil, nil, nil, nil, nil, "", nil)
 	if err == nil {
 		t.Error("expected error for invalid cron expression")
 	}
@@ -350,7 +350,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	}
 
 	skipRef := true
-	updated, err := svc.Update(ctx, created.ID, "", "new hint", nil, &skipRef, "", nil, nil, "", nil)
+	updated, err := svc.Update(ctx, created.ID, "", "new hint", nil, &skipRef, nil, nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update skip_reference_image true: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 		t.Fatal("expected skip_reference_image to update to true")
 	}
 
-	updated, err = svc.Update(ctx, created.ID, "", "unchanged hint", nil, nil, "", nil, nil, "", nil)
+	updated, err = svc.Update(ctx, created.ID, "", "unchanged hint", nil, nil, nil, nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update without skip_reference_image: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	}
 
 	skipRef = false
-	updated, err = svc.Update(ctx, created.ID, "", "final hint", nil, &skipRef, "", nil, nil, "", nil)
+	updated, err = svc.Update(ctx, created.ID, "", "final hint", nil, &skipRef, nil, nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update skip_reference_image false: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestPlanService_Update_Style(t *testing.T) {
 	}
 
 	// nil style = leave unchanged.
-	updated, err := svc.Update(ctx, created.ID, "", "hint", nil, nil, "", nil, nil, "", nil)
+	updated, err := svc.Update(ctx, created.ID, "", "hint", nil, nil, nil, nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update with nil style: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestPlanService_Update_Style(t *testing.T) {
 
 	// &"" = clear.
 	emptyStyle := ""
-	updated, err = svc.Update(ctx, created.ID, "", "hint", nil, nil, "", &emptyStyle, nil, "", nil)
+	updated, err = svc.Update(ctx, created.ID, "", "hint", nil, nil, nil, &emptyStyle, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update with empty style: %v", err)
 	}
@@ -413,12 +413,57 @@ func TestPlanService_Update_Style(t *testing.T) {
 
 	// &"new" = set.
 	newStyle := "冷色"
-	updated, err = svc.Update(ctx, created.ID, "", "hint", nil, nil, "", &newStyle, nil, "", nil)
+	updated, err = svc.Update(ctx, created.ID, "", "hint", nil, nil, nil, &newStyle, nil, "", nil)
 	if err != nil {
 		t.Fatalf("update with new style: %v", err)
 	}
 	if updated.Style != newStyle {
 		t.Errorf("new style should set; got %q, want %q", updated.Style, newStyle)
+	}
+}
+
+func TestPlanService_Update_ReferenceImageURL(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+
+	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	initialRef := "https://example.com/ref.png"
+	created, err := svc.Create(ctx, "user-1", chID, "0 9 * * *", "hint", "", nil, initialRef, "", nil, "", false)
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	if created.ReferenceImageURL != initialRef {
+		t.Fatalf("expected initial reference_image_url %q, got %q", initialRef, created.ReferenceImageURL)
+	}
+
+	// nil = leave unchanged (this is the regression fix: editing a plan without
+	// resending reference_image_url must preserve the existing value).
+	updated, err := svc.Update(ctx, created.ID, "", "hint", nil, nil, nil, nil, nil, "", nil)
+	if err != nil {
+		t.Fatalf("update with nil reference_image_url: %v", err)
+	}
+	if updated.ReferenceImageURL != initialRef {
+		t.Errorf("nil reference_image_url should leave unchanged; got %q, want %q", updated.ReferenceImageURL, initialRef)
+	}
+
+	// &"" = clear.
+	emptyRef := ""
+	updated, err = svc.Update(ctx, created.ID, "", "hint", nil, nil, &emptyRef, nil, nil, "", nil)
+	if err != nil {
+		t.Fatalf("update with empty reference_image_url: %v", err)
+	}
+	if updated.ReferenceImageURL != "" {
+		t.Errorf("empty &\"\" reference_image_url should clear; got %q, want empty", updated.ReferenceImageURL)
+	}
+
+	// &"new" = set.
+	newRef := "https://example.com/new.png"
+	updated, err = svc.Update(ctx, created.ID, "", "hint", nil, nil, &newRef, nil, nil, "", nil)
+	if err != nil {
+		t.Fatalf("update with new reference_image_url: %v", err)
+	}
+	if updated.ReferenceImageURL != newRef {
+		t.Errorf("new reference_image_url should set; got %q, want %q", updated.ReferenceImageURL, newRef)
 	}
 }
 

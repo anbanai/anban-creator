@@ -124,14 +124,15 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - watermark:     nil = leave unchanged; &true/&false = set
 //   - goalMode:      nil = leave unchanged; &true/&false = set
 //
-// referenceImageURL, prompt, and goal are plain strings and always overwritten
-// (empty string is a valid value meaning "no prompt / no reference image / no goal").
+// referenceImageURL follows the same nil-means-unchanged semantics as the other
+// optional fields. prompt and goal are plain strings and always overwritten
+// (empty string is a valid value meaning "no prompt / no goal").
 func (s *PlanService) Update(
 	ctx context.Context,
 	id, cronExpr, prompt string,
 	imageModelKey *string,
 	skipRefImage *bool,
-	referenceImageURL string,
+	referenceImageURL *string,
 	style *string,
 	watermark *bool,
 	goal string,
@@ -143,7 +144,9 @@ func (s *PlanService) Update(
 	}
 
 	plan.Prompt = prompt
-	plan.ReferenceImageURL = referenceImageURL
+	if referenceImageURL != nil {
+		plan.ReferenceImageURL = *referenceImageURL
+	}
 	plan.Goal = goal
 	if style != nil {
 		plan.Style = *style

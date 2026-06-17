@@ -20,7 +20,6 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import SchedulePicker from '@/components/SchedulePicker'
-import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -43,7 +42,6 @@ function planToFormValues(plan: Plan): PlanFormValues {
     prompt: plan.prompt || '',
     image_model_key: plan.image_model_key || '',
     skip_reference_image: plan.skip_reference_image || false,
-    reference_image_url: plan.reference_image_url || '',
     style: plan.style || '',
     watermark: plan.watermark || false,
     goal: plan.goal || '',
@@ -72,7 +70,6 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
-      reference_image_url: '',
       style: '',
     },
   })
@@ -183,7 +180,6 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
-      reference_image_url: '',
       style: '',
     })
     setSelectedTemplate(null)
@@ -215,34 +211,19 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
-      reference_image_url: '',
       style: '',
     })
     setSelectedTemplate(null)
   }
 
   function handleTemplateSelect(template: Template) {
+    // Clicking the already-active card is a no-op — preserves any edits the user
+    // has made to the style textarea. Switching to a different template refills.
+    if (selectedTemplate?.id === template.id) return
     setSelectedTemplate(template)
     // Template thumbnail is a UI preview only — it is not a generation reference image.
     // Only the style_prompt flows into the plan; agent picks it up via get_channel_profile(task_id).
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
-    // Template path and manual upload are mutually exclusive. Clear any previously
-    // uploaded image so the template path stays the sole source of style.
-    form.setValue('reference_image_url', '', { shouldDirty: true })
-  }
-
-  function handleTemplateClear() {
-    setSelectedTemplate(null)
-    // Only clear template-derived style. Manual upload is an independent path and owns reference_image_url.
-    form.setValue('style', '', { shouldDirty: true })
-  }
-
-  function handleManualImageChange(url: string) {
-    if (selectedTemplate) setSelectedTemplate(null)
-    form.setValue('reference_image_url', url, { shouldDirty: true })
-    // Always clear style — manual upload is mutually exclusive with template pick,
-    // and a previously-picked template's style must not leak into the new image.
-    form.setValue('style', '', { shouldDirty: true })
   }
 
   async function onSubmit(values: PlanFormValues) {
@@ -256,7 +237,6 @@ export default function PlansPage() {
       prompt: values.prompt?.trim() || undefined,
       channel_id: values.channel_id || undefined,
       image_model_key: values.image_model_key,
-      reference_image_url: values.reference_image_url || undefined,
       style: values.style || undefined,
       watermark: values.watermark || undefined,
       goal_mode: values.goal_mode || undefined,
@@ -489,20 +469,19 @@ export default function PlansPage() {
                 type={watchedType as import('@/types').TemplateType}
                 selected={selectedTemplate}
                 onSelect={handleTemplateSelect}
-                onClear={handleTemplateClear}
               />
 
-              <FormField control={form.control} name="reference_image_url" render={({ field }) => (
+              <FormField control={form.control} name="style" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>参考图片（可选）</FormLabel>
+                  <FormLabel>风格描述（可选）</FormLabel>
                   <FormControl>
-                    <ReferenceImageUpload
-                      value={field.value || ''}
-                      onChange={handleManualImageChange}
-                      purpose="reference"
+                    <Textarea
+                      {...field}
+                      placeholder="选择模板自动填充，或直接输入自定义风格"
+                      maxLength={1024}
+                      className="min-h-[72px] resize-y"
                     />
                   </FormControl>
-                  <FormDescription>上传商品照片等参考图，生成配图时作为风格参考</FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />

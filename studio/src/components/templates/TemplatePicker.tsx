@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { LayoutTemplate, Loader2, Inbox, X } from 'lucide-react'
+import { LayoutTemplate, Loader2, Inbox, Check } from 'lucide-react'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import type { Template, TemplateType } from '@/types'
@@ -16,17 +16,15 @@ import { SignedImage } from '@/components/ui/SignedImage'
 interface TemplatePickerProps {
   /** Restrict picker to a single template type (e.g. matching the surrounding task/plan type). */
   type: TemplateType
-  /** Currently selected template (or null). */
+  /** Currently selected template (or null). Controls only the active-card highlight. */
   selected: Template | null
-  /** Called when user picks a template. */
+  /** Called when user picks a template (clicking the active card again also fires this). */
   onSelect: (template: Template) => void
-  /** Called when user clicks the clear button. */
-  onClear: () => void
   /** Disable the picker (e.g. when surrounding type is viral_analysis). */
   disabled?: boolean
 }
 
-export function TemplatePicker({ type, selected, onSelect, onClear, disabled }: TemplatePickerProps) {
+export function TemplatePicker({ type, selected, onSelect, disabled }: TemplatePickerProps) {
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.templates.list({ type, scope: 'all' }),
     queryFn: () =>
@@ -38,28 +36,6 @@ export function TemplatePicker({ type, selected, onSelect, onClear, disabled }: 
   })
 
   const templates = data?.items ?? []
-
-  if (selected) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2.5 py-1.5">
-        <LayoutTemplate className="h-3.5 w-3.5 text-primary" />
-        <span className="text-xs font-medium text-foreground">{selected.name}</span>
-        {selected.visibility === 'private' && (
-          <Badge variant="secondary" className="text-[10px] px-1.5">
-            私
-          </Badge>
-        )}
-        <button
-          type="button"
-          onClick={onClear}
-          className="ml-1 rounded-sm p-0.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          aria-label="清除模板"
-        >
-          <X className="h-3 w-3" />
-        </button>
-      </div>
-    )
-  }
 
   return (
     <div className="rounded-md border border-border bg-card p-2">
@@ -90,13 +66,20 @@ export function TemplatePicker({ type, selected, onSelect, onClear, disabled }: 
             className="w-full"
           >
             <CarouselContent className="-ml-2">
-              {templates.map((t) => (
+              {templates.map((t) => {
+                const isActive = selected?.id === t.id
+                return (
                 <CarouselItem key={t.id} className="basis-[96px] pl-2">
                   <button
                     type="button"
                     disabled={disabled}
+                    aria-pressed={isActive}
                     onClick={() => onSelect(t)}
-                    className="group flex w-full flex-col gap-1.5 rounded-md border border-border bg-background p-1.5 text-left transition-all hover:border-primary/40 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                    className={`group flex w-full flex-col gap-1.5 rounded-md border bg-background p-1.5 text-left transition-all hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+                      isActive
+                        ? 'border-primary ring-2 ring-primary/30'
+                        : 'border-border hover:border-primary/40'
+                    }`}
                   >
                     <div className="relative aspect-[3/4] w-full overflow-hidden rounded bg-muted">
                       {t.thumbnail_url ? (
@@ -113,16 +96,22 @@ export function TemplatePicker({ type, selected, onSelect, onClear, disabled }: 
                           <LayoutTemplate className="h-5 w-5 text-muted-foreground/50" />
                         </div>
                       )}
-                      {t.visibility === 'private' && (
+                      {isActive && (
+                        <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                          <Check className="h-2.5 w-2.5" />
+                        </span>
+                      )}
+                      {t.visibility === 'private' && !isActive && (
                         <Badge variant="secondary" className="absolute right-1 top-1 px-1 text-[9px]">
                           私
                         </Badge>
                       )}
                     </div>
-                    <p className="truncate text-[11px] font-medium text-foreground">{t.name}</p>
+                    <p className={`truncate text-[11px] font-medium ${isActive ? 'text-primary' : 'text-foreground'}`}>{t.name}</p>
                   </button>
                 </CarouselItem>
-              ))}
+                )
+              })}
             </CarouselContent>
             <CarouselPrevious className="-left-1 top-1/2 h-6 w-6 shadow-sm" />
             <CarouselNext className="-right-1 top-1/2 h-6 w-6 shadow-sm" />
