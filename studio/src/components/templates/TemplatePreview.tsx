@@ -26,6 +26,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { SignedImage } from '@/components/ui/SignedImage'
 
 const typeBadgeMap: Record<TemplateType, { label: string; className: string }> = {
   poster: { label: '海报', className: 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' },
@@ -135,10 +136,11 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : data.thumbnail_url ? (
-            <img
+            <SignedImage
               src={data.thumbnail_url}
               alt={data.name}
               className="h-full w-full object-cover"
+              showLoading={false}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center">

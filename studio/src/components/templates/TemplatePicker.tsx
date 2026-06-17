@@ -12,6 +12,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { SignedImage } from '@/components/ui/SignedImage'
 
 interface TemplatePickerProps {
   /** Restrict picker to a single template type (e.g. matching the surrounding task/plan type). */
@@ -116,10 +117,13 @@ export function TemplatePicker({ type, selected, onSelect, onClear, disabled }: 
                     )}
                   >
                     {t.thumbnail_url ? (
-                      <img
+                      <SignedImage
                         src={t.thumbnail_url}
                         alt={t.name}
                         className="h-9 w-9 shrink-0 rounded border border-border object-cover"
+                        fallbackIcon={<LayoutTemplate className="h-4 w-4 text-muted-foreground/50" />}
+                        fallbackClassName="h-9 w-9 shrink-0 rounded border border-border bg-muted"
+                        showLoading={false}
                       />
                     ) : (
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-border bg-muted">

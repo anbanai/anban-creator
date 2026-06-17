@@ -15,10 +15,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/Select'
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from '@/components/ui/toggle-group'
+import { Switch } from '@/components/ui/switch'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import type { Template, TemplateType, TemplateVisibility } from '@/types'
 import { toast } from 'sonner'
@@ -199,49 +196,41 @@ export function TemplateCreateDialog({
             />
           </div>
 
-          {/* Type */}
-          <div className="space-y-1.5">
-            <Label>类别</Label>
-            <Select value={type} onValueChange={(v) => setType(v as TemplateType)}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TYPE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value} label={opt.label}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Image */}
-          <div className="space-y-1.5">
-            <Label>图片</Label>
-            <div className="flex items-start gap-3">
-              <div className="relative">
-                <ReferenceImageUpload
-                  value={thumbnailUrl}
-                  onChange={setThumbnailUrl}
-                  purpose="reference"
+          {/* Type + Visibility (side by side) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>类别</Label>
+              <Select value={type} onValueChange={(v) => setType(v as TemplateType)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TYPE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value} label={opt.label}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>可见性</Label>
+              <div className="flex h-8 items-center gap-2 rounded-lg border border-input px-3">
+                <Switch
+                  checked={visibility === 'public'}
+                  onCheckedChange={(v) => setVisibility(v ? 'public' : 'private')}
                 />
-                {analyzing && (
-                  <div className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  </div>
-                )}
+                <span className="text-sm text-foreground">
+                  {visibility === 'public' ? '公开（所有人可见）' : '私有（仅自己）'}
+                </span>
               </div>
-              <p className="text-xs text-muted-foreground pt-1">
-                上传后系统会自动识别视觉风格，你也可以在下面手动调整。
-              </p>
             </div>
           </div>
 
-          {/* Style prompt */}
+          {/* Image + Style prompt (horizontal) */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label htmlFor="tpl-style">自动识别的风格</Label>
+              <Label htmlFor="tpl-style">图片与风格</Label>
               <div className="flex items-center gap-2">
                 {analyzing && (
                   <span className="flex items-center gap-1 text-xs text-primary">
@@ -263,38 +252,32 @@ export function TemplateCreateDialog({
                 )}
               </div>
             </div>
-            <div className={`relative rounded-lg transition-all ${analyzing ? 'ring-2 ring-primary/40 ring-offset-1' : ''}`}>
+            <div className="flex items-start gap-3">
+              <div className="relative shrink-0">
+                <ReferenceImageUpload
+                  value={thumbnailUrl}
+                  onChange={setThumbnailUrl}
+                  purpose="reference"
+                />
+                {analyzing && (
+                  <div className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  </div>
+                )}
+              </div>
               <Textarea
                 id="tpl-style"
                 value={stylePrompt}
                 onChange={(e) => setStylePrompt(e.target.value)}
                 placeholder="描述视觉风格（艺术流派、画面氛围、质感…）"
-                rows={3}
+                rows={4}
                 maxLength={1024}
-                className={analyzing ? 'bg-muted/40' : ''}
+                className={`flex-1 resize-none ${analyzing ? 'bg-muted/40 ring-2 ring-primary/40 ring-offset-1' : ''}`}
               />
             </div>
-          </div>
-
-          {/* Visibility */}
-          <div className="space-y-1.5">
-            <Label>可见性</Label>
-            <ToggleGroup
-              value={[visibility]}
-              onValueChange={(vals) => {
-                const v = vals[0]
-                if (v === 'public' || v === 'private') setVisibility(v)
-              }}
-              variant="outline"
-              className="w-full"
-            >
-              <ToggleGroupItem value="public" className="flex-1">
-                公开（所有人可见）
-              </ToggleGroupItem>
-              <ToggleGroupItem value="private" className="flex-1">
-                私有（仅自己）
-              </ToggleGroupItem>
-            </ToggleGroup>
+            <p className="text-xs text-muted-foreground">
+              上传后系统会自动识别视觉风格，你也可以手动调整。
+            </p>
           </div>
         </div>
 

@@ -14,7 +14,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import EmptyState from '@/components/EmptyState'
 
 const typeOptions: { value: string; label: string }[] = [
-  { value: '', label: '全部类型' },
+  { value: 'all', label: '全部类型' },
   { value: 'poster', label: '海报' },
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
@@ -103,9 +103,10 @@ export function TemplateGrid({ type, category, tag }: TemplateGridProps) {
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-3">
         <Select
-          value={filterType || '_all'}
+          items={typeOptions}
+          value={filterType || 'all'}
           onValueChange={(v) => {
-            if (type === undefined) setLocalType(v === '_all' ? '' : (v ?? ''))
+            if (type === undefined) setLocalType(v === 'all' ? '' : (v ?? ''))
           }}
         >
           <SelectTrigger className="w-32">
@@ -113,7 +114,7 @@ export function TemplateGrid({ type, category, tag }: TemplateGridProps) {
           </SelectTrigger>
           <SelectContent>
             {typeOptions.map((opt) => (
-              <SelectItem key={opt.value || '_all'} value={opt.value || '_all'} label={opt.label}>
+              <SelectItem key={opt.value} value={opt.value} label={opt.label}>
                 {opt.label}
               </SelectItem>
             ))}

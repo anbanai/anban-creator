@@ -2,6 +2,7 @@ import { cn } from '@/lib/utils'
 import type { Template, TemplateType } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { ImageIcon } from 'lucide-react'
+import { SignedImage } from '@/components/ui/SignedImage'
 
 const typeBadgeMap: Record<TemplateType, { label: string; className: string }> = {
   poster: { label: '海报', className: 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' },
@@ -26,11 +27,10 @@ export function TemplateCard({ template, onClick }: TemplateCardProps) {
       {/* Thumbnail */}
       <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
         {template.thumbnail_url ? (
-          <img
+          <SignedImage
             src={template.thumbnail_url}
             alt={template.name}
             className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
-            loading="lazy"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center">
@@ -50,6 +50,12 @@ export function TemplateCard({ template, onClick }: TemplateCardProps) {
         <h3 className="truncate text-sm font-medium text-foreground group-hover:text-primary transition-colors">
           {template.name}
         </h3>
+
+        {template.style_prompt && (
+          <p className="line-clamp-2 text-xs text-muted-foreground/80">
+            {template.style_prompt}
+          </p>
+        )}
 
         {template.category && (
           <span className="text-xs text-muted-foreground">{template.category}</span>
