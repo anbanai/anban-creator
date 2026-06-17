@@ -93,6 +93,7 @@ func registerChannelTools(server *mcp.Server) {
 			"properties": map[string]any{
 				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
 				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote"}, "description": "Filter output by content type"},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided AND the task has a non-empty Style, the task's Style overrides the channel's Style in the `style` field (style_source becomes \"task\"); otherwise the channel's Style is returned (style_source=\"channel\"). Used to surface template-derived visual style to the agent. The task must belong to the same channel and user, otherwise the call is rejected. Note: `style_description` is always derived from the channel's writer resource key and is independent of this override."},
 			},
 			"required": []any{"channel_id"},
 		},
@@ -263,33 +264,73 @@ func channelGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 
 func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	userID := getUserID(ctx)
-	args := parseArgs(req.Params.Arguments)
+	info, errMsg := buildAccountInfo(ctx, userID, parseArgs(req.Params.Arguments))
+	if errMsg != "" {
+		return errorResult(errMsg), nil
+	}
+	return textResult(info)
+}
+
+// buildAccountInfo is the testable core of get_channel_profile. It resolves the
+// effective style (channel.Style by default; task.Style overrides when a task_id is
+// supplied and the task belongs to the requesting user+channel) and assembles the
+// profile map returned to the agent.
+func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (map[string]any, string) {
 	channelID, _ := args["channel_id"].(string)
 	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+		return nil, "channel_id is required"
 	}
 	scope, _ := args["scope"].(string)
+	taskID, _ := args["task_id"].(string)
 
-	ch, _, err := svcs.ChannelSvc.Get(context.Background(), userID, channelID)
+	if svcs.ChannelSvc == nil {
+		return nil, "channel service not available"
+	}
+	ch, _, err := svcs.ChannelSvc.Get(ctx, userID, channelID)
 	if err != nil {
-		return errorResult(fmt.Sprintf("get channel: %v", err)), nil
+		return nil, fmt.Sprintf("get channel: %v", err)
 	}
 	service.SanitizeChannel(ch)
 
+	// Resolve effective style. By default the channel's style wins; when a task_id is
+	// supplied and the task carries its own style (e.g. derived from a selected template),
+	// the task's style overrides. Template selection on TasksPage/PlansPage writes only
+	// task.Style (not reference_image_url), so this is the single path for the agent to
+	// observe template-derived style through get_channel_profile.
+	effectiveStyle := ch.Style
+	styleSource := "channel"
+	if taskID != "" {
+		if svcs.TaskSvc == nil {
+			return nil, "task service not available"
+		}
+		task, terr := svcs.TaskSvc.GetByID(ctx, taskID)
+		if terr != nil {
+			return nil, fmt.Sprintf("get task: %v", terr)
+		}
+		// Guard against cross-channel/cross-user injection: a task from another channel
+		// or user must not leak its style into this profile response.
+		if task.UserID != userID || task.ChannelID != channelID {
+			return nil, "task does not belong to the requested channel"
+		}
+		if task.Style != "" {
+			effectiveStyle = task.Style
+			styleSource = "task"
+		}
+	}
+
 	// Base account info (always included).
 	info := map[string]any{
-		"name":        ch.Name,
-		"author":      ch.Author,
-		"positioning": ch.Positioning,
-		"keywords":    ch.Keywords,
-		"style":       ch.Style,
-		"theme":       ch.Theme,
-		"platform":    ch.Platform,
+		"name":         ch.Name,
+		"author":       ch.Author,
+		"positioning":  ch.Positioning,
+		"keywords":     ch.Keywords,
+		"style":        effectiveStyle,
+		"style_source": styleSource,
+		"theme":        ch.Theme,
+		"platform":     ch.Platform,
 	}
 
 	switch scope {
-	case "article":
-		info["style"] = ch.Style
 	case "seednote":
 		// For seednote, style is a visual/image style description used for image prompt generation.
 		info["image_config"] = map[string]any{
@@ -311,6 +352,12 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	}
 	if ch.Style != "" {
 		if e := resources.Manager().Get(resources.CategoryWriter, ch.Style); e != nil {
+			// NOTE: style_description is always derived from the channel's writer
+			// resource key (ch.Style — e.g. "dan-koe"), describing the writing voice.
+			// It is independent of the task-override above: when style_source="task",
+			// the `style` field carries a free-text visual style (e.g. "温暖治愈系"),
+			// while style_description still describes the channel's writer resource.
+			// The two describe different dimensions and must not be conflated.
 			info["style_description"] = e.Description
 		}
 	}
@@ -325,7 +372,7 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		}
 	}
 
-	return textResult(info)
+	return info, ""
 }
 
 func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -223,13 +223,17 @@ export default function PlansPage() {
 
   function handleTemplateSelect(template: Template) {
     setSelectedTemplate(template)
-    form.setValue('reference_image_url', template.thumbnail_url, { shouldDirty: true })
+    // Template thumbnail is a UI preview only — it is not a generation reference image.
+    // Only the style_prompt flows into the plan; agent picks it up via get_channel_profile(task_id).
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
+    // Template path and manual upload are mutually exclusive. Clear any previously
+    // uploaded image so the template path stays the sole source of style.
+    form.setValue('reference_image_url', '', { shouldDirty: true })
   }
 
   function handleTemplateClear() {
     setSelectedTemplate(null)
-    form.setValue('reference_image_url', '', { shouldDirty: true })
+    // Only clear template-derived style. Manual upload is an independent path and owns reference_image_url.
     form.setValue('style', '', { shouldDirty: true })
   }
 
