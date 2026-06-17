@@ -3,11 +3,17 @@ package mcp
 import (
 	"context"
 	"math"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/royalrick/anbanwriter/server/model"
 )
+
+// longTextHeartbeatInterval is how often the long-text tool handlers push a
+// progress notification to keep the SSE stream alive. Must stay well under the
+// Claude Code 60s first-byte budget. See startProgressHeartbeat.
+const longTextHeartbeatInterval = 15 * time.Second
 
 // registerWritingTools registers article writing, conversion, humanization, topic research, SEO, outline generation, and scoring tools.
 func registerWritingTools(server *mcp.Server) {
@@ -138,6 +144,11 @@ func writeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	articleType, _ := args["article_type"].(string)
 	length, _ := args["length"].(string)
 
+	logLongTextToolStart("write_article", req)
+	defer logLongTextToolEnd("write_article", time.Now())
+	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "write_article", longTextHeartbeatInterval)
+	defer stop()
+
 	provider, mdl := resolveTextModel(ctx, userID)
 	if err := maybeDeduct(ctx, userID, model.CreditTypeArticleWrite, provider, mdl, 1); err != nil {
 		return billingError("write article", err), nil
@@ -169,6 +180,11 @@ func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 
 	theme, _ := args["theme"].(string)
 
+	logLongTextToolStart("convert_markdown", req)
+	defer logLongTextToolEnd("convert_markdown", time.Now())
+	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "convert_markdown", longTextHeartbeatInterval)
+	defer stop()
+
 	provider, mdl := resolveTextModel(ctx, userID)
 	if err := maybeDeduct(ctx, userID, model.CreditTypeConvert, provider, mdl, 1); err != nil {
 		return billingError("convert markdown", err), nil
@@ -199,6 +215,11 @@ func humanizeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	}
 
 	intensity, _ := args["intensity"].(string)
+
+	logLongTextToolStart("humanize_article", req)
+	defer logLongTextToolEnd("humanize_article", time.Now())
+	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "humanize_article", longTextHeartbeatInterval)
+	defer stop()
 
 	provider, mdl := resolveTextModel(ctx, userID)
 	if err := maybeDeduct(ctx, userID, model.CreditTypeHumanize, provider, mdl, 1); err != nil {
@@ -239,6 +260,11 @@ func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	if v, ok := args["count"].(float64); ok && int(v) > 0 {
 		count = int(v)
 	}
+
+	logLongTextToolStart("research_topics", req)
+	defer logLongTextToolEnd("research_topics", time.Now())
+	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "research_topics", longTextHeartbeatInterval)
+	defer stop()
 
 	provider, mdl := resolveTextModel(ctx, userID)
 	if err := maybeDeduct(ctx, userID, model.CreditTypeTopicResearch, provider, mdl, 1); err != nil {
@@ -282,6 +308,11 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		}
 	}
 
+	logLongTextToolStart("optimize_seo", req)
+	defer logLongTextToolEnd("optimize_seo", time.Now())
+	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "optimize_seo", longTextHeartbeatInterval)
+	defer stop()
+
 	provider, mdl := resolveTextModel(ctx, userID)
 	if err := maybeDeduct(ctx, userID, model.CreditTypeSEO, provider, mdl, 1); err != nil {
 		return billingError("optimize seo", err), nil
@@ -313,6 +344,11 @@ func generateOutlineHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 
 	template, _ := args["template"].(string)
 	style, _ := args["style"].(string)
+
+	logLongTextToolStart("generate_outline", req)
+	defer logLongTextToolEnd("generate_outline", time.Now())
+	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "generate_outline", longTextHeartbeatInterval)
+	defer stop()
 
 	provider, mdl := resolveTextModel(ctx, userID)
 	if err := maybeDeduct(ctx, userID, model.CreditTypeOutline, provider, mdl, 1); err != nil {

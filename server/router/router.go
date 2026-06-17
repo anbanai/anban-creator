@@ -66,7 +66,10 @@ type Services struct {
 // NewRouter creates a new Fiber app with middleware and route groups.
 func NewRouter(svc *Services) *fiber.App {
 	app := fiber.New(fiber.Config{
-		BodyLimit: 50 * 1024 * 1024, // 50 MB
+		BodyLimit:    50 * 1024 * 1024, // 50 MB
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 16 * time.Minute, // > plugin .mcp.json timeout (15min) so long LLM calls survive
+		IdleTimeout:  120 * time.Second,
 	})
 
 	// ---------------------------------------------------------------------------

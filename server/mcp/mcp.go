@@ -122,12 +122,16 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 	RegisterTools(mcServer)
 
 	// Create streamable HTTP handler (supports POST/GET/DELETE).
+	// SessionTimeout must exceed the longest tool call: convert_markdown can run
+	// up to ~10min on slow LLM responses, plugin .mcp.json hard-caps the call at
+	// 15min, and WriteTimeout is 16min. 16min here keeps sessions alive across
+	// the full window so progress notifications have a routing target.
 	mcpHTTP := mcp.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcp.Server {
 			return mcServer
 		},
 		&mcp.StreamableHTTPOptions{
-			SessionTimeout: 10 * time.Minute,
+			SessionTimeout: 16 * time.Minute,
 		},
 	)
 
