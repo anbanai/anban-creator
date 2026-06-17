@@ -1,17 +1,16 @@
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { LayoutTemplate, X, Loader2, Inbox } from 'lucide-react'
+import { LayoutTemplate, Loader2, Inbox, X } from 'lucide-react'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import type { Template, TemplateType } from '@/types'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import { cn } from '@/lib/utils'
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselPrevious,
+  CarouselNext,
+} from '@/components/ui/carousel'
 import { SignedImage } from '@/components/ui/SignedImage'
 
 interface TemplatePickerProps {
@@ -23,13 +22,11 @@ interface TemplatePickerProps {
   onSelect: (template: Template) => void
   /** Called when user clicks the clear button. */
   onClear: () => void
-  /** Disable the trigger (e.g. when surrounding type is viral_analysis). */
+  /** Disable the picker (e.g. when surrounding type is viral_analysis). */
   disabled?: boolean
 }
 
 export function TemplatePicker({ type, selected, onSelect, onClear, disabled }: TemplatePickerProps) {
-  const [open, setOpen] = useState(false)
-
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.templates.list({ type, scope: 'all' }),
     queryFn: () =>
@@ -38,7 +35,6 @@ export function TemplatePicker({ type, selected, onSelect, onClear, disabled }: 
         scope: 'all',
         limit: 50,
       }),
-    enabled: open,
   })
 
   const templates = data?.items ?? []
@@ -50,7 +46,7 @@ export function TemplatePicker({ type, selected, onSelect, onClear, disabled }: 
         <span className="text-xs font-medium text-foreground">{selected.name}</span>
         {selected.visibility === 'private' && (
           <Badge variant="secondary" className="text-[10px] px-1.5">
-            私有
+            私
           </Badge>
         )}
         <button
@@ -66,90 +62,73 @@ export function TemplatePicker({ type, selected, onSelect, onClear, disabled }: 
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        disabled={disabled}
-        render={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={disabled}
-            className="h-7 gap-1 px-2 text-xs"
-          >
-            <LayoutTemplate className="h-3.5 w-3.5" />
-            选择模板
-          </Button>
-        }
-      />
-      <PopoverContent className="w-80 p-0" align="start">
-        <div className="border-b border-border px-3 py-2">
+    <div className="rounded-md border border-border bg-card p-2">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <LayoutTemplate className="h-3.5 w-3.5 text-muted-foreground" />
           <p className="text-xs font-medium text-foreground">选择模板覆盖账号风格</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            选中后，将使用模板的参考图和风格，而非账号本身的风格。
-          </p>
         </div>
-        <div className="max-h-72 overflow-y-auto p-2">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : templates.length === 0 ? (
-            <div className="flex flex-col items-center gap-1 px-3 py-6 text-center">
-              <Inbox className="h-6 w-6 text-muted-foreground/40" />
-              <p className="text-xs text-muted-foreground">暂无此类型的模板</p>
-              <p className="text-[11px] text-muted-foreground/70">
-                可以到「模板库」页面新建一个
-              </p>
-            </div>
-          ) : (
-            <ul className="space-y-1">
+        {templates.length > 0 && (
+          <span className="text-[11px] text-muted-foreground">{templates.length} 个</span>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : templates.length === 0 ? (
+        <div className="flex flex-col items-center gap-1 px-3 py-6 text-center">
+          <Inbox className="h-6 w-6 text-muted-foreground/40" />
+          <p className="text-xs text-muted-foreground">暂无此类型的模板</p>
+          <p className="text-[11px] text-muted-foreground/70">可以到「模板库」页面新建一个</p>
+        </div>
+      ) : (
+        <div className="relative">
+          <Carousel
+            opts={{ align: 'start', dragFree: true, containScroll: 'trimSnaps' }}
+            className="w-full"
+          >
+            <CarouselContent className="-ml-2">
               {templates.map((t) => (
-                <li key={t.id}>
+                <CarouselItem key={t.id} className="basis-[96px] pl-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      onSelect(t)
-                      setOpen(false)
-                    }}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent',
-                    )}
+                    disabled={disabled}
+                    onClick={() => onSelect(t)}
+                    className="group flex w-full flex-col gap-1.5 rounded-md border border-border bg-background p-1.5 text-left transition-all hover:border-primary/40 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {t.thumbnail_url ? (
-                      <SignedImage
-                        src={t.thumbnail_url}
-                        alt={t.name}
-                        className="h-9 w-9 shrink-0 rounded border border-border object-cover"
-                        fallbackIcon={<LayoutTemplate className="h-4 w-4 text-muted-foreground/50" />}
-                        fallbackClassName="h-9 w-9 shrink-0 rounded border border-border bg-muted"
-                        showLoading={false}
-                      />
-                    ) : (
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-border bg-muted">
-                        <LayoutTemplate className="h-4 w-4 text-muted-foreground/50" />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium text-foreground">{t.name}</p>
-                      {t.style_prompt && (
-                        <p className="truncate text-[11px] text-muted-foreground">
-                          {t.style_prompt}
-                        </p>
+                    <div className="relative aspect-[3/4] w-full overflow-hidden rounded bg-muted">
+                      {t.thumbnail_url ? (
+                        <SignedImage
+                          src={t.thumbnail_url}
+                          alt={t.name}
+                          className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                          fallbackIcon={<LayoutTemplate className="h-5 w-5 text-muted-foreground/50" />}
+                          fallbackClassName="h-full w-full flex items-center justify-center"
+                          showLoading={false}
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center">
+                          <LayoutTemplate className="h-5 w-5 text-muted-foreground/50" />
+                        </div>
+                      )}
+                      {t.visibility === 'private' && (
+                        <Badge variant="secondary" className="absolute right-1 top-1 px-1 text-[9px]">
+                          私
+                        </Badge>
                       )}
                     </div>
-                    {t.visibility === 'private' && (
-                      <Badge variant="secondary" className="text-[10px] px-1.5">
-                        私有
-                      </Badge>
-                    )}
+                    <p className="truncate text-[11px] font-medium text-foreground">{t.name}</p>
                   </button>
-                </li>
+                </CarouselItem>
               ))}
-            </ul>
-          )}
+            </CarouselContent>
+            <CarouselPrevious className="-left-1 top-1/2 h-6 w-6 shadow-sm" />
+            <CarouselNext className="-right-1 top-1/2 h-6 w-6 shadow-sm" />
+          </Carousel>
         </div>
-      </PopoverContent>
-    </Popover>
+      )}
+    </div>
   )
 }

@@ -673,17 +673,18 @@ export default function TasksPage() {
               )} />
 
               {watchedType !== 'viral_analysis' && (
+                <TemplatePicker
+                  type={watchedType as import('@/types').TemplateType}
+                  selected={selectedTemplate}
+                  onSelect={handleTemplateSelect}
+                  onClear={handleTemplateClear}
+                />
+              )}
+
+              {watchedType !== 'viral_analysis' && (
                 <FormField control={form.control} name="reference_image_url" render={({ field }) => (
                   <FormItem>
-                    <div className="flex items-center justify-between">
-                      <FormLabel>参考图片（可选）</FormLabel>
-                      <TemplatePicker
-                        type={watchedType as import('@/types').TemplateType}
-                        selected={selectedTemplate}
-                        onSelect={handleTemplateSelect}
-                        onClear={handleTemplateClear}
-                      />
-                    </div>
+                    <FormLabel>参考图片（可选）</FormLabel>
                     <FormControl>
                       <ReferenceImageUpload
                         value={field.value || ''}
