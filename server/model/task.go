@@ -23,6 +23,11 @@ type Task struct {
 	// in settings.json is cleared by the executor when this is non-empty, so the
 	// agent has a single source of truth and no prompt-vs-config ambiguity.
 	Style               string     `gorm:"type:varchar(1024);default:''" json:"style,omitempty"`
+	// TemplateID records which template was selected when creating this task.
+	// Nullable: only set for manually-created tasks where the user picked a template.
+	// Not used by the style resolution chain (task > plan > channel) — only for UI
+	// attribution in Studio. Old rows migrate to NULL automatically.
+	TemplateID          *string    `gorm:"type:char(36);index" json:"template_id,omitempty"`
 	SkipReferenceImage  bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
 	Watermark           bool       `gorm:"default:false" json:"watermark,omitempty"`
 	ProgressLog         string     `gorm:"type:longtext" json:"progress_log,omitempty"`

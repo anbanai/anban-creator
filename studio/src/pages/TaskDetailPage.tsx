@@ -91,7 +91,7 @@ export default function TaskDetailPage() {
   // deleted since task creation; the card renders a fallback in that case.
   const templateId = task?.template_id
   const { data: usedTemplate, isError: templateNotFound } = useQuery({
-    queryKey: ['template', templateId],
+    queryKey: queryKeys.templates.detail(templateId!),
     queryFn: () => api.templates.get(templateId!),
     enabled: !!templateId,
     retry: false,
@@ -498,11 +498,12 @@ export default function TaskDetailPage() {
             <p className="text-xs text-muted-foreground mb-2">使用模板</p>
             {templateNotFound ? (
               <p className="text-sm text-muted-foreground italic">
-                模板已删除（id: <span className="font-mono">{task.template_id.slice(0, 8)}</span>）
+                模板不可访问（id: <span className="font-mono">{task.template_id.slice(0, 8)}</span>）
               </p>
             ) : usedTemplate ? (
               <Link
                 to="/templates"
+                aria-label={`查看模板：${usedTemplate.name}`}
                 className="flex items-start gap-3 rounded-md -mx-1 px-1 py-1 transition-colors hover:bg-accent/50"
               >
                 <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md bg-secondary">
@@ -520,14 +521,10 @@ export default function TaskDetailPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-foreground">{usedTemplate.name}</p>
-                  {usedTemplate.category && (
-                    <Badge variant="outline" className="mt-1 text-[10px]">{usedTemplate.category}</Badge>
-                  )}
-                  {usedTemplate.style_prompt && (
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                      {usedTemplate.style_prompt}
-                    </p>
-                  )}
+                  <Badge variant="outline" className="mt-1 text-[10px]">{usedTemplate.category}</Badge>
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                    {usedTemplate.style_prompt}
+                  </p>
                 </div>
               </Link>
             ) : (

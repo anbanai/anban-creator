@@ -262,6 +262,7 @@ export default function TasksPage() {
       watermark: watermark || undefined,
       goal_mode: goalMode || undefined,
       goal: goalMode ? (goalText.trim() || undefined) : undefined,
+      template_id: selectedTemplate?.id || undefined,
     }))
   }
 

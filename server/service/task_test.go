@@ -492,7 +492,11 @@ func TestTaskService_CreateManual(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	tasks, err := svc.CreateManual(context.Background(), userID, channelID, "Test topic", 1, "", "", nil, "", "", nil, "", false)
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ChannelID: channelID,
+		Prompt:    "Test topic",
+	})
 	if err != nil {
 		t.Fatalf("CreateManual: %v", err)
 	}
@@ -519,9 +523,71 @@ func TestTaskService_CreateManual(t *testing.T) {
 
 func TestTaskService_CreateManual_NoChannel(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
-	_, err := svc.CreateManual(context.Background(), "user1", "", "topic", 1, "", "", nil, "", "", nil, "", false)
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    "user1",
+		ChannelID: "",
+		Prompt:    "topic",
+	})
 	if err == nil {
 		t.Error("expected error for empty channel_id")
+	}
+}
+
+func TestTaskService_CreateManual_PersistsTemplateID(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, "wechat")
+	templateID := uuid.New().String()
+
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:     userID,
+		ChannelID:  channelID,
+		Prompt:     "topic",
+		TemplateID: &templateID,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	task := tasks[0]
+	if task.TemplateID == nil {
+		t.Fatal("TemplateID should not be nil when provided")
+	}
+	if *task.TemplateID != templateID {
+		t.Errorf("TemplateID = %q, want %q", *task.TemplateID, templateID)
+	}
+
+	// Verify persistence round-trip through the repository.
+	found, err := svc.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if found.TemplateID == nil || *found.TemplateID != templateID {
+		got := "nil"
+		if found.TemplateID != nil {
+			got = *found.TemplateID
+		}
+		t.Errorf("persisted TemplateID = %s, want %q", got, templateID)
+	}
+}
+
+func TestTaskService_CreateManual_NullTemplateIDByDefault(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, "wechat")
+
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ChannelID: channelID,
+		Prompt:    "topic",
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if tasks[0].TemplateID != nil {
+		t.Errorf("TemplateID should be nil by default, got %q", *tasks[0].TemplateID)
 	}
 }
 
@@ -530,7 +596,11 @@ func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	_, err := svc.CreateManual(context.Background(), "wrong-user", channelID, "topic", 1, "", "", nil, "", "", nil, "", false)
+	_, err := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    "wrong-user",
+		ChannelID: channelID,
+		Prompt:    "topic",
+	})
 	if err == nil {
 		t.Error("expected error for wrong user")
 	}
@@ -541,7 +611,11 @@ func TestTaskService_GetByID(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Find me", 1, "", "", nil, "", "", nil, "", false)
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ChannelID: channelID,
+		Prompt:    "Find me",
+	})
 	task := taskSlice[0]
 
 	found, err := svc.GetByID(context.Background(), task.ID)
@@ -566,7 +640,11 @@ func TestTaskService_Cancel(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Cancel me", 1, "", "", nil, "", "", nil, "", false)
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ChannelID: channelID,
+		Prompt:    "Cancel me",
+	})
 	task := taskSlice[0]
 
 	err := svc.Cancel(context.Background(), task.ID)
@@ -585,8 +663,16 @@ func TestTaskService_List(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	svc.CreateManual(context.Background(), userID, channelID, "Task 1", 1, "", "", nil, "", "", nil, "", false)
-	svc.CreateManual(context.Background(), userID, channelID, "Task 2", 1, "", "", nil, "", "", nil, "", false)
+	svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ChannelID: channelID,
+		Prompt:    "Task 1",
+	})
+	svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ChannelID: channelID,
+		Prompt:    "Task 2",
+	})
 
 	tasks, total, err := svc.List(context.Background(), userID, 0, 10, "", "")
 	if err != nil {
@@ -605,7 +691,11 @@ func TestTaskService_List_ByStatus(t *testing.T) {
 	userID := uuid.New().String()
 	channelID := createTestChannel(t, repo, userID, "wechat")
 
-	taskSlice, _ := svc.CreateManual(context.Background(), userID, channelID, "Pending task", 1, "", "", nil, "", "", nil, "", false)
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ChannelID: channelID,
+		Prompt:    "Pending task",
+	})
 	task := taskSlice[0]
 	svc.Cancel(context.Background(), task.ID)
 

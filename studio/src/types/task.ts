@@ -25,6 +25,7 @@ export interface Task {
   // the loop runs entirely inside Claude Code, server observes only the result.
   goal?: string
   goal_mode?: boolean
+  template_id?: string
   created_at: string
   started_at: string
   completed_at: string
@@ -62,6 +63,7 @@ export interface CreateTaskRequest {
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
+  template_id?: string
 }
 
 export interface WorkflowStatus {

@@ -69,17 +69,18 @@ func (h *TaskHandler) SetRepository(repo repository.Repository) {
 // Request types.
 
 type createTaskRequest struct {
-	ChannelID          string `json:"channel_id"`
-	Prompt             string `json:"prompt"`
-	Quantity           int    `json:"quantity"`
-	ImageRatio         string `json:"image_ratio"`
-	ImageModelKey      string `json:"image_model_key"`
-	SkipReferenceImage *bool  `json:"skip_reference_image"`
-	ReferenceImageURL  string `json:"reference_image_url"`
-	Style              string `json:"style"`
-	Watermark          *bool  `json:"watermark"`
-	Goal               string `json:"goal"`
-	GoalMode           bool   `json:"goal_mode"`
+	ChannelID          string  `json:"channel_id"`
+	Prompt             string  `json:"prompt"`
+	Quantity           int     `json:"quantity"`
+	ImageRatio         string  `json:"image_ratio"`
+	ImageModelKey      string  `json:"image_model_key"`
+	SkipReferenceImage *bool   `json:"skip_reference_image"`
+	ReferenceImageURL  string  `json:"reference_image_url"`
+	Style              string  `json:"style"`
+	Watermark          *bool   `json:"watermark"`
+	Goal               string  `json:"goal"`
+	GoalMode           bool    `json:"goal_mode"`
+	TemplateID         *string `json:"template_id,omitempty"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -139,7 +140,32 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
-	tasks, err := h.service.CreateManual(c.Context(), userID, req.ChannelID, prompt, quantity, req.ImageRatio, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Style, req.Watermark, req.Goal, req.GoalMode)
+	// Validate template_id format if provided. Existence is not checked — the
+	// template may be deleted later, in which case Studio renders a fallback.
+	var templateID *string
+	if req.TemplateID != nil && strings.TrimSpace(*req.TemplateID) != "" {
+		trimmed := strings.TrimSpace(*req.TemplateID)
+		if _, err := uuid.Parse(trimmed); err != nil {
+			return Error(c, fiber.StatusBadRequest, "template_id must be a valid UUID")
+		}
+		templateID = &trimmed
+	}
+
+	tasks, err := h.service.CreateManual(c.Context(), service.CreateManualParams{
+		UserID:            userID,
+		ChannelID:         req.ChannelID,
+		Prompt:            prompt,
+		Quantity:          quantity,
+		ImageRatio:        req.ImageRatio,
+		ImageModelKey:     req.ImageModelKey,
+		SkipRefImage:      req.SkipReferenceImage,
+		ReferenceImageURL: req.ReferenceImageURL,
+		Style:             req.Style,
+		Watermark:         req.Watermark,
+		Goal:              req.Goal,
+		GoalMode:          req.GoalMode,
+		TemplateID:        templateID,
+	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
 		if errors.Is(err, service.ErrInsufficientCredits) {

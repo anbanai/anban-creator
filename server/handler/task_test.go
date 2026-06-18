@@ -110,6 +110,103 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 	}
 }
 
+// TestCreateTask_TemplateIDValidation verifies that the handler:
+//   - rejects malformed template_id with 400
+//   - accepts a valid UUID and persists it on the created task
+func TestCreateTask_TemplateIDValidation(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      "tmpl-validate@example.com",
+		Password:   "hashed",
+		InviteCode: "tmplvalidate",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Channels().Create(ctx, &model.Channel{
+		ID:       channelID,
+		UserID:   userID,
+		Platform: model.PlatformSeednote,
+		Name:     "Seednote",
+		Status:   model.ChannelStatusActive,
+	}); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	t.Run("rejects malformed template_id", func(t *testing.T) {
+		body := `{"channel_id":"` + channelID + `","template_id":"not-a-uuid"}`
+		req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != fiber.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+
+	t.Run("accepts valid template_id and persists it", func(t *testing.T) {
+		templateID := uuid.New().String()
+		body := `{"channel_id":"` + channelID + `","template_id":"` + templateID + `"}`
+		req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != fiber.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+
+		// Verify the created task carries the template_id.
+		tasks, err := repo.Tasks().FindByUserID(ctx, userID, "", 0, 50)
+		if err != nil {
+			t.Fatalf("list tasks: %v", err)
+		}
+		var latest *model.Task
+		for i := range tasks {
+			if tasks[i].TemplateID != nil && *tasks[i].TemplateID == templateID {
+				latest = tasks[i]
+				break
+			}
+		}
+		if latest == nil {
+			t.Fatalf("no task with template_id=%s was persisted", templateID)
+		}
+	})
+
+	t.Run("omits template_id when not provided", func(t *testing.T) {
+		body := `{"channel_id":"` + channelID + `"}`
+		req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != fiber.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+}
+
 // TestCreateTask_ImageModelKeyTierForbidden verifies that the handler returns
 // 403 when a Free-tier user tries to create a task with a Pro-tier image preset,
 // or with "custom" (Enterprise-only). Also covers the fail-closed path:

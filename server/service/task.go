@@ -152,21 +152,45 @@ func (s *TaskService) StorageProviderName() string {
 	return s.store.Name()
 }
 
+// CreateManualParams holds the inputs for CreateManual. Fields map 1:1 to the
+// model.Task attributes that callers can supply at creation time. Using a struct
+// instead of a long positional signature keeps call sites readable as fields are
+// added and prevents argument-order bugs.
+type CreateManualParams struct {
+	UserID            string
+	ChannelID         string
+	Prompt            string
+	Quantity          int
+	ImageRatio        string
+	ImageModelKey     string
+	SkipRefImage      *bool
+	ReferenceImageURL string
+	Style             string
+	Watermark         *bool
+	Goal              string
+	GoalMode          bool
+	// TemplateID optionally records which template was selected, for UI attribution
+	// only — it does NOT enter the style resolution chain (style is already copied
+	// from the template by the caller).
+	TemplateID        *string
+}
+
 // CreateManual creates tasks without a plan and enqueues them for execution.
-// The quantity parameter (1-5) determines how many tasks to create, each independently billed.
-// imageModelKey optionally selects a per-task image model (validated upstream by the handler).
-// style optionally overrides the channel's style (e.g. from a selected template).
+// The Quantity field (1-5) determines how many tasks to create, each independently billed.
+// ImageModelKey optionally selects a per-task image model (validated upstream by the handler).
+// Style optionally overrides the channel's style (e.g. from a selected template).
 //
-// When goalMode is true, each task charges GoalMultiplier() × base cost upfront
+// When GoalMode is true, each task charges GoalMultiplier() × base cost upfront
 // and never refunds. The goal condition is propagated to the agent process and
 // prepended to the user prompt as a /goal slash command, letting Claude Code's
 // built-in goal loop drive turn-by-turn evaluation inside a single session.
-func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, prompt string, quantity int, imageRatio, imageModelKey string, skipRefImage *bool, referenceImageURL, style string, watermark *bool, goal string, goalMode bool) ([]*model.Task, error) {
-	if channelID == "" {
+func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([]*model.Task, error) {
+	if p.ChannelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
 	}
 
 	// Clamp quantity to 1-5.
+	quantity := p.Quantity
 	if quantity <= 0 {
 		quantity = 1
 	}
@@ -175,11 +199,11 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 	}
 
 	// Load and validate channel.
-	channel, err := s.repo.Channels().FindByID(ctx, channelID)
+	channel, err := s.repo.Channels().FindByID(ctx, p.ChannelID)
 	if err != nil {
 		return nil, fmt.Errorf("find channel: %w", err)
 	}
-	if channel.UserID != userID {
+	if channel.UserID != p.UserID {
 		return nil, fmt.Errorf("channel not owned by user")
 	}
 	if channel.Status != model.ChannelStatusActive {
@@ -191,7 +215,7 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 	// Resolve effective style: caller-provided (e.g. from a selected template) wins,
 	// otherwise fall back to the channel's style. From this point on task.Style is
 	// the single source of truth for image-gen style.
-	effectiveStyle := style
+	effectiveStyle := p.Style
 	if effectiveStyle == "" {
 		effectiveStyle = channel.Style
 	}
@@ -201,7 +225,7 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 	tasks := make([]*model.Task, 0, quantity)
 
 	multiplier := 1
-	if goalMode {
+	if p.GoalMode {
 		multiplier = s.GoalMultiplier()
 	}
 
@@ -221,9 +245,9 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 		// Deduct total cost in a single atomic transaction.
 		var deductErr error
 		if multiplier > 1 {
-			deductErr = s.creditSvc.DeductBatchWithMultiplier(ctx, userID, taskType, totalCost, taskIDs, multiplier)
+			deductErr = s.creditSvc.DeductBatchWithMultiplier(ctx, p.UserID, taskType, totalCost, taskIDs, multiplier)
 		} else {
-			deductErr = s.creditSvc.DeductBatch(ctx, userID, taskType, totalCost, taskIDs)
+			deductErr = s.creditSvc.DeductBatch(ctx, p.UserID, taskType, totalCost, taskIDs)
 		}
 		if deductErr != nil {
 			if errors.Is(deductErr, ErrInsufficientCredits) {
@@ -244,19 +268,20 @@ func (s *TaskService) CreateManual(ctx context.Context, userID, channelID, promp
 
 		task := &model.Task{
 			ID:                 taskID,
-			UserID:             userID,
-			ChannelID:          channelID,
+			UserID:             p.UserID,
+			ChannelID:          p.ChannelID,
 			Type:               taskType,
 			Status:             model.TaskStatusPending,
-			Prompt:             prompt,
-			ImageRatio:         imageRatio,
-			ImageModelKey:      imageModelKey,
-			ReferenceImageURL:  referenceImageURL,
+			Prompt:             p.Prompt,
+			ImageRatio:         p.ImageRatio,
+			ImageModelKey:      p.ImageModelKey,
+			ReferenceImageURL:  p.ReferenceImageURL,
 			Style:              effectiveStyle,
-			SkipReferenceImage: skipRefImage != nil && *skipRefImage,
-			Watermark:          watermark != nil && *watermark,
-			Goal:               goal,
-			GoalMode:           goalMode,
+			SkipReferenceImage: p.SkipRefImage != nil && *p.SkipRefImage,
+			Watermark:          p.Watermark != nil && *p.Watermark,
+			Goal:               p.Goal,
+			GoalMode:           p.GoalMode,
+			TemplateID:         p.TemplateID,
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
