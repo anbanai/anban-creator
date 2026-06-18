@@ -141,14 +141,88 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		}
 	}
 
+	if mcpLog != nil {
+		evt := mcpLog.Info().
+			Str("tool", "generate_image").
+			Str("task_id", taskID).
+			Str("user_id", userID).
+			Str("channel_id", channelID).
+			Str("image_type", imageType).
+			Str("size", size).
+			Str("image_model_key", imageModelKey).
+			Str("ref_image_path", refPath).
+			Str("output_path", outputPath)
+		if watermark != nil {
+			evt = evt.Bool("watermark", *watermark)
+		}
+		// prompt may carry the full visual style description; cap at 500 runes
+		// to keep logs bounded (style mismatches are still visible in the head).
+		promptSnippet := prompt
+		if r := []rune(promptSnippet); len(r) > 500 {
+			promptSnippet = string(r[:500]) + "...(truncated)"
+		}
+		evt.Str("prompt_snippet", promptSnippet).
+			Msg("MCP generate_image called")
+	}
+
 	provider, mdl := resolveImageModel(ctx, userID)
 	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, provider, mdl, 1); err != nil {
+		if mcpLog != nil {
+			// billingError below also logs the err with tool name; this entry
+			// adds task_id/channel_id/stage so concurrent-task greps can land.
+			mcpLog.Warn().
+				Str("tool", "generate_image").
+				Str("task_id", taskID).
+				Str("channel_id", channelID).
+				Str("user_id", userID).
+				Str("stage", "deduct").
+				Err(err).
+				Msg("MCP generate_image failed")
+		}
 		return billingError("generate image", err), nil
 	}
 
 	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID, size, imageModelKey, watermark)
 	if err != nil {
+		if mcpLog != nil {
+			mcpLog.Warn().
+				Str("tool", "generate_image").
+				Str("task_id", taskID).
+				Str("channel_id", channelID).
+				Str("user_id", userID).
+				Str("stage", "generate").
+				Str("image_model_key", imageModelKey).
+				Err(err).
+				Msg("MCP generate_image failed")
+		}
 		return billingError("generate image", err), nil
+	}
+
+	if mcpLog != nil {
+		// result.Provider/Model reflect what the provider actually ran (built
+		// from its response in image.go buildImageResult), which may differ
+		// from resolveImageModel() used for billing at line 168 — e.g. when
+		// the channel overrides the user-level config. result.* is the source
+		// of truth for "what generated this image".
+		// DownloadURL may be a multi-MB base64 data URL; only log its head so
+		// log volume stays sane while still identifying provider/protocol.
+		urlSnippet := result.DownloadURL
+		if r := []rune(urlSnippet); len(r) > 100 {
+			urlSnippet = string(r[:100]) + "...(truncated)"
+		}
+		mcpLog.Info().
+			Str("tool", "generate_image").
+			Str("task_id", taskID).
+			Str("channel_id", channelID).
+			Str("provider", result.Provider).
+			Str("model", result.Model).
+			Str("size", result.Size).
+			Str("response_type", result.ResponseType).
+			Str("output_mime", result.OutputMIME).
+			Str("file_path", result.FilePath).
+			Str("revised_prompt", result.RevisedPrompt).
+			Str("download_url_snippet", urlSnippet).
+			Msg("MCP generate_image succeeded")
 	}
 
 	return textResult(result)
