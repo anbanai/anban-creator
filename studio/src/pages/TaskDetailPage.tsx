@@ -21,6 +21,8 @@ import { FilePreviewGallery } from '@/components/FilePreview'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { SignedImage } from '@/components/ui/SignedImage'
+import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 
@@ -36,7 +38,7 @@ export default function TaskDetailPage() {
   }, [id, navigate])
 
   const queryClient = useQueryClient()
-  const { token } = useAuth()
+  const { token, user } = useAuth()
 
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
@@ -48,6 +50,7 @@ export default function TaskDetailPage() {
   } | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [showTemplatePreview, setShowTemplatePreview] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
   const logContainerRef = useRef<HTMLDivElement | null>(null)
@@ -501,32 +504,39 @@ export default function TaskDetailPage() {
                 模板不可访问（id: <span className="font-mono">{task.template_id.slice(0, 8)}</span>）
               </p>
             ) : usedTemplate ? (
-              <Link
-                to="/templates"
-                aria-label={`查看模板：${usedTemplate.name}`}
-                className="flex items-start gap-3 rounded-md -mx-1 px-1 py-1 transition-colors hover:bg-accent/50"
+              <button
+                type="button"
+                onClick={() => setShowTemplatePreview(true)}
+                aria-label={`查看模板详情：${usedTemplate.name}`}
+                className="group flex w-full items-start gap-3 rounded-md -mx-1 px-1 py-1 text-left transition-colors hover:bg-accent/50"
               >
-                <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md bg-secondary">
+                <div className="relative h-20 w-[60px] shrink-0 overflow-hidden rounded-md bg-secondary">
                   {usedTemplate.thumbnail_url ? (
-                    <img
+                    <SignedImage
                       src={usedTemplate.thumbnail_url}
-                      alt=""
+                      alt={usedTemplate.name}
                       className="h-full w-full object-cover"
+                      showLoading={false}
                     />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-sm font-medium">
+                    <div className="flex h-full w-full items-center justify-center text-base font-medium text-muted-foreground">
                       {usedTemplate.name.charAt(0)}
                     </div>
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-foreground">{usedTemplate.name}</p>
-                  <Badge variant="outline" className="mt-1 text-[10px]">{usedTemplate.category}</Badge>
-                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                    {usedTemplate.style_prompt}
-                  </p>
+                  {usedTemplate.category && (
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">{usedTemplate.category}</p>
+                  )}
+                  {usedTemplate.style_prompt && (
+                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/80">
+                      {usedTemplate.style_prompt}
+                    </p>
+                  )}
+                  <p className="mt-1 text-[11px] text-primary/70 group-hover:text-primary">点击查看详情</p>
                 </div>
-              </Link>
+              </button>
             ) : (
               <div className="flex items-start gap-3">
                 <Skeleton className="h-12 w-12 rounded-md" />
@@ -755,6 +765,13 @@ export default function TaskDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <TemplatePreview
+        template={usedTemplate ?? null}
+        open={showTemplatePreview}
+        onOpenChange={setShowTemplatePreview}
+        currentUserId={user?.id}
+      />
     </div>
   )
 }
