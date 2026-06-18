@@ -13,9 +13,9 @@ import { queryKeys } from '@/lib/query-keys'
 import type { TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardBody, CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
@@ -462,28 +462,28 @@ export default function TaskDetailPage() {
       {/* Details (stats) */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <CardBody>
+          <CardContent>
             <p className="text-xs text-muted-foreground">创建时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.created_at)}</p>
-          </CardBody>
+          </CardContent>
         </Card>
         <Card>
-          <CardBody>
+          <CardContent>
             <p className="text-xs text-muted-foreground">开始时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.started_at)}</p>
-          </CardBody>
+          </CardContent>
         </Card>
         <Card>
-          <CardBody>
+          <CardContent>
             <p className="text-xs text-muted-foreground">完成时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.completed_at)}</p>
-          </CardBody>
+          </CardContent>
         </Card>
         <Card>
-          <CardBody>
+          <CardContent>
             <p className="text-xs text-muted-foreground">来源</p>
             <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
-          </CardBody>
+          </CardContent>
         </Card>
       </div>
 
@@ -546,7 +546,7 @@ export default function TaskDetailPage() {
 
       {task.status !== 'completed' && (
         <Card>
-          <CardBody>
+          <CardContent>
             {task.status === 'failed' ? (
             <div className="space-y-3">
               <p className="text-sm text-red-400">任务失败</p>
@@ -596,7 +596,7 @@ export default function TaskDetailPage() {
                 )}
               </div>
             )}
-          </CardBody>
+          </CardContent>
         </Card>
       )}
 
@@ -732,7 +732,8 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" loading={cancelMutation.isPending} onClick={() => submit(async () => cancelMutation.mutateAsync())}>
+            <AlertDialogAction variant="destructive" disabled={cancelMutation.isPending} onClick={() => submit(async () => cancelMutation.mutateAsync())}>
+              {cancelMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
               确定取消
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -750,7 +751,8 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" loading={deleteMutation.isPending} onClick={() => submit(async () => deleteMutation.mutateAsync())}>
+            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => submit(async () => deleteMutation.mutateAsync())}>
+              {deleteMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
               确定删除
             </AlertDialogAction>
           </AlertDialogFooter>

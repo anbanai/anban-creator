@@ -14,7 +14,7 @@ import { ChannelSelector } from '@/components/ChannelSelector'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
@@ -507,7 +507,7 @@ export default function TasksPage() {
                           {contentTypeLabel[task.type] || task.type}
                         </Badge>
                         {task.status === 'running' && (task.progress ?? 0) > 0 && (
-                          <Badge variant="warning" className="text-[10px]">
+                          <Badge variant="secondary" className="text-[10px]">
                             {task.progress ?? 0}%
                           </Badge>
                         )}

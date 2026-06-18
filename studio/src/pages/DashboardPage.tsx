@@ -25,7 +25,7 @@ import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/common/button'
 import PageHeader from '@/components/layout/PageHeader'
 import StatsCard from '@/components/StatsCard'
 import StatsCardSkeleton from '@/components/StatsCardSkeleton'

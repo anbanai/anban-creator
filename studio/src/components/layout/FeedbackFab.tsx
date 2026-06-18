@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/common/button'
 import { Textarea } from '@/components/ui/textarea'
 import { feedbackApi } from '@/lib/api/feedback'
 

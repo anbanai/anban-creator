@@ -21,10 +21,10 @@ const themeOptions = [
   { value: 'system', label: '跟随系统', icon: Monitor },
 ] as const
 
-const tierBadgeVariant: Record<string, 'neutral' | 'info' | 'warning'> = {
-  free: 'neutral',
-  pro: 'info',
-  enterprise: 'warning',
+const tierBadgeVariant: Record<string, 'secondary' | 'outline'> = {
+  free: 'secondary',
+  pro: 'outline',
+  enterprise: 'secondary',
 }
 
 export default function UserAccountPopover({ collapsed }: { collapsed?: boolean }) {
@@ -67,7 +67,7 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
           <DropdownMenuLabel>
             <div className="flex items-center justify-between gap-2">
               <p className="min-w-0 truncate text-sm font-medium text-popover-foreground">{user.nickname || '用户'}</p>
-              <Badge variant={tierBadgeVariant[user.tier] ?? 'neutral'} className="shrink-0">
+              <Badge variant={tierBadgeVariant[user.tier] ?? 'secondary'} className="shrink-0">
                 {tierLabels[user.tier] ?? '免费版'}
               </Badge>
             </div>

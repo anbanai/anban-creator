@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { getApiErrorMessage } from '@/lib/http-client'
-import { Card, CardBody } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -219,7 +219,7 @@ export default function ModelConfigSection() {
           恢复系统默认
         </Button>
       </div>
-      <CardBody className="space-y-4">
+      <CardContent className="space-y-4">
         {/* Text Model */}
         <ModelSection
           title="服务端写作模型"
@@ -353,7 +353,7 @@ export default function ModelConfigSection() {
             </Button>
           </div>
         </ModelSection>
-      </CardBody>
+      </CardContent>
     </Card>
   )
 }

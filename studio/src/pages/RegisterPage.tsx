@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { registerSchema, type RegisterFormValues } from '@/lib/schemas'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/common/button'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import AuthLayout from '@/components/auth/AuthLayout'
 

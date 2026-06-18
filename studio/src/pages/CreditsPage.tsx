@@ -7,8 +7,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import type { CreditTransaction, CreditPricing } from '@/types'
-import { Card, CardBody } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/common/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { SimplePagination } from '@/components/SimplePagination'
@@ -20,10 +20,10 @@ import MembershipComparison from '@/components/credits/MembershipComparison'
 
 function transactionBadgeVariant(type: string) {
   switch (type) {
-    case 'sign_in': return 'success'
-    case 'task_deduct': return 'danger'
-    case 'task_refund': return 'warning'
-    case 'admin_grant': return 'info'
+    case 'sign_in': return 'default'
+    case 'task_deduct': return 'destructive'
+    case 'task_refund': return 'secondary'
+    case 'admin_grant': return 'outline'
     case 'image_gen':
     case 'image_upload':
     case 'article_write':
@@ -33,8 +33,8 @@ function transactionBadgeVariant(type: string) {
     case 'seo':
     case 'draft_publish':
     case 'outline':
-      return 'danger'
-    default: return 'neutral'
+      return 'destructive'
+    default: return 'secondary'
   }
 }
 
@@ -91,7 +91,7 @@ export default function CreditsPage() {
 
       {/* Balance card */}
       <Card>
-        <CardBody>
+        <CardContent>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">积分余额</p>
@@ -111,7 +111,7 @@ export default function CreditsPage() {
               {signedInToday ? '已签到' : `签到 +${dailySignInCredits}`}
             </Button>
           </div>
-        </CardBody>
+        </CardContent>
       </Card>
 
       {/* Membership comparison */}
@@ -119,7 +119,7 @@ export default function CreditsPage() {
 
       {/* Recharge */}
       <Card>
-        <CardBody>
+        <CardContent>
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-foreground">充值积分</h3>
             <Button variant="outline" size="sm" onClick={() => setRechargeOpen(true)}>
@@ -127,7 +127,7 @@ export default function CreditsPage() {
               充值
             </Button>
           </div>
-        </CardBody>
+        </CardContent>
       </Card>
 
       {/* Recharge dialog */}

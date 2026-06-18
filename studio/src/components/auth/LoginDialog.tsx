@@ -3,7 +3,7 @@ import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { useAuth } from '@/contexts/AuthContext'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/common/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const COUNTDOWN_SECONDS = 60
