@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Streamdown } from 'streamdown'
-import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target } from 'lucide-react'
+import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -15,13 +15,13 @@ import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardBody } from '@/components/ui/card'
+import { Card, CardBody, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant } from '@/lib/labels'
+import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 
 export default function TaskDetailPage() {
@@ -40,8 +40,12 @@ export default function TaskDetailPage() {
 
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
-  const [currentProgressMessage, setCurrentProgressMessage] = useState<string | null>(null)
-  const [liveProgress, setLiveProgress] = useState<{ percent: number; title: string | null; description: string | null } | null>(null)
+  const [liveProgress, setLiveProgress] = useState<{
+    percent: number
+    stage: string | null
+    title: string | null
+    description: string | null
+  } | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
@@ -81,6 +85,17 @@ export default function TaskDetailPage() {
     enabled: !!task?.channel_id,
   })
   const channel = channelDetail?.channel
+
+  // Resolve the template used to create this task, if any.
+  // template_id is a UI-attribution field only — the template may have been
+  // deleted since task creation; the card renders a fallback in that case.
+  const templateId = task?.template_id
+  const { data: usedTemplate, isError: templateNotFound } = useQuery({
+    queryKey: ['template', templateId],
+    queryFn: () => api.templates.get(templateId!),
+    enabled: !!templateId,
+    retry: false,
+  })
   const MAX_PERSISTED_LOGS = 500
   const persistedLogs = (task?.progress_log
     ?.split('\n')
@@ -95,10 +110,12 @@ export default function TaskDetailPage() {
     .map((line) => line.replace(/^\[\d+%]\s*/, '').trim())
     .find(Boolean)
   const progressValue = Math.max(0, Math.min(100, liveProgress?.percent ?? task?.progress ?? 0))
-  const progressMessage = liveProgress?.title
-    ? `${liveProgress.title}${liveProgress.description ? ' · ' + liveProgress.description : ''}`
-    : (currentProgressMessage || latestPersistedProgressMessage ||
-      (task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...'))
+  const fallbackTitle = latestPersistedProgressMessage
+    ?? (task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...')
+  const progressTitle = liveProgress?.title ?? fallbackTitle
+  const progressDescription = liveProgress?.description ?? null
+  const progressStage = liveProgress?.stage ?? null
+  const isRunning = task?.status === 'running'
 
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
@@ -185,10 +202,14 @@ export default function TaskDetailPage() {
             percent?: number
           }
           const pct = typeof data.percent === 'number' ? data.percent : null
-          const hasPct = pct != null && pct > 0
-          if (hasPct) {
+          const hasPositivePct = pct != null && pct > 0
+          // 任何结构化字段（stage/title/description/percent）到位都更新 liveProgress，
+          // 即使 percent === 0（未知 stage 时 server 默认 0）。否则卡片会回退到通用文案，
+          // 与同一时刻写入 SSE 日志面板的结构化数据不一致。
+          if (pct != null || data.title || data.stage || data.description) {
             setLiveProgress({
-              percent: pct as number,
+              percent: pct ?? 0,
+              stage: data.stage ?? null,
               title: data.title ?? null,
               description: data.description ?? null,
             })
@@ -199,7 +220,7 @@ export default function TaskDetailPage() {
             ? `${data.title}${data.description ? ' · ' + data.description : ''}`
             : (data.stage || '')
           if (label) {
-            const prefix = hasPct ? `[${pct as number}%] ` : ''
+            const prefix = hasPositivePct ? `[${pct as number}%] ` : ''
             setSseLogs((prev) => appendLog(prev, `${prefix}${label}`))
           }
         }
@@ -243,7 +264,6 @@ export default function TaskDetailPage() {
     if (task?.status === 'running') {
       setSseLogs(persistedLogs)
       setSseError(null)
-      setCurrentProgressMessage(null)
       setLiveProgress(null)
       connectSSE()
     }
@@ -471,6 +491,59 @@ export default function TaskDetailPage() {
         <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
+      {/* Used template attribution card */}
+      {task.template_id && (
+        <Card>
+          <CardContent>
+            <p className="text-xs text-muted-foreground mb-2">使用模板</p>
+            {templateNotFound ? (
+              <p className="text-sm text-muted-foreground italic">
+                模板已删除（id: <span className="font-mono">{task.template_id.slice(0, 8)}</span>）
+              </p>
+            ) : usedTemplate ? (
+              <Link
+                to="/templates"
+                className="flex items-start gap-3 rounded-md -mx-1 px-1 py-1 transition-colors hover:bg-accent/50"
+              >
+                <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md bg-secondary">
+                  {usedTemplate.thumbnail_url ? (
+                    <img
+                      src={usedTemplate.thumbnail_url}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-sm font-medium">
+                      {usedTemplate.name.charAt(0)}
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{usedTemplate.name}</p>
+                  {usedTemplate.category && (
+                    <Badge variant="outline" className="mt-1 text-[10px]">{usedTemplate.category}</Badge>
+                  )}
+                  {usedTemplate.style_prompt && (
+                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                      {usedTemplate.style_prompt}
+                    </p>
+                  )}
+                </div>
+              </Link>
+            ) : (
+              <div className="flex items-start gap-3">
+                <Skeleton className="h-12 w-12 rounded-md" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {task.status !== 'completed' && (
         <Card>
           <CardBody>
@@ -504,13 +577,23 @@ export default function TaskDetailPage() {
               </Button>
             </div>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                <div className="flex w-full items-center justify-between gap-3">
-                  <span className="text-sm font-medium">进度</span>
-                  <span className="text-sm text-primary tabular-nums">{progressValue}%</span>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  {isRunning && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />}
+                  <span className="min-w-0 truncate text-sm font-medium">{progressTitle}</span>
+                  {progressStage && (
+                    <Badge variant="outline" className="shrink-0 text-xs">
+                      {progressStageLabel[progressStage] ?? progressStage}
+                    </Badge>
+                  )}
+                  <span className="ml-auto shrink-0 text-sm font-semibold text-primary tabular-nums">
+                    {progressValue}%
+                  </span>
                 </div>
                 <Progress value={progressValue} className="w-full" />
-                <p className="w-full text-sm text-muted-foreground">{progressMessage}</p>
+                {progressDescription && (
+                  <p className="text-xs text-muted-foreground">{progressDescription}</p>
+                )}
               </div>
             )}
           </CardBody>

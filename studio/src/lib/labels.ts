@@ -195,6 +195,30 @@ export const contentTypeLabel: Record<string, string> = {
   article: '公众号文章',
 }
 
+// Pipeline stage → 中文标签。stage 取值来自 server/service/task_progress_stages.go
+// （article / seednote 两套），用于任务详情页进度卡片的 Badge 文案。
+// 未知 stage 回退到原 slug。
+export const progressStageLabel: Record<string, string> = {
+  // shared
+  research: '选题研究',
+  writing: '内容写作',
+  // article-only
+  outline: '大纲生成',
+  humanize: '文章润色',
+  seo: 'SEO 优化',
+  cover: '封面生成',
+  illustration: '插图生成',
+  html: 'HTML 转换',
+  draft: '草稿提交',
+  // seednote-only
+  channel: '账号信息',
+  viral_analysis: '爆文拆解',
+  image_generation: '图片生成',
+  compliance: '合规检查',
+  archive: '资源归档',
+  finalize: '完成',
+}
+
 export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
