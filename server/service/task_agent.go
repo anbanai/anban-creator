@@ -74,15 +74,15 @@ func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, 
 		}
 	}
 
-	payload := map[string]any{
-		"stage": stage,
-		"title": title,
-	}
-	if description != "" {
-		payload["description"] = description
-	}
-	if percent > 0 {
-		payload["percent"] = percent
+	// Single source of truth for the structured progress payload. The progress_log
+	// line, the latest_progress column, and the SSE event all derive from this,
+	// so a schema change (e.g. adding a sub_stage field) propagates everywhere
+	// without three separate encoding sites drifting apart.
+	payload := model.ProgressPayload{
+		Stage:       stage,
+		Title:       title,
+		Description: description,
+		Percent:     percent,
 	}
 	msg, err := json.Marshal(payload)
 	if err != nil {
@@ -92,8 +92,15 @@ func (s *TaskService) UpdateProgress(ctx context.Context, taskID, stage, title, 
 	if err := s.repo.Tasks().AppendProgressLog(ctx, taskID, string(msg)); err != nil {
 		return fmt.Errorf("append progress log: %w", err)
 	}
+	// Persist structured payload to dedicated column so Studio can render the
+	// current stage across reloads without parsing the longtext progress_log
+	// (which also carries "Using tool: ..." noise from the agent executor).
+	// Failure is non-fatal — same precedence as the progress column write above.
+	if err := s.repo.Tasks().UpdateLatestProgress(ctx, taskID, payload); err != nil {
+		s.logger.Warn().Err(err).Str("task_id", taskID).Msg("persist latest_progress")
+	}
 	if s.pubsub != nil {
-		s.pubsub.PublishProgressStructured(ctx, taskID, stage, title, description, percent)
+		s.pubsub.PublishProgressStructured(ctx, taskID, payload.Stage, payload.Title, payload.Description, payload.Percent)
 	}
 	return nil
 }

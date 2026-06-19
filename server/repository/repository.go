@@ -85,6 +85,10 @@ type TaskRepository interface {
 	UpdateProgressLog(ctx context.Context, id, log string) error
 	AppendProgressLog(ctx context.Context, id, message string) error
 	UpdateProgressColumn(ctx context.Context, id string, percent int) error
+	// UpdateLatestProgress writes the latest structured progress payload to the
+	// dedicated latest_progress JSON column. Called by TaskService.UpdateProgress
+	// so Studio can render the current stage without parsing progress_log.
+	UpdateLatestProgress(ctx context.Context, id string, payload model.ProgressPayload) error
 	// GetTypeAndProgress loads only the type and progress columns for a task.
 	// Used on hot paths (e.g. UpdateProgress) where loading the full row —
 	// including the longtext progress_log — would be wasteful.

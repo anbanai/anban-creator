@@ -10,6 +10,12 @@ export interface Task {
   status: TaskStatus
   progress?: number
   progress_log?: string
+  latest_progress?: {
+    stage?: string
+    title?: string
+    description?: string
+    percent?: number
+  }
   image_ratio?: string
   image_model_key?: string
   skip_reference_image?: boolean

@@ -109,15 +109,23 @@ export default function TaskDetailPage() {
   // 行尾两空格 + \n 是 Markdown 的硬换行语法（<br>），避免单 \n 被 marked 当作 soft break 塌缩成空格。
   const logMarkdown = displayLogs.join('  \n')
   const showLogs = displayLogs.length > 0 || Boolean(sseError) || task?.status === 'running'
-  const latestPersistedProgressMessage = [...persistedLogs].reverse()
-    .map((line) => line.replace(/^\[\d+%]\s*/, '').trim())
-    .find(Boolean)
-  const progressValue = Math.max(0, Math.min(100, liveProgress?.percent ?? task?.progress ?? 0))
-  const fallbackTitle = latestPersistedProgressMessage
-    ?? (task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...')
-  const progressTitle = liveProgress?.title ?? fallbackTitle
-  const progressDescription = liveProgress?.description ?? null
-  const progressStage = liveProgress?.stage ?? null
+  // progressValue takes the MAX of live SSE and persisted task.progress to
+  // guarantee a monotonic bar. task.progress is the server-side high-water
+  // mark (UpdateProgressColumn has a monotonic guard); latest_progress.percent
+  // is last-writer-wins and can be lower under out-of-order stage emissions,
+  // so it must NOT be the sole source — Math.max keeps the bar from regressing.
+  const progressValue = Math.max(0, Math.min(100, Math.max(
+    liveProgress?.percent ?? 0,
+    task?.progress ?? 0,
+  )))
+  // Prefer live SSE > server-persisted latest_progress > generic fallback.
+  // Never fall back to arbitrary progress_log lines — that column mixes
+  // structured JSON with "Using tool: ..." noise and would leak into the card.
+  const fallbackTitle = task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...'
+  const persistedProgress = task?.latest_progress
+  const progressTitle = liveProgress?.title ?? persistedProgress?.title ?? fallbackTitle
+  const progressDescription = liveProgress?.description ?? persistedProgress?.description ?? null
+  const progressStage = liveProgress?.stage ?? persistedProgress?.stage ?? null
   const isRunning = task?.status === 'running'
 
   const cancelMutation = useMutation({
@@ -585,16 +593,22 @@ export default function TaskDetailPage() {
             </div>
             ) : (
               <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  {isRunning && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />}
-                  <span className="min-w-0 truncate text-sm font-medium">{progressTitle}</span>
-                  {progressStage && (
-                    <Badge variant="outline" className="shrink-0 text-xs">
-                      {progressStageLabel[progressStage] ?? progressStage}
-                    </Badge>
+                <div className="flex items-center justify-between gap-2">
+                  {progressStage ? (
+                    <span className="text-xs text-muted-foreground">
+                      阶段：{progressStageLabel[progressStage] ?? progressStage}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground/60">执行中</span>
                   )}
-                  <span className="ml-auto shrink-0 text-sm font-semibold text-primary tabular-nums">
+                  <span className="shrink-0 text-sm font-semibold text-primary tabular-nums">
                     {progressValue}%
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {isRunning && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
+                  <span className="min-w-0 truncate text-base font-semibold text-foreground">
+                    {progressTitle}
                   </span>
                 </div>
                 <Progress value={progressValue} className="w-full" />

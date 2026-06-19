@@ -66,7 +66,8 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       status: 'running',
       progress: 42,
-      progress_log: '准备素材\n[42%] 正在写作正文',
+      progress_log: '准备素材\nUsing tool: Read',
+      latest_progress: { stage: 'writing', title: '正在写作正文', percent: 42 },
       result: { files: null, output: '' },
       completed_at: '',
     }))
@@ -75,6 +76,8 @@ describe('TaskDetailPage', () => {
 
     expect(await screen.findByText('42%')).toBeInTheDocument()
     expect(screen.getByText('正在写作正文')).toBeInTheDocument()
+    // progress_log noise like "Using tool: ..." must NOT leak into the card.
+    expect(screen.queryByText('Using tool: Read')).not.toBeInTheDocument()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
   })

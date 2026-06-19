@@ -384,6 +384,30 @@ func TestTaskRepository_CRUD(t *testing.T) {
 		t.Errorf("expected progress log, got %s", found.ProgressLog)
 	}
 
+	// UpdateLatestProgress — verify JSON round-trip via datatypes.JSONType.
+	lp := model.ProgressPayload{
+		Stage:       "research",
+		Title:       "选题研究",
+		Description: "采集热门笔记数据",
+		Percent:     15,
+	}
+	if err := repo.Tasks().UpdateLatestProgress(ctx, "task-abc123def456", lp); err != nil {
+		t.Fatalf("UpdateLatestProgress: %v", err)
+	}
+	found, _ = repo.Tasks().FindByID(ctx, "task-abc123def456")
+	if got := found.LatestProgress.Data(); got.Stage != "research" || got.Title != "选题研究" || got.Percent != 15 {
+		t.Errorf("latest_progress round-trip mismatch: %+v", got)
+	}
+	// Second write overwrites (last-writer-wins) — verifies the column is updatable, not append-only.
+	lp2 := model.ProgressPayload{Stage: "writing", Title: "内容写作", Percent: 45}
+	if err := repo.Tasks().UpdateLatestProgress(ctx, "task-abc123def456", lp2); err != nil {
+		t.Fatalf("UpdateLatestProgress (overwrite): %v", err)
+	}
+	found, _ = repo.Tasks().FindByID(ctx, "task-abc123def456")
+	if got := found.LatestProgress.Data(); got.Stage != "writing" || got.Description != "" {
+		t.Errorf("latest_progress overwrite mismatch: %+v", got)
+	}
+
 	// UpdateResult
 	if err := repo.Tasks().UpdateResult(ctx, "task-abc123def456", `{"url":"https://example.com"}`); err != nil {
 		t.Fatalf("UpdateResult: %v", err)

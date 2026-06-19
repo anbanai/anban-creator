@@ -7,6 +7,7 @@ import (
 
 	"github.com/royalrick/anbanwriter/server/model"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -150,6 +151,16 @@ func (r *taskRepository) AppendProgressLog(ctx context.Context, id, message stri
 // percent is available.
 func (r *taskRepository) UpdateProgressColumn(ctx context.Context, id string, percent int) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("progress", percent).Error
+}
+
+// UpdateLatestProgress writes the latest structured progress payload to the
+// dedicated latest_progress JSON column. Called by TaskService.UpdateProgress
+// at every stage transition so Studio can render the current stage across
+// reloads without parsing the mixed progress_log column.
+func (r *taskRepository) UpdateLatestProgress(ctx context.Context, id string, payload model.ProgressPayload) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ?", id).
+		Update("latest_progress", datatypes.NewJSONType(payload)).Error
 }
 
 // GetTypeAndProgress loads only the type and progress columns for a task,
