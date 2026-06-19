@@ -272,7 +272,7 @@ Codex-native port of `claudecode/`. Plugin bundle includes skills + MCP + hooks;
 codex/                             # git submodule → anbanai/anbanwriter-codex
 ├── .codex-plugin/                 # Codex plugin manifest (camelCase fields)
 ├── .mcp.json                      # MCP server config (identical to claudecode)
-├── skills/                        # 18 SKILL.md skills (aligned with claudecode, init adjusted for ~/.codex/config.toml)
+├── skills/                        # 18 SKILL.md skills (aligned with claudecode, setup adjusted for ~/.codex/config.toml)
 ├── agents/                        # 5 subagent TOMLs (wechatarticle, seednote, designer, live-slicer, short-video-studio)
 ├── install/                       # install-subagents.sh + agents-registration.toml
 ├── hooks/                         # SubagentStop + Stop (Stop replaces Claude Code's TaskCompleted)
