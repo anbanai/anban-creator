@@ -609,7 +609,7 @@ func TestBuildUserPrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildUserPrompt(tt.taskType, tt.topic, tt.agentName, tt.style, "")
+			got := BuildUserPrompt(tt.taskType, tt.topic, tt.agentName, tt.style, "", "", "")
 			for _, sub := range tt.wantContains {
 				if !strings.Contains(got, sub) {
 					t.Errorf("BuildUserPrompt() = %q, want to contain %q", got, sub)
@@ -629,14 +629,14 @@ func TestBuildUserPrompt(t *testing.T) {
 
 func TestBuildUserPrompt_Goal(t *testing.T) {
 	// Empty goal — no /goal prefix.
-	got := BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "")
+	got := BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "", "")
 	if strings.Contains(got, "/goal ") {
 		t.Errorf("empty goal should not include /goal prefix; got %q", got)
 	}
 
 	// Non-empty goal — /goal prefix appears with the condition, followed by the base prompt.
 	goal := "文章字数不少于 1000 字"
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", goal)
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", goal, "", "")
 	if !strings.HasPrefix(got, "/goal "+goal) {
 		t.Errorf("BuildUserPrompt with goal should start with %q; got %q", "/goal "+goal, got[:min(len(got), 80)])
 	}
@@ -646,13 +646,13 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 	}
 
 	// Whitespace-only goal is treated as empty.
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "   \n\t  ")
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "   \n\t  ", "", "")
 	if strings.Contains(got, "/goal ") {
 		t.Errorf("whitespace-only goal should not include /goal prefix; got %q", got)
 	}
 
 	// Surrounding whitespace is trimmed.
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "  含关键词 ABC  ")
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "  含关键词 ABC  ", "", "")
 	wantPrefix := "/goal 含关键词 ABC"
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Errorf("goal should be trimmed; want prefix %q, got %q", wantPrefix, got[:min(len(got), 80)])
@@ -660,7 +660,7 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 
 	// Multi-line goal is flattened to a single /goal line (Claude Code's slash
 	// parser only registers the first line as the condition).
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "字数 ≥ 1000\n包含 3 个案例\n带封面图")
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "字数 ≥ 1000\n包含 3 个案例\n带封面图", "", "")
 	firstLine := got
 	if idx := strings.Index(got, "\n"); idx >= 0 {
 		firstLine = got[:idx]
@@ -675,6 +675,41 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 	}
 	if strings.Contains(firstLine, "\n") {
 		t.Errorf("goal line must be single-line; got %q", firstLine)
+	}
+}
+
+func TestBuildUserPrompt_TaskContext(t *testing.T) {
+	// Both task_id and channel_id present.
+	got := BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "task-123", "chan-abc")
+	if !strings.Contains(got, "本任务上下文：") {
+		t.Errorf("missing 任务上下文 line; got %q", got)
+	}
+	if !strings.Contains(got, "task_id=task-123") {
+		t.Errorf("missing task_id; got %q", got)
+	}
+	if !strings.Contains(got, "channel_id=chan-abc") {
+		t.Errorf("missing channel_id; got %q", got)
+	}
+
+	// Only task_id.
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "task-123", "")
+	if !strings.Contains(got, "本任务上下文：task_id=task-123") {
+		t.Errorf("expected only task_id in context line; got %q", got)
+	}
+	if strings.Contains(got, "channel_id=") {
+		t.Errorf("channel_id= should be absent when empty; got %q", got)
+	}
+
+	// Only channel_id.
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "", "chan-abc")
+	if !strings.Contains(got, "本任务上下文：channel_id=chan-abc") {
+		t.Errorf("expected only channel_id in context line; got %q", got)
+	}
+
+	// Both empty — line omitted entirely.
+	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "", "")
+	if strings.Contains(got, "本任务上下文") {
+		t.Errorf("context line should be omitted when both IDs empty; got %q", got)
 	}
 }
 

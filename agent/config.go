@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 
 	serveragent "github.com/royalrick/anbanwriter/server/agent"
@@ -75,5 +76,5 @@ func ParseConfig() (*Config, error) {
 
 func (c *Config) UserPrompt() string {
 	agentName := serveragent.TaskTypeToAgent(c.TaskType)
-	return serveragent.BuildUserPrompt(c.TaskType, c.Topic, agentName, c.Style, c.Goal)
+	return serveragent.BuildUserPrompt(c.TaskType, c.Topic, agentName, c.Style, c.Goal, c.TaskID, os.Getenv("ANBANWRITER_DEFAULT_CHANNEL"))
 }

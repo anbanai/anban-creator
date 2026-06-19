@@ -51,7 +51,7 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // spaces) because Claude Code's slash command parser only registers the first
 // line as the condition — anything after a newline would leak into the user
 // prompt body and silently drop from evaluation.
-func BuildUserPrompt(taskType, topic, agentName, style, goal string) string {
+func BuildUserPrompt(taskType, topic, agentName, style, goal, taskID, channelID string) string {
 	_ = taskType // reserved for future platform-specific prompt variations
 	var base string
 	if topic == "" {
@@ -68,6 +68,16 @@ func BuildUserPrompt(taskType, topic, agentName, style, goal string) string {
 			"\n\n视觉风格要求（覆盖账号默认风格，请在生成图片时遵守）：%s",
 			style,
 		)
+	}
+	if taskID != "" || channelID != "" {
+		parts := make([]string, 0, 2)
+		if taskID != "" {
+			parts = append(parts, "task_id="+taskID)
+		}
+		if channelID != "" {
+			parts = append(parts, "channel_id="+channelID)
+		}
+		base += "\n\n本任务上下文：" + strings.Join(parts, ", ")
 	}
 	if trimmedGoal := normalizeGoalCondition(goal); trimmedGoal != "" {
 		return "/goal " + trimmedGoal + "\n\n" + base
@@ -385,7 +395,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	agentName := TaskTypeToAgent(opts.Task.Type)
 
 	// 5. Build user prompt that references the agent by name.
-	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.Style, opts.Task.Goal)
+	channelID := ""
+	if opts.Channel != nil {
+		channelID = opts.Channel.ID
+	}
+	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.Style, opts.Task.Goal, opts.Task.ID, channelID)
 
 	// Load agent definition from plugin directory and pass via WithAgent()
 	// (SDK programmatic subagents) instead of --agent CLI flag lookup.
