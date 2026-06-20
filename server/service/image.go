@@ -28,19 +28,31 @@ import (
 
 // ImageResult is the response for single image generation.
 type ImageResult struct {
-	FilePath        string `json:"file_path"`
-	DownloadURL     string `json:"download_url,omitempty"`
-	Size            string `json:"size"`
-	Width           int    `json:"width,omitempty"`
-	Height          int    `json:"height,omitempty"`
-	Prompt          string `json:"prompt,omitempty"`
-	ImageType       string `json:"image_type,omitempty"`
-	Provider        string `json:"provider,omitempty"`
-	Model           string `json:"model,omitempty"`
-	RevisedPrompt   string `json:"revised_prompt,omitempty"`
-	ResponseType    string `json:"response_type,omitempty"`
-	ResponsePreview string `json:"response_preview,omitempty"`
-	OutputMIME      string `json:"output_mime,omitempty"`
+	FilePath        string              `json:"file_path"`
+	DownloadURL     string              `json:"download_url,omitempty"`
+	Size            string              `json:"size"`
+	Width           int                 `json:"width,omitempty"`
+	Height          int                 `json:"height,omitempty"`
+	Prompt          string              `json:"prompt,omitempty"`
+	ImageType       string              `json:"image_type,omitempty"`
+	Provider        string              `json:"provider,omitempty"`
+	Model           string              `json:"model,omitempty"`
+	RevisedPrompt   string              `json:"revised_prompt,omitempty"`
+	ResponseType    string              `json:"response_type,omitempty"`
+	ResponsePreview string              `json:"response_preview,omitempty"`
+	OutputMIME      string              `json:"output_mime,omitempty"`
+	Verification    *VisionVerification `json:"verification,omitempty"`
+}
+
+// VisionVerification is the post-generation vision check result attached to
+// ImageResult when the caller passes verify_with_vision=true. The fields mirror
+// the JSON shape the agent is instructed to request in verification_prompt.
+type VisionVerification struct {
+	Passed          bool     `json:"passed"`
+	Score           string   `json:"score"` // "high" | "medium" | "low" | "unknown"
+	MissingEntities []string `json:"missing_entities,omitempty"`
+	Notes           string   `json:"notes,omitempty"`
+	Raw             string   `json:"raw,omitempty"` // raw vision model output for debugging
 }
 
 // UploadImageResult is the response for image upload.

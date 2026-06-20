@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -14,13 +15,14 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/service"
 )
 
 // registerImageTools registers image generation, upload, and compression tools.
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and if output_path is provided also saves the image to that server-local path and returns file_path.",
+		Description: "Generate a single image using the channel's configured image provider (OpenAI DALL-E, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and if output_path is provided also saves the image to that server-local path and returns file_path. When verify_with_vision=true, also runs a post-generation vision check using verification_prompt and returns a verification object {passed, score, missing_entities, notes, raw}.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -31,8 +33,10 @@ func registerImageTools(server *mcp.Server) {
 				"size":            map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides channel default when provided; providers may still return a different crop/ratio."},
 				"ref_image_path":  map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
 				"task_id":         map[string]any{"type": "string", "description": "Task ID (for logging, credit tracking, and per-task image model lookup)"},
-				"image_model_key": map[string]any{"type": "string", "description": "Optional image model key selected at task creation time. When provided, overrides user/server defaults for this single call. Resolution: '' = server default; 'custom' = user model-config override (Enterprise only); any other value must match a server-managed image preset key. If task_id is also provided and task_id has its own image_model_key, the explicit image_model_key parameter takes precedence."},
-				"watermark":       map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
+				"image_model_key":     map[string]any{"type": "string", "description": "Optional image model key selected at task creation time. When provided, overrides user/server defaults for this single call. Resolution: '' = server default; 'custom' = user model-config override (Enterprise only); any other value must match a server-managed image preset key. If task_id is also provided and task_id has its own image_model_key, the explicit image_model_key parameter takes precedence."},
+				"watermark":           map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
+				"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities/matches the chapter content. No extra credit deduction for the vision call.", "default": false},
+				"verification_prompt": map[string]any{"type": "string", "description": "Prompt for the post-generation vision check (required when verify_with_vision=true). Should ask the vision model to verify required entities are present and return JSON {all_entities_present, missing_entities, relevance_entities, relevance_score, overall_pass}."},
 			},
 			"required": []any{"channel_id", "prompt"},
 		},
@@ -119,6 +123,8 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	refPath, _ := args["ref_image_path"].(string)
 	taskID, _ := args["task_id"].(string)
 	imageModelKey, _ := args["image_model_key"].(string)
+	verifyWithVision, _ := args["verify_with_vision"].(bool)
+	verificationPrompt, _ := args["verification_prompt"].(string)
 	var watermark *bool
 	if v, ok := args["watermark"].(bool); ok {
 		watermark = &v
@@ -225,7 +231,189 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			Msg("MCP generate_image succeeded")
 	}
 
+	// Optional post-generation vision verification. Runs only when the caller
+	// explicitly requests it; failures do not block the response — the agent
+	// decides whether to retry based on the returned verification object.
+	if verifyWithVision {
+		if verificationPrompt == "" {
+			return errorResult("verification_prompt is required when verify_with_vision is true"), nil
+		}
+		if svcs.WritingSvc == nil {
+			return errorResult("writing/vision service not available for verification"), nil
+		}
+		verification, vErr := runImageVerification(ctx, userID, result, verificationPrompt)
+		if vErr != nil {
+			// Verification failed for operational reasons (vision API down,
+			// file unreadable, etc.). Surface as a soft failure: return the
+			// image with an error note rather than dropping the generation.
+			if mcpLog != nil {
+				mcpLog.Warn().
+					Str("tool", "generate_image").
+					Str("task_id", taskID).
+					Str("channel_id", channelID).
+					Err(vErr).
+					Msg("MCP generate_image vision verification failed")
+			}
+			verification = &service.VisionVerification{
+				Passed: false,
+				Score:  "unknown",
+				Notes:  "verification call failed: " + vErr.Error(),
+			}
+		}
+		result.Verification = verification
+		if mcpLog != nil {
+			mcpLog.Info().
+				Str("tool", "generate_image").
+				Str("task_id", taskID).
+				Str("channel_id", channelID).
+				Bool("verification_passed", verification.Passed).
+				Str("verification_score", verification.Score).
+				Strs("missing_entities", verification.MissingEntities).
+				Msg("MCP generate_image vision verification completed")
+		}
+	}
+
 	return textResult(result)
+}
+
+// VisionVerification lives in the service package so it can be a field on
+// ImageResult; the mcp handler constructs it via runImageVerification below.
+
+// runImageVerification calls AnalyzeImage on the just-generated image with the
+// user-supplied verification_prompt and parses the JSON response into a
+// VisionVerification struct. Non-fatal parse issues fall back to score=unknown.
+func runImageVerification(ctx context.Context, userID string, result *service.ImageResult, prompt string) (*service.VisionVerification, error) {
+	if svcs.WritingSvc == nil {
+		return nil, fmt.Errorf("writing service unavailable")
+	}
+
+	var imageSource string
+	// Prefer the saved file_path (cheaper, no re-download). Fall back to the
+	// download URL for providers that return remote CDN URLs without saving.
+	if result.FilePath != "" {
+		data, err := os.ReadFile(result.FilePath)
+		if err != nil {
+			return nil, fmt.Errorf("read generated image: %w", err)
+		}
+		if len(data) > 10<<20 {
+			return nil, fmt.Errorf("generated image too large for vision check (max 10MB)")
+		}
+		mimeType := http.DetectContentType(data)
+		if !strings.HasPrefix(mimeType, "image/") {
+			return nil, fmt.Errorf("generated file is not an image")
+		}
+		imageSource = fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
+	} else if strings.HasPrefix(result.DownloadURL, "https://") {
+		data, err := downloadHTTPSImage(ctx, result.DownloadURL, 10<<20)
+		if err != nil {
+			return nil, fmt.Errorf("download generated image for verification: %w", err)
+		}
+		mimeType := http.DetectContentType(data)
+		imageSource = fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
+	} else if strings.HasPrefix(result.DownloadURL, "data:image/") {
+		// Cap the same 10MB limit as the file_path branch. Base64 encoding
+		// inflates by ~33%, so a 10MB image is ~13MB as a data URL.
+		if len(result.DownloadURL) > 14<<20 {
+			return nil, fmt.Errorf("generated image too large for vision check (data URL exceeds 10MB image equivalent)")
+		}
+		imageSource = result.DownloadURL
+	} else {
+		return nil, fmt.Errorf("no accessible image source for verification (need file_path or download_url)")
+	}
+
+	raw, err := svcs.WritingSvc.AnalyzeImage(ctx, userID, imageSource, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("analyze image: %w", err)
+	}
+
+	return parseVisionVerificationJSON(raw), nil
+}
+
+// parseVisionVerificationJSON extracts the structured fields from the vision
+// model's response. Tolerates JSON wrapped in markdown fences or surrounded by
+// prose; missing fields default to zero values.
+func parseVisionVerificationJSON(raw string) *service.VisionVerification {
+	v := &service.VisionVerification{Score: "unknown", Raw: raw}
+
+	// Strip markdown code fences if present.
+	body := strings.TrimSpace(raw)
+	body = strings.TrimPrefix(body, "```json")
+	body = strings.TrimPrefix(body, "```")
+	body = strings.TrimSuffix(body, "```")
+	body = strings.TrimSpace(body)
+
+	// Find the first '{' and last '}' to tolerate leading/trailing prose.
+	start := strings.Index(body, "{")
+	end := strings.LastIndex(body, "}")
+	if start < 0 || end <= start {
+		// Could not find a JSON object — treat as soft failure.
+		v.Notes = "vision response was not valid JSON; raw preserved"
+		return v
+	}
+
+	var parsed struct {
+		AllEntitiesPresent  any      `json:"all_entities_present"`
+		MissingEntities     []string `json:"missing_entities"`
+		RelevanceScore      string   `json:"relevance_score"`
+		HasForbiddenContent bool     `json:"has_forbidden_content"`
+		OverallPass         any      `json:"overall_pass"`
+		ForbiddenNotes      string   `json:"forbidden_notes"`
+		SharperPromptHint   string   `json:"sharper_prompt_hint"`
+	}
+	if err := json.Unmarshal([]byte(body[start:end+1]), &parsed); err != nil {
+		v.Notes = "vision response JSON parse error: " + err.Error()
+		return v
+	}
+
+	v.MissingEntities = parsed.MissingEntities
+	if parsed.RelevanceScore != "" {
+		v.Score = strings.ToLower(parsed.RelevanceScore)
+	}
+	v.Passed = coerceBool(parsed.OverallPass, parsed.AllEntitiesPresent)
+	notes := parsed.ForbiddenNotes
+	if parsed.SharperPromptHint != "" {
+		if notes != "" {
+			notes += "; "
+		}
+		notes += "sharper_prompt_hint: " + parsed.SharperPromptHint
+	}
+	if parsed.HasForbiddenContent && parsed.ForbiddenNotes != "" {
+		v.Passed = false
+	}
+	v.Notes = notes
+	return v
+}
+
+// coerceBool returns true if any of the supplied values is truthy. Accepts
+// native bool, the strings "true"/"yes", and the integer 1 — vision models
+// occasionally wrap a boolean in a string and we don't want to silently flag
+// a passing image as failed because of JSON typing drift.
+func coerceBool(values ...any) bool {
+	for _, v := range values {
+		switch x := v.(type) {
+		case bool:
+			if x {
+				return true
+			}
+		case string:
+			if s := strings.ToLower(strings.TrimSpace(x)); s == "true" || s == "yes" {
+				return true
+			}
+		case float64:
+			if x == 1 {
+				return true
+			}
+		case int:
+			if x == 1 {
+				return true
+			}
+		case int64:
+			if x == 1 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func uploadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

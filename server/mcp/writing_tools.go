@@ -2,12 +2,14 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/service"
 )
 
 // longTextHeartbeatInterval is how often the long-text tool handlers push a
@@ -46,6 +48,55 @@ func registerWritingTools(server *mcp.Server) {
 			"required": []any{"channel_id", "markdown"},
 		},
 	}, convertMarkdownHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "render_template",
+		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the LLM freely decide image placement and layout), render_template annotates the markdown with explicit [SLOT: ...] markers so the LLM must place each image at the planned position and wrap each section in the specified layout module. Use this when you have a visual-rhythm-plan that dictates where each image goes (hero / section_opener / inline_detail / footer).",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"channel_id": map[string]any{"type": "string", "description": "Channel ID (determines theme)"},
+				"markdown":   map[string]any{"type": "string", "description": "Article Markdown (may contain inline ![alt](url) images too)"},
+				"layout_plan": map[string]any{
+					"type": "object",
+					"description": "Structured layout plan: { article_type, template_name, slots: [...], footer?: {...} }. Each slot has slot_id (hero/section_opener/inline_detail/footer), section_index, image_url, image_size (full-bleed/full-width/inline), module (optional layout module name), module_vars.",
+					"properties": map[string]any{
+						"article_type":  map[string]any{"type": "string", "description": "long-form-essay / listicle / tutorial / story-narrative"},
+						"template_name": map[string]any{"type": "string", "description": "Template name from the templates/article/ library"},
+						"slots": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"slot_id":              map[string]any{"type": "string", "enum": []any{"hero", "section_opener", "inline_detail", "footer"}},
+									"section_index":        map[string]any{"type": "integer", "description": "0-based ## section index; -1 for footer"},
+									"section_title":        map[string]any{"type": "string"},
+									"after_paragraph_index": map[string]any{"type": "integer", "description": "for inline_detail: 0-based paragraph within section"},
+									"image_url":            map[string]any{"type": "string"},
+									"image_size":           map[string]any{"type": "string", "enum": []any{"full-bleed", "full-width", "inline"}},
+									"module":               map[string]any{"type": "string", "description": "layout module name (hero/quote/callout/steps/etc.)"},
+									"module_vars":          map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+								},
+								"required": []any{"slot_id", "section_index"},
+							},
+						},
+						"footer": map[string]any{
+							"type": "object",
+							"description": "Optional footer slot (CTA / checklist / summary module)",
+							"properties": map[string]any{
+								"module":      map[string]any{"type": "string"},
+								"image_url":   map[string]any{"type": "string"},
+								"module_vars": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+							},
+						},
+					},
+					"required": []any{"article_type", "slots"},
+				},
+				"theme": map[string]any{"type": "string", "description": "Theme name override (optional, uses channel theme by default)"},
+			},
+			"required": []any{"channel_id", "markdown", "layout_plan"},
+		},
+	}, renderTemplateHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "humanize_article",
@@ -193,6 +244,47 @@ func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	result, err := svcs.WritingSvc.ConvertMarkdown(ctx, userID, channelID, markdown, theme)
 	if err != nil {
 		return billingError("convert markdown", err), nil
+	}
+
+	return textResult(result)
+}
+
+func renderTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.WritingSvc == nil {
+		return errorResult("writing service not available"), nil
+	}
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+
+	channelID, _ := args["channel_id"].(string)
+	markdown, _ := args["markdown"].(string)
+	if channelID == "" {
+		return errorResult("channel_id is required"), nil
+	}
+	if markdown == "" {
+		return errorResult("markdown is required"), nil
+	}
+
+	layoutPlan, err := service.ParseLayoutPlan(args["layout_plan"])
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid layout_plan: %v", err)), nil
+	}
+
+	theme, _ := args["theme"].(string)
+
+	logLongTextToolStart("render_template", req)
+	defer logLongTextToolEnd("render_template", time.Now())
+	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "render_template", longTextHeartbeatInterval)
+	defer stop()
+
+	provider, mdl := resolveTextModel(ctx, userID)
+	if err := maybeDeduct(ctx, userID, model.CreditTypeConvert, provider, mdl, 1); err != nil {
+		return billingError("render template", err), nil
+	}
+
+	result, err := svcs.WritingSvc.RenderTemplate(ctx, userID, channelID, markdown, layoutPlan, theme)
+	if err != nil {
+		return billingError("render template", err), nil
 	}
 
 	return textResult(result)
