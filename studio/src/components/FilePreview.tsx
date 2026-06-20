@@ -14,11 +14,6 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 
-interface FilePreviewProps {
-  file: TaskFile
-  taskId: string
-}
-
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -52,61 +47,68 @@ function FilePreviewModalContent({
   const isText = !isImage && !isVideo && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
   const isMD = isText && isMarkdownFile(file.file_name)
 
-  const fetchContent = useCallback(async () => {
-    if (isImage) {
-      const url = file.url || ''
-      if (!url) return
-      if (url.startsWith('/api/v1/files/')) {
-        const blob = await api.tasks.downloadFileBlob(taskId, file.id)
-        if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
-        blobUrlRef.current = URL.createObjectURL(blob)
-        setImgSrc(blobUrlRef.current)
-      } else {
-        setImgSrc(url)
-      }
-      return
-    }
+  useEffect(() => {
+    let cancelled = false
 
-    if (isVideo) {
-      const url = file.url || ''
-      if (!url) return
-      if (url.startsWith('/api/v1/files/')) {
-        const blob = await api.tasks.downloadFileBlob(taskId, file.id)
-        if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
-        blobUrlRef.current = URL.createObjectURL(blob)
-        setImgSrc(blobUrlRef.current)
-      } else {
-        setImgSrc(url)
+    async function load() {
+      if (isImage || isVideo) {
+        const url = file.url || ''
+        if (!url) return
+        if (url.startsWith('/api/v1/files/')) {
+          try {
+            const blob = await api.tasks.downloadFileBlob(taskId, file.id)
+            if (cancelled) return
+            const newUrl = URL.createObjectURL(blob)
+            const oldUrl = blobUrlRef.current
+            blobUrlRef.current = newUrl
+            setImgSrc(newUrl)
+            if (oldUrl) URL.revokeObjectURL(oldUrl)
+          } catch (err) {
+            console.error('Failed to fetch preview:', err)
+            toast.error('文件预览加载失败')
+          }
+        } else {
+          // Keep blobUrlRef mirroring the displayed src — unmount cleanup
+          // revokes whatever's in the ref, so it must not hold a stale blob.
+          if (blobUrlRef.current) {
+            URL.revokeObjectURL(blobUrlRef.current)
+            blobUrlRef.current = ''
+          }
+          setImgSrc(url)
+        }
+        return
       }
-      return
-    }
 
-    setLoading(true)
-    try {
-      if (isHTML) {
-        const html = await api.tasks.fetchPreviewHTML(taskId)
-        setHtmlContent(html)
-      } else if (isText) {
-        const blob = await api.tasks.downloadFileBlob(taskId, file.id)
-        setTextContent(await blob.text())
+      setLoading(true)
+      try {
+        if (isHTML) {
+          const html = await api.tasks.fetchPreviewHTML(taskId)
+          if (cancelled) return
+          setHtmlContent(html)
+        } else if (isText) {
+          const blob = await api.tasks.downloadFileBlob(taskId, file.id)
+          if (cancelled) return
+          setTextContent(await blob.text())
+        }
+      } catch (err) {
+        console.error('Failed to fetch preview:', err)
+        toast.error('文件预览加载失败')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-    } catch (err) {
-      console.error('Failed to fetch preview:', err)
-      toast.error('文件预览加载失败')
-    } finally {
-      setLoading(false)
     }
+    void load()
+    return () => { cancelled = true }
   }, [file, taskId, isImage, isVideo, isHTML, isText])
 
   useEffect(() => {
-    fetchContent()
     return () => {
       if (blobUrlRef.current) {
         URL.revokeObjectURL(blobUrlRef.current)
         blobUrlRef.current = ''
       }
     }
-  }, [fetchContent])
+  }, [])
 
   const handleDownload = async () => {
     try {
@@ -336,7 +338,7 @@ export function FilePreviewGallery({ files, taskId, inlineItemClassName }: { fil
       ))}
       {open && currentFile && (
         <Dialog open={open} onOpenChange={setOpen}>
-          <FilePreviewModalContent key={currentFile.id} file={currentFile} taskId={taskId}>
+          <FilePreviewModalContent file={currentFile} taskId={taskId}>
             {hasMultiple && (
               <>
                 {/* Counter */}
@@ -498,13 +500,5 @@ function FilePreviewInline({
         </div>
       </div>
     </div>
-  )
-}
-
-// --- Standalone FilePreview (backward compat, single-file modal) ---
-
-export function FilePreview({ file, taskId }: FilePreviewProps) {
-  return (
-    <FilePreviewGallery files={[file]} taskId={taskId} />
   )
 }
