@@ -47,12 +47,25 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // across turns until a small fast model confirms the condition holds (or
 // max_turns is exhausted). Empty string is a no-op.
 //
+// For seednote tasks, the variadic imageOpts controls image composition:
+//   imageOpts[0] = hasContentImage (default false; cover+content when true)
+//   imageOpts[1] = hasTailImage    (default false; adds tail when true)
+// Cover is always on. Non-seednote types ignore the directive. Production callers
+// (executor, agent binary) always pass two explicit bools from the task model;
+// the variadic form keeps existing one-arg test calls compiling.
+//
 // Multi-line goal conditions are flattened to a single line (newlines →
 // spaces) because Claude Code's slash command parser only registers the first
 // line as the condition — anything after a newline would leak into the user
 // prompt body and silently drop from evaluation.
-func BuildUserPrompt(taskType, topic, agentName, style, goal, taskID, channelID string) string {
-	_ = taskType // reserved for future platform-specific prompt variations
+func BuildUserPrompt(taskType, topic, agentName, style, goal, taskID, channelID string, imageOpts ...bool) string {
+	var hasContentImage, hasTailImage bool
+	if len(imageOpts) > 0 {
+		hasContentImage = imageOpts[0]
+	}
+	if len(imageOpts) > 1 {
+		hasTailImage = imageOpts[1]
+	}
 	var base string
 	if topic == "" {
 		base = fmt.Sprintf(
@@ -69,6 +82,9 @@ func BuildUserPrompt(taskType, topic, agentName, style, goal, taskID, channelID 
 			style,
 		)
 	}
+	if taskType == model.PlatformSeednote {
+		base += "\n\n" + describeSeednoteImageComposition(hasContentImage, hasTailImage)
+	}
 	if taskID != "" || channelID != "" {
 		parts := make([]string, 0, 2)
 		if taskID != "" {
@@ -83,6 +99,26 @@ func BuildUserPrompt(taskType, topic, agentName, style, goal, taskID, channelID 
 		return "/goal " + trimmedGoal + "\n\n" + base
 	}
 	return base
+}
+
+// describeSeednoteImageComposition renders the image composition directive that
+// overrides the seednote-visual-design skill's default count rules. Cover is
+// always generated; content and tail are toggled by the two flags. The skill
+// and its SubagentStop hook rely on image-plan.md declaring the same count.
+func describeSeednoteImageComposition(hasContent, hasTail bool) string {
+	parts := []string{"封面图（cover.png）"}
+	if hasContent {
+		parts = append(parts, "1 张内容图（image_01.png）")
+	}
+	if hasTail {
+		parts = append(parts, "尾图（tail.png）")
+	}
+	total := 1 + len(parts) - 1 // cover + optional content + optional tail
+	return fmt.Sprintf(
+		"图片构成要求（必须严格遵守，覆盖 skill 默认数量规则）：生成 %s，共 %d 张。"+
+			"image-plan.md 必须在「计划图片数量」字段写入此数字。",
+		strings.Join(parts, "、"), total,
+	)
 }
 
 // normalizeGoalCondition trims surrounding whitespace and collapses internal
@@ -399,7 +435,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	if opts.Channel != nil {
 		channelID = opts.Channel.ID
 	}
-	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.Style, opts.Task.Goal, opts.Task.ID, channelID)
+	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.Style, opts.Task.Goal, opts.Task.ID, channelID, opts.Task.HasContentImage, opts.Task.HasTailImage)
 
 	// Load agent definition from plugin directory and pass via WithAgent()
 	// (SDK programmatic subagents) instead of --agent CLI flag lookup.

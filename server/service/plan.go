@@ -31,6 +31,9 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 // goal and goalMode propagate to tasks spawned from this plan; when goalMode is
 // true, spawned tasks charge ×GoalMultiplier upfront and evaluate the goal
 // after each execution.
+//
+// hasContentImage / hasTailImage control seednote image composition on spawned
+// tasks. nil falls back to the model's column defaults (content on, tail off).
 func (s *PlanService) Create(
 	ctx context.Context,
 	userID, channelID, cronExpr, prompt, imageModelKey string,
@@ -39,6 +42,7 @@ func (s *PlanService) Create(
 	watermark *bool,
 	goal string,
 	goalMode bool,
+	hasContentImage, hasTailImage *bool,
 ) (*model.Plan, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
@@ -64,6 +68,17 @@ func (s *PlanService) Create(
 		return nil, fmt.Errorf("invalid cron expression: %w", err)
 	}
 
+	// Seednote image composition: honor caller's explicit choice, otherwise rely
+	// on the model's column defaults (content on, tail off).
+	hasContent := true
+	if hasContentImage != nil {
+		hasContent = *hasContentImage
+	}
+	hasTail := false
+	if hasTailImage != nil {
+		hasTail = *hasTailImage
+	}
+
 	plan := &model.Plan{
 		ID:                 uuid.New().String(),
 		UserID:             userID,
@@ -80,6 +95,8 @@ func (s *PlanService) Create(
 		Watermark:          watermark != nil && *watermark,
 		Goal:               goal,
 		GoalMode:           goalMode,
+		HasContentImage:    hasContent,
+		HasTailImage:       hasTail,
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -123,6 +140,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - style:         nil = leave unchanged; &"" = clear; &"value" = set
 //   - watermark:     nil = leave unchanged; &true/&false = set
 //   - goalMode:      nil = leave unchanged; &true/&false = set
+//   - hasContentImage / hasTailImage: nil = leave unchanged; &true/&false = set
 //
 // referenceImageURL follows the same nil-means-unchanged semantics as the other
 // optional fields. prompt and goal are plain strings and always overwritten
@@ -137,6 +155,7 @@ func (s *PlanService) Update(
 	watermark *bool,
 	goal string,
 	goalMode *bool,
+	hasContentImage, hasTailImage *bool,
 ) (*model.Plan, error) {
 	plan, err := s.repo.Plans().FindByID(ctx, id)
 	if err != nil {
@@ -162,6 +181,12 @@ func (s *PlanService) Update(
 	}
 	if goalMode != nil {
 		plan.GoalMode = *goalMode
+	}
+	if hasContentImage != nil {
+		plan.HasContentImage = *hasContentImage
+	}
+	if hasTailImage != nil {
+		plan.HasTailImage = *hasTailImage
 	}
 
 	// If cron expression changed, validate and recompute next run.

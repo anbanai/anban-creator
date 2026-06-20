@@ -81,6 +81,11 @@ type createTaskRequest struct {
 	Goal               string  `json:"goal"`
 	GoalMode           bool    `json:"goal_mode"`
 	TemplateID         *string `json:"template_id,omitempty"`
+	// HasContentImage / HasTailImage: seednote image composition (cover always
+	// generated). nil → fall back to CreateManualParams defaults (content on,
+	// tail off). Non-seednote task types ignore them.
+	HasContentImage    *bool   `json:"has_content_image,omitempty"`
+	HasTailImage       *bool   `json:"has_tail_image,omitempty"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -165,6 +170,8 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		Goal:              req.Goal,
 		GoalMode:          req.GoalMode,
 		TemplateID:        templateID,
+		HasContentImage:   req.HasContentImage,
+		HasTailImage:      req.HasTailImage,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")

@@ -3,7 +3,7 @@ import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText, Stamp, Target, Loader2 } from 'lucide-react'
+import { Plus, FileText, Stamp, Target, Loader2, Images } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -46,6 +46,8 @@ function planToFormValues(plan: Plan): PlanFormValues {
     watermark: plan.watermark || false,
     goal: plan.goal || '',
     goal_mode: plan.goal_mode || false,
+    has_content_image: plan.has_content_image ?? true,
+    has_tail_image: plan.has_tail_image ?? false,
   }
 }
 
@@ -71,6 +73,8 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       style: '',
+      has_content_image: true,
+      has_tail_image: false,
     },
   })
 
@@ -181,6 +185,8 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       style: '',
+      has_content_image: true,
+      has_tail_image: false,
     })
     setSelectedTemplate(null)
     setModalOpen(true)
@@ -212,6 +218,8 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       style: '',
+      has_content_image: true,
+      has_tail_image: false,
     })
     setSelectedTemplate(null)
   }
@@ -241,6 +249,8 @@ export default function PlansPage() {
       watermark: values.watermark || undefined,
       goal_mode: values.goal_mode || undefined,
       goal: values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
+      has_content_image: values.type === 'seednote' ? values.has_content_image : undefined,
+      has_tail_image: values.type === 'seednote' ? values.has_tail_image : undefined,
     }
 
     if (editingPlan) {
@@ -508,6 +518,57 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {/* Image composition (seednote only) */}
+              {watchedType === 'seednote' && (
+                <FormField control={form.control} name="has_content_image" render={({ field }) => {
+                  const hasTail = form.watch('has_tail_image')
+                  const total = 1 + (field.value ? 1 : 0) + (hasTail ? 1 : 0)
+                  return (
+                    <FormItem>
+                      <div className="rounded-lg border border-border p-3">
+                        <div className="flex items-start gap-3">
+                          <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-foreground">图片构成</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              封面始终生成；勾选要额外生成的图。
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-3 divide-y divide-border">
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-foreground">封面图</span>
+                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">必选</span>
+                            </div>
+                            <Switch checked disabled />
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">内容图</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">承载 2-4 个信息点（image_01.png）</p>
+                            </div>
+                            <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">尾图</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">行动召唤 / 关注引导（tail.png）</p>
+                            </div>
+                            <Switch checked={!!hasTail} onCheckedChange={(v) => form.setValue('has_tail_image', v, { shouldDirty: true })} />
+                          </div>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          当前将生成 {total} 张图片
+                        </p>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )
+                }} />
+              )}
+
 
               <FormField control={form.control} name="goal_mode" render={({ field }) => (
                 <FormItem>

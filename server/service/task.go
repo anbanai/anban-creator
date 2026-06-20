@@ -172,7 +172,12 @@ type CreateManualParams struct {
 	// TemplateID optionally records which template was selected, for UI attribution
 	// only — it does NOT enter the style resolution chain (style is already copied
 	// from the template by the caller).
-	TemplateID        *string
+	TemplateID     *string
+	// HasContentImage / HasTailImage: seednote image composition (cover always
+	// generated). nil → fall back to task model defaults (content on, tail off);
+	// non-nil honors explicit user choice.
+	HasContentImage *bool
+	HasTailImage    *bool
 }
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
@@ -266,6 +271,17 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			taskID = generateTaskID()
 		}
 
+		// Seednote image composition: honor caller's explicit choice, otherwise rely
+		// on the model's column defaults (content on, tail off).
+		hasContent := true
+		if p.HasContentImage != nil {
+			hasContent = *p.HasContentImage
+		}
+		hasTail := false
+		if p.HasTailImage != nil {
+			hasTail = *p.HasTailImage
+		}
+
 		task := &model.Task{
 			ID:                 taskID,
 			UserID:             p.UserID,
@@ -282,6 +298,8 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Goal:               p.Goal,
 			GoalMode:           p.GoalMode,
 			TemplateID:         p.TemplateID,
+			HasContentImage:    hasContent,
+			HasTailImage:       hasTail,
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -382,6 +400,8 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Watermark:          plan.Watermark,
 		Goal:               plan.Goal,
 		GoalMode:           planGoalMode,
+		HasContentImage:    plan.HasContentImage,
+		HasTailImage:       plan.HasTailImage,
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {

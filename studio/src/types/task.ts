@@ -70,6 +70,9 @@ export interface CreateTaskRequest {
   goal?: string
   goal_mode?: boolean
   template_id?: string
+  // Seednote image composition: cover always generated. Server ignores for non-seednote.
+  has_content_image?: boolean
+  has_tail_image?: boolean
 }
 
 export interface WorkflowStatus {

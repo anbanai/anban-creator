@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/rs/zerolog"
 
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
+	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/storage"
 )
 
@@ -262,7 +264,7 @@ func (e *DockerExecutor) resolveAgentAPIKey(ctx context.Context, opts *Execution
 	return rawKey, nil
 }
 
-func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string, maxTurns int, workspace, apiKey string) []string {
+func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel string, maxTurns int, workspace, apiKey string) []string {
 	cmd := []string{
 		"abwriter-agent",
 		"--server-url", strings.TrimRight(e.serverURL, "/"),
@@ -280,8 +282,17 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, model string,
 	if strings.TrimSpace(opts.Task.Goal) != "" {
 		cmd = append(cmd, "--goal", opts.Task.Goal)
 	}
-	if model != "" {
-		cmd = append(cmd, "--model", model)
+	// Seednote image composition is the only task type that consumes these flags;
+	// passing them for other types would be noise. Agent CLI defaults already
+	// match the task model column defaults (content on, tail off).
+	if opts.Task.Type == model.PlatformSeednote {
+		cmd = append(cmd,
+			"--has-content-image", strconv.FormatBool(opts.Task.HasContentImage),
+			"--has-tail-image", strconv.FormatBool(opts.Task.HasTailImage),
+		)
+	}
+	if agentModel != "" {
+		cmd = append(cmd, "--model", agentModel)
 	}
 	return cmd
 }

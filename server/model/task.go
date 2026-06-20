@@ -43,6 +43,12 @@ type Task struct {
 	TemplateID          *string                             `gorm:"type:char(36);index" json:"template_id,omitempty"`
 	SkipReferenceImage  bool                                `gorm:"default:false" json:"skip_reference_image,omitempty"`
 	Watermark           bool                                `gorm:"default:false" json:"watermark,omitempty"`
+	// HasContentImage / HasTailImage control seednote image composition. Cover is
+	// always generated; these two flags decide whether image_01.png and tail.png
+	// follow. Default matches the seednote form default (content on, tail off).
+	// Propagated to the agent via BuildUserPrompt; non-seednote task types ignore them.
+	HasContentImage     bool                                `gorm:"default:true;not null" json:"has_content_image"`
+	HasTailImage        bool                                `gorm:"default:false;not null" json:"has_tail_image"`
 	ProgressLog         string                              `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Progress            int                                 `gorm:"default:0" json:"progress,omitempty"`
 	LatestProgress      datatypes.JSONType[ProgressPayload] `gorm:"type:json" json:"latest_progress"`

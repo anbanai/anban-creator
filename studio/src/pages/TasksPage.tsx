@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -74,6 +74,8 @@ export default function TasksPage() {
   const [quantity, setQuantity] = useState(1)
   const [watermark, setWatermark] = useState(false)
   const [goalMode, setGoalMode] = useState(false)
+  const [hasContentImage, setHasContentImage] = useState(true)
+  const [hasTailImage, setHasTailImage] = useState(false)
   const [goalText, setGoalText] = useState('')
   const [channelImageRatio, setChannelImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
@@ -227,6 +229,8 @@ export default function TasksPage() {
     setWatermark(false)
     setChannelImageRatio('')
     setSelectedTemplate(null)
+    setHasContentImage(true)
+    setHasTailImage(false)
     setModalOpen(true)
   }
 
@@ -248,6 +252,8 @@ export default function TasksPage() {
     setGoalText('')
     setChannelImageRatio('')
     setSelectedTemplate(null)
+    setHasContentImage(true)
+    setHasTailImage(false)
   }
 
   async function onSubmit(values: CreateTaskFormValues) {
@@ -263,6 +269,8 @@ export default function TasksPage() {
       goal_mode: goalMode || undefined,
       goal: goalMode ? (goalText.trim() || undefined) : undefined,
       template_id: selectedTemplate?.id || undefined,
+      has_content_image: values.type === 'seednote' ? hasContentImage : undefined,
+      has_tail_image: values.type === 'seednote' ? hasTailImage : undefined,
     }))
   }
 
@@ -699,6 +707,48 @@ export default function TasksPage() {
                   <p className="mt-0.5 text-xs text-muted-foreground">开启后生成的图片将带有水印（仅火山引擎支持）</p>
                 </div>
               </button>
+
+              {/* Image composition (seednote only) */}
+              {watchedType === 'seednote' && (
+                <div className="rounded-lg border border-border p-3">
+                  <div className="flex items-start gap-3">
+                    <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">图片构成</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        封面始终生成；勾选要额外生成的图。
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 divide-y divide-border">
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-foreground">封面图</span>
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">必选</span>
+                      </div>
+                      <Switch checked disabled />
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">内容图</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">承载 2-4 个信息点（image_01.png）</p>
+                      </div>
+                      <Switch checked={hasContentImage} onCheckedChange={setHasContentImage} />
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">尾图</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">行动召唤 / 关注引导（tail.png）</p>
+                      </div>
+                      <Switch checked={hasTailImage} onCheckedChange={setHasTailImage} />
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    当前将生成 {1 + (hasContentImage ? 1 : 0) + (hasTailImage ? 1 : 0)} 张图片
+                  </p>
+                </div>
+              )}
+
 
               {/* Goal mode toggle */}
               <div className={`rounded-lg border p-3 transition-colors ${

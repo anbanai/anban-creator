@@ -713,6 +713,74 @@ func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	}
 }
 
+func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
+	cases := []struct {
+		name           string
+		hasContent     bool
+		hasTail        bool
+		wantContains   []string
+		wantAbsence    []string
+		wantTotalWord  string // expected "共 N 张"
+	}{
+		{
+			name:          "cover only",
+			hasContent:    false,
+			hasTail:       false,
+			wantContains:  []string{"图片构成要求", "封面图（cover.png）", "共 1 张"},
+			wantAbsence:   []string{"image_01.png", "tail.png"},
+			wantTotalWord: "共 1 张",
+		},
+		{
+			name:          "cover and content (default)",
+			hasContent:    true,
+			hasTail:       false,
+			wantContains:  []string{"图片构成要求", "封面图（cover.png）", "1 张内容图（image_01.png）", "共 2 张"},
+			wantAbsence:   []string{"tail.png"},
+			wantTotalWord: "共 2 张",
+		},
+		{
+			name:          "cover and tail",
+			hasContent:    false,
+			hasTail:       true,
+			wantContains:  []string{"图片构成要求", "封面图（cover.png）", "尾图（tail.png）", "共 2 张"},
+			wantAbsence:   []string{"image_01.png"},
+			wantTotalWord: "共 2 张",
+		},
+		{
+			name:          "cover content and tail",
+			hasContent:    true,
+			hasTail:       true,
+			wantContains:  []string{"图片构成要求", "封面图（cover.png）", "1 张内容图（image_01.png）", "尾图（tail.png）", "共 3 张"},
+			wantTotalWord: "共 3 张",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "", "", tc.hasContent, tc.hasTail)
+			for _, sub := range tc.wantContains {
+				if !strings.Contains(got, sub) {
+					t.Errorf("missing %q in prompt: %q", sub, got)
+				}
+			}
+			for _, sub := range tc.wantAbsence {
+				if strings.Contains(got, sub) {
+					t.Errorf("%q should be absent; got %q", sub, got)
+				}
+			}
+			if !strings.Contains(got, "image-plan.md 必须在「计划图片数量」字段写入此数字") {
+				t.Errorf("missing image-plan.md hint; got %q", got)
+			}
+		})
+	}
+
+	// Non-seednote task types must NOT get the image composition directive even
+	// when explicit flags are passed.
+	articleGot := BuildUserPrompt("article", "时间管理", "wechatarticle", "", "", "", "", true, true)
+	if strings.Contains(articleGot, "图片构成要求") {
+		t.Errorf("article task must not get image composition directive; got %q", articleGot)
+	}
+}
+
 func TestLoadAgentDefinition(t *testing.T) {
 	t.Run("valid agent file", func(t *testing.T) {
 		dir := t.TempDir()

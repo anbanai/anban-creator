@@ -19,6 +19,8 @@ export interface Plan {
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
+  has_content_image?: boolean
+  has_tail_image?: boolean
   created_at: string
   updated_at: string
 }
@@ -35,6 +37,9 @@ export interface CreatePlanRequest {
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
+  // Seednote image composition (see CreateTaskRequest).
+  has_content_image?: boolean
+  has_tail_image?: boolean
 }
 
 export interface UpdatePlanRequest {
@@ -47,4 +52,6 @@ export interface UpdatePlanRequest {
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
+  has_content_image?: boolean
+  has_tail_image?: boolean
 }

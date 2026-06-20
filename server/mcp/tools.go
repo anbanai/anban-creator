@@ -519,7 +519,7 @@ func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		return errorResult("channel_id and cron_expr are required"), nil
 	}
 
-	plan, err := svcs.PlanSvc.Create(context.Background(), userID, channelID, cronExpr, prompt, "", nil, "", "", nil, "", false)
+	plan, err := svcs.PlanSvc.Create(context.Background(), userID, channelID, cronExpr, prompt, "", nil, "", "", nil, "", false, nil, nil)
 	if err != nil {
 		return errorResult(fmt.Sprintf("create plan: %v", err)), nil
 	}

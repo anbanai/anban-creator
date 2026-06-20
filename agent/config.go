@@ -10,17 +10,19 @@ import (
 )
 
 type Config struct {
-	ServerURL string
-	APIKey    string
-	TaskID    string
-	TaskType  string
-	Topic     string
-	Style     string
-	Goal      string
-	Workspace string
-	Model     string
-	AgentFlag string
-	MaxTurns  int
+	ServerURL       string
+	APIKey          string
+	TaskID          string
+	TaskType        string
+	Topic           string
+	Style           string
+	Goal            string
+	Workspace       string
+	Model           string
+	AgentFlag       string
+	MaxTurns        int
+	HasContentImage bool
+	HasTailImage    bool
 }
 
 func ParseConfig() (*Config, error) {
@@ -36,6 +38,11 @@ func ParseConfig() (*Config, error) {
 	flag.StringVar(&cfg.Model, "model", "", "Claude model override")
 	flag.StringVar(&cfg.AgentFlag, "agent-flag", "", "Claude Code --agent flag")
 	flag.IntVar(&cfg.MaxTurns, "max-turns", 0, "maximum Claude turns")
+	// Seednote image composition defaults match the task model column defaults
+	// (content on, tail off). Server overrides via CLI when dispatching the agent
+	// so the in-prompt directive reflects the user's task/plan choice.
+	flag.BoolVar(&cfg.HasContentImage, "has-content-image", true, "seednote: generate image_01.png (content page)")
+	flag.BoolVar(&cfg.HasTailImage, "has-tail-image", false, "seednote: generate tail.png")
 	flag.Parse()
 
 	cfg.ServerURL = strings.TrimRight(strings.TrimSpace(cfg.ServerURL), "/")
@@ -76,5 +83,5 @@ func ParseConfig() (*Config, error) {
 
 func (c *Config) UserPrompt() string {
 	agentName := serveragent.TaskTypeToAgent(c.TaskType)
-	return serveragent.BuildUserPrompt(c.TaskType, c.Topic, agentName, c.Style, c.Goal, c.TaskID, os.Getenv("ANBANWRITER_DEFAULT_CHANNEL"))
+	return serveragent.BuildUserPrompt(c.TaskType, c.Topic, agentName, c.Style, c.Goal, c.TaskID, os.Getenv("ANBANWRITER_DEFAULT_CHANNEL"), c.HasContentImage, c.HasTailImage)
 }

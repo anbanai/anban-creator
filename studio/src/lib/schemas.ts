@@ -47,6 +47,11 @@ export const createTaskSchema = z.object({
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),
+  // Seednote image composition: cover always generated. Content defaults on, tail
+  // defaults off — matches server column defaults and the seednote form default.
+  // Non-seednote task types ignore these fields server-side.
+  has_content_image: z.boolean().default(true),
+  has_tail_image: z.boolean().default(false),
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -96,6 +101,9 @@ export const planSchema = z.object({
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),
+  // Seednote image composition (see createTaskSchema). Defaults match the server.
+  has_content_image: z.boolean().default(true),
+  has_tail_image: z.boolean().default(false),
 }).superRefine((data, ctx) => {
   if (data.goal_mode) {
     const goal = data.goal?.trim() || ""
