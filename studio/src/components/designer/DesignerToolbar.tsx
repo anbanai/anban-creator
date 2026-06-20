@@ -242,7 +242,7 @@ export default function DesignerToolbar({
                   <Sparkles className="h-3.5 w-3.5 text-primary" />
                 </div>
                 <span className="bg-gradient-to-r from-primary via-chart-2 to-chart-4 bg-clip-text text-sm font-bold tracking-wide text-transparent">
-                  Designer
+                  设计师
                 </span>
               </div>
               <Tooltip>
