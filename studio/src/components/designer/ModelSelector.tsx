@@ -80,7 +80,7 @@ export default function ModelSelector({
             {sortedProviders.map((p) => {
               const isSelected = p.id === selectedProviderId && p.enabled
               const isDisabled = !p.enabled
-              const caps = getModelCapabilities(p.provider, p.model)
+              const caps = getModelCapabilities(p.provider)
               return (
                 <CommandItem
                   key={p.id}

@@ -80,7 +80,7 @@ func TestModelConfigCompleteImageOverrideApplies(t *testing.T) {
 			Provider: "openai",
 			Endpoint: "https://custom.example/v1",
 			APIKey:   "custom-key",
-			Model:    "dall-e-3",
+			Model:    "gpt-image-2",
 		},
 	})
 	if err != nil {
@@ -91,7 +91,7 @@ func TestModelConfigCompleteImageOverrideApplies(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("GetEffectiveImageConfig returned nil")
 	}
-	if cfg.Cover.Provider != "openai" || cfg.Cover.Key != "custom-key" || cfg.Cover.Model != "dall-e-3" {
+	if cfg.Cover.Provider != "openai" || cfg.Cover.Key != "custom-key" || cfg.Cover.Model != "gpt-image-2" {
 		t.Fatalf("effective config = %+v, want complete user override", cfg.Cover)
 	}
 	if !svc.HasCompleteImageOverride(ctx, userID) {
@@ -108,7 +108,7 @@ func TestModelConfigRejectsImageKeepExistingKeyWithoutExistingKey(t *testing.T) 
 			Provider: "openai",
 			Endpoint: "https://custom.example/v1",
 			APIKey:   "****",
-			Model:    "dall-e-3",
+			Model:    "gpt-image-2",
 		},
 	})
 	if !errors.Is(err, ErrInvalidModelConfig) {

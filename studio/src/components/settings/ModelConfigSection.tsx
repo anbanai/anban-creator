@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 const IMAGE_PROVIDERS = [
-  { value: 'openai', label: 'OpenAI (DALL-E)' },
+  { value: 'openai', label: 'OpenAI (GPT Image)' },
   { value: 'gemini', label: 'Google Gemini' },
   { value: 'volcengine', label: 'Volcengine/Seedream' },
 ]
@@ -330,7 +330,7 @@ export default function ModelConfigSection() {
             <Input
               value={imageModel}
               onChange={(e) => setImageModel(e.target.value)}
-              placeholder="dall-e-3"
+              placeholder="gpt-image-2"
               className="text-xs"
             />
           </div>

@@ -105,7 +105,7 @@ func TestResolveImageConfigForKey(t *testing.T) {
 			Provider: "openai",
 			Endpoint: "https://custom.example/v1",
 			APIKey:   "user-own-key",
-			Model:    "dall-e-3",
+			Model:    "gpt-image-2",
 		},
 	}); err != nil {
 		t.Fatalf("set override: %v", err)
@@ -134,7 +134,7 @@ func TestResolveImageConfigForKey(t *testing.T) {
 			key:        "",
 			wantSource: "user_custom",
 			provider:   "openai",
-			model:      "dall-e-3",
+			model:      "gpt-image-2",
 			apiKey:     "user-own-key",
 		},
 		{
@@ -143,7 +143,7 @@ func TestResolveImageConfigForKey(t *testing.T) {
 			key:        model.ImageModelKeyCustom,
 			wantSource: "user_custom",
 			provider:   "openai",
-			model:      "dall-e-3",
+			model:      "gpt-image-2",
 			apiKey:     "user-own-key",
 		},
 		{

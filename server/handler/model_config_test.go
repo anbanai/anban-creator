@@ -79,7 +79,7 @@ func TestModelConfigUpdateRejectsIncompleteImageProvider(t *testing.T) {
 		"image": {
 			"provider": "openai",
 			"endpoint": "https://custom.example/v1",
-			"model": "dall-e-3"
+			"model": "gpt-image-2"
 		}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -100,7 +100,7 @@ func TestModelConfigUpdateRejectsImageKeepExistingKeyWithoutExistingKey(t *testi
 			"provider": "openai",
 			"endpoint": "https://custom.example/v1",
 			"api_key": "****",
-			"model": "dall-e-3"
+			"model": "gpt-image-2"
 		}
 	}`))
 	req.Header.Set("Content-Type", "application/json")

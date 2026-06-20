@@ -59,33 +59,8 @@ const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
   },
 }
 
-export function getModelCapabilities(provider: string, model?: string): ModelCapabilities | undefined {
-  const baseCaps = PROVIDER_CAPABILITIES[provider]
-  if (!baseCaps) return undefined
-
-  // For OpenAI, refine capabilities based on specific model
-  if (provider === 'openai' && model) {
-    const isGPTImage = model.startsWith('gpt-image-') || model === 'chatgpt-image-latest'
-    const isDallE2 = model === 'dall-e-2'
-    if (!isGPTImage && !isDallE2) {
-      // dall-e-3 and other variants: no batch, no inpainting, limited refs
-      return {
-        ...baseCaps,
-        batch: false,
-        maxBatch: 1,
-        streaming: false,
-        inpainting: false,
-        maxRefImages: 1,
-        qualityLevels: ['standard', 'hd'],
-        outputFormats: ['png'],
-        sizePresets: [],
-        hasCompression: false,
-        hasBackground: false,
-      }
-    }
-  }
-
-  return baseCaps
+export function getModelCapabilities(provider: string): ModelCapabilities | undefined {
+  return PROVIDER_CAPABILITIES[provider]
 }
 
 // Dynamic provider info from backend API

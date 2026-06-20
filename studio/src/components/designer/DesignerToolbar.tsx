@@ -168,7 +168,6 @@ interface DesignerToolbarProps {
   selectedProviderId: string
   onModelChange: (id: string) => void
   provider: string
-  model: string
   settings: DesignerSettings
   onSettingsChange: (settings: DesignerSettings) => void
   onHistoryToggle: () => void
@@ -179,12 +178,11 @@ export default function DesignerToolbar({
   selectedProviderId,
   onModelChange,
   provider,
-  model,
   settings,
   onSettingsChange,
   onHistoryToggle,
 }: DesignerToolbarProps) {
-  const caps = getModelCapabilities(provider, model)
+  const caps = getModelCapabilities(provider)
   const refInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch user credit balance

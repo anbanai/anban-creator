@@ -24,7 +24,7 @@ import (
 type OpenAIProvider struct {
 	client         openai.Client
 	model          string
-	size           string // DALL-E pixel size for API calls
+	size           string // Image size for API calls
 	sizeRatio      string // ratio string for GenerateResult.Size
 	responseFormat string // "b64_json" | "url" | "" (auto → b64_json)
 	log            *zerolog.Logger
@@ -37,12 +37,15 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*OpenAIPro
 		model = DefaultOpenAIModel
 	}
 
-	size := mapToDALLESize(apiCfg.Size, model)
+	size := mapToImageSize(apiCfg.Size, model)
 
 	var sizeRatio string
-	if IsPixelSize(apiCfg.Size) {
+	switch {
+	case isAutoSize(apiCfg.Size):
+		sizeRatio = "auto"
+	case IsPixelSize(apiCfg.Size):
 		sizeRatio = apiCfg.Size
-	} else {
+	default:
 		sizeRatio, _ = ParseSize(apiCfg.Size)
 	}
 
@@ -74,20 +77,20 @@ func NewOpenAIProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*OpenAIPro
 	}, nil
 }
 
-// mapToDALLESize 将用户配置的 size（比例格式）映射到 OpenAI Images API 支持的尺寸
-// DALL-E 3 支持: 1024x1024, 1792x1024, 1024x1792
-// DALL-E 2 支持: 256x256, 512x512, 1024x1024
-// GPT image 支持: 1024x1024, 1536x1024, 1024x1536
-func mapToDALLESize(size, model string) string {
+// mapToImageSize 将用户配置的 size（"auto"、比例或像素）映射到 OpenAI Images API 的 size 参数。
+// GPT Image 模型支持 "auto"、任意满足约束的像素尺寸，以及比例（→ 1024/1536 系列）。
+func mapToImageSize(size, model string) string {
 	if size == "" {
 		return "1024x1024"
 	}
 
-	if isDallE2Model(model) {
-		return "1024x1024"
+	// GPT Image 支持 size: "auto"，让 OpenAI 根据提示词自选宽高比。
+	// 也接受 "auto:2K"/"auto:4K"——tier 后缀在 isAutoSize 内部被识别并剥离。
+	if isGPTImageModel(model) && isAutoSize(size) {
+		return "auto"
 	}
 
-	// GPT-image models accept arbitrary pixel sizes — pass through directly.
+	// GPT Image 接受任意满足约束的像素尺寸，直接透传。
 	if isGPTImageModel(model) && IsPixelSize(size) {
 		return size
 	}
@@ -106,36 +109,19 @@ func mapToDALLESize(size, model string) string {
 		}
 	}
 
-	// 宽高比映射到 DALL-E 3 尺寸
-	ratioMap := map[string]string{
-		"1:1":    "1024x1024",
-		"16:9":   "1792x1024",
-		"9:16":   "1024x1792",
-		"4:3":    "1792x1024", // 近似横向
-		"3:4":    "1024x1792", // 近似纵向
-		"3:2":    "1792x1024",
-		"2:3":    "1024x1792",
-		"4:5":    "1024x1792",
-		"5:4":    "1792x1024",
-		"21:9":   "1792x1024",
-		"wide":   "1792x1024",
-		"tall":   "1024x1792",
-		"square": "1024x1024",
-	}
-	if mapped, ok := ratioMap[ratio]; ok {
-		return mapped
-	}
-
-	return "1024x1024" // 默认
-}
-
-func isDallE2Model(model string) bool {
-	return strings.EqualFold(strings.TrimSpace(model), "dall-e-2")
+	return "1024x1024"
 }
 
 func isGPTImageModel(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	return strings.HasPrefix(model, "gpt-image-") || model == "chatgpt-image-latest"
+}
+
+// isAutoSize 识别 "auto" 或 "auto:<tier>" 形式的 size。
+// 大小写不敏感、忽略前后空白；tier 后缀由 mapToImageSize 在返回时丢弃。
+func isAutoSize(size string) bool {
+	s := strings.ToLower(strings.TrimSpace(size))
+	return s == "auto" || strings.HasPrefix(s, "auto:")
 }
 
 // Name 返回提供者名称
@@ -172,7 +158,7 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 	// Determine effective size
 	size := p.size
 	if opts.Size != "" {
-		size = mapToDALLESize(opts.Size, p.model)
+		size = mapToImageSize(opts.Size, p.model)
 	}
 
 	hasRefImages := opts.RefImagePath != "" || len(opts.RefImagePaths) > 0
@@ -223,7 +209,6 @@ func (p *OpenAIProvider) Capabilities() *ProviderCapabilities {
 		MaxBatch:      1,
 		Streaming:     false,
 		Inpainting:    false,
-		QualityLevels: []string{"standard", "hd"},
 		OutputFormats: []string{"png"},
 		FlexibleSize:  false,
 	}

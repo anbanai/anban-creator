@@ -15,7 +15,7 @@ import (
 // 各图片生成服务商的默认模型和 API 地址
 const (
 	DefaultGeminiModel       = "gemini-3-pro-image-preview"
-	DefaultOpenAIModel       = "dall-e-3"
+	DefaultOpenAIModel       = "gpt-image-2"
 	DefaultVolcengineModel   = "doubao-seedream-5-0-260128"
 	DefaultVolcengineBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 )

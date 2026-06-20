@@ -29,7 +29,7 @@ function providerLabel(provider: string): string {
     case 'seedream':
       return '豆包'
     case 'openai':
-      return 'DALL·E'
+      return 'GPT Image'
     default:
       return provider
   }

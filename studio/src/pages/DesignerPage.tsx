@@ -78,7 +78,7 @@ export default function DesignerPage() {
   // Auto-select first enabled provider if none selected or current selection is unavailable/disabled
   const activeProvider = providerList.find((p) => p.id === selectedProviderId && p.enabled)
   const effectiveProvider = activeProvider ?? providerList.find((p) => p.enabled)
-  const effectiveCaps = getModelCapabilities(effectiveProvider?.provider ?? '', effectiveProvider?.model)
+  const effectiveCaps = getModelCapabilities(effectiveProvider?.provider ?? '')
   const canInpaint = effectiveCaps?.inpainting ?? false
 
   function stopPolling() {
@@ -229,7 +229,7 @@ export default function DesignerPage() {
   function handleModelChange(providerId: string) {
     setSelectedProviderId(providerId)
     const newProvider = providerList.find((p) => p.id === providerId)
-    const caps = getModelCapabilities(newProvider?.provider ?? '', newProvider?.model)
+    const caps = getModelCapabilities(newProvider?.provider ?? '')
     setSettings({
       ...DEFAULT_SETTINGS,
       ...(caps?.batch ? {} : { n: 1 }),
@@ -296,7 +296,6 @@ export default function DesignerPage() {
         selectedProviderId={effectiveProvider?.id ?? ''}
         onModelChange={handleModelChange}
         provider={effectiveProvider?.provider ?? ''}
-        model={effectiveProvider?.model ?? ''}
         settings={settings}
         onSettingsChange={setSettings}
         onHistoryToggle={() => setHistoryOpen(true)}

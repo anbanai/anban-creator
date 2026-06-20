@@ -21,7 +21,7 @@ func testLogger() *zerolog.Logger {
 	return &l
 }
 
-func TestMapToDALLESize(t *testing.T) {
+func TestMapToImageSize(t *testing.T) {
 	tests := []struct {
 		name  string
 		size  string
@@ -29,41 +29,34 @@ func TestMapToDALLESize(t *testing.T) {
 		want  string
 	}{
 		// Empty defaults to 1024x1024
-		{"empty defaults to 1024x1024", "", "dall-e-3", "1024x1024"},
-		// Aspect ratio mapping for DALL-E 3
-		{"16:9 maps to 1792x1024", "16:9", "dall-e-3", "1792x1024"},
-		{"9:16 maps to 1024x1792", "9:16", "dall-e-3", "1024x1792"},
-		{"1:1 maps to 1024x1024", "1:1", "dall-e-3", "1024x1024"},
-		{"4:3 maps to 1792x1024", "4:3", "dall-e-3", "1792x1024"},
-		{"3:4 maps to 1024x1792", "3:4", "dall-e-3", "1024x1792"},
-		{"3:2 maps to 1792x1024", "3:2", "dall-e-3", "1792x1024"},
-		{"2:3 maps to 1024x1792", "2:3", "dall-e-3", "1024x1792"},
-		{"21:9 maps to 1792x1024", "21:9", "dall-e-3", "1792x1024"},
-		// Tier suffix stripped before ratio lookup
-		{"16:9:2K maps to 1792x1024", "16:9:2K", "dall-e-3", "1792x1024"},
-		{"3:4:1K maps to 1024x1792", "3:4:1K", "dall-e-3", "1024x1792"},
-		// DALL-E 2 always returns 1024x1024
-		{"dall-e-2 any size defaults to 1024x1024", "16:9", "dall-e-2", "1024x1024"},
-		{"dall-e-2 pixel format defaults to 1024x1024", "2560x1440", "dall-e-2", "1024x1024"},
-		// GPT image models use a different OpenAI size set.
+		{"empty defaults to 1024x1024", "", "gpt-image-2", "1024x1024"},
+		// "auto" passes through for GPT Image models (OpenAI's default size).
+		{"auto passthrough on gpt-image-2", "auto", "gpt-image-2", "auto"},
+		{"auto case-insensitive", "AUTO", "gpt-image-2", "auto"},
+		{"auto strips 4K tier suffix", "auto:4K", "gpt-image-2", "auto"},
+		{"auto strips 2K tier suffix", "auto:2K", "gpt-image-2", "auto"},
+		{"auto trims surrounding whitespace", "  auto  ", "gpt-image-2", "auto"},
+		{"auto passthrough on gpt-image-1", "auto", "gpt-image-1", "auto"},
+		{"auto passthrough on chatgpt-image-latest", "auto", "chatgpt-image-latest", "auto"},
+		// Aspect ratio mapping for GPT Image models
 		{"gpt-image-1 16:9 maps to 1536x1024", "16:9", "gpt-image-1", "1536x1024"},
 		{"gpt-image-1 3:4 maps to 1024x1536", "3:4", "gpt-image-1", "1024x1536"},
 		{"gpt-image-1 1:1 maps to 1024x1024", "1:1", "gpt-image-1", "1024x1024"},
-		// Pixel format not supported, defaults to 1024x1024
-		{"pixel format not supported", "2560x1440", "dall-e-3", "1024x1024"},
+		// Tier suffix stripped before ratio lookup
+		{"16:9:2K maps to 1536x1024", "16:9:2K", "gpt-image-1", "1536x1024"},
 		// GPT-image models pass through raw pixel sizes.
 		{"gpt-image-2 pixel passthrough 4K", "3840x2160", "gpt-image-2", "3840x2160"},
 		{"gpt-image-1 pixel passthrough HD", "1920x1080", "gpt-image-1", "1920x1080"},
 		{"chatgpt-image-latest pixel passthrough", "4096x4096", "chatgpt-image-latest", "4096x4096"},
 		// Unknown format defaults to 1024x1024
-		{"unknown format defaults", "badformat", "dall-e-3", "1024x1024"},
+		{"unknown format defaults", "badformat", "gpt-image-2", "1024x1024"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mapToDALLESize(tt.size, tt.model)
+			got := mapToImageSize(tt.size, tt.model)
 			if got != tt.want {
-				t.Errorf("mapToDALLESize(%q, %q) = %q, want %q", tt.size, tt.model, got, tt.want)
+				t.Errorf("mapToImageSize(%q, %q) = %q, want %q", tt.size, tt.model, got, tt.want)
 			}
 		})
 	}
@@ -81,7 +74,7 @@ func TestOpenAIGenerateClassifiesHTMLResponseAsEndpointProtocolError(t *testing.
 		Key:      "test-key",
 		BaseURL:  srv.URL,
 		Provider: "openai",
-		Model:    "dall-e-3",
+		Model:    "gpt-image-2",
 	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
@@ -128,7 +121,7 @@ func TestOpenAIGenerateSavesBase64Image(t *testing.T) {
 		Key:      "test-key",
 		BaseURL:  srv.URL,
 		Provider: "openai",
-		Model:    "dall-e-3",
+		Model:    "gpt-image-2",
 	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
@@ -266,7 +259,7 @@ func TestOpenAIGenerateDownloadsURLOnlyResult(t *testing.T) {
 		Key:      "test-key",
 		BaseURL:  srv.URL,
 		Provider: "openai",
-		Model:    "dall-e-3",
+		Model:    "gpt-image-2",
 	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
@@ -310,7 +303,7 @@ func TestOpenAIGenerateReturnsErrorForEmptyImagePayload(t *testing.T) {
 		Key:      "test-key",
 		BaseURL:  srv.URL,
 		Provider: "openai",
-		Model:    "dall-e-3",
+		Model:    "gpt-image-2",
 	}, testLogger())
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)

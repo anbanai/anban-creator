@@ -445,7 +445,7 @@ func TestNewDefaultConfig_ConsistentWithRuntimeDefaults(t *testing.T) {
 
 func TestMergeImageAPI(t *testing.T) {
 	t.Run("base fields take priority", func(t *testing.T) {
-		base := ImageAPI{Key: "base-key", Provider: "openai", Model: "dall-e-3"}
+		base := ImageAPI{Key: "base-key", Provider: "openai", Model: "gpt-image-2"}
 		fallback := ImageAPI{Key: "fallback-key", Provider: "gemini", Model: "gemini-model", Size: "3:4"}
 		result := mergeImageAPI(base, fallback)
 		if result.Key != "base-key" {
@@ -454,8 +454,8 @@ func TestMergeImageAPI(t *testing.T) {
 		if result.Provider != "openai" {
 			t.Errorf("Provider = %q, want openai", result.Provider)
 		}
-		if result.Model != "dall-e-3" {
-			t.Errorf("Model = %q, want dall-e-3", result.Model)
+		if result.Model != "gpt-image-2" {
+			t.Errorf("Model = %q, want gpt-image-2", result.Model)
 		}
 		// fallback fills missing size
 		if result.Size != "3:4" {
