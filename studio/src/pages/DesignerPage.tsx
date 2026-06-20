@@ -48,6 +48,7 @@ export default function DesignerPage() {
   const [selectedProviderId, setSelectedProviderId] = useState<string>('')
   const [settings, setSettings] = useState<DesignerSettings>(DEFAULT_SETTINGS)
   const [currentImages, setCurrentImages] = useState<GenerateImage[]>([])
+  const [currentGeneration, setCurrentGeneration] = useState<ImageGeneration | null>(null)
   const [selectedGenerationId, setSelectedGenerationId] = useState<string>()
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [prefillPrompt, setPrefillPrompt] = useState<string>('')
@@ -117,6 +118,7 @@ export default function DesignerPage() {
         if (gen.status === 'completed') {
           stopPolling()
           setIsGenerating(false)
+          setCurrentGeneration(gen)
           setCurrentImages(resultsToImages(gen.results))
           clearActiveGeneration()
           toast.success('图片生成成功')
@@ -148,6 +150,7 @@ export default function DesignerPage() {
 
     designerApi.getGeneration(generationId).then((gen) => {
       if (gen.status === 'completed') {
+        setCurrentGeneration(gen)
         setCurrentImages(resultsToImages(gen.results))
         setSelectedGenerationId(generationId)
         clearActiveGeneration()
@@ -174,6 +177,7 @@ export default function DesignerPage() {
     stopPolling()
     abortedRef.current = false
     setIsGenerating(true)
+    setCurrentGeneration(null)
     setCurrentImages([])
 
     try {
@@ -213,6 +217,7 @@ export default function DesignerPage() {
 
   const handleHistorySelect = useCallback((gen: ImageGeneration) => {
     setSelectedGenerationId(gen.id)
+    setCurrentGeneration(gen)
     setCurrentImages(resultsToImages(gen.results))
   }, [])
 
@@ -340,16 +345,24 @@ export default function DesignerPage() {
       />
 
       {/* Image preview modal */}
-      {previewImage && (
+      {previewImage && currentGeneration && currentImages.length > 0 && (
         <ImagePreview
-          imageUrl={previewImage}
+          images={currentImages}
+          initialIndex={Math.max(0, currentImages.findIndex((i) => i.url === previewImage))}
+          metadata={{
+            provider: currentGeneration.provider,
+            model: currentGeneration.model,
+            prompt: currentGeneration.prompt,
+            revisedPrompt: currentGeneration.revised_prompt,
+            quality: currentGeneration.quality,
+            size: currentGeneration.size,
+            outputFormat: currentGeneration.output_format,
+            createdAt: currentGeneration.created_at,
+          }}
           canInpaint={canInpaint}
-          onEdit={() => {
-            const img = currentImages.find((i) => i.url === previewImage)
-            if (img) {
-              setPreviewImage(null)
-              setEditingImage(img)
-            }
+          onEdit={(img) => {
+            setPreviewImage(null)
+            setEditingImage(img)
           }}
           onClose={() => setPreviewImage(null)}
         />
