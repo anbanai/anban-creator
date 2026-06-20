@@ -7,11 +7,12 @@ import {
   Workflow,
   PlugZap,
   BarChart3,
-  ChevronLeft,
-  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Tooltip,
   TooltipContent,
@@ -92,16 +93,46 @@ export default function Sidebar() {
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        {/* Logo */}
-        <div className={`flex h-14 items-center ${collapsed ? "justify-center px-0" : "px-5"}`}>
-          {collapsed ? (
-            <span className="text-sm font-bold text-sidebar-foreground">A</span>
-          ) : (
-            <span className="text-base font-bold tracking-tight text-sidebar-foreground">
+        {/* Top: Logo + Collapse toggle (ChatGPT-style) */}
+        {collapsed ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setCollapsed(false)}
+              aria-expanded={false}
+              aria-label="展开侧边栏"
+              className="group relative hidden h-14 w-full items-center justify-center rounded-md transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:flex"
+            >
+              <span className="text-sm font-bold text-sidebar-foreground transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0">
+                A
+              </span>
+              <span className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100">
+                <PanelLeftOpen className="h-4 w-4 text-sidebar-foreground" />
+              </span>
+            </button>
+            <div className="flex h-14 items-center justify-center md:hidden">
+              <span className="text-sm font-bold text-sidebar-foreground">A</span>
+            </div>
+          </>
+        ) : (
+          <div className="flex h-14 items-center justify-between gap-2 px-5">
+            <span className="truncate text-base font-bold tracking-tight text-sidebar-foreground">
               Anban 智能创作助手
             </span>
-          )}
-        </div>
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-expanded={true}
+              aria-label="收起侧边栏"
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "icon" }),
+                "hidden shrink-0 md:flex"
+              )}
+            >
+              <PanelLeftClose />
+            </button>
+          </div>
+        )}
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pt-2" aria-label="主导航">
@@ -117,38 +148,10 @@ export default function Sidebar() {
           <SidebarBottomSection collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
         </div>
 
-        {/* Bottom: Collapse toggle + User + Theme */}
-        {collapsed ? (
-          <div className="border-t border-sidebar-border py-3 px-0">
-            <div className="flex justify-center mb-2">
-              <UserAccountPopover collapsed={collapsed} />
-            </div>
-            <div className="flex items-center justify-center">
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="hidden md:flex text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                onClick={() => setCollapsed(!collapsed)}
-                aria-label="展开侧边栏"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center border-t border-sidebar-border py-3 flex-row gap-1 px-3">
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="hidden md:flex text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-              onClick={() => setCollapsed(!collapsed)}
-              aria-label="收起侧边栏"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <UserAccountPopover collapsed={collapsed} />
-          </div>
-        )}
+        {/* Bottom: User account */}
+        <div className={`border-t border-sidebar-border py-3 ${collapsed ? "flex justify-center px-0" : "px-3"}`}>
+          <UserAccountPopover collapsed={collapsed} />
+        </div>
       </aside>
     </>
   );
