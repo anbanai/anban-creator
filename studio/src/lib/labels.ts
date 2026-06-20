@@ -42,7 +42,7 @@ export const tierBenefits = [
   },
 ] as const
 
-type TierKey = typeof tierBenefits[number]['key']
+export type TierKey = typeof tierBenefits[number]['key']
 
 export type MembershipComparisonValue = string | boolean
 
@@ -132,6 +132,34 @@ export const membershipComparisonGroups: MembershipComparisonGroup[] = [
         },
       },
     ],
+  },
+]
+
+export interface ModelCategory {
+  key: 'basic' | 'advanced' | 'custom'
+  label: string
+  description: string
+  available: Record<TierKey, boolean>
+}
+
+export const modelCategories: ModelCategory[] = [
+  {
+    key: 'basic',
+    label: '基础模型',
+    description: '日常任务的高性价比选择',
+    available: { free: true, pro: true, enterprise: true },
+  },
+  {
+    key: 'advanced',
+    label: '高级模型',
+    description: '顶级模型，长文与复杂任务质量更佳',
+    available: { free: false, pro: false, enterprise: true },
+  },
+  {
+    key: 'custom',
+    label: '自定义模型 (BYOK)',
+    description: '绑定自己的 API Key，全部操作免费',
+    available: { free: false, pro: true, enterprise: true },
   },
 ]
 

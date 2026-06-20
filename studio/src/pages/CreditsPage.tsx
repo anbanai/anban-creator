@@ -17,6 +17,7 @@ import { formatFullDateTimeCN, transactionTypeLabel, operationLabel, taskTypeLab
 import PageHeader from '@/components/layout/PageHeader'
 import { useAuth } from '@/contexts/AuthContext'
 import MembershipComparison from '@/components/credits/MembershipComparison'
+import ModelCapabilities from '@/components/credits/ModelCapabilities'
 
 function transactionBadgeVariant(type: string) {
   switch (type) {
@@ -116,6 +117,9 @@ export default function CreditsPage() {
 
       {/* Membership comparison */}
       <MembershipComparison currentTier={user?.tier ?? 'free'} />
+
+      {/* Model capabilities per tier */}
+      <ModelCapabilities currentTier={user?.tier ?? 'free'} />
 
       {/* Recharge */}
       <Card>
