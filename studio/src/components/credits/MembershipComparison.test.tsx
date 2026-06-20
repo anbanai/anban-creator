@@ -22,7 +22,7 @@ describe('MembershipComparison', () => {
     expect(screen.getByText('10 个')).toBeInTheDocument()
     const platformRow = screen.getByRole('row', { name: /可用平台/ })
     expect(within(platformRow).getByText('Web 端')).toBeInTheDocument()
-    expect(within(platformRow).getByText('Web 端、Claude Code、OpenClaw')).toBeInTheDocument()
+    expect(within(platformRow).getByText('Web 端、Claude Code、OpenClaw、Codex')).toBeInTheDocument()
     expect(within(platformRow).getByText('全部平台')).toBeInTheDocument()
 
     const customModelRow = screen.getByRole('row', { name: /自定义模型/ })

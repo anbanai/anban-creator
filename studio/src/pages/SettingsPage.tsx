@@ -248,6 +248,9 @@ export default function SettingsPage() {
                 <Link to="/connect/openclaw">
                   <Button size="sm" variant="outline">继续配置 OpenClaw</Button>
                 </Link>
+                <Link to="/connect/codex">
+                  <Button size="sm" variant="outline">继续配置 Codex</Button>
+                </Link>
                 <Button size="sm" variant="ghost" onClick={() => setNewKeyData(null)}>
                   我已保存密钥
                 </Button>
@@ -280,7 +283,7 @@ export default function SettingsPage() {
           ) : isError ? (
             <p className="text-xs text-muted-foreground">加载密钥失败，<button onClick={() => refetch()} className="text-primary hover:underline">点击重试</button></p>
           ) : apiKeys.length === 0 ? (
-            <p className="text-xs text-muted-foreground">暂无密钥。创建一个新密钥后，可以直接继续去完成 Claude Code 或 OpenClaw 的接入。</p>
+            <p className="text-xs text-muted-foreground">暂无密钥。创建一个新密钥后，可以直接继续去完成 Claude Code、OpenClaw 或 Codex 的接入。</p>
           ) : (
             <div className="space-y-2">
               {apiKeys.map((key) => (

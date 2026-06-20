@@ -27,7 +27,7 @@ export const tierBenefits = [
     name: '专业版',
     description: '适合稳定创作',
     creditMultiplier: '1.2x',
-    platforms: ['Web 端', 'Claude Code', 'OpenClaw'],
+    platforms: ['Web 端', 'Claude Code', 'OpenClaw', 'Codex'],
     concurrentTasks: 5,
     recommended: true,
   },
@@ -85,7 +85,7 @@ export const membershipComparisonGroups: MembershipComparisonGroup[] = [
         label: '可用平台',
         values: {
           free: 'Web 端',
-          pro: 'Web 端、Claude Code、OpenClaw',
+          pro: 'Web 端、Claude Code、OpenClaw、Codex',
           enterprise: '全部平台',
         },
       },

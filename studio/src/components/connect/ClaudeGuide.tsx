@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import CodeBlock from '@/components/connect/CodeBlock'
 import StepCard from '@/components/connect/StepCard'
+import InstallStep from '@/components/connect/InstallStep'
 import McpConfigStep from '@/components/connect/McpConfigStep'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
@@ -21,7 +22,7 @@ export default function ClaudeGuide() {
         <CardContent className="space-y-2">
           <h2 className="text-sm font-semibold text-foreground">Anban 智能创作助手 Claude Code 插件</h2>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            通过 Claude Code 插件，你可以用自然语言直接驱动 AI 创作流程。推荐按「注册账号 → 创建 Key → 安装插件 → 配置 Key → /init → 重启 → 开始使用」这条路径完成接入，第一次配置会最顺。
+            通过 Claude Code 插件，你可以用自然语言直接驱动 AI 创作流程。推荐按「注册账号 → 创建 Key → 安装插件 → 配置 Key → /setup → 重启 → 开始使用」这条路径完成接入，第一次配置会最顺。
           </p>
         </CardContent>
       </Card>
@@ -45,22 +46,14 @@ export default function ClaudeGuide() {
         </div>
       </StepCard>
 
-      <StepCard step={3} title="安装插件">
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">推荐先添加插件市场源：</p>
-            <CodeBlock code="claude plugin marketplace add anbanai/anbanwriter-claudecode" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">然后安装插件：</p>
-            <CodeBlock code="claude plugin install --scope user anbanwriter@anbanai" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">安装后可以用下面的命令确认插件是否已经安装成功：</p>
-            <CodeBlock code="/plugin" />
-          </div>
-        </div>
-      </StepCard>
+      <InstallStep
+        cliName="Claude Code CLI"
+        oneLiner="帮我安装 anbanwriter Claude Code 插件 https://github.com/anbanai/anbanwriter-claudecode"
+        oneLinerHint="AI 会自动添加 marketplace 源并完成插件安装。"
+        advancedCli={`claude plugin marketplace add anbanai/anbanwriter-claudecode
+claude plugin install --scope user anbanwriter@anbanai`}
+        advancedHint="安装后可以用 `/plugin` 命令确认插件是否已经安装成功。"
+      />
 
       <StepCard step={4} title="配置 API Key">
         <div className="space-y-3">
@@ -84,21 +77,21 @@ export default function ClaudeGuide() {
         </div>
       </StepCard>
 
-      <StepCard step={5} title="运行 /init">
+      <StepCard step={5} title="运行 /setup">
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
             安装并配置好 Key 后，运行初始化命令，检查 API Key、MCP 服务和账号连接是否正常：
           </p>
-          <CodeBlock code="/init" />
+          <CodeBlock code="/setup" />
         </div>
       </StepCard>
 
       <StepCard step={6} title="重启并再次验证">
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            `/init` 完成后，请完全退出并重新启动 Claude Code。重启后再运行一次 `/init`，确认连接真的已经生效。
+            `/setup` 完成后，请完全退出并重新启动 Claude Code。重启后再运行一次 `/setup`，确认连接真的已经生效。
           </p>
-          <CodeBlock code={`/init
+          <CodeBlock code={`/setup
 /plugin`} />
         </div>
       </StepCard>

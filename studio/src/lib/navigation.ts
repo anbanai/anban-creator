@@ -12,6 +12,7 @@ import {
   Puzzle,
   LayoutGrid,
   Palette,
+  Boxes,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -40,6 +41,7 @@ export const analyticsItems: NavItem[] = [
 export const platformItems: NavItem[] = [
   { to: '/connect/claude-code', label: 'Claude Code', icon: Terminal },
   { to: '/connect/openclaw', label: 'OpenClaw', icon: Puzzle },
+  { to: '/connect/codex', label: 'Codex', icon: Boxes },
 ]
 
 export const allNavItems: NavItem[] = [

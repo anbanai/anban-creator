@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import CodeBlock from '@/components/connect/CodeBlock'
 import StepCard from '@/components/connect/StepCard'
+import InstallStep from '@/components/connect/InstallStep'
 import McpConfigStep from '@/components/connect/McpConfigStep'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
@@ -21,7 +22,7 @@ export default function OpenClawGuide() {
         <CardContent className="space-y-2">
           <h2 className="text-sm font-semibold text-foreground">Anban 智能创作助手 OpenClaw 插件</h2>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            通过 OpenClaw 原生插件，你可以在 OpenClaw 中使用斜杠命令或自然语言驱动 AI 创作流程。推荐按「注册账号 → 创建 Key → 安装插件 → 配置 Key → /init → 重启 → 开始使用」这条顺序接入。
+            通过 OpenClaw 原生插件，你可以在 OpenClaw 中使用斜杠命令或自然语言驱动 AI 创作流程。推荐按「注册账号 → 创建 Key → 安装插件 → 配置 Key → /setup → 重启 → 开始使用」这条顺序接入。
           </p>
         </CardContent>
       </Card>
@@ -45,18 +46,14 @@ export default function OpenClawGuide() {
         </div>
       </StepCard>
 
-      <StepCard step={3} title="安装插件">
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">先克隆插件仓库：</p>
-            <CodeBlock code={`git clone https://github.com/anbanai/anbanwriter-openclaw.git\ncd anbanwriter-openclaw`} />
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">然后安装为 OpenClaw 原生插件：</p>
-            <CodeBlock code="openclaw plugins install ./" />
-          </div>
-        </div>
-      </StepCard>
+      <InstallStep
+        cliName="OpenClaw CLI"
+        oneLiner="帮我安装 anbanwriter OpenClaw 插件 https://github.com/anbanai/anbanwriter-openclaw"
+        oneLinerHint="AI 会自动完成仓库克隆与原生插件注册。"
+        advancedCli={`git clone https://github.com/anbanai/anbanwriter-openclaw.git
+cd anbanwriter-openclaw
+openclaw plugins install ./`}
+      />
 
       <StepCard step={4} title="配置 API Key">
         <div className="space-y-3">
@@ -72,21 +69,21 @@ export default function OpenClawGuide() {
         </div>
       </StepCard>
 
-      <StepCard step={5} title="运行 /init">
+      <StepCard step={5} title="运行 /setup">
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            安装并配置好 Key 后，运行 `/init`，让插件检查 API Key、MCP 服务和账号连接：
+            安装并配置好 Key 后，运行 `/setup`，让插件检查 API Key、MCP 服务和账号连接：
           </p>
-          <CodeBlock code="/init" />
+          <CodeBlock code="/setup" />
         </div>
       </StepCard>
 
       <StepCard step={6} title="重启并再次验证">
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            `/init` 跑完以后，请完全退出并重新启动 OpenClaw。重启后再执行一次 `/init`，确认连接已经正式生效。
+            `/setup` 跑完以后，请完全退出并重新启动 OpenClaw。重启后再执行一次 `/setup`，确认连接已经正式生效。
           </p>
-          <CodeBlock code="/init" />
+          <CodeBlock code="/setup" />
         </div>
       </StepCard>
 
