@@ -8,7 +8,6 @@ export const queryKeys = {
     details: (filter?: string) => ['channel-details', filter] as const,
     detail: (id: string) => ['channel', id] as const,
     platformConfigs: ['platform-configs'] as const,
-    seednoteLoginStatus: ['seednote', 'login-status'] as const,
   },
   plans: {
     all: ['plans'] as const,

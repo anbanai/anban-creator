@@ -14,7 +14,6 @@ import type { ResourceEntry } from '@/types/resource'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
 import { SearchInput } from '@/components/ui/SearchInput'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/common/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -135,13 +134,6 @@ export default function ChannelsPage() {
 
   const currentPlatformConfig = platformConfigMap[selectedPlatform]
   const hasProfileField = currentPlatformConfig?.fields?.some((field) => field.key === 'profile_url') ?? false
-
-  const { data: seednoteStatus } = useQuery({
-    queryKey: queryKeys.channels.seednoteLoginStatus,
-    queryFn: () => api.channels.seednoteLoginStatus(),
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  })
 
   const { data: writerResources } = useQuery({
     queryKey: queryKeys.resources.writers,
@@ -453,13 +445,6 @@ export default function ChannelsPage() {
           新建账号
         </Button>
       </PageHeader>
-
-      {/* Seednote login status indicator */}
-      {seednoteStatus && (
-        <Badge variant={seednoteStatus.available && seednoteStatus.logged_in ? 'default' : 'secondary'} className="text-xs">
-          种草笔记 {seednoteStatus.available ? (seednoteStatus.logged_in ? '已连接' : '未登录') : '未配置'}
-        </Badge>
-      )}
 
       {/* Status filter tabs */}
       <ToggleGroup

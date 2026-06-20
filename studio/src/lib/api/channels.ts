@@ -53,9 +53,4 @@ export const channelsApi = {
     unwrap<{ style: string }>(http.post('/channels/analyze-image', {
       image_url: imageUrl,
     }, { timeout: 120000 })),
-
-  seednoteLoginStatus: () =>
-    unwrap<{ available: boolean; logged_in: boolean; message: string }>(
-      http.get('/seednote/login-status'),
-    ),
 }
