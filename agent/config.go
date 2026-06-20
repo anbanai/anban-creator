@@ -83,5 +83,15 @@ func ParseConfig() (*Config, error) {
 
 func (c *Config) UserPrompt() string {
 	agentName := serveragent.TaskTypeToAgent(c.TaskType)
-	return serveragent.BuildUserPrompt(c.TaskType, c.Topic, agentName, c.Style, c.Goal, c.TaskID, os.Getenv("ANBANWRITER_DEFAULT_CHANNEL"), c.HasContentImage, c.HasTailImage)
+	return serveragent.BuildUserPrompt(serveragent.UserPromptParams{
+		TaskType:        c.TaskType,
+		Topic:           c.Topic,
+		AgentName:       agentName,
+		Style:           c.Style,
+		Goal:            c.Goal,
+		TaskID:          c.TaskID,
+		ChannelID:       os.Getenv("ANBANWRITER_DEFAULT_CHANNEL"),
+		HasContentImage: c.HasContentImage,
+		HasTailImage:    c.HasTailImage,
+	})
 }

@@ -31,71 +31,76 @@ func filterAgentEnv(env map[string]string) map[string]string {
 	return filtered
 }
 
+// UserPromptParams holds the inputs for BuildUserPrompt. Struct keeps call sites
+// readable as fields are added and prevents argument-order bugs.
+type UserPromptParams struct {
+	TaskType string // model.PlatformArticle / model.PlatformSeednote
+	Topic    string // user prompt; empty triggers autonomous research mode
+	AgentName string
+	Style    string // effective visual style (task > plan > channel); empty = no override
+	Goal     string // goal-mode condition; empty = no /goal prefix
+	TaskID   string // injected as task_id=<x> into the prompt body
+	ChannelID string // injected as channel_id=<x> into the prompt body
+	// HasContentImage / HasTailImage toggle seednote image composition. Cover is
+	// always generated. Ignored for non-seednote task types.
+	HasContentImage bool
+	HasTailImage    bool
+}
+
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
 // The agent definition is loaded via WithAgent() (system prompt), so the user
 // message only needs to provide the topic or an autonomous execution instruction.
 //
-// style, when non-empty, is the effective visual style resolved at task creation
+// p.Style, when non-empty, is the effective visual style resolved at task creation
 // (task > plan > channel). It is injected into the prompt as the image-gen style
 // override; the agent picks this up naturally when composing image prompts and
 // calls generate_image with a full prompt string. This keeps BuildAppConfig pure
 // (channel-only) — task-specific overrides flow through the prompt, not config.
 //
-// goal, when non-empty, is prepended as a /goal slash command so Claude Code's
+// p.Goal, when non-empty, is prepended as a /goal slash command so Claude Code's
 // built-in goal loop drives turn-by-turn evaluation inside the same session.
 // The CLI registers the condition as a prompt-based Stop hook and keeps working
 // across turns until a small fast model confirms the condition holds (or
 // max_turns is exhausted). Empty string is a no-op.
 //
-// For seednote tasks, the variadic imageOpts controls image composition:
-//   imageOpts[0] = hasContentImage (default false; cover+content when true)
-//   imageOpts[1] = hasTailImage    (default false; adds tail when true)
-// Cover is always on. Non-seednote types ignore the directive. Production callers
-// (executor, agent binary) always pass two explicit bools from the task model;
-// the variadic form keeps existing one-arg test calls compiling.
+// For seednote tasks, p.HasContentImage / p.HasTailImage control image
+// composition (cover always generated). Non-seednote types ignore the directive.
 //
 // Multi-line goal conditions are flattened to a single line (newlines →
 // spaces) because Claude Code's slash command parser only registers the first
 // line as the condition — anything after a newline would leak into the user
 // prompt body and silently drop from evaluation.
-func BuildUserPrompt(taskType, topic, agentName, style, goal, taskID, channelID string, imageOpts ...bool) string {
-	var hasContentImage, hasTailImage bool
-	if len(imageOpts) > 0 {
-		hasContentImage = imageOpts[0]
-	}
-	if len(imageOpts) > 1 {
-		hasTailImage = imageOpts[1]
-	}
+func BuildUserPrompt(p UserPromptParams) string {
 	var base string
-	if topic == "" {
+	if p.Topic == "" {
 		base = fmt.Sprintf(
 			"Use the %s agent to research and create content. "+
 				"Analyze the channel profile, keywords, and historical topics "+
 				"to choose the optimal theme, then execute the full creation workflow.",
-			agentName)
+			p.AgentName)
 	} else {
-		base = fmt.Sprintf("Use the %s agent to create content about: %s", agentName, topic)
+		base = fmt.Sprintf("Use the %s agent to create content about: %s", p.AgentName, p.Topic)
 	}
-	if style != "" {
+	if p.Style != "" {
 		base += fmt.Sprintf(
 			"\n\n视觉风格要求（覆盖账号默认风格，请在生成图片时遵守）：%s",
-			style,
+			p.Style,
 		)
 	}
-	if taskType == model.PlatformSeednote {
-		base += "\n\n" + describeSeednoteImageComposition(hasContentImage, hasTailImage)
+	if p.TaskType == model.PlatformSeednote {
+		base += "\n\n" + describeSeednoteImageComposition(p.HasContentImage, p.HasTailImage)
 	}
-	if taskID != "" || channelID != "" {
+	if p.TaskID != "" || p.ChannelID != "" {
 		parts := make([]string, 0, 2)
-		if taskID != "" {
-			parts = append(parts, "task_id="+taskID)
+		if p.TaskID != "" {
+			parts = append(parts, "task_id="+p.TaskID)
 		}
-		if channelID != "" {
-			parts = append(parts, "channel_id="+channelID)
+		if p.ChannelID != "" {
+			parts = append(parts, "channel_id="+p.ChannelID)
 		}
 		base += "\n\n本任务上下文：" + strings.Join(parts, ", ")
 	}
-	if trimmedGoal := normalizeGoalCondition(goal); trimmedGoal != "" {
+	if trimmedGoal := normalizeGoalCondition(p.Goal); trimmedGoal != "" {
 		return "/goal " + trimmedGoal + "\n\n" + base
 	}
 	return base
@@ -113,11 +118,10 @@ func describeSeednoteImageComposition(hasContent, hasTail bool) string {
 	if hasTail {
 		parts = append(parts, "尾图（tail.png）")
 	}
-	total := 1 + len(parts) - 1 // cover + optional content + optional tail
 	return fmt.Sprintf(
 		"图片构成要求（必须严格遵守，覆盖 skill 默认数量规则）：生成 %s，共 %d 张。"+
 			"image-plan.md 必须在「计划图片数量」字段写入此数字。",
-		strings.Join(parts, "、"), total,
+		strings.Join(parts, "、"), len(parts),
 	)
 }
 
@@ -435,7 +439,17 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	if opts.Channel != nil {
 		channelID = opts.Channel.ID
 	}
-	userPrompt := BuildUserPrompt(opts.Task.Type, opts.Task.Prompt, agentName, opts.Task.Style, opts.Task.Goal, opts.Task.ID, channelID, opts.Task.HasContentImage, opts.Task.HasTailImage)
+	userPrompt := BuildUserPrompt(UserPromptParams{
+		TaskType:        opts.Task.Type,
+		Topic:           opts.Task.Prompt,
+		AgentName:       agentName,
+		Style:           opts.Task.Style,
+		Goal:            opts.Task.Goal,
+		TaskID:          opts.Task.ID,
+		ChannelID:       channelID,
+		HasContentImage: opts.Task.HasContentImage,
+		HasTailImage:    opts.Task.HasTailImage,
+	})
 
 	// Load agent definition from plugin directory and pass via WithAgent()
 	// (SDK programmatic subagents) instead of --agent CLI flag lookup.

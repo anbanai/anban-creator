@@ -24,46 +24,61 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 	return &PlanService{repo: repo, logger: logger}
 }
 
+// CreatePlanParams holds the inputs for PlanService.Create. Pointer-typed optional
+// fields use the same nil-means-default / nil-means-unchanged semantics as the
+// underlying model. Struct form keeps call sites readable as fields are added
+// and prevents argument-order bugs on a signature that has grown past a dozen
+// positional params.
+type CreatePlanParams struct {
+	UserID            string
+	ChannelID         string
+	CronExpr          string
+	Prompt            string
+	ImageModelKey     string
+	SkipReferenceImage *bool
+	ReferenceImageURL string
+	Style             string
+	Watermark         *bool
+	Goal              string
+	GoalMode          bool
+	// HasContentImage / HasTailImage: seednote image composition (cover always
+	// generated). nil → fall back to plan model defaults (content on, tail off);
+	// non-nil honors explicit user choice.
+	HasContentImage *bool
+	HasTailImage    *bool
+}
+
 // Create validates the cron expression, resolves the channel, computes the next run
 // time, and persists the plan. The task type is derived from the channel's platform.
-// imageModelKey optionally selects a per-plan image model (validated upstream by the handler).
+// ImageModelKey optionally selects a per-plan image model (validated upstream by the handler).
 //
-// goal and goalMode propagate to tasks spawned from this plan; when goalMode is
+// Goal and GoalMode propagate to tasks spawned from this plan; when GoalMode is
 // true, spawned tasks charge ×GoalMultiplier upfront and evaluate the goal
 // after each execution.
 //
-// hasContentImage / hasTailImage control seednote image composition on spawned
+// HasContentImage / HasTailImage control seednote image composition on spawned
 // tasks. nil falls back to the model's column defaults (content on, tail off).
-func (s *PlanService) Create(
-	ctx context.Context,
-	userID, channelID, cronExpr, prompt, imageModelKey string,
-	skipRefImage *bool,
-	referenceImageURL, style string,
-	watermark *bool,
-	goal string,
-	goalMode bool,
-	hasContentImage, hasTailImage *bool,
-) (*model.Plan, error) {
-	if channelID == "" {
+func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Plan, error) {
+	if p.ChannelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
 	}
-	if cronExpr == "" {
+	if p.CronExpr == "" {
 		return nil, fmt.Errorf("cron_expr is required")
 	}
 
 	// Load channel to derive type and validate ownership.
-	channel, err := s.repo.Channels().FindByID(ctx, channelID)
+	channel, err := s.repo.Channels().FindByID(ctx, p.ChannelID)
 	if err != nil {
 		return nil, fmt.Errorf("find channel: %w", err)
 	}
-	if channel.UserID != userID {
+	if channel.UserID != p.UserID {
 		return nil, fmt.Errorf("channel not owned by user")
 	}
 	if channel.Status != model.ChannelStatusActive {
 		return nil, fmt.Errorf("channel is not active")
 	}
 
-	nextRun, err := s.computeNextRun(cronExpr)
+	nextRun, err := s.computeNextRun(p.CronExpr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid cron expression: %w", err)
 	}
@@ -71,30 +86,30 @@ func (s *PlanService) Create(
 	// Seednote image composition: honor caller's explicit choice, otherwise rely
 	// on the model's column defaults (content on, tail off).
 	hasContent := true
-	if hasContentImage != nil {
-		hasContent = *hasContentImage
+	if p.HasContentImage != nil {
+		hasContent = *p.HasContentImage
 	}
 	hasTail := false
-	if hasTailImage != nil {
-		hasTail = *hasTailImage
+	if p.HasTailImage != nil {
+		hasTail = *p.HasTailImage
 	}
 
 	plan := &model.Plan{
 		ID:                 uuid.New().String(),
-		UserID:             userID,
-		ChannelID:          channelID,
+		UserID:             p.UserID,
+		ChannelID:          p.ChannelID,
 		Type:               channel.Platform,
-		CronExpr:           cronExpr,
-		Prompt:             prompt,
+		CronExpr:           p.CronExpr,
+		Prompt:             p.Prompt,
 		Status:             model.PlanStatusActive,
 		NextRunAt:          nextRun,
-		ImageModelKey:      imageModelKey,
-		ReferenceImageURL:  referenceImageURL,
-		Style:              style,
-		SkipReferenceImage: skipRefImage != nil && *skipRefImage,
-		Watermark:          watermark != nil && *watermark,
-		Goal:               goal,
-		GoalMode:           goalMode,
+		ImageModelKey:      p.ImageModelKey,
+		ReferenceImageURL:  p.ReferenceImageURL,
+		Style:              p.Style,
+		SkipReferenceImage: p.SkipReferenceImage != nil && *p.SkipReferenceImage,
+		Watermark:          p.Watermark != nil && *p.Watermark,
+		Goal:               p.Goal,
+		GoalMode:           p.GoalMode,
 		HasContentImage:    hasContent,
 		HasTailImage:       hasTail,
 	}
@@ -131,71 +146,76 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 	return plans, total, nil
 }
 
-// Update modifies a plan's fields. If the cron expression changed, next_run_at is recomputed.
-//
-// Pointer-typed fields use leave-unchanged semantics:
-//   - imageModelKey: nil = leave unchanged; &"" = clear to system default
+// UpdatePlanParams holds the inputs for PlanService.Update. Pointer-typed fields
+// use leave-unchanged semantics:
+//   - ImageModelKey: nil = leave unchanged; &"" = clear to system default
 //     (use model.ImageModelKeySystemDefault / ImageModelKeyCustom for clarity)
-//   - skipRefImage:  nil = leave unchanged; &true/&false = set
-//   - style:         nil = leave unchanged; &"" = clear; &"value" = set
-//   - watermark:     nil = leave unchanged; &true/&false = set
-//   - goalMode:      nil = leave unchanged; &true/&false = set
-//   - hasContentImage / hasTailImage: nil = leave unchanged; &true/&false = set
+//   - SkipReferenceImage: nil = leave unchanged; &true/&false = set
+//   - ReferenceImageURL: nil = leave unchanged; &"" = clear; &"value" = set
+//   - Style: nil = leave unchanged; &"" = clear; &"value" = set
+//   - Watermark: nil = leave unchanged; &true/&false = set
+//   - GoalMode: nil = leave unchanged; &true/&false = set
+//   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
 //
-// referenceImageURL follows the same nil-means-unchanged semantics as the other
-// optional fields. prompt and goal are plain strings and always overwritten
-// (empty string is a valid value meaning "no prompt / no goal").
-func (s *PlanService) Update(
-	ctx context.Context,
-	id, cronExpr, prompt string,
-	imageModelKey *string,
-	skipRefImage *bool,
-	referenceImageURL *string,
-	style *string,
-	watermark *bool,
-	goal string,
-	goalMode *bool,
-	hasContentImage, hasTailImage *bool,
-) (*model.Plan, error) {
-	plan, err := s.repo.Plans().FindByID(ctx, id)
+// ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
+// unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
+type UpdatePlanParams struct {
+	ID                 string
+	CronExpr           string
+	Prompt             string
+	ImageModelKey      *string
+	SkipReferenceImage *bool
+	ReferenceImageURL  *string
+	Style              *string
+	Watermark          *bool
+	Goal               string
+	GoalMode           *bool
+	HasContentImage    *bool
+	HasTailImage       *bool
+}
+
+// Update modifies a plan's fields per UpdatePlanParams. If the cron expression
+// changed, next_run_at is recomputed. See UpdatePlanParams for field semantics.
+func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Plan, error) {
+	plan, err := s.repo.Plans().FindByID(ctx, p.ID)
 	if err != nil {
 		return nil, fmt.Errorf("find plan: %w", err)
 	}
 
-	plan.Prompt = prompt
-	if referenceImageURL != nil {
-		plan.ReferenceImageURL = *referenceImageURL
+	plan.Prompt = p.Prompt
+	if p.ReferenceImageURL != nil {
+		plan.ReferenceImageURL = *p.ReferenceImageURL
 	}
-	plan.Goal = goal
-	if style != nil {
-		plan.Style = *style
+	plan.Goal = p.Goal
+	if p.Style != nil {
+		plan.Style = *p.Style
 	}
-	if imageModelKey != nil {
-		plan.ImageModelKey = *imageModelKey
+	if p.ImageModelKey != nil {
+		plan.ImageModelKey = *p.ImageModelKey
 	}
-	if skipRefImage != nil {
-		plan.SkipReferenceImage = *skipRefImage
+	if p.SkipReferenceImage != nil {
+		plan.SkipReferenceImage = *p.SkipReferenceImage
 	}
-	if watermark != nil {
-		plan.Watermark = *watermark
+	if p.Watermark != nil {
+		plan.Watermark = *p.Watermark
 	}
-	if goalMode != nil {
-		plan.GoalMode = *goalMode
+	if p.GoalMode != nil {
+		plan.GoalMode = *p.GoalMode
 	}
-	if hasContentImage != nil {
-		plan.HasContentImage = *hasContentImage
+	if p.HasContentImage != nil {
+		plan.HasContentImage = *p.HasContentImage
 	}
-	if hasTailImage != nil {
-		plan.HasTailImage = *hasTailImage
+	if p.HasTailImage != nil {
+		plan.HasTailImage = *p.HasTailImage
 	}
 
 	// If cron expression changed, validate and recompute next run.
-	if cronExpr != "" && cronExpr != plan.CronExpr {
-		if _, err := cron.ParseStandard(cronExpr); err != nil {
+	if p.CronExpr != "" && p.CronExpr != plan.CronExpr {
+		if _, err := cron.ParseStandard(p.CronExpr); err != nil {
 			return nil, fmt.Errorf("invalid cron expression: %w", err)
 		}
-		plan.CronExpr = cronExpr
-		nextRun, err := s.computeNextRun(cronExpr)
+		plan.CronExpr = p.CronExpr
+		nextRun, err := s.computeNextRun(p.CronExpr)
 		if err != nil {
 			return nil, fmt.Errorf("compute next run: %w", err)
 		}

@@ -115,7 +115,21 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
 
-	plan, err := h.service.Create(c.Context(), userID, req.ChannelID, req.CronExpr, req.Prompt, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Style, req.Watermark, req.Goal, req.GoalMode, req.HasContentImage, req.HasTailImage)
+	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
+		UserID:             userID,
+		ChannelID:          req.ChannelID,
+		CronExpr:           req.CronExpr,
+		Prompt:             req.Prompt,
+		ImageModelKey:      req.ImageModelKey,
+		SkipReferenceImage: req.SkipReferenceImage,
+		ReferenceImageURL:  req.ReferenceImageURL,
+		Style:              req.Style,
+		Watermark:          req.Watermark,
+		Goal:               req.Goal,
+		GoalMode:           req.GoalMode,
+		HasContentImage:    req.HasContentImage,
+		HasTailImage:       req.HasTailImage,
+	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
@@ -217,7 +231,20 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
 
-	plan, err := h.service.Update(c.Context(), id, req.CronExpr, req.Prompt, req.ImageModelKey, req.SkipReferenceImage, req.ReferenceImageURL, req.Style, req.Watermark, req.Goal, req.GoalMode, req.HasContentImage, req.HasTailImage)
+	plan, err := h.service.Update(c.Context(), service.UpdatePlanParams{
+		ID:                 id,
+		CronExpr:           req.CronExpr,
+		Prompt:             req.Prompt,
+		ImageModelKey:      req.ImageModelKey,
+		SkipReferenceImage: req.SkipReferenceImage,
+		ReferenceImageURL:  req.ReferenceImageURL,
+		Style:              req.Style,
+		Watermark:          req.Watermark,
+		Goal:               req.Goal,
+		GoalMode:           req.GoalMode,
+		HasContentImage:    req.HasContentImage,
+		HasTailImage:       req.HasTailImage,
+	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")

@@ -609,7 +609,12 @@ func TestBuildUserPrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildUserPrompt(tt.taskType, tt.topic, tt.agentName, tt.style, "", "", "")
+			got := BuildUserPrompt(UserPromptParams{
+				TaskType:  tt.taskType,
+				Topic:     tt.topic,
+				AgentName: tt.agentName,
+				Style:     tt.style,
+			})
 			for _, sub := range tt.wantContains {
 				if !strings.Contains(got, sub) {
 					t.Errorf("BuildUserPrompt() = %q, want to contain %q", got, sub)
@@ -629,14 +634,14 @@ func TestBuildUserPrompt(t *testing.T) {
 
 func TestBuildUserPrompt_Goal(t *testing.T) {
 	// Empty goal — no /goal prefix.
-	got := BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "", "")
+	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote"})
 	if strings.Contains(got, "/goal ") {
 		t.Errorf("empty goal should not include /goal prefix; got %q", got)
 	}
 
 	// Non-empty goal — /goal prefix appears with the condition, followed by the base prompt.
 	goal := "文章字数不少于 1000 字"
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", goal, "", "")
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", Goal: goal})
 	if !strings.HasPrefix(got, "/goal "+goal) {
 		t.Errorf("BuildUserPrompt with goal should start with %q; got %q", "/goal "+goal, got[:min(len(got), 80)])
 	}
@@ -646,13 +651,13 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 	}
 
 	// Whitespace-only goal is treated as empty.
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "   \n\t  ", "", "")
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", Goal: "   \n\t  "})
 	if strings.Contains(got, "/goal ") {
 		t.Errorf("whitespace-only goal should not include /goal prefix; got %q", got)
 	}
 
 	// Surrounding whitespace is trimmed.
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "  含关键词 ABC  ", "", "")
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", Goal: "  含关键词 ABC  "})
 	wantPrefix := "/goal 含关键词 ABC"
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Errorf("goal should be trimmed; want prefix %q, got %q", wantPrefix, got[:min(len(got), 80)])
@@ -660,7 +665,7 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 
 	// Multi-line goal is flattened to a single /goal line (Claude Code's slash
 	// parser only registers the first line as the condition).
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "字数 ≥ 1000\n包含 3 个案例\n带封面图", "", "")
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", Goal: "字数 ≥ 1000\n包含 3 个案例\n带封面图"})
 	firstLine := got
 	if idx := strings.Index(got, "\n"); idx >= 0 {
 		firstLine = got[:idx]
@@ -680,7 +685,7 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 
 func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	// Both task_id and channel_id present.
-	got := BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "task-123", "chan-abc")
+	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", TaskID: "task-123", ChannelID: "chan-abc"})
 	if !strings.Contains(got, "本任务上下文：") {
 		t.Errorf("missing 任务上下文 line; got %q", got)
 	}
@@ -692,7 +697,7 @@ func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	}
 
 	// Only task_id.
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "task-123", "")
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", TaskID: "task-123"})
 	if !strings.Contains(got, "本任务上下文：task_id=task-123") {
 		t.Errorf("expected only task_id in context line; got %q", got)
 	}
@@ -701,13 +706,13 @@ func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	}
 
 	// Only channel_id.
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "", "chan-abc")
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", ChannelID: "chan-abc"})
 	if !strings.Contains(got, "本任务上下文：channel_id=chan-abc") {
 		t.Errorf("expected only channel_id in context line; got %q", got)
 	}
 
 	// Both empty — line omitted entirely.
-	got = BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "", "")
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote"})
 	if strings.Contains(got, "本任务上下文") {
 		t.Errorf("context line should be omitted when both IDs empty; got %q", got)
 	}
@@ -756,7 +761,13 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := BuildUserPrompt("seednote", "春季穿搭", "seednote", "", "", "", "", tc.hasContent, tc.hasTail)
+			got := BuildUserPrompt(UserPromptParams{
+				TaskType:        "seednote",
+				Topic:           "春季穿搭",
+				AgentName:       "seednote",
+				HasContentImage: tc.hasContent,
+				HasTailImage:    tc.hasTail,
+			})
 			for _, sub := range tc.wantContains {
 				if !strings.Contains(got, sub) {
 					t.Errorf("missing %q in prompt: %q", sub, got)
@@ -775,7 +786,13 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 
 	// Non-seednote task types must NOT get the image composition directive even
 	// when explicit flags are passed.
-	articleGot := BuildUserPrompt("article", "时间管理", "wechatarticle", "", "", "", "", true, true)
+	articleGot := BuildUserPrompt(UserPromptParams{
+		TaskType:        "article",
+		Topic:           "时间管理",
+		AgentName:       "wechatarticle",
+		HasContentImage: true,
+		HasTailImage:    true,
+	})
 	if strings.Contains(articleGot, "图片构成要求") {
 		t.Errorf("article task must not get image composition directive; got %q", articleGot)
 	}
