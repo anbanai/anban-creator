@@ -108,20 +108,41 @@ func BuildUserPrompt(p UserPromptParams) string {
 
 // describeSeednoteImageComposition renders the image composition directive that
 // overrides the seednote-visual-design skill's default count rules. Cover is
-// always generated; content and tail are toggled by the two flags. The skill
-// and its SubagentStop hook rely on image-plan.md declaring the same count.
+// always generated; content and tail are toggled by the two flags.
+//
+// Content image count is adaptive: when enabled, the agent splits information
+// points into 1~3 pages (2-4 points each), so the exact total is decided at
+// run time and recorded in image-plan.md. The skill and its SubagentStop hook
+// validate that image-plan.md's declared count matches the generated files.
 func describeSeednoteImageComposition(hasContent, hasTail bool) string {
 	parts := []string{"封面图（cover.png）"}
 	if hasContent {
-		parts = append(parts, "1 张内容图（image_01.png）")
+		parts = append(parts, "1~3 张内容图（image_01.png…image_0N.png，N 由信息点数量自适应，每张承载 2-4 个信息点，最多 3 张）")
 	}
 	if hasTail {
 		parts = append(parts, "尾图（tail.png）")
 	}
+
+	// Content images are adaptive → the total is not fixed, so we hand the
+	// decision to the agent and let the mechanical gate validate consistency.
+	if hasContent {
+		return fmt.Sprintf(
+			"图片构成要求（必须严格遵守，覆盖 skill 默认数量规则）：生成 %s。"+
+				"内容图张数由信息点分组决定（1~3 张，每张 2-4 个信息点）；"+
+				"image-plan.md 必须在「计划图片数量」字段写入实际生成的总张数，机械闸门按此校验。",
+			strings.Join(parts, "、"),
+		)
+	}
+
+	// No content images → composition is fully deterministic.
+	total := 1 // cover
+	if hasTail {
+		total++
+	}
 	return fmt.Sprintf(
 		"图片构成要求（必须严格遵守，覆盖 skill 默认数量规则）：生成 %s，共 %d 张。"+
 			"image-plan.md 必须在「计划图片数量」字段写入此数字。",
-		strings.Join(parts, "、"), len(parts),
+		strings.Join(parts, "、"), total,
 	)
 }
 
