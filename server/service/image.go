@@ -28,20 +28,31 @@ import (
 
 // ImageResult is the response for single image generation.
 type ImageResult struct {
-	FilePath        string              `json:"file_path"`
-	DownloadURL     string              `json:"download_url,omitempty"`
-	Size            string              `json:"size"`
-	Width           int                 `json:"width,omitempty"`
-	Height          int                 `json:"height,omitempty"`
-	Prompt          string              `json:"prompt,omitempty"`
-	ImageType       string              `json:"image_type,omitempty"`
-	Provider        string              `json:"provider,omitempty"`
-	Model           string              `json:"model,omitempty"`
-	RevisedPrompt   string              `json:"revised_prompt,omitempty"`
-	ResponseType    string              `json:"response_type,omitempty"`
-	ResponsePreview string              `json:"response_preview,omitempty"`
-	OutputMIME      string              `json:"output_mime,omitempty"`
-	Verification    *VisionVerification `json:"verification,omitempty"`
+	FilePath        string `json:"file_path"`
+	DownloadURL     string `json:"download_url,omitempty"`
+	Size            string `json:"size"`
+	Width           int    `json:"width,omitempty"`
+	Height          int    `json:"height,omitempty"`
+	Prompt          string `json:"prompt,omitempty"`
+	ImageType       string `json:"image_type,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	Model           string `json:"model,omitempty"`
+	RevisedPrompt   string `json:"revised_prompt,omitempty"`
+	ResponseType    string `json:"response_type,omitempty"`
+	ResponsePreview string `json:"response_preview,omitempty"`
+	OutputMIME      string `json:"output_mime,omitempty"`
+	// WeChatURL/MediaID are populated when generate_image is called with
+	// upload_to_cdn=true and the image is uploaded to the channel's CDN
+	// (WeChat material library for article channels) in the same call.
+	// This collapses the old fragile two-step generate→upload into one
+	// atomic round-trip, so each image is durable the moment it is generated.
+	WeChatURL string `json:"wechat_url,omitempty"`
+	MediaID   string `json:"media_id,omitempty"`
+	// UploadError is set (instead of WeChatURL) when upload_to_cdn=true but
+	// the upload failed AFTER a successful generation. The generation is not
+	// wasted: the caller retries only the upload via upload_image(file_path).
+	UploadError  string              `json:"upload_error,omitempty"`
+	Verification *VisionVerification `json:"verification,omitempty"`
 }
 
 // VisionVerification is the post-generation vision check result attached to

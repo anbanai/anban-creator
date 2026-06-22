@@ -158,3 +158,89 @@ func TestVisionVerification_JSONTags(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldUploadAfterVerification(t *testing.T) {
+	// Every combination of the three inputs. This is the gate that makes
+	// generate_image(upload_to_cdn=true) upload atomically: a rejected image
+	// (passed=false) must never consume a material slot, and a missing
+	// verification object when one was requested must default to skip.
+	passed := &service.VisionVerification{Passed: true}
+	failed := &service.VisionVerification{Passed: false, Score: "medium"}
+
+	cases := []struct {
+		name             string
+		uploadToCDN      bool
+		verifyWithVision bool
+		verification     *service.VisionVerification
+		want             bool
+	}{
+		{"upload off, no verify", false, false, nil, false},
+		{"upload off, verify passed", false, true, passed, false},
+		{"upload off, verify failed", false, true, failed, false},
+		{"upload on, no verify (always upload)", true, false, nil, true},
+		{"upload on, verify passed", true, true, passed, true},
+		{"upload on, verify failed -> skip", true, true, failed, false},
+		{"upload on, verify requested but nil -> skip (safe default)", true, true, nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := shouldUploadAfterVerification(c.uploadToCDN, c.verifyWithVision, c.verification)
+			if got != c.want {
+				t.Errorf("[FAIL] shouldUploadAfterVerification(%v, %v, %+v) = %v, want %v",
+					c.uploadToCDN, c.verifyWithVision, c.verification, got, c.want)
+			}
+		})
+	}
+}
+
+func TestImageResult_UploadFields_JSONTags(t *testing.T) {
+	// The atomic-upload contract: wechat_url + media_id appear on success;
+	// upload_error appears (and the URL fields stay omitempty) on failure.
+	// Verify the omitempty so a normal (non-upload) generate result doesn't
+	// leak empty "wechat_url":"" / "media_id":"" keys to the agent.
+	success := &service.ImageResult{
+		FilePath:  "/tmp/img.png",
+		WeChatURL: "https://cdn.example/img.png",
+		MediaID:   "media_123",
+	}
+	b, err := json.Marshal(success)
+	if err != nil {
+		t.Fatalf("[FAIL] marshal success: %v", err)
+	}
+	s := string(b)
+	for _, want := range []string{`"wechat_url":"https://cdn.example/img.png"`, `"media_id":"media_123"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("[FAIL] success JSON missing %q in: %s", want, s)
+		}
+	}
+
+	// A result with no upload fields must not emit empty upload keys.
+	plain := &service.ImageResult{FilePath: "/tmp/img.png"}
+	bp, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatalf("[FAIL] marshal plain: %v", err)
+	}
+	sp := string(bp)
+	for _, unwanted := range []string{`"wechat_url"`, `"media_id"`, `"upload_error"`} {
+		if strings.Contains(sp, unwanted) {
+			t.Errorf("[FAIL] plain JSON should omit %q, got: %s", unwanted, sp)
+		}
+	}
+
+	// Upload-failure result carries upload_error and omits the URL fields.
+	failedUp := &service.ImageResult{
+		FilePath:    "/tmp/img.png",
+		UploadError: "boom",
+	}
+	bf, err := json.Marshal(failedUp)
+	if err != nil {
+		t.Fatalf("[FAIL] marshal failed: %v", err)
+	}
+	sf := string(bf)
+	if !strings.Contains(sf, `"upload_error":"boom"`) {
+		t.Errorf("[FAIL] failed JSON missing upload_error in: %s", sf)
+	}
+	if strings.Contains(sf, `"wechat_url"`) || strings.Contains(sf, `"media_id"`) {
+		t.Errorf("[FAIL] failed JSON should not carry URL fields when upload errored: %s", sf)
+	}
+}

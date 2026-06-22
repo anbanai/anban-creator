@@ -22,14 +22,14 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate a single image using the channel's configured image provider (OpenAI GPT Image, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and if output_path is provided also saves the image to that server-local path and returns file_path. When verify_with_vision=true, also runs a post-generation vision check using verification_prompt and returns a verification object {passed, score, missing_entities, notes, raw}.",
+		Description: "Generate a single image using the channel's configured image provider (OpenAI GPT Image, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and if output_path is provided also saves the image to that server-local path and returns file_path. When verify_with_vision=true, also runs a post-generation vision check using verification_prompt and returns a verification object {passed, score, missing_entities, notes, raw}. When upload_to_cdn=true, the server ALSO uploads the saved image to the channel's CDN (WeChat material library for article channels, returning wechat_url + media_id) in the SAME call, right after a passing vision check — this makes each image durable the moment it is generated and removes the need for a separate, interruptible upload_image step. Upload is skipped when verify_with_vision=true but verification fails (so a rejected image never consumes a material slot); on a post-generation upload failure the response carries upload_error instead of wechat_url so the caller can retry just the upload via upload_image without regenerating.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id":          map[string]any{"type": "string", "description": "Channel ID (determines which image API config to use)"},
 				"prompt":              map[string]any{"type": "string", "description": "Image generation prompt"},
 				"image_type":          map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
-				"output_path":         map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, server will download and save). Use a writable server path such as /tmp/...; this is not the agent client's current working directory."},
+				"output_path":         map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, but required when upload_to_cdn=true since the upload reads this file). Use a writable server path such as /tmp/...; this is not the agent client's current working directory."},
 				"size":                map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides channel default when provided; providers may still return a different crop/ratio."},
 				"ref_image_path":      map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
 				"task_id":             map[string]any{"type": "string", "description": "Task ID (for logging, credit tracking, and per-task image model lookup)"},
@@ -37,6 +37,7 @@ func registerImageTools(server *mcp.Server) {
 				"watermark":           map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
 				"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities/matches the chapter content. No extra credit deduction for the vision call.", "default": false},
 				"verification_prompt": map[string]any{"type": "string", "description": "Prompt for the post-generation vision check (required when verify_with_vision=true). Should ask the vision model to verify required entities are present and return JSON {all_entities_present, missing_entities, relevance_entities, relevance_score, overall_pass}."},
+				"upload_to_cdn":       map[string]any{"type": "boolean", "description": "When true (requires output_path), upload the saved image to the channel's CDN in the same call and return wechat_url + media_id on the result. For article channels this uploads to the WeChat material library. Upload runs only after a passing vision check (or when verify_with_vision is false), so rejected images are never uploaded. On upload failure the result carries upload_error instead — retry the upload alone via upload_image, no regeneration needed.", "default": false},
 			},
 			"required": []any{"channel_id", "prompt"},
 		},
@@ -125,6 +126,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	imageModelKey, _ := args["image_model_key"].(string)
 	verifyWithVision, _ := args["verify_with_vision"].(bool)
 	verificationPrompt, _ := args["verification_prompt"].(string)
+	uploadToCDN, _ := args["upload_to_cdn"].(bool)
 	var watermark *bool
 	if v, ok := args["watermark"].(bool); ok {
 		watermark = &v
@@ -145,6 +147,12 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				watermark = &wm
 			}
 		}
+	}
+
+	// upload_to_cdn requires a saved local file to upload; validate before
+	// billing/generation so a contract violation never wastes a generation.
+	if uploadToCDN && outputPath == "" {
+		return errorResult("output_path is required when upload_to_cdn is true"), nil
 	}
 
 	if mcpLog != nil {
@@ -273,6 +281,51 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		}
 	}
 
+	// upload_to_cdn: make image upload atomic with generation. Each image
+	// becomes durable on the channel's CDN the instant it is generated,
+	// eliminating the lost-results window of the old separate upload_image
+	// batch. Upload is gated on a passing vision check (when requested) so a
+	// rejected image never consumes a material slot; a post-generation upload
+	// failure surfaces as upload_error so the caller retries just the upload
+	// via upload_image without paying for regeneration.
+	if shouldUploadAfterVerification(uploadToCDN, verifyWithVision, result.Verification) {
+		uploaded, upErr := svcs.ImageSvc.UploadImage(ctx, userID, channelID, result.FilePath)
+		if upErr != nil {
+			result.UploadError = upErr.Error()
+			if mcpLog != nil {
+				mcpLog.Warn().
+					Str("tool", "generate_image").
+					Str("task_id", taskID).
+					Str("channel_id", channelID).
+					Str("file_path", result.FilePath).
+					Err(upErr).
+					Msg("MCP generate_image CDN upload failed (generation kept; retry upload via upload_image)")
+			}
+		} else {
+			result.WeChatURL = uploaded.WechatURL
+			result.MediaID = uploaded.MediaID
+			if mcpLog != nil {
+				mcpLog.Info().
+					Str("tool", "generate_image").
+					Str("task_id", taskID).
+					Str("channel_id", channelID).
+					Str("wechat_url", uploaded.WechatURL).
+					Msg("MCP generate_image uploaded to CDN")
+			}
+		}
+	} else if uploadToCDN {
+		// upload_to_cdn requested but gated off (vision check failed or
+		// unavailable). Log so the skip is observable; the caller regenerates
+		// with a sharper prompt or re-verifies before retrying the upload.
+		if mcpLog != nil {
+			mcpLog.Info().
+				Str("tool", "generate_image").
+				Str("task_id", taskID).
+				Str("channel_id", channelID).
+				Msg("MCP generate_image skipped CDN upload (vision verification did not pass)")
+		}
+	}
+
 	return textResult(result)
 }
 
@@ -327,6 +380,26 @@ func runImageVerification(ctx context.Context, userID string, result *service.Im
 	}
 
 	return parseVisionVerificationJSON(raw), nil
+}
+
+// shouldUploadAfterVerification decides whether a generate_image call with
+// upload_to_cdn=true proceeds to upload the generated image to the CDN. Upload
+// is gated on a passing vision check so a rejected image never consumes a
+// material slot. When verify_with_vision is true but no verification object is
+// attached (e.g. the vision call errored operationally), we default to NOT
+// uploading — the safer of the two options, since the image bytes are still
+// saved locally and the caller can re-verify / re-upload explicitly.
+func shouldUploadAfterVerification(uploadToCDN, verifyWithVision bool, verification *service.VisionVerification) bool {
+	if !uploadToCDN {
+		return false
+	}
+	if !verifyWithVision {
+		return true
+	}
+	if verification == nil {
+		return false
+	}
+	return verification.Passed
 }
 
 // parseVisionVerificationJSON extracts the structured fields from the vision
