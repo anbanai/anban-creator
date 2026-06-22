@@ -66,10 +66,12 @@ type createPlanRequest struct {
 	Watermark          *bool  `json:"watermark"`
 	Goal               string `json:"goal"`
 	GoalMode           bool   `json:"goal_mode"`
+	// TemplateID records the template selected during plan creation. nil/empty = no template.
+	TemplateID *string `json:"template_id,omitempty"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off).
-	HasContentImage    *bool  `json:"has_content_image,omitempty"`
-	HasTailImage       *bool  `json:"has_tail_image,omitempty"`
+	HasContentImage *bool `json:"has_content_image,omitempty"`
+	HasTailImage    *bool `json:"has_tail_image,omitempty"`
 }
 
 type updatePlanRequest struct {
@@ -82,6 +84,7 @@ type updatePlanRequest struct {
 	Watermark          *bool   `json:"watermark"`
 	Goal               string  `json:"goal"`
 	GoalMode           *bool   `json:"goal_mode"`
+	TemplateID         *string `json:"template_id,omitempty"`
 	HasContentImage    *bool   `json:"has_content_image,omitempty"`
 	HasTailImage       *bool   `json:"has_tail_image,omitempty"`
 }
@@ -127,6 +130,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		Watermark:          req.Watermark,
 		Goal:               req.Goal,
 		GoalMode:           req.GoalMode,
+		TemplateID:         req.TemplateID,
 		HasContentImage:    req.HasContentImage,
 		HasTailImage:       req.HasTailImage,
 	})
@@ -242,6 +246,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		Watermark:          req.Watermark,
 		Goal:               req.Goal,
 		GoalMode:           req.GoalMode,
+		TemplateID:         req.TemplateID,
 		HasContentImage:    req.HasContentImage,
 		HasTailImage:       req.HasTailImage,
 	})

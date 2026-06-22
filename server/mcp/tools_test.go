@@ -23,16 +23,17 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ChannelS
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Task{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Task{}, &model.Template{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := repository.New(db)
 	logger := zerolog.Nop()
 	channelSvc := service.NewChannelService(repo, &logger)
 	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	templateSvc := service.NewTemplateService(repo, &logger)
 
 	old := svcs
-	svcs = &Services{ChannelSvc: channelSvc, TaskSvc: taskSvc}
+	svcs = &Services{ChannelSvc: channelSvc, TaskSvc: taskSvc, TemplateSvc: templateSvc}
 
 	cleanup := func() {
 		sqlDB, _ := db.DB()
@@ -261,5 +262,104 @@ func TestBuildAccountInfo_CrossUser_RejectedAtChannelLookup(t *testing.T) {
 	// error, because ChannelSvc.Get runs first.
 	if !strings.Contains(errMsg, "channel not owned") && !strings.Contains(errMsg, "owned by user") {
 		t.Errorf("error message = %q, want it to mention channel ownership rejection", errMsg)
+	}
+}
+
+// createAccountInfoTemplate inserts a template row directly via the repository
+// (bypassing the service's name-derivation so we control every field).
+func createAccountInfoTemplate(t *testing.T, repo repository.Repository, userID string) *model.Template {
+	t.Helper()
+	ctx := context.Background()
+	tmpl := &model.Template{
+		ID:             uuid.New().String(),
+		UserID:         userID,
+		Type:           model.PlatformArticle,
+		Name:           "测试脚手架模板",
+		Visibility:     "public",
+		WritingStyle:   "犀利、接地气、像朋友聊天",
+		Structure:      map[string]any{"text": "开头钩子 → 3 个论点 → 行动号召"},
+		ExampleContent: map[string]any{"text": "示例正文片段……"},
+		IsActive:       true,
+	}
+	if err := repo.Templates().Create(ctx, tmpl); err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+	return tmpl
+}
+
+// TestBuildAccountInfo_TemplateScaffold: a task carrying a template_id surfaces
+// the template's writing style / structure / example in the profile response, so
+// the agent can apply the content scaffold. Visual style (style/style_source) is
+// unaffected — the scaffold rides on separate template_* keys.
+func TestBuildAccountInfo_TemplateScaffold(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	tmpl := createAccountInfoTemplate(t, repo, userID)
+	task := createAccountInfoTask(t, repo, userID, ch.ID, "温暖治愈系，柔光摄影")
+	task.TemplateID = &tmpl.ID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task template_id: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"channel_id": ch.ID,
+		"scope":      "article",
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	if got := info["template_id"]; got != tmpl.ID {
+		t.Errorf("template_id = %v, want %s", got, tmpl.ID)
+	}
+	if got := info["template_name"]; got != "测试脚手架模板" {
+		t.Errorf("template_name = %v, want 测试脚手架模板", got)
+	}
+	if got := info["template_writing_style"]; got != "犀利、接地气、像朋友聊天" {
+		t.Errorf("template_writing_style = %v, want 犀利、接地气、像朋友聊天", got)
+	}
+	if got := info["template_structure"]; got != "开头钩子 → 3 个论点 → 行动号召" {
+		t.Errorf("template_structure = %v, want scaffold text", got)
+	}
+	if got := info["template_example"]; got != "示例正文片段……" {
+		t.Errorf("template_example = %v, want example text", got)
+	}
+	// Visual style channel is untouched by the scaffold.
+	if got := info["style"]; got != "温暖治愈系，柔光摄影" {
+		t.Errorf("style = %v, want task visual style (unchanged)", got)
+	}
+}
+
+// TestBuildAccountInfo_TemplateDeleted_NoScaffold: a task whose template_id points
+// at a deleted/non-existent template must not fail the whole profile — the
+// template_* keys are simply absent. Guards against stale template_id rows.
+func TestBuildAccountInfo_TemplateDeleted_NoScaffold(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
+	ghostID := uuid.New().String() // no template row exists for this id
+	task.TemplateID = &ghostID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task template_id: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"channel_id": ch.ID,
+		"scope":      "article",
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("expected no error for stale template_id, got: %s", errMsg)
+	}
+	for _, key := range []string{"template_id", "template_name", "template_writing_style", "template_structure", "template_example"} {
+		if _, present := info[key]; present {
+			t.Errorf("stale template should not surface %q, got %v", key, info[key])
+		}
 	}
 }

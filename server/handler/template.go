@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -94,13 +95,31 @@ func (h *TemplateHandler) GetByID(c fiber.Ctx) error {
 	return Success(c, tmpl)
 }
 
-// createTemplateRequest is the body for POST /api/v1/templates.
+// createTemplateRequest is the body for POST /api/v1/templates (Create) and
+// PUT /api/v1/templates/:id (Update). Structure/ExampleContent are sent as plain
+// markdown text from the Studio form; the handler wraps them into {"text": ...}
+// for the model's JSON columns (the MCP save_template path keeps passing raw JSON).
 type createTemplateRequest struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	ThumbnailURL string `json:"thumbnail_url"`
-	StylePrompt  string `json:"style_prompt"`
-	Visibility   string `json:"visibility"`
+	Name           string   `json:"name"`
+	Type           string   `json:"type"`
+	ThumbnailURL   string   `json:"thumbnail_url"`
+	StylePrompt    string   `json:"style_prompt"`
+	Visibility     string   `json:"visibility"`
+	WritingStyle   string   `json:"writing_style"`
+	Structure      string   `json:"structure"`
+	ExampleContent string   `json:"example_content"`
+	Category       string   `json:"category"`
+	Tags           []string `json:"tags"`
+}
+
+// scaffoldText wraps a plain-text scaffold value into the model's {"text": ...}
+// JSON shape. Empty input returns nil so the column stays NULL/empty (lets the
+// PATCH "non-empty = set" rule in the service work correctly on Update).
+func scaffoldText(s string) map[string]any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return map[string]any{"text": s}
 }
 
 // Create handles POST /api/v1/templates.
@@ -127,12 +146,17 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 	}
 
 	tmpl := &model.Template{
-		Name:         req.Name,
-		Type:         req.Type,
-		ThumbnailURL: req.ThumbnailURL,
-		StylePrompt:  req.StylePrompt,
-		Visibility:   req.Visibility,
-		IsActive:     true,
+		Name:           req.Name,
+		Type:           req.Type,
+		ThumbnailURL:   req.ThumbnailURL,
+		StylePrompt:    req.StylePrompt,
+		Visibility:     req.Visibility,
+		WritingStyle:   req.WritingStyle,
+		Structure:      scaffoldText(req.Structure),
+		ExampleContent: scaffoldText(req.ExampleContent),
+		Category:       req.Category,
+		Tags:           req.Tags,
+		IsActive:       true,
 	}
 
 	created, err := h.service.Create(c.Context(), tmpl, userID)
@@ -177,11 +201,16 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 	}
 
 	patch := &model.Template{
-		Name:         req.Name,
-		Type:         req.Type,
-		ThumbnailURL: req.ThumbnailURL,
-		StylePrompt:  req.StylePrompt,
-		Visibility:   req.Visibility,
+		Name:           req.Name,
+		Type:           req.Type,
+		ThumbnailURL:   req.ThumbnailURL,
+		StylePrompt:    req.StylePrompt,
+		Visibility:     req.Visibility,
+		WritingStyle:   req.WritingStyle,
+		Structure:      scaffoldText(req.Structure),
+		ExampleContent: scaffoldText(req.ExampleContent),
+		Category:       req.Category,
+		Tags:           req.Tags,
 	}
 
 	updated, err := h.service.Update(c.Context(), id, userID, patch)

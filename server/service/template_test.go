@@ -203,6 +203,61 @@ func TestTemplateService_Update_OwnerOnly(t *testing.T) {
 	}
 }
 
+// TestTemplateService_Update_PersistsScaffold: the content scaffold fields
+// (WritingStyle / Structure / ExampleContent / Category / Tags) set via Update
+// must round-trip through the repository. The repository uses db.Save (writes
+// ALL columns), so the service MUST copy every patch field onto `existing` —
+// forgetting one silently persists the OLD value. This test guards that footgun.
+func TestTemplateService_Update_PersistsScaffold(t *testing.T) {
+	svc, _, _ := setupTemplateService(t)
+	ctx := context.Background()
+	ownerID := uuid.New().String()
+
+	created, err := svc.Create(ctx, &model.Template{Name: "脚手架模板", Type: "article"}, ownerID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	patch := &model.Template{
+		WritingStyle:   "犀利、接地气",
+		Structure:      map[string]any{"text": "钩子 → 论点 → 行动"},
+		ExampleContent: map[string]any{"text": "示例正文"},
+		Category:       "个人成长",
+		Tags:           []string{"干货", "方法论"},
+	}
+	updated, err := svc.Update(ctx, created.ID, ownerID, patch)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.WritingStyle != "犀利、接地气" {
+		t.Errorf("WritingStyle = %q, want 犀利、接地气", updated.WritingStyle)
+	}
+	if got, ok := updated.Structure["text"].(string); !ok || got != "钩子 → 论点 → 行动" {
+		t.Errorf("Structure = %v, want {text: 钩子 → 论点 → 行动}", updated.Structure)
+	}
+	if got, ok := updated.ExampleContent["text"].(string); !ok || got != "示例正文" {
+		t.Errorf("ExampleContent = %v, want {text: 示例正文}", updated.ExampleContent)
+	}
+	if updated.Category != "个人成长" {
+		t.Errorf("Category = %q, want 个人成长", updated.Category)
+	}
+	if len(updated.Tags) != 2 || updated.Tags[0] != "干货" || updated.Tags[1] != "方法论" {
+		t.Errorf("Tags = %v, want [干货 方法论]", updated.Tags)
+	}
+
+	// Re-fetch from the repository to confirm persistence (not just in-memory).
+	refetched, err := svc.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if refetched.WritingStyle != "犀利、接地气" {
+		t.Errorf("persisted WritingStyle = %q, want 犀利、接地气", refetched.WritingStyle)
+	}
+	if got, ok := refetched.Structure["text"].(string); !ok || got != "钩子 → 论点 → 行动" {
+		t.Errorf("persisted Structure = %v", refetched.Structure)
+	}
+}
+
 func TestTemplateService_Delete_OwnerOnly(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	ctx := context.Background()

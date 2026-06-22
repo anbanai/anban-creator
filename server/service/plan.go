@@ -30,17 +30,21 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 // and prevents argument-order bugs on a signature that has grown past a dozen
 // positional params.
 type CreatePlanParams struct {
-	UserID            string
-	ChannelID         string
-	CronExpr          string
-	Prompt            string
-	ImageModelKey     string
+	UserID             string
+	ChannelID          string
+	CronExpr           string
+	Prompt             string
+	ImageModelKey      string
 	SkipReferenceImage *bool
-	ReferenceImageURL string
-	Style             string
-	Watermark         *bool
-	Goal              string
-	GoalMode          bool
+	ReferenceImageURL  string
+	Style              string
+	Watermark          *bool
+	Goal               string
+	GoalMode           bool
+	// TemplateID records the template selected during plan creation. Propagated to
+	// spawned tasks by CreateFromPlan so the agent can surface the template's
+	// content scaffold via get_channel_profile(task_id). nil = no template.
+	TemplateID *string
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -106,6 +110,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ImageModelKey:      p.ImageModelKey,
 		ReferenceImageURL:  p.ReferenceImageURL,
 		Style:              p.Style,
+		TemplateID:         p.TemplateID,
 		SkipReferenceImage: p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:          p.Watermark != nil && *p.Watermark,
 		Goal:               p.Goal,
@@ -153,6 +158,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - SkipReferenceImage: nil = leave unchanged; &true/&false = set
 //   - ReferenceImageURL: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Style: nil = leave unchanged; &"" = clear; &"value" = set
+//   - TemplateID: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
@@ -170,8 +176,10 @@ type UpdatePlanParams struct {
 	Watermark          *bool
 	Goal               string
 	GoalMode           *bool
-	HasContentImage    *bool
-	HasTailImage       *bool
+	// TemplateID: nil = leave unchanged; &"" = clear; &"value" = set.
+	TemplateID      *string
+	HasContentImage *bool
+	HasTailImage    *bool
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -189,6 +197,9 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 	plan.Goal = p.Goal
 	if p.Style != nil {
 		plan.Style = *p.Style
+	}
+	if p.TemplateID != nil {
+		plan.TemplateID = p.TemplateID
 	}
 	if p.ImageModelKey != nil {
 		plan.ImageModelKey = *p.ImageModelKey

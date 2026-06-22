@@ -197,6 +197,17 @@ export default function PlansPage() {
     form.reset(planToFormValues(plan))
     setSelectedTemplate(null)
     setModalOpen(true)
+
+    // 回填计划已绑定的模板：fetch 后回填 selectedTemplate，style 已由
+    // planToFormValues 从 plan.style 填入，无需再覆盖（shouldDirty:false 不触脏）。
+    if (plan.template_id) {
+      api.templates
+        .get(plan.template_id)
+        .then(setSelectedTemplate)
+        .catch(() => {
+          /* 模板已删/不存在：保持空选，不阻断编辑 */
+        })
+    }
   }
 
   function closeModal() {
@@ -251,6 +262,9 @@ export default function PlansPage() {
       goal: values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
       has_content_image: values.type === 'seednote' ? values.has_content_image : undefined,
       has_tail_image: values.type === 'seednote' ? values.has_tail_image : undefined,
+      // template_id 透传给后端，由 CreateFromPlan 复制到派生任务，从而让 Agent 通过
+      // get_channel_profile(task_id) 拿到模板的内容脚手架。
+      template_id: selectedTemplate?.id || undefined,
     }
 
     if (editingPlan) {

@@ -21,6 +21,10 @@ export interface Plan {
   goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
+  // template_id records the template selected when creating the plan; spawned
+  // tasks inherit it so the agent can surface the template's content scaffold
+  // via get_channel_profile(task_id).
+  template_id?: string
   created_at: string
   updated_at: string
 }
@@ -40,6 +44,7 @@ export interface CreatePlanRequest {
   // Seednote image composition (see CreateTaskRequest).
   has_content_image?: boolean
   has_tail_image?: boolean
+  template_id?: string
 }
 
 export interface UpdatePlanRequest {
@@ -54,4 +59,5 @@ export interface UpdatePlanRequest {
   goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
+  template_id?: string
 }

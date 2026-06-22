@@ -232,6 +232,22 @@ export default function TasksPage() {
     setHasContentImage(true)
     setHasTailImage(false)
     setModalOpen(true)
+
+    // 预选模板：来自模板预览「用于公众号/种草笔记」按钮携带的 template_id。
+    // 异步取回模板后回填 selectedTemplate + style（shouldDirty:false 防止脏检查
+    // 弹窗在用户未改动时就困住关闭）。取回失败（模板已删等）静默留空，不阻断创建。
+    const templateID = searchParams.get('template_id')
+    if (templateID) {
+      api.templates
+        .get(templateID)
+        .then((tmpl) => {
+          setSelectedTemplate(tmpl)
+          form.setValue('style', tmpl.style_prompt || '', { shouldDirty: false })
+        })
+        .catch(() => {
+          /* 模板不存在/已删：保持空选，用户可手动选其他模板 */
+        })
+    }
   }
 
   function closeModal() {

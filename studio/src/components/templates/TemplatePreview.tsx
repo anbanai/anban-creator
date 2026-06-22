@@ -60,6 +60,27 @@ function JsonDisplay({ data, title }: { data: Record<string, unknown>; title: st
   )
 }
 
+// Scaffold fields (structure / example_content) are stored as { text: <markdown> }.
+// Extract the text for readable display; returns '' when absent (legacy rows or
+// never-set), in which case the caller falls back to the raw JSON expand.
+function scaffoldText(value: Record<string, unknown> | undefined): string {
+  if (!value) return ''
+  const text = value.text
+  return typeof text === 'string' ? text : ''
+}
+
+// Readable scaffold block: renders the .text as preformatted text. Used for the
+// writing_style / structure / example channels that the agent consumes.
+function ScaffoldBlock({ label, text }: { label: string; text: string }) {
+  if (!text.trim()) return null
+  return (
+    <div className="rounded-lg border border-border px-3 py-2">
+      <p className="text-xs font-medium text-muted-foreground mb-1">{label}</p>
+      <p className="text-sm text-foreground whitespace-pre-wrap break-words">{text}</p>
+    </div>
+  )
+}
+
 interface TemplatePreviewProps {
   template: Template | null
   open: boolean
@@ -166,33 +187,46 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
               </div>
             )}
 
-            {/* Style prompt */}
+            {/* Style prompt (视觉风格) */}
             {data.style_prompt && (
               <div className="rounded-lg border border-border px-3 py-2">
-                <p className="text-xs font-medium text-muted-foreground mb-1">风格提示</p>
+                <p className="text-xs font-medium text-muted-foreground mb-1">视觉风格</p>
                 <p className="text-sm text-foreground whitespace-pre-wrap">{data.style_prompt}</p>
               </div>
             )}
 
-            {/* Structure */}
-            {data.structure && Object.keys(data.structure).length > 0 && (
-              <JsonDisplay data={data.structure} title="模板结构" />
+            {/* 写作风格 (内容脚手架) */}
+            <ScaffoldBlock label="写作风格" text={data.writing_style ?? ''} />
+
+            {/* 内容结构 —— 优先渲染 .text，无 .text 时回退到 JSON 展开（poster 旧结构） */}
+            {scaffoldText(data.structure) ? (
+              <ScaffoldBlock label="内容结构" text={scaffoldText(data.structure)} />
+            ) : (
+              data.structure &&
+              Object.keys(data.structure).length > 0 && (
+                <JsonDisplay data={data.structure} title="模板结构" />
+              )
             )}
 
-            {/* Example content */}
-            {data.example_content && Object.keys(data.example_content).length > 0 && (
-              <JsonDisplay data={data.example_content} title="示例内容" />
+            {/* 示例内容 —— 同上 */}
+            {scaffoldText(data.example_content) ? (
+              <ScaffoldBlock label="示例内容" text={scaffoldText(data.example_content)} />
+            ) : (
+              data.example_content &&
+              Object.keys(data.example_content).length > 0 && (
+                <JsonDisplay data={data.example_content} title="示例内容" />
+              )
             )}
 
             {/* Action buttons */}
             <div className="flex flex-wrap gap-2 pt-2">
               {(data.type === 'poster' || data.type === 'article') && (
-                <Button size="sm" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=article') }}>
+                <Button size="sm" onClick={() => { onOpenChange(false); navigate(`/tasks?create=true&type=article&template_id=${data.id}`) }}>
                   用于公众号
                 </Button>
               )}
               {(data.type === 'seednote' || data.type === 'poster') && (
-                <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); navigate('/tasks?create=true&type=seednote') }}>
+                <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); navigate(`/tasks?create=true&type=seednote&template_id=${data.id}`) }}>
                   用于种草笔记
                 </Button>
               )}

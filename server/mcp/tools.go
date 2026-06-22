@@ -299,6 +299,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	// observe template-derived style through get_channel_profile.
 	effectiveStyle := ch.Style
 	styleSource := "channel"
+	var taskTemplateID *string
 	if taskID != "" {
 		if svcs.TaskSvc == nil {
 			return nil, "task service not available"
@@ -316,6 +317,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			effectiveStyle = task.Style
 			styleSource = "task"
 		}
+		taskTemplateID = task.TemplateID
 	}
 
 	// Base account info (always included).
@@ -372,7 +374,44 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		}
 	}
 
+	// Surface the linked template's content scaffold (writing style / structure /
+	// example) so the agent can apply it during creation. Only present when the
+	// task carries a template_id (manual task or spawned from a plan). Errors
+	// (e.g. template deleted) are logged-and-skipped so a stale template_id never
+	// breaks the whole profile — the keys simply stay absent.
+	if taskTemplateID != nil && *taskTemplateID != "" && svcs.TemplateSvc != nil {
+		if tmpl, terr := svcs.TemplateSvc.GetByID(ctx, *taskTemplateID); terr == nil {
+			info["template_id"] = tmpl.ID
+			info["template_name"] = tmpl.Name
+			info["template_writing_style"] = tmpl.WritingStyle
+			info["template_structure"] = extractScaffoldText(tmpl.Structure)
+			info["template_example"] = extractScaffoldText(tmpl.ExampleContent)
+		} else if mcpLog != nil {
+			mcpLog.Warn().Err(terr).Str("template_id", *taskTemplateID).
+				Msg("template linked to task not found; skipping content scaffold")
+		}
+	}
+
 	return info, ""
+}
+
+// extractScaffoldText pulls the human-editable text out of a template scaffold
+// JSON column. The Studio form stores {"text": "<markdown>"}; the legacy MCP
+// save_template path may store richer JSON. We prefer .text, fall back to a
+// compact stringification of whatever is there, and return "" for empty/nil so
+// the profile omits the key naturally.
+func extractScaffoldText(m map[string]any) string {
+	if len(m) == 0 {
+		return ""
+	}
+	if v, ok := m["text"].(string); ok {
+		return v
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Sprintf("%v", m)
+	}
+	return string(out)
 }
 
 func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

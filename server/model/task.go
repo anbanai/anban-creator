@@ -36,13 +36,14 @@ type Task struct {
 	// in settings.json is cleared by the executor when this is non-empty, so the
 	// agent has a single source of truth and no prompt-vs-config ambiguity.
 	Style string `gorm:"type:varchar(1024);default:''" json:"style,omitempty"`
-	// TemplateID records which template was selected when creating this task.
-	// Nullable: only set for manually-created tasks where the user picked a template.
-	// Not used by the style resolution chain (task > plan > channel) — only for UI
-	// attribution in Studio. Old rows migrate to NULL automatically.
-	TemplateID          *string                             `gorm:"type:char(36);index" json:"template_id,omitempty"`
-	SkipReferenceImage  bool                                `gorm:"default:false" json:"skip_reference_image,omitempty"`
-	Watermark           bool                                `gorm:"default:false" json:"watermark,omitempty"`
+	// TemplateID records which template was selected when creating this task
+	// (manual task, or a plan-spawned task inheriting plan.TemplateID). It does
+	// NOT enter the style resolution chain (visual style lives in Style) —
+	// instead the agent surfaces the template's content scaffold (writing style /
+	// structure / example) via get_channel_profile(task_id). Old rows → NULL.
+	TemplateID         *string `gorm:"type:char(36);index" json:"template_id,omitempty"`
+	SkipReferenceImage bool    `gorm:"default:false" json:"skip_reference_image,omitempty"`
+	Watermark          bool    `gorm:"default:false" json:"watermark,omitempty"`
 	// HasContentImage / HasTailImage control seednote image composition. Cover is
 	// always generated; these two flags decide whether image_01.png and tail.png
 	// follow. Default matches the seednote form default (content on, tail off).

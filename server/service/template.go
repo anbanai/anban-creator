@@ -125,6 +125,25 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	if patch.Visibility == "public" || patch.Visibility == "private" {
 		existing.Visibility = patch.Visibility
 	}
+	// Content scaffold fields use "non-empty = set, empty = leave unchanged"
+	// (matching Name/Type/ThumbnailURL). This means PATCH cannot CLEAR them — the
+	// Studio edit form always round-trips the current values, so clearing in the
+	// UI sends "" which is treated as "unchanged". Acceptable for v1.
+	if patch.WritingStyle != "" {
+		existing.WritingStyle = patch.WritingStyle
+	}
+	if patch.Category != "" {
+		existing.Category = patch.Category
+	}
+	if len(patch.Tags) > 0 {
+		existing.Tags = patch.Tags
+	}
+	if len(patch.Structure) > 0 {
+		existing.Structure = patch.Structure
+	}
+	if len(patch.ExampleContent) > 0 {
+		existing.ExampleContent = patch.ExampleContent
+	}
 
 	ensureTagsNotNil(existing)
 	if err := s.repo.Templates().Update(ctx, existing); err != nil {

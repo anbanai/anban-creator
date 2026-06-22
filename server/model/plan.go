@@ -18,14 +18,19 @@ type Plan struct {
 	// Style is the plan-level visual style, populated when a template is selected
 	// during plan creation. Copied to Task.Style (with task-level override winning)
 	// when CreateFromPlan runs; if empty, the channel's style is used as fallback.
-	Style              string `gorm:"type:varchar(1024);default:''" json:"style,omitempty"`
-	SkipReferenceImage bool   `gorm:"default:false" json:"skip_reference_image,omitempty"`
-	Watermark          bool   `gorm:"default:false" json:"watermark,omitempty"`
+	Style string `gorm:"type:varchar(1024);default:''" json:"style,omitempty"`
+	// TemplateID records which template was selected during plan creation. Copied
+	// to Task.TemplateID by CreateFromPlan so spawned tasks surface the template's
+	// content scaffold (writing style / structure / example) to the agent via
+	// get_channel_profile(task_id). Nullable; old rows migrate to NULL.
+	TemplateID         *string `gorm:"type:char(36);index" json:"template_id,omitempty"`
+	SkipReferenceImage bool    `gorm:"default:false" json:"skip_reference_image,omitempty"`
+	Watermark          bool    `gorm:"default:false" json:"watermark,omitempty"`
 	// HasContentImage / HasTailImage are plan-level seednote image composition
 	// flags copied to Task on CreateFromPlan. Cover is always on; content defaults
 	// to on, tail defaults to off — matches the seednote form default.
-	HasContentImage    bool   `gorm:"default:true;not null" json:"has_content_image"`
-	HasTailImage       bool   `gorm:"default:false;not null" json:"has_tail_image"`
+	HasContentImage bool `gorm:"default:true;not null" json:"has_content_image"`
+	HasTailImage    bool `gorm:"default:false;not null" json:"has_tail_image"`
 
 	// Goal mode configuration propagated to tasks created from this plan.
 	Goal     string `gorm:"type:text" json:"goal,omitempty"`

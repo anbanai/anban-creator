@@ -169,10 +169,11 @@ type CreateManualParams struct {
 	Watermark         *bool
 	Goal              string
 	GoalMode          bool
-	// TemplateID optionally records which template was selected, for UI attribution
-	// only — it does NOT enter the style resolution chain (style is already copied
-	// from the template by the caller).
-	TemplateID     *string
+	// TemplateID optionally records which template was selected. It does NOT enter
+	// the style resolution chain (visual style is already copied to Style by the
+	// caller); instead the agent surfaces the template's content scaffold via
+	// get_channel_profile(task_id).
+	TemplateID *string
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to task model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -396,6 +397,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ImageModelKey:      plan.ImageModelKey,
 		ReferenceImageURL:  plan.ReferenceImageURL,
 		Style:              effectiveStyle,
+		TemplateID:         plan.TemplateID,
 		SkipReferenceImage: plan.SkipReferenceImage,
 		Watermark:          plan.Watermark,
 		Goal:               plan.Goal,

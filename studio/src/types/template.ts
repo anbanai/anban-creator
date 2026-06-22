@@ -12,6 +12,10 @@ export interface Template {
   thumbnail_url: string
   structure: Record<string, unknown>
   style_prompt: string
+  // writing_style is the content/tonality scaffold (separate from the visual
+  // style_prompt). Surfaced to the agent via get_channel_profile(task_id) as
+  // template_writing_style. Old rows omit it.
+  writing_style?: string
   example_content: Record<string, unknown>
   tags: string[]
   sort_order: number
@@ -26,6 +30,14 @@ export interface CreateTemplateRequest {
   thumbnail_url: string
   style_prompt: string
   visibility: TemplateVisibility
+  // Content scaffold (optional). The form wraps structure/example_content as
+  // { text: <markdown> } on submit; backend extracts .text when delivering to
+  // the agent. Category/tags are passed through verbatim.
+  writing_style?: string
+  structure?: string
+  example_content?: string
+  category?: string
+  tags?: string[]
 }
 
 export type UpdateTemplateRequest = CreateTemplateRequest

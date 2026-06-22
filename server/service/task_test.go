@@ -591,6 +591,82 @@ func TestTaskService_CreateManual_NullTemplateIDByDefault(t *testing.T) {
 	}
 }
 
+// TestTaskService_CreateFromPlan_PropagatesTemplateID: a plan with a TemplateID
+// must copy it onto the spawned task, so the agent can surface the template's
+// content scaffold via get_channel_profile(task_id). This is the link that closes
+// the plan→task→agent loop for templates.
+func TestTaskService_CreateFromPlan_PropagatesTemplateID(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, "wechat")
+	templateID := uuid.New().String()
+
+	plan := &model.Plan{
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		ChannelID:  channelID,
+		Type:       model.PlatformArticle,
+		Prompt:     "plan topic",
+		Status:     model.PlanStatusActive,
+		TemplateID: &templateID,
+	}
+
+	task, err := svc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("CreateFromPlan: %v", err)
+	}
+	if task == nil {
+		t.Fatal("expected a task, got nil")
+	}
+	if task.TemplateID == nil || *task.TemplateID != templateID {
+		got := "nil"
+		if task.TemplateID != nil {
+			got = *task.TemplateID
+		}
+		t.Fatalf("spawned task TemplateID = %s, want %q", got, templateID)
+	}
+
+	// Confirm persistence round-trip.
+	found, err := svc.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if found.TemplateID == nil || *found.TemplateID != templateID {
+		t.Errorf("persisted spawned task TemplateID = %v, want %q", found.TemplateID, templateID)
+	}
+}
+
+// TestTaskService_CreateFromPlan_NoTemplateIDByDefault: a plan without a template
+// spawns a task with a nil TemplateID (no scaffold surfaced). Guards the regression
+// where the new TemplateID wiring could accidentally default to a non-nil value.
+func TestTaskService_CreateFromPlan_NoTemplateIDByDefault(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	channelID := createTestChannel(t, repo, userID, "wechat")
+
+	plan := &model.Plan{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ChannelID: channelID,
+		Type:      model.PlatformArticle,
+		Prompt:    "plan topic",
+		Status:    model.PlanStatusActive,
+	}
+
+	task, err := svc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("CreateFromPlan: %v", err)
+	}
+	if task == nil {
+		t.Fatal("expected a task, got nil")
+	}
+	if task.TemplateID != nil {
+		t.Errorf("spawned task TemplateID should be nil without a plan template, got %q", *task.TemplateID)
+	}
+}
+
 func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()

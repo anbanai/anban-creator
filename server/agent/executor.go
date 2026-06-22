@@ -34,13 +34,17 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // UserPromptParams holds the inputs for BuildUserPrompt. Struct keeps call sites
 // readable as fields are added and prevents argument-order bugs.
 type UserPromptParams struct {
-	TaskType string // model.PlatformArticle / model.PlatformSeednote
-	Topic    string // user prompt; empty triggers autonomous research mode
+	TaskType  string // model.PlatformArticle / model.PlatformSeednote
+	Topic     string // user prompt; empty triggers autonomous research mode
 	AgentName string
-	Style    string // effective visual style (task > plan > channel); empty = no override
-	Goal     string // goal-mode condition; empty = no /goal prefix
-	TaskID   string // injected as task_id=<x> into the prompt body
+	Style     string // effective visual style (task > plan > channel); empty = no override
+	Goal      string // goal-mode condition; empty = no /goal prefix
+	TaskID    string // injected as task_id=<x> into the prompt body
 	ChannelID string // injected as channel_id=<x> into the prompt body
+	// HasTemplate indicates the task references a content template. When true, a
+	// pointer is appended telling the agent to fetch the template's writing style /
+	// structure / example via get_channel_profile(task_id) and follow them.
+	HasTemplate bool
 	// HasContentImage / HasTailImage toggle seednote image composition. Cover is
 	// always generated. Ignored for non-seednote task types.
 	HasContentImage bool
@@ -99,6 +103,14 @@ func BuildUserPrompt(p UserPromptParams) string {
 			parts = append(parts, "channel_id="+p.ChannelID)
 		}
 		base += "\n\n本任务上下文：" + strings.Join(parts, ", ")
+	}
+	if p.HasTemplate {
+		// The article skill historically calls get_channel_profile WITHOUT task_id;
+		// without it the server cannot resolve the linked template. The pointer
+		// explicitly demands task_id so the template_* scaffold fields are returned.
+		base += "\n\n本任务已关联内容模板：请调用 get_channel_profile（带 task_id）获取返回的 " +
+			"template_writing_style（写作风格/调性）、template_structure（内容结构）、" +
+			"template_example（示例）字段，并在创作正文与配图时严格遵守这些要求。"
 	}
 	if trimmedGoal := normalizeGoalCondition(p.Goal); trimmedGoal != "" {
 		return "/goal " + trimmedGoal + "\n\n" + base
@@ -468,6 +480,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		Goal:            opts.Task.Goal,
 		TaskID:          opts.Task.ID,
 		ChannelID:       channelID,
+		HasTemplate:     opts.Task.TemplateID != nil && *opts.Task.TemplateID != "",
 		HasContentImage: opts.Task.HasContentImage,
 		HasTailImage:    opts.Task.HasTailImage,
 	})

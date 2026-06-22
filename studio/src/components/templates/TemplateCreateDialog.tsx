@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
-import type { Template, TemplateType, TemplateVisibility } from '@/types'
+import type { Template, TemplateType, TemplateVisibility, CreateTemplateRequest, UpdateTemplateRequest } from '@/types'
 import { toast } from 'sonner'
 
 const TYPE_OPTIONS: { value: TemplateType; label: string }[] = [
@@ -32,6 +32,18 @@ const TYPE_OPTIONS: { value: TemplateType; label: string }[] = [
 function deriveTemplateName(style: string): string {
   const firstClause = style.trim().split(/[\n。，,.]/)[0]
   return firstClause.slice(0, 20).trim()
+}
+
+// structure / example_content are stored server-side as { text: <markdown> }.
+// Backfill the textarea from that shape, tolerating legacy plain-string rows.
+function extractScaffoldText(value: unknown): string {
+  if (!value) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'object' && value !== null) {
+    const text = (value as Record<string, unknown>).text
+    if (typeof text === 'string') return text
+  }
+  return ''
 }
 
 interface TemplateCreateDialogProps {
@@ -59,6 +71,17 @@ export function TemplateCreateDialog({
   const [visibility, setVisibility] = useState<TemplateVisibility>('public')
   const [analyzing, setAnalyzing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  // Content scaffold (optional, separate from visual style_prompt). The agent
+  // receives these via get_channel_profile(task_id) as template_writing_style /
+  // template_structure / template_example. structure/example wrap as
+  // { text: <markdown> } on submit (matches the backend JSON column shape).
+  const [writingStyle, setWritingStyle] = useState('')
+  const [structure, setStructure] = useState('')
+  const [example, setExample] = useState('')
+  const [category, setCategory] = useState('')
+  // Tags entered as comma-separated text; split on submit. Editing backfills
+  // the existing tags joined by ", ".
+  const [tagsText, setTagsText] = useState('')
 
   // Session epoch: incremented every time the dialog opens. Captured at the
   // start of handleSubmit and compared after the await — if the user closed
@@ -87,12 +110,24 @@ export function TemplateCreateDialog({
       setThumbnailUrl(template.thumbnail_url)
       setStylePrompt(template.style_prompt)
       setVisibility(template.visibility === 'private' ? 'private' : 'public')
+      setWritingStyle(template.writing_style ?? '')
+      // structure / example are stored as { text: ... }; fall back to raw for
+      // legacy rows that may have stored plain strings.
+      setStructure(extractScaffoldText(template.structure))
+      setExample(extractScaffoldText(template.example_content))
+      setCategory(template.category ?? '')
+      setTagsText(Array.isArray(template.tags) ? template.tags.join(', ') : '')
     } else {
       setName('')
       setType(defaultType)
       setThumbnailUrl('')
       setStylePrompt('')
       setVisibility('public')
+      setWritingStyle('')
+      setStructure('')
+      setExample('')
+      setCategory('')
+      setTagsText('')
     }
   }, [open, template, defaultType])
 
@@ -139,13 +174,7 @@ export function TemplateCreateDialog({
   // for session N+1 would fire its onSuccess and toast/close the wrong
   // session.
   const createMutation = useMutation({
-    mutationFn: (data: {
-      name: string
-      type: TemplateType
-      thumbnail_url: string
-      style_prompt: string
-      visibility: TemplateVisibility
-    }) => api.templates.create(data),
+    mutationFn: (data: CreateTemplateRequest) => api.templates.create(data),
   })
 
   const updateMutation = useMutation({
@@ -154,13 +183,7 @@ export function TemplateCreateDialog({
       data,
     }: {
       id: string
-      data: {
-        name: string
-        type: TemplateType
-        thumbnail_url: string
-        style_prompt: string
-        visibility: TemplateVisibility
-      }
+      data: UpdateTemplateRequest
     }) => api.templates.update(id, data),
   })
 
@@ -178,15 +201,32 @@ export function TemplateCreateDialog({
     const epoch = sessionEpochRef.current
     setSubmitting(true)
     try {
-      const payload = {
+      const trimmedTags = tagsText
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
+      // Build payload with the scaffold fields. Each scaffold field is only
+      // included when non-empty: the backend Update treats "absent = no change"
+      // and "non-empty = set", so omitting empties preserves prior values on
+      // edit and avoids clobbering with blanks on create.
+      const payload: CreateTemplateRequest = {
         name: finalName,
         type,
         thumbnail_url: thumbnailUrl,
         style_prompt: stylePrompt.trim(),
         visibility,
       }
+      const writingStyleTrimmed = writingStyle.trim()
+      if (writingStyleTrimmed) payload.writing_style = writingStyleTrimmed
+      const structureTrimmed = structure.trim()
+      if (structureTrimmed) payload.structure = structureTrimmed
+      const exampleTrimmed = example.trim()
+      if (exampleTrimmed) payload.example_content = exampleTrimmed
+      const categoryTrimmed = category.trim()
+      if (categoryTrimmed) payload.category = categoryTrimmed
+      if (trimmedTags.length > 0) payload.tags = trimmedTags
       if (isEditing && template) {
-        await updateMutation.mutateAsync({ id: template.id, data: payload })
+        await updateMutation.mutateAsync({ id: template.id, data: payload as UpdateTemplateRequest })
       } else {
         await createMutation.mutateAsync(payload)
       }
@@ -216,7 +256,7 @@ export function TemplateCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEditing ? '编辑模板' : '新建模板'}</DialogTitle>
         </DialogHeader>
@@ -329,6 +369,82 @@ export function TemplateCreateDialog({
             <p className="text-xs text-muted-foreground">
               上传后系统会自动识别视觉风格，你也可以手动调整。
             </p>
+          </div>
+
+          {/* 内容脚手架（可选）—— 写作风格 / 内容结构 / 示例。
+              通过 get_channel_profile(task_id) 送达生成 Agent，与视觉风格
+              style_prompt 是相互独立的通道。category / tags 用于检索归类。 */}
+          <div className="space-y-3 rounded-lg border border-dashed border-input p-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">内容脚手架</Label>
+              <span className="text-xs text-muted-foreground">可选，创建任务/计划选此模板时送达 AI</span>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tpl-writing-style" className="text-xs text-muted-foreground">
+                写作风格 / 调性
+              </Label>
+              <Textarea
+                id="tpl-writing-style"
+                value={writingStyle}
+                onChange={(e) => setWritingStyle(e.target.value)}
+                placeholder="例如：犀利、接地气、像朋友聊天；多用短句和反问"
+                maxLength={1024}
+                className="resize-none"
+                rows={2}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tpl-structure" className="text-xs text-muted-foreground">
+                内容结构
+              </Label>
+              <Textarea
+                id="tpl-structure"
+                value={structure}
+                onChange={(e) => setStructure(e.target.value)}
+                placeholder={'例如：\n1. 开头钩子（一句话点出痛点）\n2. 3 个论点（每个配案例）\n3. 行动号召'}
+                className="resize-none font-mono text-xs"
+                rows={4}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tpl-example" className="text-xs text-muted-foreground">
+                示例内容
+              </Label>
+              <Textarea
+                id="tpl-example"
+                value={example}
+                onChange={(e) => setExample(e.target.value)}
+                placeholder="贴一段你认可的成稿片段，AI 会模仿它的语气与节奏"
+                className="resize-none"
+                rows={4}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="tpl-category" className="text-xs text-muted-foreground">
+                  分类
+                </Label>
+                <Input
+                  id="tpl-category"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  placeholder="例如：个人成长"
+                  maxLength={50}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tpl-tags" className="text-xs text-muted-foreground">
+                  标签<span className="ml-1 font-normal">（逗号分隔）</span>
+                </Label>
+                <Input
+                  id="tpl-tags"
+                  value={tagsText}
+                  onChange={(e) => setTagsText(e.target.value)}
+                  placeholder="例如：干货, 方法论"
+                  maxLength={200}
+                />
+              </div>
+            </div>
           </div>
         </div>
 
