@@ -108,9 +108,12 @@ func BuildUserPrompt(p UserPromptParams) string {
 		// The article skill historically calls get_channel_profile WITHOUT task_id;
 		// without it the server cannot resolve the linked template. The pointer
 		// explicitly demands task_id so the template_* scaffold fields are returned.
-		base += "\n\n本任务已关联内容模板：请调用 get_channel_profile（带 task_id）获取返回的 " +
-			"template_writing_style（写作风格/调性）、template_structure（内容结构）、" +
-			"template_example（示例）字段，并在创作正文与配图时严格遵守这些要求。"
+		base += "\n\n本任务已关联内容模板：请调用 get_channel_profile（带 task_id）获取模板字段。" +
+			"注意「作者」与「写作风格」是两个独立维度，切勿混淆——" +
+			"① 作者（返回顶层的 `author`，已按 模板>频道 解析）仅用于发布署名：发布草稿时填入 publish_draft 的 author；" +
+			"② 写作风格（`template_writing_style`，模仿内容的框架/写作方式/笔迹）驱动正文口吻，若返回则严格遵守；" +
+			"`template_author_avatar` 是写作人设的可选头像（仅人设参考，不入署名）。" +
+			"若还返回 template_structure（内容结构）/template_example（示例），一并遵守。"
 	}
 	if trimmedGoal := normalizeGoalCondition(p.Goal); trimmedGoal != "" {
 		return "/goal " + trimmedGoal + "\n\n" + base

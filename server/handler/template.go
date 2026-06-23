@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -11,17 +12,35 @@ import (
 
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
 
 // TemplateHandler handles template-related HTTP endpoints.
 type TemplateHandler struct {
 	service *service.TemplateService
 	logger  *zerolog.Logger
+	store   storage.Provider
 }
 
 // NewTemplateHandler creates a new TemplateHandler.
 func NewTemplateHandler(svc *service.TemplateService, logger *zerolog.Logger) *TemplateHandler {
 	return &TemplateHandler{service: svc, logger: logger}
+}
+
+// SetStore injects a storage provider so image URLs can be resolved to signed,
+// directly-fetchable URLs in responses.
+func (h *TemplateHandler) SetStore(s storage.Provider) {
+	h.store = s
+}
+
+// signTemplateURLs resolves stored image URLs (thumbnail, author avatar) to
+// directly-fetchable signed URLs so any viewer who can see the template can load
+// its images regardless of which user originally uploaded them. No-op when no
+// store is wired (e.g. unit tests) or the URL is external/empty. Delegates the
+// field list to the shared service.SignTemplateURLs so it stays in sync with the
+// recommended-templates path in channel create.
+func (h *TemplateHandler) signTemplateURLs(ctx context.Context, t *model.Template) {
+	service.SignTemplateURLs(ctx, h.store, h.logger, t)
 }
 
 // List handles GET /api/v1/templates.
@@ -61,6 +80,10 @@ func (h *TemplateHandler) List(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to list templates")
 	}
 
+	for _, t := range templates {
+		h.signTemplateURLs(c.Context(), t)
+	}
+
 	return Success(c, fiber.Map{
 		"items": templates,
 		"total": total,
@@ -92,6 +115,7 @@ func (h *TemplateHandler) GetByID(c fiber.Ctx) error {
 		}
 	}
 
+	h.signTemplateURLs(c.Context(), tmpl)
 	return Success(c, tmpl)
 }
 
@@ -111,6 +135,10 @@ type createTemplateRequest struct {
 	ExampleContent string   `json:"example_content"`
 	Category       string   `json:"category"`
 	Tags           []string `json:"tags"`
+	// Author persona (公众号 写作风格 dimension, inline on the template).
+	AuthorName       string `json:"author_name"`
+	AuthorAvatarURL  string `json:"author_avatar_url"`
+	AuthorStyleIntro string `json:"author_style_intro"`
 }
 
 // scaffoldText wraps a plain-text scaffold value into the model's {"text": ...}
@@ -147,18 +175,21 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 	}
 
 	tmpl := &model.Template{
-		Name:           req.Name,
-		Type:           req.Type,
-		ThumbnailURL:   req.ThumbnailURL,
-		StylePrompt:    req.StylePrompt,
-		Visibility:     req.Visibility,
-		WritingStyle:   req.WritingStyle,
-		Theme:          req.Theme,
-		Structure:      scaffoldText(req.Structure),
-		ExampleContent: scaffoldText(req.ExampleContent),
-		Category:       req.Category,
-		Tags:           req.Tags,
-		IsActive:       true,
+		Name:             req.Name,
+		Type:             req.Type,
+		ThumbnailURL:     req.ThumbnailURL,
+		StylePrompt:      req.StylePrompt,
+		Visibility:       req.Visibility,
+		WritingStyle:     req.WritingStyle,
+		Theme:            req.Theme,
+		Structure:        scaffoldText(req.Structure),
+		ExampleContent:   scaffoldText(req.ExampleContent),
+		Category:         req.Category,
+		Tags:             req.Tags,
+		AuthorName:       req.AuthorName,
+		AuthorAvatarURL:  req.AuthorAvatarURL,
+		AuthorStyleIntro: req.AuthorStyleIntro,
+		IsActive:         true,
 	}
 
 	created, err := h.service.Create(c.Context(), tmpl, userID)
@@ -170,6 +201,7 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to create template")
 	}
 
+	h.signTemplateURLs(c.Context(), created)
 	return Success(c, created)
 }
 
@@ -203,17 +235,20 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 	}
 
 	patch := &model.Template{
-		Name:           req.Name,
-		Type:           req.Type,
-		ThumbnailURL:   req.ThumbnailURL,
-		StylePrompt:    req.StylePrompt,
-		Visibility:     req.Visibility,
-		WritingStyle:   req.WritingStyle,
-		Theme:          req.Theme,
-		Structure:      scaffoldText(req.Structure),
-		ExampleContent: scaffoldText(req.ExampleContent),
-		Category:       req.Category,
-		Tags:           req.Tags,
+		Name:             req.Name,
+		Type:             req.Type,
+		ThumbnailURL:     req.ThumbnailURL,
+		StylePrompt:      req.StylePrompt,
+		Visibility:       req.Visibility,
+		WritingStyle:     req.WritingStyle,
+		Theme:            req.Theme,
+		Structure:        scaffoldText(req.Structure),
+		ExampleContent:   scaffoldText(req.ExampleContent),
+		Category:         req.Category,
+		Tags:             req.Tags,
+		AuthorName:       req.AuthorName,
+		AuthorAvatarURL:  req.AuthorAvatarURL,
+		AuthorStyleIntro: req.AuthorStyleIntro,
 	}
 
 	updated, err := h.service.Update(c.Context(), id, userID, patch)
@@ -229,6 +264,7 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 		}
 	}
 
+	h.signTemplateURLs(c.Context(), updated)
 	return Success(c, updated)
 }
 

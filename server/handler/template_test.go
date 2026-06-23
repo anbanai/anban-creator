@@ -228,6 +228,37 @@ func TestTemplateHandler_Create_Success(t *testing.T) {
 	}
 }
 
+// TestTemplateHandler_Create_ArticleAuthorPersona: the 公众号 author-persona
+// fields round-trip through the REST Create path.
+func TestTemplateHandler_Create_ArticleAuthorPersona(t *testing.T) {
+	app, _ := setupTemplateHandlerTest(t)
+	userID := uuid.New().String()
+
+	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
+		"name":               "老李的公众号",
+		"type":               "article",
+		"thumbnail_url":      "https://example.com/x.png",
+		"style_prompt":       "暖色",
+		"visibility":         "public",
+		"author_name":        "老李",
+		"author_avatar_url":  "https://example.com/avatar.png",
+		"author_style_intro": "犀利、接地气、像朋友聊天",
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	data := decodeBody(t, resp)["data"].(map[string]any)
+	if data["author_name"] != "老李" {
+		t.Errorf("author_name = %v, want 老李", data["author_name"])
+	}
+	if data["author_avatar_url"] != "https://example.com/avatar.png" {
+		t.Errorf("author_avatar_url = %v", data["author_avatar_url"])
+	}
+	if data["author_style_intro"] != "犀利、接地气、像朋友聊天" {
+		t.Errorf("author_style_intro = %v", data["author_style_intro"])
+	}
+}
+
 func TestTemplateHandler_Update_NonOwnerReturns403(t *testing.T) {
 	app, repo := setupTemplateHandlerTest(t)
 	owner := uuid.New().String()

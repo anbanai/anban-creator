@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, ZoomIn, Upload } from 'lucide-react'
 import http from '@/lib/http-client'
+import { isInternalStorageUrl, normalizeStorageUrl } from '@/lib/storage-url'
 import {
   Dialog,
   DialogContent,
@@ -15,24 +16,6 @@ interface ReferenceImageUploadProps {
 
 const MAX_SIZE_MB = 10
 const ACCEPTED = "image/jpeg,image/png,image/webp,image/gif"
-
-function isInternalUrl(url: string) {
-  return url.startsWith('/files/')
-}
-
-function normalizeUrl(url: string): string {
-  if (url.startsWith('/api/v1/files/')) {
-    return url.replace('/api/v1/files/', '/files/')
-  }
-  if (url.startsWith('/files/')) return url
-  try {
-    const u = new URL(url)
-    if (u.hostname.endsWith('.aliyuncs.com')) {
-      return '/files/' + u.pathname.slice(1)
-    }
-  } catch {}
-  return url
-}
 
 export function ReferenceImageUpload({ value, onChange, purpose, compact }: ReferenceImageUploadProps) {
   const [previewUrl, setPreviewUrl] = useState<string>('')
@@ -55,9 +38,9 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
     setPreviewLoading(true)
     setPreviewError(false)
 
-    const normalized = normalizeUrl(value)
+    const normalized = normalizeStorageUrl(value)
 
-    if (isInternalUrl(normalized)) {
+    if (isInternalStorageUrl(normalized)) {
       http.get(normalized, { responseType: 'blob' })
         .then((res) => {
           if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)

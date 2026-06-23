@@ -359,6 +359,9 @@ func main() {
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
+		if store != nil {
+			planHandler.SetStore(store)
+		}
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
 		if seednoteTrackingSvc != nil {
@@ -396,6 +399,9 @@ func main() {
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
+		if store != nil {
+			templateHandler.SetStore(store)
+		}
 		if viralAnalysisSvc != nil {
 			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisSvc, log)
 		}

@@ -1,25 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { ImageIcon, Loader2 } from 'lucide-react'
 import http from '@/lib/http-client'
+import { isInternalStorageUrl, normalizeStorageUrl } from '@/lib/storage-url'
 import { cn } from '@/lib/utils'
-
-function isInternalUrl(url: string) {
-  return url.startsWith('/files/')
-}
-
-function normalizeUrl(url: string): string {
-  if (url.startsWith('/api/v1/files/')) {
-    return url.replace('/api/v1/files/', '/files/')
-  }
-  if (url.startsWith('/files/')) return url
-  try {
-    const u = new URL(url)
-    if (u.hostname.endsWith('.aliyuncs.com')) {
-      return '/files/' + u.pathname.slice(1)
-    }
-  } catch {}
-  return url
-}
 
 export interface SignedImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src' | 'loading'> {
   src: string
@@ -59,9 +42,9 @@ export function SignedImage({
       return
     }
 
-    const normalized = normalizeUrl(src)
+    const normalized = normalizeStorageUrl(src)
 
-    if (!isInternalUrl(normalized)) {
+    if (!isInternalStorageUrl(normalized)) {
       // External URL — render directly.
       if (blobUrlRef.current) {
         URL.revokeObjectURL(blobUrlRef.current)

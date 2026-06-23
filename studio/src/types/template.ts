@@ -12,13 +12,19 @@ export interface Template {
   thumbnail_url: string
   structure: Record<string, unknown>
   style_prompt: string
-  // writing_style is the content/tonality scaffold (separate from the visual
-  // style_prompt). Surfaced to the agent via get_channel_profile(task_id) as
-  // template_writing_style. Old rows omit it.
+  // writing_style is the legacy writer-key scaffold (poster). Surfaced to the
+  // agent via get_channel_profile(task_id). Old rows omit it.
   writing_style?: string
   // theme is the 排版样式 dimension (Markdown→HTML layout theme). Surfaced to
   // the agent as template_theme. Old rows omit it.
   theme?: string
+  // Author persona — the 公众号 写作风格 dimension, defined inline on the
+  // template (not a writer key). Surfaced to the agent as template_author_*
+  // (name/avatar) and template_writing_style (= author_style_intro). Old rows
+  // (and non-article types) omit these.
+  author_name?: string
+  author_avatar_url?: string
+  author_style_intro?: string
   example_content: Record<string, unknown>
   tags: string[]
   sort_order: number
@@ -33,8 +39,8 @@ export interface CreateTemplateRequest {
   thumbnail_url: string
   style_prompt: string
   visibility: TemplateVisibility
-  // Content scaffold (optional). The form wraps structure/example_content as
-  // { text: <markdown> } on submit; backend extracts .text when delivering to
+  // Content scaffold (optional, poster). The form wraps structure/example_content
+  // as { text: <markdown> } on submit; backend extracts .text when delivering to
   // the agent. Category/tags are passed through verbatim.
   writing_style?: string
   theme?: string
@@ -42,6 +48,10 @@ export interface CreateTemplateRequest {
   example_content?: string
   category?: string
   tags?: string[]
+  // Author persona (公众号). Sent only for article templates.
+  author_name?: string
+  author_avatar_url?: string
+  author_style_intro?: string
 }
 
 export type UpdateTemplateRequest = CreateTemplateRequest

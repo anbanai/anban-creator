@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { SignedImage } from '@/components/ui/SignedImage'
+import { ThemePreview } from '@/components/templates/ThemePreview'
 
 const typeBadgeMap: Record<TemplateType, { label: string; className: string }> = {
   poster: { label: '海报', className: 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' },
@@ -195,27 +196,71 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
               </div>
             )}
 
-            {/* 写作风格 (内容脚手架) */}
-            <ScaffoldBlock label="写作风格" text={data.writing_style ?? ''} />
-
-            {/* 内容结构 —— 优先渲染 .text，无 .text 时回退到 JSON 展开（poster 旧结构） */}
-            {scaffoldText(data.structure) ? (
-              <ScaffoldBlock label="内容结构" text={scaffoldText(data.structure)} />
-            ) : (
-              data.structure &&
-              Object.keys(data.structure).length > 0 && (
-                <JsonDisplay data={data.structure} title="模板结构" />
-              )
+            {/* 公众号 (article): 作者(署名, 仅名字) + 写作风格(头像+介绍) + 排版预览 */}
+            {data.type === 'article' && (
+              <>
+                {/* 作者（署名）—— 仅名字 */}
+                {data.author_name && (
+                  <div className="rounded-lg border border-border px-3 py-2">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">作者（署名）</p>
+                    <p className="text-sm font-medium text-foreground">{data.author_name}</p>
+                  </div>
+                )}
+                {/* 写作风格 —— 模仿写作；可选人设头像（不入署名） */}
+                {(data.author_style_intro || data.author_avatar_url) && (
+                  <div className="rounded-lg border border-border px-3 py-2">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">写作风格</p>
+                    <div className="flex items-start gap-3">
+                      {data.author_avatar_url && (
+                        <SignedImage
+                          src={data.author_avatar_url}
+                          alt="写作风格人设头像"
+                          className="h-12 w-12 shrink-0 rounded-full object-cover"
+                          showLoading={false}
+                        />
+                      )}
+                      {data.author_style_intro && (
+                        <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
+                          {data.author_style_intro}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {data.theme && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground">排版预览</p>
+                    <ThemePreview theme={data.theme} />
+                  </div>
+                )}
+              </>
             )}
 
-            {/* 示例内容 —— 同上 */}
-            {scaffoldText(data.example_content) ? (
-              <ScaffoldBlock label="示例内容" text={scaffoldText(data.example_content)} />
-            ) : (
-              data.example_content &&
-              Object.keys(data.example_content).length > 0 && (
-                <JsonDisplay data={data.example_content} title="示例内容" />
-              )
+            {/* 海报 (poster): 内容脚手架（写作风格 / 内容结构 / 示例）—— 保留原展示 */}
+            {data.type === 'poster' && (
+              <>
+                <ScaffoldBlock label="写作风格" text={data.writing_style ?? ''} />
+
+                {/* 内容结构 —— 优先渲染 .text，无 .text 时回退到 JSON 展开（poster 旧结构） */}
+                {scaffoldText(data.structure) ? (
+                  <ScaffoldBlock label="内容结构" text={scaffoldText(data.structure)} />
+                ) : (
+                  data.structure &&
+                  Object.keys(data.structure).length > 0 && (
+                    <JsonDisplay data={data.structure} title="模板结构" />
+                  )
+                )}
+
+                {/* 示例内容 —— 同上 */}
+                {scaffoldText(data.example_content) ? (
+                  <ScaffoldBlock label="示例内容" text={scaffoldText(data.example_content)} />
+                ) : (
+                  data.example_content &&
+                  Object.keys(data.example_content).length > 0 && (
+                    <JsonDisplay data={data.example_content} title="示例内容" />
+                  )
+                )}
+              </>
             )}
 
             {/* Action buttons */}

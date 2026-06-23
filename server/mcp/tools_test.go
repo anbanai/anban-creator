@@ -333,6 +333,113 @@ func TestBuildAccountInfo_TemplateScaffold(t *testing.T) {
 	}
 }
 
+// TestBuildAccountInfo_AuthorBylineAndWritingStyle: a 公众号 template carries TWO
+// independent dimensions — 作者 (AuthorName, the published byline) and 写作风格
+// (AuthorStyleIntro + optional AuthorAvatarURL, the writing imitation). The template
+// AuthorName OVERRIDES the channel byline and surfaces as the resolved top-level
+// `author` (precedence template > channel). AuthorStyleIntro surfaces as
+// template_writing_style (writing direction); AuthorAvatarURL as template_author_avatar
+// (persona avatar, NOT the byline). The two never derive from each other.
+func TestBuildAccountInfo_AuthorBylineAndWritingStyle(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+
+	// Template WITH 作者 (byline) + 写作风格 (imitation + avatar).
+	tmpl := &model.Template{
+		ID:               uuid.New().String(),
+		UserID:           userID,
+		Type:             model.PlatformArticle,
+		Name:             "作者+写作风格模板",
+		Visibility:       "public",
+		AuthorName:       "老李",
+		AuthorAvatarURL:  "https://example.com/avatar.png",
+		AuthorStyleIntro: "犀利、接地气、像朋友聊天",
+		IsActive:         true,
+	}
+	if err := repo.Templates().Create(ctx, tmpl); err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+
+	task := createAccountInfoTask(t, repo, userID, ch.ID, "温暖治愈系，柔光摄影")
+	task.TemplateID = &tmpl.ID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task template_id: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"channel_id": ch.ID,
+		"scope":      "article",
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	// 作者 (byline): template AuthorName overrides the (empty) channel author and
+	// surfaces as the resolved top-level `author` that the agent passes to publish_draft.
+	if got := info["author"]; got != "老李" {
+		t.Errorf("author = %v, want 老李 (template byline overrides channel)", got)
+	}
+	if got := info["template_author_name"]; got != "老李" {
+		t.Errorf("template_author_name = %v, want 老李", got)
+	}
+	// 写作风格 (imitation): AuthorStyleIntro drives template_writing_style (NOT the
+	// empty WritingStyle). It is the writing direction, independent of the byline.
+	if got := info["template_writing_style"]; got != "犀利、接地气、像朋友聊天" {
+		t.Errorf("template_writing_style = %v, want the writing-style intro", got)
+	}
+	if got := info["template_author_avatar"]; got != "https://example.com/avatar.png" {
+		t.Errorf("template_author_avatar = %v, want avatar url", got)
+	}
+}
+
+// TestBuildAccountInfo_BylineFallbackToChannel: when the linked template has NO
+// AuthorName, the channel's own byline (channel.Author) must be preserved as the
+// top-level `author` — a template must never clobber the channel byline with an
+// empty value. (precedence template > channel, but only when the template defines one.)
+func TestBuildAccountInfo_BylineFallbackToChannel(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	ch.Author = "频道作者"
+	if err := repo.Channels().Update(ctx, ch); err != nil {
+		t.Fatalf("update channel author: %v", err)
+	}
+	// Template WITHOUT an 作者 (AuthorName) — only a writing-style intro.
+	tmpl := &model.Template{
+		ID:               uuid.New().String(),
+		UserID:           userID,
+		Type:             model.PlatformArticle,
+		Name:             "无作者模板",
+		Visibility:       "public",
+		AuthorStyleIntro: "犀利、接地气",
+		IsActive:         true,
+	}
+	if err := repo.Templates().Create(ctx, tmpl); err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
+	task.TemplateID = &tmpl.ID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task template_id: %v", err)
+	}
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"channel_id": ch.ID,
+		"scope":      "article",
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	if got := info["author"]; got != "频道作者" {
+		t.Errorf("author = %v, want 频道作者 (template without AuthorName keeps channel byline)", got)
+	}
+}
+
 // TestBuildAccountInfo_TemplateDeleted_NoScaffold: a task whose template_id points
 // at a deleted/non-existent template must not fail the whole profile — the
 // template_* keys are simply absent. Guards against stale template_id rows.

@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
+import { ThemePreview } from '@/components/templates/ThemePreview'
 import type { Template, TemplateType, TemplateVisibility, CreateTemplateRequest, UpdateTemplateRequest } from '@/types'
 import type { ResourceEntry } from '@/types/resource'
 import { toast } from 'sonner'
@@ -86,6 +87,16 @@ export function TemplateCreateDialog({
   // Tags entered as comma-separated text; split on submit. Editing backfills
   // the existing tags joined by ", ".
   const [tagsText, setTagsText] = useState('')
+  // 公众号 two SEPARATE dimensions, only collected for article templates:
+  //   - 作者 (署名 byline): authorName — just a name, becomes the published
+  //     author via get_channel_profile.author (precedence template > channel).
+  //   - 写作风格 (writing imitation): authorStyleIntro (free-text 框架/写作方式/
+  //     笔迹) + optional authorAvatarUrl (persona avatar, NOT the byline).
+  const [authorName, setAuthorName] = useState('')
+  const [authorAvatarUrl, setAuthorAvatarUrl] = useState('')
+  const [authorStyleIntro, setAuthorStyleIntro] = useState('')
+  // Toggle the inline 排版预览 iframe in the article form.
+  const [themePreviewOpen, setThemePreviewOpen] = useState(false)
 
   // Available 排版样式 themes (for the article template's theme dropdown).
   const { data: themeResources } = useQuery({
@@ -127,12 +138,16 @@ export function TemplateCreateDialog({
       setVisibility(template.visibility === 'private' ? 'private' : 'public')
       setWritingStyle(template.writing_style ?? '')
       setTheme(template.theme ?? '')
+      setAuthorName(template.author_name ?? '')
+      setAuthorAvatarUrl(template.author_avatar_url ?? '')
+      setAuthorStyleIntro(template.author_style_intro ?? '')
       // structure / example are stored as { text: ... }; fall back to raw for
       // legacy rows that may have stored plain strings.
       setStructure(extractScaffoldText(template.structure))
       setExample(extractScaffoldText(template.example_content))
       setCategory(template.category ?? '')
       setTagsText(Array.isArray(template.tags) ? template.tags.join(', ') : '')
+      setThemePreviewOpen(false)
     } else {
       setName('')
       setType(defaultType)
@@ -141,10 +156,14 @@ export function TemplateCreateDialog({
       setVisibility('public')
       setWritingStyle('')
       setTheme('')
+      setAuthorName('')
+      setAuthorAvatarUrl('')
+      setAuthorStyleIntro('')
       setStructure('')
       setExample('')
       setCategory('')
       setTagsText('')
+      setThemePreviewOpen(false)
     }
   }, [open, template, defaultType])
 
@@ -233,17 +252,35 @@ export function TemplateCreateDialog({
         style_prompt: stylePrompt.trim(),
         visibility,
       }
-      const writingStyleTrimmed = writingStyle.trim()
-      if (writingStyleTrimmed) payload.writing_style = writingStyleTrimmed
-      const themeTrimmed = theme.trim()
-      if (themeTrimmed) payload.theme = themeTrimmed
-      const structureTrimmed = structure.trim()
-      if (structureTrimmed) payload.structure = structureTrimmed
-      const exampleTrimmed = example.trim()
-      if (exampleTrimmed) payload.example_content = exampleTrimmed
-      const categoryTrimmed = category.trim()
-      if (categoryTrimmed) payload.category = categoryTrimmed
-      if (trimmedTags.length > 0) payload.tags = trimmedTags
+      // Type-aware payload: each type sends ONLY the fields its form renders.
+      // This is the definitive guard for the writer-key bug trap — an article or
+      // seednote template must NEVER carry writing_style: style_resolve copies it
+      // into Task.WritingStyle, which config_builder treats as a writer resource
+      // key, so a free-text value there silently fails to resolve any writer.
+      // (Editing a legacy article row that backfilled a stale writing_style into
+      // state must NOT re-send it on save, since the field isn't rendered.)
+      if (type === 'poster') {
+        const writingStyleTrimmed = writingStyle.trim()
+        if (writingStyleTrimmed) payload.writing_style = writingStyleTrimmed
+        const structureTrimmed = structure.trim()
+        if (structureTrimmed) payload.structure = structureTrimmed
+        const exampleTrimmed = example.trim()
+        if (exampleTrimmed) payload.example_content = exampleTrimmed
+        const categoryTrimmed = category.trim()
+        if (categoryTrimmed) payload.category = categoryTrimmed
+        if (trimmedTags.length > 0) payload.tags = trimmedTags
+      }
+      if (type === 'article') {
+        const themeTrimmed = theme.trim()
+        if (themeTrimmed) payload.theme = themeTrimmed
+        // 作者 (署名, byline) + 写作风格 (imitation): two independent dimensions.
+        const authorNameTrimmed = authorName.trim()
+        if (authorNameTrimmed) payload.author_name = authorNameTrimmed
+        const authorAvatarTrimmed = authorAvatarUrl.trim()
+        if (authorAvatarTrimmed) payload.author_avatar_url = authorAvatarTrimmed
+        const authorIntroTrimmed = authorStyleIntro.trim()
+        if (authorIntroTrimmed) payload.author_style_intro = authorIntroTrimmed
+      }
       if (isEditing && template) {
         await updateMutation.mutateAsync({ id: template.id, data: payload as UpdateTemplateRequest })
       } else {
@@ -390,33 +427,147 @@ export function TemplateCreateDialog({
             </p>
           </div>
 
-          {/* 内容脚手架（可选）—— 写作风格 / 内容结构 / 示例。
-              通过 get_channel_profile(task_id) 送达生成 Agent，与视觉风格
-              style_prompt 是相互独立的通道。category / tags 用于检索归类。 */}
-          <div className="space-y-3 rounded-lg border border-dashed border-input p-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium">内容脚手架</Label>
-              <span className="text-xs text-muted-foreground">可选，创建任务/计划选此模板时送达 AI</span>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="tpl-writing-style" className="text-xs text-muted-foreground">
-                写作风格 / 调性
-              </Label>
-              <Textarea
-                id="tpl-writing-style"
-                value={writingStyle}
-                onChange={(e) => setWritingStyle(e.target.value)}
-                placeholder="例如：犀利、接地气、像朋友聊天；多用短句和反问"
-                maxLength={1024}
-                className="resize-none"
-                rows={2}
-              />
-            </div>
-            {type === 'article' && (
+          {/* 海报 (poster) — legacy 内容脚手架 (writing style / structure /
+              example / category / tags). Poster keeps the original form
+              unchanged (see no-silent-feature-removal). */}
+          {type === 'poster' && (
+            <div className="space-y-3 rounded-lg border border-dashed border-input p-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">内容脚手架</Label>
+                <span className="text-xs text-muted-foreground">可选，创建任务/计划选此模板时送达 AI</span>
+              </div>
               <div className="space-y-1.5">
-                <Label htmlFor="tpl-theme" className="text-xs text-muted-foreground">
-                  排版样式（主题）
+                <Label htmlFor="tpl-writing-style" className="text-xs text-muted-foreground">
+                  写作风格 / 调性
                 </Label>
+                <Textarea
+                  id="tpl-writing-style"
+                  value={writingStyle}
+                  onChange={(e) => setWritingStyle(e.target.value)}
+                  placeholder="例如：犀利、接地气、像朋友聊天；多用短句和反问"
+                  maxLength={1024}
+                  className="resize-none"
+                  rows={2}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tpl-structure" className="text-xs text-muted-foreground">
+                  内容结构
+                </Label>
+                <Textarea
+                  id="tpl-structure"
+                  value={structure}
+                  onChange={(e) => setStructure(e.target.value)}
+                  placeholder={'例如：\n1. 开头钩子（一句话点出痛点）\n2. 3 个论点（每个配案例）\n3. 行动号召'}
+                  className="resize-none font-mono text-xs"
+                  rows={4}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tpl-example" className="text-xs text-muted-foreground">
+                  示例内容
+                </Label>
+                <Textarea
+                  id="tpl-example"
+                  value={example}
+                  onChange={(e) => setExample(e.target.value)}
+                  placeholder="贴一段你认可的成稿片段，AI 会模仿它的语气与节奏"
+                  className="resize-none"
+                  rows={4}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="tpl-category" className="text-xs text-muted-foreground">
+                    分类
+                  </Label>
+                  <Input
+                    id="tpl-category"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    placeholder="例如：个人成长"
+                    maxLength={50}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tpl-tags" className="text-xs text-muted-foreground">
+                    标签<span className="ml-1 font-normal">（逗号分隔）</span>
+                  </Label>
+                  <Input
+                    id="tpl-tags"
+                    value={tagsText}
+                    onChange={(e) => setTagsText(e.target.value)}
+                    placeholder="例如：干货, 方法论"
+                    maxLength={200}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 公众号 (article) — 图片风格（在上）之外的要素：
+              作者（署名，仅名字 → 发布作者名）+ 写作风格（模仿框架/写作方式/
+              笔迹 + 可选人设头像）+ 排版模板（可预览）。作者与写作风格是两个
+              独立维度：作者只用于署名，写作风格只用于模仿写作。 */}
+          {type === 'article' && (
+            <>
+              {/* 作者（署名）—— 仅名字，作为公众号发布时的作者名 */}
+              <div className="space-y-1.5">
+                <Label htmlFor="tpl-author-name">
+                  作者（署名）
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                    （可选，仅名字；发布时作为公众号作者名，留空则用频道作者）
+                  </span>
+                </Label>
+                <Input
+                  id="tpl-author-name"
+                  value={authorName}
+                  onChange={(e) => setAuthorName(e.target.value)}
+                  placeholder="例如：老李"
+                  maxLength={100}
+                />
+              </div>
+
+              {/* 写作风格 —— 模仿内容的框架 / 写作方式 / 笔迹；人设头像可选（不入署名） */}
+              <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">写作风格</Label>
+                  <span className="text-xs text-muted-foreground">模仿框架 / 写作方式 / 笔迹</span>
+                </div>
+                <div className="flex items-stretch gap-3">
+                  <div className="shrink-0">
+                    <ReferenceImageUpload
+                      value={authorAvatarUrl}
+                      onChange={setAuthorAvatarUrl}
+                      purpose="reference"
+                    />
+                    <p className="mt-1 text-center text-[11px] text-muted-foreground">人设头像（可选）</p>
+                  </div>
+                  <Textarea
+                    value={authorStyleIntro}
+                    onChange={(e) => setAuthorStyleIntro(e.target.value)}
+                    placeholder="例如：犀利、接地气、像朋友聊天；多用短句和反问；爱用具体数字和案例"
+                    maxLength={1024}
+                    className="flex-1 resize-none"
+                    rows={4}
+                  />
+                </div>
+              </div>
+
+              {/* 排版模板 */}
+              <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="tpl-theme" className="text-sm font-medium">排版模板</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => setThemePreviewOpen((v) => !v)}
+                  >
+                    {themePreviewOpen ? '收起预览' : '预览排版'}
+                  </Button>
+                </div>
                 <Select value={theme || '_none'} onValueChange={(v) => setTheme(v && v !== '_none' ? v : '')}>
                   <SelectTrigger id="tpl-theme" className="w-full">
                     <SelectValue placeholder="留空则用频道默认排版" />
@@ -428,61 +579,13 @@ export function TemplateCreateDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                {themePreviewOpen && theme && <ThemePreview theme={theme} />}
+                {themePreviewOpen && !theme && (
+                  <p className="text-xs text-muted-foreground">请先选择一个排版主题，再点预览。</p>
+                )}
               </div>
-            )}
-            <div className="space-y-1.5">
-              <Label htmlFor="tpl-structure" className="text-xs text-muted-foreground">
-                内容结构
-              </Label>
-              <Textarea
-                id="tpl-structure"
-                value={structure}
-                onChange={(e) => setStructure(e.target.value)}
-                placeholder={'例如：\n1. 开头钩子（一句话点出痛点）\n2. 3 个论点（每个配案例）\n3. 行动号召'}
-                className="resize-none font-mono text-xs"
-                rows={4}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="tpl-example" className="text-xs text-muted-foreground">
-                示例内容
-              </Label>
-              <Textarea
-                id="tpl-example"
-                value={example}
-                onChange={(e) => setExample(e.target.value)}
-                placeholder="贴一段你认可的成稿片段，AI 会模仿它的语气与节奏"
-                className="resize-none"
-                rows={4}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="tpl-category" className="text-xs text-muted-foreground">
-                  分类
-                </Label>
-                <Input
-                  id="tpl-category"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  placeholder="例如：个人成长"
-                  maxLength={50}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="tpl-tags" className="text-xs text-muted-foreground">
-                  标签<span className="ml-1 font-normal">（逗号分隔）</span>
-                </Label>
-                <Input
-                  id="tpl-tags"
-                  value={tagsText}
-                  onChange={(e) => setTagsText(e.target.value)}
-                  placeholder="例如：干货, 方法论"
-                  maxLength={200}
-                />
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
 
         <DialogFooter>

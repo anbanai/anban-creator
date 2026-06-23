@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { User, AuthResponse } from '@/types'
 
@@ -60,22 +61,42 @@ function clearStoredState() {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(loadStoredState)
+  const queryClient = useQueryClient()
+  // Track the signed-in user so we drop cached queries only when the identity
+  // actually changes (login / account switch) — not on same-user token refresh,
+  // which would otherwise trigger a wasteful full refetch.
+  const prevUserIdRef = useRef<string | null>(state.user?.id ?? null)
+
+  // Drop all cached queries (templates/channels/plans carry the previous user's
+  // image URLs) and reset the identity tracker. Used on logout / token expiry.
+  const clearUserCache = useCallback(() => {
+    prevUserIdRef.current = null
+    queryClient.clear()
+  }, [queryClient])
 
   // Listen for token expiration events dispatched by the API interceptor
   useEffect(() => {
     const handler = () => {
+      clearUserCache()
       setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
     }
     window.addEventListener('auth:token-expired', handler)
     return () => window.removeEventListener('auth:token-expired', handler)
-  }, [])
+  }, [clearUserCache])
 
   const login = useCallback((token: string, refreshToken: string, user: User) => {
+    // Clear cached queries when the signed-in identity changes (initial login or
+    // account switch) so we never render another account's user-scoped data.
+    // Same-user token refresh leaves the cache intact.
+    if (prevUserIdRef.current !== user.id) {
+      queryClient.clear()
+    }
+    prevUserIdRef.current = user.id
     localStorage.setItem(TOKEN_KEY, token)
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
     localStorage.setItem(USER_KEY, JSON.stringify(user))
     setState({ token, refreshToken, user, isAuthenticated: true })
-  }, [])
+  }, [queryClient])
 
   const logout = useCallback(async () => {
     try {
@@ -84,13 +105,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Ignore logout API errors
     }
     clearStoredState()
+    clearUserCache()
     setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
-  }, [])
+  }, [clearUserCache])
 
   const refreshAuthToken = useCallback(async () => {
     const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY)
     if (!storedRefresh) {
       clearStoredState()
+      clearUserCache()
       setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
       return
     }
@@ -100,9 +123,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login(response.token, response.refresh_token, { ...response.user, has_password: response.has_password, max_invites: response.max_invites })
     } catch {
       clearStoredState()
+      clearUserCache()
       setState({ token: null, refreshToken: null, user: null, isAuthenticated: false })
     }
-  }, [login])
+  }, [login, clearUserCache])
 
   const setUser = useCallback((user: User) => {
     localStorage.setItem(USER_KEY, JSON.stringify(user))

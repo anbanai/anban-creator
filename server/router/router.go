@@ -198,6 +198,9 @@ func NewRouter(svc *Services) *fiber.App {
 
 	// Public resource catalog endpoint (no auth required).
 	if svc.ResourceHandler != nil {
+		// Theme preview (registered before the :category wildcards; distinct
+		// segment count avoids any match conflict). Renders static theme styling.
+		app.Get("/api/v1/resources/themes/:name/preview", svc.ResourceHandler.PreviewTheme)
 		app.Get("/api/v1/resources/:category", svc.ResourceHandler.List)
 		app.Get("/api/v1/resources/:category/:name", svc.ResourceHandler.Get)
 	}

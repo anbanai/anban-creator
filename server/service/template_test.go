@@ -258,6 +258,52 @@ func TestTemplateService_Update_PersistsScaffold(t *testing.T) {
 	}
 }
 
+// TestTemplateService_Update_PersistsAuthorPersona: the 公众号 author-persona
+// fields (AuthorName / AuthorAvatarURL / AuthorStyleIntro) set via Update must
+// round-trip through the repository. Same footgun guard as PersistsScaffold: the
+// repo writes ALL columns, so the service must copy each patch field.
+func TestTemplateService_Update_PersistsAuthorPersona(t *testing.T) {
+	svc, _, _ := setupTemplateService(t)
+	ctx := context.Background()
+	ownerID := uuid.New().String()
+
+	created, err := svc.Create(ctx, &model.Template{Name: "作者模板", Type: "article"}, ownerID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	patch := &model.Template{
+		AuthorName:       "老李",
+		AuthorAvatarURL:  "https://example.com/avatar.png",
+		AuthorStyleIntro: "犀利、接地气、像朋友聊天",
+	}
+	updated, err := svc.Update(ctx, created.ID, ownerID, patch)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.AuthorName != "老李" {
+		t.Errorf("AuthorName = %q, want 老李", updated.AuthorName)
+	}
+	if updated.AuthorAvatarURL != "https://example.com/avatar.png" {
+		t.Errorf("AuthorAvatarURL = %q, want avatar url", updated.AuthorAvatarURL)
+	}
+	if updated.AuthorStyleIntro != "犀利、接地气、像朋友聊天" {
+		t.Errorf("AuthorStyleIntro = %q, want intro", updated.AuthorStyleIntro)
+	}
+
+	// Re-fetch to confirm persistence (not just in-memory).
+	refetched, err := svc.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if refetched.AuthorName != "老李" {
+		t.Errorf("persisted AuthorName = %q, want 老李", refetched.AuthorName)
+	}
+	if refetched.AuthorStyleIntro != "犀利、接地气、像朋友聊天" {
+		t.Errorf("persisted AuthorStyleIntro = %q", refetched.AuthorStyleIntro)
+	}
+}
+
 func TestTemplateService_Delete_OwnerOnly(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	ctx := context.Background()

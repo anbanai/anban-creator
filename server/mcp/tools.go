@@ -344,17 +344,17 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	//   - writing_style (写作风格): writer resource key, e.g. "dan-koe"
 	//   - theme         (排版样式): theme resource key, e.g. "autumn-warm"
 	info := map[string]any{
-		"name":                ch.Name,
-		"author":              ch.Author,
-		"positioning":         ch.Positioning,
-		"keywords":            ch.Keywords,
-		"style":               effectiveVisual,
-		"writing_style":       effectiveWriter,
-		"theme":               effectiveTheme,
-		"style_source":        visualSource,
+		"name":                 ch.Name,
+		"author":               ch.Author,
+		"positioning":          ch.Positioning,
+		"keywords":             ch.Keywords,
+		"style":                effectiveVisual,
+		"writing_style":        effectiveWriter,
+		"theme":                effectiveTheme,
+		"style_source":         visualSource,
 		"writing_style_source": writerSource,
-		"theme_source":        themeSource,
-		"platform":            ch.Platform,
+		"theme_source":         themeSource,
+		"platform":             ch.Platform,
 	}
 
 	switch scope {
@@ -396,16 +396,45 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		}
 	}
 
-	// Surface the linked template's content scaffold (writing style / structure /
-	// example / theme) so the agent can apply it during creation. Only present when
-	// the task carries a template_id (manual task or spawned from a plan). Errors
-	// (e.g. template deleted) are logged-and-skipped so a stale template_id never
-	// breaks the whole profile — the keys simply stay absent.
+	// Surface the linked template's content. Three things are delivered, kept as
+	// STRICTLY INDEPENDENT concepts (the article 作者/byline must never be conflated
+	// with 写作风格/writing imitation):
+	//
+	//   - 作者 (byline): the template's AuthorName overrides the channel byline
+	//     (precedence template > channel) and surfaces as the top-level `author`
+	//     field, which the agent passes to publish_draft. A template without
+	//     AuthorName leaves the channel byline untouched.
+	//   - 写作风格 (writing imitation, free text): AuthorStyleIntro for article,
+	//     falling back to the writer-key scaffold WritingStyle (poster). Surfaced
+	//     as template_writing_style; the skill follows it for 框架/写作方式/笔迹.
+	//   - template_author_avatar: the optional 写作风格 persona avatar (part of the
+	//     writing persona, NOT the byline).
+	//
+	// Only present when the task carries a template_id (manual task or spawned
+	// from a plan). Errors (template deleted) are logged-and-skipped so a stale
+	// template_id never breaks the profile — the keys simply stay absent.
 	if taskTemplateID != nil && *taskTemplateID != "" && svcs.TemplateSvc != nil {
 		if tmpl, terr := svcs.TemplateSvc.GetByID(ctx, *taskTemplateID); terr == nil {
 			info["template_id"] = tmpl.ID
 			info["template_name"] = tmpl.Name
-			info["template_writing_style"] = tmpl.WritingStyle
+			// 作者（署名 byline）: the template AuthorName overrides the channel byline
+			// (precedence template > channel). It surfaces as the resolved top-level
+			// `author`, which the agent passes to publish_draft.
+			if tmpl.AuthorName != "" {
+				info["author"] = tmpl.AuthorName
+				info["template_author_name"] = tmpl.AuthorName
+			}
+			// 写作风格（模仿写作）: article inline intro (free-text 框架/写作方式/笔迹),
+			// else the writer-key scaffold WritingStyle (poster). Independent of the byline.
+			if tmpl.AuthorStyleIntro != "" {
+				info["template_writing_style"] = tmpl.AuthorStyleIntro
+			} else {
+				info["template_writing_style"] = tmpl.WritingStyle
+			}
+			// 写作风格的可选人设头像（仅作人设参考，不入署名）。
+			if tmpl.AuthorAvatarURL != "" {
+				info["template_author_avatar"] = tmpl.AuthorAvatarURL
+			}
 			info["template_theme"] = tmpl.Theme
 			info["template_structure"] = extractScaffoldText(tmpl.Structure)
 			info["template_example"] = extractScaffoldText(tmpl.ExampleContent)

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
 
 // PlanHandler handles plan-related HTTP endpoints.
@@ -20,11 +22,28 @@ type PlanHandler struct {
 	logger       *zerolog.Logger
 	imagePresets []config.ImageModelPreset
 	repo         repository.Repository
+	store        storage.Provider
 }
 
 // NewPlanHandler creates a new PlanHandler.
 func NewPlanHandler(svc *service.PlanService, logger *zerolog.Logger) *PlanHandler {
 	return &PlanHandler{service: svc, logger: logger}
+}
+
+// SetStore injects a storage provider so the reference image URL can be resolved
+// to a signed, directly-fetchable URL in responses.
+func (h *PlanHandler) SetStore(s storage.Provider) {
+	h.store = s
+}
+
+// signPlanURLs resolves the stored reference-image URL to a directly-fetchable
+// signed URL. No-op when no store is wired (e.g. unit tests) or the URL is
+// external/empty.
+func (h *PlanHandler) signPlanURLs(ctx context.Context, p *model.Plan) {
+	if p == nil {
+		return
+	}
+	p.ReferenceImageURL = service.SignURL(ctx, h.store, h.logger, p.ReferenceImageURL, service.DefaultSignedURLTTL)
 }
 
 // SetImagePresets wires the system-managed image model presets for tier-gated
@@ -145,6 +164,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
 	}
 
+	h.signPlanURLs(c.Context(), plan)
 	return Success(c, plan)
 }
 
@@ -167,6 +187,10 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 	if err != nil {
 		h.logger.Error().Err(err).Msg("list plans failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to list plans")
+	}
+
+	for _, p := range plans {
+		h.signPlanURLs(c.Context(), p)
 	}
 
 	return Success(c, fiber.Map{
@@ -196,6 +220,7 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this plan")
 	}
 
+	h.signPlanURLs(c.Context(), plan)
 	return Success(c, plan)
 }
 
@@ -263,6 +288,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")
 	}
 
+	h.signPlanURLs(c.Context(), plan)
 	return Success(c, plan)
 }
 

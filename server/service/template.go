@@ -132,6 +132,17 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	if patch.WritingStyle != "" {
 		existing.WritingStyle = patch.WritingStyle
 	}
+	// Author persona (公众号 写作风格). Same "non-empty = set" PATCH rule as the
+	// scaffold fields above; the Studio edit form round-trips current values.
+	if patch.AuthorName != "" {
+		existing.AuthorName = patch.AuthorName
+	}
+	if patch.AuthorAvatarURL != "" {
+		existing.AuthorAvatarURL = patch.AuthorAvatarURL
+	}
+	if patch.AuthorStyleIntro != "" {
+		existing.AuthorStyleIntro = patch.AuthorStyleIntro
+	}
 	if patch.Category != "" {
 		existing.Category = patch.Category
 	}

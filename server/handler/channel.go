@@ -72,6 +72,18 @@ func (h *ChannelHandler) SetStore(s storage.Provider) {
 	h.store = s
 }
 
+// signChannelURLs resolves stored image URLs (avatar, reference image) to
+// directly-fetchable signed URLs so any viewer who can see the channel can load
+// its images regardless of which user originally uploaded them. No-op when no
+// store is wired (e.g. unit tests) or the URL is external/empty.
+func (h *ChannelHandler) signChannelURLs(ctx context.Context, ch *model.Channel) {
+	if ch == nil {
+		return
+	}
+	ch.AvatarURL = service.SignURL(ctx, h.store, h.logger, ch.AvatarURL, service.DefaultSignedURLTTL)
+	ch.ReferenceImageURL = service.SignURL(ctx, h.store, h.logger, ch.ReferenceImageURL, service.DefaultSignedURLTTL)
+}
+
 // SetSeednoteClient injects the Seednote SDK client.
 func (h *ChannelHandler) SetSeednoteClient(client *seednote.Client) {
 	h.seednoteClient = client
@@ -148,6 +160,7 @@ func (h *ChannelHandler) List(c fiber.Ctx) error {
 	// Sanitize all channels before returning.
 	for _, ch := range channels {
 		service.SanitizeChannel(ch)
+		h.signChannelURLs(c.Context(), ch)
 	}
 
 	return Success(c, channels)
@@ -249,11 +262,18 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 	}
 
 	service.SanitizeChannel(created)
+	h.signChannelURLs(c.Context(), created)
 
 	// For Seednote channels, include recommended templates.
 	recommended := []*model.Template{}
 	if created.Platform == model.PlatformSeednote && h.templateSvc != nil {
 		if rec := h.getRecommendedTemplates(c.Context(), created); rec != nil {
+			// Sign each recommended template's image URLs so the cross-account
+			// signed-direct path covers them too (these are public templates the
+			// viewer may not have uploaded).
+			for _, t := range rec {
+				service.SignTemplateURLs(c.Context(), h.store, h.logger, t)
+			}
 			recommended = rec
 		}
 	}
@@ -289,6 +309,7 @@ func (h *ChannelHandler) Get(c fiber.Ctx) error {
 	}
 
 	service.SanitizeChannel(ch)
+	h.signChannelURLs(c.Context(), ch)
 	return Success(c, fiber.Map{
 		"channel": ch,
 		"stats":   stats,
@@ -340,6 +361,7 @@ func (h *ChannelHandler) Update(c fiber.Ctx) error {
 	}
 
 	service.SanitizeChannel(updated)
+	h.signChannelURLs(c.Context(), updated)
 	return Success(c, updated)
 }
 
