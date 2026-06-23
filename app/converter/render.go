@@ -108,15 +108,21 @@ func (r *detRenderer) wrapContainer(inner string) string {
 	}
 
 	var sb strings.Builder
-	// font-family is set on the outer wrapper so the whole document (headings,
-	// paragraphs, list items, quotes — none of which set their own family)
-	// inherits it. Code blocks override with monospace. This lets serif/mono
-	// themes (classic-serif, geek-terminal, …) actually render their font;
-	// sans themes are unaffected ('Inter' → system sans, the prior default).
-	fmt.Fprintf(&sb, `<section style="background-color:%s;padding:%s;font-family:%s;">`,
+	// All inherited body typography (font-family, font-size, line-height,
+	// letter-spacing) is set ONCE on the outer wrapper so the whole document
+	// (headings, paragraphs, list items, quotes — none of which repeat these)
+	// inherits it. Code blocks override with monospace; headings override
+	// line-height/font-size. Color lives on the card below (also inherited by
+	// <p>/<li>). Hoisting these avoids repeating a ~70-char style block on every
+	// <p>, which otherwise inflates long articles past WeChat's 20,000-char draft
+	// limit. Serif/mono themes (classic-serif, geek-terminal, …) still render
+	// their font; sans themes are unaffected ('Inter' → system sans).
+	fmt.Fprintf(&sb, `<section style="background-color:%s;padding:%s;font-family:%s;font-size:%s;line-height:%s;letter-spacing:%s;">`,
 		bg,
 		r.firstNonEmpty(r.theme.Layout.ContainerPadding, "24px 12px"),
-		r.firstNonEmpty(r.theme.Typography.FontFamily, "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"))
+		r.firstNonEmpty(r.theme.Typography.FontFamily, "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"),
+		r.firstNonEmpty(r.theme.Typography.FontSize, "16px"),
+		r.lineHeight(), r.letterSpacing())
 	sb.WriteString("\n")
 	fmt.Fprintf(&sb, `<section style="%s">`, cardStyle)
 	sb.WriteString("\n")
@@ -140,14 +146,14 @@ func (r *detRenderer) renderBlock(node ast.Node, sb *strings.Builder) {
 		r.renderHeading(n, sb)
 	case *ast.Paragraph:
 		sb.WriteString(`<p style="`)
-		sb.WriteString(r.bodyTextStyle())
+		sb.WriteString(r.bodyMargin())
 		sb.WriteString(`">`)
 		sb.WriteString(r.renderInlines(n))
 		sb.WriteString("</p>\n")
 	case *ast.TextBlock:
 		// Loose text block (e.g. inside a list item): treat as a paragraph.
 		sb.WriteString(`<p style="`)
-		sb.WriteString(r.bodyTextStyle())
+		sb.WriteString(r.bodyMargin())
 		sb.WriteString(`">`)
 		sb.WriteString(r.renderInlines(n))
 		sb.WriteString("</p>\n")
@@ -253,7 +259,7 @@ func (r *detRenderer) renderAlert(n *ast.Blockquote, alertType string, sb *strin
 			if p, ok := child.(*ast.Paragraph); ok {
 				body := strings.TrimSpace(alertLeadingMarker.ReplaceAllString(r.renderInlines(p), ""))
 				if body != "" {
-					fmt.Fprintf(sb, `<p style="%s">%s</p>`+"\n", r.bodyTextStyle(), body)
+					fmt.Fprintf(sb, `<p style="%s">%s</p>`+"\n", r.bodyMargin(), body)
 				}
 				continue
 			}
@@ -293,7 +299,7 @@ func (r *detRenderer) renderList(n *ast.List, sb *strings.Builder) {
 			r.renderBlock(child, sb)
 			continue
 		}
-		sb.WriteString(`<li style="margin:6px 0;color:` + r.textColor() + `;">`)
+		sb.WriteString(`<li style="margin:6px 0;">`)
 		// A task-list checkbox is the first inline child of the item.
 		r.renderListItemChildren(li, sb)
 		sb.WriteString("</li>\n")
@@ -473,11 +479,11 @@ func (r *detRenderer) lineHeight() string {
 func (r *detRenderer) letterSpacing() string {
 	return r.firstNonEmpty(r.theme.Typography.LetterSpacing, "0.5px")
 }
-func (r *detRenderer) bodyTextStyle() string {
-	return fmt.Sprintf("color:%s;font-size:%s;line-height:%s;letter-spacing:%s;margin:0 0 16px;",
-		r.textColor(),
-		r.firstNonEmpty(r.theme.Typography.FontSize, "16px"),
-		r.lineHeight(), r.letterSpacing())
+func (r *detRenderer) bodyMargin() string {
+	// Body color + typography are inherited from the container wrapper, so a <p>
+	// only needs its own margin. Repeating the full style on every paragraph
+	// bloats long articles past WeChat's 20,000-char draft limit.
+	return "margin:0 0 16px;"
 }
 
 func (r *detRenderer) hrTag() string {

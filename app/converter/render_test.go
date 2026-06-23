@@ -353,6 +353,47 @@ func TestRender_DangerousLinks_StrippedFromHref(t *testing.T) {
 	}
 }
 
+// TestRender_LeanInlineStyles: inherited body typography (font-size, line-height,
+// letter-spacing) must live ONCE on the container and NOT be repeated on every
+// <p>/<li>. Repeating a ~70-char style block per paragraph bloats long articles
+// past WeChat's 20,000-char draft limit. Each <p> should carry only its margin.
+func TestRender_LeanInlineStyles(t *testing.T) {
+	cvt := newTestConverter(t)
+	var sb strings.Builder
+	for range 40 {
+		sb.WriteString("正文段落，含**加粗**与`行内代码`，模拟真实长文。\n\n")
+	}
+	sb.WriteString("- 列表项一\n- 列表项二\n")
+	res := cvt.Convert(&ConvertRequest{Markdown: sb.String(), Theme: "test-theme"})
+	if !res.Success {
+		t.Fatalf("render failed: %s", res.Error)
+	}
+	html := res.HTML
+
+	// The inherited typography block appears exactly once — on the outer wrapper.
+	if c := strings.Count(html, "letter-spacing:0.5px"); c != 1 {
+		t.Errorf("letter-spacing should appear once on the container, got %d", c)
+	}
+	// EVERY paragraph carries only its margin (color/typography inherited).
+	totalP := strings.Count(html, "<p ")
+	leanP := strings.Count(html, `<p style="margin:0 0 16px;">`)
+	if leanP == 0 || leanP != totalP {
+		t.Errorf("all %d <p> tags should be lean (margin only), only %d are", totalP, leanP)
+	}
+	// No <p> should still repeat the full body style.
+	if strings.Contains(html, `<p style="color:`) {
+		t.Error("a <p> still repeats the inherited body style block")
+	}
+	// <li> carries only its margin too (color inherited from the card).
+	if strings.Contains(html, `<li style="margin:6px 0;color:`) {
+		t.Error("a <li> still repeats the inherited color")
+	}
+	// Theme text color is still present (on the card, inherited by <p>).
+	if !strings.Contains(html, "#333333") {
+		t.Error("theme text color #333333 missing from container")
+	}
+}
+
 // TestRender_StrongUsesThemeColor: **bold** inlines the theme strong color.
 func TestRender_StrongUsesThemeColor(t *testing.T) {
 	cvt := newTestConverter(t)
