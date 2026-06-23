@@ -86,6 +86,7 @@ type channelRequest struct {
 	Positioning        string `json:"positioning"`
 	Keywords           string `json:"keywords"`
 	Style              string `json:"style"`
+	WritingStyle       string `json:"writing_style"`
 	Theme              string `json:"theme"`
 	Author             string `json:"author"`
 	ReferenceImageURL  string `json:"reference_image_url"`
@@ -109,6 +110,7 @@ func (req *channelRequest) toChannel() *model.Channel {
 		Positioning:        req.Positioning,
 		Keywords:           req.Keywords,
 		Style:              req.Style,
+		WritingStyle:       req.WritingStyle,
 		Theme:              req.Theme,
 		Author:             req.Author,
 		ReferenceImageURL:  req.ReferenceImageURL,
@@ -740,6 +742,8 @@ func (req *channelRequest) getFieldValue(key string) string {
 		return req.Keywords
 	case "style":
 		return req.Style
+	case "writing_style":
+		return req.WritingStyle
 	case "theme":
 		return req.Theme
 	case "author":

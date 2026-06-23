@@ -36,8 +36,14 @@ func TestChannelServiceDefaultsArticleStyle(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			if ch.Style != writer.DefaultStyleName {
-				t.Fatalf("Style = %q, want %q", ch.Style, writer.DefaultStyleName)
+			// The writer dimension (写作风格) defaults to the platform writer;
+			// the visual dimension (图片视觉) must stay empty — it must NEVER
+			// be seeded with a writer key (the dan-koe → Victorian-woodcut bug).
+			if ch.WritingStyle != writer.DefaultStyleName {
+				t.Fatalf("WritingStyle = %q, want %q", ch.WritingStyle, writer.DefaultStyleName)
+			}
+			if ch.Style != "" {
+				t.Fatalf("Style (visual) = %q, want empty — writer key must not leak into visual style", ch.Style)
 			}
 		})
 	}
@@ -75,8 +81,13 @@ func TestChannelServiceUpdateDefaultsArticleStyle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.Style != writer.DefaultStyleName {
-		t.Fatalf("Style = %q, want %q", updated.Style, writer.DefaultStyleName)
+	// Update re-applies defaults: the writer dimension is defaulted, the visual
+	// dimension stays empty.
+	if updated.WritingStyle != writer.DefaultStyleName {
+		t.Fatalf("WritingStyle = %q, want %q", updated.WritingStyle, writer.DefaultStyleName)
+	}
+	if updated.Style != "" {
+		t.Fatalf("Style (visual) = %q, want empty", updated.Style)
 	}
 }
 

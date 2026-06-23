@@ -77,6 +77,8 @@ type createTaskRequest struct {
 	SkipReferenceImage *bool   `json:"skip_reference_image"`
 	ReferenceImageURL  string  `json:"reference_image_url"`
 	Style              string  `json:"style"`
+	WritingStyle       string  `json:"writing_style"`
+	Theme              string  `json:"theme"`
 	Watermark          *bool   `json:"watermark"`
 	Goal               string  `json:"goal"`
 	GoalMode           bool    `json:"goal_mode"`
@@ -166,6 +168,8 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		SkipRefImage:      req.SkipReferenceImage,
 		ReferenceImageURL: req.ReferenceImageURL,
 		Style:             req.Style,
+		WritingStyle:      req.WritingStyle,
+		Theme:             req.Theme,
 		Watermark:         req.Watermark,
 		Goal:              req.Goal,
 		GoalMode:          req.GoalMode,

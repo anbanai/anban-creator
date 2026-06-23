@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Sparkles, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
@@ -20,6 +20,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import type { Template, TemplateType, TemplateVisibility, CreateTemplateRequest, UpdateTemplateRequest } from '@/types'
+import type { ResourceEntry } from '@/types/resource'
 import { toast } from 'sonner'
 
 const TYPE_OPTIONS: { value: TemplateType; label: string }[] = [
@@ -76,12 +77,26 @@ export function TemplateCreateDialog({
   // template_structure / template_example. structure/example wrap as
   // { text: <markdown> } on submit (matches the backend JSON column shape).
   const [writingStyle, setWritingStyle] = useState('')
+  // 排版样式 (theme) — the Markdown→HTML layout theme. Orthogonal to visual
+  // style_prompt and writing_style. Surfaced to the agent as template_theme.
+  const [theme, setTheme] = useState('')
   const [structure, setStructure] = useState('')
   const [example, setExample] = useState('')
   const [category, setCategory] = useState('')
   // Tags entered as comma-separated text; split on submit. Editing backfills
   // the existing tags joined by ", ".
   const [tagsText, setTagsText] = useState('')
+
+  // Available 排版样式 themes (for the article template's theme dropdown).
+  const { data: themeResources } = useQuery({
+    queryKey: queryKeys.resources.themes,
+    queryFn: () => api.resources.list('themes'),
+    staleTime: Infinity,
+  })
+  const themeOptions = (themeResources?.items || []).map((t: ResourceEntry) => ({
+    value: t.name,
+    label: t.description || t.name,
+  }))
 
   // Session epoch: incremented every time the dialog opens. Captured at the
   // start of handleSubmit and compared after the await — if the user closed
@@ -111,6 +126,7 @@ export function TemplateCreateDialog({
       setStylePrompt(template.style_prompt)
       setVisibility(template.visibility === 'private' ? 'private' : 'public')
       setWritingStyle(template.writing_style ?? '')
+      setTheme(template.theme ?? '')
       // structure / example are stored as { text: ... }; fall back to raw for
       // legacy rows that may have stored plain strings.
       setStructure(extractScaffoldText(template.structure))
@@ -124,6 +140,7 @@ export function TemplateCreateDialog({
       setStylePrompt('')
       setVisibility('public')
       setWritingStyle('')
+      setTheme('')
       setStructure('')
       setExample('')
       setCategory('')
@@ -218,6 +235,8 @@ export function TemplateCreateDialog({
       }
       const writingStyleTrimmed = writingStyle.trim()
       if (writingStyleTrimmed) payload.writing_style = writingStyleTrimmed
+      const themeTrimmed = theme.trim()
+      if (themeTrimmed) payload.theme = themeTrimmed
       const structureTrimmed = structure.trim()
       if (structureTrimmed) payload.structure = structureTrimmed
       const exampleTrimmed = example.trim()
@@ -393,6 +412,24 @@ export function TemplateCreateDialog({
                 rows={2}
               />
             </div>
+            {type === 'article' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="tpl-theme" className="text-xs text-muted-foreground">
+                  排版样式（主题）
+                </Label>
+                <Select value={theme || '_none'} onValueChange={(v) => setTheme(v && v !== '_none' ? v : '')}>
+                  <SelectTrigger id="tpl-theme" className="w-full">
+                    <SelectValue placeholder="留空则用频道默认排版" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none" label="不设置（用频道默认）">不设置（用频道默认）</SelectItem>
+                    {themeOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="tpl-structure" className="text-xs text-muted-foreground">
                 内容结构

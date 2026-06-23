@@ -1,18 +1,61 @@
-# 自定义主题
+# 自定义主题 — 结构化排版规格，供确定性渲染器（app/converter/render.go）消费。
+#
+# 这是一个中性、克制的默认排版，适合作为自定义起点：直接编辑下面的
+# colors / typography / layout / modules 字段即可定制样式（不再需要写 LLM 提示词）。
 name: custom
-type: ai
-description: "自定义主题，使用您自己的提示词"
-version: "1.0"
+type: deterministic
+description: "自定义主题（编辑下方结构化字段以定制样式）"
+version: "2.0"
 
-# AI 提示词模板（用户可自定义）
-prompt: |
-  你是一个专业的微信公众号排版助手。请将以下 Markdown 内容转换为微信公众号兼容的 HTML。
+# 风格说明
+style_info:
+  mood: "中性克制"
+  colors: "灰黑调"
+  best_for: "通用文章、默认排版"
 
-  ## 重要规则
-  1. 所有 CSS 必须使用内联 style 属性
-  2. 不使用外部样式表或 <style> 标签
-  3. 只使用安全的 HTML 标签（section, p, span, strong, em, a, h1-h6, ul, ol, li, blockquote, pre, code, table, img, br, hr）
-  4. 图片使用占位符格式：<!-- IMG:index -->
-  5. 返回完整的 HTML，不需要其他说明文字
+# 颜色方案
+colors:
+  background: "#f7f7f7"     # 浅灰背景（主容器）
+  text: "#333333"           # 主文字色
+  primary: "#1a1a1a"        # 主强调色（近黑）
+  secondary: "#666666"      # 副强调色（中灰）
+  quote_background: "#f0f0f0"
 
-  请转换以下 Markdown内容：
+# 字体排版
+typography:
+  font_family: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+  font_size: "16px"
+  line_height: "1.75"
+  letter_spacing: "0.2px"
+
+# 容器与卡片布局
+layout:
+  container_padding: "32px 12px"
+  max_width: "800px"
+  card_padding: "24px"
+  section_gap: "32px"
+  paragraph_margin: "0 0 16px"
+  border_radius: "10px"
+  card_background_color: "#ffffff"
+  card_border: "1px solid rgba(0, 0, 0, 0.06)"
+  card_box_shadow: "0 2px 12px rgba(0, 0, 0, 0.04)"
+
+# 元素样式
+modules:
+  h2:
+    icon: "▎"
+    icon_color: "#1a1a1a"
+    text_color: "#1a1a1a"
+    border_bottom: "1px solid rgba(0, 0, 0, 0.12)"
+  h3:
+    text_color: "#1a1a1a"
+    border_bottom: "2px solid #1a1a1a"
+  strong:
+    color: "#1a1a1a"
+  blockquote:
+    background_color: "#f0f0f0"
+    border_left: "4px solid #1a1a1a"
+  hr:
+    border: "none"
+    height: "1px"
+    background: "rgba(0, 0, 0, 0.1)"

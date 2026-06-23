@@ -97,6 +97,14 @@ func main() {
 			log.Info().Msg("database migration completed")
 		}
 
+		// 6.1 One-time backfill: split the overloaded article Channel.Style into
+		// the new orthogonal dimensions (Style=visual / WritingStyle=writer). Old
+		// article rows stored the writer key in Style; move it to WritingStyle and
+		// clear Style so the writer key is no longer read as a visual-style anchor.
+		if err := service.MigrateArticleStyleOverload(context.Background(), mysqlDB, log); err != nil {
+			log.Error().Err(err).Msg("failed to backfill article channel style overload")
+		}
+
 	}
 
 	// 7. Create repository.
@@ -444,7 +452,7 @@ func main() {
 				if cfg.Claude.PluginDir != "" {
 					writersDir = filepath.Join(cfg.Claude.PluginDir, "writers")
 				}
-				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, cfg.Writing.Timeout, cfg.Writing.ConvertTimeout, log)
+				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, cfg.Writing.Timeout, log)
 				if visionLLMClient != nil {
 					writingSvc.SetVisionClient(visionLLMClient)
 				}

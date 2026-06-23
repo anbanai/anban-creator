@@ -15,10 +15,17 @@ type Plan struct {
 	Status            string `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
 	ImageModelKey     string `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL string `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
-	// Style is the plan-level visual style, populated when a template is selected
-	// during plan creation. Copied to Task.Style (with task-level override winning)
-	// when CreateFromPlan runs; if empty, the channel's style is used as fallback.
+	// Style is the plan-level 图片视觉 (image visual style), one of three orthogonal
+	// dimensions (visual / writing / theme). Resolved at plan creation with
+	// precedence plan > template > channel, then copied to Task.Style by
+	// CreateFromPlan (task-level override wins).
 	Style string `gorm:"type:varchar(1024);default:''" json:"style,omitempty"`
+	// WritingStyle is the plan-level 写作风格 (writer resource key, e.g. "dan-koe").
+	// Orthogonal to Style/Theme; resolved plan > template > channel, copied to Task.
+	WritingStyle string `gorm:"type:varchar(100);default:''" json:"writing_style,omitempty"`
+	// Theme is the plan-level 排版样式 (theme resource key). Orthogonal to
+	// Style/WritingStyle; resolved plan > template > channel, copied to Task.
+	Theme string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`
 	// TemplateID records which template was selected during plan creation. Copied
 	// to Task.TemplateID by CreateFromPlan so spawned tasks surface the template's
 	// content scaffold (writing style / structure / example) to the agent via

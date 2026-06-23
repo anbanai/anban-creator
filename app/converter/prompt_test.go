@@ -1,7 +1,6 @@
 package converter
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -144,22 +143,5 @@ func TestPromptBuilder_GetVariable(t *testing.T) {
 	}
 	if v.DefaultValue != "autumn-warm" {
 		t.Errorf("THEME_NAME default = %q, want %q", v.DefaultValue, "autumn-warm")
-	}
-}
-
-func TestBuildCustomAIPrompt(t *testing.T) {
-	prompt := BuildCustomAIPrompt("My custom style")
-	if prompt == "" {
-		t.Error("expected non-empty prompt")
-	}
-	if !strings.Contains(prompt, "My custom style") {
-		t.Error("expected custom prompt to be included")
-	}
-}
-
-func TestBuildCustomAIPrompt_Empty(t *testing.T) {
-	prompt := BuildCustomAIPrompt("")
-	if prompt != "" {
-		t.Errorf("expected empty for empty input, got %q", prompt)
 	}
 }

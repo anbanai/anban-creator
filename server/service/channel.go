@@ -41,14 +41,20 @@ func (s *ChannelService) SetTemplateService(svc *TemplateService) {
 	s.templateSvc = svc
 }
 
-func defaultWritingStyleForPlatform(platform, style string) string {
-	if style != "" {
-		return style
+// applyStyleDefaults normalizes the two text/style dimensions on a channel:
+//   - style (图片视觉) is free text and NEVER defaults to a writer resource key.
+//     Previously the article platform defaulted ch.Style to writer.DefaultStyleName,
+//     which seeded the bug where a writer key ("dan-koe") leaked into the visual
+//     style field and was injected as an image-gen style. Visual style stays empty
+//     unless the user sets one.
+//   - writingStyle (写作风格) defaults to the platform's default writer
+//     (article → writer.DefaultStyleName) when empty, so article channels always
+//     carry a writing voice. Seednote has no writer dimension.
+func applyStyleDefaults(platform, style, writingStyle string) (string, string) {
+	if platform == model.PlatformArticle && writingStyle == "" {
+		writingStyle = writer.DefaultStyleName
 	}
-	if platform == model.PlatformArticle {
-		return writer.DefaultStyleName
-	}
-	return style
+	return style, writingStyle
 }
 
 // Create creates a new channel for the given user.
@@ -69,7 +75,7 @@ func (s *ChannelService) Create(ctx context.Context, userID string, ch *model.Ch
 	ch.ID = uuid.New().String()
 	ch.UserID = userID
 	ch.Status = model.ChannelStatusActive
-	ch.Style = defaultWritingStyleForPlatform(ch.Platform, ch.Style)
+	ch.Style, ch.WritingStyle = applyStyleDefaults(ch.Platform, ch.Style, ch.WritingStyle)
 
 	if err := s.repo.Channels().Create(ctx, ch); err != nil {
 		return nil, fmt.Errorf("create channel: %w", err)
@@ -150,6 +156,9 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	if ch.Style != "" {
 		existing.Style = ch.Style
 	}
+	if ch.WritingStyle != "" {
+		existing.WritingStyle = ch.WritingStyle
+	}
 	if ch.Theme != "" {
 		existing.Theme = ch.Theme
 	}
@@ -170,7 +179,7 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	if ch.Config.WechatSecret != "" {
 		existing.Config.WechatSecret = ch.Config.WechatSecret
 	}
-	existing.Style = defaultWritingStyleForPlatform(existing.Platform, existing.Style)
+	existing.Style, existing.WritingStyle = applyStyleDefaults(existing.Platform, existing.Style, existing.WritingStyle)
 
 	if err := s.repo.Channels().Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("update channel: %w", err)

@@ -30,12 +30,19 @@ type Task struct {
 	ImageRatio        string `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageModelKey     string `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL string `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
-	// Style is the effective visual style for this task's image generation,
-	// resolved at creation time with precedence task > plan > channel. Propagated
-	// to the agent via the user prompt (BuildUserPrompt); the channel-level style
-	// in settings.json is cleared by the executor when this is non-empty, so the
-	// agent has a single source of truth and no prompt-vs-config ambiguity.
+	// Style is the effective 图片视觉 (image visual style) for this task, one of
+	// three orthogonal dimensions (visual / writing / theme). Resolved at creation
+	// with precedence task > template > plan > channel. Propagated to the agent
+	// via the user prompt (BuildUserPrompt).
 	Style string `gorm:"type:varchar(1024);default:''" json:"style,omitempty"`
+	// WritingStyle is the effective 写作风格 (writer resource key, e.g. "dan-koe"),
+	// orthogonal to Style/Theme. Resolved task > template > plan > channel.
+	// Consumed by write_article / GenerateOutline (never injected as visual style).
+	WritingStyle string `gorm:"type:varchar(100);default:''" json:"writing_style,omitempty"`
+	// Theme is the effective 排版样式 (theme resource key), orthogonal to
+	// Style/WritingStyle. Resolved task > template > plan > channel. Consumed by
+	// the deterministic HTML renderer (convert_markdown / render_template).
+	Theme string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`
 	// TemplateID records which template was selected when creating this task
 	// (manual task, or a plan-spawned task inheriting plan.TemplateID). It does
 	// NOT enter the style resolution chain (visual style lives in Style) —

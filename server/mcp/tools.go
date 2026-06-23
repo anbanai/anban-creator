@@ -87,13 +87,13 @@ func registerChannelTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_channel_profile",
-		Description: "Get formatted account information for AI content creation context. Returns account positioning, keywords, style, theme, and platform-specific configuration. Does NOT expose sensitive credentials.",
+		Description: "Get formatted account information for AI content creation context. Returns positioning, keywords, and three INDEPENDENT style dimensions: `style` (图片视觉 image visual style, free text), `writing_style` (写作风格 writer resource key e.g. dan-koe), `theme` (排版样式 theme resource key e.g. autumn-warm). These three never derive from each other. Does NOT expose sensitive credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
 				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote"}, "description": "Filter output by content type"},
-				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided AND the task has a non-empty Style, the task's Style overrides the channel's Style in the `style` field (style_source becomes \"task\"); otherwise the channel's Style is returned (style_source=\"channel\"). Used to surface template-derived visual style to the agent. The task must belong to the same channel and user, otherwise the call is rejected. Note: `style_description` is always derived from the channel's writer resource key and is independent of this override."},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, the task is the single source of truth: its resolved `style`/`writing_style`/`theme` (precedence task > template > plan > channel) are returned with *_source=\"task\"; otherwise the channel's values are returned with *_source=\"channel\". The task must belong to the same channel and user, otherwise the call is rejected. Always pass task_id when one exists so template-derived dimensions surface correctly."},
 			},
 			"required": []any{"channel_id"},
 		},
@@ -272,9 +272,11 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 }
 
 // buildAccountInfo is the testable core of get_channel_profile. It resolves the
-// effective style (channel.Style by default; task.Style overrides when a task_id is
-// supplied and the task belongs to the requesting user+channel) and assembles the
-// profile map returned to the agent.
+// three orthogonal style dimensions (图片视觉 / 写作风格 / 排版样式). When a task_id
+// is supplied and the task belongs to the requesting user+channel, the task is the
+// single source of truth (its Style/WritingStyle/Theme are already resolved at
+// creation); otherwise the channel's values are used. The three dimensions never
+// derive from one another.
 func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (map[string]any, string) {
 	channelID, _ := args["channel_id"].(string)
 	if channelID == "" {
@@ -292,13 +294,17 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	}
 	service.SanitizeChannel(ch)
 
-	// Resolve effective style. By default the channel's style wins; when a task_id is
-	// supplied and the task carries its own style (e.g. derived from a selected template),
-	// the task's style overrides. Template selection on TasksPage/PlansPage writes only
-	// task.Style (not reference_image_url), so this is the single path for the agent to
-	// observe template-derived style through get_channel_profile.
-	effectiveStyle := ch.Style
-	styleSource := "channel"
+	// Resolve the three orthogonal style dimensions. Each is independent — the
+	// writer never drives the visual style. When a task_id is supplied, the task is
+	// the single source of truth: Task.Style / Task.WritingStyle / Task.Theme are
+	// already the resolved effective values (precedence task > template > plan >
+	// channel, computed at creation). Without a task_id we fall back to the channel.
+	effectiveVisual := ch.Style
+	effectiveWriter := ch.WritingStyle
+	effectiveTheme := ch.Theme
+	visualSource := "channel"
+	writerSource := "channel"
+	themeSource := "channel"
 	var taskTemplateID *string
 	if taskID != "" {
 		if svcs.TaskSvc == nil {
@@ -308,28 +314,47 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		if terr != nil {
 			return nil, fmt.Sprintf("get task: %v", terr)
 		}
-		// Guard against cross-channel/cross-user injection: a task from another channel
-		// or user must not leak its style into this profile response.
+		// Guard against cross-channel/cross-user injection.
 		if task.UserID != userID || task.ChannelID != channelID {
 			return nil, "task does not belong to the requested channel"
 		}
+		// Task fields hold the resolved effective values (precedence
+		// task > template > plan > channel, computed at creation). We still fall
+		// back to the channel PER DIMENSION when a task field is empty, and
+		// report each dimension's source honestly — so a task that only set its
+		// writer doesn't silently clobber the channel's visual/theme.
 		if task.Style != "" {
-			effectiveStyle = task.Style
-			styleSource = "task"
+			effectiveVisual = task.Style
+			visualSource = "task"
+		}
+		if task.WritingStyle != "" {
+			effectiveWriter = task.WritingStyle
+			writerSource = "task"
+		}
+		if task.Theme != "" {
+			effectiveTheme = task.Theme
+			themeSource = "task"
 		}
 		taskTemplateID = task.TemplateID
 	}
 
-	// Base account info (always included).
+	// Base account info (always included). The three style dimensions are exposed
+	// as independent fields so the agent never conflates them:
+	//   - style         (图片视觉): free-text image visual style; empty = none
+	//   - writing_style (写作风格): writer resource key, e.g. "dan-koe"
+	//   - theme         (排版样式): theme resource key, e.g. "autumn-warm"
 	info := map[string]any{
-		"name":         ch.Name,
-		"author":       ch.Author,
-		"positioning":  ch.Positioning,
-		"keywords":     ch.Keywords,
-		"style":        effectiveStyle,
-		"style_source": styleSource,
-		"theme":        ch.Theme,
-		"platform":     ch.Platform,
+		"name":                ch.Name,
+		"author":              ch.Author,
+		"positioning":         ch.Positioning,
+		"keywords":            ch.Keywords,
+		"style":               effectiveVisual,
+		"writing_style":       effectiveWriter,
+		"theme":               effectiveTheme,
+		"style_source":        visualSource,
+		"writing_style_source": writerSource,
+		"theme_source":        themeSource,
+		"platform":            ch.Platform,
 	}
 
 	switch scope {
@@ -346,21 +371,18 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	info["available_layouts"] = resources.Manager().ListByPlatform(resources.CategoryLayout, ch.Platform)
 	info["available_image_presets"] = resources.Manager().ListByPlatform(resources.CategoryImagePreset, ch.Platform)
 
-	// Add channel's selected resource descriptions.
-	if ch.Theme != "" {
-		if e := resources.Manager().Get(resources.CategoryTheme, ch.Theme); e != nil {
+	// Descriptions for the RESOLVED theme / writer (not the raw channel fields).
+	if effectiveTheme != "" {
+		if e := resources.Manager().Get(resources.CategoryTheme, effectiveTheme); e != nil {
 			info["theme_description"] = e.Description
 		}
 	}
-	if ch.Style != "" {
-		if e := resources.Manager().Get(resources.CategoryWriter, ch.Style); e != nil {
-			// NOTE: style_description is always derived from the channel's writer
-			// resource key (ch.Style — e.g. "dan-koe"), describing the writing voice.
-			// It is independent of the task-override above: when style_source="task",
-			// the `style` field carries a free-text visual style (e.g. "温暖治愈系"),
-			// while style_description still describes the channel's writer resource.
-			// The two describe different dimensions and must not be conflated.
-			info["style_description"] = e.Description
+	if effectiveWriter != "" {
+		if e := resources.Manager().Get(resources.CategoryWriter, effectiveWriter); e != nil {
+			// writing_style_description describes the writing VOICE (tone/人设/调性)
+			// of the resolved writer resource key. It is independent of `style`
+			// (visual). The two describe different dimensions and must not be conflated.
+			info["writing_style_description"] = e.Description
 		}
 	}
 	if ch.Layout != "" {
@@ -375,8 +397,8 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	}
 
 	// Surface the linked template's content scaffold (writing style / structure /
-	// example) so the agent can apply it during creation. Only present when the
-	// task carries a template_id (manual task or spawned from a plan). Errors
+	// example / theme) so the agent can apply it during creation. Only present when
+	// the task carries a template_id (manual task or spawned from a plan). Errors
 	// (e.g. template deleted) are logged-and-skipped so a stale template_id never
 	// breaks the whole profile — the keys simply stay absent.
 	if taskTemplateID != nil && *taskTemplateID != "" && svcs.TemplateSvc != nil {
@@ -384,6 +406,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			info["template_id"] = tmpl.ID
 			info["template_name"] = tmpl.Name
 			info["template_writing_style"] = tmpl.WritingStyle
+			info["template_theme"] = tmpl.Theme
 			info["template_structure"] = extractScaffoldText(tmpl.Structure)
 			info["template_example"] = extractScaffoldText(tmpl.ExampleContent)
 		} else if mcpLog != nil {

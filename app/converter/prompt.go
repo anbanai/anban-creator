@@ -170,39 +170,6 @@ func (pb *PromptBuilder) BuildPrompt(templateName string, vars map[string]string
 	return result, nil
 }
 
-// BuildPromptFromTheme 从主题构建 Prompt
-func (pb *PromptBuilder) BuildPromptFromTheme(theme *Theme, markdown string, vars map[string]string) (string, error) {
-	// 设置默认变量
-	if vars == nil {
-		vars = make(map[string]string)
-	}
-	if _, ok := vars["MARKDOWN"]; !ok {
-		vars["MARKDOWN"] = markdown
-	}
-	if _, ok := vars["THEME_NAME"]; !ok {
-		vars["THEME_NAME"] = theme.Name
-	}
-
-	// 使用主题的 Prompt 作为模板
-	prompt := theme.Prompt
-
-	// 替换 {{MARKDOWN}} 变量
-	if strings.Contains(prompt, "{{MARKDOWN}}") {
-		prompt = strings.ReplaceAll(prompt, "{{MARKDOWN}}", markdown)
-	} else {
-		// 如果没有占位符，追加到末尾
-		prompt = prompt + "\n\n```\n" + markdown + "\n```"
-	}
-
-	// 替换其他变量
-	for key, value := range vars {
-		placeholder := "{{" + key + "}}"
-		prompt = strings.ReplaceAll(prompt, placeholder, value)
-	}
-
-	return prompt, nil
-}
-
 // ValidateTemplate 验证模板
 func (pb *PromptBuilder) ValidateTemplate(templateName string) error {
 	tpl, ok := pb.templates[templateName]

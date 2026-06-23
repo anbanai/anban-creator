@@ -3,7 +3,6 @@ package converter
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -15,7 +14,9 @@ version: "1.0"
 colors:
   background: "#ffffff"
   text: "#333333"
-prompt: "Convert to styled HTML"
+typography:
+  font_size: "16px"
+  line_height: "1.75"
 `
 	if err := os.WriteFile(filepath.Join(dir, "test.yaml"), []byte(themeYAML), 0644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -36,6 +37,9 @@ prompt: "Convert to styled HTML"
 	}
 	if theme.Colors["background"] != "#ffffff" {
 		t.Errorf("Colors[background] = %q", theme.Colors["background"])
+	}
+	if theme.Typography.FontSize != "16px" {
+		t.Errorf("Typography.FontSize = %q, want 16px", theme.Typography.FontSize)
 	}
 }
 
@@ -75,26 +79,6 @@ func TestThemeManager_GetThemeDescription_Unknown(t *testing.T) {
 	desc := tm.GetThemeDescription("nonexistent")
 	if desc != "未知主题" {
 		t.Errorf("got %q, want %q", desc, "未知主题")
-	}
-}
-
-func TestThemeManager_GetAIPrompt(t *testing.T) {
-	dir := t.TempDir()
-	yaml := `name: "prompted"
-prompt: "Convert this {{MARKDOWN}} to HTML"`
-	if err := os.WriteFile(filepath.Join(dir, "prompted.yaml"), []byte(yaml), 0644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	tm := NewThemeManager()
-	tm.LoadTheme(filepath.Join(dir, "prompted.yaml"))
-
-	prompt, err := tm.GetAIPrompt("prompted")
-	if err != nil {
-		t.Fatalf("GetAIPrompt: %v", err)
-	}
-	if prompt != "Convert this {{MARKDOWN}} to HTML" {
-		t.Errorf("prompt = %q", prompt)
 	}
 }
 
@@ -138,15 +122,4 @@ description: "v1"`
 	tm.ReloadThemes()
 	// After reload with no themes dir, themes from LoadTheme are cleared
 	// (depends on theme dir existence)
-}
-
-func TestBuildCustomAIPrompt_AppendsRules(t *testing.T) {
-	custom := "Use dark theme colors"
-	result := BuildCustomAIPrompt(custom)
-	if result == "" {
-		t.Error("expected non-empty result")
-	}
-	if !strings.Contains(result, "Use dark theme colors") {
-		t.Error("expected custom prompt to be included")
-	}
 }

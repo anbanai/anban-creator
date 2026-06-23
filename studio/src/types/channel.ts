@@ -18,6 +18,7 @@ export interface Channel {
   positioning: string
   keywords: string
   style: string
+  writing_style: string
   theme: string
   author: string
   reference_image_url: string
@@ -55,6 +56,7 @@ export interface CreateChannelRequest {
   positioning?: string
   keywords?: string
   style?: string
+  writing_style?: string
   theme?: string
   author?: string
   reference_image_url?: string

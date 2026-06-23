@@ -44,19 +44,22 @@ func setupTestWritingService(t *testing.T, llm *fakeWritingLLM) (*WritingService
 	if err != nil {
 		t.Fatalf("resolve writers dir: %v", err)
 	}
-	svc := NewWritingService(repo, llm, writersDir, 0, 0, &logger)
+	svc := NewWritingService(repo, llm, writersDir, 0, &logger)
 	return svc, repo
 }
 
-func createWritingChannel(t *testing.T, repo repository.Repository, userID, platform, style string) string {
+// createWritingChannel seeds a channel with the given 写作风格 (writer key).
+// WriteArticle resolves the writer from WritingStyle, never from ch.Style (the
+// visual dimension), so the helper writes the writer key into WritingStyle.
+func createWritingChannel(t *testing.T, repo repository.Repository, userID, platform, writingStyle string) string {
 	t.Helper()
 	ch := &model.Channel{
-		ID:       uuid.NewString(),
-		UserID:   userID,
-		Platform: platform,
-		Name:     "Writing Channel",
-		Style:    style,
-		Status:   model.ChannelStatusActive,
+		ID:           uuid.NewString(),
+		UserID:       userID,
+		Platform:     platform,
+		Name:         "Writing Channel",
+		WritingStyle: writingStyle,
+		Status:       model.ChannelStatusActive,
 	}
 	if err := repo.Channels().Create(context.Background(), ch); err != nil {
 		t.Fatalf("create channel: %v", err)
@@ -69,7 +72,7 @@ func TestWritingServiceWriteArticleDefaultsEmptyArticleStyle(t *testing.T) {
 	svc, repo := setupTestWritingService(t, llm)
 	channelID := createWritingChannel(t, repo, "user-1", model.PlatformArticle, "")
 
-	result, err := svc.WriteArticle(context.Background(), "user-1", channelID, "写一篇关于专注力的文章", "idea", "", "")
+	result, err := svc.WriteArticle(context.Background(), "user-1", channelID, "写一篇关于专注力的文章", "idea", "", "", "")
 	if err != nil {
 		t.Fatalf("WriteArticle: %v", err)
 	}
@@ -89,7 +92,7 @@ func TestWritingServiceWriteArticleKeepsMissingStyleError(t *testing.T) {
 	svc, repo := setupTestWritingService(t, llm)
 	channelID := createWritingChannel(t, repo, "user-1", model.PlatformArticle, "missing-style")
 
-	_, err := svc.WriteArticle(context.Background(), "user-1", channelID, "写一篇文章", "idea", "", "")
+	_, err := svc.WriteArticle(context.Background(), "user-1", channelID, "写一篇文章", "idea", "", "", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

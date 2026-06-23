@@ -43,6 +43,8 @@ function planToFormValues(plan: Plan): PlanFormValues {
     image_model_key: plan.image_model_key || '',
     skip_reference_image: plan.skip_reference_image || false,
     style: plan.style || '',
+    writing_style: plan.writing_style || '',
+    theme: plan.theme || '',
     watermark: plan.watermark || false,
     goal: plan.goal || '',
     goal_mode: plan.goal_mode || false,
@@ -73,6 +75,8 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       style: '',
+      writing_style: '',
+      theme: '',
       has_content_image: true,
       has_tail_image: false,
     },
@@ -185,6 +189,8 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       style: '',
+      writing_style: '',
+      theme: '',
       has_content_image: true,
       has_tail_image: false,
     })
@@ -229,6 +235,8 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       style: '',
+      writing_style: '',
+      theme: '',
       has_content_image: true,
       has_tail_image: false,
     })
@@ -241,8 +249,11 @@ export default function PlansPage() {
     if (selectedTemplate?.id === template.id) return
     setSelectedTemplate(template)
     // Template thumbnail is a UI preview only — it is not a generation reference image.
-    // Only the style_prompt flows into the plan; agent picks it up via get_channel_profile(task_id).
+    // The three orthogonal style dimensions flow into the plan; spawned tasks inherit
+    // them and the agent surfaces them via get_channel_profile(task_id).
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
+    form.setValue('writing_style', template.writing_style || '', { shouldDirty: true })
+    form.setValue('theme', template.theme || '', { shouldDirty: true })
   }
 
   async function onSubmit(values: PlanFormValues) {
@@ -257,6 +268,8 @@ export default function PlansPage() {
       channel_id: values.channel_id || undefined,
       image_model_key: values.image_model_key,
       style: values.style || undefined,
+      writing_style: values.writing_style || undefined,
+      theme: values.theme || undefined,
       watermark: values.watermark || undefined,
       goal_mode: values.goal_mode || undefined,
       goal: values.goal_mode ? (values.goal?.trim() || undefined) : undefined,

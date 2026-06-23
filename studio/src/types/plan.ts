@@ -16,6 +16,8 @@ export interface Plan {
   skip_reference_image?: boolean
   reference_image_url?: string
   style?: string
+  writing_style?: string
+  theme?: string
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
@@ -38,6 +40,8 @@ export interface CreatePlanRequest {
   skip_reference_image?: boolean
   reference_image_url?: string
   style?: string
+  writing_style?: string
+  theme?: string
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
@@ -54,6 +58,8 @@ export interface UpdatePlanRequest {
   skip_reference_image?: boolean
   reference_image_url?: string
   style?: string
+  writing_style?: string
+  theme?: string
   watermark?: boolean
   goal?: string
   goal_mode?: boolean

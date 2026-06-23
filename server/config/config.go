@@ -204,12 +204,15 @@ func (c *ImageAPIConfig) DesignerOrder() []string {
 
 // WritingConfig holds LLM API configuration for writing services
 // (article writing, humanization, topic research, SEO, outlines).
+//
+// Markdown→WeChat-HTML conversion is now deterministic (no LLM), so it has no
+// dedicated timeout — Timeout below covers only the LLM-using paths
+// (write_article, humanize, outlines).
 type WritingConfig struct {
-	BaseURL        string        `yaml:"base_url"`        // LLM API endpoint
-	Key            string        `yaml:"key"`             // API key
-	Model          string        `yaml:"model"`           // Model name
-	Timeout        time.Duration `yaml:"timeout"`         // LLM request timeout (default 5m)
-	ConvertTimeout time.Duration `yaml:"convert_timeout"` // Markdown-to-HTML convert timeout (default 2x Timeout)
+	BaseURL string        `yaml:"base_url"` // LLM API endpoint
+	Key     string        `yaml:"key"`      // API key
+	Model   string        `yaml:"model"`    // Model name
+	Timeout time.Duration `yaml:"timeout"`  // LLM request timeout (default 5m)
 }
 
 // VisionConfig holds LLM API configuration for vision/image analysis services.
@@ -750,16 +753,6 @@ func (c *Config) applyEnvOverrides() {
 			c.Writing.Timeout = d
 		} else {
 			fmt.Fprintf(os.Stderr, "invalid %sWRITING_TIMEOUT=%q: %v, using default %v\n", prefix, v, err, c.Writing.Timeout)
-		}
-	}
-	if c.Writing.ConvertTimeout == 0 {
-		c.Writing.ConvertTimeout = 2 * c.Writing.Timeout
-	}
-	if v := os.Getenv(prefix + "WRITING_CONVERT_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			c.Writing.ConvertTimeout = d
-		} else {
-			fmt.Fprintf(os.Stderr, "invalid %sWRITING_CONVERT_TIMEOUT=%q: %v, using default %v\n", prefix, v, err, c.Writing.ConvertTimeout)
 		}
 	}
 

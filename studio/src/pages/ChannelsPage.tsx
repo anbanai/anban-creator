@@ -52,6 +52,7 @@ const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   keywords: '',
   positioning: '',
   style: '',
+  writing_style: '',
   theme: '',
   layout: '',
   image_preset: '',
@@ -72,6 +73,7 @@ function channelToForm(ch: Channel): ChannelFormValues {
     keywords: ch.keywords || '',
     positioning: ch.positioning || '',
     style: ch.style || '',
+    writing_style: ch.writing_style || '',
     theme: ch.theme || '',
     layout: ch.layout || '',
     image_preset: ch.image_preset || '',
@@ -398,6 +400,7 @@ export default function ChannelsPage() {
       positioning: values.positioning?.trim() || undefined,
       keywords: values.keywords?.trim() || undefined,
       style: values.style?.trim() || undefined,
+      writing_style: values.writing_style?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       layout: values.layout?.trim() || undefined,
       image_preset: values.image_preset?.trim() || undefined,
@@ -721,7 +724,7 @@ export default function ChannelsPage() {
               <FormField control={form.control} name="style" render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between gap-2">
-                    <FormLabel>{isSeednote ? '视觉风格' : '写作风格'}</FormLabel>
+                    <FormLabel>视觉风格</FormLabel>
                     {isSeednote && (
                       <ReferenceImageUpload
                         value={referenceImageUrl}
@@ -731,8 +734,8 @@ export default function ChannelsPage() {
                       />
                     )}
                   </div>
-                  {isSeednote ? (
-                    <FormControl>
+                  <FormControl>
+                    {isSeednote ? (
                       <div className="relative">
                         <Textarea
                           placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
@@ -748,37 +751,49 @@ export default function ChannelsPage() {
                             <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                           </div>
                         )}
+                        {analyzingStyle && (
+                          <p className="text-xs text-muted-foreground">正在分析参考图...</p>
+                        )}
                       </div>
-                      {analyzingStyle && (
-                        <p className="text-xs text-muted-foreground">正在分析参考图...</p>
-                      )}
-                    </FormControl>
-                  ) : (
-                    <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="选择写作风格" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {styleOptions.map((opt) => (
-                          <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <FormDescription>{isSeednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '选择内置写作风格模板'}</FormDescription>
+                    ) : (
+                      <Textarea
+                        placeholder="描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由账号定位与内容主题三维分析自动确定"
+                        {...field}
+                      />
+                    )}
+                  </FormControl>
+                  <FormDescription>{isSeednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'}</FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />
 
-              {!isSeednote && <FormField control={form.control} name="theme" render={({ field }) => (
+              {!isSeednote && <FormField control={form.control} name="writing_style" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>主题</FormLabel>
+                  <FormLabel>写作风格</FormLabel>
                   <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
                     <FormControl>
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择转换主题" />
+                        <SelectValue placeholder="选择写作风格" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {styleOptions.map((opt) => (
+                        <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>选择内置写作风格模板，决定文章文字调性与结构</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />}
+
+              {!isSeednote && <FormField control={form.control} name="theme" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>排版样式</FormLabel>
+                  <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择排版样式" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
@@ -787,7 +802,7 @@ export default function ChannelsPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <FormDescription>选择内置转换主题模板</FormDescription>
+                  <FormDescription>排版样式维度——文章转 HTML 的版式主题，与图片视觉、写作风格相互独立</FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />}

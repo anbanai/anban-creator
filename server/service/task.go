@@ -11,6 +11,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/royalrick/anbanwriter/server/agent"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
@@ -166,6 +167,11 @@ type CreateManualParams struct {
 	SkipRefImage      *bool
 	ReferenceImageURL string
 	Style             string
+	// WritingStyle / Theme carry the task-level 写作风格 / 排版样式 overrides (the
+	// other two orthogonal dimensions). Resolved alongside Style with precedence
+	// task > template > plan > channel.
+	WritingStyle      string
+	Theme             string
 	Watermark         *bool
 	Goal              string
 	GoalMode          bool
@@ -218,12 +224,23 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 	taskType := channel.Platform
 
-	// Resolve effective style: caller-provided (e.g. from a selected template) wins,
-	// otherwise fall back to the channel's style. From this point on task.Style is
-	// the single source of truth for image-gen style.
-	effectiveStyle := p.Style
-	if effectiveStyle == "" {
-		effectiveStyle = channel.Style
+	// Resolve the three orthogonal style dimensions with precedence
+	// task > template > channel (manual tasks have no plan level). Each dimension
+	// is independent — the writer never drives the visual style.
+	var tmpl *model.Template
+	if p.TemplateID != nil && *p.TemplateID != "" {
+		if t, terr := s.repo.Templates().FindByID(ctx, *p.TemplateID); terr == nil {
+			tmpl = t
+		} else {
+			s.logger.Warn().Err(terr).Str("template_id", *p.TemplateID).Msg("template not found during style resolution")
+		}
+	}
+	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), channel.Style)
+	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), channel.WritingStyle)
+	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), channel.Theme)
+	// Article always carries a writing voice (seednote has none).
+	if effectiveWriter == "" && taskType == model.PlatformArticle {
+		effectiveWriter = writer.DefaultStyleName
 	}
 
 	// Pre-calculate total credit cost and deduct upfront to avoid race conditions.
@@ -293,7 +310,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ImageRatio:         p.ImageRatio,
 			ImageModelKey:      p.ImageModelKey,
 			ReferenceImageURL:  p.ReferenceImageURL,
-			Style:              effectiveStyle,
+			Style:              effectiveVisual,
+			WritingStyle:       effectiveWriter,
+			Theme:              effectiveTheme,
 			SkipReferenceImage: p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:          p.Watermark != nil && *p.Watermark,
 			Goal:               p.Goal,
@@ -357,10 +376,21 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		}
 	}
 
-	// Resolve effective style: plan-level wins, otherwise fall back to the channel.
-	effectiveStyle := plan.Style
-	if effectiveStyle == "" && ch != nil {
-		effectiveStyle = ch.Style
+	// Resolve the three orthogonal style dimensions. The plan already resolved
+	// them at creation (plan > template > channel); fall back to the channel when
+	// the plan fields are empty (e.g. legacy rows pre-migration). Each dimension
+	// is independent — the writer never drives the visual style.
+	var chVisual, chWriter, chTheme string
+	if ch != nil {
+		chVisual = ch.Style
+		chWriter = ch.WritingStyle
+		chTheme = ch.Theme
+	}
+	effectiveVisual := firstNonEmpty(plan.Style, chVisual)
+	effectiveWriter := firstNonEmpty(plan.WritingStyle, chWriter)
+	effectiveTheme := firstNonEmpty(plan.Theme, chTheme)
+	if effectiveWriter == "" && taskType == model.PlatformArticle {
+		effectiveWriter = writer.DefaultStyleName
 	}
 
 	// Deduct credits for the plan task.
@@ -396,7 +426,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Prompt:             prompt,
 		ImageModelKey:      plan.ImageModelKey,
 		ReferenceImageURL:  plan.ReferenceImageURL,
-		Style:              effectiveStyle,
+		Style:              effectiveVisual,
+		WritingStyle:       effectiveWriter,
+		Theme:              effectiveTheme,
 		TemplateID:         plan.TemplateID,
 		SkipReferenceImage: plan.SkipReferenceImage,
 		Watermark:          plan.Watermark,

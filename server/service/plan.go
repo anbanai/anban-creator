@@ -9,6 +9,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 
+	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 )
@@ -38,6 +39,11 @@ type CreatePlanParams struct {
 	SkipReferenceImage *bool
 	ReferenceImageURL  string
 	Style              string
+	// WritingStyle / Theme carry the plan-level 写作风格 / 排版样式 (the other two
+	// orthogonal dimensions). Resolved alongside Style with precedence
+	// plan > template > channel, then copied to spawned tasks by CreateFromPlan.
+	WritingStyle       string
+	Theme              string
 	Watermark          *bool
 	Goal               string
 	GoalMode           bool
@@ -98,6 +104,25 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		hasTail = *p.HasTailImage
 	}
 
+	// Resolve the three orthogonal style dimensions with precedence
+	// plan > template > channel. Each dimension is independent — the writer never
+	// drives the visual style. A missing template is logged and treated as "no
+	// template override" so a stale template_id never blocks plan creation.
+	var tmpl *model.Template
+	if p.TemplateID != nil && *p.TemplateID != "" {
+		if t, terr := s.repo.Templates().FindByID(ctx, *p.TemplateID); terr == nil {
+			tmpl = t
+		} else {
+			s.logger.Warn().Err(terr).Str("template_id", *p.TemplateID).Msg("template not found during style resolution")
+		}
+	}
+	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), channel.Style)
+	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), channel.WritingStyle)
+	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), channel.Theme)
+	if effectiveWriter == "" && channel.Platform == model.PlatformArticle {
+		effectiveWriter = writer.DefaultStyleName
+	}
+
 	plan := &model.Plan{
 		ID:                 uuid.New().String(),
 		UserID:             p.UserID,
@@ -109,7 +134,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		NextRunAt:          nextRun,
 		ImageModelKey:      p.ImageModelKey,
 		ReferenceImageURL:  p.ReferenceImageURL,
-		Style:              p.Style,
+		Style:              effectiveVisual,
+		WritingStyle:       effectiveWriter,
+		Theme:              effectiveTheme,
 		TemplateID:         p.TemplateID,
 		SkipReferenceImage: p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:          p.Watermark != nil && *p.Watermark,
@@ -158,6 +185,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - SkipReferenceImage: nil = leave unchanged; &true/&false = set
 //   - ReferenceImageURL: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Style: nil = leave unchanged; &"" = clear; &"value" = set
+//   - WritingStyle / Theme: nil = leave unchanged; &"" = clear; &"value" = set
 //   - TemplateID: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
@@ -173,6 +201,8 @@ type UpdatePlanParams struct {
 	SkipReferenceImage *bool
 	ReferenceImageURL  *string
 	Style              *string
+	WritingStyle       *string
+	Theme              *string
 	Watermark          *bool
 	Goal               string
 	GoalMode           *bool
@@ -197,6 +227,12 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 	plan.Goal = p.Goal
 	if p.Style != nil {
 		plan.Style = *p.Style
+	}
+	if p.WritingStyle != nil {
+		plan.WritingStyle = *p.WritingStyle
+	}
+	if p.Theme != nil {
+		plan.Theme = *p.Theme
 	}
 	if p.TemplateID != nil {
 		plan.TemplateID = p.TemplateID

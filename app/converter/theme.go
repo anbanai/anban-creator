@@ -9,14 +9,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Theme 主题定义
+// Theme 主题定义 — 机器可读的结构化排版规格，供确定性渲染器消费。
+//
+// 旧版的 prompt: 字段（喂给 LLM 的提示词）已移除：渲染现在由 render.go 确定性地
+// 完成，主题完全由以下结构化块驱动。三个维度的设计值都内联到 HTML style 中。
 type Theme struct {
 	Name        string            `yaml:"name"`
+	Type        string            `yaml:"type"` // "deterministic"
 	Description string            `yaml:"description"`
 	Version     string            `yaml:"version"`
 	StyleInfo   ThemeStyleInfo    `yaml:"style_info,omitempty"`
 	Colors      map[string]string `yaml:"colors,omitempty"`
-	Prompt      string            `yaml:"prompt,omitempty"`
+	Typography  ThemeTypography   `yaml:"typography,omitempty"`
+	Layout      ThemeLayout       `yaml:"layout,omitempty"`
+	Modules     ThemeModules      `yaml:"modules,omitempty"`
 }
 
 // ThemeStyleInfo 主题风格信息
@@ -24,6 +30,66 @@ type ThemeStyleInfo struct {
 	Mood    string `yaml:"mood"`
 	Colors  string `yaml:"colors"`
 	BestFor string `yaml:"best_for"`
+}
+
+// ThemeTypography 字体/字号/行高/字间距。
+type ThemeTypography struct {
+	FontFamily    string `yaml:"font_family,omitempty"`
+	FontSize      string `yaml:"font_size,omitempty"`
+	LineHeight    string `yaml:"line_height,omitempty"`
+	LetterSpacing string `yaml:"letter_spacing,omitempty"`
+}
+
+// ThemeLayout 容器与卡片的布局参数。
+type ThemeLayout struct {
+	ContainerPadding    string `yaml:"container_padding,omitempty"`
+	MaxWidth            string `yaml:"max_width,omitempty"`
+	CardPadding         string `yaml:"card_padding,omitempty"`
+	SectionGap          string `yaml:"section_gap,omitempty"`
+	ParagraphMargin     string `yaml:"paragraph_margin,omitempty"`
+	BorderRadius        string `yaml:"border_radius,omitempty"`
+	CardBackgroundColor string `yaml:"card_background_color,omitempty"`
+	CardBackgroundImage string `yaml:"card_background_image,omitempty"`
+	CardBackgroundSize  string `yaml:"card_background_size,omitempty"`
+	CardBorder          string `yaml:"card_border,omitempty"`
+	CardBoxShadow       string `yaml:"card_box_shadow,omitempty"`
+}
+
+// ThemeModules 元素级样式（标题/加粗/引用/分割线），render.go 按块类型应用。
+type ThemeModules struct {
+	H2         ThemeHeading `yaml:"h2,omitempty"`
+	H3         ThemeHeading `yaml:"h3,omitempty"`
+	Strong     ThemeTextMod `yaml:"strong,omitempty"`
+	Blockquote ThemeBlock   `yaml:"blockquote,omitempty"`
+	HR         ThemeHR      `yaml:"hr,omitempty"`
+}
+
+// ThemeHeading 标题样式：H2 带图标 span + 虚线下划线；H3 带实线下划线。
+type ThemeHeading struct {
+	Icon           string `yaml:"icon,omitempty"`
+	IconColor      string `yaml:"icon_color,omitempty"`
+	IconTextShadow string `yaml:"icon_text_shadow,omitempty"`
+	TextColor      string `yaml:"text_color,omitempty"`
+	BorderBottom   string `yaml:"border_bottom,omitempty"`
+}
+
+// ThemeTextMod 行内文本修饰（如 strong 的着色）。
+type ThemeTextMod struct {
+	Color string `yaml:"color,omitempty"`
+}
+
+// ThemeBlock 块级容器样式（如 blockquote）。
+type ThemeBlock struct {
+	BackgroundColor string `yaml:"background_color,omitempty"`
+	BorderLeft      string `yaml:"border_left,omitempty"`
+	BoxShadow       string `yaml:"box_shadow,omitempty"`
+}
+
+// ThemeHR 分割线样式。
+type ThemeHR struct {
+	Border     string `yaml:"border,omitempty"`
+	Height     string `yaml:"height,omitempty"`
+	Background string `yaml:"background,omitempty"`
 }
 
 // ThemeManager 主题管理器
@@ -168,47 +234,6 @@ func (tm *ThemeManager) ListThemes() []string {
 		names = append(names, name)
 	}
 	return names
-}
-
-// GetAIPrompt 获取 AI 模式的提示词
-func (tm *ThemeManager) GetAIPrompt(name string) (string, error) {
-	theme, err := tm.GetTheme(name)
-	if err != nil {
-		return "", err
-	}
-	if theme.Prompt == "" {
-		return "", fmt.Errorf("theme '%s' has no prompt defined", name)
-	}
-	return theme.Prompt, nil
-}
-
-// BuildCustomAIPrompt 构建自定义 AI 提示词
-func BuildCustomAIPrompt(customPrompt string) string {
-	if customPrompt == "" {
-		return customPrompt
-	}
-
-	// 确保包含基本规则
-	baseRules := `
-
-## 重要规则
-1. 所有 CSS 必须使用内联 style 属性
-2. 不使用外部样式表或 <style> 标签
-3. 只使用安全的 HTML 标签（section, p, span, strong, em, a, h1-h6, ul, ol, li, blockquote, pre, code, table, img, br, hr）
-4. 图片使用占位符格式：<!-- IMG:index -->
-5. 返回完整的 HTML，不需要其他说明文字
-
-`
-
-	if !strings.Contains(customPrompt, "重要规则") && !strings.Contains(customPrompt, "规则") {
-		customPrompt += baseRules
-	}
-
-	if !strings.Contains(customPrompt, "请转换") {
-		customPrompt += "\n\n请转换以下 Markdown内容："
-	}
-
-	return customPrompt
 }
 
 // GetThemeDescription 获取主题描述

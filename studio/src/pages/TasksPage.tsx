@@ -113,7 +113,7 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '', image_model_key: '' },
+    defaultValues: { type: 'seednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
@@ -224,7 +224,7 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '' })
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '' })
     setQuantity(1)
     setWatermark(false)
     setChannelImageRatio('')
@@ -243,6 +243,8 @@ export default function TasksPage() {
         .then((tmpl) => {
           setSelectedTemplate(tmpl)
           form.setValue('style', tmpl.style_prompt || '', { shouldDirty: false })
+          form.setValue('writing_style', tmpl.writing_style || '', { shouldDirty: false })
+          form.setValue('theme', tmpl.theme || '', { shouldDirty: false })
         })
         .catch(() => {
           /* 模板不存在/已删：保持空选，用户可手动选其他模板 */
@@ -261,7 +263,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '' })
+    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '' })
     setQuantity(1)
     setWatermark(false)
     setGoalMode(false)
@@ -281,6 +283,8 @@ export default function TasksPage() {
       image_ratio: values.image_ratio || undefined,
       image_model_key: values.image_model_key || undefined,
       style: values.style || undefined,
+      writing_style: values.writing_style || undefined,
+      theme: values.theme || undefined,
       watermark: watermark || undefined,
       goal_mode: goalMode || undefined,
       goal: goalMode ? (goalText.trim() || undefined) : undefined,
@@ -296,8 +300,11 @@ export default function TasksPage() {
     if (selectedTemplate?.id === template.id) return
     setSelectedTemplate(template)
     // Template thumbnail is a UI preview only — it is not a generation reference image.
-    // Only the style_prompt flows into the task; agent picks it up via get_channel_profile(task_id).
+    // The three orthogonal style dimensions flow into the task; the agent picks them up
+    // via get_channel_profile(task_id) (template_style / template_writing_style / template_theme).
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
+    form.setValue('writing_style', template.writing_style || '', { shouldDirty: true })
+    form.setValue('theme', template.theme || '', { shouldDirty: true })
   }
 
   function toggleTaskSelection(taskId: string) {

@@ -148,15 +148,13 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
-		// Apply task-level style override at dispatch time (kept out of BuildAppConfig
-		// to preserve the channel→config mapping). When a task carries its own style
-		// (resolved at creation), clear the channel-level style in settings.json so the
-		// agent sees a single source of truth in the user prompt.
-		if opts.Task.Style != "" {
-			if cfg.Seednote != nil {
-				cfg.Seednote.Style = ""
-			}
-			cfg.Wechat.Article.Style = ""
+		// Seednote: the task's visual style (opts.Task.Style) is injected via the
+		// user prompt; clear the settings.json duplicate so the agent sees a single
+		// source of truth. Article is NOT cleared — after the 3-dimension split
+		// cfg.Wechat.Article.Style holds the WRITING style (a different dimension
+		// from the visual style in the prompt), so clearing it would drop the writer.
+		if opts.Task.Style != "" && cfg.Seednote != nil {
+			cfg.Seednote.Style = ""
 		}
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)

@@ -19,8 +19,9 @@ type Channel struct {
 	ProfileURL         string        `gorm:"type:varchar(500)" json:"profile_url"`            // 平台主页链接
 	Positioning        string        `gorm:"type:text" json:"positioning"`                    // 账号定位
 	Keywords           string        `gorm:"type:text" json:"keywords"`                       // 关键词
-	Style              string        `gorm:"type:text" json:"style"`                          // 写作风格 / 视觉风格（种草笔记用）
-	Theme              string        `gorm:"type:varchar(50)" json:"theme"`                   // 主题
+	Style              string        `gorm:"type:text" json:"style"`                            // 图片视觉风格（封面/配图方向，自由文本）
+	WritingStyle       string        `gorm:"type:varchar(100);default:''" json:"writing_style"` // 写作风格（writer 资源 key，如 dan-koe）；与 Style/Theme 三维正交
+	Theme              string        `gorm:"type:varchar(50)" json:"theme"`                     // 排版样式（theme 资源 key，如 autumn-warm）
 	Author             string        `gorm:"type:varchar(50)" json:"author"`                  // 作者名
 	ReferenceImageURL  string        `gorm:"type:varchar(500)" json:"reference_image_url"`    // 品牌视觉参考图 URL
 	ImageRatio         string        `gorm:"type:varchar(10);default:''" json:"image_ratio"`  // 图片比例: "3:4", "1:1", "4:3", "16:9"

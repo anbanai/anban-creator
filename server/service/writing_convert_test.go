@@ -16,7 +16,10 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Diagnostic LLM mock — records everything and logs it
+// Diagnostic LLM mock — still wired through setupConvertTest because the
+// WriteArticle path uses it. ConvertMarkdown/RenderTemplate no longer call the
+// LLM (deterministic renderer), so the mock's recorded calls stay empty for
+// those paths and the tests below assert on the rendered HTML instead.
 // ---------------------------------------------------------------------------
 
 type llmCall struct {
@@ -47,15 +50,6 @@ func (d *diagnosticLLM) CompleteWithImage(_ context.Context, _, _, _ string) (st
 	return "", fmt.Errorf("not implemented")
 }
 
-func (d *diagnosticLLM) lastCall() *llmCall {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if len(d.calls) == 0 {
-		return nil
-	}
-	return &d.calls[len(d.calls)-1]
-}
-
 func (d *diagnosticLLM) callCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -78,7 +72,7 @@ func setupConvertTest(t *testing.T, llm *diagnosticLLM) (*WritingService, reposi
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
 
-	svc := NewWritingService(repo, llm, "", 0, 0, &logger)
+	svc := NewWritingService(repo, llm, "", 0, &logger)
 	return svc, repo
 }
 
@@ -138,140 +132,117 @@ func logPhase(t *testing.T, phase int, msg string, args ...any) {
 	t.Logf("=== PHASE %d: %s ===", phase, fmt.Sprintf(msg, args...))
 }
 
-func logPrompt(t *testing.T, prompt string) {
-	t.Helper()
-	t.Logf("  [PROMPT] length=%d", len(prompt))
-	if len(prompt) > 200 {
-		t.Logf("  [PROMPT] first 200 chars: %q", prompt[:200])
-		t.Logf("  [PROMPT] last 200 chars: %q", prompt[len(prompt)-200:])
-	} else {
-		t.Logf("  [PROMPT] full content: %q", prompt)
-	}
-}
-
 // ---------------------------------------------------------------------------
-// Test 1: Full diagnostic trace (master test)
+// Test 1: Full deterministic render trace (master test)
+//
+// ConvertMarkdown no longer touches the LLM. We assert the deterministic
+// renderer produces non-empty WeChat HTML with the markdown content and that
+// both images surface as IMG placeholders.
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_FullDiagnosticTrace(t *testing.T) {
-	llm := &diagnosticLLM{
-		response: `<section style="background:#faf9f5;"><p style="color:#4a413d;">专注力的秘密</p></section>`,
-	}
-	svc, repo := setupConvertTest(t, llm)
+	// The LLM mock is irrelevant for convert now; render is deterministic.
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-trace-001"
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
 	logPhase(t, 0, "Channel created channel_id=%s theme=autumn-warm", channelID)
 
-	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, sampleMarkdown, "")
+	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, sampleMarkdown, "", "")
 	if err != nil {
 		t.Fatalf("ConvertMarkdown failed: %v", err)
 	}
 
-	// Phase 1: Channel lookup
-	logPhase(t, 1, "Channel lookup — OK (user=%s, channel=%s)", userID, channelID)
+	logPhase(t, 1, "Channel lookup + deterministic render — OK")
 
-	// Phase 2: LLM call inspection
-	call := llm.lastCall()
-	if call == nil {
-		t.Fatal("LLM was never called — converter may not have produced an AI_MODE_REQUEST sentinel")
-	}
-	logPhase(t, 2, "LLM call received — system_prompt_empty=%v user_prompt_len=%d",
-		call.SystemPrompt == "", len(call.UserPrompt))
-
-	logPrompt(t, call.UserPrompt)
-
-	// Verify prompt contains theme-specific content
-	if !strings.Contains(call.UserPrompt, "秋日暖光") {
-		t.Logf("  [WARN] Prompt does NOT contain '秋日暖光' theme name")
-	}
-	if !strings.Contains(call.UserPrompt, "#faf9f5") {
-		t.Logf("  [WARN] Prompt does NOT contain autumn-warm background color #faf9f5")
-	}
-	if !strings.Contains(call.UserPrompt, "专注力") {
-		t.Logf("  [WARN] Prompt does NOT contain the markdown content '专注力'")
+	logPhase(t, 2, "LLM must NOT be called by the convert path")
+	// Deterministic: the LLM mock records zero calls.
+	if got := callCountOf(svc); got != 0 {
+		t.Errorf("[FAIL] ConvertMarkdown invoked the LLM %d time(s) — convert must be LLM-free", got)
 	}
 
-	// Phase 3: Final result
 	logPhase(t, 3, "Final result — html_len=%d image_count=%d", len(result.HTML), len(result.Images))
-	t.Logf("  [HTML] first 200 chars: %q", result.HTML)
+	t.Logf("  [HTML] first 200 chars: %q", firstN(result.HTML, 200))
 	for i, img := range result.Images {
 		t.Logf("  [IMAGE %d] index=%d original=%q placeholder=%q", i, img.Index, img.Original, img.Placeholder)
 	}
 
 	if result.HTML == "" {
-		t.Error("[FAIL] HTML is empty")
+		t.Fatal("[FAIL] HTML is empty")
 	}
+	// The rendered HTML must carry the markdown content.
+	if !strings.Contains(result.HTML, "专注力") {
+		t.Error("[FAIL] HTML missing markdown content '专注力'")
+	}
+	// Both images must surface as ordered IMG placeholders.
 	if len(result.Images) != 2 {
-		t.Errorf("[FAIL] Expected 2 images, got %d", len(result.Images))
+		t.Fatalf("[FAIL] Expected 2 images, got %d", len(result.Images))
+	}
+	for _, want := range []string{"<!-- IMG:0 -->", "<!-- IMG:1 -->"} {
+		if !strings.Contains(result.HTML, want) {
+			t.Errorf("[FAIL] HTML missing placeholder %s", want)
+		}
+	}
+	// Image order follows document order (local first, then online).
+	if result.Images[0].Original != "./images/focus.jpg" {
+		t.Errorf("[FAIL] Images[0].Original = %q", result.Images[0].Original)
+	}
+	if result.Images[1].Original != "https://example.com/reference.png" {
+		t.Errorf("[FAIL] Images[1].Original = %q", result.Images[1].Original)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: Default theme (no prompt) — exposes the bug
+// Test 2: Default theme (empty) resolves to autumn-warm deterministically
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_DefaultTheme_NoPrompt(t *testing.T) {
-	llm := &diagnosticLLM{
-		response: `<p>Hello</p>`,
-	}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-default-001"
+	// Channel has EMPTY theme → resolves to autumn-warm.
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
-	logPhase(t, 0, "Channel created with EMPTY theme (will resolve to 'autumn-warm' as new default)")
+	logPhase(t, 0, "Channel created with EMPTY theme (resolves to autumn-warm)")
 
-	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Hello\n\nWorld", "")
+	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Hello\n\nWorld", "", "")
 	if err != nil {
 		t.Fatalf("ConvertMarkdown failed: %v", err)
 	}
 
-	call := llm.lastCall()
-	if call == nil {
-		t.Fatal("LLM was never called")
+	if result.HTML == "" {
+		t.Fatal("[FAIL] HTML is empty")
 	}
-
-	t.Logf("  [DEFAULT THEME] Prompt length: %d", len(call.UserPrompt))
-
-	// Now that default resolves to autumn-warm, the prompt should contain autumn-warm content
-	if strings.Contains(call.UserPrompt, "秋日暖光") {
-		t.Log("  [OK] Default resolved to autumn-warm — prompt contains theme content")
-	} else if strings.Contains(call.UserPrompt, "微信公众号排版助手") {
-		t.Log("  [FALLBACK] Theme not found, using generic prompt")
-	} else {
-		t.Logf("  [WARN] Unexpected prompt content, first 200 chars: %q", call.UserPrompt[:min(200, len(call.UserPrompt))])
+	// autumn-warm text color (#4a413d) must be inlined into the rendered HTML.
+	if !strings.Contains(result.HTML, "#4a413d") {
+		t.Errorf("[FAIL] autumn-warm text color #4a413d missing — default theme not applied: %q", firstN(result.HTML, 120))
 	}
-
-	t.Logf("  [DEFAULT THEME] HTML returned: %q", result.HTML)
+	t.Logf("  [DEFAULT THEME] HTML returned: %q", firstN(result.HTML, 120))
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: Explicit theme arg override
+// Test 3: Explicit theme arg overrides channel theme
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_ExplicitThemeArg(t *testing.T) {
-	llm := &diagnosticLLM{
-		response: `<section><p>Minimal</p></section>`,
-	}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-override-001"
-	// Channel has autumn-warm but we override to minimal-blue
+	// Channel has autumn-warm but we override to spring-fresh.
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
-	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Test", "minimal-blue")
+	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Test", "spring-fresh", "")
 	if err != nil {
 		t.Fatalf("ConvertMarkdown failed: %v", err)
 	}
 
-	call := llm.lastCall()
-	t.Logf("  [OVERRIDE] Prompt length: %d", len(call.UserPrompt))
-
-	// Check the prompt is NOT using autumn-warm content
-	if strings.Contains(call.UserPrompt, "秋日暖光") {
-		t.Error("[FAIL] Prompt contains autumn-warm content — theme arg was not overridden")
+	// spring-fresh text color (#3d4a3d) must be present …
+	if !strings.Contains(result.HTML, "#3d4a3d") {
+		t.Error("[FAIL] spring-fresh text color #3d4a3d missing — theme arg not applied")
 	}
-
-	t.Logf("  [OVERRIDE] HTML: %q", result.HTML)
+	// … and autumn-warm's text color (#4a413d) must be ABSENT, proving override.
+	if strings.Contains(result.HTML, "#4a413d") {
+		t.Error("[FAIL] autumn-warm text color #4a413d present — channel theme leaked past the override")
+	}
+	t.Logf("  [OVERRIDE] HTML: %q", firstN(result.HTML, 120))
 }
 
 // ---------------------------------------------------------------------------
@@ -279,10 +250,7 @@ func TestConvertMarkdown_ExplicitThemeArg(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_WithImages(t *testing.T) {
-	llm := &diagnosticLLM{
-		response: `<p>Content</p><!-- IMG:0 --><p>More</p><!-- IMG:1 -->`,
-	}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-images-001"
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -299,7 +267,7 @@ More text.
 ![another local](./img/hero.png)
 `
 
-	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, markdown, "")
+	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, markdown, "", "")
 	if err != nil {
 		t.Fatalf("ConvertMarkdown failed: %v", err)
 	}
@@ -326,30 +294,26 @@ func classifyImage(original string) string {
 }
 
 // ---------------------------------------------------------------------------
-// Test 5: Nonexistent theme → generic fallback
+// Test 5: Nonexistent theme → hard error (no silent fallback)
+//
+// Per the refactor's "errors must be exposed" directive, an explicit but
+// nonexistent theme is a hard error — it must NOT silently fall back to a
+// generic theme.
 // ---------------------------------------------------------------------------
 
-func TestConvertMarkdown_NonexistentTheme_Fallback(t *testing.T) {
-	llm := &diagnosticLLM{
-		response: `<p>Fallback</p>`,
-	}
-	svc, repo := setupConvertTest(t, llm)
-	userID := "user-fallback-001"
+func TestConvertMarkdown_NonexistentTheme_Error(t *testing.T) {
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	userID := "user-theme-err-001"
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
-	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Test", "nonexistent-xyz-999")
-	if err != nil {
-		t.Fatalf("ConvertMarkdown failed: %v", err)
+	_, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Test", "nonexistent-xyz-999", "")
+	if err == nil {
+		t.Fatal("[FAIL] Expected error for nonexistent theme, got nil")
 	}
-
-	call := llm.lastCall()
-	t.Logf("  [FALLBACK] Prompt length: %d", len(call.UserPrompt))
-	t.Logf("  [FALLBACK] Full prompt:\n%s", call.UserPrompt)
-
-	if !strings.Contains(call.UserPrompt, "微信公众号排版助手") {
-		t.Error("[FAIL] Prompt should contain generic prompt '微信公众号排版助手'")
+	t.Logf("  [THEME ERROR] Error: %v", err)
+	if !strings.Contains(err.Error(), "nonexistent-xyz-999") {
+		t.Errorf("[FAIL] Error should name the bad theme, got: %v", err)
 	}
-	t.Logf("  [FALLBACK] HTML: %q", result.HTML)
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +326,7 @@ func TestConvertMarkdown_EmptyMarkdown(t *testing.T) {
 	userID := "user-empty-001"
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
-	_, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "", "")
+	_, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "", "", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for empty markdown, got nil")
 	}
@@ -384,7 +348,7 @@ func TestConvertMarkdown_ChannelNotFound(t *testing.T) {
 	llm := &diagnosticLLM{response: "should not reach"}
 	svc, _ := setupConvertTest(t, llm)
 
-	_, err := svc.ConvertMarkdown(context.Background(), "user-ghost", "nonexistent-channel-id", "# Test", "")
+	_, err := svc.ConvertMarkdown(context.Background(), "user-ghost", "nonexistent-channel-id", "# Test", "", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for nonexistent channel, got nil")
 	}
@@ -406,7 +370,7 @@ func TestConvertMarkdown_ChannelOwnershipMismatch(t *testing.T) {
 	otherID := "user-other-001"
 	channelID := createChannelWithTheme(t, repo, ownerID, model.PlatformArticle, "", "autumn-warm")
 
-	_, err := svc.ConvertMarkdown(context.Background(), otherID, channelID, "# Test", "")
+	_, err := svc.ConvertMarkdown(context.Background(), otherID, channelID, "# Test", "", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for ownership mismatch, got nil")
 	}
@@ -421,32 +385,21 @@ func TestConvertMarkdown_ChannelOwnershipMismatch(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 9: LLM returns error
+// Small test-only helpers (kept local so assertions read cleanly).
 // ---------------------------------------------------------------------------
 
-func TestConvertMarkdown_LLMError(t *testing.T) {
-	llm := &diagnosticLLM{
-		responseErr: fmt.Errorf("API rate limit exceeded"),
+// callCountOf inspects the WritingService's underlying diagnostic LLM mock. It
+// panics if the wired client is not the diagnostic mock — acceptable for tests.
+func callCountOf(svc *WritingService) int {
+	if d, ok := svc.llmClient.(*diagnosticLLM); ok {
+		return d.callCount()
 	}
-	svc, repo := setupConvertTest(t, llm)
-	userID := "user-llmerr-001"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	return 0
+}
 
-	_, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Test\n\nHello", "")
-	if err == nil {
-		t.Fatal("[FAIL] Expected error when LLM fails, got nil")
+func firstN(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	t.Logf("  [LLM ERROR] Error: %v", err)
-
-	if !strings.Contains(err.Error(), "llm convert markdown") {
-		t.Errorf("[FAIL] Error should be wrapped by 'llm convert markdown', got: %v", err)
-	}
-
-	// But the LLM should have been called with the prompt
-	call := llm.lastCall()
-	if call == nil {
-		t.Error("[WARN] LLM was not called at all")
-	} else {
-		t.Logf("  [LLM ERROR] Prompt length before error: %d", len(call.UserPrompt))
-	}
+	return s[:n]
 }

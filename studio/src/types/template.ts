@@ -16,6 +16,9 @@ export interface Template {
   // style_prompt). Surfaced to the agent via get_channel_profile(task_id) as
   // template_writing_style. Old rows omit it.
   writing_style?: string
+  // theme is the 排版样式 dimension (Markdown→HTML layout theme). Surfaced to
+  // the agent as template_theme. Old rows omit it.
+  theme?: string
   example_content: Record<string, unknown>
   tags: string[]
   sort_order: number
@@ -34,6 +37,7 @@ export interface CreateTemplateRequest {
   // { text: <markdown> } on submit; backend extracts .text when delivering to
   // the agent. Category/tags are passed through verbatim.
   writing_style?: string
+  theme?: string
   structure?: string
   example_content?: string
   category?: string

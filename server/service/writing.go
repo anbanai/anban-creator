@@ -17,6 +17,7 @@ import (
 	"github.com/royalrick/anbanwriter/app/converter"
 	"github.com/royalrick/anbanwriter/app/humanizer"
 	"github.com/royalrick/anbanwriter/app/writer"
+	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/resources"
 )
@@ -196,7 +197,6 @@ type WritingService struct {
 	repo           repository.Repository
 	llmClient      LLMClient
 	llmTimeout     time.Duration
-	convertTimeout time.Duration
 	modelConfigSvc *ModelConfigService
 	writersDir     string
 	logger         *zerolog.Logger
@@ -204,14 +204,13 @@ type WritingService struct {
 }
 
 // NewWritingService creates a new WritingService.
-func NewWritingService(repo repository.Repository, llmClient LLMClient, writersDir string, llmTimeout, convertTimeout time.Duration, logger *zerolog.Logger) *WritingService {
+func NewWritingService(repo repository.Repository, llmClient LLMClient, writersDir string, llmTimeout time.Duration, logger *zerolog.Logger) *WritingService {
 	return &WritingService{
-		repo:           repo,
-		llmClient:      llmClient,
-		llmTimeout:     llmTimeout,
-		convertTimeout: convertTimeout,
-		writersDir:     writersDir,
-		logger:         logger,
+		repo:       repo,
+		llmClient:  llmClient,
+		llmTimeout: llmTimeout,
+		writersDir: writersDir,
+		logger:     logger,
 	}
 }
 
@@ -259,6 +258,40 @@ func (s *WritingService) AnalyzeImage(ctx context.Context, userID, imageSource, 
 		return "", fmt.Errorf("image analysis: %w", err)
 	}
 	return strings.TrimSpace(result), nil
+}
+
+// resolveWriterKey returns the 写作风格 (writer resource key) for a writing
+// operation. When taskID is supplied, the task's resolved writer wins; otherwise
+// the channel's writing_style is used. Article defaults to the platform default
+// writer. It NEVER reads ch.Style — that is the 图片视觉 (visual) dimension and
+// must not leak into writer selection (the dan-koe → Victorian-woodcut bug).
+func (s *WritingService) resolveWriterKey(ctx context.Context, taskID string, ch *model.Channel) string {
+	key := ch.WritingStyle
+	if taskID != "" {
+		if task, terr := s.repo.Tasks().FindByID(ctx, taskID); terr == nil && task.WritingStyle != "" {
+			key = task.WritingStyle
+		}
+	}
+	if key == "" && ch.Platform == model.PlatformArticle {
+		key = writer.DefaultStyleName
+	}
+	return key
+}
+
+// resolveEffectiveTheme returns the 排版样式 (theme resource key) for a render
+// operation. When taskID is supplied, the task's resolved theme wins; otherwise
+// the channel's theme is used. Falls back to the platform default "autumn-warm".
+func (s *WritingService) resolveEffectiveTheme(ctx context.Context, taskID string, ch *model.Channel) string {
+	theme := ch.Theme
+	if taskID != "" {
+		if task, terr := s.repo.Tasks().FindByID(ctx, taskID); terr == nil && task.Theme != "" {
+			theme = task.Theme
+		}
+	}
+	if theme == "" {
+		theme = "autumn-warm"
+	}
+	return theme
 }
 
 // ---------------------------------------------------------------------------
@@ -351,9 +384,11 @@ type OutlineResult struct {
 // ---------------------------------------------------------------------------
 
 // WriteArticle generates an article using the writer assistant and LLM.
+// taskID optionally resolves the 写作风格 from the task (task > channel); empty
+// falls back to the channel's writing_style.
 func (s *WritingService) WriteArticle(
 	ctx context.Context,
-	userID, channelID, topic, inputType, articleType, length string,
+	userID, channelID, topic, inputType, articleType, length, taskID string,
 ) (*WriteArticleResult, error) {
 	ch, err := s.repo.Channels().FindByID(ctx, channelID)
 	if err != nil {
@@ -367,10 +402,7 @@ func (s *WritingService) WriteArticle(
 	if s.writersDir != "" {
 		assistant.SetWritersDir(s.writersDir)
 	}
-	styleName := ch.Style
-	if styleName == "" && (ch.Platform == "article") {
-		styleName = writer.DefaultStyleName
-	}
+	styleName := s.resolveWriterKey(ctx, taskID, ch)
 
 	req := &writer.WriteRequest{
 		Input:       topic,
@@ -418,7 +450,7 @@ func (s *WritingService) WriteArticle(
 // converter package and LLM.
 func (s *WritingService) ConvertMarkdown(
 	ctx context.Context,
-	userID, channelID, markdown, theme string,
+	userID, channelID, markdown, theme, taskID string,
 ) (*ConvertMarkdownResult, error) {
 	if markdown == "" {
 		return nil, fmt.Errorf("markdown content is required")
@@ -432,17 +464,14 @@ func (s *WritingService) ConvertMarkdown(
 		return nil, fmt.Errorf("channel not owned by user")
 	}
 
-	// Use channel theme if not specified.
+	// Resolve 排版样式: explicit caller theme wins, else the task's resolved
+	// theme (task > channel), else the platform default.
 	if theme == "" {
-		theme = ch.Theme
+		theme = s.resolveEffectiveTheme(ctx, taskID, ch)
 	}
 
-	if theme == "" {
-		theme = "autumn-warm"
-	}
-
-	// Build the converter prompt via the writer package's converter.
-	// We use a no-op logger since we do our own logging via zerolog.
+	// Deterministic render (goldmark + structured theme). No LLM, no timeout —
+	// errors surface directly rather than silently degrading to hand-written HTML.
 	nopLog := zerolog.Nop()
 	cvt := converter.NewConverterWithThemes(&nopLog, resources.Manager().GetAllRaw(resources.CategoryTheme))
 
@@ -451,37 +480,13 @@ func (s *WritingService) ConvertMarkdown(
 		Theme:    theme,
 	}
 
-	// Convert triggers the AI path which returns the assembled prompt in the
-	// error field as a sentinel value.
 	convResult := cvt.Convert(convReq)
-
-	prompt, images, ok := converter.GetAIRequestInfo(convResult)
-	if !ok {
-		// If not an AI request, the converter may have returned an actual error.
-		if convResult.Error != "" {
-			return nil, fmt.Errorf("convert error: %s", convResult.Error)
-		}
-		// Non-AI path (shouldn't happen in practice).
-		return &ConvertMarkdownResult{
-			HTML: convResult.HTML,
-		}, nil
+	if !convResult.Success {
+		return nil, fmt.Errorf("convert error: %s", convResult.Error)
 	}
 
-	// Call LLM with the assembled prompt.
-	// Apply convert-specific timeout (longer than default) since HTML
-	// conversion can be slow for large markdown documents.
-	convertCtx := ctx
-	if s.convertTimeout > 0 {
-		var cancel context.CancelFunc
-		convertCtx, cancel = context.WithTimeout(ctx, s.convertTimeout)
-		defer cancel()
-	}
-	html, err := s.getLLMClient(convertCtx, userID).Complete(convertCtx, "", prompt)
-	if err != nil {
-		return nil, fmt.Errorf("llm convert markdown: %w", err)
-	}
-	imageDTOs := make([]ImageRefDTO, 0, len(images))
-	for _, img := range images {
+	imageDTOs := make([]ImageRefDTO, 0, len(convResult.Images))
+	for _, img := range convResult.Images {
 		imageDTOs = append(imageDTOs, ImageRefDTO{
 			Index:       img.Index,
 			Original:    img.Original,
@@ -497,7 +502,7 @@ func (s *WritingService) ConvertMarkdown(
 		Msg("markdown converted")
 
 	return &ConvertMarkdownResult{
-		HTML:   html,
+		HTML:   convResult.HTML,
 		Images: imageDTOs,
 	}, nil
 }
@@ -653,7 +658,7 @@ func (s *WritingService) OptimizeSEO(
 // GenerateOutline generates a structured article outline using an LLM.
 func (s *WritingService) GenerateOutline(
 	ctx context.Context,
-	userID, channelID, topic, template, style string,
+	userID, channelID, topic, template, style, taskID string,
 ) (*OutlineResult, error) {
 	if topic == "" {
 		return nil, fmt.Errorf("topic is required")
@@ -670,12 +675,10 @@ func (s *WritingService) GenerateOutline(
 		return nil, fmt.Errorf("channel not owned by user")
 	}
 
-	// Use channel style if not overridden.
+	// Resolve 写作风格: explicit caller style wins, else the task's resolved
+	// writer (task > channel). Never read ch.Style (that is the visual dimension).
 	if style == "" {
-		style = ch.Style
-	}
-	if style == "" {
-		style = "dan-koe"
+		style = s.resolveWriterKey(ctx, taskID, ch)
 	}
 
 	// Extract keywords from the channel.

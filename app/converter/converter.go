@@ -57,17 +57,15 @@ type Converter interface {
 
 // converter 转换器实现
 type converter struct {
-	log           *zerolog.Logger
-	theme         *ThemeManager
-	promptBuilder *PromptBuilder
+	log   *zerolog.Logger
+	theme *ThemeManager
 }
 
 // NewConverter 创建转换器
 func NewConverter(log *zerolog.Logger) Converter {
 	return &converter{
-		log:           log,
-		theme:         NewThemeManager(),
-		promptBuilder: NewPromptBuilder(),
+		log:   log,
+		theme: NewThemeManager(),
 	}
 }
 
@@ -80,40 +78,15 @@ func NewConverterWithThemes(log *zerolog.Logger, themeData map[string][]byte) Co
 		}
 	}
 	return &converter{
-		log:           log,
-		theme:         tm,
-		promptBuilder: NewPromptBuilder(),
+		log:   log,
+		theme: tm,
 	}
 }
 
-// Convert 执行转换
+// Convert 执行转换 — 确定性渲染（goldmark + 结构化 theme），不再经过 LLM。
+// markdown 为空或缺主题时直接返回 error，不做静默兜底。
 func (c *converter) Convert(req *ConvertRequest) *ConvertResult {
-	result := &ConvertResult{
-		Theme: req.Theme,
-	}
-
-	// 验证请求
-	if err := c.validateRequest(req); err != nil {
-		result.Success = false
-		result.Error = err.Error()
-		return result
-	}
-
-	// 使用 AI 模式转换
-	return c.convertViaAI(req)
-}
-
-// validateRequest 验证请求参数
-func (c *converter) validateRequest(req *ConvertRequest) error {
-	if req.Markdown == "" {
-		return ErrEmptyMarkdown
-	}
-
-	if req.Theme == "" {
-		req.Theme = "autumn-warm"
-	}
-
-	return nil
+	return c.renderDeterministic(req)
 }
 
 // ExtractImages 从 Markdown 中提取图片引用

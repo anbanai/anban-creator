@@ -49,10 +49,15 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 	switch ch.Platform {
 	case model.ScopeArticle:
 		cfg.Wechat.Article.Author = ch.Author
-		cfg.Wechat.Article.Style = ch.Style
+		// After the 3-dimension split, Wechat.Article.Style is the WRITING style
+		// (writer resource key, e.g. "dan-koe") — NOT the image visual style. The
+		// visual style is orthogonal and flows through the user prompt
+		// (BuildUserPrompt) and get_channel_profile, never through settings.json.
+		cfg.Wechat.Article.Style = ch.WritingStyle
 		cfg.Wechat.Article.Theme = ch.Theme
 	case model.ScopeSeednote:
 		cfg.Seednote = &appconfig.SeednoteConfig{}
+		// Seednote style is a visual/image description (no separate writer dimension).
 		cfg.Seednote.Style = ch.Style
 	}
 

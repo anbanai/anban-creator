@@ -106,6 +106,7 @@ type createTemplateRequest struct {
 	StylePrompt    string   `json:"style_prompt"`
 	Visibility     string   `json:"visibility"`
 	WritingStyle   string   `json:"writing_style"`
+	Theme          string   `json:"theme"`
 	Structure      string   `json:"structure"`
 	ExampleContent string   `json:"example_content"`
 	Category       string   `json:"category"`
@@ -152,6 +153,7 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 		StylePrompt:    req.StylePrompt,
 		Visibility:     req.Visibility,
 		WritingStyle:   req.WritingStyle,
+		Theme:          req.Theme,
 		Structure:      scaffoldText(req.Structure),
 		ExampleContent: scaffoldText(req.ExampleContent),
 		Category:       req.Category,
@@ -207,6 +209,7 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 		StylePrompt:    req.StylePrompt,
 		Visibility:     req.Visibility,
 		WritingStyle:   req.WritingStyle,
+		Theme:          req.Theme,
 		Structure:      scaffoldText(req.Structure),
 		ExampleContent: scaffoldText(req.ExampleContent),
 		Category:       req.Category,

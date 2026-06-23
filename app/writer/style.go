@@ -208,7 +208,6 @@ func (sm *StyleManager) ListStyles() []StyleSummary {
 			EnglishName: style.EnglishName,
 			Category:    style.Category,
 			Description: style.Description,
-			CoverStyle:  style.CoverStyle,
 		})
 	}
 	return result
@@ -321,7 +320,6 @@ func (sm *StyleManager) GetStyleByCategory(category string) []StyleSummary {
 				EnglishName: style.EnglishName,
 				Category:    style.Category,
 				Description: style.Description,
-				CoverStyle:  style.CoverStyle,
 			})
 		}
 	}

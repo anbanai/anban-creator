@@ -120,10 +120,10 @@ func TestParseLayoutPlan_Valid(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// annotateMarkdownWithSlots unit tests (pure function, no LLM/DB)
+// applySlotsToMarkdown unit tests (pure function, no LLM/DB)
 // ---------------------------------------------------------------------------
 
-func TestAnnotateMarkdownWithSlots_HeroAndSectionOpeners(t *testing.T) {
+func TestApplySlotsToMarkdown_HeroAndSectionOpeners(t *testing.T) {
 	markdown := `# Title
 
 Intro paragraph.
@@ -146,28 +146,19 @@ Content of section 2.
 		},
 	}
 
-	annotated, withImages := annotateMarkdownWithSlots(markdown, plan)
-	if len(withImages) != 3 {
-		t.Errorf("[FAIL] slotsWithImages = %d, want 3", len(withImages))
+	augmented := applySlotsToMarkdown(markdown, plan)
+	// Hero image must be at the very top.
+	if !strings.HasPrefix(augmented, "![hero](https://cdn/hero.png)") {
+		t.Errorf("[FAIL] hero image not at top: %q", augmented[:min(len(augmented), 40)])
 	}
-	if !strings.Contains(annotated, "[SLOT: hero") {
-		t.Error("[FAIL] Missing [SLOT: hero] marker")
-	}
-	if !strings.Contains(annotated, "https://cdn/hero.png") {
-		t.Error("[FAIL] Missing hero image URL")
-	}
-	if !strings.Contains(annotated, "https://cdn/s1.png") {
-		t.Error("[FAIL] Missing section 1 image URL")
-	}
-	if !strings.Contains(annotated, "https://cdn/s2.png") {
-		t.Error("[FAIL] Missing section 2 image URL")
-	}
-	if !strings.Contains(annotated, "RENDER_TEMPLATE_CONTRACT") {
-		t.Error("[FAIL] Missing contract header")
+	for _, url := range []string{"https://cdn/hero.png", "https://cdn/s1.png", "https://cdn/s2.png"} {
+		if !strings.Contains(augmented, url) {
+			t.Errorf("[FAIL] Missing image URL %s", url)
+		}
 	}
 }
 
-func TestAnnotateMarkdownWithSlots_Footer(t *testing.T) {
+func TestApplySlotsToMarkdown_Footer(t *testing.T) {
 	markdown := "## Section\n\nBody."
 	plan := &LayoutPlan{
 		ArticleType:  "tutorial",
@@ -175,23 +166,18 @@ func TestAnnotateMarkdownWithSlots_Footer(t *testing.T) {
 		Slots: []LayoutPlanSlot{
 			{SlotID: "section_opener", SectionIndex: 0, ImageURL: "https://cdn/a.png"},
 		},
-		Footer: &LayoutPlanSlot{Module: strPtr("cta")},
+		Footer: &LayoutPlanSlot{SlotID: "footer", ImageURL: "https://cdn/footer.png"},
 	}
-	annotated, _ := annotateMarkdownWithSlots(markdown, plan)
-	if !strings.Contains(annotated, "FOOTER SLOT") {
-		t.Error("[FAIL] Missing FOOTER SLOT marker")
-	}
-	if !strings.Contains(annotated, "module=cta") {
-		t.Error("[FAIL] Missing footer module=cta in marker")
+	augmented := applySlotsToMarkdown(markdown, plan)
+	// Footer image lands at the end of the document.
+	if !strings.HasSuffix(strings.TrimSpace(augmented), "![footer](https://cdn/footer.png)") {
+		t.Errorf("[FAIL] footer image not at end: %q", augmented)
 	}
 }
 
-// TestAnnotateMarkdownWithSlots_SectionOpenerBeforeContent is a regression
-// test: section_opener markers MUST appear BEFORE the section body (so the
-// LLM anchors them to the section title per contract rule 2). Earlier
-// implementations emitted them at the section's tail, which would make the
-// LLM place the image at the wrong position.
-func TestAnnotateMarkdownWithSlots_SectionOpenerBeforeContent(t *testing.T) {
+// Regression: section_opener images must appear BEFORE the section body so they
+// anchor to the heading (earlier impls emitted them at the section tail).
+func TestApplySlotsToMarkdown_SectionOpenerBeforeContent(t *testing.T) {
 	markdown := "## First Section\n\nFirst body.\n\n## Second Section\n\nSecond body.\n"
 	plan := &LayoutPlan{
 		ArticleType: "long-form-essay",
@@ -201,59 +187,55 @@ func TestAnnotateMarkdownWithSlots_SectionOpenerBeforeContent(t *testing.T) {
 		},
 	}
 
-	annotated, _ := annotateMarkdownWithSlots(markdown, plan)
+	augmented := applySlotsToMarkdown(markdown, plan)
 
-	// Marker for section 2 must come before the "Second body." text.
-	markerIdx := strings.Index(annotated, "https://cdn/before-second.png")
-	bodyIdx := strings.Index(annotated, "Second body.")
+	markerIdx := strings.Index(augmented, "https://cdn/before-second.png")
+	bodyIdx := strings.Index(augmented, "Second body.")
 	if markerIdx < 0 {
-		t.Fatal("[FAIL] section 2 image URL missing from annotation")
+		t.Fatal("[FAIL] section 2 image URL missing")
 	}
 	if bodyIdx < 0 {
-		t.Fatal("[FAIL] section 2 body missing from annotation")
+		t.Fatal("[FAIL] section 2 body missing")
 	}
 	if markerIdx > bodyIdx {
-		t.Errorf("[FAIL] section_opener marker (idx=%d) appears AFTER section body (idx=%d) — should be before",
+		t.Errorf("[FAIL] section_opener image (idx=%d) appears AFTER section body (idx=%d) — should be before",
 			markerIdx, bodyIdx)
 	}
 }
 
-// TestAnnotateMarkdownWithSlots_InlineDetailAfterSection verifies inline_detail
-// directives are placed at the END of the section body (the LLM reads the
-// paragraph index from the directive).
-func TestAnnotateMarkdownWithSlots_InlineDetailAfterSection(t *testing.T) {
+// inline_detail images land after the target paragraph within the section.
+func TestApplySlotsToMarkdown_InlineDetailAfterParagraph(t *testing.T) {
 	markdown := "## Section\n\nParagraph one.\n\nParagraph two.\n"
 	plan := &LayoutPlan{
 		ArticleType: "long-form-essay",
 		Slots: []LayoutPlanSlot{
-			{SlotID: "inline_detail", SectionIndex: 0, AfterParagraphIndex: 1, ImageURL: "https://cdn/inline.png"},
+			{SlotID: "inline_detail", SectionIndex: 0, AfterParagraphIndex: 0, ImageURL: "https://cdn/inline.png"},
 		},
 	}
-	annotated, _ := annotateMarkdownWithSlots(markdown, plan)
-	bodyIdx := strings.Index(annotated, "Paragraph two.")
-	directiveIdx := strings.Index(annotated, "INLINE_SLOT")
-	if directiveIdx < 0 {
-		t.Fatal("[FAIL] inline_detail directive missing")
+	augmented := applySlotsToMarkdown(markdown, plan)
+	firstParaIdx := strings.Index(augmented, "Paragraph one.")
+	secondParaIdx := strings.Index(augmented, "Paragraph two.")
+	inlineIdx := strings.Index(augmented, "https://cdn/inline.png")
+	if inlineIdx < 0 {
+		t.Fatal("[FAIL] inline image missing")
 	}
-	if bodyIdx < 0 {
-		t.Fatal("[FAIL] section body missing")
+	if secondParaIdx < 0 {
+		t.Fatal("[FAIL] second paragraph missing")
 	}
-	if directiveIdx < bodyIdx {
-		t.Errorf("[FAIL] INLINE_SLOT directive (idx=%d) appears BEFORE section body (idx=%d) — should be after",
-			directiveIdx, bodyIdx)
+	// Inline image (after paragraph 0) must come after "Paragraph one." and
+	// before "Paragraph two.".
+	if inlineIdx < firstParaIdx || inlineIdx > secondParaIdx {
+		t.Errorf("[FAIL] inline image (idx=%d) not between para1 (idx=%d) and para2 (idx=%d)",
+			inlineIdx, firstParaIdx, secondParaIdx)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Integration: RenderTemplate with diagnostic LLM mock
+// Integration: RenderTemplate (deterministic — no LLM)
 // ---------------------------------------------------------------------------
 
 func TestRenderTemplate_LongFormEssay(t *testing.T) {
-	llm := &diagnosticLLM{
-		// LLM "renders" the HTML with all 3 image URLs present.
-		response: `<section><img src="https://cdn/hero.png"><h1>标题</h1><p>引言。</p><h2>第一节</h2><img src="https://cdn/s1.png"><p>正文。</p><h2>第二节</h2><img src="https://cdn/s2.png"><p>正文。</p></section>`,
-	}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-render-001"
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -269,7 +251,7 @@ func TestRenderTemplate_LongFormEssay(t *testing.T) {
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "")
+	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
@@ -278,7 +260,7 @@ func TestRenderTemplate_LongFormEssay(t *testing.T) {
 		t.Fatal("[FAIL] HTML empty")
 	}
 
-	// All 3 images should have been rendered (mock LLM included them).
+	// Deterministic placement renders all 3 slot images as real <img> tags.
 	if len(result.SlotsRendered) != 3 {
 		t.Errorf("[FAIL] SlotsRendered len = %d, want 3", len(result.SlotsRendered))
 	}
@@ -287,17 +269,10 @@ func TestRenderTemplate_LongFormEssay(t *testing.T) {
 			t.Errorf("[FAIL] Slot %s status = %s, want rendered", audit.SlotID, audit.Status)
 		}
 	}
-
-	// Prompt must include contract + theme + markdown.
-	call := llm.lastCall()
-	if call == nil {
-		t.Fatal("[FAIL] LLM not called")
-	}
-	if !strings.Contains(call.UserPrompt, "结构化渲染契约") {
-		t.Error("[FAIL] Prompt missing 结构化渲染契约 contract")
-	}
-	if !strings.Contains(call.UserPrompt, "[SLOT: hero") {
-		t.Error("[FAIL] Prompt missing [SLOT: hero] marker")
+	for _, url := range []string{"https://cdn/hero.png", "https://cdn/s1.png", "https://cdn/s2.png"} {
+		if !strings.Contains(result.HTML, url) {
+			t.Errorf("[FAIL] HTML missing image URL %s", url)
+		}
 	}
 
 	if result.Theme != "autumn-warm" {
@@ -306,10 +281,7 @@ func TestRenderTemplate_LongFormEssay(t *testing.T) {
 }
 
 func TestRenderTemplate_Listicle(t *testing.T) {
-	llm := &diagnosticLLM{
-		response: `<section><img src="https://cdn/lh.png"><h1>三个清单</h1><h2>第一项</h2><img src="https://cdn/l1.png"><h2>第二项</h2><img src="https://cdn/l2.png"><h2>第三项</h2><img src="https://cdn/l3.png"></section>`,
-	}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-listicle-001"
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
@@ -326,7 +298,7 @@ func TestRenderTemplate_Listicle(t *testing.T) {
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "")
+	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
@@ -341,13 +313,12 @@ func TestRenderTemplate_Listicle(t *testing.T) {
 	}
 }
 
-func TestRenderTemplate_MissingImage_MarkedInAudit(t *testing.T) {
-	// LLM "forgets" to include the second image URL — audit should catch it.
-	llm := &diagnosticLLM{
-		response: `<section><img src="https://cdn/hero.png"><h1>T</h1><h2>S1</h2><p>body</p><h2>S2</h2><p>body</p></section>`,
-	}
-	svc, repo := setupConvertTest(t, llm)
-	userID := "user-missing-001"
+// With deterministic rendering, every image-bearing slot is placed; the audit
+// reflects that. (Previously this tested an LLM "forgetting" an image — no
+// longer applicable without an LLM.)
+func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	userID := "user-all-rendered-001"
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
 	markdown := "# T\n\n## S1\n\nbody.\n\n## S2\n\nbody.\n"
@@ -355,41 +326,32 @@ func TestRenderTemplate_MissingImage_MarkedInAudit(t *testing.T) {
 		ArticleType: "long-form-essay",
 		Slots: []LayoutPlanSlot{
 			{SlotID: "hero", SectionIndex: 0, ImageURL: "https://cdn/hero.png"},
-			{SlotID: "section_opener", SectionIndex: 1, ImageURL: "https://cdn/s1.png"}, // missing in HTML
-			{SlotID: "section_opener", SectionIndex: 2, ImageURL: "https://cdn/s2.png"}, // missing in HTML
+			{SlotID: "section_opener", SectionIndex: 1, ImageURL: "https://cdn/s1.png"},
+			{SlotID: "section_opener", SectionIndex: 2, ImageURL: "https://cdn/s2.png"},
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "")
+	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
 
-	// Soft audit: still succeeds, but flags the missing images.
 	if len(result.SlotsRendered) != 3 {
 		t.Fatalf("[FAIL] SlotsRendered len = %d, want 3", len(result.SlotsRendered))
 	}
-
-	renderedCount, missingCount := 0, 0
+	renderedCount := 0
 	for _, a := range result.SlotsRendered {
 		if a.Status == "rendered" {
 			renderedCount++
 		}
-		if a.Status == "missing-image" {
-			missingCount++
-		}
 	}
-	if renderedCount != 1 {
-		t.Errorf("[FAIL] rendered slot count = %d, want 1 (only hero)", renderedCount)
-	}
-	if missingCount != 2 {
-		t.Errorf("[FAIL] missing-image count = %d, want 2", missingCount)
+	if renderedCount != 3 {
+		t.Errorf("[FAIL] rendered slot count = %d, want 3", renderedCount)
 	}
 }
 
 func TestRenderTemplate_ThemeFallbackToChannelTheme(t *testing.T) {
-	llm := &diagnosticLLM{response: "<p>ok</p>"}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-theme-fallback-001"
 	// Channel has no theme set → should default to "autumn-warm".
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
@@ -402,7 +364,7 @@ func TestRenderTemplate_ThemeFallbackToChannelTheme(t *testing.T) {
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "")
+	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
@@ -412,8 +374,7 @@ func TestRenderTemplate_ThemeFallbackToChannelTheme(t *testing.T) {
 }
 
 func TestRenderTemplate_ThemeArgOverridesChannelTheme(t *testing.T) {
-	llm := &diagnosticLLM{response: "<p>ok</p>"}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-theme-override-001"
 	// Channel has autumn-warm but we override to spring-fresh.
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
@@ -426,7 +387,7 @@ func TestRenderTemplate_ThemeArgOverridesChannelTheme(t *testing.T) {
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "spring-fresh")
+	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "spring-fresh", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
@@ -436,8 +397,7 @@ func TestRenderTemplate_ThemeArgOverridesChannelTheme(t *testing.T) {
 }
 
 func TestRenderTemplate_EmptyMarkdown(t *testing.T) {
-	llm := &diagnosticLLM{response: "should not reach"}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-empty-md"
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
@@ -447,27 +407,20 @@ func TestRenderTemplate_EmptyMarkdown(t *testing.T) {
 			{SlotID: "hero", SectionIndex: 0, ImageURL: "https://cdn/h.png"},
 		},
 	}
-	_, err := svc.RenderTemplate(context.Background(), userID, channelID, "", plan, "")
+	_, err := svc.RenderTemplate(context.Background(), userID, channelID, "", plan, "", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for empty markdown")
-	}
-	if llm.callCount() > 0 {
-		t.Error("[FAIL] LLM should not have been called for empty markdown")
 	}
 }
 
 func TestRenderTemplate_NilPlan(t *testing.T) {
-	llm := &diagnosticLLM{response: "should not reach"}
-	svc, repo := setupConvertTest(t, llm)
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-nil-plan"
 	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
-	_, err := svc.RenderTemplate(context.Background(), userID, channelID, "# Hello", nil, "")
+	_, err := svc.RenderTemplate(context.Background(), userID, channelID, "# Hello", nil, "", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for nil plan")
-	}
-	if llm.callCount() > 0 {
-		t.Error("[FAIL] LLM should not have been called")
 	}
 }
 

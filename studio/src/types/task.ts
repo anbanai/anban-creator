@@ -66,6 +66,8 @@ export interface CreateTaskRequest {
   skip_reference_image?: boolean
   reference_image_url?: string
   style?: string
+  writing_style?: string
+  theme?: string
   watermark?: boolean
   goal?: string
   goal_mode?: boolean

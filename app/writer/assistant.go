@@ -325,9 +325,6 @@ func FormatStyleSummary(style StyleSummary) string {
 	sb.WriteString(fmt.Sprintf("📝 %s (%s)\n", style.Name, style.EnglishName))
 	sb.WriteString(fmt.Sprintf("   分类: %s\n", style.Category))
 	sb.WriteString(fmt.Sprintf("   描述: %s", style.Description))
-	if style.CoverStyle != "" {
-		sb.WriteString(fmt.Sprintf("\n   封面: %s", style.CoverStyle))
-	}
 	return sb.String()
 }
 

@@ -102,6 +102,7 @@ export const mockChannels: Channel[] = [
     positioning: '测试定位',
     keywords: '测试',
     style: '',
+    writing_style: '',
     theme: '',
     author: '作者',
     reference_image_url: '',

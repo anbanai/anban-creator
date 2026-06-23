@@ -86,24 +86,6 @@ type RefineResult struct {
 	Error       string
 }
 
-// GenerateCoverRequest 生成封面请求
-type GenerateCoverRequest struct {
-	ArticleTitle   string
-	ArticleContent string
-	StyleName      string
-}
-
-// GenerateCoverResult 生成封面结果
-type GenerateCoverResult struct {
-	Prompt      string // 生成的提示词
-	Explanation string // 隐喻解释
-	ImageURL    string // 生成的图片 URL
-	MediaID     string // 微信素材 ID
-	MetaData    CoverMetaData
-	Success     bool
-	Error       string
-}
-
 // WriterStyle 写作风格定义
 type WriterStyle struct {
 	Name        string `yaml:"name"`         // 风格名称
@@ -136,11 +118,11 @@ type WriterStyle struct {
 	// 金句模板
 	QuoteTemplates []string `yaml:"quote_templates,omitempty"`
 
-	// 封面相关
-	CoverPrompt      string   `yaml:"cover_prompt,omitempty"`
-	CoverStyle       string   `yaml:"cover_style,omitempty"`
-	CoverMood        string   `yaml:"cover_mood,omitempty"`
-	CoverColorScheme []string `yaml:"cover_color_scheme,omitempty"`
+	// 注：封面/视觉相关字段（cover_style / cover_prompt / cover_mood /
+	// cover_color_scheme）已移除。图片视觉是与写作风格正交的独立维度，由
+	// Channel/Template/Plan/Task 的 style 字段承载（见服务端三维度解析链）。
+	// writer 不再携带任何视觉身份，避免 writer key（如 dan-koe）将其封面风格
+	// 泄漏为图片生成指令（曾经的 dan-koe → 维多利亚木刻 bug）。
 }
 
 // WritingStyleDef 写作风格定义
@@ -178,14 +160,6 @@ type TitleFormula struct {
 	Examples []string `yaml:"examples,omitempty"` // 示例
 }
 
-// CoverMetaData 封面元数据
-type CoverMetaData struct {
-	CoreTheme    string // 核心主题
-	CoreView     string // 核心观点
-	Mood         string // 情绪基调
-	VisualAnchor string // 视觉锚点
-}
-
 // StyleListResult 风格列表结果
 type StyleListResult struct {
 	Styles  []StyleSummary
@@ -199,7 +173,6 @@ type StyleSummary struct {
 	EnglishName string `json:"english_name"`
 	Category    string `json:"category"`
 	Description string `json:"description"`
-	CoverStyle  string `json:"cover_style,omitempty"`
 }
 
 // AIGenerationRequest AI 生成请求（用于传递给 Claude）
