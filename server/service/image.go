@@ -119,6 +119,14 @@ func (s *ImageService) resolveToLocalFile(rawURL string) (string, error) {
 	return s.downloadURLToTempFile(rawURL)
 }
 
+// buildImageResult maps the provider's raw result onto the MCP-facing
+// ImageResult. DownloadURL starts as rawResult.URL, which for OpenAI/Gemini is
+// a multi-MB base64 data URL (Processor.resolveRawURL inlines the provider temp
+// file). When generate_image runs with a task context, the MCP handler rewrites
+// DownloadURL to the image's fetchable storage URL (see
+// registerGeneratedImageTaskFile in server/mcp/image_tools.go), so no inline
+// base64 reaches the LLM on the task path. The ad-hoc path (no task_id) keeps
+// the raw value.
 func buildImageResult(rawResult *image.GenerateRawResult, imageType string) *ImageResult {
 	return &ImageResult{
 		DownloadURL:     rawResult.URL,

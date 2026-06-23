@@ -22,7 +22,7 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate a single image using the channel's configured image provider (OpenAI GPT Image, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns the download URL (remote CDN URL or data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and if output_path is provided also saves the image to that server-local path and returns file_path. When verify_with_vision=true, also runs a post-generation vision check using verification_prompt and returns a verification object {passed, score, missing_entities, notes, raw}. When upload_to_cdn=true, the server ALSO uploads the saved image to the channel's CDN (WeChat material library for article channels, returning wechat_url + media_id) in the SAME call, right after a passing vision check — this makes each image durable the moment it is generated and removes the need for a separate, interruptible upload_image step. Upload is skipped when verify_with_vision=true but verification fails (so a rejected image never consumes a material slot); on a post-generation upload failure the response carries upload_error instead of wechat_url so the caller can retry just the upload via upload_image without regenerating.",
+		Description: "Generate a single image using the channel's configured image provider (OpenAI GPT Image, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns a fetchable download_url (always a storage URL — never an inline base64 data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and file_path when output_path is provided. When task_id is provided the image is also registered as a task_file in the same call, so list_task_files returns it immediately. When verify_with_vision=true, also runs a post-generation vision check using verification_prompt and returns a verification object {passed, score, missing_entities, notes, raw}. When upload_to_cdn=true, the server ALSO uploads the saved image to the channel's CDN (WeChat material library for article channels, returning wechat_url + media_id) in the SAME call, right after a passing vision check — this makes each image durable the moment it is generated and removes the need for a separate, interruptible upload_image step. Upload is skipped when verify_with_vision=true but verification fails (so a rejected image never consumes a material slot); on a post-generation upload failure the response carries upload_error instead of wechat_url so the caller can retry just the upload via upload_image without regenerating.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -212,14 +212,40 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		return billingError("generate image", err), nil
 	}
 
+	// Register the generated image as a task_file so list_task_files returns
+	// it mid-run (P2), and rewrite download_url to the file's fetchable
+	// storage URL so the LLM-facing response never carries a multi-MB base64
+	// data URL for OpenAI/Gemini providers (P1). Skipped for ad-hoc generation
+	// (no task_id) and when no file was persisted (no file_path). Soft failure:
+	// a registration error is logged but never fails the call — the image is
+	// already durable on disk and uploadMissingTaskFiles (task_execution.go)
+	// will index it post-execution.
+	if taskID != "" && result.FilePath != "" && svcs.TaskSvc != nil {
+		if url, tfErr := registerGeneratedImageTaskFile(ctx, svcs.TaskSvc, taskID, userID, result); tfErr != nil {
+			if mcpLog != nil {
+				mcpLog.Warn().
+					Str("tool", "generate_image").
+					Str("task_id", taskID).
+					Str("user_id", userID).
+					Str("file_path", result.FilePath).
+					Err(tfErr).
+					Msg("MCP generate_image task_file registration failed (download_url left as provider value)")
+			}
+		} else if url != "" {
+			result.DownloadURL = url
+		}
+	}
+
 	if mcpLog != nil {
 		// result.Provider/Model reflect what the provider actually ran (built
 		// from its response in image.go buildImageResult), which may differ
 		// from resolveImageModel() used for billing at line 168 — e.g. when
 		// the channel overrides the user-level config. result.* is the source
 		// of truth for "what generated this image".
-		// DownloadURL may be a multi-MB base64 data URL; only log its head so
-		// log volume stays sane while still identifying provider/protocol.
+		// On the task path DownloadURL is now a short fetchable storage URL
+		// (rewritten above by registerGeneratedImageTaskFile); for ad-hoc
+		// generation (no task_id) it may still be a multi-MB base64 data URL.
+		// Cap at 100 runes either way so log volume stays bounded.
 		urlSnippet := result.DownloadURL
 		if r := []rune(urlSnippet); len(r) > 100 {
 			urlSnippet = string(r[:100]) + "...(truncated)"
@@ -327,6 +353,50 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	}
 
 	return textResult(result)
+}
+
+// taskFileRegistrar is the subset of TaskService used to register a generated
+// image as a task_file. Declared as an interface so generate_image's P1/P2
+// logic (rewrite download_url to a fetchable URL + index the file) is unit-
+// testable without a full TaskService + storage + repo. *service.TaskService
+// satisfies it.
+type taskFileRegistrar interface {
+	UploadTaskFileFromReader(ctx context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error)
+	EnrichFilesWithURLs(ctx context.Context, files []*model.TaskFile)
+}
+
+// registerGeneratedImageTaskFile records the generated image (already saved at
+// result.FilePath) as a task_files row, uploading the bytes to storage once
+// (UploadTaskFileFromReader dedupes by (taskID, filePath) + content hash), then
+// enriches the row to a fetchable URL (signed for OSS without a custom domain,
+// or the local /api/v1/files path) and returns it. The caller assigns it to
+// ImageResult.DownloadURL, guaranteeing no inline base64 reaches the LLM.
+func registerGeneratedImageTaskFile(ctx context.Context, reg taskFileRegistrar, taskID, userID string, result *service.ImageResult) (string, error) {
+	info, err := os.Stat(result.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("stat generated image: %w", err)
+	}
+	f, err := os.Open(result.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("open generated image: %w", err)
+	}
+	defer f.Close()
+
+	mimeType := result.OutputMIME
+	if mimeType == "" {
+		mimeType = service.DetectTaskFileMIME(result.FilePath)
+	}
+
+	tf, err := reg.UploadTaskFileFromReader(ctx, taskID, userID, result.FilePath, f, mimeType, info.Size())
+	if err != nil {
+		return "", fmt.Errorf("register task file: %w", err)
+	}
+
+	reg.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
+	if tf.URL != "" {
+		return tf.URL, nil
+	}
+	return tf.OSSURL, nil
 }
 
 // VisionVerification lives in the service package so it can be a field on

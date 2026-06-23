@@ -1,10 +1,16 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
@@ -242,5 +248,129 @@ func TestImageResult_UploadFields_JSONTags(t *testing.T) {
 	}
 	if strings.Contains(sf, `"wechat_url"`) || strings.Contains(sf, `"media_id"`) {
 		t.Errorf("[FAIL] failed JSON should not carry URL fields when upload errored: %s", sf)
+	}
+}
+
+// fakeTaskFileRegistrar implements taskFileRegistrar for unit tests. Its Enrich
+// is a no-op so tests can exercise both the URL and OSSURL branches of the
+// helper (the real EnrichFilesWithURLs only sets URL when OSSKey != "").
+type fakeTaskFileRegistrar struct {
+	uploadCalls  []fakeUploadCall
+	uploadResult *model.TaskFile
+	uploadErr    error
+	enrichCalled bool
+}
+
+type fakeUploadCall struct {
+	taskID, userID, relPath, mime string
+	size                          int64
+}
+
+func (f *fakeTaskFileRegistrar) UploadTaskFileFromReader(_ context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
+	io.Copy(io.Discard, reader) // drain so the helper's file handle closes cleanly
+	f.uploadCalls = append(f.uploadCalls, fakeUploadCall{taskID, userID, relPath, mimeType, fileSize})
+	return f.uploadResult, f.uploadErr
+}
+
+func (f *fakeTaskFileRegistrar) EnrichFilesWithURLs(_ context.Context, _ []*model.TaskFile) {
+	f.enrichCalled = true
+}
+
+func TestRegisterGeneratedImageTaskFile_RegistersAndReturnsFetchableURL(t *testing.T) {
+	// P1 + P2 at the unit level: the helper must (a) register with the correct
+	// (taskID, relPath, mime, size) and (b) return a fetchable URL that is NOT
+	// an inline base64 data URL — the value the handler will assign to
+	// ImageResult.DownloadURL.
+	tmp := filepath.Join(t.TempDir(), "cover.png")
+	body := []byte("fake-png-bytes")
+	if err := os.WriteFile(tmp, body, 0o644); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+
+	fake := &fakeTaskFileRegistrar{
+		uploadResult: &model.TaskFile{URL: "https://cdn.example.com/u/t/output/cover.png"},
+	}
+	res := &service.ImageResult{FilePath: tmp, OutputMIME: "image/png"}
+
+	url, err := registerGeneratedImageTaskFile(context.Background(), fake, "task-1", "user-1", res)
+	if err != nil {
+		t.Fatalf("[FAIL] unexpected error: %v", err)
+	}
+	if url != "https://cdn.example.com/u/t/output/cover.png" {
+		t.Errorf("[FAIL] url = %q, want the enriched fetchable URL", url)
+	}
+	if strings.HasPrefix(url, "data:") {
+		t.Errorf("[FAIL] returned url must never be an inline base64 data URL, got %q", url)
+	}
+	if len(fake.uploadCalls) != 1 {
+		t.Fatalf("[FAIL] expected exactly 1 Upload call, got %d", len(fake.uploadCalls))
+	}
+	c := fake.uploadCalls[0]
+	if c.taskID != "task-1" || c.userID != "user-1" {
+		t.Errorf("[FAIL] ids = (%q,%q), want (task-1,user-1)", c.taskID, c.userID)
+	}
+	if c.relPath != tmp {
+		t.Errorf("[FAIL] relPath = %q, want %q (result.FilePath passed through)", c.relPath, tmp)
+	}
+	if c.mime != "image/png" {
+		t.Errorf("[FAIL] mime = %q, want image/png", c.mime)
+	}
+	if c.size != int64(len(body)) {
+		t.Errorf("[FAIL] size = %d, want %d", c.size, len(body))
+	}
+	if !fake.enrichCalled {
+		t.Error("[FAIL] EnrichFilesWithURLs was not called")
+	}
+}
+
+func TestRegisterGeneratedImageTaskFile_FallsBackToOSSURL(t *testing.T) {
+	// When Enrich leaves URL empty (OSSKey == "" branch), the helper must fall
+	// back to OSSURL so the caller still gets a fetchable download_url.
+	tmp := filepath.Join(t.TempDir(), "image_01.png")
+	if err := os.WriteFile(tmp, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	fake := &fakeTaskFileRegistrar{
+		uploadResult: &model.TaskFile{OSSURL: "https://oss.example.com/u/t/output/image_01.png"},
+	}
+	res := &service.ImageResult{FilePath: tmp, OutputMIME: "image/png"}
+
+	url, err := registerGeneratedImageTaskFile(context.Background(), fake, "task-1", "user-1", res)
+	if err != nil {
+		t.Fatalf("[FAIL] unexpected error: %v", err)
+	}
+	if url != "https://oss.example.com/u/t/output/image_01.png" {
+		t.Errorf("[FAIL] url = %q, want OSSURL fallback when URL unset", url)
+	}
+}
+
+func TestRegisterGeneratedImageTaskFile_StatErrorSkipsUpload(t *testing.T) {
+	fake := &fakeTaskFileRegistrar{}
+	res := &service.ImageResult{FilePath: "/does/not/exist/cover.png", OutputMIME: "image/png"}
+
+	if _, err := registerGeneratedImageTaskFile(context.Background(), fake, "task-1", "user-1", res); err == nil {
+		t.Fatal("[FAIL] expected error for missing file, got nil")
+	}
+	if len(fake.uploadCalls) != 0 {
+		t.Errorf("[FAIL] Upload must not be called when stat fails, got %d calls", len(fake.uploadCalls))
+	}
+}
+
+func TestRegisterGeneratedImageTaskFile_UploadErrorPropagates(t *testing.T) {
+	// The handler treats this as a soft failure (logs + keeps generation); the
+	// helper itself must surface the error so the handler can decide.
+	tmp := filepath.Join(t.TempDir(), "cover.png")
+	if err := os.WriteFile(tmp, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	fake := &fakeTaskFileRegistrar{uploadErr: fmt.Errorf("storage down")}
+	res := &service.ImageResult{FilePath: tmp, OutputMIME: "image/png"}
+
+	_, err := registerGeneratedImageTaskFile(context.Background(), fake, "task-1", "user-1", res)
+	if err == nil {
+		t.Fatal("[FAIL] expected error when Upload fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "storage down") {
+		t.Errorf("[FAIL] error should wrap the upload error, got %q", err.Error())
 	}
 }
