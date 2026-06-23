@@ -82,6 +82,7 @@ func (h *ChannelHandler) signChannelURLs(ctx context.Context, ch *model.Channel)
 	}
 	ch.AvatarURL = service.SignURL(ctx, h.store, h.logger, ch.AvatarURL, service.DefaultSignedURLTTL)
 	ch.ReferenceImageURL = service.SignURL(ctx, h.store, h.logger, ch.ReferenceImageURL, service.DefaultSignedURLTTL)
+	ch.AuthorAvatarURL = service.SignURL(ctx, h.store, h.logger, ch.AuthorAvatarURL, service.DefaultSignedURLTTL)
 }
 
 // SetSeednoteClient injects the Seednote SDK client.
@@ -101,6 +102,9 @@ type channelRequest struct {
 	WritingStyle       string `json:"writing_style"`
 	Theme              string `json:"theme"`
 	Author             string `json:"author"`
+	AuthorStyleIntro   string `json:"author_style_intro"`
+	AuthorAvatarURL    string `json:"author_avatar_url"`
+	TemplateID         string `json:"template_id"`
 	ReferenceImageURL  string `json:"reference_image_url"`
 	ImageRatio         string `json:"image_ratio"`
 	Layout             string `json:"layout"`
@@ -125,6 +129,9 @@ func (req *channelRequest) toChannel() *model.Channel {
 		WritingStyle:       req.WritingStyle,
 		Theme:              req.Theme,
 		Author:             req.Author,
+		AuthorStyleIntro:   req.AuthorStyleIntro,
+		AuthorAvatarURL:    req.AuthorAvatarURL,
+		TemplateID:         req.TemplateID,
 		ReferenceImageURL:  req.ReferenceImageURL,
 		ImageRatio:         req.ImageRatio,
 		Layout:             req.Layout,

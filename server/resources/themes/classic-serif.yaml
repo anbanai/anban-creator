@@ -1,0 +1,57 @@
+# 经典衬线主题 — 庄重正式，深色标题，阅读向。
+name: classic-serif
+type: deterministic
+description: "【经典衬线】庄重正式，深色标题，阅读向"
+version: "5.0"
+
+style_info:
+  mood: "庄重正式"
+  colors: "墨蓝/米白"
+  best_for: "深度长文、评论、人文社科"
+
+colors:
+  background: "#fbfaf6"
+  text: "#2c2c2c"
+  primary: "#1f2d4a"
+  secondary: "#7a2e2e"
+  quote_background: "#f1ede2"
+
+typography:
+  font_family: "Georgia, 'Songti SC', 'SimSun', 'Times New Roman', serif"
+  font_size: "16.5px"
+  line_height: "1.85"
+  letter_spacing: "0.4px"
+
+layout:
+  container_padding: "40px 12px"
+  max_width: "760px"
+  card_padding: "30px 32px"
+  section_gap: "40px"
+  paragraph_margin: "0 0 18px"
+  border_radius: "4px"
+  card_background_color: "#fffef9"
+  card_background_image: ""
+  card_background_size: ""
+  card_border: "1px solid #e7e0cf"
+  card_box_shadow: "0 6px 22px rgba(31, 45, 74, 0.06)"
+
+modules:
+  h2:
+    icon: "§"
+    icon_color: "#1f2d4a"
+    icon_text_shadow: "none"
+    text_color: "#1f2d4a"
+    border_bottom: "2px solid #1f2d4a"
+  h3:
+    text_color: "#1f2d4a"
+    border_bottom: "1px solid #cdbf9b"
+  strong:
+    color: "#7a2e2e"
+  blockquote:
+    background_color: "#f1ede2"
+    border_left: "4px solid #1f2d4a"
+    box_shadow: "none"
+  hr:
+    border: "none"
+    height: "1px"
+    background: "#d9cfb6"

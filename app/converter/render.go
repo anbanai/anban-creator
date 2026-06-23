@@ -108,7 +108,15 @@ func (r *detRenderer) wrapContainer(inner string) string {
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `<section style="background-color:%s;padding:%s;">`, bg, r.firstNonEmpty(r.theme.Layout.ContainerPadding, "24px 12px"))
+	// font-family is set on the outer wrapper so the whole document (headings,
+	// paragraphs, list items, quotes — none of which set their own family)
+	// inherits it. Code blocks override with monospace. This lets serif/mono
+	// themes (classic-serif, geek-terminal, …) actually render their font;
+	// sans themes are unaffected ('Inter' → system sans, the prior default).
+	fmt.Fprintf(&sb, `<section style="background-color:%s;padding:%s;font-family:%s;">`,
+		bg,
+		r.firstNonEmpty(r.theme.Layout.ContainerPadding, "24px 12px"),
+		r.firstNonEmpty(r.theme.Typography.FontFamily, "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"))
 	sb.WriteString("\n")
 	fmt.Fprintf(&sb, `<section style="%s">`, cardStyle)
 	sb.WriteString("\n")

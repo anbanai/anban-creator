@@ -470,3 +470,112 @@ func TestBuildAccountInfo_TemplateDeleted_NoScaffold(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildAccountInfo_ChannelTemplateFallback: a 公众号 channel that BINDS a template
+// (channel.TemplateID) — with no task-level template — resolves the persona (byline +
+// writing style + avatar) and theme from the channel's bound template. This is the
+// channel-template precedence rung: task > task-template > plan > channel-template >
+// channel own fields. The bound template's theme is folded into the resolved `theme`
+// with source "channel-template" so convert_markdown uses it.
+func TestBuildAccountInfo_ChannelTemplateFallback(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+
+	tmpl := &model.Template{
+		ID:               uuid.New().String(),
+		UserID:           userID,
+		Type:             model.PlatformArticle,
+		Name:             "频道绑定模板",
+		Visibility:       "public",
+		AuthorName:       "老李",
+		AuthorStyleIntro: "犀利、接地气、像朋友聊天",
+		AuthorAvatarURL:  "https://example.com/li.png",
+		Theme:            "autumn-warm",
+		IsActive:         true,
+	}
+	if err := repo.Templates().Create(ctx, tmpl); err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+
+	// Article channel bound to the template; no task and no own persona/theme.
+	ch := &model.Channel{
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		Platform:   model.PlatformArticle,
+		Name:       "article-channel",
+		TemplateID: tmpl.ID,
+	}
+	if err := repo.Channels().Create(ctx, ch); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"channel_id": ch.ID,
+		"scope":      "article",
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	// 作者 (byline): channel-template AuthorName overrides the empty channel byline.
+	if got := info["author"]; got != "老李" {
+		t.Errorf("author = %v, want 老李 (channel-template byline)", got)
+	}
+	if got := info["template_writing_style"]; got != "犀利、接地气、像朋友聊天" {
+		t.Errorf("template_writing_style = %v, want intro from channel-template", got)
+	}
+	if got := info["template_author_avatar"]; got != "https://example.com/li.png" {
+		t.Errorf("template_author_avatar = %v, want avatar url from channel-template", got)
+	}
+	// Theme is folded into the resolved theme (channel-template rung).
+	if got := info["theme"]; got != "autumn-warm" {
+		t.Errorf("theme = %v, want autumn-warm (folded from channel-template)", got)
+	}
+	if got := info["theme_source"]; got != "channel-template" {
+		t.Errorf("theme_source = %v, want channel-template", got)
+	}
+}
+
+// TestBuildAccountInfo_NoTemplate_ChannelPersonaFallback: a channel with its OWN persona
+// (author_style_intro / author_avatar_url) but no bound template surfaces that persona so
+// a writing direction defined directly on the channel still reaches the agent. The
+// channel's own byline (channel.Author) is the top-level `author` (lowest precedence rung).
+func TestBuildAccountInfo_NoTemplate_ChannelPersonaFallback(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+
+	ch := &model.Channel{
+		ID:               uuid.New().String(),
+		UserID:           userID,
+		Platform:         model.PlatformArticle,
+		Name:             "article-channel",
+		Author:           "频道作者",
+		AuthorStyleIntro: "平实、克制、重数据",
+		AuthorAvatarURL:  "https://example.com/ch.png",
+	}
+	if err := repo.Channels().Create(ctx, ch); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"channel_id": ch.ID,
+		"scope":      "article",
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	// Channel's own byline (no template to override it).
+	if got := info["author"]; got != "频道作者" {
+		t.Errorf("author = %v, want 频道作者 (channel own byline)", got)
+	}
+	// Channel's own persona surfaces as the writing direction / avatar fallback.
+	if got := info["template_writing_style"]; got != "平实、克制、重数据" {
+		t.Errorf("template_writing_style = %v, want channel author_style_intro fallback", got)
+	}
+	if got := info["template_author_avatar"]; got != "https://example.com/ch.png" {
+		t.Errorf("template_author_avatar = %v, want channel avatar fallback", got)
+	}
+}

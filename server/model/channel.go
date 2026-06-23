@@ -22,7 +22,10 @@ type Channel struct {
 	Style              string        `gorm:"type:text" json:"style"`                            // 图片视觉风格（封面/配图方向，自由文本）
 	WritingStyle       string        `gorm:"type:varchar(100);default:''" json:"writing_style"` // 写作风格（writer 资源 key，如 dan-koe）；与 Style/Theme 三维正交
 	Theme              string        `gorm:"type:varchar(50)" json:"theme"`                     // 排版样式（theme 资源 key，如 autumn-warm）
-	Author             string        `gorm:"type:varchar(50)" json:"author"`                  // 作者名
+	Author             string        `gorm:"type:varchar(50)" json:"author"`                  // 作者名（署名）
+	AuthorStyleIntro   string        `gorm:"type:text" json:"author_style_intro"`             // 写作风格（自由文本 框架/写作方式/笔迹，公众号人设维度）
+	AuthorAvatarURL    string        `gorm:"type:varchar(500)" json:"author_avatar_url"`      // 人设头像（可选，不入署名）
+	TemplateID         string        `gorm:"type:char(36);default:''" json:"template_id"`     // 绑定的公众号模板（人设/排版随模板同步，运行时解析纳入优先级链）
 	ReferenceImageURL  string        `gorm:"type:varchar(500)" json:"reference_image_url"`    // 品牌视觉参考图 URL
 	ImageRatio         string        `gorm:"type:varchar(10);default:''" json:"image_ratio"`  // 图片比例: "3:4", "1:1", "4:3", "16:9"
 	Layout             string        `gorm:"type:varchar(100);default:''" json:"layout"`      // 默认布局模块

@@ -1,0 +1,57 @@
+# 优雅紫主题 — 紫调点缀，精致高级，美妆时尚。
+name: elegant-violet
+type: deterministic
+description: "【优雅紫】紫调点缀，精致高级，美妆时尚"
+version: "5.0"
+
+style_info:
+  mood: "精致高级"
+  colors: "紫色"
+  best_for: "美妆、时尚、精致生活、品牌"
+
+colors:
+  background: "#faf9fc"
+  text: "#3b2d4a"
+  primary: "#7c3aed"
+  secondary: "#a855f7"
+  quote_background: "#f3eefa"
+
+typography:
+  font_family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif"
+  font_size: "16px"
+  line_height: "1.85"
+  letter_spacing: "0.4px"
+
+layout:
+  container_padding: "40px 10px"
+  max_width: "780px"
+  card_padding: "30px 28px"
+  section_gap: "38px"
+  paragraph_margin: "0 0 17px"
+  border_radius: "20px"
+  card_background_color: "#ffffff"
+  card_background_image: ""
+  card_background_size: ""
+  card_border: "1px solid #ece3f8"
+  card_box_shadow: "0 12px 30px rgba(124, 58, 237, 0.1)"
+
+modules:
+  h2:
+    icon: "✦"
+    icon_color: "#7c3aed"
+    icon_text_shadow: "0 0 12px rgba(124, 58, 237, 0.4)"
+    text_color: "#7c3aed"
+    border_bottom: "1px solid #ddd0f3"
+  h3:
+    text_color: "#a855f7"
+    border_bottom: "2px solid #c4b0f7"
+  strong:
+    color: "#6d28d9"
+  blockquote:
+    background_color: "#f3eefa"
+    border_left: "4px solid #7c3aed"
+    box_shadow: "inset 0 0 12px rgba(124, 58, 237, 0.05)"
+  hr:
+    border: "none"
+    height: "1px"
+    background: "#ddd0f3"

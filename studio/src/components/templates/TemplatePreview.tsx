@@ -196,34 +196,32 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
               </div>
             )}
 
-            {/* 公众号 (article): 作者(署名, 仅名字) + 写作风格(头像+介绍) + 排版预览 */}
+            {/* 公众号 (article): 人设（名称即署名 + 写作风格 + 可选头像，同框）+ 排版预览 */}
             {data.type === 'article' && (
               <>
-                {/* 作者（署名）—— 仅名字 */}
-                {data.author_name && (
+                {/* 人设 —— 名称(署名) + 写作风格 + 可选头像，放在一起（与编辑器一致） */}
+                {(data.author_name || data.author_style_intro || data.author_avatar_url) && (
                   <div className="rounded-lg border border-border px-3 py-2">
-                    <p className="text-xs font-medium text-muted-foreground mb-1">作者（署名）</p>
-                    <p className="text-sm font-medium text-foreground">{data.author_name}</p>
-                  </div>
-                )}
-                {/* 写作风格 —— 模仿写作；可选人设头像（不入署名） */}
-                {(data.author_style_intro || data.author_avatar_url) && (
-                  <div className="rounded-lg border border-border px-3 py-2">
-                    <p className="text-xs font-medium text-muted-foreground mb-2">写作风格</p>
+                    <p className="text-xs font-medium text-muted-foreground mb-2">人设</p>
                     <div className="flex items-start gap-3">
                       {data.author_avatar_url && (
                         <SignedImage
                           src={data.author_avatar_url}
-                          alt="写作风格人设头像"
+                          alt="人设头像"
                           className="h-12 w-12 shrink-0 rounded-full object-cover"
                           showLoading={false}
                         />
                       )}
-                      {data.author_style_intro && (
-                        <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-                          {data.author_style_intro}
-                        </p>
-                      )}
+                      <div className="min-w-0 flex-1 space-y-1">
+                        {data.author_name && (
+                          <p className="text-sm font-medium text-foreground">{data.author_name}</p>
+                        )}
+                        {data.author_style_intro && (
+                          <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
+                            {data.author_style_intro}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

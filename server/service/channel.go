@@ -165,6 +165,10 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	if ch.Author != "" {
 		existing.Author = ch.Author
 	}
+	// 公众号人设字段 + 绑定模板：unconditional assign 以支持清空（解除绑定、清头像/写作风格）。
+	existing.AuthorStyleIntro = ch.AuthorStyleIntro
+	existing.AuthorAvatarURL = ch.AuthorAvatarURL
+	existing.TemplateID = ch.TemplateID
 	// ReferenceImageURL: unconditional assign to support clearing.
 	existing.ReferenceImageURL = ch.ReferenceImageURL
 	// ImageRatio: unconditional assign to support clearing.

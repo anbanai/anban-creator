@@ -1,0 +1,57 @@
+# 商务藏青主题 — 藏青灰，专业沉稳，职场干货。
+name: business-navy
+type: deterministic
+description: "【商务藏青】藏青灰，专业沉稳，职场干货"
+version: "5.0"
+
+style_info:
+  mood: "专业沉稳"
+  colors: "藏青/灰"
+  best_for: "职场、商业、管理、行业分析"
+
+colors:
+  background: "#f5f6f8"
+  text: "#2d3748"
+  primary: "#1e3a5f"
+  secondary: "#2563eb"
+  quote_background: "#eef2f7"
+
+typography:
+  font_family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Roboto, Arial, sans-serif"
+  font_size: "15.5px"
+  line_height: "1.75"
+  letter_spacing: "0.2px"
+
+layout:
+  container_padding: "36px 10px"
+  max_width: "800px"
+  card_padding: "28px 30px"
+  section_gap: "36px"
+  paragraph_margin: "0 0 16px"
+  border_radius: "10px"
+  card_background_color: "#ffffff"
+  card_background_image: ""
+  card_background_size: ""
+  card_border: "1px solid #e2e8f0"
+  card_box_shadow: "0 8px 22px rgba(30, 58, 95, 0.07)"
+
+modules:
+  h2:
+    icon: "▪"
+    icon_color: "#1e3a5f"
+    icon_text_shadow: "none"
+    text_color: "#1e3a5f"
+    border_bottom: "2px solid #1e3a5f"
+  h3:
+    text_color: "#2563eb"
+    border_bottom: "1px solid #cbd5e0"
+  strong:
+    color: "#1e3a5f"
+  blockquote:
+    background_color: "#eef2f7"
+    border_left: "4px solid #1e3a5f"
+    box_shadow: "none"
+  hr:
+    border: "none"
+    height: "1px"
+    background: "#cbd5e0"

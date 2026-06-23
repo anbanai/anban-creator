@@ -1,0 +1,57 @@
+# 水墨文艺主题 — 墨灰衬线，留白意境，文艺随笔。
+name: ink-literary
+type: deterministic
+description: "【水墨文艺】墨灰衬线，留白意境，文艺随笔"
+version: "5.0"
+
+style_info:
+  mood: "留白意境"
+  colors: "墨灰"
+  best_for: "散文、读书笔记、生活哲思"
+
+colors:
+  background: "#f8f7f2"
+  text: "#2e2e2e"
+  primary: "#3a3a3a"
+  secondary: "#6a6a6a"
+  quote_background: "#efeddf"
+
+typography:
+  font_family: "Georgia, 'Songti SC', 'SimSun', 'Times New Roman', serif"
+  font_size: "16px"
+  line_height: "1.9"
+  letter_spacing: "0.5px"
+
+layout:
+  container_padding: "48px 12px"
+  max_width: "740px"
+  card_padding: "36px 34px"
+  section_gap: "44px"
+  paragraph_margin: "0 0 20px"
+  border_radius: "6px"
+  card_background_color: "#fdfcf7"
+  card_background_image: ""
+  card_background_size: ""
+  card_border: "1px solid #e6e2d2"
+  card_box_shadow: "0 6px 24px rgba(0, 0, 0, 0.04)"
+
+modules:
+  h2:
+    icon: "❖"
+    icon_color: "#3a3a3a"
+    icon_text_shadow: "none"
+    text_color: "#2e2e2e"
+    border_bottom: "1px solid #cfc9b8"
+  h3:
+    text_color: "#3a3a3a"
+    border_bottom: "1px solid #cfc9b8"
+  strong:
+    color: "#5a4a2a"
+  blockquote:
+    background_color: "#efeddf"
+    border_left: "3px solid #6a6a6a"
+    box_shadow: "none"
+  hr:
+    border: "none"
+    height: "1px"
+    background: "#d8d2bf"

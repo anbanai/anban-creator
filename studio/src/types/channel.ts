@@ -21,6 +21,9 @@ export interface Channel {
   writing_style: string
   theme: string
   author: string
+  author_style_intro: string
+  author_avatar_url: string
+  template_id: string
   reference_image_url: string
   image_ratio: string
   layout: string
@@ -59,6 +62,9 @@ export interface CreateChannelRequest {
   writing_style?: string
   theme?: string
   author?: string
+  author_style_intro?: string
+  author_avatar_url?: string
+  template_id?: string
   reference_image_url?: string
   image_ratio?: string
   layout?: string

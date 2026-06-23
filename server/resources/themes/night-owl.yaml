@@ -1,0 +1,57 @@
+# 暗夜模式主题 — 深色背景，浅色字，护眼夜间。
+name: night-owl
+type: deterministic
+description: "【暗夜模式】深色背景，浅色字，护眼夜间"
+version: "5.0"
+
+style_info:
+  mood: "护眼夜间"
+  colors: "深色"
+  best_for: "夜间阅读、长篇连载、技术长文"
+
+colors:
+  background: "#1a1b26"
+  text: "#c0caf5"
+  primary: "#7aa2f7"
+  secondary: "#bb9af7"
+  quote_background: "#24283b"
+
+typography:
+  font_family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Roboto, Arial, sans-serif"
+  font_size: "16px"
+  line_height: "1.8"
+  letter_spacing: "0.3px"
+
+layout:
+  container_padding: "36px 10px"
+  max_width: "780px"
+  card_padding: "28px 28px"
+  section_gap: "36px"
+  paragraph_margin: "0 0 16px"
+  border_radius: "14px"
+  card_background_color: "#24283b"
+  card_background_image: ""
+  card_background_size: ""
+  card_border: "1px solid #2e334d"
+  card_box_shadow: "0 10px 30px rgba(0, 0, 0, 0.35)"
+
+modules:
+  h2:
+    icon: "◆"
+    icon_color: "#7aa2f7"
+    icon_text_shadow: "0 0 12px rgba(122, 162, 247, 0.5)"
+    text_color: "#7aa2f7"
+    border_bottom: "1px dashed #3b4261"
+  h3:
+    text_color: "#bb9af7"
+    border_bottom: "2px solid #7aa2f7"
+  strong:
+    color: "#e0af68"
+  blockquote:
+    background_color: "#24283b"
+    border_left: "4px solid #7aa2f7"
+    box_shadow: "none"
+  hr:
+    border: "none"
+    height: "1px"
+    background: "#3b4261"

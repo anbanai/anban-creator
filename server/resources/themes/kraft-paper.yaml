@@ -1,0 +1,57 @@
+# 牛皮纸主题 — 米黄做旧，复古质感，手账风。
+name: kraft-paper
+type: deterministic
+description: "【牛皮纸】米黄做旧，复古质感，手账风"
+version: "5.0"
+
+style_info:
+  mood: "复古质感"
+  colors: "米黄/棕"
+  best_for: "手账、旅行、回忆、生活记录"
+
+colors:
+  background: "#f4ecd8"
+  text: "#3e2c1c"
+  primary: "#6b4423"
+  secondary: "#8b5a2b"
+  quote_background: "#e8dcc0"
+
+typography:
+  font_family: "Georgia, 'Songti SC', 'SimSun', 'Times New Roman', serif"
+  font_size: "16px"
+  line_height: "1.85"
+  letter_spacing: "0.4px"
+
+layout:
+  container_padding: "40px 12px"
+  max_width: "760px"
+  card_padding: "30px 30px"
+  section_gap: "38px"
+  paragraph_margin: "0 0 18px"
+  border_radius: "6px"
+  card_background_color: "#f8f1dc"
+  card_background_image: "linear-gradient(rgba(107, 68, 35, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(107, 68, 35, 0.04) 1px, transparent 1px)"
+  card_background_size: "22px 22px"
+  card_border: "1px solid #ddcaa0"
+  card_box_shadow: "0 8px 24px rgba(107, 68, 35, 0.12)"
+
+modules:
+  h2:
+    icon: "✎"
+    icon_color: "#6b4423"
+    icon_text_shadow: "none"
+    text_color: "#6b4423"
+    border_bottom: "2px dashed #c9ae7a"
+  h3:
+    text_color: "#8b5a2b"
+    border_bottom: "1px solid #c9ae7a"
+  strong:
+    color: "#8b3a1a"
+  blockquote:
+    background_color: "#e8dcc0"
+    border_left: "4px solid #6b4423"
+    box_shadow: "inset 0 0 12px rgba(107, 68, 35, 0.06)"
+  hr:
+    border: "none"
+    height: "2px"
+    background: "repeating-linear-gradient(90deg, #c9ae7a 0, #c9ae7a 8px, transparent 8px, transparent 14px)"

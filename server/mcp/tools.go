@@ -396,25 +396,38 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		}
 	}
 
-	// Surface the linked template's content. Three things are delivered, kept as
-	// STRICTLY INDEPENDENT concepts (the article 作者/byline must never be conflated
-	// with 写作风格/writing imitation):
+	// Surface the effective template's content. The effective template is the
+	// task's template if present (precedence task > task-template > plan), else
+	// the channel's bound 公众号 template (channel-template). Three things are
+	// delivered, kept as STRICTLY INDEPENDENT concepts (the article 作者/byline
+	// must never be conflated with 写作风格/writing imitation):
 	//
 	//   - 作者 (byline): the template's AuthorName overrides the channel byline
-	//     (precedence template > channel) and surfaces as the top-level `author`
-	//     field, which the agent passes to publish_draft. A template without
-	//     AuthorName leaves the channel byline untouched.
+	//     and surfaces as the top-level `author` (passed to publish_draft).
 	//   - 写作风格 (writing imitation, free text): AuthorStyleIntro for article,
 	//     falling back to the writer-key scaffold WritingStyle (poster). Surfaced
-	//     as template_writing_style; the skill follows it for 框架/写作方式/笔迹.
-	//   - template_author_avatar: the optional 写作风格 persona avatar (part of the
-	//     writing persona, NOT the byline).
+	//     as template_writing_style.
+	//   - template_author_avatar: the optional 写作风格 persona avatar.
+	//   - For a channel-level template, its theme is folded into the resolved
+	//     `theme` so convert_markdown uses it (a task-level template already had
+	//     its theme folded into Task.Theme at creation).
 	//
-	// Only present when the task carries a template_id (manual task or spawned
-	// from a plan). Errors (template deleted) are logged-and-skipped so a stale
-	// template_id never breaks the profile — the keys simply stay absent.
-	if taskTemplateID != nil && *taskTemplateID != "" && svcs.TemplateSvc != nil {
-		if tmpl, terr := svcs.TemplateSvc.GetByID(ctx, *taskTemplateID); terr == nil {
+	// When NO template is bound (task or channel), the channel's own persona
+	// (author_style_intro / author_avatar_url) is surfaced instead, so a writing
+	// direction defined directly on the channel still reaches the agent. Errors
+	// (template deleted) are logged-and-skipped so a stale id never breaks the
+	// profile — the keys simply stay absent.
+	effectiveTemplateID := ""
+	templateFromTask := false
+	if taskTemplateID != nil && *taskTemplateID != "" {
+		effectiveTemplateID = *taskTemplateID
+		templateFromTask = true
+	} else if ch.TemplateID != "" {
+		effectiveTemplateID = ch.TemplateID
+	}
+
+	if effectiveTemplateID != "" && svcs.TemplateSvc != nil {
+		if tmpl, terr := svcs.TemplateSvc.GetByID(ctx, effectiveTemplateID); terr == nil {
 			info["template_id"] = tmpl.ID
 			info["template_name"] = tmpl.Name
 			// 作者（署名 byline）: the template AuthorName overrides the channel byline
@@ -438,9 +451,32 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			info["template_theme"] = tmpl.Theme
 			info["template_structure"] = extractScaffoldText(tmpl.Structure)
 			info["template_example"] = extractScaffoldText(tmpl.ExampleContent)
+			// Channel-level template (no task template): fold its theme into the
+			// resolved theme so the agent uses it for convert_markdown. A task
+			// template's theme was already folded into Task.Theme at creation (and
+			// set effectiveTheme above), so we only fold for the channel-template
+			// path — never clobbering a task's explicit theme override.
+			if !templateFromTask && tmpl.Theme != "" {
+				effectiveTheme = tmpl.Theme
+				themeSource = "channel-template"
+				info["theme"] = effectiveTheme
+				info["theme_source"] = themeSource
+				if e := resources.Manager().Get(resources.CategoryTheme, effectiveTheme); e != nil {
+					info["theme_description"] = e.Description
+				}
+			}
 		} else if mcpLog != nil {
-			mcpLog.Warn().Err(terr).Str("template_id", *taskTemplateID).
-				Msg("template linked to task not found; skipping content scaffold")
+			mcpLog.Warn().Err(terr).Str("template_id", effectiveTemplateID).
+				Msg("linked template not found; skipping content scaffold")
+		}
+	} else {
+		// No template bound (task or channel): surface the channel's own persona so
+		// a writing direction defined directly on the channel still reaches the agent.
+		if ch.AuthorStyleIntro != "" {
+			info["template_writing_style"] = ch.AuthorStyleIntro
+		}
+		if ch.AuthorAvatarURL != "" {
+			info["template_author_avatar"] = ch.AuthorAvatarURL
 		}
 	}
 

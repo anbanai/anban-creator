@@ -1,0 +1,57 @@
+# 极客终端主题 — 等宽字，终端绿，程序员风（浅底代码编辑器观感）。
+name: geek-terminal
+type: deterministic
+description: "【极客终端】等宽字，终端绿，程序员风"
+version: "5.0"
+
+style_info:
+  mood: "极客/终端"
+  colors: "终端绿/蓝"
+  best_for: "编程、开发者、极客向"
+
+colors:
+  background: "#f6f8fa"
+  text: "#1f2328"
+  primary: "#1a7f37"
+  secondary: "#0550ae"
+  quote_background: "#eaeef2"
+
+typography:
+  font_family: "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace"
+  font_size: "15px"
+  line_height: "1.75"
+  letter_spacing: "0.2px"
+
+layout:
+  container_padding: "32px 10px"
+  max_width: "800px"
+  card_padding: "26px 26px"
+  section_gap: "34px"
+  paragraph_margin: "0 0 15px"
+  border_radius: "8px"
+  card_background_color: "#ffffff"
+  card_background_image: ""
+  card_background_size: ""
+  card_border: "1px solid #d6dbe0"
+  card_box_shadow: "0 6px 20px rgba(31, 35, 40, 0.06)"
+
+modules:
+  h2:
+    icon: "›"
+    icon_color: "#1a7f37"
+    icon_text_shadow: "none"
+    text_color: "#1f2328"
+    border_bottom: "1px solid #d6dbe0"
+  h3:
+    text_color: "#0550ae"
+    border_bottom: "2px solid #1a7f37"
+  strong:
+    color: "#1a7f37"
+  blockquote:
+    background_color: "#eaeef2"
+    border_left: "4px solid #1a7f37"
+    box_shadow: "none"
+  hr:
+    border: "none"
+    height: "1px"
+    background: "#d6dbe0"

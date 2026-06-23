@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Sparkles, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
@@ -19,9 +19,9 @@ import {
 } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
-import { ThemePreview } from '@/components/templates/ThemePreview'
+import { PersonaBlock } from '@/components/templates/PersonaBlock'
+import { ThemePicker } from '@/components/templates/ThemePicker'
 import type { Template, TemplateType, TemplateVisibility, CreateTemplateRequest, UpdateTemplateRequest } from '@/types'
-import type { ResourceEntry } from '@/types/resource'
 import { toast } from 'sonner'
 
 const TYPE_OPTIONS: { value: TemplateType; label: string }[] = [
@@ -87,27 +87,15 @@ export function TemplateCreateDialog({
   // Tags entered as comma-separated text; split on submit. Editing backfills
   // the existing tags joined by ", ".
   const [tagsText, setTagsText] = useState('')
-  // 公众号 two SEPARATE dimensions, only collected for article templates:
-  //   - 作者 (署名 byline): authorName — just a name, becomes the published
-  //     author via get_channel_profile.author (precedence template > channel).
-  //   - 写作风格 (writing imitation): authorStyleIntro (free-text 框架/写作方式/
-  //     笔迹) + optional authorAvatarUrl (persona avatar, NOT the byline).
+  // 公众号 (article) 人设 — 统一区块（名称即署名 + 写作风格 + 可选人设头像）：
+  //   - authorName：名称 = 发布作者名（get_channel_profile.author，precedence
+  //     template > channel）。
+  //   - authorStyleIntro：写作风格（自由文本 框架/写作方式/笔迹）= template_writing_style。
+  //   - authorAvatarUrl：可选人设头像（不入署名）。三者聚合在 PersonaBlock，
+  //     可从人设库一键导入；与公众号频道编辑器 UI 完全一致。
   const [authorName, setAuthorName] = useState('')
   const [authorAvatarUrl, setAuthorAvatarUrl] = useState('')
   const [authorStyleIntro, setAuthorStyleIntro] = useState('')
-  // Toggle the inline 排版预览 iframe in the article form.
-  const [themePreviewOpen, setThemePreviewOpen] = useState(false)
-
-  // Available 排版样式 themes (for the article template's theme dropdown).
-  const { data: themeResources } = useQuery({
-    queryKey: queryKeys.resources.themes,
-    queryFn: () => api.resources.list('themes'),
-    staleTime: Infinity,
-  })
-  const themeOptions = (themeResources?.items || []).map((t: ResourceEntry) => ({
-    value: t.name,
-    label: t.description || t.name,
-  }))
 
   // Session epoch: incremented every time the dialog opens. Captured at the
   // start of handleSubmit and compared after the await — if the user closed
@@ -147,7 +135,6 @@ export function TemplateCreateDialog({
       setExample(extractScaffoldText(template.example_content))
       setCategory(template.category ?? '')
       setTagsText(Array.isArray(template.tags) ? template.tags.join(', ') : '')
-      setThemePreviewOpen(false)
     } else {
       setName('')
       setType(defaultType)
@@ -163,7 +150,6 @@ export function TemplateCreateDialog({
       setExample('')
       setCategory('')
       setTagsText('')
-      setThemePreviewOpen(false)
     }
   }, [open, template, defaultType])
 
@@ -339,7 +325,9 @@ export function TemplateCreateDialog({
               <Label>类别</Label>
               <Select value={type} onValueChange={(v) => setType(v as TemplateType)}>
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue placeholder="选择类别">
+                    {(value: string) => TYPE_OPTIONS.find((o) => o.value === value)?.label ?? value}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {TYPE_OPTIONS.map((opt) => (
@@ -505,85 +493,21 @@ export function TemplateCreateDialog({
             </div>
           )}
 
-          {/* 公众号 (article) — 图片风格（在上）之外的要素：
-              作者（署名，仅名字 → 发布作者名）+ 写作风格（模仿框架/写作方式/
-              笔迹 + 可选人设头像）+ 排版模板（可预览）。作者与写作风格是两个
-              独立维度：作者只用于署名，写作风格只用于模仿写作。 */}
+          {/* 公众号 (article) — 人设（名称即署名 + 写作风格 + 可选人设头像，统一区块）
+              + 排版风格（实时预览）。名称落到 author_name（=发布作者名），写作风格落到
+              author_style_intro（=template_writing_style）。二者共用 PersonaBlock /
+              ThemePicker，与公众号频道编辑器 UI 完全一致。 */}
           {type === 'article' && (
             <>
-              {/* 作者（署名）—— 仅名字，作为公众号发布时的作者名 */}
-              <div className="space-y-1.5">
-                <Label htmlFor="tpl-author-name">
-                  作者（署名）
-                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                    （可选，仅名字；发布时作为公众号作者名，留空则用频道作者）
-                  </span>
-                </Label>
-                <Input
-                  id="tpl-author-name"
-                  value={authorName}
-                  onChange={(e) => setAuthorName(e.target.value)}
-                  placeholder="例如：老李"
-                  maxLength={100}
-                />
-              </div>
-
-              {/* 写作风格 —— 模仿内容的框架 / 写作方式 / 笔迹；人设头像可选（不入署名） */}
-              <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-medium">写作风格</Label>
-                  <span className="text-xs text-muted-foreground">模仿框架 / 写作方式 / 笔迹</span>
-                </div>
-                <div className="flex items-stretch gap-3">
-                  <div className="shrink-0">
-                    <ReferenceImageUpload
-                      value={authorAvatarUrl}
-                      onChange={setAuthorAvatarUrl}
-                      purpose="reference"
-                    />
-                    <p className="mt-1 text-center text-[11px] text-muted-foreground">人设头像（可选）</p>
-                  </div>
-                  <Textarea
-                    value={authorStyleIntro}
-                    onChange={(e) => setAuthorStyleIntro(e.target.value)}
-                    placeholder="例如：犀利、接地气、像朋友聊天；多用短句和反问；爱用具体数字和案例"
-                    maxLength={1024}
-                    className="flex-1 resize-none"
-                    rows={4}
-                  />
-                </div>
-              </div>
-
-              {/* 排版模板 */}
-              <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="tpl-theme" className="text-sm font-medium">排版模板</Label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    onClick={() => setThemePreviewOpen((v) => !v)}
-                  >
-                    {themePreviewOpen ? '收起预览' : '预览排版'}
-                  </Button>
-                </div>
-                <Select value={theme || '_none'} onValueChange={(v) => setTheme(v && v !== '_none' ? v : '')}>
-                  <SelectTrigger id="tpl-theme" className="w-full">
-                    <SelectValue placeholder="留空则用频道默认排版" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none" label="不设置（用频道默认）">不设置（用频道默认）</SelectItem>
-                    {themeOptions.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {themePreviewOpen && theme && <ThemePreview theme={theme} />}
-                {themePreviewOpen && !theme && (
-                  <p className="text-xs text-muted-foreground">请先选择一个排版主题，再点预览。</p>
-                )}
-              </div>
+              <PersonaBlock
+                authorName={authorName}
+                onAuthorName={setAuthorName}
+                authorStyleIntro={authorStyleIntro}
+                onAuthorStyleIntro={setAuthorStyleIntro}
+                authorAvatarUrl={authorAvatarUrl}
+                onAuthorAvatarUrl={setAuthorAvatarUrl}
+              />
+              <ThemePicker theme={theme} onTheme={setTheme} />
             </>
           )}
         </div>

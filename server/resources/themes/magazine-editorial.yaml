@@ -1,0 +1,57 @@
+# 杂志版式主题 — 粗体大标题，分隔线，编辑感。
+name: magazine-editorial
+type: deterministic
+description: "【杂志版式】粗体大标题，分隔线，编辑感"
+version: "5.0"
+
+style_info:
+  mood: "编辑/杂志"
+  colors: "墨黑/朱红"
+  best_for: "人物报道、特稿、品牌故事"
+
+colors:
+  background: "#ffffff"
+  text: "#1f1f1f"
+  primary: "#111111"
+  secondary: "#b91c1c"
+  quote_background: "#f4f2ec"
+
+typography:
+  font_family: "Georgia, 'Songti SC', 'SimSun', 'Times New Roman', serif"
+  font_size: "16px"
+  line_height: "1.8"
+  letter_spacing: "0.3px"
+
+layout:
+  container_padding: "40px 10px"
+  max_width: "780px"
+  card_padding: "34px 32px"
+  section_gap: "40px"
+  paragraph_margin: "0 0 18px"
+  border_radius: "2px"
+  card_background_color: "#fffefb"
+  card_background_image: ""
+  card_background_size: ""
+  card_border: "1px solid #e8e4d8"
+  card_box_shadow: "0 10px 30px rgba(0, 0, 0, 0.05)"
+
+modules:
+  h2:
+    icon: "■"
+    icon_color: "#b91c1c"
+    icon_text_shadow: "none"
+    text_color: "#111111"
+    border_bottom: "4px solid #111111"
+  h3:
+    text_color: "#111111"
+    border_bottom: "2px solid #b91c1c"
+  strong:
+    color: "#b91c1c"
+  blockquote:
+    background_color: "#f4f2ec"
+    border_left: "6px solid #111111"
+    box_shadow: "none"
+  hr:
+    border: "none"
+    height: "2px"
+    background: "#111111"

@@ -22,6 +22,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
+import { PersonaBlock } from '@/components/templates/PersonaBlock'
+import { ThemePicker } from '@/components/templates/ThemePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { channelSchema, type ChannelFormValues } from '@/lib/schemas'
@@ -57,6 +59,9 @@ const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   layout: '',
   image_preset: '',
   author: '',
+  author_style_intro: '',
+  author_avatar_url: '',
+  template_id: '',
   reference_image_url: '',
   image_ratio: '',
   enable_publishing: false,
@@ -78,6 +83,9 @@ function channelToForm(ch: Channel): ChannelFormValues {
     layout: ch.layout || '',
     image_preset: ch.image_preset || '',
     author: ch.author || '',
+    author_style_intro: ch.author_style_intro || '',
+    author_avatar_url: ch.author_avatar_url || '',
+    template_id: ch.template_id || '',
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
     enable_publishing: ch.config?.enable_publishing ?? false,
@@ -107,6 +115,11 @@ export default function ChannelsPage() {
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
+  const templateId = useWatch({ control: form.control, name: 'template_id' })
+  const authorName = useWatch({ control: form.control, name: 'author' })
+  const authorStyleIntro = useWatch({ control: form.control, name: 'author_style_intro' })
+  const authorAvatarUrl = useWatch({ control: form.control, name: 'author_avatar_url' })
+  const themeValue = useWatch({ control: form.control, name: 'theme' })
 
   // Auto-focus profile_url field when dialog opens
   useEffect(() => {
@@ -137,16 +150,6 @@ export default function ChannelsPage() {
   const currentPlatformConfig = platformConfigMap[selectedPlatform]
   const hasProfileField = currentPlatformConfig?.fields?.some((field) => field.key === 'profile_url') ?? false
 
-  const { data: writerResources } = useQuery({
-    queryKey: queryKeys.resources.writers,
-    queryFn: () => api.resources.list('writers'),
-    staleTime: Infinity,
-  })
-  const { data: themeResources } = useQuery({
-    queryKey: queryKeys.resources.themes,
-    queryFn: () => api.resources.list('themes'),
-    staleTime: Infinity,
-  })
   const { data: layoutResources } = useQuery({
     queryKey: queryKeys.resources.layouts,
     queryFn: () => api.resources.list('layouts'),
@@ -158,21 +161,30 @@ export default function ChannelsPage() {
     staleTime: Infinity,
   })
 
-  const styleOptions = useMemo(() => [
-    { value: '', label: '不设置' },
-    ...(writerResources?.items || []).map((w: ResourceEntry) => ({
-      value: w.english_name || w.name,
-      label: w.display_name || w.description || w.english_name || w.name,
-    })),
-  ], [writerResources])
+  // 公众号模板：用于频道绑定（绑定后人设/排版随模板同步，只读展示）。仅 article
+  // 平台拉取。人设库（writers）与排版（themes）由 PersonaBlock / ThemePicker 各自
+  // 内部查询，页面不再持有 writer/theme 资源状态。
+  const { data: articleTemplatesData } = useQuery({
+    queryKey: queryKeys.templates.list({ type: 'article', scope: 'all' }),
+    queryFn: () => api.templates.list({ type: 'article', scope: 'all' }),
+    staleTime: Infinity,
+    enabled: selectedPlatform === 'article',
+  })
+  const articleTemplates = articleTemplatesData?.items ?? []
+  const articleTemplateLabel = (id: string) => {
+    const t = articleTemplates.find((x) => x.id === id)
+    if (!t) return id
+    return t.author_name ? `${t.name} · ${t.author_name}` : t.name
+  }
 
-  const themeOptions = useMemo(() => [
-    { value: '', label: '不设置' },
-    ...(themeResources?.items || []).map((t: ResourceEntry) => ({
-      value: t.name,
-      label: t.description || t.name,
-    })),
-  ], [themeResources])
+  // 绑定模板的完整详情：用于只读展示模板人设（author_name/author_style_intro/
+  // author_avatar_url）与排版（theme）。列表摘要可能不含这些字段，故按 id 取详情。
+  const { data: boundTemplate } = useQuery({
+    queryKey: queryKeys.templates.detail(templateId ?? ''),
+    queryFn: () => api.templates.get(templateId as string),
+    enabled: !!templateId,
+    staleTime: Infinity,
+  })
 
   const layoutOptions = useMemo(() => [
     { value: '', label: '不设置' },
@@ -405,6 +417,9 @@ export default function ChannelsPage() {
       layout: values.layout?.trim() || undefined,
       image_preset: values.image_preset?.trim() || undefined,
       author: values.author?.trim() || undefined,
+      author_style_intro: values.author_style_intro?.trim() || undefined,
+      author_avatar_url: values.author_avatar_url?.trim() || undefined,
+      template_id: values.template_id?.trim() || undefined,
       reference_image_url: values.reference_image_url?.trim() || undefined,
       image_ratio: values.image_ratio || undefined,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
@@ -439,6 +454,7 @@ export default function ChannelsPage() {
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isWechat = selectedPlatform === 'article'
   const isSeednote = selectedPlatform === 'seednote'
+  const templateBound = isWechat && !!templateId
 
   return (
     <div className="space-y-6">
@@ -767,45 +783,63 @@ export default function ChannelsPage() {
                 </FormItem>
               )} />
 
-              {!isSeednote && <FormField control={form.control} name="writing_style" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>写作风格</FormLabel>
-                  <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                    <FormControl>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择写作风格" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {styleOptions.map((opt) => (
-                        <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>选择内置写作风格模板，决定文章文字调性与结构</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />}
+              {!isSeednote && (
+                <>
+                  {/* 公众号模板：绑定后人设/排版随模板同步（只读）；解绑则在此自定义人设/排版。
+                      运行时解析优先级：task > task-template > plan > channel-template > channel 自身。 */}
+                  <FormField control={form.control} name="template_id" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>公众号模板</FormLabel>
+                      <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="不绑定（自定义）">
+                              {(value: string) => (!value || value === '_none') ? '不绑定（自定义）' : articleTemplateLabel(value)}
+                            </SelectValue>
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="_none" label="不绑定（自定义）">不绑定（自定义）</SelectItem>
+                          {articleTemplates.map((t) => (
+                            <SelectItem key={t.id} value={t.id} label={articleTemplateLabel(t.id)}>{articleTemplateLabel(t.id)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>绑定模板后，人设与排版随模板同步（改模板自动更新）；不绑定则在此自定义人设与排版。</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
 
-              {!isSeednote && <FormField control={form.control} name="theme" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>排版样式</FormLabel>
-                  <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                    <FormControl>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择排版样式" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {themeOptions.map((opt) => (
-                        <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>排版样式维度——文章转 HTML 的版式主题，与图片视觉、写作风格相互独立</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />}
+                  {templateBound ? (
+                    <>
+                      {/* 绑定模板：人设/排版只读展示（取自模板详情，改模板自动更新）。 */}
+                      <PersonaBlock
+                        readOnly
+                        authorName={boundTemplate?.author_name ?? ''}
+                        onAuthorName={() => {}}
+                        authorStyleIntro={boundTemplate?.author_style_intro ?? ''}
+                        onAuthorStyleIntro={() => {}}
+                        authorAvatarUrl={boundTemplate?.author_avatar_url ?? ''}
+                        onAuthorAvatarUrl={() => {}}
+                      />
+                      <ThemePicker readOnly theme={boundTemplate?.theme ?? ''} onTheme={() => {}} />
+                    </>
+                  ) : (
+                    <>
+                      {/* 未绑定：编辑频道自身人设（名称即署名 + 写作风格 + 可选头像）与排版。 */}
+                      <PersonaBlock
+                        authorName={authorName ?? ''}
+                        onAuthorName={(v) => form.setValue('author', v, { shouldDirty: true })}
+                        authorStyleIntro={authorStyleIntro ?? ''}
+                        onAuthorStyleIntro={(v) => form.setValue('author_style_intro', v, { shouldDirty: true })}
+                        authorAvatarUrl={authorAvatarUrl ?? ''}
+                        onAuthorAvatarUrl={(v) => form.setValue('author_avatar_url', v, { shouldDirty: true })}
+                      />
+                      <ThemePicker theme={themeValue ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
+                    </>
+                  )}
+                </>
+              )}
 
               {!isSeednote && (
                 <FormField control={form.control} name="layout" render={({ field }) => (
@@ -847,7 +881,8 @@ export default function ChannelsPage() {
                 )} />
               )}
 
-              <FormField control={form.control} name="author" render={({ field }) => (
+              {/* 作者名（署名）：seednote 在此编辑；article 改由上方「公众号模板/人设」区块统一维护。 */}
+              {isSeednote && <FormField control={form.control} name="author" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>
                   <FormControl>
@@ -855,7 +890,7 @@ export default function ChannelsPage() {
                   </FormControl>
                   <FormMessage />
                 </FormItem>
-              )} />
+              )} />}
             </form>
           </Form>
           <DialogFooter>

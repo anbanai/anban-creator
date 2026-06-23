@@ -1,0 +1,57 @@
+# 科技蓝主题 — 理性现代，蓝色强调，技术/产品向。
+name: tech-blue
+type: deterministic
+description: "【科技蓝】理性现代，蓝色强调，技术/产品向"
+version: "5.0"
+
+style_info:
+  mood: "理性现代"
+  colors: "科技蓝"
+  best_for: "技术教程、产品测评、互联网观察"
+
+colors:
+  background: "#f7f9fc"
+  text: "#24292f"
+  primary: "#0969da"
+  secondary: "#0550ae"
+  quote_background: "#ddf4ff"
+
+typography:
+  font_family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Roboto, Arial, sans-serif"
+  font_size: "15.5px"
+  line_height: "1.75"
+  letter_spacing: "0.2px"
+
+layout:
+  container_padding: "36px 10px"
+  max_width: "800px"
+  card_padding: "28px 28px"
+  section_gap: "36px"
+  paragraph_margin: "0 0 16px"
+  border_radius: "14px"
+  card_background_color: "#ffffff"
+  card_background_image: ""
+  card_background_size: ""
+  card_border: "1px solid #e3e8ef"
+  card_box_shadow: "0 8px 24px rgba(9, 105, 218, 0.06)"
+
+modules:
+  h2:
+    icon: "▸"
+    icon_color: "#0969da"
+    icon_text_shadow: "none"
+    text_color: "#0969da"
+    border_bottom: "1px solid #d0d7de"
+  h3:
+    text_color: "#0550ae"
+    border_bottom: "2px solid #0969da"
+  strong:
+    color: "#0550ae"
+  blockquote:
+    background_color: "#ddf4ff"
+    border_left: "4px solid #0969da"
+    box_shadow: "none"
+  hr:
+    border: "none"
+    height: "1px"
+    background: "#d0d7de"
