@@ -138,27 +138,41 @@ func describeSeednoteImageComposition(hasContent, hasTail bool) string {
 		parts = append(parts, "尾图（tail.png）")
 	}
 
-	// Content images are adaptive → the total is not fixed, so we hand the
-	// decision to the agent and let the mechanical gate validate consistency.
+	var directive string
 	if hasContent {
-		return fmt.Sprintf(
+		// Content images are adaptive → the total is not fixed, so we hand the
+		// decision to the agent and let the mechanical gate validate consistency.
+		directive = fmt.Sprintf(
 			"图片构成要求（必须严格遵守，覆盖 skill 默认数量规则）：生成 %s。"+
 				"内容图张数由信息点分组决定（1~3 张，每张 2-4 个信息点）；"+
 				"image-plan.md 必须在「计划图片数量」字段写入实际生成的总张数，机械闸门按此校验。",
 			strings.Join(parts, "、"),
 		)
+	} else {
+		// No content images → composition is fully deterministic.
+		total := 1 // cover
+		if hasTail {
+			total++
+		}
+		directive = fmt.Sprintf(
+			"图片构成要求（必须严格遵守，覆盖 skill 默认数量规则）：生成 %s，共 %d 张。"+
+				"image-plan.md 必须在「计划图片数量」字段写入此数字。",
+			strings.Join(parts, "、"), total,
+		)
 	}
 
-	// No content images → composition is fully deterministic.
-	total := 1 // cover
-	if hasTail {
-		total++
+	// The seednote agent and seednote-visual-design skill hardcode 尾图 as a
+	// mandatory deliverable (success criteria, image-plan `## tail` template
+	// section, generation step). Simply omitting it from the composition list
+	// above is too weak an override — the model still generates it to satisfy the
+	// hardcoded requirement. State the prohibition explicitly so it carries the
+	// same weight as the requirement it must override. Phrased around 「尾图」 /
+	// the `## tail` section (no literal "tail.png") to stay unambiguous without
+	// filename noise.
+	if !hasTail {
+		directive += " 另：禁止生成尾图——image-plan.md 不得包含 `## tail` 节，不得调用 generate_image 生成尾图文件，最终报告图片数量不含尾图。"
 	}
-	return fmt.Sprintf(
-		"图片构成要求（必须严格遵守，覆盖 skill 默认数量规则）：生成 %s，共 %d 张。"+
-			"image-plan.md 必须在「计划图片数量」字段写入此数字。",
-		strings.Join(parts, "、"), total,
-	)
+	return directive
 }
 
 // normalizeGoalCondition trims surrounding whitespace and collapses internal

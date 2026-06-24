@@ -730,14 +730,14 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 			name:         "cover only",
 			hasContent:   false,
 			hasTail:      false,
-			wantContains: []string{"图片构成要求", "封面图（cover.png）", "共 1 张", "写入此数字"},
+			wantContains: []string{"图片构成要求", "封面图（cover.png）", "共 1 张", "写入此数字", "禁止生成尾图"},
 			wantAbsence:  []string{"image_01.png", "tail.png", "1~3 张内容图"},
 		},
 		{
 			name:         "cover and content (default)",
 			hasContent:   true,
 			hasTail:      false,
-			wantContains: []string{"图片构成要求", "封面图（cover.png）", "1~3 张内容图", "写入实际生成的总张数", "内容图张数由信息点分组决定", "最多 3 张"},
+			wantContains: []string{"图片构成要求", "封面图（cover.png）", "1~3 张内容图", "写入实际生成的总张数", "内容图张数由信息点分组决定", "最多 3 张", "禁止生成尾图"},
 			wantAbsence:  []string{"tail.png", "共 2 张"},
 		},
 		{
@@ -745,14 +745,14 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 			hasContent:   false,
 			hasTail:      true,
 			wantContains: []string{"图片构成要求", "封面图（cover.png）", "尾图（tail.png）", "共 2 张", "写入此数字"},
-			wantAbsence:  []string{"image_01.png", "1~3 张内容图"},
+			wantAbsence:  []string{"image_01.png", "1~3 张内容图", "禁止生成尾图"},
 		},
 		{
 			name:         "cover content and tail",
 			hasContent:   true,
 			hasTail:      true,
 			wantContains: []string{"图片构成要求", "封面图（cover.png）", "1~3 张内容图", "尾图（tail.png）", "写入实际生成的总张数", "内容图张数由信息点分组决定", "最多 3 张"},
-			wantAbsence:  []string{"共 3 张"},
+			wantAbsence:  []string{"共 3 张", "禁止生成尾图"},
 		},
 	}
 	for _, tc := range cases {
