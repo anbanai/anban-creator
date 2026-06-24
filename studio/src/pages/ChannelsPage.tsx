@@ -161,8 +161,8 @@ export default function ChannelsPage() {
     staleTime: Infinity,
   })
 
-  // 公众号模板：用于频道绑定（绑定后人设/排版随模板同步，只读展示）。仅 article
-  // 平台拉取。人设库（writers）与排版（themes）由 PersonaBlock / ThemePicker 各自
+  // 公众号模板：用于频道绑定（绑定后写作风格/排版随模板同步，只读展示）。仅 article
+  // 平台拉取。写作风格库（writers）与排版（themes）由 PersonaBlock / ThemePicker 各自
   // 内部查询，页面不再持有 writer/theme 资源状态。
   const { data: articleTemplatesData } = useQuery({
     queryKey: queryKeys.templates.list({ type: 'article', scope: 'all' }),
@@ -177,7 +177,7 @@ export default function ChannelsPage() {
     return t.author_name ? `${t.name} · ${t.author_name}` : t.name
   }
 
-  // 绑定模板的完整详情：用于只读展示模板人设（author_name/author_style_intro/
+  // 绑定模板的完整详情：用于只读展示模板写作风格（author_name/author_style_intro/
   // author_avatar_url）与排版（theme）。列表摘要可能不含这些字段，故按 id 取详情。
   const { data: boundTemplate } = useQuery({
     queryKey: queryKeys.templates.detail(templateId ?? ''),
@@ -785,7 +785,7 @@ export default function ChannelsPage() {
 
               {!isSeednote && (
                 <>
-                  {/* 公众号模板：绑定后人设/排版随模板同步（只读）；解绑则在此自定义人设/排版。
+                  {/* 公众号模板：绑定后写作风格/排版随模板同步（只读）；解绑则在此自定义写作风格/排版。
                       运行时解析优先级：task > task-template > plan > channel-template > channel 自身。 */}
                   <FormField control={form.control} name="template_id" render={({ field }) => (
                     <FormItem>
@@ -805,14 +805,14 @@ export default function ChannelsPage() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <FormDescription>绑定模板后，人设与排版随模板同步（改模板自动更新）；不绑定则在此自定义人设与排版。</FormDescription>
+                      <FormDescription>绑定模板后，写作风格与排版随模板同步（改模板自动更新）；不绑定则在此自定义写作风格与排版。</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />
 
                   {templateBound ? (
                     <>
-                      {/* 绑定模板：人设/排版只读展示（取自模板详情，改模板自动更新）。 */}
+                      {/* 绑定模板：写作风格/排版只读展示（取自模板详情，改模板自动更新）。 */}
                       <PersonaBlock
                         readOnly
                         authorName={boundTemplate?.author_name ?? ''}
@@ -826,7 +826,7 @@ export default function ChannelsPage() {
                     </>
                   ) : (
                     <>
-                      {/* 未绑定：编辑频道自身人设（名称即署名 + 写作风格 + 可选头像）与排版。 */}
+                      {/* 未绑定：编辑频道自身写作风格（名称即署名 + 写作风格 + 可选头像）与排版。 */}
                       <PersonaBlock
                         authorName={authorName ?? ''}
                         onAuthorName={(v) => form.setValue('author', v, { shouldDirty: true })}
@@ -881,7 +881,7 @@ export default function ChannelsPage() {
                 )} />
               )}
 
-              {/* 作者名（署名）：seednote 在此编辑；article 改由上方「公众号模板/人设」区块统一维护。 */}
+              {/* 作者名（署名）：seednote 在此编辑；article 改由上方「公众号模板/写作风格」区块统一维护。 */}
               {isSeednote && <FormField control={form.control} name="author" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>

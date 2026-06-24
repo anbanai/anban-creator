@@ -132,18 +132,18 @@ export const channelSchema = z.object({
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
   positioning: z.string().max(1024, "账号定位不能超过 1024 个字符").optional(),
-  style: z.string().max(1024, "风格描述不能超过 1024 个字符").optional(),
+  style: z.string().max(1024, "视觉风格不能超过 1024 个字符").optional(),
   writing_style: z.string().max(100, "写作风格不能超过 100 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
   author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
-  // 公众号人设（自由文本写作风格 + 可选人设头像）：未绑定模板时自定义人设，
-  // 与模板人设模型对齐（author_style_intro → template_writing_style 下发）。
+  // 公众号写作风格（自由文本写作风格 + 可选头像）：未绑定模板时自定义写作风格，
+  // 与模板写作风格模型对齐（author_style_intro → template_writing_style 下发）。
   author_style_intro: z.string().max(1024, "写作风格不能超过 1024 个字符").optional(),
   author_avatar_url: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
-  // 绑定的公众号模板：人设/排版随模板同步，运行时解析纳入优先级链。
+  // 绑定的公众号模板：写作风格/排版随模板同步，运行时解析纳入优先级链。
   template_id: z.string().optional(),
   reference_image_url: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),

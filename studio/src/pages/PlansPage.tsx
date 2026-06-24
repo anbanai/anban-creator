@@ -21,6 +21,8 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import SchedulePicker from '@/components/SchedulePicker'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
+import { PersonaBlock } from '@/components/templates/PersonaBlock'
+import { ThemePicker } from '@/components/templates/ThemePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
@@ -510,7 +512,7 @@ export default function PlansPage() {
 
               <FormField control={form.control} name="style" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>风格描述（可选）</FormLabel>
+                  <FormLabel>视觉风格</FormLabel>
                   <FormControl>
                     <Textarea
                       {...field}
@@ -522,6 +524,26 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {/* 公众号 (article) 写作风格 + 排版：选了模板后随模板只读展示（与模板/账号/任务编辑器一致）。
+                  计划级只读——Plan 无 author_* 列，运行时仍由 template_id → get_channel_profile 解析。 */}
+              {watchedType === 'article' &&
+                (selectedTemplate ? (
+                  <>
+                    <PersonaBlock
+                      readOnly
+                      authorName={selectedTemplate.author_name ?? ''}
+                      onAuthorName={() => {}}
+                      authorStyleIntro={selectedTemplate.author_style_intro ?? ''}
+                      onAuthorStyleIntro={() => {}}
+                      authorAvatarUrl={selectedTemplate.author_avatar_url ?? ''}
+                      onAuthorAvatarUrl={() => {}}
+                    />
+                    <ThemePicker readOnly theme={selectedTemplate.theme ?? ''} onTheme={() => {}} />
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">未选模板时，写作风格与排版随账号设置。</p>
+                ))}
 
               <FormField control={form.control} name="watermark" render={({ field }) => (
                 <FormItem>

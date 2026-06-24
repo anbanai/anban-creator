@@ -87,12 +87,12 @@ export function TemplateCreateDialog({
   // Tags entered as comma-separated text; split on submit. Editing backfills
   // the existing tags joined by ", ".
   const [tagsText, setTagsText] = useState('')
-  // 公众号 (article) 人设 — 统一区块（名称即署名 + 写作风格 + 可选人设头像）：
+  // 公众号 (article) 写作风格 — 统一区块（名称即署名 + 写作风格 + 可选头像）：
   //   - authorName：名称 = 发布作者名（get_channel_profile.author，precedence
   //     template > channel）。
   //   - authorStyleIntro：写作风格（自由文本 框架/写作方式/笔迹）= template_writing_style。
-  //   - authorAvatarUrl：可选人设头像（不入署名）。三者聚合在 PersonaBlock，
-  //     可从人设库一键导入；与公众号频道编辑器 UI 完全一致。
+  //   - authorAvatarUrl：可选头像（不入署名）。三者聚合在 PersonaBlock，
+  //     可从写作风格库一键导入；与公众号频道编辑器 UI 完全一致。
   const [authorName, setAuthorName] = useState('')
   const [authorAvatarUrl, setAuthorAvatarUrl] = useState('')
   const [authorStyleIntro, setAuthorStyleIntro] = useState('')
@@ -355,7 +355,7 @@ export function TemplateCreateDialog({
           {/* Image + Style prompt (horizontal) */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label htmlFor="tpl-style">图片与风格</Label>
+              <Label htmlFor="tpl-style">视觉风格</Label>
               <div className="flex items-center gap-2">
                 {analyzing && (
                   <span className="flex items-center gap-1 text-xs text-primary">
@@ -493,7 +493,7 @@ export function TemplateCreateDialog({
             </div>
           )}
 
-          {/* 公众号 (article) — 人设（名称即署名 + 写作风格 + 可选人设头像，统一区块）
+          {/* 公众号 (article) — 写作风格（名称即署名 + 写作风格 + 可选头像，统一区块）
               + 排版风格（实时预览）。名称落到 author_name（=发布作者名），写作风格落到
               author_style_intro（=template_writing_style）。二者共用 PersonaBlock /
               ThemePicker，与公众号频道编辑器 UI 完全一致。 */}

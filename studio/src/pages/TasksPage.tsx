@@ -12,6 +12,8 @@ import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus, 
 import type { Resolver } from 'react-hook-form'
 import { ChannelSelector } from '@/components/ChannelSelector'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
+import { PersonaBlock } from '@/components/templates/PersonaBlock'
+import { ThemePicker } from '@/components/templates/ThemePicker'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
@@ -698,7 +700,7 @@ export default function TasksPage() {
               {watchedType !== 'viral_analysis' && (
                 <FormField control={form.control} name="style" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>风格描述（可选）</FormLabel>
+                    <FormLabel>视觉风格</FormLabel>
                     <FormControl>
                       <Textarea
                         {...field}
@@ -711,6 +713,26 @@ export default function TasksPage() {
                   </FormItem>
                 )} />
               )}
+
+              {/* 公众号 (article) 写作风格 + 排版：选了模板后随模板只读展示（与模板/账号编辑器一致）。
+                  任务级只读——Task 无 author_* 列，运行时仍由 template_id → get_channel_profile(task_id) 解析。 */}
+              {watchedType === 'article' &&
+                (selectedTemplate ? (
+                  <>
+                    <PersonaBlock
+                      readOnly
+                      authorName={selectedTemplate.author_name ?? ''}
+                      onAuthorName={() => {}}
+                      authorStyleIntro={selectedTemplate.author_style_intro ?? ''}
+                      onAuthorStyleIntro={() => {}}
+                      authorAvatarUrl={selectedTemplate.author_avatar_url ?? ''}
+                      onAuthorAvatarUrl={() => {}}
+                    />
+                    <ThemePicker readOnly theme={selectedTemplate.theme ?? ''} onTheme={() => {}} />
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">未选模板时，写作风格与排版随账号设置。</p>
+                ))}
 
               {/* Watermark toggle */}
               <button

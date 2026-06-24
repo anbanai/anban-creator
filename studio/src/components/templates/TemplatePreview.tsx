@@ -196,18 +196,18 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
               </div>
             )}
 
-            {/* 公众号 (article): 人设（名称即署名 + 写作风格 + 可选头像，同框）+ 排版预览 */}
+            {/* 公众号 (article): 写作风格（名称即署名 + 写作风格 + 可选头像，同框）+ 排版预览 */}
             {data.type === 'article' && (
               <>
-                {/* 人设 —— 名称(署名) + 写作风格 + 可选头像，放在一起（与编辑器一致） */}
+                {/* 写作风格 —— 名称(署名) + 写作风格 + 可选头像，放在一起（与编辑器一致） */}
                 {(data.author_name || data.author_style_intro || data.author_avatar_url) && (
                   <div className="rounded-lg border border-border px-3 py-2">
-                    <p className="text-xs font-medium text-muted-foreground mb-2">人设</p>
+                    <p className="text-xs font-medium text-muted-foreground mb-2">写作风格</p>
                     <div className="flex items-start gap-3">
                       {data.author_avatar_url && (
                         <SignedImage
                           src={data.author_avatar_url}
-                          alt="人设头像"
+                          alt="头像"
                           className="h-12 w-12 shrink-0 rounded-full object-cover"
                           showLoading={false}
                         />
