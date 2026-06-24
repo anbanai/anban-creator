@@ -266,10 +266,11 @@ claude:
   # Override with ANBAN_SERVER_CLAUDE_SANDBOX=true.
 
   # Per-task-type max turns for agent execution.
-  # Defaults: article=100, seednote=60. Increase if agent hits max_turns errors.
+  # article=300 (10-step pipeline + 7 images + HTML + draft), seednote=150.
+  # Increase further if agent hits max_turns errors.
   max_turns:
-    article: 100
-    seednote: 60
+    article: 300
+    seednote: 150
 
   # Docker executor settings (used when executor=docker).
   docker:

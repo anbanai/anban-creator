@@ -262,7 +262,7 @@ type ClaudeConfig struct {
 	PluginDir      string            `yaml:"plugin_dir"`       // Path to the abwriter plugin directory (contains agents/, skills/)
 	Sandbox        bool              `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
-	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 100, "seednote": 60}
+	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 300, "seednote": 150}
 	TaskLogDir     string            `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
 	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). Override with ANBAN_SERVER_CLAUDE_AGENT_SERVER_URL.
 }

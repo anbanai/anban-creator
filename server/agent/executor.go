@@ -206,6 +206,13 @@ func loadAgentDefinition(pluginDir, agentName string) (*claudecode.AgentDefiniti
 	fm := content[3 : 3+end]
 	prompt := strings.TrimSpace(content[3+end+6:])
 
+	// NOTE: only description/tools/model are parsed. The agent frontmatter's
+	// `maxTurns` is intentionally NOT parsed here — the SDK AgentDefinition has
+	// no MaxTurns field, so it cannot be forwarded via WithAgent(). The
+	// production turn budget is governed solely by the server's per-task-type
+	// `max_turns` config (applied via WithMaxTurns in the Execute path). The frontmatter
+	// maxTurns only affects interactive Claude Code runs where the CLI parses
+	// it natively. Keep the two values in sync (config.yaml + agent .md).
 	var frontmatter struct {
 		Description string   `yaml:"description"`
 		Tools       []string `yaml:"tools"`
