@@ -440,6 +440,98 @@ func TestBuildAccountInfo_BylineFallbackToChannel(t *testing.T) {
 	}
 }
 
+// TestBuildAccountInfo_TaskAuthorOverridesTemplateByline: the TOP rung of the author
+// precedence chain — a task carrying its OWN Author wins over both the linked
+// template's AuthorName and the channel byline. This rung was never asserted before
+// (the test helpers create tasks with empty Author), so a refactor dropping the task
+// rung of firstNonEmptyStr(task, template, channel) would slip through.
+func TestBuildAccountInfo_TaskAuthorOverridesTemplateByline(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	ch.Author = "频道作者"
+	if err := repo.Channels().Update(ctx, ch); err != nil {
+		t.Fatalf("update channel author: %v", err)
+	}
+	tmpl := &model.Template{
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		Type:       model.PlatformArticle,
+		Name:       "作者模板",
+		Visibility: "public",
+		AuthorName: "老李",
+		IsActive:   true,
+	}
+	if err := repo.Templates().Create(ctx, tmpl); err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
+	task.TemplateID = &tmpl.ID
+	task.Author = "任务作者"
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task author: %v", err)
+	}
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"channel_id": ch.ID,
+		"scope":      "article",
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	if got := info["author"]; got != "任务作者" {
+		t.Errorf("author = %v, want 任务作者 (task byline wins over template and channel)", got)
+	}
+}
+
+// TestBuildAccountInfo_TemplateBylineOverridesChannelWhenTaskEmpty: the MIDDLE rung —
+// when the task has no Author of its own but links a template that does, the template's
+// AuthorName wins over the channel byline. This is the exact case the centralization
+// fixed: persona used to be folded only in the !templateFromTask branch, so a task with
+// template_id silently fell back to the channel byline instead of the template's.
+// Together with _TaskAuthorOverridesTemplateByline this pins the full chain.
+func TestBuildAccountInfo_TemplateBylineOverridesChannelWhenTaskEmpty(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	ch.Author = "频道作者"
+	if err := repo.Channels().Update(ctx, ch); err != nil {
+		t.Fatalf("update channel author: %v", err)
+	}
+	tmpl := &model.Template{
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		Type:       model.PlatformArticle,
+		Name:       "作者模板",
+		Visibility: "public",
+		AuthorName: "老李",
+		IsActive:   true,
+	}
+	if err := repo.Templates().Create(ctx, tmpl); err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
+	task.TemplateID = &tmpl.ID
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task template_id: %v", err)
+	}
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"channel_id": ch.ID,
+		"scope":      "article",
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	if got := info["author"]; got != "老李" {
+		t.Errorf("author = %v, want 老李 (template byline wins over channel when task author is empty)", got)
+	}
+}
+
 // TestBuildAccountInfo_TemplateDeleted_NoScaffold: a task whose template_id points
 // at a deleted/non-existent template must not fail the whole profile — the
 // template_* keys are simply absent. Guards against stale template_id rows.

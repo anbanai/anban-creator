@@ -37,3 +37,29 @@ func templateTheme(t *model.Template) string {
 	}
 	return t.Theme
 }
+
+// templateAuthorName returns the template's 作者（署名 byline）, nil-safe.
+func templateAuthorName(t *model.Template) string {
+	if t == nil {
+		return ""
+	}
+	return t.AuthorName
+}
+
+// templateAuthorStyleIntro returns the template's 写作风格 (free-text writing
+// imitation), nil-safe.
+func templateAuthorStyleIntro(t *model.Template) string {
+	if t == nil {
+		return ""
+	}
+	return t.AuthorStyleIntro
+}
+
+// templateAuthorAvatar returns the template's optional 写作风格 persona avatar,
+// nil-safe.
+func templateAuthorAvatar(t *model.Template) string {
+	if t == nil {
+		return ""
+	}
+	return t.AuthorAvatarURL
+}

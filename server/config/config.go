@@ -335,6 +335,20 @@ type CORSConfig struct {
 // AsynqConfig holds Asynq task queue configuration.
 type AsynqConfig struct {
 	Concurrency int `yaml:"concurrency"` // default 3
+
+	// ContentGenerateTimeout bounds the whole content:generate task (research →
+	// images → HTML → draft). It is set as the asynq task Timeout and as the
+	// Redis-down fallback goroutine deadline. Must comfortably exceed the
+	// realistic pipeline wall-clock time so the agent reaches 100% delivery
+	// before the asynq ctx expires. Default 60m (the wechatarticle pipeline
+	// with 8 vision-verified images runs ~35-40m at max_turns.article=300).
+	ContentGenerateTimeout time.Duration `yaml:"content_generate_timeout"` // default 60m
+
+	// PersistTimeout bounds the post-execution DB writes (result, workspace
+	// files, workflow status, terminal status) which are decoupled from the
+	// execution ctx so completed work is saved even when the pipeline overruns
+	// ContentGenerateTimeout. Default 10m.
+	PersistTimeout time.Duration `yaml:"persist_timeout"` // default 10m
 }
 
 // InvitationConfig holds invitation system configuration.
@@ -441,6 +455,12 @@ func (c *Config) applyDefaults() {
 	if c.Asynq.Concurrency == 0 {
 		c.Asynq.Concurrency = 3
 	}
+	if c.Asynq.ContentGenerateTimeout == 0 {
+		c.Asynq.ContentGenerateTimeout = 60 * time.Minute
+	}
+	if c.Asynq.PersistTimeout == 0 {
+		c.Asynq.PersistTimeout = 10 * time.Minute
+	}
 
 	// Invitation defaults.
 	if c.Invitation.MaxPerUser == 0 {
@@ -486,7 +506,10 @@ func (c *Config) applyDefaults() {
 		c.Claude.Docker.MemoryMB = 4096
 	}
 	if c.Claude.Docker.TimeoutSec == 0 {
-		c.Claude.Docker.TimeoutSec = 1800
+		// Default 3600s (60m) to stay >= asynq.content_generate_timeout (60m).
+		// The container must outlive the task deadline, otherwise it is killed
+		// before the agent finishes (silent partial failure).
+		c.Claude.Docker.TimeoutSec = 3600
 	}
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
@@ -871,6 +894,17 @@ func (c *Config) Validate() error {
 
 	if c.Claude.Executor != "local" && c.Claude.Executor != "docker" {
 		errs = append(errs, fmt.Sprintf("claude.executor must be 'local' or 'docker', got %q", c.Claude.Executor))
+	}
+
+	// When using the Docker executor, the container timeout must be at least as
+	// long as content_generate_timeout, otherwise the container is killed before
+	// the asynq task deadline (the agent's work is lost mid-pipeline).
+	if c.Claude.Executor == "docker" {
+		if time.Duration(c.Claude.Docker.TimeoutSec)*time.Second < c.Asynq.ContentGenerateTimeout {
+			errs = append(errs, fmt.Sprintf(
+				"claude.docker.timeout_sec (%ds) must be >= asynq.content_generate_timeout (%s); otherwise the container is killed before the task deadline",
+				c.Claude.Docker.TimeoutSec, c.Asynq.ContentGenerateTimeout))
+		}
 	}
 
 	if c.Claude.AgentServerURL != "" {

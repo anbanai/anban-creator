@@ -21,7 +21,6 @@ import (
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/platform"
 	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/seednote"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
@@ -107,8 +106,6 @@ type channelRequest struct {
 	TemplateID         string `json:"template_id"`
 	ReferenceImageURL  string `json:"reference_image_url"`
 	ImageRatio         string `json:"image_ratio"`
-	Layout             string `json:"layout"`
-	ImagePreset        string `json:"image_preset"`
 	MaxConcurrentTasks int    `json:"max_concurrent_tasks"`
 	// Config fields for platform-specific credentials.
 	WechatAppID      string `json:"wechat_app_id"`
@@ -134,8 +131,6 @@ func (req *channelRequest) toChannel() *model.Channel {
 		TemplateID:         req.TemplateID,
 		ReferenceImageURL:  req.ReferenceImageURL,
 		ImageRatio:         req.ImageRatio,
-		Layout:             req.Layout,
-		ImagePreset:        req.ImagePreset,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		Config: model.ChannelConfig{
 			WechatAppID:      req.WechatAppID,
@@ -250,13 +245,6 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
 
-	if req.Layout != "" && resources.Manager().Get(resources.CategoryLayout, req.Layout) == nil {
-		return Error(c, fiber.StatusBadRequest, "invalid layout: "+req.Layout)
-	}
-	if req.ImagePreset != "" && resources.Manager().Get(resources.CategoryImagePreset, req.ImagePreset) == nil {
-		return Error(c, fiber.StatusBadRequest, "invalid image_preset: "+req.ImagePreset)
-	}
-
 	ch := req.toChannel()
 
 	// Force max_concurrent_tasks based on user tier.
@@ -342,12 +330,6 @@ func (h *ChannelHandler) Update(c fiber.Ctx) error {
 
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
-	}
-	if req.Layout != "" && resources.Manager().Get(resources.CategoryLayout, req.Layout) == nil {
-		return Error(c, fiber.StatusBadRequest, "invalid layout: "+req.Layout)
-	}
-	if req.ImagePreset != "" && resources.Manager().Get(resources.CategoryImagePreset, req.ImagePreset) == nil {
-		return Error(c, fiber.StatusBadRequest, "invalid image_preset: "+req.ImagePreset)
 	}
 
 	ch := req.toChannel()
@@ -781,10 +763,6 @@ func (req *channelRequest) getFieldValue(key string) string {
 		return req.ReferenceImageURL
 	case "image_ratio":
 		return req.ImageRatio
-	case "layout":
-		return req.Layout
-	case "image_preset":
-		return req.ImagePreset
 	case "max_concurrent_tasks":
 		return fmt.Sprintf("%d", req.MaxConcurrentTasks)
 	case "wechat_app_id":

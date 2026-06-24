@@ -84,9 +84,14 @@ type createPlanRequest struct {
 	Style              string `json:"style"`
 	WritingStyle       string `json:"writing_style"`
 	Theme              string `json:"theme"`
-	Watermark          *bool  `json:"watermark"`
-	Goal               string `json:"goal"`
-	GoalMode           bool   `json:"goal_mode"`
+	// Author / AuthorStyleIntro / AuthorAvatarURL: 公众号 作者（署名）+ 写作风格（模仿）
+	// + 可选人设头像 overrides, orthogonal to Style/WritingStyle/Theme.
+	Author           string `json:"author"`
+	AuthorStyleIntro string `json:"author_style_intro"`
+	AuthorAvatarURL  string `json:"author_avatar_url"`
+	Watermark        *bool  `json:"watermark"`
+	Goal             string `json:"goal"`
+	GoalMode         bool   `json:"goal_mode"`
 	// TemplateID records the template selected during plan creation. nil/empty = no template.
 	TemplateID *string `json:"template_id,omitempty"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
@@ -104,12 +109,17 @@ type updatePlanRequest struct {
 	Style              *string `json:"style"`
 	WritingStyle       *string `json:"writing_style"`
 	Theme              *string `json:"theme"`
-	Watermark          *bool   `json:"watermark"`
-	Goal               string  `json:"goal"`
-	GoalMode           *bool   `json:"goal_mode"`
-	TemplateID         *string `json:"template_id,omitempty"`
-	HasContentImage    *bool   `json:"has_content_image,omitempty"`
-	HasTailImage       *bool   `json:"has_tail_image,omitempty"`
+	// Author / AuthorStyleIntro / AuthorAvatarURL: leave-unchanged semantics
+	// (omitted = unchanged), same as Style/WritingStyle/Theme.
+	Author           *string `json:"author"`
+	AuthorStyleIntro *string `json:"author_style_intro"`
+	AuthorAvatarURL  *string `json:"author_avatar_url"`
+	Watermark        *bool   `json:"watermark"`
+	Goal             string  `json:"goal"`
+	GoalMode         *bool   `json:"goal_mode"`
+	TemplateID       *string `json:"template_id,omitempty"`
+	HasContentImage  *bool   `json:"has_content_image,omitempty"`
+	HasTailImage     *bool   `json:"has_tail_image,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -152,6 +162,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		Style:              req.Style,
 		WritingStyle:       req.WritingStyle,
 		Theme:              req.Theme,
+		Author:             req.Author,
+		AuthorStyleIntro:   req.AuthorStyleIntro,
+		AuthorAvatarURL:    req.AuthorAvatarURL,
 		Watermark:          req.Watermark,
 		Goal:               req.Goal,
 		GoalMode:           req.GoalMode,
@@ -276,6 +289,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		Style:              req.Style,
 		WritingStyle:       req.WritingStyle,
 		Theme:              req.Theme,
+		Author:             req.Author,
+		AuthorStyleIntro:   req.AuthorStyleIntro,
+		AuthorAvatarURL:    req.AuthorAvatarURL,
 		Watermark:          req.Watermark,
 		Goal:               req.Goal,
 		GoalMode:           req.GoalMode,

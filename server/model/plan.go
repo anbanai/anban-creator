@@ -26,6 +26,13 @@ type Plan struct {
 	// Theme is the plan-level 排版样式 (theme resource key). Orthogonal to
 	// Style/WritingStyle; resolved plan > template > channel, copied to Task.
 	Theme string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`
+	// Author / AuthorStyleIntro / AuthorAvatarURL are the plan-level 作者（署名） +
+	// 写作风格（free-text imitation） + 可选人设头像, orthogonal to Style/WritingStyle/
+	// Theme. Resolved plan > template > channel, copied to Task by CreateFromPlan
+	// (task-level override wins). Surfaced via get_channel_profile(task_id).
+	Author           string `gorm:"type:varchar(50);default:''" json:"author,omitempty"`
+	AuthorStyleIntro string `gorm:"type:text" json:"author_style_intro,omitempty"`
+	AuthorAvatarURL  string `gorm:"type:varchar(500);default:''" json:"author_avatar_url,omitempty"`
 	// TemplateID records which template was selected during plan creation. Copied
 	// to Task.TemplateID by CreateFromPlan so spawned tasks surface the template's
 	// content scaffold (writing style / structure / example) to the agent via
