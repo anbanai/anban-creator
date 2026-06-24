@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/seednote"
@@ -305,12 +306,19 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	visualSource := "channel"
 	writerSource := "channel"
 	themeSource := "channel"
+	// 公众号人设维度（作者署名 + 写作风格模仿 + 可选头像），与视觉/写作key/排版正交，
+	// 同样按 task > template > channel 解析。
+	effectiveAuthor := ch.Author
+	effectiveAuthorIntro := ch.AuthorStyleIntro
+	effectiveAuthorAvatar := ch.AuthorAvatarURL
 	var taskTemplateID *string
+	var task *model.Task
 	if taskID != "" {
 		if svcs.TaskSvc == nil {
 			return nil, "task service not available"
 		}
-		task, terr := svcs.TaskSvc.GetByID(ctx, taskID)
+		var terr error
+		task, terr = svcs.TaskSvc.GetByID(ctx, taskID)
 		if terr != nil {
 			return nil, fmt.Sprintf("get task: %v", terr)
 		}
@@ -323,6 +331,8 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		// back to the channel PER DIMENSION when a task field is empty, and
 		// report each dimension's source honestly — so a task that only set its
 		// writer doesn't silently clobber the channel's visual/theme.
+		// (Persona Author/AuthorStyleIntro/AuthorAvatarURL is resolved centrally
+		// below via task > template > channel, so it is not folded here.)
 		if task.Style != "" {
 			effectiveVisual = task.Style
 			visualSource = "task"
@@ -345,7 +355,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	//   - theme         (排版样式): theme resource key, e.g. "autumn-warm"
 	info := map[string]any{
 		"name":                 ch.Name,
-		"author":               ch.Author,
+		"author":               effectiveAuthor,
 		"positioning":          ch.Positioning,
 		"keywords":             ch.Keywords,
 		"style":                effectiveVisual,
@@ -368,8 +378,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	// Add available resource options for the platform.
 	info["available_themes"] = resources.Manager().ListByPlatform(resources.CategoryTheme, ch.Platform)
 	info["available_writers"] = resources.Manager().ListByPlatform(resources.CategoryWriter, ch.Platform)
-	info["available_layouts"] = resources.Manager().ListByPlatform(resources.CategoryLayout, ch.Platform)
-	info["available_image_presets"] = resources.Manager().ListByPlatform(resources.CategoryImagePreset, ch.Platform)
 
 	// Descriptions for the RESOLVED theme / writer (not the raw channel fields).
 	if effectiveTheme != "" {
@@ -383,16 +391,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			// of the resolved writer resource key. It is independent of `style`
 			// (visual). The two describe different dimensions and must not be conflated.
 			info["writing_style_description"] = e.Description
-		}
-	}
-	if ch.Layout != "" {
-		if e := resources.Manager().Get(resources.CategoryLayout, ch.Layout); e != nil {
-			info["layout_description"] = e.Description
-		}
-	}
-	if ch.ImagePreset != "" {
-		if e := resources.Manager().Get(resources.CategoryImagePreset, ch.ImagePreset); e != nil {
-			info["image_preset_description"] = e.Description
 		}
 	}
 
@@ -426,36 +424,23 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		effectiveTemplateID = ch.TemplateID
 	}
 
+	var tmpl *model.Template
 	if effectiveTemplateID != "" && svcs.TemplateSvc != nil {
-		if tmpl, terr := svcs.TemplateSvc.GetByID(ctx, effectiveTemplateID); terr == nil {
+		if t, terr := svcs.TemplateSvc.GetByID(ctx, effectiveTemplateID); terr == nil {
+			tmpl = t
 			info["template_id"] = tmpl.ID
 			info["template_name"] = tmpl.Name
-			// 作者（署名 byline）: the template AuthorName overrides the channel byline
-			// (precedence template > channel). It surfaces as the resolved top-level
-			// `author`, which the agent passes to publish_draft.
 			if tmpl.AuthorName != "" {
-				info["author"] = tmpl.AuthorName
 				info["template_author_name"] = tmpl.AuthorName
-			}
-			// 写作风格（模仿写作）: article inline intro (free-text 框架/写作方式/笔迹),
-			// else the writer-key scaffold WritingStyle (poster). Independent of the byline.
-			if tmpl.AuthorStyleIntro != "" {
-				info["template_writing_style"] = tmpl.AuthorStyleIntro
-			} else {
-				info["template_writing_style"] = tmpl.WritingStyle
-			}
-			// 写作风格的可选人设头像（仅作人设参考，不入署名）。
-			if tmpl.AuthorAvatarURL != "" {
-				info["template_author_avatar"] = tmpl.AuthorAvatarURL
 			}
 			info["template_theme"] = tmpl.Theme
 			info["template_structure"] = extractScaffoldText(tmpl.Structure)
 			info["template_example"] = extractScaffoldText(tmpl.ExampleContent)
 			// Channel-level template (no task template): fold its theme into the
-			// resolved theme so the agent uses it for convert_markdown. A task
-			// template's theme was already folded into Task.Theme at creation (and
-			// set effectiveTheme above), so we only fold for the channel-template
-			// path — never clobbering a task's explicit theme override.
+			// resolved theme so convert_markdown uses it. A task template's theme was
+			// already folded into Task.Theme at creation (and set effectiveTheme above),
+			// so we only fold for the channel-template path — never clobbering a task's
+			// explicit theme override. Persona is resolved centrally below.
 			if !templateFromTask && tmpl.Theme != "" {
 				effectiveTheme = tmpl.Theme
 				themeSource = "channel-template"
@@ -469,18 +454,54 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			mcpLog.Warn().Err(terr).Str("template_id", effectiveTemplateID).
 				Msg("linked template not found; skipping content scaffold")
 		}
+	}
+
+	// 人设维度（作者署名 + 写作风格模仿 + 可选头像）按 task > template > channel 解析。
+	// 这对 task-template 与 channel-template 两条路径都成立：task 字段在创建时已解析
+	// （task > template > channel），tmpl 为有效模板（缺失则为 nil）。写作风格模仿优先取
+	// AuthorStyleIntro，回退 writer-key scaffold WritingStyle（poster）。逐维度独立，作者
+	// 署名绝不与写作模仿混用。author 透传给 publish_draft；template_writing_style 供写作
+	// 模仿；template_author_avatar 为人设参考（不入署名）。
+	var tmplAuthor, tmplIntro, tmplAvatar string
+	if tmpl != nil {
+		tmplAuthor = tmpl.AuthorName
+		tmplIntro = tmpl.AuthorStyleIntro
+		if tmplIntro == "" {
+			tmplIntro = tmpl.WritingStyle
+		}
+		tmplAvatar = tmpl.AuthorAvatarURL
+	}
+	if task != nil {
+		effectiveAuthor = firstNonEmptyStr(task.Author, tmplAuthor, ch.Author)
+		effectiveAuthorIntro = firstNonEmptyStr(task.AuthorStyleIntro, tmplIntro, ch.AuthorStyleIntro)
+		effectiveAuthorAvatar = firstNonEmptyStr(task.AuthorAvatarURL, tmplAvatar, ch.AuthorAvatarURL)
 	} else {
-		// No template bound (task or channel): surface the channel's own persona so
-		// a writing direction defined directly on the channel still reaches the agent.
-		if ch.AuthorStyleIntro != "" {
-			info["template_writing_style"] = ch.AuthorStyleIntro
-		}
-		if ch.AuthorAvatarURL != "" {
-			info["template_author_avatar"] = ch.AuthorAvatarURL
-		}
+		effectiveAuthor = firstNonEmptyStr(tmplAuthor, ch.Author)
+		effectiveAuthorIntro = firstNonEmptyStr(tmplIntro, ch.AuthorStyleIntro)
+		effectiveAuthorAvatar = firstNonEmptyStr(tmplAvatar, ch.AuthorAvatarURL)
+	}
+	info["author"] = effectiveAuthor
+	if effectiveAuthorIntro != "" {
+		info["template_writing_style"] = effectiveAuthorIntro
+	}
+	if effectiveAuthorAvatar != "" {
+		info["template_author_avatar"] = effectiveAuthorAvatar
 	}
 
 	return info, ""
+}
+
+// firstNonEmptyStr returns the first non-empty argument, or "" when all are empty.
+// Local mirror of service.firstNonEmpty (which is unexported) so package mcp can
+// resolve persona dimensions with task > template > channel precedence without an
+// export cycle. Pure helper; all args must be plain strings.
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // extractScaffoldText pulls the human-editable text out of a template scaffold

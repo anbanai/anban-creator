@@ -23,6 +23,10 @@ export interface Plan {
   goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
+  // 公众号人设（与频道/模板同链解析：plan > template > channel），spawned task 继承。
+  author?: string
+  author_style_intro?: string
+  author_avatar_url?: string
   // template_id records the template selected when creating the plan; spawned
   // tasks inherit it so the agent can surface the template's content scaffold
   // via get_channel_profile(task_id).
@@ -48,6 +52,10 @@ export interface CreatePlanRequest {
   // Seednote image composition (see CreateTaskRequest).
   has_content_image?: boolean
   has_tail_image?: boolean
+  // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。
+  author?: string
+  author_style_intro?: string
+  author_avatar_url?: string
   template_id?: string
 }
 
@@ -65,5 +73,9 @@ export interface UpdatePlanRequest {
   goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
+  // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。
+  author?: string
+  author_style_intro?: string
+  author_avatar_url?: string
   template_id?: string
 }

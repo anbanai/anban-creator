@@ -69,25 +69,30 @@ func (h *TaskHandler) SetRepository(repo repository.Repository) {
 // Request types.
 
 type createTaskRequest struct {
-	ChannelID          string  `json:"channel_id"`
-	Prompt             string  `json:"prompt"`
-	Quantity           int     `json:"quantity"`
-	ImageRatio         string  `json:"image_ratio"`
-	ImageModelKey      string  `json:"image_model_key"`
-	SkipReferenceImage *bool   `json:"skip_reference_image"`
-	ReferenceImageURL  string  `json:"reference_image_url"`
-	Style              string  `json:"style"`
-	WritingStyle       string  `json:"writing_style"`
-	Theme              string  `json:"theme"`
-	Watermark          *bool   `json:"watermark"`
-	Goal               string  `json:"goal"`
-	GoalMode           bool    `json:"goal_mode"`
-	TemplateID         *string `json:"template_id,omitempty"`
+	ChannelID          string `json:"channel_id"`
+	Prompt             string `json:"prompt"`
+	Quantity           int    `json:"quantity"`
+	ImageRatio         string `json:"image_ratio"`
+	ImageModelKey      string `json:"image_model_key"`
+	SkipReferenceImage *bool  `json:"skip_reference_image"`
+	ReferenceImageURL  string `json:"reference_image_url"`
+	Style              string `json:"style"`
+	WritingStyle       string `json:"writing_style"`
+	Theme              string `json:"theme"`
+	// Author / AuthorStyleIntro / AuthorAvatarURL: 公众号 作者（署名）+ 写作风格（模仿）
+	// + 可选人设头像 overrides, orthogonal to Style/WritingStyle/Theme.
+	Author           string  `json:"author"`
+	AuthorStyleIntro string  `json:"author_style_intro"`
+	AuthorAvatarURL  string  `json:"author_avatar_url"`
+	Watermark        *bool   `json:"watermark"`
+	Goal             string  `json:"goal"`
+	GoalMode         bool    `json:"goal_mode"`
+	TemplateID       *string `json:"template_id,omitempty"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to CreateManualParams defaults (content on,
 	// tail off). Non-seednote task types ignore them.
-	HasContentImage    *bool   `json:"has_content_image,omitempty"`
-	HasTailImage       *bool   `json:"has_tail_image,omitempty"`
+	HasContentImage *bool `json:"has_content_image,omitempty"`
+	HasTailImage    *bool `json:"has_tail_image,omitempty"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -170,6 +175,9 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		Style:             req.Style,
 		WritingStyle:      req.WritingStyle,
 		Theme:             req.Theme,
+		Author:            req.Author,
+		AuthorStyleIntro:  req.AuthorStyleIntro,
+		AuthorAvatarURL:   req.AuthorAvatarURL,
 		Watermark:         req.Watermark,
 		Goal:              req.Goal,
 		GoalMode:          req.GoalMode,

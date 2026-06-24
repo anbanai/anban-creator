@@ -162,9 +162,10 @@ func (s *ChannelService) Update(ctx context.Context, userID, channelID string, c
 	if ch.Theme != "" {
 		existing.Theme = ch.Theme
 	}
-	if ch.Author != "" {
-		existing.Author = ch.Author
-	}
+	// 作者署名（byline）：unconditional assign 以支持清空，与 AuthorStyleIntro/
+	// AuthorAvatarURL 一致。导入模型下"导入模板→清空署名"是合法操作，guarded assign
+	// 会让清空后的保存静默回填旧署名。
+	existing.Author = ch.Author
 	// 公众号人设字段 + 绑定模板：unconditional assign 以支持清空（解除绑定、清头像/写作风格）。
 	existing.AuthorStyleIntro = ch.AuthorStyleIntro
 	existing.AuthorAvatarURL = ch.AuthorAvatarURL

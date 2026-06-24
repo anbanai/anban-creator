@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -83,6 +83,9 @@ export default function TasksPage() {
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
+  // 递增令牌：openCreate 的模板异步回填在 .then 中比对，若对话框已重开/切走则丢弃，
+  // 避免陈旧回填串改表单（与 ChannelsPage 同一防护思路）。
+  const taskCreateTokenRef = useRef(0)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
 
@@ -115,10 +118,14 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '' },
+    defaultValues: { type: 'seednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
+  const watchedAuthor = useWatch({ control: form.control, name: 'author' })
+  const watchedAuthorIntro = useWatch({ control: form.control, name: 'author_style_intro' })
+  const watchedAuthorAvatar = useWatch({ control: form.control, name: 'author_avatar_url' })
+  const watchedTheme = useWatch({ control: form.control, name: 'theme' })
 
   // Auto-focus prompt field when dialog opens
   useEffect(() => {
@@ -226,7 +233,7 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '' })
+    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '' })
     setQuantity(1)
     setWatermark(false)
     setChannelImageRatio('')
@@ -240,13 +247,19 @@ export default function TasksPage() {
     // 弹窗在用户未改动时就困住关闭）。取回失败（模板已删等）静默留空，不阻断创建。
     const templateID = searchParams.get('template_id')
     if (templateID) {
+      const token = ++taskCreateTokenRef.current
       api.templates
         .get(templateID)
         .then((tmpl) => {
+          // 对话框已重开/切走则丢弃这条陈旧回填，避免串改。
+          if (taskCreateTokenRef.current !== token) return
           setSelectedTemplate(tmpl)
           form.setValue('style', tmpl.style_prompt || '', { shouldDirty: false })
           form.setValue('writing_style', tmpl.writing_style || '', { shouldDirty: false })
           form.setValue('theme', tmpl.theme || '', { shouldDirty: false })
+          form.setValue('author', tmpl.author_name || '', { shouldDirty: false })
+          form.setValue('author_style_intro', tmpl.author_style_intro || '', { shouldDirty: false })
+          form.setValue('author_avatar_url', tmpl.author_avatar_url || '', { shouldDirty: false })
         })
         .catch(() => {
           /* 模板不存在/已删：保持空选，用户可手动选其他模板 */
@@ -265,7 +278,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '' })
+    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '' })
     setQuantity(1)
     setWatermark(false)
     setGoalMode(false)
@@ -287,6 +300,9 @@ export default function TasksPage() {
       style: values.style || undefined,
       writing_style: values.writing_style || undefined,
       theme: values.theme || undefined,
+      author: values.author || undefined,
+      author_style_intro: values.author_style_intro || undefined,
+      author_avatar_url: values.author_avatar_url || undefined,
       watermark: watermark || undefined,
       goal_mode: goalMode || undefined,
       goal: goalMode ? (goalText.trim() || undefined) : undefined,
@@ -307,6 +323,10 @@ export default function TasksPage() {
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
     form.setValue('writing_style', template.writing_style || '', { shouldDirty: true })
     form.setValue('theme', template.theme || '', { shouldDirty: true })
+    // 公众号人设（作者署名 + 写作风格模仿 + 可选头像）随模板导入，仍可编辑。
+    form.setValue('author', template.author_name || '', { shouldDirty: true })
+    form.setValue('author_style_intro', template.author_style_intro || '', { shouldDirty: true })
+    form.setValue('author_avatar_url', template.author_avatar_url || '', { shouldDirty: true })
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -580,7 +600,7 @@ export default function TasksPage() {
 
       {/* Create Task Dialog */}
       <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>新建任务</DialogTitle>
           </DialogHeader>
@@ -714,25 +734,24 @@ export default function TasksPage() {
                 )} />
               )}
 
-              {/* 公众号 (article) 写作风格 + 排版：选了模板后随模板只读展示（与模板/账号编辑器一致）。
-                  任务级只读——Task 无 author_* 列，运行时仍由 template_id → get_channel_profile(task_id) 解析。 */}
-              {watchedType === 'article' &&
-                (selectedTemplate ? (
-                  <>
-                    <PersonaBlock
-                      readOnly
-                      authorName={selectedTemplate.author_name ?? ''}
-                      onAuthorName={() => {}}
-                      authorStyleIntro={selectedTemplate.author_style_intro ?? ''}
-                      onAuthorStyleIntro={() => {}}
-                      authorAvatarUrl={selectedTemplate.author_avatar_url ?? ''}
-                      onAuthorAvatarUrl={() => {}}
-                    />
-                    <ThemePicker readOnly theme={selectedTemplate.theme ?? ''} onTheme={() => {}} />
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground">未选模板时，写作风格与排版随账号设置。</p>
-                ))}
+              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑（覆盖模板/账号）。
+                  任务级 author_* 字段经后端解析链 task > template > channel 下发。 */}
+              {watchedType === 'article' && (
+                <>
+                  <PersonaBlock
+                    authorName={watchedAuthor ?? ''}
+                    onAuthorName={(v) => form.setValue('author', v, { shouldDirty: true })}
+                    authorStyleIntro={watchedAuthorIntro ?? ''}
+                    onAuthorStyleIntro={(v) => form.setValue('author_style_intro', v, { shouldDirty: true })}
+                    authorAvatarUrl={watchedAuthorAvatar ?? ''}
+                    onAuthorAvatarUrl={(v) => form.setValue('author_avatar_url', v, { shouldDirty: true })}
+                  />
+                  <ThemePicker theme={watchedTheme ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
+                  {!selectedTemplate && (
+                    <p className="text-xs text-muted-foreground">未选模板时默认随账号设置，也可在此覆盖。</p>
+                  )}
+                </>
+              )}
 
               {/* Watermark toggle */}
               <button

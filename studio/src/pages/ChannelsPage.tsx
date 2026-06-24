@@ -8,9 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import { queryKeys } from '@/lib/query-keys'
-import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig } from '@/types'
-import type { ResourceEntry } from '@/types/resource'
+import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig, Template } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ChannelCard } from '@/components/ChannelCard'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -22,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
 import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
+import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
 import { ThemePicker } from '@/components/templates/ThemePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
@@ -56,8 +55,6 @@ const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   style: '',
   writing_style: '',
   theme: '',
-  layout: '',
-  image_preset: '',
   author: '',
   author_style_intro: '',
   author_avatar_url: '',
@@ -80,8 +77,6 @@ function channelToForm(ch: Channel): ChannelFormValues {
     style: ch.style || '',
     writing_style: ch.writing_style || '',
     theme: ch.theme || '',
-    layout: ch.layout || '',
-    image_preset: ch.image_preset || '',
     author: ch.author || '',
     author_style_intro: ch.author_style_intro || '',
     author_avatar_url: ch.author_avatar_url || '',
@@ -103,6 +98,10 @@ export default function ChannelsPage() {
   const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [analyzingStyle, setAnalyzingStyle] = useState(false)
+  // 导入模型：频道 Owns 自己的人设（视觉/写作风格/排版/作者）。selectedTemplate 仅
+  // 用于 TemplatePicker 的高亮，标记"当前按哪个模板导入"——不写入表单，提交时也不发送
+  // template_id（后端 Update 无条件清空，存量绑定频道保存即迁移为自有值）。
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const styleManuallyEditedRef = useRef(false)
   const { submit } = useSubmitLock()
 
@@ -115,7 +114,6 @@ export default function ChannelsPage() {
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
-  const templateId = useWatch({ control: form.control, name: 'template_id' })
   const authorName = useWatch({ control: form.control, name: 'author' })
   const authorStyleIntro = useWatch({ control: form.control, name: 'author_style_intro' })
   const authorAvatarUrl = useWatch({ control: form.control, name: 'author_avatar_url' })
@@ -150,58 +148,6 @@ export default function ChannelsPage() {
   const currentPlatformConfig = platformConfigMap[selectedPlatform]
   const hasProfileField = currentPlatformConfig?.fields?.some((field) => field.key === 'profile_url') ?? false
 
-  const { data: layoutResources } = useQuery({
-    queryKey: queryKeys.resources.layouts,
-    queryFn: () => api.resources.list('layouts'),
-    staleTime: Infinity,
-  })
-  const { data: presetResources } = useQuery({
-    queryKey: queryKeys.resources.imagePresets,
-    queryFn: () => api.resources.list('image_presets'),
-    staleTime: Infinity,
-  })
-
-  // 公众号模板：用于频道绑定（绑定后写作风格/排版随模板同步，只读展示）。仅 article
-  // 平台拉取。写作风格库（writers）与排版（themes）由 PersonaBlock / ThemePicker 各自
-  // 内部查询，页面不再持有 writer/theme 资源状态。
-  const { data: articleTemplatesData } = useQuery({
-    queryKey: queryKeys.templates.list({ type: 'article', scope: 'all' }),
-    queryFn: () => api.templates.list({ type: 'article', scope: 'all' }),
-    staleTime: Infinity,
-    enabled: selectedPlatform === 'article',
-  })
-  const articleTemplates = articleTemplatesData?.items ?? []
-  const articleTemplateLabel = (id: string) => {
-    const t = articleTemplates.find((x) => x.id === id)
-    if (!t) return id
-    return t.author_name ? `${t.name} · ${t.author_name}` : t.name
-  }
-
-  // 绑定模板的完整详情：用于只读展示模板写作风格（author_name/author_style_intro/
-  // author_avatar_url）与排版（theme）。列表摘要可能不含这些字段，故按 id 取详情。
-  const { data: boundTemplate } = useQuery({
-    queryKey: queryKeys.templates.detail(templateId ?? ''),
-    queryFn: () => api.templates.get(templateId as string),
-    enabled: !!templateId,
-    staleTime: Infinity,
-  })
-
-  const layoutOptions = useMemo(() => [
-    { value: '', label: '不设置' },
-    ...(layoutResources?.items || []).map((l: ResourceEntry) => ({
-      value: l.name,
-      label: l.description || l.name,
-    })),
-  ], [layoutResources])
-
-  const presetOptions = useMemo(() => [
-    { value: '', label: '不设置' },
-    ...(presetResources?.items || []).map((p: ResourceEntry) => ({
-      value: p.name,
-      label: p.description || p.name,
-    })),
-  ], [presetResources])
-
   function extractSupportedProfileUrl(value: string) {
     const match = value.match(/https?:\/\/((m\.|www\.)?xiaohongshu\.com|xhslink\.com)\/[^\s"'<>，。！？；、]+/i)
     return match?.[0]?.replace(/[.,;:!?)]}）】。！？；，、]+$/g, '') || ''
@@ -212,6 +158,9 @@ export default function ChannelsPage() {
   }
 
   const skipAutoFetchRef = useRef(false)
+  // 递增令牌：openEdit 触发的模板异步回填在 .then 中比对，若对话框已切到别的频道则丢弃，
+  // 避免陈旧回填串改其他频道的表单（与上方 cancelled 取消防护同一思路）。
+  const channelEditTokenRef = useRef(0)
 
   useEffect(() => {
     if (skipAutoFetchRef.current) {
@@ -376,6 +325,7 @@ export default function ChannelsPage() {
     setEditingChannel(null)
     setProfileFetchHint(null)
     form.reset(CHANNEL_FORM_DEFAULTS)
+    setSelectedTemplate(null)
     setModalOpen(true)
   }
 
@@ -384,7 +334,31 @@ export default function ChannelsPage() {
     setProfileFetchHint(null)
     form.reset(channelToForm(channel))
     skipAutoFetchRef.current = true
+    setSelectedTemplate(null)
     setModalOpen(true)
+
+    // 导入模型存量兼容：旧"绑定模板"频道的人设字段历史上为空（运行时由模板下发）。
+    // 打开编辑时把模板人设作为默认值回填到当前为空的字段，让用户看到生效中的人设并可
+    // 编辑。保存后 template_id 由后端清空（迁移为频道自有值）。shouldDirty:false 避免
+    // 未改动时触发脏检查弹窗。模板已删则静默留空，用户可手动选其他模板。
+    if (channel.template_id) {
+      const token = ++channelEditTokenRef.current
+      api.templates
+        .get(channel.template_id)
+        .then((t) => {
+          // 对话框已切到别的频道（或重开）则丢弃这条陈旧回填，避免串改。
+          if (channelEditTokenRef.current !== token) return
+          setSelectedTemplate(t)
+          if (!form.getValues('style')) form.setValue('style', t.style_prompt || '', { shouldDirty: false })
+          if (!form.getValues('author')) form.setValue('author', t.author_name || '', { shouldDirty: false })
+          if (!form.getValues('author_style_intro')) form.setValue('author_style_intro', t.author_style_intro || '', { shouldDirty: false })
+          if (!form.getValues('author_avatar_url')) form.setValue('author_avatar_url', t.author_avatar_url || '', { shouldDirty: false })
+          if (!form.getValues('theme')) form.setValue('theme', t.theme || '', { shouldDirty: false })
+        })
+        .catch(() => {
+          /* 模板不存在/已删：保持空选，用户可手动选其他模板 */
+        })
+    }
   }
 
   function closeModal() {
@@ -400,7 +374,20 @@ export default function ChannelsPage() {
     setShowDirtyDialog(false)
     setEditingChannel(null)
     setProfileFetchHint(null)
+    setSelectedTemplate(null)
     form.reset(CHANNEL_FORM_DEFAULTS)
+  }
+
+  // 选模板=一次性把模板风格导入表单（视觉/作者/写作风格/排版，可编辑）。再次点击同一
+  // 卡片为 no-op（保留用户对风格文本框的改动），切换到别的模板则覆盖。
+  function handleChannelTemplateImport(template: Template) {
+    if (selectedTemplate?.id === template.id) return
+    setSelectedTemplate(template)
+    form.setValue('style', template.style_prompt || '', { shouldDirty: true })
+    form.setValue('author', template.author_name || '', { shouldDirty: true })
+    form.setValue('author_style_intro', template.author_style_intro || '', { shouldDirty: true })
+    form.setValue('author_avatar_url', template.author_avatar_url || '', { shouldDirty: true })
+    form.setValue('theme', template.theme || '', { shouldDirty: true })
   }
 
   async function onSubmit(values: ChannelFormValues) {
@@ -414,12 +401,11 @@ export default function ChannelsPage() {
       style: values.style?.trim() || undefined,
       writing_style: values.writing_style?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
-      layout: values.layout?.trim() || undefined,
-      image_preset: values.image_preset?.trim() || undefined,
       author: values.author?.trim() || undefined,
       author_style_intro: values.author_style_intro?.trim() || undefined,
       author_avatar_url: values.author_avatar_url?.trim() || undefined,
-      template_id: values.template_id?.trim() || undefined,
+      // 导入模型：频道 Owns 自己的人设。不发送 template_id——后端 Update 无条件清空，
+      // 存量"绑定模板"频道保存后即迁移为自有值（运行时 task>template>channel 解析）。
       reference_image_url: values.reference_image_url?.trim() || undefined,
       image_ratio: values.image_ratio || undefined,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
@@ -454,7 +440,6 @@ export default function ChannelsPage() {
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isWechat = selectedPlatform === 'article'
   const isSeednote = selectedPlatform === 'seednote'
-  const templateBound = isWechat && !!templateId
 
   return (
     <div className="space-y-6">
@@ -537,7 +522,7 @@ export default function ChannelsPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingChannel ? '编辑账号' : '新建账号'}</DialogTitle>
           </DialogHeader>
@@ -785,100 +770,23 @@ export default function ChannelsPage() {
 
               {!isSeednote && (
                 <>
-                  {/* 公众号模板：绑定后写作风格/排版随模板同步（只读）；解绑则在此自定义写作风格/排版。
-                      运行时解析优先级：task > task-template > plan > channel-template > channel 自身。 */}
-                  <FormField control={form.control} name="template_id" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>公众号模板</FormLabel>
-                      <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="不绑定（自定义）">
-                              {(value: string) => (!value || value === '_none') ? '不绑定（自定义）' : articleTemplateLabel(value)}
-                            </SelectValue>
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="_none" label="不绑定（自定义）">不绑定（自定义）</SelectItem>
-                          {articleTemplates.map((t) => (
-                            <SelectItem key={t.id} value={t.id} label={articleTemplateLabel(t.id)}>{articleTemplateLabel(t.id)}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>绑定模板后，写作风格与排版随模板同步（改模板自动更新）；不绑定则在此自定义写作风格与排版。</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
+                  {/* 公众号模板：像小红书一样左右滑动选模板；选中后一次性把视觉/作者/写作
+                      风格/排版导入表单，可继续自行调整（导入模型，频道 Owns 自己的人设）。
+                      运行时解析优先级：task > task-template > plan > channel 自身。 */}
+                  <TemplatePicker type="article" selected={selectedTemplate} onSelect={handleChannelTemplateImport} />
 
-                  {templateBound ? (
-                    <>
-                      {/* 绑定模板：写作风格/排版只读展示（取自模板详情，改模板自动更新）。 */}
-                      <PersonaBlock
-                        readOnly
-                        authorName={boundTemplate?.author_name ?? ''}
-                        onAuthorName={() => {}}
-                        authorStyleIntro={boundTemplate?.author_style_intro ?? ''}
-                        onAuthorStyleIntro={() => {}}
-                        authorAvatarUrl={boundTemplate?.author_avatar_url ?? ''}
-                        onAuthorAvatarUrl={() => {}}
-                      />
-                      <ThemePicker readOnly theme={boundTemplate?.theme ?? ''} onTheme={() => {}} />
-                    </>
-                  ) : (
-                    <>
-                      {/* 未绑定：编辑频道自身写作风格（名称即署名 + 写作风格 + 可选头像）与排版。 */}
-                      <PersonaBlock
-                        authorName={authorName ?? ''}
-                        onAuthorName={(v) => form.setValue('author', v, { shouldDirty: true })}
-                        authorStyleIntro={authorStyleIntro ?? ''}
-                        onAuthorStyleIntro={(v) => form.setValue('author_style_intro', v, { shouldDirty: true })}
-                        authorAvatarUrl={authorAvatarUrl ?? ''}
-                        onAuthorAvatarUrl={(v) => form.setValue('author_avatar_url', v, { shouldDirty: true })}
-                      />
-                      <ThemePicker theme={themeValue ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
-                    </>
-                  )}
+                  {/* 写作风格（作者署名 + 写作风格模仿 + 可选头像）与排版：始终可编辑，
+                      绑定到频道自身字段。选模板后自动填入，用户可覆盖。 */}
+                  <PersonaBlock
+                    authorName={authorName ?? ''}
+                    onAuthorName={(v) => form.setValue('author', v, { shouldDirty: true })}
+                    authorStyleIntro={authorStyleIntro ?? ''}
+                    onAuthorStyleIntro={(v) => form.setValue('author_style_intro', v, { shouldDirty: true })}
+                    authorAvatarUrl={authorAvatarUrl ?? ''}
+                    onAuthorAvatarUrl={(v) => form.setValue('author_avatar_url', v, { shouldDirty: true })}
+                  />
+                  <ThemePicker theme={themeValue ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
                 </>
-              )}
-
-              {!isSeednote && (
-                <FormField control={form.control} name="layout" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>默认布局</FormLabel>
-                    <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择默认布局" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {layoutOptions.map((opt) => (
-                          <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>文章默认使用的排版布局模块（仅 article 平台）</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              )}
-
-              {!isSeednote && (
-                <FormField control={form.control} name="image_preset" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>图片预设</FormLabel>
-                    <Select value={field.value || '_none'} onValueChange={(v) => field.onChange(v === '_none' ? '' : v)}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择图片预设" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {presetOptions.map((opt) => (
-                          <SelectItem key={opt.value || '_none'} value={opt.value || '_none'} label={opt.label}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>封面图和内容图的默认生成预设模板</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )} />
               )}
 
               {/* 作者名（署名）：seednote 在此编辑；article 改由上方「公众号模板/写作风格」区块统一维护。 */}

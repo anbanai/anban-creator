@@ -32,6 +32,11 @@ export interface Task {
   goal?: string
   goal_mode?: boolean
   template_id?: string
+  // 公众号人设（与频道/模板同链解析：task > template > channel）：作者署名 + 写作风格
+  // 模仿（自由文本） + 可选人设头像，正交于 style/writing_style/theme。
+  author?: string
+  author_style_intro?: string
+  author_avatar_url?: string
   created_at: string
   started_at: string
   completed_at: string
@@ -72,6 +77,11 @@ export interface CreateTaskRequest {
   goal?: string
   goal_mode?: boolean
   template_id?: string
+  // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。空则按解析链兜底到
+  // 模板/频道；非空即覆盖。
+  author?: string
+  author_style_intro?: string
+  author_avatar_url?: string
   // Seednote image composition: cover always generated. Server ignores for non-seednote.
   has_content_image?: boolean
   has_tail_image?: boolean

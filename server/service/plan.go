@@ -42,11 +42,18 @@ type CreatePlanParams struct {
 	// WritingStyle / Theme carry the plan-level 写作风格 / 排版样式 (the other two
 	// orthogonal dimensions). Resolved alongside Style with precedence
 	// plan > template > channel, then copied to spawned tasks by CreateFromPlan.
-	WritingStyle       string
-	Theme              string
-	Watermark          *bool
-	Goal               string
-	GoalMode           bool
+	WritingStyle string
+	Theme        string
+	// Author / AuthorStyleIntro / AuthorAvatarURL carry the plan-level 作者（署名）
+	// + 写作风格（free-text imitation） + 可选人设头像 overrides. Resolved alongside
+	// Style/WritingStyle/Theme with precedence plan > template > channel, then
+	// copied to Task by CreateFromPlan (task-level override wins).
+	Author           string
+	AuthorStyleIntro string
+	AuthorAvatarURL  string
+	Watermark        *bool
+	Goal             string
+	GoalMode         bool
 	// TemplateID records the template selected during plan creation. Propagated to
 	// spawned tasks by CreateFromPlan so the agent can surface the template's
 	// content scaffold via get_channel_profile(task_id). nil = no template.
@@ -119,6 +126,10 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), channel.Style)
 	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), channel.WritingStyle)
 	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), channel.Theme)
+	// 公众号人设维度（作者署名 + 写作风格模仿 + 可选头像），与视觉/排版正交，同链解析。
+	effectiveAuthor := firstNonEmpty(p.Author, templateAuthorName(tmpl), channel.Author)
+	effectiveAuthorIntro := firstNonEmpty(p.AuthorStyleIntro, templateAuthorStyleIntro(tmpl), channel.AuthorStyleIntro)
+	effectiveAuthorAvatar := firstNonEmpty(p.AuthorAvatarURL, templateAuthorAvatar(tmpl), channel.AuthorAvatarURL)
 	if effectiveWriter == "" && channel.Platform == model.PlatformArticle {
 		effectiveWriter = writer.DefaultStyleName
 	}
@@ -137,6 +148,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		Style:              effectiveVisual,
 		WritingStyle:       effectiveWriter,
 		Theme:              effectiveTheme,
+		Author:             effectiveAuthor,
+		AuthorStyleIntro:   effectiveAuthorIntro,
+		AuthorAvatarURL:    effectiveAuthorAvatar,
 		TemplateID:         p.TemplateID,
 		SkipReferenceImage: p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:          p.Watermark != nil && *p.Watermark,
@@ -203,9 +217,14 @@ type UpdatePlanParams struct {
 	Style              *string
 	WritingStyle       *string
 	Theme              *string
-	Watermark          *bool
-	Goal               string
-	GoalMode           *bool
+	// Author / AuthorStyleIntro / AuthorAvatarURL: leave-unchanged semantics
+	// (nil = unchanged; &"" = clear; &"value" = set), same as Style/WritingStyle/Theme.
+	Author           *string
+	AuthorStyleIntro *string
+	AuthorAvatarURL  *string
+	Watermark        *bool
+	Goal             string
+	GoalMode         *bool
 	// TemplateID: nil = leave unchanged; &"" = clear; &"value" = set.
 	TemplateID      *string
 	HasContentImage *bool
@@ -233,6 +252,15 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 	}
 	if p.Theme != nil {
 		plan.Theme = *p.Theme
+	}
+	if p.Author != nil {
+		plan.Author = *p.Author
+	}
+	if p.AuthorStyleIntro != nil {
+		plan.AuthorStyleIntro = *p.AuthorStyleIntro
+	}
+	if p.AuthorAvatarURL != nil {
+		plan.AuthorAvatarURL = *p.AuthorAvatarURL
 	}
 	if p.TemplateID != nil {
 		plan.TemplateID = p.TemplateID

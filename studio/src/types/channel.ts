@@ -26,8 +26,6 @@ export interface Channel {
   template_id: string
   reference_image_url: string
   image_ratio: string
-  layout: string
-  image_preset: string
   max_concurrent_tasks: number
   config: ChannelConfig
   status: ChannelStatus
@@ -67,8 +65,6 @@ export interface CreateChannelRequest {
   template_id?: string
   reference_image_url?: string
   image_ratio?: string
-  layout?: string
-  image_preset?: string
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string

@@ -110,8 +110,6 @@ export const mockChannels: Channel[] = [
     template_id: '',
     reference_image_url: '',
     image_ratio: '16:9',
-    layout: '',
-    image_preset: '',
     max_concurrent_tasks: 2,
     config: { wechat_app_id: 'wx123' },
     status: 'active',

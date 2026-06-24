@@ -46,6 +46,13 @@ export const createTaskSchema = z.object({
   style: z.string().max(1024).optional(),
   writing_style: z.string().max(100).optional(),
   theme: z.string().max(100).optional(),
+  // 公众号人设（作者署名 + 写作风格模仿 + 可选头像），正交于三维风格。
+  author: z.string().max(50).optional(),
+  author_style_intro: z.string().max(1024).optional(),
+  author_avatar_url: z.string().refine(
+    (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
+    { message: "请输入有效的图片 URL" },
+  ).optional(),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),
@@ -102,6 +109,13 @@ export const planSchema = z.object({
   style: z.string().max(1024).optional(),
   writing_style: z.string().max(100).optional(),
   theme: z.string().max(100).optional(),
+  // 公众号人设（作者署名 + 写作风格模仿 + 可选头像），spawned task 继承。
+  author: z.string().max(50).optional(),
+  author_style_intro: z.string().max(1024).optional(),
+  author_avatar_url: z.string().refine(
+    (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
+    { message: "请输入有效的图片 URL" },
+  ).optional(),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),
@@ -150,8 +164,6 @@ export const channelSchema = z.object({
     { message: "请输入有效的图片 URL" },
   ).optional(),
   image_ratio: z.enum(["", "3:4", "1:1", "4:3", "16:9"]).optional(),
-  layout: z.string().max(100).optional(),
-  image_preset: z.string().max(50).optional(),
 }).refine((data) => {
   if (data.enable_publishing) {
     return !!data.wechat_app_id?.trim()

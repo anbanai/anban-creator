@@ -193,11 +193,17 @@ type CreateManualParams struct {
 	// WritingStyle / Theme carry the task-level 写作风格 / 排版样式 overrides (the
 	// other two orthogonal dimensions). Resolved alongside Style with precedence
 	// task > template > plan > channel.
-	WritingStyle      string
-	Theme             string
-	Watermark         *bool
-	Goal              string
-	GoalMode          bool
+	WritingStyle string
+	Theme        string
+	// Author / AuthorStyleIntro / AuthorAvatarURL carry the task-level 作者（署名）
+	// + 写作风格（free-text imitation） + 可选人设头像 overrides. Resolved alongside
+	// Style/WritingStyle/Theme with precedence task > template > plan > channel.
+	Author           string
+	AuthorStyleIntro string
+	AuthorAvatarURL  string
+	Watermark        *bool
+	Goal             string
+	GoalMode         bool
 	// TemplateID optionally records which template was selected. It does NOT enter
 	// the style resolution chain (visual style is already copied to Style by the
 	// caller); instead the agent surfaces the template's content scaffold via
@@ -261,6 +267,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), channel.Style)
 	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), channel.WritingStyle)
 	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), channel.Theme)
+	// 公众号人设维度（作者署名 + 写作风格模仿 + 可选头像），与视觉/排版正交，同链解析。
+	effectiveAuthor := firstNonEmpty(p.Author, templateAuthorName(tmpl), channel.Author)
+	effectiveAuthorIntro := firstNonEmpty(p.AuthorStyleIntro, templateAuthorStyleIntro(tmpl), channel.AuthorStyleIntro)
+	effectiveAuthorAvatar := firstNonEmpty(p.AuthorAvatarURL, templateAuthorAvatar(tmpl), channel.AuthorAvatarURL)
 	// Article always carries a writing voice (seednote has none).
 	if effectiveWriter == "" && taskType == model.PlatformArticle {
 		effectiveWriter = writer.DefaultStyleName
@@ -336,6 +346,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Style:              effectiveVisual,
 			WritingStyle:       effectiveWriter,
 			Theme:              effectiveTheme,
+			Author:             effectiveAuthor,
+			AuthorStyleIntro:   effectiveAuthorIntro,
+			AuthorAvatarURL:    effectiveAuthorAvatar,
 			SkipReferenceImage: p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:          p.Watermark != nil && *p.Watermark,
 			Goal:               p.Goal,
@@ -403,15 +416,21 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	// them at creation (plan > template > channel); fall back to the channel when
 	// the plan fields are empty (e.g. legacy rows pre-migration). Each dimension
 	// is independent — the writer never drives the visual style.
-	var chVisual, chWriter, chTheme string
+	var chVisual, chWriter, chTheme, chAuthor, chAuthorIntro, chAvatar string
 	if ch != nil {
 		chVisual = ch.Style
 		chWriter = ch.WritingStyle
 		chTheme = ch.Theme
+		chAuthor = ch.Author
+		chAuthorIntro = ch.AuthorStyleIntro
+		chAvatar = ch.AuthorAvatarURL
 	}
 	effectiveVisual := firstNonEmpty(plan.Style, chVisual)
 	effectiveWriter := firstNonEmpty(plan.WritingStyle, chWriter)
 	effectiveTheme := firstNonEmpty(plan.Theme, chTheme)
+	effectiveAuthor := firstNonEmpty(plan.Author, chAuthor)
+	effectiveAuthorIntro := firstNonEmpty(plan.AuthorStyleIntro, chAuthorIntro)
+	effectiveAuthorAvatar := firstNonEmpty(plan.AuthorAvatarURL, chAvatar)
 	if effectiveWriter == "" && taskType == model.PlatformArticle {
 		effectiveWriter = writer.DefaultStyleName
 	}
@@ -452,6 +471,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Style:              effectiveVisual,
 		WritingStyle:       effectiveWriter,
 		Theme:              effectiveTheme,
+		Author:             effectiveAuthor,
+		AuthorStyleIntro:   effectiveAuthorIntro,
+		AuthorAvatarURL:    effectiveAuthorAvatar,
 		TemplateID:         plan.TemplateID,
 		SkipReferenceImage: plan.SkipReferenceImage,
 		Watermark:          plan.Watermark,

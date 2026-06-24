@@ -47,6 +47,9 @@ function planToFormValues(plan: Plan): PlanFormValues {
     style: plan.style || '',
     writing_style: plan.writing_style || '',
     theme: plan.theme || '',
+    author: plan.author || '',
+    author_style_intro: plan.author_style_intro || '',
+    author_avatar_url: plan.author_avatar_url || '',
     watermark: plan.watermark || false,
     goal: plan.goal || '',
     goal_mode: plan.goal_mode || false,
@@ -79,6 +82,9 @@ export default function PlansPage() {
       style: '',
       writing_style: '',
       theme: '',
+      author: '',
+      author_style_intro: '',
+      author_avatar_url: '',
       has_content_image: true,
       has_tail_image: false,
     },
@@ -92,6 +98,10 @@ export default function PlansPage() {
   }, [modalOpen, form])
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
+  const watchedAuthor = useWatch({ control: form.control, name: 'author' })
+  const watchedAuthorIntro = useWatch({ control: form.control, name: 'author_style_intro' })
+  const watchedAuthorAvatar = useWatch({ control: form.control, name: 'author_avatar_url' })
+  const watchedTheme = useWatch({ control: form.control, name: 'theme' })
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -193,6 +203,9 @@ export default function PlansPage() {
       style: '',
       writing_style: '',
       theme: '',
+      author: '',
+      author_style_intro: '',
+      author_avatar_url: '',
       has_content_image: true,
       has_tail_image: false,
     })
@@ -239,6 +252,9 @@ export default function PlansPage() {
       style: '',
       writing_style: '',
       theme: '',
+      author: '',
+      author_style_intro: '',
+      author_avatar_url: '',
       has_content_image: true,
       has_tail_image: false,
     })
@@ -256,6 +272,10 @@ export default function PlansPage() {
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
     form.setValue('writing_style', template.writing_style || '', { shouldDirty: true })
     form.setValue('theme', template.theme || '', { shouldDirty: true })
+    // 公众号人设（作者署名 + 写作风格模仿 + 可选头像）随模板导入，仍可编辑。
+    form.setValue('author', template.author_name || '', { shouldDirty: true })
+    form.setValue('author_style_intro', template.author_style_intro || '', { shouldDirty: true })
+    form.setValue('author_avatar_url', template.author_avatar_url || '', { shouldDirty: true })
   }
 
   async function onSubmit(values: PlanFormValues) {
@@ -272,6 +292,9 @@ export default function PlansPage() {
       style: values.style || undefined,
       writing_style: values.writing_style || undefined,
       theme: values.theme || undefined,
+      author: values.author || undefined,
+      author_style_intro: values.author_style_intro || undefined,
+      author_avatar_url: values.author_avatar_url || undefined,
       watermark: values.watermark || undefined,
       goal_mode: values.goal_mode || undefined,
       goal: values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
@@ -422,7 +445,7 @@ export default function PlansPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle>
           </DialogHeader>
@@ -525,25 +548,24 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              {/* 公众号 (article) 写作风格 + 排版：选了模板后随模板只读展示（与模板/账号/任务编辑器一致）。
-                  计划级只读——Plan 无 author_* 列，运行时仍由 template_id → get_channel_profile 解析。 */}
-              {watchedType === 'article' &&
-                (selectedTemplate ? (
-                  <>
-                    <PersonaBlock
-                      readOnly
-                      authorName={selectedTemplate.author_name ?? ''}
-                      onAuthorName={() => {}}
-                      authorStyleIntro={selectedTemplate.author_style_intro ?? ''}
-                      onAuthorStyleIntro={() => {}}
-                      authorAvatarUrl={selectedTemplate.author_avatar_url ?? ''}
-                      onAuthorAvatarUrl={() => {}}
-                    />
-                    <ThemePicker readOnly theme={selectedTemplate.theme ?? ''} onTheme={() => {}} />
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground">未选模板时，写作风格与排版随账号设置。</p>
-                ))}
+              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑（覆盖模板/账号）。
+                  计划级 author_* 字段经后端解析链 plan > template > channel 下发到 spawned task。 */}
+              {watchedType === 'article' && (
+                <>
+                  <PersonaBlock
+                    authorName={watchedAuthor ?? ''}
+                    onAuthorName={(v) => form.setValue('author', v, { shouldDirty: true })}
+                    authorStyleIntro={watchedAuthorIntro ?? ''}
+                    onAuthorStyleIntro={(v) => form.setValue('author_style_intro', v, { shouldDirty: true })}
+                    authorAvatarUrl={watchedAuthorAvatar ?? ''}
+                    onAuthorAvatarUrl={(v) => form.setValue('author_avatar_url', v, { shouldDirty: true })}
+                  />
+                  <ThemePicker theme={watchedTheme ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
+                  {!selectedTemplate && (
+                    <p className="text-xs text-muted-foreground">未选模板时默认随账号设置，也可在此覆盖。</p>
+                  )}
+                </>
+              )}
 
               <FormField control={form.control} name="watermark" render={({ field }) => (
                 <FormItem>

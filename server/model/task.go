@@ -43,6 +43,18 @@ type Task struct {
 	// Style/WritingStyle. Resolved task > template > plan > channel. Consumed by
 	// the deterministic HTML renderer (convert_markdown / render_template).
 	Theme string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`
+	// Author is the effective 作者（署名 byline）for this task, surfaced as the
+	// top-level `author` via get_channel_profile(task_id). Resolved task > template
+	// > plan > channel. Independent of the writing-imitation intro below.
+	Author string `gorm:"type:varchar(50);default:''" json:"author,omitempty"`
+	// AuthorStyleIntro is the effective 写作风格 (free-text writing imitation),
+	// surfaced as template_writing_style via get_channel_profile(task_id). Resolved
+	// task > template > plan > channel. Orthogonal to Style/Theme and to the byline.
+	AuthorStyleIntro string `gorm:"type:text" json:"author_style_intro,omitempty"`
+	// AuthorAvatarURL is the optional 写作风格 persona avatar (not part of the
+	// byline), surfaced as template_author_avatar. Resolved task > template > plan
+	// > channel.
+	AuthorAvatarURL string `gorm:"type:varchar(500);default:''" json:"author_avatar_url,omitempty"`
 	// TemplateID records which template was selected when creating this task
 	// (manual task, or a plan-spawned task inheriting plan.TemplateID). It does
 	// NOT enter the style resolution chain (visual style lives in Style) —
