@@ -127,8 +127,15 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	result, execErr := s.executor.Execute(execCtx, opts)
 
+	// Post-execution persistence uses a fresh, bounded context that is decoupled
+	// from the asynq execution ctx. If the pipeline overruns the asynq deadline,
+	// execCtx/ctx expires and the agent's already-completed work (result, files,
+	// terminal status) would otherwise fail to persist — losing everything.
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), s.persistTimeout)
+	defer persistCancel()
+
 	// Store result.
-	if err := s.UpdateExecutionResult(ctx, taskID, result); err != nil {
+	if err := s.UpdateExecutionResult(persistCtx, taskID, result); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to persist task result")
 	}
 
@@ -137,10 +144,10 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	// so we always attempt host-side upload as a safety net. Files already
 	// recorded via agent upload or MCP tool calls are skipped.
 	if result.WorkDir != "" {
-		if err := s.uploadMissingTaskFiles(ctx, taskID, userID, result.WorkDir); err != nil {
+		if err := s.uploadMissingTaskFiles(persistCtx, taskID, userID, result.WorkDir); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("workspace file upload failed")
 		}
-		if err := s.RebuildWorkflowStatus(ctx, taskID); err != nil {
+		if err := s.RebuildWorkflowStatus(persistCtx, taskID); err != nil {
 			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to rebuild workflow status")
 		}
 		// Schedule workspace cleanup after all processing is done.
@@ -154,24 +161,24 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		errMsg := "task cancelled: " + execCtx.Err().Error()
 		s.logger.Info().Str("task_id", taskID).Msg(errMsg)
 		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndError(
-			ctx, taskID, model.TaskStatusRunning, model.TaskStatusCancelled, errMsg,
+			persistCtx, taskID, model.TaskStatusRunning, model.TaskStatusCancelled, errMsg,
 		)
 		if swapped {
-			if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+			if err := s.repo.Tasks().SetCompletedAt(persistCtx, taskID); err != nil {
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on cancelled task")
 			}
 			// Re-read the task so refundTaskByMode sees the final status
 			// (goal-mode tasks skip refund; normal tasks full-refund).
-			if t, err := s.repo.Tasks().FindByID(ctx, taskID); err == nil {
-				s.refundTaskByMode(ctx, t, "取消")
+			if t, err := s.repo.Tasks().FindByID(persistCtx, taskID); err == nil {
+				s.refundTaskByMode(persistCtx, t, "取消")
 			} else {
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to reload task for refund")
 			}
 			if task.ChannelID != "" && s.pubsub != nil {
-				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+				s.pubsub.ReleaseSlot(persistCtx, task.ChannelID)
 			}
 			if task.ChannelID != "" {
-				if derr := s.DispatchPendingTasks(ctx, task.ChannelID); derr != nil {
+				if derr := s.DispatchPendingTasks(persistCtx, task.ChannelID); derr != nil {
 					s.logger.Warn().Err(derr).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after cancellation")
 				}
 			}
@@ -181,7 +188,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 
 	if execErr != nil {
 		s.logger.Error().Err(execErr).Str("task_id", taskID).Msg("task execution failed")
-		_ = s.HandleExecutionFailure(ctx, task, execErr)
+		_ = s.HandleExecutionFailure(persistCtx, task, execErr)
 		return nil // retry handled internally, don't trigger Asynq retry
 	}
 
@@ -191,7 +198,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			errMsg = "execution returned unsuccessful result"
 		}
 		s.logger.Error().Str("task_id", taskID).Str("error", errMsg).Msg("task execution returned failure")
-		_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+		_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("%s", errMsg))
 		return nil // retry handled internally, don't trigger Asynq retry
 	}
 
@@ -239,7 +246,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 				errEvt = errEvt.Str("tools_used", toolSummaryStr)
 			}
 			errEvt.Msg(errMsg)
-			_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("%s", errMsg))
 			return nil
 		}
 		// Agent reported failure but produced output files — allow completion with a warning.
@@ -267,12 +274,12 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			errEvt = errEvt.Str("tools_used", toolSummaryStr)
 		}
 		errEvt.Msg(errMsg)
-		_ = s.HandleExecutionFailure(ctx, task, fmt.Errorf("%s", errMsg))
+		_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("%s", errMsg))
 		return nil
 	}
 
 	// Check if task was cancelled during execution before marking as completed.
-	finalTask, err := s.repo.Tasks().FindByID(ctx, taskID)
+	finalTask, err := s.repo.Tasks().FindByID(persistCtx, taskID)
 	if err == nil && finalTask.Status == model.TaskStatusCancelled {
 		s.logger.Info().Str("task_id", taskID).Msg("task was cancelled during execution, skipping completion")
 		return nil
@@ -318,23 +325,23 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	// /goal loop. The server just observes the final result — no retry,
 	// no CAS, no special terminal status.
 
-	if err := s.repo.Tasks().UpdateStatus(ctx, taskID, model.TaskStatusCompleted); err != nil {
+	if err := s.repo.Tasks().UpdateStatus(persistCtx, taskID, model.TaskStatusCompleted); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to completed")
 	}
-	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+	if err := s.repo.Tasks().SetCompletedAt(persistCtx, taskID); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
 	}
 
 	// Release concurrency slot.
 	if task.ChannelID != "" {
 		if s.pubsub != nil {
-			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+			s.pubsub.ReleaseSlot(persistCtx, task.ChannelID)
 		}
 	}
 
 	// Dispatch pending tasks for the same channel now that a slot opened.
 	if task.ChannelID != "" {
-		if err := s.DispatchPendingTasks(ctx, task.ChannelID); err != nil {
+		if err := s.DispatchPendingTasks(persistCtx, task.ChannelID); err != nil {
 			s.logger.Warn().Err(err).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after completion")
 		}
 	}

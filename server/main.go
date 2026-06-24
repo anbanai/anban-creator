@@ -246,11 +246,13 @@ func main() {
 				cfg.Redis.Addr,
 				cfg.Redis.Password,
 				cfg.Redis.DB,
+				cfg.Asynq.ContentGenerateTimeout,
 			)
 			log.Info().Msg("Asynq client initialized")
 		}
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		if count, err := taskSvc.ClearArtifactTitles(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clear artifact task titles")
 		} else if count > 0 {

@@ -49,6 +49,14 @@ type TaskService struct {
 	seednoteTrackingSvc PublishedTrackingService
 	topicPoolSvc        *TopicPoolService
 	goalMultiplier      int
+	// executionTimeout bounds the fallback (Redis-down) in-process execution.
+	// The asynq path is bounded by the asynq task Timeout (see scheduler).
+	// Default 60m; override via SetExecutionTimeouts.
+	executionTimeout time.Duration
+	// persistTimeout bounds the post-execution DB writes (result/files/status),
+	// decoupled from the execution ctx so completed work is saved even on overrun.
+	// Default 10m; override via SetExecutionTimeouts.
+	persistTimeout time.Duration
 }
 
 // NewTaskService creates a new TaskService.
@@ -67,17 +75,19 @@ func NewTaskService(
 	publishingSvc *PublishingService,
 ) *TaskService {
 	svc := &TaskService{
-		repo:          repo,
-		executor:      executor,
-		logger:        logger,
-		enqueuer:      enqueuer,
-		store:         store,
-		creditSvc:     creditSvc,
-		publishingSvc: publishingSvc,
-		taskLogDir:    taskLogDir,
-		workspaceSvc:  workspaceSvc,
-		workspaceDir:  workspaceDir,
-		pubsub:        pubsub,
+		repo:             repo,
+		executor:         executor,
+		logger:           logger,
+		enqueuer:         enqueuer,
+		store:            store,
+		creditSvc:        creditSvc,
+		publishingSvc:    publishingSvc,
+		taskLogDir:       taskLogDir,
+		workspaceSvc:     workspaceSvc,
+		workspaceDir:     workspaceDir,
+		pubsub:           pubsub,
+		executionTimeout: 60 * time.Minute,
+		persistTimeout:   10 * time.Minute,
 	}
 
 	// Start listening for cross-replica cancel events.
@@ -105,6 +115,19 @@ func (s *TaskService) SetSeednoteTrackingService(trackingSvc PublishedTrackingSe
 // SetTopicPoolService sets the topic pool service for plan-task integration.
 func (s *TaskService) SetTopicPoolService(svc *TopicPoolService) {
 	s.topicPoolSvc = svc
+}
+
+// SetExecutionTimeouts overrides the fallback execution timeout and the
+// post-execution persistence timeout (both have sensible defaults).
+// execution bounds the Redis-down in-process path; persist bounds the
+// result/files/status DB writes that are decoupled from the execution ctx.
+func (s *TaskService) SetExecutionTimeouts(execution, persist time.Duration) {
+	if execution > 0 {
+		s.executionTimeout = execution
+	}
+	if persist > 0 {
+		s.persistTimeout = persist
+	}
 }
 
 // GoalMultiplier returns the configured goal-mode credit multiplier (default 3).
@@ -807,7 +830,7 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 				}
 			}
 		}()
-		fallbackCtx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
+		fallbackCtx, cancel := context.WithTimeout(context.Background(), s.executionTimeout)
 		defer cancel()
 		// Set running status before execution to prevent plan checker from re-dispatching.
 		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)

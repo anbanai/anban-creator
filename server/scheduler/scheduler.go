@@ -30,17 +30,28 @@ type TaskEnqueuer interface {
 
 // AsynqClient wraps an asynq.Client for enqueuing tasks.
 type AsynqClient struct {
-	client *asynq.Client
+	client  *asynq.Client
+	timeout time.Duration
 }
 
 // NewAsynqClient creates a new AsynqClient with the given Redis configuration.
-func NewAsynqClient(redisAddr, redisPassword string, redisDB int) *AsynqClient {
+// timeout is applied as the asynq task Timeout for every enqueued task; pass 0
+// to use the default of 60 minutes.
+func NewAsynqClient(redisAddr, redisPassword string, redisDB int, timeout time.Duration) *AsynqClient {
 	client := asynq.NewClient(asynq.RedisClientOpt{
 		Addr:     redisAddr,
 		Password: redisPassword,
 		DB:       redisDB,
 	})
-	return &AsynqClient{client: client}
+	return &AsynqClient{client: client, timeout: timeout}
+}
+
+// effectiveTimeout returns the configured task timeout, defaulting to 60 minutes.
+func (c *AsynqClient) effectiveTimeout() time.Duration {
+	if c.timeout > 0 {
+		return c.timeout
+	}
+	return 60 * time.Minute
 }
 
 // Enqueue creates an Asynq task and enqueues it.
@@ -48,7 +59,7 @@ func (c *AsynqClient) Enqueue(taskType string, payload []byte) error {
 	_, err := c.client.Enqueue(
 		asynq.NewTask(taskType, payload),
 		asynq.MaxRetry(3),
-		asynq.Timeout(30*time.Minute),
+		asynq.Timeout(c.effectiveTimeout()),
 	)
 	return err
 }
@@ -59,7 +70,7 @@ func (c *AsynqClient) EnqueueIn(taskType string, payload []byte, delay time.Dura
 		asynq.NewTask(taskType, payload),
 		asynq.ProcessIn(delay),
 		asynq.MaxRetry(3),
-		asynq.Timeout(30*time.Minute),
+		asynq.Timeout(c.effectiveTimeout()),
 	)
 	return err
 }
