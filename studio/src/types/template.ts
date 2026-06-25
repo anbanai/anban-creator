@@ -1,6 +1,19 @@
-export type TemplateType = 'poster' | 'seednote' | 'article'
+export type TemplateType = 'poster' | 'seednote' | 'article' | 'ecommerce'
 export type TemplateVisibility = 'public' | 'private'
 export type TemplateScope = 'all' | 'public' | 'mine'
+
+// E-commerce template defaults (server model.EcommerceTemplateDefaults). Carried
+// on type="ecommerce" templates and merged into the task at creation
+// (service/task.go CreateManual) when the task omits its own values. Only the
+// visual StylePrompt dimension is used (3-dimension architecture: ecommerce
+// uses Style only, not WritingStyle/Theme/author). Product photos are uploaded
+// per-task and are never part of the template.
+export interface EcommerceTemplateDefaults {
+  default_selected_modules?: Record<string, number>
+  target_platform?: string
+  brand_brief?: string
+  image_model_key?: string
+}
 
 export interface Template {
   id: string
@@ -27,6 +40,9 @@ export interface Template {
   author_style_intro?: string
   example_content: Record<string, unknown>
   tags: string[]
+  // E-commerce template defaults (type="ecommerce" only). Surfaced to the task
+  // creation form as pre-filled module/brand/model defaults.
+  ecommerce?: EcommerceTemplateDefaults
   sort_order: number
   is_active: boolean
   created_at: string
@@ -52,6 +68,8 @@ export interface CreateTemplateRequest {
   author_name?: string
   author_avatar_url?: string
   author_style_intro?: string
+  // E-commerce template defaults. Sent only for ecommerce templates.
+  ecommerce?: EcommerceTemplateDefaults
 }
 
 export type UpdateTemplateRequest = CreateTemplateRequest

@@ -69,7 +69,6 @@ export const createTaskSchema = z.object({
   target_platform: z.string().optional(),
   selling_points: z.string().max(2000, "卖点不能超过 2000 个字符").optional(),
   language: z.string().optional(),
-  provider_strategy_override: z.string().optional(),
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""

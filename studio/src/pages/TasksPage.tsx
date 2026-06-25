@@ -119,7 +119,7 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', provider_strategy_override: '' },
+    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
@@ -265,7 +265,7 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', project_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', provider_strategy_override: '' })
+    form.reset({ type: defaultType, prompt: '', project_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
     setQuantity(1)
     setWatermark(false)
     setProjectImageRatio('')
@@ -310,7 +310,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', provider_strategy_override: '' })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
     setQuantity(1)
     setWatermark(false)
     setGoalMode(false)
@@ -348,7 +348,6 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      provider_strategy_override: values.type === 'ecommerce' ? (values.provider_strategy_override?.trim() || undefined) : undefined,
     }))
   }
 
@@ -367,6 +366,19 @@ export default function TasksPage() {
     form.setValue('author', template.author_name || '', { shouldDirty: true })
     form.setValue('author_style_intro', template.author_style_intro || '', { shouldDirty: true })
     form.setValue('author_avatar_url', template.author_avatar_url || '', { shouldDirty: true })
+    // E-commerce template defaults: pre-fill modules / target platform / image
+    // model so picking a template configures the whole package. Product photos
+    // stay per-task (the user uploads them). The server (CreateManual) re-merges
+    // these as fallbacks; surfacing them here lets the user review/tweak before
+    // billing. Non-ecommerce templates carry no `ecommerce` block (no-op).
+    if (template.type === 'ecommerce' && template.ecommerce) {
+      const ec = template.ecommerce
+      if (ec.default_selected_modules && Object.keys(ec.default_selected_modules).length > 0) {
+        form.setValue('selected_modules', ec.default_selected_modules, { shouldDirty: true })
+      }
+      if (ec.target_platform) form.setValue('target_platform', ec.target_platform, { shouldDirty: true })
+      if (ec.image_model_key) form.setValue('image_model_key', ec.image_model_key, { shouldDirty: true })
+    }
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -753,7 +765,7 @@ export default function TasksPage() {
                 </FormItem>
               )} />
 
-              {(watchedType === 'article' || watchedType === 'seednote') && (
+              {(watchedType === 'article' || watchedType === 'seednote' || watchedType === 'ecommerce') && (
                 <TemplatePicker
                   type={watchedType as import('@/types').TemplateType}
                   selected={selectedTemplate}
@@ -955,40 +967,22 @@ export default function TasksPage() {
                     </FormItem>
                   )} />
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <FormField control={form.control} name="language" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>语言</FormLabel>
-                        <Select value={field.value || undefined} onValueChange={field.onChange}>
-                          <FormControl>
-                            <SelectTrigger className="w-full"><SelectValue placeholder="中文" /></SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {ecommerceLanguageOptions.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-
-                    <FormField control={form.control} name="provider_strategy_override" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Provider 策略（可选）</FormLabel>
-                        <Select value={field.value || undefined} onValueChange={field.onChange}>
-                          <FormControl>
-                            <SelectTrigger className="w-full"><SelectValue placeholder="跟随项目默认" /></SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="openai">OpenAI 多参考（一致性优先）</SelectItem>
-                            <SelectItem value="seedream">Seedream 锚点（速度优先）</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  </div>
+                  <FormField control={form.control} name="language" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>语言</FormLabel>
+                      <Select value={field.value || undefined} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger className="w-full"><SelectValue placeholder="中文" /></SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {ecommerceLanguageOptions.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
                 </div>
               )}
 

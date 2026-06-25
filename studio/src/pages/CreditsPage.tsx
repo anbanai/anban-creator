@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Badge } from '@/components/ui/badge'
 import { SimplePagination } from '@/components/SimplePagination'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'
-import { formatFullDateTimeCN, transactionTypeLabel, operationLabel, taskTypeLabelCN } from '@/lib/labels'
+import { formatFullDateTimeCN, transactionTypeLabel, operationLabel, taskTypeLabelCN, ecommerceModuleCatalog } from '@/lib/labels'
 import PageHeader from '@/components/layout/PageHeader'
 import { useAuth } from '@/contexts/AuthContext'
 import MembershipComparison from '@/components/credits/MembershipComparison'
@@ -259,6 +259,18 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
   const textOps = modelOps.filter(([op]) => op !== 'image_gen')
   const textModels = [...new Set(textOps.flatMap(([, models]) => Object.keys(models)))]
 
+  // E-commerce module unit prices (Σ module price × qty = package cost). Catalog
+  // supplies the Chinese label/ratio/unit; price comes from /credits/pricing.
+  const ecommercePrices = pricing.ecommerce_module_prices
+  const ecommerceRows = ecommercePrices
+    ? ecommerceModuleCatalog
+        .map((mod) => {
+          const price = ecommercePrices[mod.key]
+          return price == null ? null : { label: `${mod.label}（${mod.ratio}）`, value: `${price} 积分/${mod.qtyLabel}` }
+        })
+        .filter((r): r is { label: string; value: string } => r !== null)
+    : []
+
   return (
     <Card>
       <div className="border-b border-border px-4 py-3">
@@ -277,6 +289,17 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
             />
           </AccordionContent>
         </AccordionItem>
+
+        {/* E-commerce module costs */}
+        {ecommerceRows.length > 0 && (
+          <AccordionItem>
+            <AccordionTrigger>电商素材模块（按所选模块求和扣费）</AccordionTrigger>
+            <AccordionContent>
+              <PricingTable rows={ecommerceRows} />
+              <p className="mt-2 text-xs text-muted-foreground">套餐价 = Σ（模块单价 × 数量）；产品图上传免费。</p>
+            </AccordionContent>
+          </AccordionItem>
+        )}
 
         {/* Image model costs */}
         {Object.keys(imageModels).length > 0 && (

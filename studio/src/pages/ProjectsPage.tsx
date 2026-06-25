@@ -781,6 +781,12 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
+              {/* 电商模板：选模板一次性导入视觉风格基线（三维风格架构——电商只用 Style 维度；
+                  模块的默认模块/品牌/模型属任务级配置，项目只承载视觉风格）。 */}
+              {isEcommerce && (
+                <TemplatePicker type="ecommerce" selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
+              )}
+
               {isWechat && (
                 <>
                   {/* 公众号模板：像小红书一样左右滑动选模板；选中后一次性把视觉/作者/写作

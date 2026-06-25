@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Sparkles, RefreshCw } from 'lucide-react'
+import { Loader2, Sparkles, RefreshCw, Minus, Plus } from 'lucide-react'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
+import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
+import { ImageModelSelector } from '@/components/ImageModelSelector'
+import { useImageModels } from '@/hooks/useImageModels'
 import { queryKeys } from '@/lib/query-keys'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -28,6 +31,7 @@ const TYPE_OPTIONS: { value: TemplateType; label: string }[] = [
   { value: 'poster', label: '海报' },
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
+  { value: 'ecommerce', label: '电商出图' },
 ]
 
 // 从风格描述截取第一段并限长 20 字，作为默认模板名。前后端语义保持一致。
@@ -96,6 +100,14 @@ export function TemplateCreateDialog({
   const [authorName, setAuthorName] = useState('')
   const [authorAvatarUrl, setAuthorAvatarUrl] = useState('')
   const [authorStyleIntro, setAuthorStyleIntro] = useState('')
+  // E-commerce template defaults (type="ecommerce"). Pre-fill the task form when
+  // this template is picked. Visual style reuses the shared style_prompt field
+  // above; product photos are NEVER part of the template (per-task upload).
+  const [ecommerceModules, setEcommerceModules] = useState<Record<string, number>>({})
+  const [ecommerceTargetPlatform, setEcommerceTargetPlatform] = useState('')
+  const [ecommerceBrandBrief, setEcommerceBrandBrief] = useState('')
+  const [ecommerceImageModelKey, setEcommerceImageModelKey] = useState('')
+  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
 
   // Session epoch: incremented every time the dialog opens. Captured at the
   // start of handleSubmit and compared after the await — if the user closed
@@ -135,6 +147,10 @@ export function TemplateCreateDialog({
       setExample(extractScaffoldText(template.example_content))
       setCategory(template.category ?? '')
       setTagsText(Array.isArray(template.tags) ? template.tags.join(', ') : '')
+      setEcommerceModules(template.ecommerce?.default_selected_modules ?? {})
+      setEcommerceTargetPlatform(template.ecommerce?.target_platform ?? '')
+      setEcommerceBrandBrief(template.ecommerce?.brand_brief ?? '')
+      setEcommerceImageModelKey(template.ecommerce?.image_model_key ?? '')
     } else {
       setName('')
       setType(defaultType)
@@ -150,6 +166,10 @@ export function TemplateCreateDialog({
       setExample('')
       setCategory('')
       setTagsText('')
+      setEcommerceModules({})
+      setEcommerceTargetPlatform('')
+      setEcommerceBrandBrief('')
+      setEcommerceImageModelKey('')
     }
   }, [open, template, defaultType])
 
@@ -266,6 +286,22 @@ export function TemplateCreateDialog({
         if (authorAvatarTrimmed) payload.author_avatar_url = authorAvatarTrimmed
         const authorIntroTrimmed = authorStyleIntro.trim()
         if (authorIntroTrimmed) payload.author_style_intro = authorIntroTrimmed
+      }
+      if (type === 'ecommerce') {
+        // E-commerce defaults — only the non-empty ones are attached, matching
+        // the backend Update "absent = no change" semantics. Modules are pruned
+        // of zero/absent quantities so the template carries only active modules.
+        const modules: Record<string, number> = {}
+        for (const [k, q] of Object.entries(ecommerceModules)) {
+          if (q >= 1) modules[k] = q
+        }
+        const ecommerce: NonNullable<CreateTemplateRequest['ecommerce']> = {}
+        if (Object.keys(modules).length > 0) ecommerce.default_selected_modules = modules
+        if (ecommerceTargetPlatform) ecommerce.target_platform = ecommerceTargetPlatform
+        const brandBriefTrimmed = ecommerceBrandBrief.trim()
+        if (brandBriefTrimmed) ecommerce.brand_brief = brandBriefTrimmed
+        if (ecommerceImageModelKey) ecommerce.image_model_key = ecommerceImageModelKey
+        if (Object.keys(ecommerce).length > 0) payload.ecommerce = ecommerce
       }
       if (isEditing && template) {
         await updateMutation.mutateAsync({ id: template.id, data: payload as UpdateTemplateRequest })
@@ -509,6 +545,96 @@ export function TemplateCreateDialog({
               />
               <ThemePicker theme={theme} onTheme={setTheme} />
             </>
+          )}
+
+          {/* 电商 (ecommerce) — 视觉风格沿用上方公共 style_prompt 字段（三维风格架构：
+              电商只用 Style 维度）。此处配置建任务选此模板时自动带入的默认模块/目标平台/
+              品牌定位/默认模型；产品图始终在任务级上传，不进模板。 */}
+          {type === 'ecommerce' && (
+            <div className="space-y-3 rounded-lg border border-dashed border-input p-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">电商默认配置</Label>
+                <span className="text-xs text-muted-foreground">可选，建任务选此模板时自动带入</span>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">默认交付模块</Label>
+                <div className="divide-y divide-border">
+                  {ecommerceModuleCatalog.map((mod) => {
+                    const qty = ecommerceModules[mod.key] ?? 0
+                    const enabled = qty >= 1
+                    return (
+                      <div key={mod.key} className="flex items-center justify-between gap-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-medium text-foreground">{mod.label}</p>
+                            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{mod.ratio}</span>
+                          </div>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{mod.hint}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {enabled && (
+                            <div className="flex items-center gap-1">
+                              <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setEcommerceModules((cur) => ({ ...cur, [mod.key]: Math.max(mod.minQty, (cur[mod.key] ?? mod.defaultQty) - mod.qtyStep) }))} aria-label="减少">
+                                <Minus className="h-3 w-3" />
+                              </Button>
+                              <span className="w-8 text-center text-sm tabular-nums">{qty}{mod.qtyLabel}</span>
+                              <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setEcommerceModules((cur) => ({ ...cur, [mod.key]: Math.min(mod.maxQty, (cur[mod.key] ?? mod.defaultQty) + mod.qtyStep) }))} aria-label="增加">
+                                <Plus className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                          <Switch
+                            checked={enabled}
+                            onCheckedChange={(on) => setEcommerceModules((cur) => {
+                              const next = { ...cur }
+                              if (on) next[mod.key] = mod.defaultQty
+                              else delete next[mod.key]
+                              return next
+                            })}
+                            aria-label={`默认启用 ${mod.label}`}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">默认目标平台</Label>
+                <Select value={ecommerceTargetPlatform || undefined} onValueChange={(v) => setEcommerceTargetPlatform(v ?? '')}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="不指定（建任务时再选）" /></SelectTrigger>
+                  <SelectContent>
+                    {ecommerceTargetPlatformOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="tpl-brand-brief" className="text-xs text-muted-foreground">品牌定位 / 调性</Label>
+                <Textarea
+                  id="tpl-brand-brief"
+                  value={ecommerceBrandBrief}
+                  onChange={(e) => setEcommerceBrandBrief(e.target.value)}
+                  placeholder="例如：新锐国货美妆、主打成分党、高级简约视觉；用于约束跨图一致的品牌语境"
+                  maxLength={1024}
+                  className="resize-none"
+                  rows={2}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">默认图像模型</Label>
+                {imageModelsLoading ? (
+                  <Skeleton className="h-10 w-full rounded-xl" />
+                ) : (
+                  <ImageModelSelector options={imageModelOptions} value={ecommerceImageModelKey} onChange={setEcommerceImageModelKey} />
+                )}
+              </div>
+            </div>
           )}
         </div>
 

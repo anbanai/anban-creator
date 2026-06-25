@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { FileText, Loader2, Package } from 'lucide-react'
+import { FileText, Loader2, Package, Download } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { TaskFile } from '@/types'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
+import { Button } from '@/components/common/button'
 
 // E-commerce delivery gallery: groups generated images by module prefix
 // (main_/detail_/cover_/share_/sku_) and provides an on-demand viewer for the
@@ -37,6 +38,29 @@ function isDoc(name: string): boolean {
 export function EcommerceFilesGallery({ files, taskId }: { files: TaskFile[]; taskId: string }) {
   const images = files.filter((f) => f.mime_type?.startsWith('image/'))
   const docs = files.filter((f) => isDoc(f.file_name))
+  const [downloading, setDownloading] = useState(false)
+
+  // 整包下载：复用通用 zip 端点（与 TaskDetailPage 一致）。叶子组件不引 toast，
+  // 失败静默（画廊本身是 best-effort 视图）。
+  const handleDownloadAll = async () => {
+    setDownloading(true)
+    try {
+      const blob = await api.tasks.downloadZipBlob(taskId)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ecommerce_${taskId}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      // Best-effort download in a leaf component (no toast here). Log so a
+      // session-expiry / 401 / network failure is traceable in devtools rather
+      // than the button silently stopping its spinner.
+      console.error('[EcommerceFilesGallery] download zip failed:', err)
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   // Bucket images by module prefix (preserving catalog order), collect the rest.
   const bucket: Record<string, TaskFile[]> = {}
@@ -55,6 +79,12 @@ export function EcommerceFilesGallery({ files, taskId }: { files: TaskFile[]; ta
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={handleDownloadAll} loading={downloading} disabled={images.length === 0}>
+          <Download className="h-3.5 w-3.5" />
+          整包下载
+        </Button>
+      </div>
       {grouped.map((grp) => (
         <div key={grp.key}>
           <div className="mb-1.5 flex items-center gap-2">

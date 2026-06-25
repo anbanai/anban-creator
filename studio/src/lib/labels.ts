@@ -246,6 +246,9 @@ export const progressStageLabel: Record<string, string> = {
   image_generation: '图片生成',
   compliance: '合规检查',
   archive: '资源归档',
+  // ecommerce-only (slugs from claudecode/agents/ecommerce.md)
+  analysis: '产品档案',
+  copywriting: '卖点与文案',
   finalize: '完成',
 }
 

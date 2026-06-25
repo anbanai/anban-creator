@@ -33,6 +33,7 @@ const typeBadgeMap: Record<TemplateType, { label: string; className: string }> =
   poster: { label: '海报', className: 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' },
   seednote: { label: '种草笔记', className: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20' },
   article: { label: '公众号', className: 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20' },
+  ecommerce: { label: '电商出图', className: 'bg-orange-500/10 text-orange-400 ring-1 ring-orange-500/20' },
 }
 
 function JsonDisplay({ data, title }: { data: Record<string, unknown>; title: string }) {

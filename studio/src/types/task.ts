@@ -9,7 +9,6 @@ export interface EcommerceTaskConfig {
   target_platform?: string
   selling_points?: string
   language?: string
-  provider_strategy_override?: string
 }
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
@@ -107,7 +106,6 @@ export interface CreateTaskRequest {
   target_platform?: string
   selling_points?: string
   language?: string
-  provider_strategy_override?: string
 }
 
 export interface WorkflowStatus {
