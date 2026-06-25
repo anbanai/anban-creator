@@ -90,7 +90,7 @@ func (c *Config) UserPrompt() string {
 		Style:           c.Style,
 		Goal:            c.Goal,
 		TaskID:          c.TaskID,
-		ProjectID:       os.Getenv("ANBANWRITER_DEFAULT_PROJECT"),
+		ProjectID:       os.Getenv("ANBAN_DEFAULT_PROJECT"),
 		HasContentImage: c.HasContentImage,
 		HasTailImage:    c.HasTailImage,
 	})

@@ -64,10 +64,10 @@ bash install/install-subagents.sh`}
             Codex 插件通过环境变量读取平台连接信息。最少只需要配置 API Key：
           </p>
           <CodeBlock
-            code={`export ANBANWRITER_API_KEY="你的完整 API Key"`}
+            code={`export ANBAN_API_KEY="你的完整 API Key"`}
           />
           <p className="text-xs text-muted-foreground">
-            把上面这行写入 `~/.zshrc`（或 `~/.bashrc`），然后执行 `source ~/.zshrc`，或者直接关闭并重新打开一个新的终端会话。如果你使用官方在线服务，可以再加一行 `export ANBANWRITER_API_URL="https://api.creator.anbanai.com"`；接自建或本地服务就填你自己的服务地址。
+            把上面这行写入 `~/.zshrc`（或 `~/.bashrc`），然后执行 `source ~/.zshrc`，或者直接关闭并重新打开一个新的终端会话。如果你使用官方在线服务，可以再加一行 `export ANBAN_API_URL="https://api.creator.anbanai.com"`；接自建或本地服务就填你自己的服务地址。
           </p>
         </div>
       </StepCard>

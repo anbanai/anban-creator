@@ -39,8 +39,8 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		claudecode.WithExtraArgs(map[string]*string{
 			"agent": &r.cfg.AgentFlag,
 		}),
-		claudecode.WithEnvVar("ANBANWRITER_API_KEY", r.cfg.APIKey),
-		claudecode.WithEnvVar("ANBANWRITER_API_URL", r.cfg.ServerURL),
+		claudecode.WithEnvVar("ANBAN_API_KEY", r.cfg.APIKey),
+		claudecode.WithEnvVar("ANBAN_API_URL", r.cfg.ServerURL),
 		claudecode.WithStderrCallback(func(line string) {
 			_ = r.reporter.ReportProgress(ctx, strings.TrimSpace(line))
 		}),

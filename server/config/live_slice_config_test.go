@@ -3,11 +3,11 @@ package config
 import "testing"
 
 func TestTingWuEnvOverrides(t *testing.T) {
-	t.Setenv("ANBAN_SERVER_TINGWU_ENDPOINT", "tingwu.cn-beijing.aliyuncs.com")
-	t.Setenv("ANBAN_SERVER_TINGWU_REGION", "cn-beijing")
-	t.Setenv("ANBAN_SERVER_TINGWU_APP_KEY", "app-key")
-	t.Setenv("ANBAN_SERVER_TINGWU_ACCESS_KEY", "access-key")
-	t.Setenv("ANBAN_SERVER_TINGWU_ACCESS_SECRET", "access-secret")
+	t.Setenv("ANBAN_TINGWU_ENDPOINT", "tingwu.cn-beijing.aliyuncs.com")
+	t.Setenv("ANBAN_TINGWU_REGION", "cn-beijing")
+	t.Setenv("ANBAN_TINGWU_APP_KEY", "app-key")
+	t.Setenv("ANBAN_TINGWU_ACCESS_KEY", "access-key")
+	t.Setenv("ANBAN_TINGWU_ACCESS_SECRET", "access-secret")
 
 	cfg := &Config{}
 	cfg.applyEnvOverrides()

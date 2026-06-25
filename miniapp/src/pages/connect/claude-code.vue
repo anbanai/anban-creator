@@ -57,8 +57,8 @@ const keys = ref<APIKey[]>([])
 const keyPrefixes = computed(() => keys.value.map((key) => key.key_prefix).join('、') || '暂无密钥')
 const settingsSnippet = `{
   "env": {
-    "ANBANWRITER_API_KEY": "你的完整 API Key",
-    "ANBANWRITER_API_URL": "https://api.creator.anbanai.com"
+    "ANBAN_API_KEY": "你的完整 API Key",
+    "ANBAN_API_URL": "https://api.creator.anbanai.com"
   }
 }`
 

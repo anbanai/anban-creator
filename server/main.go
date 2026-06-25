@@ -39,7 +39,7 @@ var defaultConfigPaths = []string{"./config.yaml", "./server/config.yaml"}
 func main() {
 	// 1. Parse flags.
 	configPath := flag.String("config", "", "path to server config file (default: ./config.yaml or ./server/config.yaml)")
-	port := flag.Int("port", 0, "server listen port (overrides config and ANBAN_SERVER_PORT)")
+	port := flag.Int("port", 0, "server listen port (overrides config and ANBAN_PORT)")
 	flag.Parse()
 
 	// Resolve config path: explicit flag > env > default search.
@@ -52,10 +52,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Override port via ANBAN_SERVER_PORT env or -port flag.
+	// Override port via ANBAN_PORT env or -port flag.
 	if *port > 0 {
 		cfg.Server.Port = *port
-	} else if v := os.Getenv("ANBAN_SERVER_PORT"); v != "" {
+	} else if v := os.Getenv("ANBAN_PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil && p > 0 {
 			cfg.Server.Port = p
 		}

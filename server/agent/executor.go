@@ -449,7 +449,12 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	if opts.Task.Type == model.PlatformEcommerce {
 		photos := opts.Task.Ecommerce.Data().ProductPhotos
 		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, photos); n == 0 && len(photos) > 0 {
-			e.logger.Warn().Str("task_id", opts.Task.ID).Msg("failed to download any product photos, continuing without them")
+			// E-commerce output is a consistency contract on the uploaded product
+			// photos. If none materialized, the agent has no product reference and
+			// would hallucinate inconsistent assets. Fail fast (task error → refund)
+			// rather than ship a broken workspace and discover the gap at generation.
+			e.logger.Error().Str("task_id", opts.Task.ID).Int("provided", len(photos)).Msg("failed to download any product photos, aborting")
+			return nil, fmt.Errorf("ecommerce task: %d product photo(s) provided but none could be downloaded to the workspace; aborting to avoid inconsistent output", len(photos))
 		}
 	}
 
@@ -551,27 +556,27 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
-	// ${ANBANWRITER_API_KEY} for the anbanwriter MCP server.
+	// ${ANBAN_API_KEY} for the anbanwriter MCP server.
 	if mcpAPIKey != "" {
-		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_API_KEY", mcpAPIKey))
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBAN_API_KEY", mcpAPIKey))
 	}
 	// Inject MCP server base URL so plugin/.mcp.json can resolve
-	// ${ANBANWRITER_API_URL} for the anbanwriter MCP server.
+	// ${ANBAN_API_URL} for the anbanwriter MCP server.
 	if e.serverBaseURL != "" {
-		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_API_URL", e.serverBaseURL))
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBAN_API_URL", e.serverBaseURL))
 	}
 
 	// Inject the task's project ID so the agent definition can use it directly
 	// instead of discovering projects via list_projects (which may pick the wrong
 	// one when the user has multiple projects of the same platform type).
 	if opts.Project != nil {
-		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_DEFAULT_PROJECT", opts.Project.ID))
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBAN_DEFAULT_PROJECT", opts.Project.ID))
 	}
 
 	// Inject MCP server config directly via SDK (--mcp-config), bypassing
 	// .mcp.json env var substitution. This ensures URL and API key are always
-	// correct regardless of how .mcp.json resolves ${ANBANWRITER_API_URL} and
-	// ${ANBANWRITER_API_KEY}.
+	// correct regardless of how .mcp.json resolves ${ANBAN_API_URL} and
+	// ${ANBAN_API_KEY}.
 	// Note: WithMcpServers replaces the entire map, so this must be the only call.
 	mcpInjected := e.serverBaseURL != ""
 	if mcpInjected {

@@ -144,7 +144,7 @@ Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhos
 
 ### Server
 
-YAML config at `server/config.yaml`. All fields overridable via `ANBAN_SERVER_*` env vars.
+YAML config at `server/config.yaml`. All fields overridable via `ANBAN_*` env vars.
 
 Graceful degradation: MySQL unreachable → degraded mode (no persistence). Redis unreachable → in-process goroutine task execution, rate limiting skipped.
 

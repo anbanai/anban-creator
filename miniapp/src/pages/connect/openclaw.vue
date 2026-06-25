@@ -57,8 +57,8 @@ import AbButton from '@/components/common/AbButton.vue'
 
 const keys = ref<APIKey[]>([])
 const keyPrefixes = computed(() => keys.value.map((key) => key.key_prefix).join('、') || '暂无密钥')
-const envSnippet = `export ANBANWRITER_API_KEY="你的完整 API Key"
-export ANBANWRITER_API_URL="https://api.creator.anbanai.com"`
+const envSnippet = `export ANBAN_API_KEY="你的完整 API Key"
+export ANBAN_API_URL="https://api.creator.anbanai.com"`
 
 function copyText(text: string) {
   uni.setClipboardData({

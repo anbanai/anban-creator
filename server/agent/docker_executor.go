@@ -177,7 +177,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	if opts.Task.Type == model.PlatformEcommerce {
 		photos := opts.Task.Ecommerce.Data().ProductPhotos
 		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, photos); n == 0 && len(photos) > 0 {
-			e.logger.Warn().Str("task_id", opts.Task.ID).Msg("failed to download any product photos, continuing without them")
+			// E-commerce output is a consistency contract on the uploaded product
+			// photos. Fail fast (task error → refund) when none materialized rather
+			// than letting the agent hallucinate inconsistent assets. See executor.go
+			// for the matching guard in the non-docker path.
+			e.logger.Error().Str("task_id", opts.Task.ID).Int("provided", len(photos)).Msg("failed to download any product photos, aborting")
+			return nil, fmt.Errorf("ecommerce task: %d product photo(s) provided but none could be downloaded to the workspace; aborting to avoid inconsistent output", len(photos))
 		}
 	}
 
@@ -310,9 +315,9 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	if opts.Project != nil {
-		env = append(env, fmt.Sprintf("ANBANWRITER_DEFAULT_PROJECT=%s", opts.Project.ID))
+		env = append(env, fmt.Sprintf("ANBAN_DEFAULT_PROJECT=%s", opts.Project.ID))
 	}
-	env = append(env, fmt.Sprintf("ANBANWRITER_API_URL=%s", e.serverURL))
+	env = append(env, fmt.Sprintf("ANBAN_API_URL=%s", e.serverURL))
 	return env
 }
 

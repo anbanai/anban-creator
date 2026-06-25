@@ -20,7 +20,7 @@ claude:
     container_name: "abwriter-persistent"  # optional; empty = old create+destroy mode
 ```
 
-Env override: `ANBAN_SERVER_CLAUDE_DOCKER_CONTAINER_NAME`.
+Env override: `ANBAN_CLAUDE_DOCKER_CONTAINER_NAME`.
 
 When `ContainerName` is set, the executor uses persistent mode. When empty, it uses the existing create+destroy behavior unchanged.
 

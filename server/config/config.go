@@ -264,7 +264,7 @@ type ClaudeConfig struct {
 	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
 	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 300, "seednote": 150}
 	TaskLogDir     string            `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
-	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). Override with ANBAN_SERVER_CLAUDE_AGENT_SERVER_URL.
+	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). Override with ANBAN_CLAUDE_AGENT_SERVER_URL.
 }
 
 // DockerConfig holds Docker executor settings for container-based task execution.
@@ -364,7 +364,7 @@ type InvitationConfig struct {
 }
 
 // NewConfig loads configuration from a YAML file, applies defaults, then
-// overlays any ANBAN_SERVER_ prefixed environment variables.
+// overlays any ANBAN_ prefixed environment variables.
 func NewConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -575,23 +575,23 @@ func (c *Config) resolvePaths() {
 	}
 }
 
-// applyEnvOverrides reads ANBAN_SERVER_ prefixed environment variables and
+// applyEnvOverrides reads ANBAN_ prefixed environment variables and
 // overwrites the corresponding config fields. The mapping follows the struct
 // hierarchy using underscores as separators, e.g.:
 //
-//	ANBAN_SERVER_DATABASE_DSN
-//	ANBAN_SERVER_JWT_SECRET_KEY
-//	ANBAN_SERVER_REDIS_ADDR
-//	ANBAN_SERVER_SERVER_PORT
+//	ANBAN_DATABASE_DSN
+//	ANBAN_JWT_SECRET_KEY
+//	ANBAN_REDIS_ADDR
+//	ANBAN_PORT
 func (c *Config) applyEnvOverrides() {
-	prefix := "ANBAN_SERVER_"
+	prefix := "ANBAN_"
 
-	if v := os.Getenv(prefix + "SERVER_PORT"); v != "" {
+	if v := os.Getenv(prefix + "PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			c.Server.Port = port
 		}
 	}
-	if v := os.Getenv(prefix + "SERVER_HOST"); v != "" {
+	if v := os.Getenv(prefix + "HOST"); v != "" {
 		c.Server.Host = v
 	}
 
@@ -941,7 +941,7 @@ func (c *Config) Validate() error {
 	}
 	if c.Claude.Executor == "local" {
 		if strings.TrimSpace(c.Claude.PluginDir) == "" {
-			errs = append(errs, "claude.plugin_dir is required for agent execution (set via config, ANBAN_SERVER_CLAUDE_PLUGIN_DIR env, or ensure agents/ exists in a parent directory)")
+			errs = append(errs, "claude.plugin_dir is required for agent execution (set via config, ANBAN_CLAUDE_PLUGIN_DIR env, or ensure agents/ exists in a parent directory)")
 		} else {
 			agentsDir := filepath.Join(c.Claude.PluginDir, "agents")
 			if info, err := os.Stat(agentsDir); err != nil || !info.IsDir() {

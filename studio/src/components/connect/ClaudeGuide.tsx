@@ -63,7 +63,7 @@ claude plugin install --scope user anbanwriter@anbanai`}
           <CodeBlock
             code={`{
   "env": {
-    "ANBANWRITER_API_KEY": "你的完整 API Key"
+    "ANBAN_API_KEY": "你的完整 API Key"
   }
 }`}
             language="json"
@@ -72,7 +72,7 @@ claude plugin install --scope user anbanwriter@anbanai`}
             如果这个文件原来已经有别的配置，只需要把 `env` 字段合并进去，不要覆盖已有内容。
           </p>
           <p className="text-xs text-muted-foreground">
-            如果你使用官方在线服务，可以额外配置 `ANBANWRITER_API_URL=https://api.creator.anbanai.com`；如果你接的是自建或本地服务，就填你自己的服务地址。
+            如果你使用官方在线服务，可以额外配置 `ANBAN_API_URL=https://api.creator.anbanai.com`；如果你接的是自建或本地服务，就填你自己的服务地址。
           </p>
         </div>
       </StepCard>

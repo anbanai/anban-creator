@@ -149,7 +149,7 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *
 			if zlog != nil {
 				zlog.Warn().
 					Str("remote_addr", r.RemoteAddr).
-					Msg("mcp auth failed: empty bearer token (ANBANWRITER_API_KEY env var may not be set)")
+					Msg("mcp auth failed: empty bearer token (ANBAN_API_KEY env var may not be set)")
 			}
 			return nil, auth.ErrInvalidToken
 		}

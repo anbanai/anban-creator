@@ -74,8 +74,8 @@ npm install -g @anthropic-ai/claude-code
 配置命令（代码块 + 复制按钮）：
 ```bash
 # 添加到 ~/.zshrc
-export ANBANWRITER_API_KEY="你的API Key"
-export ANBANWRITER_API_URL="https://你的域名"  # 本地开发默认 http://localhost:18060
+export ANBAN_API_KEY="你的API Key"
+export ANBAN_API_URL="https://你的域名"  # 本地开发默认 http://localhost:18060
 ```
 
 ### 步骤 4: 图片生成配置（可选）
