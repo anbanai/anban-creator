@@ -23,7 +23,7 @@ vi.mock('@/contexts/AuthContext', () => ({
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
-  const { mockChannelDetail } = await vi.importActual<typeof import('@/test/mocks/handlers')>('@/test/mocks/handlers')
+  const { mockProjectDetail } = await vi.importActual<typeof import('@/test/mocks/handlers')>('@/test/mocks/handlers')
   return {
     ...actual,
     api: {
@@ -33,9 +33,9 @@ vi.mock('@/lib/api', async () => {
         get: vi.fn(),
         files: vi.fn().mockResolvedValue([]),
       },
-      channels: {
-        ...actual.api.channels,
-        get: vi.fn().mockResolvedValue(mockChannelDetail),
+      projects: {
+        ...actual.api.projects,
+        get: vi.fn().mockResolvedValue(mockProjectDetail),
       },
     },
   }

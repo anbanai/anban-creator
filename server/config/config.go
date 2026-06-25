@@ -159,7 +159,7 @@ type SizesConfig struct {
 }
 
 // ImageAPIConfig holds global image generation API configuration.
-// All channels share this server-level config.
+// All projects share this server-level config.
 type ImageAPIConfig struct {
 	Cover    *appconfig.ImageAPI            `yaml:"cover"`
 	Content  *appconfig.ImageAPI            `yaml:"content"`
@@ -285,6 +285,12 @@ type CreditsConfig struct {
 	TaskCosts     map[string]int            `yaml:"task_costs"`     // per-task-type costs, e.g. {"article": 4000, "seednote": 3200}
 	ModelCosts    map[string]map[string]int `yaml:"model_costs"`    // per-model costs, key format: "provider/model"
 	AdminAPIKey   string                    `yaml:"admin_api_key"`  // API key for admin credit grant endpoint
+
+	// E-commerce deliverable module pricing. Each module (main_images, detail_page,
+	// cover_banner, share_image, sku_images) maps to a per-unit credit price; an
+	// e-commerce task's total cost is sum(unit_price × quantity) over the
+	// user-selected modules (see CreditService.EcommercePackageCost).
+	EcommerceModulePrices map[string]int `yaml:"ecommerce_module_prices"`
 
 	// Goal mode pricing.
 	// GoalModeMultiplier is the upfront credit multiplier applied when a task is
@@ -450,6 +456,15 @@ func (c *Config) applyDefaults() {
 	if c.Credits.GoalModeMultiplier <= 0 {
 		c.Credits.GoalModeMultiplier = 3
 	}
+	if c.Credits.EcommerceModulePrices == nil {
+		c.Credits.EcommerceModulePrices = map[string]int{
+			"main_images":  1500, // 主图套（默认5张，CTR之战）
+			"detail_page":  3000, // 详情页商详（默认8-12节，FABE叙事）
+			"cover_banner": 600,  // 封面/类目 banner，每张
+			"share_image":  400,  // 分享图，每张
+			"sku_images":   300,  // SKU 变体图，每张
+		}
+	}
 
 	// Asynq defaults.
 	if c.Asynq.Concurrency == 0 {
@@ -492,8 +507,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Claude.MaxTurns == nil {
 		c.Claude.MaxTurns = map[string]int{
-			"article":  100,
-			"seednote": 60,
+			"article":   100,
+			"seednote":  60,
+			"ecommerce": 120, // 多产品图 → 产品档案 → 主图/详情/封面/分享/SKU 批量 + 视觉自检循环，给足余量
 		}
 	}
 	if c.Claude.Docker.Image == "" {

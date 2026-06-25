@@ -51,7 +51,7 @@ func TestSeednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	taskID := uuid.New().String()
-	channelID := uuid.New().String()
+	projectID := uuid.New().String()
 	now := time.Now().UTC()
 	next := now.Add(24 * time.Hour)
 	viewCount := 1200
@@ -59,17 +59,17 @@ func TestSeednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "owner@example.com", Nickname: "Owner", Password: "hashed", InviteCode: "owner1"}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{ID: channelID, UserID: userID, Platform: model.PlatformSeednote, Name: "SeedNote", Status: model.ChannelStatusActive}); err != nil {
-		t.Fatalf("create channel: %v", err)
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "SeedNote", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ChannelID: channelID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, Published: true}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, Published: true}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
-		ChannelID:         channelID,
+		ProjectID:         projectID,
 		Status:            model.SeednoteTrackingStatusTracking,
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
 		NoteTitle:         "早起效率翻倍的方法",
@@ -144,7 +144,7 @@ func TestSeednoteAnalyticsHandler_RejectsNonOwner(t *testing.T) {
 	ownerID := uuid.New().String()
 	otherID := uuid.New().String()
 	taskID := uuid.New().String()
-	channelID := uuid.New().String()
+	projectID := uuid.New().String()
 
 	if err := repo.Users().Create(ctx, &model.User{ID: ownerID, Email: "owner@example.com", Nickname: "Owner", Password: "hashed", InviteCode: "owner2"}); err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -152,10 +152,10 @@ func TestSeednoteAnalyticsHandler_RejectsNonOwner(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: otherID, Email: "other@example.com", Nickname: "Other", Password: "hashed", InviteCode: "other2"}); err != nil {
 		t.Fatalf("create other: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{ID: channelID, UserID: ownerID, Platform: model.PlatformSeednote, Name: "SeedNote", Status: model.ChannelStatusActive}); err != nil {
-		t.Fatalf("create channel: %v", err)
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: ownerID, Platform: model.PlatformSeednote, Name: "SeedNote", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: ownerID, ChannelID: channelID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, Published: true}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: ownerID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, Published: true}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 

@@ -97,12 +97,21 @@ func main() {
 			log.Info().Msg("database migration completed")
 		}
 
-		// 6.1 One-time backfill: split the overloaded article Channel.Style into
+		// 6.1 One-time backfill: split the overloaded article Project.Style into
 		// the new orthogonal dimensions (Style=visual / WritingStyle=writer). Old
 		// article rows stored the writer key in Style; move it to WritingStyle and
 		// clear Style so the writer key is no longer read as a visual-style anchor.
 		if err := service.MigrateArticleStyleOverload(context.Background(), mysqlDB, log); err != nil {
-			log.Error().Err(err).Msg("failed to backfill article channel style overload")
+			log.Error().Err(err).Msg("failed to backfill article project style overload")
+		}
+
+		// 6.2 One-time rename: the `channel` (WeChat account) concept became
+		// `project`. AutoMigrate cannot rename tables/columns, so this reconciles
+		// the legacy `channels` table + `channel_id` foreign keys into `projects`
+		// / `project_id` while preserving all data. Idempotent; no-op on fresh or
+		// already-migrated databases.
+		if err := service.MigrateChannelsToProjects(context.Background(), mysqlDB, log); err != nil {
+			log.Error().Err(err).Msg("failed to migrate channels to projects")
 		}
 
 	}
@@ -220,7 +229,7 @@ func main() {
 	// 13. Create services.
 	var planSvc *service.PlanService
 	var taskSvc *service.TaskService
-	var channelSvc *service.ChannelService
+	var projectSvc *service.ProjectService
 	var creditSvc *service.CreditService
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
@@ -233,7 +242,7 @@ func main() {
 
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
-		channelSvc = service.NewChannelService(repo, log)
+		projectSvc = service.NewProjectService(repo, log)
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
@@ -341,7 +350,7 @@ func main() {
 	var taskHandler *handler.TaskHandler
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var agentHandler *handler.AgentHandler
-	var channelHandler *handler.ChannelHandler
+	var projectHandler *handler.ProjectHandler
 	var timelineHandler *handler.TimelineHandler
 	var creditHandler *handler.CreditHandler
 	var apiKeyHandler *handler.APIKeyHandler
@@ -369,24 +378,24 @@ func main() {
 		if seednoteTrackingSvc != nil {
 			seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
 		}
-		channelHandler = handler.NewChannelHandler(channelSvc, log)
+		projectHandler = handler.NewProjectHandler(projectSvc, log)
 		if modelConfigSvc != nil {
-			channelHandler.SetModelConfigService(modelConfigSvc)
+			projectHandler.SetModelConfigService(modelConfigSvc)
 		}
 		if writingLLMClient != nil {
-			channelHandler.SetLLMClient(writingLLMClient, cfg.Writing.Timeout)
+			projectHandler.SetLLMClient(writingLLMClient, cfg.Writing.Timeout)
 		}
 		if visionLLMClient != nil {
-			channelHandler.SetVisionClient(visionLLMClient)
+			projectHandler.SetVisionClient(visionLLMClient)
 		}
 		if templateSvc != nil {
-			channelHandler.SetTemplateService(templateSvc)
+			projectHandler.SetTemplateService(templateSvc)
 		}
 		if store != nil {
-			channelHandler.SetStore(store)
+			projectHandler.SetStore(store)
 		}
 		if seednoteClient != nil {
-			channelHandler.SetSeednoteClient(seednoteClient)
+			projectHandler.SetSeednoteClient(seednoteClient)
 		}
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
@@ -438,7 +447,7 @@ func main() {
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
 	var mcpHandler http.Handler
-	if channelSvc != nil && taskSvc != nil && creditSvc != nil && planSvc != nil {
+	if projectSvc != nil && taskSvc != nil && creditSvc != nil && planSvc != nil {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
 		var writingSvc *service.WritingService
@@ -486,7 +495,7 @@ func main() {
 		}
 
 		mcp.SetServices(&mcp.Services{
-			ChannelSvc:       channelSvc,
+			ProjectSvc:       projectSvc,
 			TaskSvc:          taskSvc,
 			CreditSvc:        creditSvc,
 			PlanSvc:          planSvc,
@@ -550,7 +559,7 @@ func main() {
 		PlanService:              planSvc,
 		TaskService:              taskSvc,
 		CreditService:            creditSvc,
-		ChannelHandler:           channelHandler,
+		ProjectHandler:           projectHandler,
 		PlanHandler:              planHandler,
 		TaskHandler:              taskHandler,
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,

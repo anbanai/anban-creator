@@ -110,7 +110,7 @@ func reapStuckTasks(ctx context.Context, repo repository.Repository, taskSvc *se
 		logger.Warn().
 			Str("task_id", t.ID).
 			Str("user_id", t.UserID).
-			Str("channel_id", t.ChannelID).
+			Str("project_id", t.ProjectID).
 			Str("stale_duration", staleDuration.Round(time.Second).String()).
 			Msg(errMsg)
 
@@ -132,13 +132,13 @@ func reapStuckTasks(ctx context.Context, repo repository.Repository, taskSvc *se
 		}
 
 		// Release concurrency slot for the reaped task.
-		if t.ChannelID != "" && taskSvc.PubSub() != nil {
-			taskSvc.PubSub().ReleaseSlot(ctx, t.ChannelID)
+		if t.ProjectID != "" && taskSvc.PubSub() != nil {
+			taskSvc.PubSub().ReleaseSlot(ctx, t.ProjectID)
 		}
 
-		if t.ChannelID != "" {
-			if err := taskSvc.DispatchPendingTasks(ctx, t.ChannelID); err != nil {
-				logger.Warn().Err(err).Str("channel_id", t.ChannelID).Msg("failed to dispatch pending tasks after reaping stuck task")
+		if t.ProjectID != "" {
+			if err := taskSvc.DispatchPendingTasks(ctx, t.ProjectID); err != nil {
+				logger.Warn().Err(err).Str("project_id", t.ProjectID).Msg("failed to dispatch pending tasks after reaping stuck task")
 			}
 		}
 		reaped++
@@ -247,26 +247,26 @@ func advancePlanNextRun(ctx context.Context, repo repository.Repository, plan *m
 	return &next, nil
 }
 
-// checkAndDispatchPendingTasks finds all channels that have pending tasks
+// checkAndDispatchPendingTasks finds all projects that have pending tasks
 // and available concurrency slots, then enqueues them.
 // This serves as a fallback for cases where the post-completion dispatch
 // was missed (e.g., server restart, crash).
 func checkAndDispatchPendingTasks(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger) {
-	// Find all active channels.
-	channels, err := repo.Channels().ListActiveChannels(ctx)
+	// Find all active projects.
+	projects, err := repo.Projects().ListActiveProjects(ctx)
 	if err != nil {
-		logger.Warn().Err(err).Msg("failed to list channels for pending task dispatch")
+		logger.Warn().Err(err).Msg("failed to list projects for pending task dispatch")
 		return
 	}
 
-	for _, ch := range channels {
+	for _, ch := range projects {
 		// Reconcile Redis counter with DB to prevent drift.
 		if taskSvc.PubSub() != nil {
-			dbCount, _ := repo.Tasks().CountRunningByChannel(ctx, ch.ID)
-			taskSvc.PubSub().SyncChannelCount(ctx, ch.ID, dbCount)
+			dbCount, _ := repo.Tasks().CountRunningByProject(ctx, ch.ID)
+			taskSvc.PubSub().SyncProjectCount(ctx, ch.ID, dbCount)
 		}
 		if err := taskSvc.DispatchPendingTasks(ctx, ch.ID); err != nil {
-			logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to dispatch pending tasks")
+			logger.Warn().Err(err).Str("project_id", ch.ID).Msg("failed to dispatch pending tasks")
 		}
 	}
 }

@@ -112,7 +112,7 @@ func mcpLoggingMiddleware(next http.Handler, zlog *zerolog.Logger) http.Handler 
 func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zerolog.Logger) http.Handler {
 	// Create MCP server.
 	mcServer := mcp.NewServer(&mcp.Implementation{
-		Name:    "anbanwriter-mcp",
+		Name:    "anban-mcp",
 		Version: "1.2.0",
 	}, &mcp.ServerOptions{
 		Instructions: "Content creation assistant for WeChat and Seednote publishing.",

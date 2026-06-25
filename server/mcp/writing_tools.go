@@ -21,46 +21,46 @@ const longTextHeartbeatInterval = 15 * time.Second
 func registerWritingTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "write_article",
-		Description: "Generate an article using the resolved writing style and an LLM. The writing style is resolved from the task (task > template > plan > channel) when task_id is given, falling back to the channel's writing_style. The server assembles the writing prompt from the resolved writer resource, calls the LLM, and returns the article text in Markdown format.",
+		Description: "Generate an article using the resolved writing style and an LLM. The writing style is resolved from the task (task > template > plan > project) when task_id is given, falling back to the project's writing_style. The server assembles the writing prompt from the resolved writer resource, calls the LLM, and returns the article text in Markdown format.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id":   map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id":   map[string]any{"type": "string", "description": "Project ID"},
 				"topic":        map[string]any{"type": "string", "description": "Article topic or idea to write about"},
 				"input_type":   map[string]any{"type": "string", "enum": []any{"idea", "fragment", "outline", "title"}, "description": "Type of input content (default: idea)"},
 				"article_type": map[string]any{"type": "string", "enum": []any{"essay", "commentary", "story", "tutorial", "review"}, "description": "Article type (default: essay)"},
 				"length":       map[string]any{"type": "string", "enum": []any{"short", "medium", "long"}, "description": "Desired article length (default: medium)"},
-				"task_id":      map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > template > plan > channel) as the single source of truth. Omit only for direct CLI calls, which fall back to the channel's writing_style."},
+				"task_id":      map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > template > plan > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project's writing_style."},
 			},
-			"required": []any{"channel_id", "topic"},
+			"required": []any{"project_id", "topic"},
 		},
 	}, writeArticleHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "convert_markdown",
-		Description: "Convert Markdown content to WeChat-compatible HTML. The theme (排版样式) is resolved from the task (task > template > plan > channel) when task_id is given, falling back to the channel theme. The server renders the HTML with image placeholders.",
+		Description: "Convert Markdown content to WeChat-compatible HTML. The theme (排版样式) is resolved from the task (task > template > plan > project) when task_id is given, falling back to the project theme. The server renders the HTML with image placeholders.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"markdown":   map[string]any{"type": "string", "description": "Markdown content to convert"},
-				"theme":      map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > template > plan > channel), then the channel theme."},
-				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > template > plan > channel) as the single source of truth. Omit only for direct CLI calls, which fall back to the channel theme."},
+				"theme":      map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > template > plan > project), then the project theme."},
+				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > template > plan > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
 			},
-			"required": []any{"channel_id", "markdown"},
+			"required": []any{"project_id", "markdown"},
 		},
 	}, convertMarkdownHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "render_template",
-		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the renderer freely decide image placement and layout), render_template annotates the markdown with explicit [SLOT: ...] markers so each image is placed at the planned position and each section is wrapped in the specified layout module. The theme (排版样式) is resolved from the task (task > template > plan > channel) when task_id is given, falling back to the channel theme. Use this when you have a visual-rhythm-plan that dictates where each image goes (hero / section_opener / inline_detail / footer).",
+		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the renderer freely decide image placement and layout), render_template annotates the markdown with explicit [SLOT: ...] markers so each image is placed at the planned position and each section is wrapped in the specified layout module. The theme (排版样式) is resolved from the task (task > template > plan > project) when task_id is given, falling back to the project theme. Use this when you have a visual-rhythm-plan that dictates where each image goes (hero / section_opener / inline_detail / footer).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"markdown":   map[string]any{"type": "string", "description": "Article Markdown (may contain inline ![alt](url) images too)"},
 				"layout_plan": map[string]any{
-					"type": "object",
+					"type":        "object",
 					"description": "Structured layout plan: { article_type, template_name, slots: [...], footer?: {...} }. Each slot has slot_id (hero/section_opener/inline_detail/footer), section_index, image_url, image_size (full-bleed/full-width/inline), module (optional layout module name), module_vars.",
 					"properties": map[string]any{
 						"article_type":  map[string]any{"type": "string", "description": "long-form-essay / listicle / tutorial / story-narrative"},
@@ -70,20 +70,20 @@ func registerWritingTools(server *mcp.Server) {
 							"items": map[string]any{
 								"type": "object",
 								"properties": map[string]any{
-									"slot_id":              map[string]any{"type": "string", "enum": []any{"hero", "section_opener", "inline_detail", "footer"}},
-									"section_index":        map[string]any{"type": "integer", "description": "0-based ## section index; -1 for footer"},
-									"section_title":        map[string]any{"type": "string"},
+									"slot_id":               map[string]any{"type": "string", "enum": []any{"hero", "section_opener", "inline_detail", "footer"}},
+									"section_index":         map[string]any{"type": "integer", "description": "0-based ## section index; -1 for footer"},
+									"section_title":         map[string]any{"type": "string"},
 									"after_paragraph_index": map[string]any{"type": "integer", "description": "for inline_detail: 0-based paragraph within section"},
-									"image_url":            map[string]any{"type": "string"},
-									"image_size":           map[string]any{"type": "string", "enum": []any{"full-bleed", "full-width", "inline"}},
-									"module":               map[string]any{"type": "string", "description": "layout module name (hero/quote/callout/steps/etc.)"},
-									"module_vars":          map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+									"image_url":             map[string]any{"type": "string"},
+									"image_size":            map[string]any{"type": "string", "enum": []any{"full-bleed", "full-width", "inline"}},
+									"module":                map[string]any{"type": "string", "description": "layout module name (hero/quote/callout/steps/etc.)"},
+									"module_vars":           map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 								},
 								"required": []any{"slot_id", "section_index"},
 							},
 						},
 						"footer": map[string]any{
-							"type": "object",
+							"type":        "object",
 							"description": "Optional footer slot (CTA / checklist / summary module)",
 							"properties": map[string]any{
 								"module":      map[string]any{"type": "string"},
@@ -94,10 +94,10 @@ func registerWritingTools(server *mcp.Server) {
 					},
 					"required": []any{"article_type", "slots"},
 				},
-				"theme":   map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > template > plan > channel), then the channel theme."},
-				"task_id": map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > template > plan > channel) as the single source of truth. Omit only for direct CLI calls, which fall back to the channel theme."},
+				"theme":   map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > template > plan > project), then the project theme."},
+				"task_id": map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > template > plan > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
 			},
-			"required": []any{"channel_id", "markdown", "layout_plan"},
+			"required": []any{"project_id", "markdown", "layout_plan"},
 		},
 	}, renderTemplateHandler)
 
@@ -107,26 +107,26 @@ func registerWritingTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"content":    map[string]any{"type": "string", "description": "Article content to humanize"},
 				"intensity":  map[string]any{"type": "string", "enum": []any{"gentle", "medium", "aggressive", "authentic"}, "description": "Humanization intensity (default: medium). 'authentic' uses 6-dimension rules to rewrite like real human writing."},
 			},
-			"required": []any{"channel_id", "content"},
+			"required": []any{"project_id", "content"},
 		},
 	}, humanizeArticleHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "research_topics",
-		Description: "Generate topic suggestions based on a channel's positioning and keywords. Returns an array of topics with viral scores, angles, and keywords.",
+		Description: "Generate topic suggestions based on a project's positioning and keywords. Returns an array of topics with viral scores, angles, and keywords.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID (uses its positioning and keywords)"},
-				"keywords":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Override keywords (optional, uses channel keywords by default)"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID (uses its positioning and keywords)"},
+				"keywords":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Override keywords (optional, uses project keywords by default)"},
 				"domain":     map[string]any{"type": "string", "description": "Domain or niche focus (optional)"},
 				"count":      map[string]any{"type": "integer", "description": "Number of topics to generate (1-20, default 5)", "minimum": 1, "maximum": 20},
 			},
-			"required": []any{"channel_id"},
+			"required": []any{"project_id"},
 		},
 	}, researchTopicsHandler)
 
@@ -136,28 +136,28 @@ func registerWritingTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"content":    map[string]any{"type": "string", "description": "Article content to optimize"},
 				"title":      map[string]any{"type": "string", "description": "Original title to optimize"},
 				"keywords":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Current keywords (optional)"},
 			},
-			"required": []any{"channel_id", "content", "title"},
+			"required": []any{"project_id", "content", "title"},
 		},
 	}, optimizeSEOHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_outline",
-		Description: "Generate a structured article outline/framework based on a topic and template. The writing style is resolved from the task (task > template > plan > channel) when task_id is given, falling back to the channel's writing_style. Returns title, hook, sections, key points, CTA, and viral elements.",
+		Description: "Generate a structured article outline/framework based on a topic and template. The writing style is resolved from the task (task > template > plan > project) when task_id is given, falling back to the project's writing_style. Returns title, hook, sections, key points, CTA, and viral elements.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID (uses its keywords)"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID (uses its keywords)"},
 				"topic":      map[string]any{"type": "string", "description": "Article topic or idea"},
 				"template":   map[string]any{"type": "string", "enum": []any{"authoritative", "comparison", "cultural", "practical"}, "description": "Outline template type (default: authoritative)"},
-				"style":      map[string]any{"type": "string", "description": "Writing style override (optional). When omitted, resolves from task_id (task > template > plan > channel), then the channel's writing_style."},
-				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > template > plan > channel) as the single source of truth. Omit only for direct CLI calls."},
+				"style":      map[string]any{"type": "string", "description": "Writing style override (optional). When omitted, resolves from task_id (task > template > plan > project), then the project's writing_style."},
+				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > template > plan > project) as the single source of truth. Omit only for direct CLI calls."},
 			},
-			"required": []any{"channel_id", "topic"},
+			"required": []any{"project_id", "topic"},
 		},
 	}, generateOutlineHandler)
 
@@ -186,10 +186,10 @@ func writeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	topic, _ := args["topic"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if topic == "" {
 		return errorResult("topic is required"), nil
@@ -210,7 +210,7 @@ func writeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		return billingError("write article", err), nil
 	}
 
-	result, err := svcs.WritingSvc.WriteArticle(ctx, userID, channelID, topic, inputType, articleType, length, taskID)
+	result, err := svcs.WritingSvc.WriteArticle(ctx, userID, projectID, topic, inputType, articleType, length, taskID)
 	if err != nil {
 		return billingError("write article", err), nil
 	}
@@ -225,10 +225,10 @@ func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	markdown, _ := args["markdown"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if markdown == "" {
 		return errorResult("markdown is required"), nil
@@ -247,7 +247,7 @@ func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 		return billingError("convert markdown", err), nil
 	}
 
-	result, err := svcs.WritingSvc.ConvertMarkdown(ctx, userID, channelID, markdown, theme, taskID)
+	result, err := svcs.WritingSvc.ConvertMarkdown(ctx, userID, projectID, markdown, theme, taskID)
 	if err != nil {
 		return billingError("convert markdown", err), nil
 	}
@@ -262,10 +262,10 @@ func renderTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	markdown, _ := args["markdown"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if markdown == "" {
 		return errorResult("markdown is required"), nil
@@ -289,7 +289,7 @@ func renderTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		return billingError("render template", err), nil
 	}
 
-	result, err := svcs.WritingSvc.RenderTemplate(ctx, userID, channelID, markdown, layoutPlan, theme, taskID)
+	result, err := svcs.WritingSvc.RenderTemplate(ctx, userID, projectID, markdown, layoutPlan, theme, taskID)
 	if err != nil {
 		return billingError("render template", err), nil
 	}
@@ -304,10 +304,10 @@ func humanizeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	content, _ := args["content"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if content == "" {
 		return errorResult("content is required"), nil
@@ -325,7 +325,7 @@ func humanizeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 		return billingError("humanize article", err), nil
 	}
 
-	result, err := svcs.WritingSvc.HumanizeArticle(ctx, userID, channelID, content, intensity)
+	result, err := svcs.WritingSvc.HumanizeArticle(ctx, userID, projectID, content, intensity)
 	if err != nil {
 		return billingError("humanize article", err), nil
 	}
@@ -340,9 +340,9 @@ func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	projectID, _ := args["project_id"].(string)
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 
 	var keywords []string
@@ -370,7 +370,7 @@ func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		return billingError("research topics", err), nil
 	}
 
-	result, err := svcs.WritingSvc.ResearchTopics(ctx, userID, channelID, keywords, domain, count)
+	result, err := svcs.WritingSvc.ResearchTopics(ctx, userID, projectID, keywords, domain, count)
 	if err != nil {
 		return billingError("research topics", err), nil
 	}
@@ -385,11 +385,11 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	content, _ := args["content"].(string)
 	title, _ := args["title"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if content == "" {
 		return errorResult("content is required"), nil
@@ -417,7 +417,7 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		return billingError("optimize seo", err), nil
 	}
 
-	result, err := svcs.WritingSvc.OptimizeSEO(ctx, userID, channelID, content, title, keywords)
+	result, err := svcs.WritingSvc.OptimizeSEO(ctx, userID, projectID, content, title, keywords)
 	if err != nil {
 		return billingError("optimize seo", err), nil
 	}
@@ -432,10 +432,10 @@ func generateOutlineHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	topic, _ := args["topic"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if topic == "" {
 		return errorResult("topic is required"), nil
@@ -455,7 +455,7 @@ func generateOutlineHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 		return billingError("generate outline", err), nil
 	}
 
-	result, err := svcs.WritingSvc.GenerateOutline(ctx, userID, channelID, topic, template, style, taskID)
+	result, err := svcs.WritingSvc.GenerateOutline(ctx, userID, projectID, topic, template, style, taskID)
 	if err != nil {
 		return billingError("generate outline", err), nil
 	}

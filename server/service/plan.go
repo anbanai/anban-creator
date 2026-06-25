@@ -32,7 +32,7 @@ func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanSer
 // positional params.
 type CreatePlanParams struct {
 	UserID             string
-	ChannelID          string
+	ProjectID          string
 	CronExpr           string
 	Prompt             string
 	ImageModelKey      string
@@ -41,12 +41,12 @@ type CreatePlanParams struct {
 	Style              string
 	// WritingStyle / Theme carry the plan-level 写作风格 / 排版样式 (the other two
 	// orthogonal dimensions). Resolved alongside Style with precedence
-	// plan > template > channel, then copied to spawned tasks by CreateFromPlan.
+	// plan > template > project, then copied to spawned tasks by CreateFromPlan.
 	WritingStyle string
 	Theme        string
 	// Author / AuthorStyleIntro / AuthorAvatarURL carry the plan-level 作者（署名）
 	// + 写作风格（free-text imitation） + 可选人设头像 overrides. Resolved alongside
-	// Style/WritingStyle/Theme with precedence plan > template > channel, then
+	// Style/WritingStyle/Theme with precedence plan > template > project, then
 	// copied to Task by CreateFromPlan (task-level override wins).
 	Author           string
 	AuthorStyleIntro string
@@ -56,7 +56,7 @@ type CreatePlanParams struct {
 	GoalMode         bool
 	// TemplateID records the template selected during plan creation. Propagated to
 	// spawned tasks by CreateFromPlan so the agent can surface the template's
-	// content scaffold via get_channel_profile(task_id). nil = no template.
+	// content scaffold via get_project_profile(task_id). nil = no template.
 	TemplateID *string
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off);
@@ -65,8 +65,8 @@ type CreatePlanParams struct {
 	HasTailImage    *bool
 }
 
-// Create validates the cron expression, resolves the channel, computes the next run
-// time, and persists the plan. The task type is derived from the channel's platform.
+// Create validates the cron expression, resolves the project, computes the next run
+// time, and persists the plan. The task type is derived from the project's platform.
 // ImageModelKey optionally selects a per-plan image model (validated upstream by the handler).
 //
 // Goal and GoalMode propagate to tasks spawned from this plan; when GoalMode is
@@ -76,23 +76,32 @@ type CreatePlanParams struct {
 // HasContentImage / HasTailImage control seednote image composition on spawned
 // tasks. nil falls back to the model's column defaults (content on, tail off).
 func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Plan, error) {
-	if p.ChannelID == "" {
-		return nil, fmt.Errorf("channel_id is required")
+	if p.ProjectID == "" {
+		return nil, fmt.Errorf("project_id is required")
 	}
 	if p.CronExpr == "" {
 		return nil, fmt.Errorf("cron_expr is required")
 	}
 
-	// Load channel to derive type and validate ownership.
-	channel, err := s.repo.Channels().FindByID(ctx, p.ChannelID)
+	// Load project to derive type and validate ownership.
+	project, err := s.repo.Projects().FindByID(ctx, p.ProjectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
-	if channel.UserID != p.UserID {
-		return nil, fmt.Errorf("channel not owned by user")
+	if project.UserID != p.UserID {
+		return nil, fmt.Errorf("project not owned by user")
 	}
-	if channel.Status != model.ChannelStatusActive {
-		return nil, fmt.Errorf("channel is not active")
+	if project.Status != model.ProjectStatusActive {
+		return nil, fmt.Errorf("project is not active")
+	}
+	// E-commerce projects can't back plans: e-commerce tasks are package-priced
+	// (sum of selected modules) and require per-task product photos + module
+	// selection, none of which a plan can supply. Reject up front so an
+	// API/legacy plan referencing an e-commerce project fails fast here instead
+	// of silently no-op'ing (and re-firing every check) at spawn time — see
+	// TaskService.CreateFromPlan, where taskType resolves to the project platform.
+	if project.Platform == model.PlatformEcommerce {
+		return nil, fmt.Errorf("plans are not supported for e-commerce projects")
 	}
 
 	nextRun, err := s.computeNextRun(p.CronExpr)
@@ -112,7 +121,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	}
 
 	// Resolve the three orthogonal style dimensions with precedence
-	// plan > template > channel. Each dimension is independent — the writer never
+	// plan > template > project. Each dimension is independent — the writer never
 	// drives the visual style. A missing template is logged and treated as "no
 	// template override" so a stale template_id never blocks plan creation.
 	var tmpl *model.Template
@@ -123,22 +132,22 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 			s.logger.Warn().Err(terr).Str("template_id", *p.TemplateID).Msg("template not found during style resolution")
 		}
 	}
-	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), channel.Style)
-	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), channel.WritingStyle)
-	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), channel.Theme)
+	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), project.Style)
+	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), project.WritingStyle)
+	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), project.Theme)
 	// 公众号人设维度（作者署名 + 写作风格模仿 + 可选头像），与视觉/排版正交，同链解析。
-	effectiveAuthor := firstNonEmpty(p.Author, templateAuthorName(tmpl), channel.Author)
-	effectiveAuthorIntro := firstNonEmpty(p.AuthorStyleIntro, templateAuthorStyleIntro(tmpl), channel.AuthorStyleIntro)
-	effectiveAuthorAvatar := firstNonEmpty(p.AuthorAvatarURL, templateAuthorAvatar(tmpl), channel.AuthorAvatarURL)
-	if effectiveWriter == "" && channel.Platform == model.PlatformArticle {
+	effectiveAuthor := firstNonEmpty(p.Author, templateAuthorName(tmpl), project.Author)
+	effectiveAuthorIntro := firstNonEmpty(p.AuthorStyleIntro, templateAuthorStyleIntro(tmpl), project.AuthorStyleIntro)
+	effectiveAuthorAvatar := firstNonEmpty(p.AuthorAvatarURL, templateAuthorAvatar(tmpl), project.AuthorAvatarURL)
+	if effectiveWriter == "" && project.Platform == model.PlatformArticle {
 		effectiveWriter = writer.DefaultStyleName
 	}
 
 	plan := &model.Plan{
 		ID:                 uuid.New().String(),
 		UserID:             p.UserID,
-		ChannelID:          p.ChannelID,
-		Type:               channel.Platform,
+		ProjectID:          p.ProjectID,
+		Type:               project.Platform,
 		CronExpr:           p.CronExpr,
 		Prompt:             p.Prompt,
 		Status:             model.PlanStatusActive,
@@ -176,15 +185,15 @@ func (s *PlanService) GetByID(ctx context.Context, id string) (*model.Plan, erro
 	return plan, nil
 }
 
-// List returns plans for a user with optional channel filter and pagination.
+// List returns plans for a user with optional project filter and pagination.
 // Returns plans and total count.
-func (s *PlanService) List(ctx context.Context, userID string, offset, limit int, channelID string) ([]*model.Plan, int64, error) {
-	plans, err := s.repo.Plans().FindByUserID(ctx, userID, channelID, offset, limit)
+func (s *PlanService) List(ctx context.Context, userID string, offset, limit int, projectID string) ([]*model.Plan, int64, error) {
+	plans, err := s.repo.Plans().FindByUserID(ctx, userID, projectID, offset, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list plans: %w", err)
 	}
 
-	total, err := s.repo.Plans().CountByUserID(ctx, userID, channelID)
+	total, err := s.repo.Plans().CountByUserID(ctx, userID, projectID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count plans: %w", err)
 	}

@@ -19,7 +19,7 @@ func setupTestDBForHandler(t *testing.T) *gorm.DB {
 		t.Fatalf("failed to open test db: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&model.Channel{},
+		&model.Project{},
 		&model.Plan{},
 		&model.Task{},
 		&model.User{},

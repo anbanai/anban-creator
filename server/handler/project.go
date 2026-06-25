@@ -26,9 +26,9 @@ import (
 	"github.com/royalrick/anbanwriter/server/storage"
 )
 
-// ChannelHandler handles channel-related HTTP endpoints.
-type ChannelHandler struct {
-	service        *service.ChannelService
+// ProjectHandler handles project-related HTTP endpoints.
+type ProjectHandler struct {
+	service        *service.ProjectService
 	logger         *zerolog.Logger
 	llm            service.LLMClient
 	llmTimeout     time.Duration
@@ -39,43 +39,43 @@ type ChannelHandler struct {
 	seednoteClient *seednote.Client
 }
 
-// NewChannelHandler creates a new ChannelHandler.
-func NewChannelHandler(svc *service.ChannelService, logger *zerolog.Logger) *ChannelHandler {
-	return &ChannelHandler{service: svc, logger: logger}
+// NewProjectHandler creates a new ProjectHandler.
+func NewProjectHandler(svc *service.ProjectService, logger *zerolog.Logger) *ProjectHandler {
+	return &ProjectHandler{service: svc, logger: logger}
 }
 
 // SetLLMClient injects an optional LLM client for profile analysis.
-func (h *ChannelHandler) SetLLMClient(llm service.LLMClient, timeout time.Duration) {
+func (h *ProjectHandler) SetLLMClient(llm service.LLMClient, timeout time.Duration) {
 	h.llm = llm
 	h.llmTimeout = timeout
 }
 
 // SetVisionClient injects a dedicated vision-capable LLM client used by AnalyzeImage.
 // When nil or never called, AnalyzeImage falls back to the writing LLM client.
-func (h *ChannelHandler) SetVisionClient(client service.LLMClient) {
+func (h *ProjectHandler) SetVisionClient(client service.LLMClient) {
 	h.visionClient = client
 }
 
 // SetModelConfigService injects per-user model overrides for profile analysis.
-func (h *ChannelHandler) SetModelConfigService(svc *service.ModelConfigService) {
+func (h *ProjectHandler) SetModelConfigService(svc *service.ModelConfigService) {
 	h.modelConfigSvc = svc
 }
 
-// SetTemplateService injects an optional TemplateService for template recommendations on channel creation.
-func (h *ChannelHandler) SetTemplateService(svc *service.TemplateService) {
+// SetTemplateService injects an optional TemplateService for template recommendations on project creation.
+func (h *ProjectHandler) SetTemplateService(svc *service.TemplateService) {
 	h.templateSvc = svc
 }
 
 // SetStore injects a storage provider for reading locally uploaded files.
-func (h *ChannelHandler) SetStore(s storage.Provider) {
+func (h *ProjectHandler) SetStore(s storage.Provider) {
 	h.store = s
 }
 
-// signChannelURLs resolves stored image URLs (avatar, reference image) to
-// directly-fetchable signed URLs so any viewer who can see the channel can load
+// signProjectURLs resolves stored image URLs (avatar, reference image) to
+// directly-fetchable signed URLs so any viewer who can see the project can load
 // its images regardless of which user originally uploaded them. No-op when no
 // store is wired (e.g. unit tests) or the URL is external/empty.
-func (h *ChannelHandler) signChannelURLs(ctx context.Context, ch *model.Channel) {
+func (h *ProjectHandler) signProjectURLs(ctx context.Context, ch *model.Project) {
 	if ch == nil {
 		return
 	}
@@ -85,12 +85,12 @@ func (h *ChannelHandler) signChannelURLs(ctx context.Context, ch *model.Channel)
 }
 
 // SetSeednoteClient injects the Seednote SDK client.
-func (h *ChannelHandler) SetSeednoteClient(client *seednote.Client) {
+func (h *ProjectHandler) SetSeednoteClient(client *seednote.Client) {
 	h.seednoteClient = client
 }
 
-// channelRequest is the shared request body for creating and updating a channel.
-type channelRequest struct {
+// projectRequest is the shared request body for creating and updating a project.
+type projectRequest struct {
 	Platform           string `json:"platform"`
 	Name               string `json:"name"`
 	ProfileURL         string `json:"profile_url"`
@@ -113,9 +113,9 @@ type channelRequest struct {
 	EnablePublishing bool   `json:"enable_publishing"`
 }
 
-// toChannel converts a request to a Channel model.
-func (req *channelRequest) toChannel() *model.Channel {
-	return &model.Channel{
+// toProject converts a request to a Project model.
+func (req *projectRequest) toProject() *model.Project {
+	return &model.Project{
 		Platform:           req.Platform,
 		Name:               req.Name,
 		ProfileURL:         req.ProfileURL,
@@ -132,7 +132,7 @@ func (req *channelRequest) toChannel() *model.Channel {
 		ReferenceImageURL:  req.ReferenceImageURL,
 		ImageRatio:         req.ImageRatio,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
-		Config: model.ChannelConfig{
+		Config: model.ProjectConfig{
 			WechatAppID:      req.WechatAppID,
 			WechatSecret:     req.WechatSecret,
 			EnablePublishing: req.EnablePublishing,
@@ -140,8 +140,8 @@ func (req *channelRequest) toChannel() *model.Channel {
 	}
 }
 
-// List handles GET /channels.
-func (h *ChannelHandler) List(c fiber.Ctx) error {
+// List handles GET /projects.
+func (h *ProjectHandler) List(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
@@ -150,26 +150,26 @@ func (h *ChannelHandler) List(c fiber.Ctx) error {
 	status := c.Query("status", "")
 	platform := c.Query("platform", "")
 
-	channels, err := h.service.List(c.Context(), userID, repository.ChannelListOptions{
+	projects, err := h.service.List(c.Context(), userID, repository.ProjectListOptions{
 		Status:   status,
 		Platform: platform,
 	})
 	if err != nil {
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("list channels failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to list channels")
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("list projects failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to list projects")
 	}
 
-	// Sanitize all channels before returning.
-	for _, ch := range channels {
-		service.SanitizeChannel(ch)
-		h.signChannelURLs(c.Context(), ch)
+	// Sanitize all projects before returning.
+	for _, ch := range projects {
+		service.SanitizeProject(ch)
+		h.signProjectURLs(c.Context(), ch)
 	}
 
-	return Success(c, channels)
+	return Success(c, projects)
 }
 
-// Stats handles GET /channels/stats?ids=a,b,c and returns a per-channel stats map.
-func (h *ChannelHandler) Stats(c fiber.Ctx) error {
+// Stats handles GET /projects/stats?ids=a,b,c and returns a per-project stats map.
+func (h *ProjectHandler) Stats(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
@@ -180,45 +180,45 @@ func (h *ChannelHandler) Stats(c fiber.Ctx) error {
 		return Success(c, fiber.Map{})
 	}
 
-	channels, err := h.service.List(c.Context(), userID, repository.ChannelListOptions{})
+	projects, err := h.service.List(c.Context(), userID, repository.ProjectListOptions{})
 	if err != nil {
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("list channels for stats failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to list channels")
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("list projects for stats failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to list projects")
 	}
 
-	allowed := make(map[string]struct{}, len(channels))
-	for _, ch := range channels {
+	allowed := make(map[string]struct{}, len(projects))
+	for _, ch := range projects {
 		allowed[ch.ID] = struct{}{}
 	}
 
-	channelIDs := make([]string, 0, len(channels))
+	projectIDs := make([]string, 0, len(projects))
 	for _, rawID := range strings.Split(idsParam, ",") {
 		id := strings.TrimSpace(rawID)
 		if id == "" {
 			continue
 		}
 		if _, ok := allowed[id]; ok {
-			channelIDs = append(channelIDs, id)
+			projectIDs = append(projectIDs, id)
 		}
 	}
 
-	stats, err := h.service.BatchStats(c.Context(), channelIDs)
+	stats, err := h.service.BatchStats(c.Context(), projectIDs)
 	if err != nil {
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("get channel stats failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to get channel stats")
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("get project stats failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to get project stats")
 	}
 
 	return Success(c, stats)
 }
 
-// Create handles POST /channels.
-func (h *ChannelHandler) Create(c fiber.Ctx) error {
+// Create handles POST /projects.
+func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	var req channelRequest
+	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
@@ -245,21 +245,21 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
 
-	ch := req.toChannel()
+	ch := req.toProject()
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("create channel failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to create channel: "+err.Error())
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to create project: "+err.Error())
 	}
 
-	service.SanitizeChannel(created)
-	h.signChannelURLs(c.Context(), created)
+	service.SanitizeProject(created)
+	h.signProjectURLs(c.Context(), created)
 
-	// For Seednote channels, include recommended templates.
+	// For Seednote projects, include recommended templates.
 	recommended := []*model.Template{}
 	if created.Platform == model.PlatformSeednote && h.templateSvc != nil {
 		if rec := h.getRecommendedTemplates(c.Context(), created); rec != nil {
@@ -274,56 +274,56 @@ func (h *ChannelHandler) Create(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{
-		"channel":               created,
+		"project":               created,
 		"recommended_templates": recommended,
 	})
 }
 
-// Get handles GET /channels/:id.
-func (h *ChannelHandler) Get(c fiber.Ctx) error {
+// Get handles GET /projects/:id.
+func (h *ProjectHandler) Get(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Params("id")
-	if channelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel id is required")
+	projectID := c.Params("id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project id is required")
 	}
 
-	ch, stats, err := h.service.Get(c.Context(), userID, channelID)
+	ch, stats, err := h.service.Get(c.Context(), userID, projectID)
 	if err != nil {
-		if errors.Is(err, service.ErrChannelNotFound) {
-			return Error(c, fiber.StatusNotFound, "channel not found")
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
 		}
-		if errors.Is(err, service.ErrChannelOwnedByUser) {
-			return Forbidden(c, "you do not have access to this channel")
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "you do not have access to this project")
 		}
-		h.logger.Error().Err(err).Str("channel_id", channelID).Msg("get channel failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to get channel")
+		h.logger.Error().Err(err).Str("project_id", projectID).Msg("get project failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to get project")
 	}
 
-	service.SanitizeChannel(ch)
-	h.signChannelURLs(c.Context(), ch)
+	service.SanitizeProject(ch)
+	h.signProjectURLs(c.Context(), ch)
 	return Success(c, fiber.Map{
-		"channel": ch,
+		"project": ch,
 		"stats":   stats,
 	})
 }
 
-// Update handles PUT /channels/:id.
-func (h *ChannelHandler) Update(c fiber.Ctx) error {
+// Update handles PUT /projects/:id.
+func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Params("id")
-	if channelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel id is required")
+	projectID := c.Params("id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project id is required")
 	}
 
-	var req channelRequest
+	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
@@ -332,108 +332,108 @@ func (h *ChannelHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
 
-	ch := req.toChannel()
+	ch := req.toProject()
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
 
-	updated, err := h.service.Update(c.Context(), userID, channelID, ch)
+	updated, err := h.service.Update(c.Context(), userID, projectID, ch)
 	if err != nil {
-		if errors.Is(err, service.ErrChannelNotFound) {
-			return Error(c, fiber.StatusNotFound, "channel not found")
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
 		}
-		if errors.Is(err, service.ErrChannelOwnedByUser) {
-			return Forbidden(c, "you do not have access to this channel")
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "you do not have access to this project")
 		}
-		h.logger.Error().Err(err).Str("channel_id", channelID).Msg("update channel failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to update channel")
+		h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to update project")
 	}
 
-	service.SanitizeChannel(updated)
-	h.signChannelURLs(c.Context(), updated)
+	service.SanitizeProject(updated)
+	h.signProjectURLs(c.Context(), updated)
 	return Success(c, updated)
 }
 
-// Archive handles PATCH /channels/:id/archive.
-func (h *ChannelHandler) Archive(c fiber.Ctx) error {
+// Archive handles PATCH /projects/:id/archive.
+func (h *ProjectHandler) Archive(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Params("id")
-	if channelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel id is required")
+	projectID := c.Params("id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project id is required")
 	}
 
-	if err := h.service.Archive(c.Context(), userID, channelID); err != nil {
-		if errors.Is(err, service.ErrChannelNotFound) {
-			return Error(c, fiber.StatusNotFound, "channel not found")
+	if err := h.service.Archive(c.Context(), userID, projectID); err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
 		}
-		if errors.Is(err, service.ErrChannelOwnedByUser) {
-			return Forbidden(c, "you do not have access to this channel")
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "you do not have access to this project")
 		}
-		h.logger.Error().Err(err).Str("channel_id", channelID).Msg("archive channel failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to archive channel")
+		h.logger.Error().Err(err).Str("project_id", projectID).Msg("archive project failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to archive project")
 	}
 
-	return Success(c, fiber.Map{"message": "channel archived"})
+	return Success(c, fiber.Map{"message": "project archived"})
 }
 
-// Restore handles PATCH /channels/:id/restore.
-func (h *ChannelHandler) Restore(c fiber.Ctx) error {
+// Restore handles PATCH /projects/:id/restore.
+func (h *ProjectHandler) Restore(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Params("id")
-	if channelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel id is required")
+	projectID := c.Params("id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project id is required")
 	}
 
-	if err := h.service.Restore(c.Context(), userID, channelID); err != nil {
-		if errors.Is(err, service.ErrChannelNotFound) {
-			return Error(c, fiber.StatusNotFound, "channel not found")
+	if err := h.service.Restore(c.Context(), userID, projectID); err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
 		}
-		if errors.Is(err, service.ErrChannelOwnedByUser) {
-			return Forbidden(c, "you do not have access to this channel")
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "you do not have access to this project")
 		}
-		h.logger.Error().Err(err).Str("channel_id", channelID).Msg("restore channel failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to restore channel")
+		h.logger.Error().Err(err).Str("project_id", projectID).Msg("restore project failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to restore project")
 	}
 
-	return Success(c, fiber.Map{"message": "channel restored"})
+	return Success(c, fiber.Map{"message": "project restored"})
 }
 
-// Delete handles DELETE /channels/:id.
-func (h *ChannelHandler) Delete(c fiber.Ctx) error {
+// Delete handles DELETE /projects/:id.
+func (h *ProjectHandler) Delete(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Params("id")
-	if channelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel id is required")
+	projectID := c.Params("id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project id is required")
 	}
 
-	if err := h.service.Delete(c.Context(), userID, channelID); err != nil {
-		if errors.Is(err, service.ErrChannelNotFound) {
-			return Error(c, fiber.StatusNotFound, "channel not found")
+	if err := h.service.Delete(c.Context(), userID, projectID); err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
 		}
-		if errors.Is(err, service.ErrChannelOwnedByUser) {
-			return Forbidden(c, "you do not have access to this channel")
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "you do not have access to this project")
 		}
-		h.logger.Error().Err(err).Str("channel_id", channelID).Msg("delete channel failed")
+		h.logger.Error().Err(err).Str("project_id", projectID).Msg("delete project failed")
 		return Error(c, fiber.StatusInternalServerError, err.Error())
 	}
 
-	return Success(c, fiber.Map{"message": "channel deleted"})
+	return Success(c, fiber.Map{"message": "project deleted"})
 }
 
-// GetPlatformConfigs handles GET /channels/platform-configs.
-func (h *ChannelHandler) GetPlatformConfigs(c fiber.Ctx) error {
+// GetPlatformConfigs handles GET /projects/platform-configs.
+func (h *ProjectHandler) GetPlatformConfigs(c fiber.Ctx) error {
 	return Success(c, model.GetAllPlatformConfigs())
 }
 
@@ -446,9 +446,9 @@ type fetchProfileRequest struct {
 	WechatSecret string `json:"wechat_secret"`
 }
 
-// FetchProfile handles POST /channels/fetch-profile.
+// FetchProfile handles POST /projects/fetch-profile.
 // It fetches profile data from the specified platform using the profile URL.
-func (h *ChannelHandler) FetchProfile(c fiber.Ctx) error {
+func (h *ProjectHandler) FetchProfile(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
@@ -521,7 +521,7 @@ type seednoteProfileAnalysis struct {
 	ContentSummary string   `json:"content_summary"`
 }
 
-func (h *ChannelHandler) enrichSeednoteProfileWithAI(ctx context.Context, userID string, profile *platform.PlatformProfile) {
+func (h *ProjectHandler) enrichSeednoteProfileWithAI(ctx context.Context, userID string, profile *platform.PlatformProfile) {
 	llm := h.getLLMClient(ctx, userID)
 	if llm == nil || profile == nil {
 		return
@@ -585,7 +585,7 @@ func (h *ChannelHandler) enrichSeednoteProfileWithAI(ctx context.Context, userID
 	profile.RawData["analysis"] = analysis
 }
 
-func (h *ChannelHandler) getLLMClient(ctx context.Context, userID string) service.LLMClient {
+func (h *ProjectHandler) getLLMClient(ctx context.Context, userID string) service.LLMClient {
 	if h.modelConfigSvc != nil {
 		if baseURL, key, modelName, ok := h.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID); ok {
 			h.logger.Info().
@@ -702,8 +702,8 @@ func truncateRunes(s string, max int) string {
 	return string([]rune(s)[:max])
 }
 
-// getRecommendedTemplates returns templates recommended for a channel based on its profile keywords.
-func (h *ChannelHandler) getRecommendedTemplates(ctx context.Context, ch *model.Channel) []*model.Template {
+// getRecommendedTemplates returns templates recommended for a project based on its profile keywords.
+func (h *ProjectHandler) getRecommendedTemplates(ctx context.Context, ch *model.Project) []*model.Template {
 	if ch.Keywords == "" {
 		return nil
 	}
@@ -717,7 +717,7 @@ func (h *ChannelHandler) getRecommendedTemplates(ctx context.Context, ch *model.
 
 	templates, err := h.templateSvc.GetRecommended(ctx, category, tags, 5)
 	if err != nil {
-		h.logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to get recommended templates")
+		h.logger.Warn().Err(err).Str("project_id", ch.ID).Msg("failed to get recommended templates")
 		return nil
 	}
 	return templates
@@ -737,7 +737,7 @@ func splitKeywords(keywords string) []string {
 }
 
 // getFieldValue returns the value of a field by key from the request.
-func (req *channelRequest) getFieldValue(key string) string {
+func (req *projectRequest) getFieldValue(key string) string {
 	switch key {
 	case "platform":
 		return req.Platform
@@ -778,7 +778,7 @@ func (req *channelRequest) getFieldValue(key string) string {
 
 // getTierMaxConcurrent reads the user's tier from auth middleware locals
 // and returns the max concurrent tasks limit for that tier.
-func (h *ChannelHandler) getTierMaxConcurrent(c fiber.Ctx) int {
+func (h *ProjectHandler) getTierMaxConcurrent(c fiber.Ctx) int {
 	user, _ := c.Locals("user").(*model.User)
 	tier := model.TierFree
 	if user != nil {
@@ -796,7 +796,7 @@ type analyzeImageRequest struct {
 }
 
 // SeednoteLoginStatus handles GET /seednote/login-status.
-func (h *ChannelHandler) SeednoteLoginStatus(c fiber.Ctx) error {
+func (h *ProjectHandler) SeednoteLoginStatus(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
@@ -830,9 +830,9 @@ func (h *ChannelHandler) SeednoteLoginStatus(c fiber.Ctx) error {
 	})
 }
 
-// AnalyzeImage handles POST /channels/analyze-image.
+// AnalyzeImage handles POST /projects/analyze-image.
 // It sends the reference image to a vision LLM and returns a visual style description.
-func (h *ChannelHandler) AnalyzeImage(c fiber.Ctx) error {
+func (h *ProjectHandler) AnalyzeImage(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
@@ -1036,11 +1036,14 @@ func cleanOwnedUploadKey(imageURL, userID string) (string, fiberErrorFunc) {
 		return "", func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
 	}
 	// Align with FileHandler.ServeFile (file.go) ownership rules:
-	// channels/references are user uploads (purpose="channel" / "reference"),
+	// projects/references are user uploads (purpose="project" / "reference"),
 	// {userID}/designer/ are designer-generated images.
+	// "uploads/channels/" is the legacy prefix from before the channel→project
+	// rename; keep accepting it so existing user uploads remain analyzable.
 	allowed := []string{
-		"uploads/channels/" + userID + "/",
+		"uploads/projects/" + userID + "/",
 		"uploads/references/" + userID + "/",
+		"uploads/channels/" + userID + "/",
 		userID + "/designer/",
 	}
 	for _, prefix := range allowed {

@@ -76,19 +76,19 @@ func setupConvertTest(t *testing.T, llm *diagnosticLLM) (*WritingService, reposi
 	return svc, repo
 }
 
-func createChannelWithTheme(t *testing.T, repo repository.Repository, userID, platform, style, theme string) string {
+func createProjectWithTheme(t *testing.T, repo repository.Repository, userID, platform, style, theme string) string {
 	t.Helper()
-	ch := &model.Channel{
+	ch := &model.Project{
 		ID:       uuid.NewString(),
 		UserID:   userID,
 		Platform: platform,
-		Name:     "Convert Test Channel",
+		Name:     "Convert Test Project",
 		Style:    style,
 		Theme:    theme,
-		Status:   model.ChannelStatusActive,
+		Status:   model.ProjectStatusActive,
 	}
-	if err := repo.Channels().Create(context.Background(), ch); err != nil {
-		t.Fatalf("create channel: %v", err)
+	if err := repo.Projects().Create(context.Background(), ch); err != nil {
+		t.Fatalf("create project: %v", err)
 	}
 	return ch.ID
 }
@@ -144,16 +144,16 @@ func TestConvertMarkdown_FullDiagnosticTrace(t *testing.T) {
 	// The LLM mock is irrelevant for convert now; render is deterministic.
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-trace-001"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
-	logPhase(t, 0, "Channel created channel_id=%s theme=autumn-warm", channelID)
+	logPhase(t, 0, "Project created project_id=%s theme=autumn-warm", projectID)
 
-	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, sampleMarkdown, "", "")
+	result, err := svc.ConvertMarkdown(context.Background(), userID, projectID, sampleMarkdown, "", "")
 	if err != nil {
 		t.Fatalf("ConvertMarkdown failed: %v", err)
 	}
 
-	logPhase(t, 1, "Channel lookup + deterministic render — OK")
+	logPhase(t, 1, "Project lookup + deterministic render — OK")
 
 	logPhase(t, 2, "LLM must NOT be called by the convert path")
 	// Deterministic: the LLM mock records zero calls.
@@ -199,12 +199,12 @@ func TestConvertMarkdown_FullDiagnosticTrace(t *testing.T) {
 func TestConvertMarkdown_DefaultTheme_NoPrompt(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-default-001"
-	// Channel has EMPTY theme → resolves to autumn-warm.
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	// Project has EMPTY theme → resolves to autumn-warm.
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
-	logPhase(t, 0, "Channel created with EMPTY theme (resolves to autumn-warm)")
+	logPhase(t, 0, "Project created with EMPTY theme (resolves to autumn-warm)")
 
-	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Hello\n\nWorld", "", "")
+	result, err := svc.ConvertMarkdown(context.Background(), userID, projectID, "# Hello\n\nWorld", "", "")
 	if err != nil {
 		t.Fatalf("ConvertMarkdown failed: %v", err)
 	}
@@ -220,16 +220,16 @@ func TestConvertMarkdown_DefaultTheme_NoPrompt(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: Explicit theme arg overrides channel theme
+// Test 3: Explicit theme arg overrides project theme
 // ---------------------------------------------------------------------------
 
 func TestConvertMarkdown_ExplicitThemeArg(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-override-001"
-	// Channel has autumn-warm but we override to spring-fresh.
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	// Project has autumn-warm but we override to spring-fresh.
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
-	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Test", "spring-fresh", "")
+	result, err := svc.ConvertMarkdown(context.Background(), userID, projectID, "# Test", "spring-fresh", "")
 	if err != nil {
 		t.Fatalf("ConvertMarkdown failed: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestConvertMarkdown_ExplicitThemeArg(t *testing.T) {
 	}
 	// … and autumn-warm's text color (#4a413d) must be ABSENT, proving override.
 	if strings.Contains(result.HTML, "#4a413d") {
-		t.Error("[FAIL] autumn-warm text color #4a413d present — channel theme leaked past the override")
+		t.Error("[FAIL] autumn-warm text color #4a413d present — project theme leaked past the override")
 	}
 	t.Logf("  [OVERRIDE] HTML: %q", firstN(result.HTML, 120))
 }
@@ -252,7 +252,7 @@ func TestConvertMarkdown_ExplicitThemeArg(t *testing.T) {
 func TestConvertMarkdown_WithImages(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-images-001"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
 	markdown := `# Article
 
@@ -267,7 +267,7 @@ More text.
 ![another local](./img/hero.png)
 `
 
-	result, err := svc.ConvertMarkdown(context.Background(), userID, channelID, markdown, "", "")
+	result, err := svc.ConvertMarkdown(context.Background(), userID, projectID, markdown, "", "")
 	if err != nil {
 		t.Fatalf("ConvertMarkdown failed: %v", err)
 	}
@@ -304,9 +304,9 @@ func classifyImage(original string) string {
 func TestConvertMarkdown_NonexistentTheme_Error(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-theme-err-001"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
-	_, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "# Test", "nonexistent-xyz-999", "")
+	_, err := svc.ConvertMarkdown(context.Background(), userID, projectID, "# Test", "nonexistent-xyz-999", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for nonexistent theme, got nil")
 	}
@@ -324,9 +324,9 @@ func TestConvertMarkdown_EmptyMarkdown(t *testing.T) {
 	llm := &diagnosticLLM{response: "should not reach"}
 	svc, repo := setupConvertTest(t, llm)
 	userID := "user-empty-001"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
-	_, err := svc.ConvertMarkdown(context.Background(), userID, channelID, "", "", "")
+	_, err := svc.ConvertMarkdown(context.Background(), userID, projectID, "", "", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for empty markdown, got nil")
 	}
@@ -341,16 +341,16 @@ func TestConvertMarkdown_EmptyMarkdown(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 7: Channel not found → error
+// Test 7: Project not found → error
 // ---------------------------------------------------------------------------
 
-func TestConvertMarkdown_ChannelNotFound(t *testing.T) {
+func TestConvertMarkdown_ProjectNotFound(t *testing.T) {
 	llm := &diagnosticLLM{response: "should not reach"}
 	svc, _ := setupConvertTest(t, llm)
 
-	_, err := svc.ConvertMarkdown(context.Background(), "user-ghost", "nonexistent-channel-id", "# Test", "", "")
+	_, err := svc.ConvertMarkdown(context.Background(), "user-ghost", "nonexistent-project-id", "# Test", "", "")
 	if err == nil {
-		t.Fatal("[FAIL] Expected error for nonexistent channel, got nil")
+		t.Fatal("[FAIL] Expected error for nonexistent project, got nil")
 	}
 	t.Logf("  [NOT FOUND] Error: %v", err)
 
@@ -360,23 +360,23 @@ func TestConvertMarkdown_ChannelNotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 8: Channel ownership mismatch → error
+// Test 8: Project ownership mismatch → error
 // ---------------------------------------------------------------------------
 
-func TestConvertMarkdown_ChannelOwnershipMismatch(t *testing.T) {
+func TestConvertMarkdown_ProjectOwnershipMismatch(t *testing.T) {
 	llm := &diagnosticLLM{response: "should not reach"}
 	svc, repo := setupConvertTest(t, llm)
 	ownerID := "user-owner-001"
 	otherID := "user-other-001"
-	channelID := createChannelWithTheme(t, repo, ownerID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, ownerID, model.PlatformArticle, "", "autumn-warm")
 
-	_, err := svc.ConvertMarkdown(context.Background(), otherID, channelID, "# Test", "", "")
+	_, err := svc.ConvertMarkdown(context.Background(), otherID, projectID, "# Test", "", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for ownership mismatch, got nil")
 	}
 	t.Logf("  [OWNERSHIP] Error: %v", err)
 
-	if !strings.Contains(err.Error(), "channel not owned") {
+	if !strings.Contains(err.Error(), "project not owned") {
 		t.Errorf("[FAIL] Error should mention ownership, got: %v", err)
 	}
 	if llm.callCount() > 0 {

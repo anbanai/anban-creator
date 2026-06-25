@@ -522,3 +522,77 @@ func (s *CreditService) RefundForOperationByID(ctx context.Context, operationID 
 		return nil
 	})
 }
+
+// DeductForTaskWithAmount deducts an explicit credit amount for a task whose
+// cost is computed from user-selected options rather than the fixed TaskCosts
+// table — e.g. an e-commerce package whose total is the sum of selected module
+// prices (see EcommercePackageCost). The deduction is recorded as a task_deduct
+// tied to taskID, so the amount-agnostic RefundForTask(taskID) refunds the exact
+// amount on failure without any change to the refund path.
+func (s *CreditService) DeductForTaskWithAmount(ctx context.Context, userID, taskType, taskID string, amount int) (int, error) {
+	if amount <= 0 {
+		return 0, ErrInvalidAmount
+	}
+
+	var newBalance int
+	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		var ok bool
+		var err error
+		newBalance, ok, err = txRepo.Users().DeductCredits(ctx, userID, amount)
+		if err != nil {
+			return fmt.Errorf("deduct credits: %w", err)
+		}
+		if !ok {
+			return ErrInsufficientCredits
+		}
+
+		taskIDCopy := taskID
+		tx := &model.CreditTransaction{
+			UserID:       userID,
+			Type:         model.CreditTypeTaskDeduct,
+			Amount:       -amount,
+			BalanceAfter: newBalance,
+			TaskID:       &taskIDCopy,
+			Description:  fmt.Sprintf("套餐扣费 (%s) -%d", taskType, amount),
+		}
+		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
+			return fmt.Errorf("create deduction transaction: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	s.logger.Info().Str("user_id", userID).Str("task_id", taskID).Str("task_type", taskType).Int("cost", amount).Int("balance", newBalance).Msg("credits deducted for task (explicit amount)")
+	return newBalance, nil
+}
+
+// EcommercePackageCost sums the per-module unit price × quantity over the
+// selected deliverable modules. selected maps a module key (e.g. "main_images",
+// "detail_page", "sku_images") to its quantity. The boolean reports whether
+// every selected module had a configured price; unknown modules are skipped but
+// reported as false so the caller can reject the request rather than silently
+// under-charging.
+func (s *CreditService) EcommercePackageCost(selected map[string]int) (int, bool) {
+	total := 0
+	known := true
+	for module, count := range selected {
+		if count <= 0 {
+			continue
+		}
+		price, ok := s.cfg.EcommerceModulePrices[module]
+		if !ok {
+			known = false
+			continue
+		}
+		total += price * count
+	}
+	return total, known
+}
+
+// EcommerceModulePrices returns the configured per-module unit prices, exposed
+// so the API can give the task-creation UI a real-time cost estimate.
+func (s *CreditService) EcommerceModulePrices() map[string]int {
+	return s.cfg.EcommerceModulePrices
+}

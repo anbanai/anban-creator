@@ -1,16 +1,16 @@
-export type ChannelPlatform = 'article' | 'seednote'
-export type ChannelStatus = 'active' | 'archived'
+export type ProjectPlatform = 'article' | 'seednote' | 'ecommerce'
+export type ProjectStatus = 'active' | 'archived'
 
-export interface ChannelConfig {
+export interface ProjectConfig {
   wechat_app_id?: string
   wechat_secret?: string
   enable_publishing?: boolean
 }
 
-export interface Channel {
+export interface Project {
   id: string
   user_id: string
-  platform: ChannelPlatform
+  platform: ProjectPlatform
   name: string
   avatar_url: string
   profile_url: string
@@ -27,14 +27,14 @@ export interface Channel {
   reference_image_url: string
   image_ratio: string
   max_concurrent_tasks: number
-  config: ChannelConfig
-  status: ChannelStatus
-  stats?: ChannelStats
+  config: ProjectConfig
+  status: ProjectStatus
+  stats?: ProjectStats
   created_at: string
   updated_at: string
 }
 
-export interface ChannelStats {
+export interface ProjectStats {
   total_tasks: number
   completed_tasks: number
   failed_tasks: number
@@ -44,12 +44,12 @@ export interface ChannelStats {
   last_activity_at: string
 }
 
-export interface ChannelDetail {
-  channel: Channel
-  stats: ChannelStats
+export interface ProjectDetail {
+  project: Project
+  stats: ProjectStats
 }
 
-export interface CreateChannelRequest {
+export interface CreateProjectRequest {
   platform: string
   name?: string
   profile_url?: string
@@ -71,8 +71,8 @@ export interface CreateChannelRequest {
   enable_publishing?: boolean
 }
 
-export interface CreateChannelResponse {
-  channel: Channel
+export interface CreateProjectResponse {
+  project: Project
 }
 
 export interface PlatformFieldConfig {

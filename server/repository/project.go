@@ -8,8 +8,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// ChannelStats holds computed statistics for a channel.
-type ChannelStats struct {
+// ProjectStats holds computed statistics for a project.
+type ProjectStats struct {
 	TotalTasks     int64      `json:"total_tasks"`
 	CompletedTasks int64      `json:"completed_tasks"`
 	FailedTasks    int64      `json:"failed_tasks"`
@@ -19,51 +19,51 @@ type ChannelStats struct {
 	LastActivityAt *time.Time `json:"last_activity_at"`
 }
 
-// ChannelListOptions for filtering channel list queries.
-type ChannelListOptions struct {
+// ProjectListOptions for filtering project list queries.
+type ProjectListOptions struct {
 	Status   string // filter by status (active, archived)
 	Platform string // filter by platform (article, seednote)
 }
 
-// ChannelRepository defines the interface for channel data access.
-type ChannelRepository interface {
-	Create(ctx context.Context, channel *model.Channel) error
-	FindByID(ctx context.Context, id string) (*model.Channel, error)
-	ListByUserID(ctx context.Context, userID string, opts ChannelListOptions) ([]*model.Channel, error)
-	ListActiveChannels(ctx context.Context) ([]*model.Channel, error)
-	FindByUserAndPlatform(ctx context.Context, userID, platform string) ([]*model.Channel, error)
-	Update(ctx context.Context, channel *model.Channel) error
+// ProjectRepository defines the interface for project data access.
+type ProjectRepository interface {
+	Create(ctx context.Context, project *model.Project) error
+	FindByID(ctx context.Context, id string) (*model.Project, error)
+	ListByUserID(ctx context.Context, userID string, opts ProjectListOptions) ([]*model.Project, error)
+	ListActiveProjects(ctx context.Context) ([]*model.Project, error)
+	FindByUserAndPlatform(ctx context.Context, userID, platform string) ([]*model.Project, error)
+	Update(ctx context.Context, project *model.Project) error
 	UpdateStatus(ctx context.Context, id, status string) error
 	Delete(ctx context.Context, id string) error
-	GetStats(ctx context.Context, channelID string) (*ChannelStats, error)
-	GetStatsByChannelIDs(ctx context.Context, channelIDs []string) (map[string]*ChannelStats, error)
+	GetStats(ctx context.Context, projectID string) (*ProjectStats, error)
+	GetStatsByProjectIDs(ctx context.Context, projectIDs []string) (map[string]*ProjectStats, error)
 }
 
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
 
-type gormChannelRepository struct {
+type gormProjectRepository struct {
 	db *gorm.DB
 }
 
-func newChannelRepository(db *gorm.DB) ChannelRepository {
-	return &gormChannelRepository{db: db}
+func newProjectRepository(db *gorm.DB) ProjectRepository {
+	return &gormProjectRepository{db: db}
 }
 
-func (r *gormChannelRepository) Create(ctx context.Context, channel *model.Channel) error {
-	return r.db.WithContext(ctx).Create(channel).Error
+func (r *gormProjectRepository) Create(ctx context.Context, project *model.Project) error {
+	return r.db.WithContext(ctx).Create(project).Error
 }
 
-func (r *gormChannelRepository) FindByID(ctx context.Context, id string) (*model.Channel, error) {
-	var channel model.Channel
-	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&channel).Error; err != nil {
+func (r *gormProjectRepository) FindByID(ctx context.Context, id string) (*model.Project, error) {
+	var project model.Project
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&project).Error; err != nil {
 		return nil, err
 	}
-	return &channel, nil
+	return &project, nil
 }
 
-func (r *gormChannelRepository) ListByUserID(ctx context.Context, userID string, opts ChannelListOptions) ([]*model.Channel, error) {
+func (r *gormProjectRepository) ListByUserID(ctx context.Context, userID string, opts ProjectListOptions) ([]*model.Project, error) {
 	q := r.db.WithContext(ctx).Where("user_id = ?", userID)
 	if opts.Status != "" {
 		q = q.Where("status = ?", opts.Status)
@@ -72,38 +72,38 @@ func (r *gormChannelRepository) ListByUserID(ctx context.Context, userID string,
 		q = q.Where("platform = ?", opts.Platform)
 	}
 
-	var channels []*model.Channel
-	if err := q.Order("created_at DESC").Find(&channels).Error; err != nil {
+	var projects []*model.Project
+	if err := q.Order("created_at DESC").Find(&projects).Error; err != nil {
 		return nil, err
 	}
-	return channels, nil
+	return projects, nil
 }
 
-func (r *gormChannelRepository) ListActiveChannels(ctx context.Context) ([]*model.Channel, error) {
-	var channels []*model.Channel
+func (r *gormProjectRepository) ListActiveProjects(ctx context.Context) ([]*model.Project, error) {
+	var projects []*model.Project
 	err := r.db.WithContext(ctx).
-		Where("status = ?", model.ChannelStatusActive).
-		Find(&channels).Error
-	return channels, err
+		Where("status = ?", model.ProjectStatusActive).
+		Find(&projects).Error
+	return projects, err
 }
 
-func (r *gormChannelRepository) FindByUserAndPlatform(ctx context.Context, userID, platform string) ([]*model.Channel, error) {
-	var channels []*model.Channel
+func (r *gormProjectRepository) FindByUserAndPlatform(ctx context.Context, userID, platform string) ([]*model.Project, error) {
+	var projects []*model.Project
 	if err := r.db.WithContext(ctx).
-		Where("user_id = ? AND platform = ? AND status = ?", userID, platform, model.ChannelStatusActive).
-		Find(&channels).Error; err != nil {
+		Where("user_id = ? AND platform = ? AND status = ?", userID, platform, model.ProjectStatusActive).
+		Find(&projects).Error; err != nil {
 		return nil, err
 	}
-	return channels, nil
+	return projects, nil
 }
 
-func (r *gormChannelRepository) Update(ctx context.Context, channel *model.Channel) error {
-	return r.db.WithContext(ctx).Save(channel).Error
+func (r *gormProjectRepository) Update(ctx context.Context, project *model.Project) error {
+	return r.db.WithContext(ctx).Save(project).Error
 }
 
-func (r *gormChannelRepository) UpdateStatus(ctx context.Context, id, status string) error {
+func (r *gormProjectRepository) UpdateStatus(ctx context.Context, id, status string) error {
 	return r.db.WithContext(ctx).
-		Model(&model.Channel{}).
+		Model(&model.Project{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
 			"status":     status,
@@ -111,11 +111,11 @@ func (r *gormChannelRepository) UpdateStatus(ctx context.Context, id, status str
 		}).Error
 }
 
-func (r *gormChannelRepository) Delete(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Channel{}).Error
+func (r *gormProjectRepository) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Project{}).Error
 }
 
-func (r *gormChannelRepository) GetStats(ctx context.Context, channelID string) (*ChannelStats, error) {
+func (r *gormProjectRepository) GetStats(ctx context.Context, projectID string) (*ProjectStats, error) {
 	var stats struct {
 		TotalTasks     int64
 		CompletedTasks int64
@@ -133,14 +133,14 @@ func (r *gormChannelRepository) GetStats(ctx context.Context, channelID string) 
 			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_tasks,
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_tasks,
 			MAX(completed_at) as last_activity_at
-		FROM tasks WHERE channel_id = ?
-	`, channelID).Scan(&stats).Error
+		FROM tasks WHERE project_id = ?
+	`, projectID).Scan(&stats).Error
 
 	if err != nil {
 		return nil, err
 	}
 
-	result := &ChannelStats{
+	result := &ProjectStats{
 		TotalTasks:     stats.TotalTasks,
 		CompletedTasks: stats.CompletedTasks,
 		FailedTasks:    stats.FailedTasks,
@@ -156,13 +156,13 @@ func (r *gormChannelRepository) GetStats(ctx context.Context, channelID string) 
 	return result, nil
 }
 
-func (r *gormChannelRepository) GetStatsByChannelIDs(ctx context.Context, channelIDs []string) (map[string]*ChannelStats, error) {
-	if len(channelIDs) == 0 {
-		return map[string]*ChannelStats{}, nil
+func (r *gormProjectRepository) GetStatsByProjectIDs(ctx context.Context, projectIDs []string) (map[string]*ProjectStats, error) {
+	if len(projectIDs) == 0 {
+		return map[string]*ProjectStats{}, nil
 	}
 
 	type statsRow struct {
-		ChannelID      string
+		ProjectID      string
 		TotalTasks     int64
 		CompletedTasks int64
 		FailedTasks    int64
@@ -174,7 +174,7 @@ func (r *gormChannelRepository) GetStatsByChannelIDs(ctx context.Context, channe
 	var rows []statsRow
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT
-			channel_id,
+			project_id,
 			COUNT(*) as total_tasks,
 			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_tasks,
 			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_tasks,
@@ -182,20 +182,20 @@ func (r *gormChannelRepository) GetStatsByChannelIDs(ctx context.Context, channe
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_tasks,
 			MAX(completed_at) as last_activity_at
 		FROM tasks
-		WHERE channel_id IN ?
-		GROUP BY channel_id
-	`, channelIDs).Scan(&rows).Error
+		WHERE project_id IN ?
+		GROUP BY project_id
+	`, projectIDs).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 
-	statsMap := make(map[string]*ChannelStats, len(channelIDs))
-	for _, channelID := range channelIDs {
-		statsMap[channelID] = &ChannelStats{}
+	statsMap := make(map[string]*ProjectStats, len(projectIDs))
+	for _, projectID := range projectIDs {
+		statsMap[projectID] = &ProjectStats{}
 	}
 
 	for _, row := range rows {
-		stats := &ChannelStats{
+		stats := &ProjectStats{
 			TotalTasks:     row.TotalTasks,
 			CompletedTasks: row.CompletedTasks,
 			FailedTasks:    row.FailedTasks,
@@ -206,7 +206,7 @@ func (r *gormChannelRepository) GetStatsByChannelIDs(ctx context.Context, channe
 		if row.TotalTasks > 0 {
 			stats.SuccessRate = float64(row.CompletedTasks) / float64(row.TotalTasks)
 		}
-		statsMap[row.ChannelID] = stats
+		statsMap[row.ProjectID] = stats
 	}
 
 	return statsMap, nil

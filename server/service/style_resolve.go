@@ -4,7 +4,7 @@ import "github.com/royalrick/anbanwriter/server/model"
 
 // firstNonEmpty returns the first non-empty string in args, or "" if all empty.
 // Used to resolve each style dimension through its precedence chain
-// (task → template → plan → channel).
+// (task → template → plan → project).
 func firstNonEmpty(args ...string) string {
 	for _, s := range args {
 		if s != "" {

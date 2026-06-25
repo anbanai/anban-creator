@@ -1,4 +1,16 @@
-export type TaskType = 'seednote' | 'article'
+export type TaskType = 'seednote' | 'article' | 'ecommerce'
+
+// E-commerce package config carried on a task (server model.EcommerceConfig).
+// `selected_modules` maps module key → quantity; the package price is the
+// Σ(module price × quantity), computed from /credits/pricing.ecommerce_module_prices.
+export interface EcommerceTaskConfig {
+  selected_modules?: Record<string, number>
+  product_photos?: string[]
+  target_platform?: string
+  selling_points?: string
+  language?: string
+  provider_strategy_override?: string
+}
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface Task {
@@ -22,7 +34,7 @@ export interface Task {
   reference_image_url?: string
   error: string | null
   plan_id: string | null
-  channel_id: string
+  project_id: string
   result: TaskResult
   published: boolean
   published_at: string | null
@@ -32,11 +44,13 @@ export interface Task {
   goal?: string
   goal_mode?: boolean
   template_id?: string
-  // 公众号人设（与频道/模板同链解析：task > template > channel）：作者署名 + 写作风格
+  // 公众号人设（与项目/模板同链解析：task > template > project）：作者署名 + 写作风格
   // 模仿（自由文本） + 可选人设头像，正交于 style/writing_style/theme。
   author?: string
   author_style_intro?: string
   author_avatar_url?: string
+  // E-commerce package config (only present for platform=ecommerce tasks).
+  ecommerce?: EcommerceTaskConfig
   created_at: string
   started_at: string
   completed_at: string
@@ -64,7 +78,7 @@ export interface CreateTaskRequest {
   type: TaskType
   topic?: string
   prompt?: string
-  channel_id: string
+  project_id: string
   quantity?: number
   image_ratio?: string
   image_model_key?: string
@@ -78,13 +92,22 @@ export interface CreateTaskRequest {
   goal_mode?: boolean
   template_id?: string
   // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。空则按解析链兜底到
-  // 模板/频道；非空即覆盖。
+  // 模板/项目；非空即覆盖。
   author?: string
   author_style_intro?: string
   author_avatar_url?: string
   // Seednote image composition: cover always generated. Server ignores for non-seednote.
   has_content_image?: boolean
   has_tail_image?: boolean
+  // E-commerce package fields (server ignores for non-ecommerce). Product photos
+  // are server-owned URLs returned by /files/upload; the executor materializes
+  // them into the agent workspace.
+  product_photos?: string[]
+  selected_modules?: Record<string, number>
+  target_platform?: string
+  selling_points?: string
+  language?: string
+  provider_strategy_override?: string
 }
 
 export interface WorkflowStatus {

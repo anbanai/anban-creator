@@ -5,53 +5,53 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/rs/zerolog"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )
 
-// createBackfillChannel inserts a channel with exact field values, bypassing
+// createBackfillProject inserts a project with exact field values, bypassing
 // service defaults so the backfill logic is tested in isolation.
-func createBackfillChannel(t *testing.T, db *gorm.DB, platform, style, writingStyle string) *model.Channel {
+func createBackfillProject(t *testing.T, db *gorm.DB, platform, style, writingStyle string) *model.Project {
 	t.Helper()
-	ch := &model.Channel{
+	ch := &model.Project{
 		ID:           uuid.NewString(),
 		UserID:       "user-backfill",
 		Platform:     platform,
 		Name:         "Backfill Test " + platform,
 		Style:        style,
 		WritingStyle: writingStyle,
-		Status:       model.ChannelStatusActive,
+		Status:       model.ProjectStatusActive,
 	}
 	if err := db.Create(ch).Error; err != nil {
-		t.Fatalf("create channel: %v", err)
+		t.Fatalf("create project: %v", err)
 	}
 	return ch
 }
 
-func reloadChannel(t *testing.T, db *gorm.DB, id string) *model.Channel {
+func reloadProject(t *testing.T, db *gorm.DB, id string) *model.Project {
 	t.Helper()
-	var ch model.Channel
+	var ch model.Project
 	if err := db.First(&ch, "id = ?", id).Error; err != nil {
-		t.Fatalf("reload channel %s: %v", id, err)
+		t.Fatalf("reload project %s: %v", id, err)
 	}
 	return &ch
 }
 
 // TestMigrateArticleStyleOverload_MovesWriterKey — the core root-cause fix:
-// an article channel whose overloaded Style held a writer key ("dan-koe") must
+// an article project whose overloaded Style held a writer key ("dan-koe") must
 // move it to WritingStyle and clear Style (visual), so the writer key no longer
 // leaks into image generation as a visual-style anchor.
 func TestMigrateArticleStyleOverload_MovesWriterKey(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
-	ch := createBackfillChannel(t, db, model.PlatformArticle, "dan-koe", "")
+	ch := createBackfillProject(t, db, model.PlatformArticle, "dan-koe", "")
 
 	if err := MigrateArticleStyleOverload(context.Background(), db, &log); err != nil {
 		t.Fatalf("MigrateArticleStyleOverload: %v", err)
 	}
 
-	got := reloadChannel(t, db, ch.ID)
+	got := reloadProject(t, db, ch.ID)
 	if got.Style != "" {
 		t.Errorf("Style (visual) = %q, want empty — writer key must not remain in visual style", got.Style)
 	}
@@ -65,13 +65,13 @@ func TestMigrateArticleStyleOverload_MovesWriterKey(t *testing.T) {
 func TestMigrateArticleStyleOverload_PreservesRealVisualStyle(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
-	ch := createBackfillChannel(t, db, model.PlatformArticle, "温暖自然的生活摄影，柔光大地色系", "")
+	ch := createBackfillProject(t, db, model.PlatformArticle, "温暖自然的生活摄影，柔光大地色系", "")
 
 	if err := MigrateArticleStyleOverload(context.Background(), db, &log); err != nil {
 		t.Fatalf("MigrateArticleStyleOverload: %v", err)
 	}
 
-	got := reloadChannel(t, db, ch.ID)
+	got := reloadProject(t, db, ch.ID)
 	if got.Style != "温暖自然的生活摄影，柔光大地色系" {
 		t.Errorf("Style = %q, want the original visual description (a non-writer Style must be preserved)", got.Style)
 	}
@@ -82,35 +82,35 @@ func TestMigrateArticleStyleOverload_PreservesRealVisualStyle(t *testing.T) {
 
 // TestMigrateArticleStyleOverload_LeavesSeednoteUntouched — seednote Style is a
 // real visual style; even if it happened to equal a writer key it would still
-// be a visual value for seednote. The backfill only touches article channels.
+// be a visual value for seednote. The backfill only touches article projects.
 func TestMigrateArticleStyleOverload_LeavesSeednoteUntouched(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
-	ch := createBackfillChannel(t, db, model.PlatformSeednote, "手绘水彩插画风格", "")
+	ch := createBackfillProject(t, db, model.PlatformSeednote, "手绘水彩插画风格", "")
 
 	if err := MigrateArticleStyleOverload(context.Background(), db, &log); err != nil {
 		t.Fatalf("MigrateArticleStyleOverload: %v", err)
 	}
 
-	got := reloadChannel(t, db, ch.ID)
+	got := reloadProject(t, db, ch.ID)
 	if got.Style != "手绘水彩插画风格" {
 		t.Errorf("seednote Style = %q, want unchanged", got.Style)
 	}
 }
 
 // TestMigrateArticleStyleOverload_DoesNotClobberExistingWritingStyle — if a
-// channel already has a WritingStyle set, the writer key in Style is moved away
+// project already has a WritingStyle set, the writer key in Style is moved away
 // (Style cleared) but the existing WritingStyle is preserved.
 func TestMigrateArticleStyleOverload_DoesNotClobberExistingWritingStyle(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
-	ch := createBackfillChannel(t, db, model.PlatformArticle, "casual-science", "cultural-depth")
+	ch := createBackfillProject(t, db, model.PlatformArticle, "casual-science", "cultural-depth")
 
 	if err := MigrateArticleStyleOverload(context.Background(), db, &log); err != nil {
 		t.Fatalf("MigrateArticleStyleOverload: %v", err)
 	}
 
-	got := reloadChannel(t, db, ch.ID)
+	got := reloadProject(t, db, ch.ID)
 	if got.Style != "" {
 		t.Errorf("Style = %q, want empty (stale writer key cleared)", got.Style)
 	}
@@ -124,7 +124,7 @@ func TestMigrateArticleStyleOverload_DoesNotClobberExistingWritingStyle(t *testi
 func TestMigrateArticleStyleOverload_Idempotent(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
-	ch := createBackfillChannel(t, db, model.PlatformArticle, "dan-koe", "")
+	ch := createBackfillProject(t, db, model.PlatformArticle, "dan-koe", "")
 
 	for i := 0; i < 2; i++ {
 		if err := MigrateArticleStyleOverload(context.Background(), db, &log); err != nil {
@@ -132,7 +132,7 @@ func TestMigrateArticleStyleOverload_Idempotent(t *testing.T) {
 		}
 	}
 
-	got := reloadChannel(t, db, ch.ID)
+	got := reloadProject(t, db, ch.ID)
 	if got.Style != "" || got.WritingStyle != "dan-koe" {
 		t.Errorf("after 2 passes: Style=%q WritingStyle=%q, want Style empty + WritingStyle=dan-koe", got.Style, got.WritingStyle)
 	}

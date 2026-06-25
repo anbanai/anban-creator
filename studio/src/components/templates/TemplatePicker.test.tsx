@@ -78,7 +78,7 @@ describe('TemplatePicker', () => {
       expect(screen.getByText('水彩治愈系')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('选择模板覆盖账号风格')).toBeInTheDocument()
+    expect(screen.getByText('选择模板覆盖项目风格')).toBeInTheDocument()
     expect(screen.getAllByText((_, node) => !!node?.textContent?.match(/^2\s*个$/)).length).toBeGreaterThan(0)
     expect(screen.getByText('极简日系')).toBeInTheDocument()
   })
@@ -131,7 +131,7 @@ describe('TemplatePicker', () => {
     })
 
     // 轮播仍常驻 —— 标题和其他卡片都可见
-    expect(screen.getByText('选择模板覆盖账号风格')).toBeInTheDocument()
+    expect(screen.getByText('选择模板覆盖项目风格')).toBeInTheDocument()
     expect(screen.getByText('极简日系')).toBeInTheDocument()
 
     // 选中卡片有 aria-pressed

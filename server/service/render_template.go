@@ -116,7 +116,7 @@ func ParseLayoutPlan(raw any) (*LayoutPlan, error) {
 
 func (s *WritingService) RenderTemplate(
 	ctx context.Context,
-	userID, channelID, markdown string,
+	userID, projectID, markdown string,
 	layoutPlan *LayoutPlan,
 	theme, taskID string,
 ) (*RenderTemplateResult, error) {
@@ -127,16 +127,16 @@ func (s *WritingService) RenderTemplate(
 		return nil, fmt.Errorf("layout_plan is required")
 	}
 
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 	if ch.UserID != userID {
-		return nil, fmt.Errorf("channel not owned by user")
+		return nil, fmt.Errorf("project not owned by user")
 	}
 
 	// Resolve 排版样式: explicit caller theme wins, else the task's resolved
-	// theme (task > channel), else the platform default.
+	// theme (task > project), else the platform default.
 	if theme == "" {
 		theme = s.resolveEffectiveTheme(ctx, taskID, ch)
 	}
@@ -159,7 +159,7 @@ func (s *WritingService) RenderTemplate(
 
 	s.logger.Info().
 		Str("user_id", userID).
-		Str("channel_id", channelID).
+		Str("project_id", projectID).
 		Str("theme", theme).
 		Str("template_name", layoutPlan.TemplateName).
 		Int("slot_count", len(layoutPlan.Slots)).

@@ -179,8 +179,9 @@ func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{
-		"task_costs":  h.service.TaskCosts(),
-		"model_costs": modelCosts,
+		"task_costs":              h.service.TaskCosts(),
+		"model_costs":             modelCosts,
+		"ecommerce_module_prices": h.service.EcommerceModulePrices(),
 		"income": fiber.Map{
 			"daily_sign_in":  h.cfg.DailySignIn,
 			"register_bonus": h.cfg.RegisterBonus,

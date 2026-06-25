@@ -16,7 +16,7 @@ type Repository interface {
 	Plans() PlanRepository
 	Tasks() TaskRepository
 	TaskFiles() TaskFileRepository
-	Channels() ChannelRepository
+	Projects() ProjectRepository
 	Credits() CreditRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
@@ -60,25 +60,25 @@ type SessionRepository interface {
 type PlanRepository interface {
 	Create(ctx context.Context, plan *model.Plan) error
 	FindByID(ctx context.Context, id string) (*model.Plan, error)
-	FindByUserID(ctx context.Context, userID string, channelID string, offset, limit int) ([]*model.Plan, error)
+	FindByUserID(ctx context.Context, userID string, projectID string, offset, limit int) ([]*model.Plan, error)
 	Update(ctx context.Context, plan *model.Plan) error
 	Delete(ctx context.Context, id string) error
 	ListActive(ctx context.Context) ([]*model.Plan, error)
-	ListActiveByUserID(ctx context.Context, userID string, channelID string) ([]*model.Plan, error)
+	ListActiveByUserID(ctx context.Context, userID string, projectID string) ([]*model.Plan, error)
 	ListDue(ctx context.Context, now time.Time) ([]*model.Plan, error)
-	CountByUserID(ctx context.Context, userID string, channelID string) (int64, error)
+	CountByUserID(ctx context.Context, userID string, projectID string) (int64, error)
 }
 
 // TaskRepository provides access to the tasks table.
 type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	FindByID(ctx context.Context, id string) (*model.Task, error)
-	FindByUserID(ctx context.Context, userID string, channelID string, offset, limit int) ([]*model.Task, error)
-	FindByUserIDAndStatus(ctx context.Context, userID, status string, channelID string, offset, limit int) ([]*model.Task, error)
+	FindByUserID(ctx context.Context, userID string, projectID string, offset, limit int) ([]*model.Task, error)
+	FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, offset, limit int) ([]*model.Task, error)
 	FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindByUserIDAndCreatedAtRange(ctx context.Context, userID string, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindRunning(ctx context.Context) ([]*model.Task, error)
-	FindRunningByUser(ctx context.Context, userID string, channelID string) ([]*model.Task, error)
+	FindRunningByUser(ctx context.Context, userID string, projectID string) ([]*model.Task, error)
 	FindCompletedOlderThan(ctx context.Context, before time.Time) ([]*model.Task, error)
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
@@ -100,23 +100,23 @@ type TaskRepository interface {
 	SetStartedAt(ctx context.Context, id string) error
 	SetCompletedAt(ctx context.Context, id string) error
 	UpdateHeartbeat(ctx context.Context, id string) error
-	CountByUserID(ctx context.Context, userID string, channelID string) (int64, error)
-	CountByUserIDAndStatus(ctx context.Context, userID, status string, channelID string) (int64, error)
-	CountRunningByChannel(ctx context.Context, channelID string) (int64, error)
-	FindPendingByChannel(ctx context.Context, channelID string, limit int) ([]*model.Task, error)
+	CountByUserID(ctx context.Context, userID string, projectID string) (int64, error)
+	CountByUserIDAndStatus(ctx context.Context, userID, status string, projectID string) (int64, error)
+	CountRunningByProject(ctx context.Context, projectID string) (int64, error)
+	FindPendingByProject(ctx context.Context, projectID string, limit int) ([]*model.Task, error)
 	CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
 	IncrementRetryAndSetPending(ctx context.Context, taskID string, field string) error
-	FindTitlesByChannelID(ctx context.Context, channelID string) ([]string, error)
-	FindTitleTasksByChannelID(ctx context.Context, channelID string) ([]*model.Task, error)
+	FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error)
+	FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error)
 	ClearTitles(ctx context.Context, titles []string) (int64, error)
 	SetPublished(ctx context.Context, id string, published bool) error
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	Delete(ctx context.Context, id string) error
 	UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error
-	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, channelID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error)
-	AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, channelID string) ([]TypeUsageRow, error)
+	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error)
+	AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error)
 }
 
 // TaskFileRepository provides access to the task_files table.
@@ -162,9 +162,9 @@ type TopicPoolRepository interface {
 	Create(ctx context.Context, topic *model.TopicPool) error
 	CreateBatch(ctx context.Context, topics []*model.TopicPool) error
 	FindByID(ctx context.Context, id uint) (*model.TopicPool, error)
-	FindByChannel(ctx context.Context, channelID, status string, offset, limit int) ([]*model.TopicPool, int64, error)
-	ClaimOne(ctx context.Context, userID, channelID string) (*model.TopicPool, error)
-	ClaimWithTask(ctx context.Context, userID, channelID, taskID string) (*model.TopicPool, error)
+	FindByProject(ctx context.Context, projectID, status string, offset, limit int) ([]*model.TopicPool, int64, error)
+	ClaimOne(ctx context.Context, userID, projectID string) (*model.TopicPool, error)
+	ClaimWithTask(ctx context.Context, userID, projectID, taskID string) (*model.TopicPool, error)
 	MarkUsed(ctx context.Context, id uint, taskID string) error
 	ResetStatus(ctx context.Context, id uint) error
 	Delete(ctx context.Context, id uint) error
@@ -187,7 +187,7 @@ type repository struct {
 	plans                   PlanRepository
 	tasks                   TaskRepository
 	files                   TaskFileRepository
-	channels                ChannelRepository
+	projects                ProjectRepository
 	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
@@ -208,7 +208,7 @@ func New(db *gorm.DB) Repository {
 	plans := newPlanRepository(db)
 	tasks := newTaskRepository(db)
 	files := newTaskFileRepository(db)
-	channels := newChannelRepository(db)
+	projects := newProjectRepository(db)
 	credits := newCreditRepository(db)
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
@@ -228,7 +228,7 @@ func New(db *gorm.DB) Repository {
 		plans:                   plans,
 		tasks:                   tasks,
 		files:                   files,
-		channels:                channels,
+		projects:                projects,
 		credits:                 credits,
 		apiKeys:                 apiKeys,
 		feedbacks:               feedbacks,
@@ -248,7 +248,7 @@ func (r *repository) Sessions() SessionRepository                   { return r.s
 func (r *repository) Plans() PlanRepository                         { return r.plans }
 func (r *repository) Tasks() TaskRepository                         { return r.tasks }
 func (r *repository) TaskFiles() TaskFileRepository                 { return r.files }
-func (r *repository) Channels() ChannelRepository                   { return r.channels }
+func (r *repository) Projects() ProjectRepository                   { return r.projects }
 func (r *repository) Credits() CreditRepository                     { return r.credits }
 func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *repository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
@@ -294,7 +294,7 @@ type txRepository struct {
 	plans                   PlanRepository
 	tasks                   TaskRepository
 	files                   TaskFileRepository
-	channels                ChannelRepository
+	projects                ProjectRepository
 	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
@@ -316,7 +316,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		plans:                   newPlanRepository(tx),
 		tasks:                   newTaskRepository(tx),
 		files:                   newTaskFileRepository(tx),
-		channels:                newChannelRepository(tx),
+		projects:                newProjectRepository(tx),
 		credits:                 newCreditRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
 		feedbacks:               newFeedbackRepository(tx),
@@ -336,7 +336,7 @@ func (r *txRepository) Sessions() SessionRepository                   { return r
 func (r *txRepository) Plans() PlanRepository                         { return r.plans }
 func (r *txRepository) Tasks() TaskRepository                         { return r.tasks }
 func (r *txRepository) TaskFiles() TaskFileRepository                 { return r.files }
-func (r *txRepository) Channels() ChannelRepository                   { return r.channels }
+func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
 func (r *txRepository) Credits() CreditRepository                     { return r.credits }
 func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *txRepository) Feedbacks() FeedbackRepository                 { return r.feedbacks }

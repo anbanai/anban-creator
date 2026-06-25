@@ -63,7 +63,7 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.LoginSession{},
-		&model.Channel{},
+		&model.Project{},
 		&model.Plan{},
 		&model.Task{},
 		&model.TaskFile{},
@@ -179,21 +179,21 @@ func TestE2E_FullUserFlow(t *testing.T) {
 	// Step 1: Register user 1.
 	token1, userID1 := registerUser(t, app, "test@example.com", "testpassword123", "Test User")
 
-	// Step 1.5: Create a test channel for the user.
-	testChannel := &model.Channel{
-		ID:       "test-channel-seednote-1",
+	// Step 1.5: Create a test project for the user.
+	testProject := &model.Project{
+		ID:       "test-project-seednote-1",
 		UserID:   userID1,
 		Platform: model.ScopeSeednote,
-		Name:     "Test Seednote Channel",
-		Status:   model.ChannelStatusActive,
+		Name:     "Test Seednote Project",
+		Status:   model.ProjectStatusActive,
 	}
-	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
-		t.Fatalf("create test channel: %v", err)
+	if err := repo.Projects().Create(context.Background(), testProject); err != nil {
+		t.Fatalf("create test project: %v", err)
 	}
 
 	// Step 2: Create a manual task.
 	taskBody, _ := json.Marshal(map[string]string{
-		"channel_id": testChannel.ID,
+		"project_id": testProject.ID,
 		"prompt":     "TestTopic",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
@@ -308,21 +308,21 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 
 	token, userID := registerUser(t, app, "plan@example.com", "testpassword123", "Plan User")
 
-	// Step 0: Create a test channel for the user.
-	testChannel := &model.Channel{
-		ID:       "plan-lifecycle-channel",
+	// Step 0: Create a test project for the user.
+	testProject := &model.Project{
+		ID:       "plan-lifecycle-project",
 		UserID:   userID,
 		Platform: model.PlatformSeednote,
-		Name:     "Plan Lifecycle Channel",
-		Status:   model.ChannelStatusActive,
+		Name:     "Plan Lifecycle Project",
+		Status:   model.ProjectStatusActive,
 	}
-	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
-		t.Fatalf("create test channel: %v", err)
+	if err := repo.Projects().Create(context.Background(), testProject); err != nil {
+		t.Fatalf("create test project: %v", err)
 	}
 
 	// Step 1: Create a plan.
 	planBody, _ := json.Marshal(map[string]string{
-		"channel_id": testChannel.ID,
+		"project_id": testProject.ID,
 		"cron_expr":  "0 9 * * *",
 		"prompt":     "spring fashion",
 	})
@@ -539,21 +539,21 @@ func TestE2E_TaskOwnershipIsolation(t *testing.T) {
 	token1, userID1 := registerUser(t, app, "user1@example.com", "password123", "User One")
 	token2, _ := registerUser(t, app, "user2@example.com", "password123", "User Two")
 
-	// Create a test channel for user 1.
-	testChannel := &model.Channel{
-		ID:       "test-channel-ownership-1",
+	// Create a test project for user 1.
+	testProject := &model.Project{
+		ID:       "test-project-ownership-1",
 		UserID:   userID1,
 		Platform: model.ScopeArticle,
-		Name:     "User1 Article Channel",
-		Status:   model.ChannelStatusActive,
+		Name:     "User1 Article Project",
+		Status:   model.ProjectStatusActive,
 	}
-	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
-		t.Fatalf("create test channel: %v", err)
+	if err := repo.Projects().Create(context.Background(), testProject); err != nil {
+		t.Fatalf("create test project: %v", err)
 	}
 
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
-		"channel_id": testChannel.ID,
+		"project_id": testProject.ID,
 		"prompt":     "User1 Article",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))
@@ -625,21 +625,21 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 	token1, userID1 := registerUser(t, app, "planuser1@example.com", "password123", "Plan User One")
 	token2, _ := registerUser(t, app, "planuser2@example.com", "password123", "Plan User Two")
 
-	// Create a test channel for User 1.
-	testChannel := &model.Channel{
-		ID:       "plan-ownership-channel",
+	// Create a test project for User 1.
+	testProject := &model.Project{
+		ID:       "plan-ownership-project",
 		UserID:   userID1,
 		Platform: model.PlatformSeednote,
-		Name:     "User1 Seednote Channel",
-		Status:   model.ChannelStatusActive,
+		Name:     "User1 Seednote Project",
+		Status:   model.ProjectStatusActive,
 	}
-	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
-		t.Fatalf("create test channel: %v", err)
+	if err := repo.Projects().Create(context.Background(), testProject); err != nil {
+		t.Fatalf("create test project: %v", err)
 	}
 
 	// User 1 creates a plan.
 	planBody, _ := json.Marshal(map[string]string{
-		"channel_id": testChannel.ID,
+		"project_id": testProject.ID,
 		"cron_expr":  "0 10 * * *",
 		"prompt":     "daily inspiration",
 	})
@@ -727,7 +727,7 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			wantStatus: fiber.StatusBadRequest,
 		},
 		{
-			name:       "create task without channel_id",
+			name:       "create task without project_id",
 			method:     "POST",
 			path:       "/api/v1/tasks",
 			body:       `{"prompt":"test"}`,
@@ -735,15 +735,15 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			wantStatus: fiber.StatusBadRequest,
 		},
 		{
-			name:       "create task with non-existent channel_id",
+			name:       "create task with non-existent project_id",
 			method:     "POST",
 			path:       "/api/v1/tasks",
-			body:       `{"channel_id":"nonexistent-id","prompt":"test"}`,
+			body:       `{"project_id":"nonexistent-id","prompt":"test"}`,
 			auth:       true,
 			wantStatus: fiber.StatusInternalServerError,
 		},
 		{
-			name:       "create plan without channel_id",
+			name:       "create plan without project_id",
 			method:     "POST",
 			path:       "/api/v1/plans",
 			body:       `{"title":"test"}`,
@@ -793,21 +793,21 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	token1, userID1 := registerUser(t, app, "runner1@example.com", "password123", "Runner One")
 	token2, _ := registerUser(t, app, "runner2@example.com", "password123", "Runner Two")
 
-	// Create a test channel for user 1.
-	testChannel := &model.Channel{
-		ID:       "test-channel-leak-1",
+	// Create a test project for user 1.
+	testProject := &model.Project{
+		ID:       "test-project-leak-1",
 		UserID:   userID1,
 		Platform: model.ScopeSeednote,
-		Name:     "Runner1 Seednote Channel",
-		Status:   model.ChannelStatusActive,
+		Name:     "Runner1 Seednote Project",
+		Status:   model.ProjectStatusActive,
 	}
-	if err := repo.Channels().Create(context.Background(), testChannel); err != nil {
-		t.Fatalf("create test channel: %v", err)
+	if err := repo.Projects().Create(context.Background(), testProject); err != nil {
+		t.Fatalf("create test project: %v", err)
 	}
 
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
-		"channel_id": testChannel.ID,
+		"project_id": testProject.ID,
 		"prompt":     "Runner1 Task",
 	})
 	taskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(taskBody)))

@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
+import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -81,13 +82,13 @@ export default function TaskDetailPage() {
     enabled: !!id && task?.status === 'completed',
   })
 
-  // Resolve channel info for the task
-  const { data: channelDetail } = useQuery({
-    queryKey: ['channel', task?.channel_id],
-    queryFn: () => api.channels.get(task!.channel_id),
-    enabled: !!task?.channel_id,
+  // Resolve project info for the task
+  const { data: projectDetail } = useQuery({
+    queryKey: ['project', task?.project_id],
+    queryFn: () => api.projects.get(task!.project_id),
+    enabled: !!task?.project_id,
   })
-  const channel = channelDetail?.channel
+  const project = projectDetail?.project
 
   // Resolve the template used to create this task, if any.
   // template_id is a UI-attribution field only — the template may have been
@@ -350,7 +351,7 @@ export default function TaskDetailPage() {
       const nextTask = await api.tasks.create({
         type: currentTask.type,
         prompt: currentTask.prompt || undefined,
-        channel_id: currentTask.channel_id,
+        project_id: currentTask.project_id,
         image_ratio: currentTask.image_ratio || undefined,
       })
       toast.success('已重新创建任务')
@@ -410,19 +411,19 @@ export default function TaskDetailPage() {
                 {contentTypeLabel[task.type] || task.type}
               </Badge>
             <Badge variant={statusBadgeVariant(task.status)}>{taskStatusLabel[task.status] || task.status}</Badge>
-            {channel && (
+            {project && (
               <Link
-                to={`/channels`}
+                to={`/projects`}
                 className="flex items-center gap-1.5 rounded-md bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
               >
-                {channel.avatar_url ? (
-                  <img src={channel.avatar_url} alt="" className="h-4 w-4 rounded-full object-cover" />
+                {project.avatar_url ? (
+                  <img src={project.avatar_url} alt="" className="h-4 w-4 rounded-full object-cover" />
                 ) : (
                   <span className="flex h-4 w-4 items-center justify-center rounded-full bg-secondary text-[8px] font-medium">
-                    {channel.name.charAt(0)}
+                    {project.name.charAt(0)}
                   </span>
                 )}
-                {channel.name}
+                {project.name}
               </Link>
             )}
           </div>
@@ -578,8 +579,8 @@ export default function TaskDetailPage() {
                 <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')}>
                   返回任务列表
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigate('/channels')}>
-                  检查账号配置
+                <Button variant="ghost" size="sm" onClick={() => navigate('/projects')}>
+                  检查项目配置
                 </Button>
               </div>
             </div>
@@ -651,36 +652,42 @@ export default function TaskDetailPage() {
             </Button>
           </div>
           <div className="p-4 space-y-4">
-            {/* Image files in compact grid */}
-            {(() => {
-              const imageFiles = files.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
-              if (imageFiles.length === 0) return null
-              return (
-                <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-                  <FilePreviewGallery files={imageFiles} taskId={task.id} inlineItemClassName="shrink-0 snap-start" />
-                </div>
-              )
-            })()}
-            {/* HTML files */}
-            {(() => {
-              const htmlFiles = files.filter((f: TaskFile) => f.mime_type === 'text/html')
-              if (htmlFiles.length === 0) return null
-              return (
-                <div className="space-y-3">
-                  <FilePreviewGallery files={htmlFiles} taskId={task.id} />
-                </div>
-              )
-            })()}
-            {/* Other files */}
-            {(() => {
-              const otherFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/') && f.mime_type !== 'text/html')
-              if (otherFiles.length === 0) return null
-              return (
-                <div className="space-y-2">
-                  <FilePreviewGallery files={otherFiles} taskId={task.id} />
-                </div>
-              )
-            })()}
+            {task.type === 'ecommerce' ? (
+              <EcommerceFilesGallery files={files} taskId={task.id} />
+            ) : (
+              <>
+                {/* Image files in compact grid */}
+                {(() => {
+                  const imageFiles = files.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
+                  if (imageFiles.length === 0) return null
+                  return (
+                    <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
+                      <FilePreviewGallery files={imageFiles} taskId={task.id} inlineItemClassName="shrink-0 snap-start" />
+                    </div>
+                  )
+                })()}
+                {/* HTML files */}
+                {(() => {
+                  const htmlFiles = files.filter((f: TaskFile) => f.mime_type === 'text/html')
+                  if (htmlFiles.length === 0) return null
+                  return (
+                    <div className="space-y-3">
+                      <FilePreviewGallery files={htmlFiles} taskId={task.id} />
+                    </div>
+                  )
+                })()}
+                {/* Other files */}
+                {(() => {
+                  const otherFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/') && f.mime_type !== 'text/html')
+                  if (otherFiles.length === 0) return null
+                  return (
+                    <div className="space-y-2">
+                      <FilePreviewGallery files={otherFiles} taskId={task.id} />
+                    </div>
+                  )
+                })()}
+              </>
+            )}
           </div>
         </Card>
       )}

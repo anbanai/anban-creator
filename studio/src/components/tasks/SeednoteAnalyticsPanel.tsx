@@ -34,7 +34,7 @@ interface SeednoteAnalyticsPanelProps {
 }
 
 const statusCopy: Record<SeednoteTrackingStatus, string> = {
-  waiting_discovery: '明天将从账号主页自动识别这篇笔记',
+  waiting_discovery: '明天将从项目主页自动识别这篇笔记',
   tracking: '正在每日采集公开数据',
   stopped: '数据变化已趋缓，已停止自动采集',
   failed: '暂时无法识别或采集这篇笔记',
@@ -260,7 +260,7 @@ function formatDateTime(value?: string | null) {
 
 function friendlyTrackingError(error: string) {
   if (!error) return ''
-  if (error.includes('profile URL')) return '账号主页链接缺失，请检查频道配置'
+  if (error.includes('profile URL')) return '项目主页链接缺失，请检查项目配置'
   if (error.includes('fetch')) return '公开页面暂时无法访问，系统会继续重试'
   if (error.includes('matched')) return '尚未从主页识别到对应笔记'
   return '公开数据采集暂时异常，系统会继续重试'

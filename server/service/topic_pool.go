@@ -10,7 +10,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 )
 
-// TopicPoolService manages the topic pool per channel.
+// TopicPoolService manages the topic pool per project.
 type TopicPoolService struct {
 	repo   repository.Repository
 	logger *zerolog.Logger
@@ -23,15 +23,15 @@ func NewTopicPoolService(repo repository.Repository, logger *zerolog.Logger) *To
 
 const maxTopicLength = 500
 
-// Add creates one or more topics in the pool for the given channel.
-func (s *TopicPoolService) Add(ctx context.Context, userID, channelID string, topics []string) ([]*model.TopicPool, error) {
-	if channelID == "" {
-		return nil, fmt.Errorf("channel_id is required")
+// Add creates one or more topics in the pool for the given project.
+func (s *TopicPoolService) Add(ctx context.Context, userID, projectID string, topics []string) ([]*model.TopicPool, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("project_id is required")
 	}
 	if len(topics) == 0 {
 		return nil, fmt.Errorf("at least one topic is required")
 	}
-	if err := s.validateChannelOwnership(ctx, userID, channelID); err != nil {
+	if err := s.validateProjectOwnership(ctx, userID, projectID); err != nil {
 		return nil, err
 	}
 
@@ -45,7 +45,7 @@ func (s *TopicPoolService) Add(ctx context.Context, userID, channelID string, to
 		}
 		items = append(items, &model.TopicPool{
 			UserID:    userID,
-			ChannelID: channelID,
+			ProjectID: projectID,
 			Topic:     t,
 			Status:    model.TopicStatusUnused,
 		})
@@ -60,43 +60,43 @@ func (s *TopicPoolService) Add(ctx context.Context, userID, channelID string, to
 	return items, nil
 }
 
-// List returns topics for a channel with optional status filter and pagination.
-func (s *TopicPoolService) List(ctx context.Context, userID, channelID, status string, offset, limit int) ([]*model.TopicPool, int64, error) {
-	if err := s.validateChannelOwnership(ctx, userID, channelID); err != nil {
+// List returns topics for a project with optional status filter and pagination.
+func (s *TopicPoolService) List(ctx context.Context, userID, projectID, status string, offset, limit int) ([]*model.TopicPool, int64, error) {
+	if err := s.validateProjectOwnership(ctx, userID, projectID); err != nil {
 		return nil, 0, err
 	}
-	return s.repo.TopicPools().FindByChannel(ctx, channelID, status, offset, limit)
+	return s.repo.TopicPools().FindByProject(ctx, projectID, status, offset, limit)
 }
 
-// Claim atomically claims the next unused topic for the channel.
+// Claim atomically claims the next unused topic for the project.
 // Returns the topic text and its ID, or empty string/0 if none available.
-func (s *TopicPoolService) Claim(ctx context.Context, userID, channelID string) (string, uint, error) {
-	topic, err := s.repo.TopicPools().ClaimOne(ctx, userID, channelID)
+func (s *TopicPoolService) Claim(ctx context.Context, userID, projectID string) (string, uint, error) {
+	topic, err := s.repo.TopicPools().ClaimOne(ctx, userID, projectID)
 	if err != nil {
 		return "", 0, fmt.Errorf("claim topic: %w", err)
 	}
 	if topic == nil {
 		return "", 0, nil
 	}
-	s.logger.Info().Uint("topic_id", topic.ID).Str("channel_id", channelID).Str("topic", topic.Topic).Msg("claimed topic from pool")
+	s.logger.Info().Uint("topic_id", topic.ID).Str("project_id", projectID).Str("topic", topic.Topic).Msg("claimed topic from pool")
 	return topic.Topic, topic.ID, nil
 }
 
 // ClaimForTask atomically claims a topic and associates it with the given task ID.
-func (s *TopicPoolService) ClaimForTask(ctx context.Context, userID, channelID, taskID string) (string, error) {
-	topic, err := s.repo.TopicPools().ClaimWithTask(ctx, userID, channelID, taskID)
+func (s *TopicPoolService) ClaimForTask(ctx context.Context, userID, projectID, taskID string) (string, error) {
+	topic, err := s.repo.TopicPools().ClaimWithTask(ctx, userID, projectID, taskID)
 	if err != nil {
 		return "", fmt.Errorf("claim topic: %w", err)
 	}
 	if topic == nil {
 		return "", nil
 	}
-	s.logger.Info().Uint("topic_id", topic.ID).Str("channel_id", channelID).Str("task_id", taskID).Msg("claimed topic from pool for task")
+	s.logger.Info().Uint("topic_id", topic.ID).Str("project_id", projectID).Str("task_id", taskID).Msg("claimed topic from pool for task")
 	return topic.Topic, nil
 }
 
 // Reset marks a used topic as unused again.
-func (s *TopicPoolService) Reset(ctx context.Context, userID, channelID string, id uint) error {
+func (s *TopicPoolService) Reset(ctx context.Context, userID, projectID string, id uint) error {
 	topic, err := s.repo.TopicPools().FindByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("find topic: %w", err)
@@ -104,8 +104,8 @@ func (s *TopicPoolService) Reset(ctx context.Context, userID, channelID string, 
 	if topic.UserID != userID {
 		return fmt.Errorf("topic not owned by user")
 	}
-	if topic.ChannelID != channelID {
-		return fmt.Errorf("topic does not belong to this channel")
+	if topic.ProjectID != projectID {
+		return fmt.Errorf("topic does not belong to this project")
 	}
 	if topic.Status != model.TopicStatusUsed {
 		return fmt.Errorf("only used topics can be reset")
@@ -114,7 +114,7 @@ func (s *TopicPoolService) Reset(ctx context.Context, userID, channelID string, 
 }
 
 // Delete removes a topic from the pool.
-func (s *TopicPoolService) Delete(ctx context.Context, userID, channelID string, id uint) error {
+func (s *TopicPoolService) Delete(ctx context.Context, userID, projectID string, id uint) error {
 	topic, err := s.repo.TopicPools().FindByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("find topic: %w", err)
@@ -122,19 +122,19 @@ func (s *TopicPoolService) Delete(ctx context.Context, userID, channelID string,
 	if topic.UserID != userID {
 		return fmt.Errorf("topic not owned by user")
 	}
-	if topic.ChannelID != channelID {
-		return fmt.Errorf("topic does not belong to this channel")
+	if topic.ProjectID != projectID {
+		return fmt.Errorf("topic does not belong to this project")
 	}
 	return s.repo.TopicPools().Delete(ctx, id)
 }
 
-func (s *TopicPoolService) validateChannelOwnership(ctx context.Context, userID, channelID string) error {
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+func (s *TopicPoolService) validateProjectOwnership(ctx context.Context, userID, projectID string) error {
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("find channel: %w", err)
+		return fmt.Errorf("find project: %w", err)
 	}
 	if ch.UserID != userID {
-		return fmt.Errorf("channel not owned by user")
+		return fmt.Errorf("project not owned by user")
 	}
 	return nil
 }

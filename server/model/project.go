@@ -2,22 +2,23 @@ package model
 
 import "time"
 
-// ChannelConfig holds platform-specific configuration stored as JSON.
-type ChannelConfig struct {
+// ProjectConfig holds platform-specific configuration stored as JSON.
+type ProjectConfig struct {
 	WechatAppID      string `json:"wechat_app_id,omitempty"`
 	WechatSecret     string `json:"wechat_secret,omitempty"`
 	EnablePublishing bool   `json:"enable_publishing"`
 }
 
-// Channel represents a user's platform account (e.g., a WeChat public account or Seednote account).
-type Channel struct {
+// Project represents a user's content project — a platform account such as a
+// WeChat public account or a Seednote account.
+type Project struct {
 	ID                 string        `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID             string        `gorm:"type:char(36);index;not null" json:"user_id"`
 	Platform           string        `gorm:"type:varchar(20);not null" json:"platform"` // article, seednote
 	Name               string        `gorm:"type:varchar(100);not null" json:"name"`
 	AvatarURL          string        `gorm:"type:varchar(500)" json:"avatar_url"`
 	ProfileURL         string        `gorm:"type:varchar(500)" json:"profile_url"`              // 平台主页链接
-	Positioning        string        `gorm:"type:text" json:"positioning"`                      // 账号定位
+	Positioning        string        `gorm:"type:text" json:"positioning"`                      // 项目定位
 	Keywords           string        `gorm:"type:text" json:"keywords"`                         // 关键词
 	Style              string        `gorm:"type:text" json:"style"`                            // 图片视觉风格（封面/配图方向，自由文本）
 	WritingStyle       string        `gorm:"type:varchar(100);default:''" json:"writing_style"` // 写作风格（writer 资源 key，如 dan-koe）；与 Style/Theme 三维正交
@@ -29,25 +30,25 @@ type Channel struct {
 	ReferenceImageURL  string        `gorm:"type:varchar(500)" json:"reference_image_url"`      // 品牌视觉参考图 URL
 	ImageRatio         string        `gorm:"type:varchar(10);default:''" json:"image_ratio"`    // 图片比例: "3:4", "1:1", "4:3", "16:9"
 	MaxConcurrentTasks int           `gorm:"type:int;default:10" json:"max_concurrent_tasks"`   // 最大并发任务数
-	Config             ChannelConfig `gorm:"type:json;serializer:json" json:"config"`           // 平台特有配置
+	Config             ProjectConfig `gorm:"type:json;serializer:json" json:"config"`           // 平台特有配置
 	Status             string        `gorm:"type:varchar(20);default:active" json:"status"`     // active, archived
 	CreatedAt          time.Time     `json:"created_at"`
 	UpdatedAt          time.Time     `json:"updated_at"`
 }
 
-func (Channel) TableName() string { return "channels" }
+func (Project) TableName() string { return "projects" }
 
 // GetWechatAppID returns the WeChat App ID from config.
-func (ch *Channel) GetWechatAppID() string {
-	return ch.Config.WechatAppID
+func (p *Project) GetWechatAppID() string {
+	return p.Config.WechatAppID
 }
 
 // GetWechatSecret returns the WeChat Secret from config.
-func (ch *Channel) GetWechatSecret() string {
-	return ch.Config.WechatSecret
+func (p *Project) GetWechatSecret() string {
+	return p.Config.WechatSecret
 }
 
-// GetEnablePublishing returns whether auto-publishing is enabled for this channel.
-func (ch *Channel) GetEnablePublishing() bool {
-	return ch.Config.EnablePublishing
+// GetEnablePublishing returns whether auto-publishing is enabled for this project.
+func (p *Project) GetEnablePublishing() bool {
+	return p.Config.EnablePublishing
 }

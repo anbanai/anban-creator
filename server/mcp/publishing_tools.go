@@ -18,7 +18,7 @@ func registerPublishingTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID (determines WeChat credentials)"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID (determines WeChat credentials)"},
 				"articles": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{
 					"title":              map[string]any{"type": "string", "description": "Article title"},
 					"author":             map[string]any{"type": "string", "description": "Author name (optional)"},
@@ -28,35 +28,35 @@ func registerPublishingTools(server *mcp.Server) {
 					"content_source_url": map[string]any{"type": "string", "description": "Original article URL (optional)"},
 				}}, "description": "Array of articles to publish as a draft"},
 			},
-			"required": []any{"channel_id", "articles"},
+			"required": []any{"project_id", "articles"},
 		},
 	}, publishDraftHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_drafts",
-		Description: "List WeChat drafts for a channel. Returns draft media IDs, titles, and update times.",
+		Description: "List WeChat drafts for a project. Returns draft media IDs, titles, and update times.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"offset":     map[string]any{"type": "integer", "description": "Pagination offset (default: 0)"},
 				"count":      map[string]any{"type": "integer", "description": "Number of results (default: 20)", "default": 20},
 			},
-			"required": []any{"channel_id"},
+			"required": []any{"project_id"},
 		},
 	}, listDraftsHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_published_articles",
-		Description: "List published WeChat articles for a channel. Returns article IDs, titles, URLs, and update times.",
+		Description: "List published WeChat articles for a project. Returns article IDs, titles, URLs, and update times.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"offset":     map[string]any{"type": "integer", "description": "Pagination offset (default: 0)"},
 				"count":      map[string]any{"type": "integer", "description": "Number of results (default: 20)", "default": 20},
 			},
-			"required": []any{"channel_id"},
+			"required": []any{"project_id"},
 		},
 	}, listPublishedHandler)
 }
@@ -68,9 +68,9 @@ func publishDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	projectID, _ := args["project_id"].(string)
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 
 	// Parse articles from JSON.
@@ -88,7 +88,7 @@ func publishDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		return errorResult("at least one article is required"), nil
 	}
 
-	result, err := svcs.PublishingSvc.PublishDraft(ctx, userID, channelID, articles)
+	result, err := svcs.PublishingSvc.PublishDraft(ctx, userID, projectID, articles)
 	if err != nil {
 		return errorResult(fmt.Sprintf("publish draft: %v", err)), nil
 	}
@@ -103,9 +103,9 @@ func listDraftsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	projectID, _ := args["project_id"].(string)
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 
 	var offset, count int64 = 0, 20
@@ -116,7 +116,7 @@ func listDraftsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		count = int64(v)
 	}
 
-	result, err := svcs.PublishingSvc.ListDrafts(ctx, userID, channelID, offset, count)
+	result, err := svcs.PublishingSvc.ListDrafts(ctx, userID, projectID, offset, count)
 	if err != nil {
 		return errorResult(fmt.Sprintf("list drafts: %v", err)), nil
 	}
@@ -131,9 +131,9 @@ func listPublishedHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	projectID, _ := args["project_id"].(string)
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 
 	var offset, count int64 = 0, 20
@@ -144,7 +144,7 @@ func listPublishedHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		count = int64(v)
 	}
 
-	result, err := svcs.PublishingSvc.ListPublished(ctx, userID, channelID, offset, count)
+	result, err := svcs.PublishingSvc.ListPublished(ctx, userID, projectID, offset, count)
 	if err != nil {
 		return errorResult(fmt.Sprintf("list published: %v", err)), nil
 	}

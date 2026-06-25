@@ -19,7 +19,7 @@ import (
 type PublishingService struct {
 	repo                 repository.Repository
 	logger               *zerolog.Logger
-	createDraftServiceFn func(*model.Channel) (draftClient, error)
+	createDraftServiceFn func(*model.Project) (draftClient, error)
 }
 
 type draftClient interface {
@@ -73,13 +73,13 @@ type PublishDraftResult struct {
 	DraftURL string `json:"draft_url,omitempty"`
 }
 
-// buildAppConfig creates an app config from a channel (nil image config since publishing doesn't need image API).
-func (s *PublishingService) buildAppConfig(ch *model.Channel) (*appconfig.Config, error) {
+// buildAppConfig creates an app config from a project (nil image config since publishing doesn't need image API).
+func (s *PublishingService) buildAppConfig(ch *model.Project) (*appconfig.Config, error) {
 	return agent.BuildAppConfig(ch, nil, "", false, "")
 }
 
-// defaultCreateDraftService creates a draft.Service for the given channel.
-func (s *PublishingService) defaultCreateDraftService(ch *model.Channel) (draftClient, error) {
+// defaultCreateDraftService creates a draft.Service for the given project.
+func (s *PublishingService) defaultCreateDraftService(ch *model.Project) (draftClient, error) {
 	appCfg, err := s.buildAppConfig(ch)
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
@@ -87,30 +87,30 @@ func (s *PublishingService) defaultCreateDraftService(ch *model.Channel) (draftC
 	return &appDraftClient{service: draft.NewService(appCfg, s.logger)}, nil
 }
 
-// getChannel retrieves and validates a channel for the given user.
-func (s *PublishingService) getChannel(ctx context.Context, userID, channelID string) (*model.Channel, error) {
-	if channelID == "" {
-		return nil, fmt.Errorf("channel_id is required")
+// getProject retrieves and validates a project for the given user.
+func (s *PublishingService) getProject(ctx context.Context, userID, projectID string) (*model.Project, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("project_id is required")
 	}
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 	if ch == nil {
-		return nil, fmt.Errorf("channel not found")
+		return nil, fmt.Errorf("project not found")
 	}
 	if ch.UserID != userID {
-		return nil, fmt.Errorf("channel not owned by user")
+		return nil, fmt.Errorf("project not owned by user")
 	}
 	if ch.GetWechatAppID() == "" || ch.GetWechatSecret() == "" {
-		return nil, fmt.Errorf("channel missing WeChat credentials")
+		return nil, fmt.Errorf("project missing WeChat credentials")
 	}
 	return ch, nil
 }
 
-// PublishDraft creates a WeChat article draft for the given channel.
-func (s *PublishingService) PublishDraft(ctx context.Context, userID, channelID string, articles []DraftArticleInput) (*PublishDraftResult, error) {
-	ch, err := s.getChannel(ctx, userID, channelID)
+// PublishDraft creates a WeChat article draft for the given project.
+func (s *PublishingService) PublishDraft(ctx context.Context, userID, projectID string, articles []DraftArticleInput) (*PublishDraftResult, error) {
+	ch, err := s.getProject(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (s *PublishingService) PublishDraft(ctx context.Context, userID, channelID 
 		if err := validateContentImageDiversity(a.Content); err != nil {
 			s.logger.Warn().
 				Str("user_id", userID).
-				Str("channel_id", channelID).
+				Str("project_id", projectID).
 				Int("article_index", i).
 				Msg("publish_draft rejected: duplicate content images")
 			return nil, err
@@ -154,7 +154,7 @@ func (s *PublishingService) PublishDraft(ctx context.Context, userID, channelID 
 		return nil, fmt.Errorf("create draft: %w", err)
 	}
 
-	s.logger.Info().Str("user_id", userID).Str("channel_id", channelID).Str("media_id", result.MediaID).Msg("article draft published")
+	s.logger.Info().Str("user_id", userID).Str("project_id", projectID).Str("media_id", result.MediaID).Msg("article draft published")
 
 	return &PublishDraftResult{
 		MediaID:  result.MediaID,
@@ -162,9 +162,9 @@ func (s *PublishingService) PublishDraft(ctx context.Context, userID, channelID 
 	}, nil
 }
 
-// ListDrafts returns a paginated list of WeChat drafts for the given channel.
-func (s *PublishingService) ListDrafts(ctx context.Context, userID, channelID string, offset, count int64) (*draft.ListDraftsResult, error) {
-	ch, err := s.getChannel(ctx, userID, channelID)
+// ListDrafts returns a paginated list of WeChat drafts for the given project.
+func (s *PublishingService) ListDrafts(ctx context.Context, userID, projectID string, offset, count int64) (*draft.ListDraftsResult, error) {
+	ch, err := s.getProject(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -191,9 +191,9 @@ func (s *PublishingService) ListDrafts(ctx context.Context, userID, channelID st
 	return result, nil
 }
 
-// ListPublished returns a paginated list of published WeChat articles for the given channel.
-func (s *PublishingService) ListPublished(ctx context.Context, userID, channelID string, offset, count int64) (*draft.ListPublishedResult, error) {
-	ch, err := s.getChannel(ctx, userID, channelID)
+// ListPublished returns a paginated list of published WeChat articles for the given project.
+func (s *PublishingService) ListPublished(ctx context.Context, userID, projectID string, offset, count int64) (*draft.ListPublishedResult, error) {
+	ch, err := s.getProject(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}

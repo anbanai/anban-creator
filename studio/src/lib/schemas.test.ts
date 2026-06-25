@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loginSchema, registerSchema, createTaskSchema, planSchema, channelSchema } from './schemas'
+import { loginSchema, registerSchema, createTaskSchema, planSchema, projectSchema } from './schemas'
 
 describe('loginSchema', () => {
   it('accepts valid email and password', () => {
@@ -76,24 +76,24 @@ describe('registerSchema', () => {
 describe('createTaskSchema', () => {
   it('accepts valid task creation data', () => {
     expect(createTaskSchema.safeParse({
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       type: 'article',
       prompt: '测试主题',
     }).success).toBe(true)
   })
 
-  it('rejects missing channel_id', () => {
+  it('rejects missing project_id', () => {
     const result = createTaskSchema.safeParse({
-      channel_id: '',
+      project_id: '',
       type: 'article',
       prompt: '测试主题',
     })
     expect(result.success).toBe(false)
   })
 
-  it('accepts viral analysis without a channel when prompt contains a note URL', () => {
+  it('accepts viral analysis without a project when prompt contains a note URL', () => {
     const result = createTaskSchema.safeParse({
-      channel_id: '',
+      project_id: '',
       type: 'viral_analysis',
       prompt: '帮我拆解这篇 http://xhslink.com/a1b2c3',
     })
@@ -102,7 +102,7 @@ describe('createTaskSchema', () => {
 
   it('rejects viral analysis without a URL in prompt', () => {
     const result = createTaskSchema.safeParse({
-      channel_id: '',
+      project_id: '',
       type: 'viral_analysis',
       prompt: '帮我拆解这篇爆款笔记',
     })
@@ -111,7 +111,7 @@ describe('createTaskSchema', () => {
 
   it('accepts optional prompt', () => {
     const result = createTaskSchema.safeParse({
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       type: 'article',
       prompt: '',
     })
@@ -120,7 +120,7 @@ describe('createTaskSchema', () => {
 
   it('accepts prompt at max length', () => {
     const result = createTaskSchema.safeParse({
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       type: 'article',
       prompt: 'a'.repeat(5120),
     })
@@ -129,7 +129,7 @@ describe('createTaskSchema', () => {
 
   it('counts unicode prompt length like the API', () => {
     const result = createTaskSchema.safeParse({
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       type: 'article',
       prompt: '😀'.repeat(5120),
     })
@@ -138,7 +138,7 @@ describe('createTaskSchema', () => {
 
   it('rejects prompt exceeding max length', () => {
     const result = createTaskSchema.safeParse({
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       type: 'article',
       prompt: 'a'.repeat(5121),
     })
@@ -148,7 +148,7 @@ describe('createTaskSchema', () => {
   it('accepts all valid content types', () => {
     for (const type of ['seednote', 'article', 'viral_analysis'] as const) {
       expect(createTaskSchema.safeParse({
-        channel_id: type === 'viral_analysis' ? '' : 'ch-1',
+        project_id: type === 'viral_analysis' ? '' : 'ch-1',
         type,
         prompt: type === 'viral_analysis' ? 'https://www.xiaohongshu.com/explore/mock' : '测试',
       }).success).toBe(true)
@@ -157,7 +157,7 @@ describe('createTaskSchema', () => {
 
   it('applies default values for quantity and image_ratio', () => {
     const result = createTaskSchema.parse({
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       type: 'article',
       prompt: '测试',
     })
@@ -167,7 +167,7 @@ describe('createTaskSchema', () => {
 
   it('accepts goal_mode with a non-empty goal', () => {
     expect(createTaskSchema.safeParse({
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       type: 'article',
       prompt: '测试',
       goal_mode: true,
@@ -177,7 +177,7 @@ describe('createTaskSchema', () => {
 
   it('rejects goal_mode=true without a goal', () => {
     const result = createTaskSchema.safeParse({
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       type: 'article',
       prompt: '测试',
       goal_mode: true,
@@ -188,7 +188,7 @@ describe('createTaskSchema', () => {
 
   it('rejects goal longer than 4000 characters', () => {
     const result = createTaskSchema.safeParse({
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       type: 'article',
       prompt: '测试',
       goal_mode: true,
@@ -255,22 +255,22 @@ describe('planSchema', () => {
       type: 'seednote',
       cron_expr: '0 9 * * 1',
       prompt: '主题方向',
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
     })
     expect(result.success).toBe(true)
   })
 })
 
-describe('channelSchema', () => {
+describe('projectSchema', () => {
   it('accepts article platform without wechat_app_id when publishing disabled', () => {
-    expect(channelSchema.safeParse({
+    expect(projectSchema.safeParse({
       platform: 'article',
       enable_publishing: false,
     }).success).toBe(true)
   })
 
   it('accepts article platform with wechat_app_id when publishing enabled', () => {
-    expect(channelSchema.safeParse({
+    expect(projectSchema.safeParse({
       platform: 'article',
       enable_publishing: true,
       wechat_app_id: 'wx123',
@@ -278,7 +278,7 @@ describe('channelSchema', () => {
   })
 
   it('rejects article platform without wechat_app_id when publishing enabled', () => {
-    const result = channelSchema.safeParse({
+    const result = projectSchema.safeParse({
       platform: 'article',
       enable_publishing: true,
     })
@@ -286,18 +286,18 @@ describe('channelSchema', () => {
   })
 
   it('accepts seednote platform without wechat_app_id', () => {
-    expect(channelSchema.safeParse({
+    expect(projectSchema.safeParse({
       platform: 'seednote',
     }).success).toBe(true)
   })
 
   it('accepts all optional fields', () => {
-    const result = channelSchema.safeParse({
+    const result = projectSchema.safeParse({
       platform: 'article',
       enable_publishing: true,
       wechat_app_id: 'wx123',
       wechat_secret: 'secret',
-      name: '账号名称',
+      name: '项目名称',
       keywords: '测试',
       positioning: '定位',
       style: 'casual-science',

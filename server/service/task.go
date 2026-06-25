@@ -182,7 +182,7 @@ func (s *TaskService) StorageProviderName() string {
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
 	UserID            string
-	ChannelID         string
+	ProjectID         string
 	Prompt            string
 	Quantity          int
 	ImageRatio        string
@@ -192,12 +192,12 @@ type CreateManualParams struct {
 	Style             string
 	// WritingStyle / Theme carry the task-level 写作风格 / 排版样式 overrides (the
 	// other two orthogonal dimensions). Resolved alongside Style with precedence
-	// task > template > plan > channel.
+	// task > template > plan > project.
 	WritingStyle string
 	Theme        string
 	// Author / AuthorStyleIntro / AuthorAvatarURL carry the task-level 作者（署名）
 	// + 写作风格（free-text imitation） + 可选人设头像 overrides. Resolved alongside
-	// Style/WritingStyle/Theme with precedence task > template > plan > channel.
+	// Style/WritingStyle/Theme with precedence task > template > plan > project.
 	Author           string
 	AuthorStyleIntro string
 	AuthorAvatarURL  string
@@ -207,27 +207,33 @@ type CreateManualParams struct {
 	// TemplateID optionally records which template was selected. It does NOT enter
 	// the style resolution chain (visual style is already copied to Style by the
 	// caller); instead the agent surfaces the template's content scaffold via
-	// get_channel_profile(task_id).
+	// get_project_profile(task_id).
 	TemplateID *string
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to task model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
 	HasContentImage *bool
 	HasTailImage    *bool
+	// Ecommerce carries the e-commerce package config (selected modules, product
+	// photos, target platform, selling points, language, provider-strategy
+	// override). Only consulted when the project platform is "ecommerce"; ignored
+	// otherwise. When set, the task is billed once as a single package at the sum
+	// of selected module prices and quantity is forced to 1.
+	Ecommerce *model.EcommerceConfig
 }
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The Quantity field (1-5) determines how many tasks to create, each independently billed.
 // ImageModelKey optionally selects a per-task image model (validated upstream by the handler).
-// Style optionally overrides the channel's style (e.g. from a selected template).
+// Style optionally overrides the project's style (e.g. from a selected template).
 //
 // When GoalMode is true, each task charges GoalMultiplier() × base cost upfront
 // and never refunds. The goal condition is propagated to the agent process and
 // prepended to the user prompt as a /goal slash command, letting Claude Code's
 // built-in goal loop drive turn-by-turn evaluation inside a single session.
 func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([]*model.Task, error) {
-	if p.ChannelID == "" {
-		return nil, fmt.Errorf("channel_id is required")
+	if p.ProjectID == "" {
+		return nil, fmt.Errorf("project_id is required")
 	}
 
 	// Clamp quantity to 1-5.
@@ -239,22 +245,22 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		quantity = 5
 	}
 
-	// Load and validate channel.
-	channel, err := s.repo.Channels().FindByID(ctx, p.ChannelID)
+	// Load and validate project.
+	project, err := s.repo.Projects().FindByID(ctx, p.ProjectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
-	if channel.UserID != p.UserID {
-		return nil, fmt.Errorf("channel not owned by user")
+	if project.UserID != p.UserID {
+		return nil, fmt.Errorf("project not owned by user")
 	}
-	if channel.Status != model.ChannelStatusActive {
-		return nil, fmt.Errorf("channel is not active")
+	if project.Status != model.ProjectStatusActive {
+		return nil, fmt.Errorf("project is not active")
 	}
 
-	taskType := channel.Platform
+	taskType := project.Platform
 
 	// Resolve the three orthogonal style dimensions with precedence
-	// task > template > channel (manual tasks have no plan level). Each dimension
+	// task > template > project (manual tasks have no plan level). Each dimension
 	// is independent — the writer never drives the visual style.
 	var tmpl *model.Template
 	if p.TemplateID != nil && *p.TemplateID != "" {
@@ -264,13 +270,13 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			s.logger.Warn().Err(terr).Str("template_id", *p.TemplateID).Msg("template not found during style resolution")
 		}
 	}
-	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), channel.Style)
-	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), channel.WritingStyle)
-	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), channel.Theme)
+	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), project.Style)
+	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), project.WritingStyle)
+	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), project.Theme)
 	// 公众号人设维度（作者署名 + 写作风格模仿 + 可选头像），与视觉/排版正交，同链解析。
-	effectiveAuthor := firstNonEmpty(p.Author, templateAuthorName(tmpl), channel.Author)
-	effectiveAuthorIntro := firstNonEmpty(p.AuthorStyleIntro, templateAuthorStyleIntro(tmpl), channel.AuthorStyleIntro)
-	effectiveAuthorAvatar := firstNonEmpty(p.AuthorAvatarURL, templateAuthorAvatar(tmpl), channel.AuthorAvatarURL)
+	effectiveAuthor := firstNonEmpty(p.Author, templateAuthorName(tmpl), project.Author)
+	effectiveAuthorIntro := firstNonEmpty(p.AuthorStyleIntro, templateAuthorStyleIntro(tmpl), project.AuthorStyleIntro)
+	effectiveAuthorAvatar := firstNonEmpty(p.AuthorAvatarURL, templateAuthorAvatar(tmpl), project.AuthorAvatarURL)
 	// Article always carries a writing voice (seednote has none).
 	if effectiveWriter == "" && taskType == model.PlatformArticle {
 		effectiveWriter = writer.DefaultStyleName
@@ -286,32 +292,58 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 
 	if s.creditSvc != nil {
-		cost, ok := s.creditSvc.TaskCost(taskType)
-		if !ok {
-			return nil, fmt.Errorf("unknown task type: %s", taskType)
-		}
-		totalCost := cost * quantity * multiplier
-
-		// Generate all task IDs upfront so we can create individual transactions.
-		taskIDs := make([]string, quantity)
-		for i := range taskIDs {
-			taskIDs[i] = generateTaskID()
-		}
-
-		// Deduct total cost in a single atomic transaction.
-		var deductErr error
-		if multiplier > 1 {
-			deductErr = s.creditSvc.DeductBatchWithMultiplier(ctx, p.UserID, taskType, totalCost, taskIDs, multiplier)
-		} else {
-			deductErr = s.creditSvc.DeductBatch(ctx, p.UserID, taskType, totalCost, taskIDs)
-		}
-		if deductErr != nil {
-			if errors.Is(deductErr, ErrInsufficientCredits) {
-				return nil, fmt.Errorf("积分不足: %w", deductErr)
+		if taskType == model.PlatformEcommerce {
+			// E-commerce is billed as a single deliverable package whose cost is
+			// the sum of selected module unit prices × quantities (see
+			// CreditService.EcommercePackageCost). Quantity is forced to 1 (one
+			// package per task); the goal-mode multiplier does not apply.
+			quantity = 1
+			if p.Ecommerce == nil || len(p.Ecommerce.SelectedModules) == 0 {
+				return nil, fmt.Errorf("ecommerce task requires at least one selected module")
 			}
-			return nil, fmt.Errorf("deduct credits: %w", deductErr)
+			packageCost, known := s.creditSvc.EcommercePackageCost(p.Ecommerce.SelectedModules)
+			if !known {
+				return nil, fmt.Errorf("unknown ecommerce module selected")
+			}
+			if packageCost <= 0 {
+				return nil, fmt.Errorf("ecommerce package cost must be positive")
+			}
+			taskID := generateTaskID()
+			if _, err := s.creditSvc.DeductForTaskWithAmount(ctx, p.UserID, taskType, taskID, packageCost); err != nil {
+				if errors.Is(err, ErrInsufficientCredits) {
+					return nil, fmt.Errorf("积分不足: %w", err)
+				}
+				return nil, fmt.Errorf("deduct credits: %w", err)
+			}
+			deductedTaskIDs = []string{taskID}
+		} else {
+			cost, ok := s.creditSvc.TaskCost(taskType)
+			if !ok {
+				return nil, fmt.Errorf("unknown task type: %s", taskType)
+			}
+			totalCost := cost * quantity * multiplier
+
+			// Generate all task IDs upfront so we can create individual transactions.
+			taskIDs := make([]string, quantity)
+			for i := range taskIDs {
+				taskIDs[i] = generateTaskID()
+			}
+
+			// Deduct total cost in a single atomic transaction.
+			var deductErr error
+			if multiplier > 1 {
+				deductErr = s.creditSvc.DeductBatchWithMultiplier(ctx, p.UserID, taskType, totalCost, taskIDs, multiplier)
+			} else {
+				deductErr = s.creditSvc.DeductBatch(ctx, p.UserID, taskType, totalCost, taskIDs)
+			}
+			if deductErr != nil {
+				if errors.Is(deductErr, ErrInsufficientCredits) {
+					return nil, fmt.Errorf("积分不足: %w", deductErr)
+				}
+				return nil, fmt.Errorf("deduct credits: %w", deductErr)
+			}
+			deductedTaskIDs = taskIDs
 		}
-		deductedTaskIDs = taskIDs
 	}
 
 	for i := 0; i < quantity; i++ {
@@ -336,7 +368,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		task := &model.Task{
 			ID:                 taskID,
 			UserID:             p.UserID,
-			ChannelID:          p.ChannelID,
+			ProjectID:          p.ProjectID,
 			Type:               taskType,
 			Status:             model.TaskStatusPending,
 			Prompt:             p.Prompt,
@@ -356,6 +388,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			TemplateID:         p.TemplateID,
 			HasContentImage:    hasContent,
 			HasTailImage:       hasTail,
+		}
+		if p.Ecommerce != nil {
+			task.SetEcommerce(*p.Ecommerce)
 		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
@@ -393,8 +428,8 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	// Try to claim a topic from the topic pool if no prompt is set.
-	if prompt == "" && s.topicPoolSvc != nil && plan.ChannelID != "" {
-		claimed, err := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ChannelID, taskID)
+	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {
+		claimed, err := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ProjectID, taskID)
 		if err != nil {
 			s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
 		} else if claimed != "" {
@@ -402,18 +437,18 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		}
 	}
 
-	// Derive task type from the channel if ChannelID is set.
-	var ch *model.Channel
+	// Derive task type from the project if ProjectID is set.
+	var ch *model.Project
 	taskType := plan.Type
-	if plan.ChannelID != "" {
-		if found, err := s.repo.Channels().FindByID(ctx, plan.ChannelID); err == nil {
+	if plan.ProjectID != "" {
+		if found, err := s.repo.Projects().FindByID(ctx, plan.ProjectID); err == nil {
 			ch = found
 			taskType = ch.Platform
 		}
 	}
 
 	// Resolve the three orthogonal style dimensions. The plan already resolved
-	// them at creation (plan > template > channel); fall back to the channel when
+	// them at creation (plan > template > project); fall back to the project when
 	// the plan fields are empty (e.g. legacy rows pre-migration). Each dimension
 	// is independent — the writer never drives the visual style.
 	var chVisual, chWriter, chTheme, chAuthor, chAuthorIntro, chAvatar string
@@ -462,7 +497,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	task := &model.Task{
 		ID:                 taskID,
 		UserID:             plan.UserID,
-		ChannelID:          plan.ChannelID,
+		ProjectID:          plan.ProjectID,
 		Type:               taskType,
 		Status:             model.TaskStatusPending,
 		Prompt:             prompt,
@@ -511,15 +546,15 @@ func (s *TaskService) GetByID(ctx context.Context, id string) (*model.Task, erro
 	return task, nil
 }
 
-// List returns tasks for a user with optional status and channel filters and pagination.
-func (s *TaskService) List(ctx context.Context, userID string, offset, limit int, status, channelID string) ([]*model.Task, int64, error) {
+// List returns tasks for a user with optional status and project filters and pagination.
+func (s *TaskService) List(ctx context.Context, userID string, offset, limit int, status, projectID string) ([]*model.Task, int64, error) {
 	var tasks []*model.Task
 	var err error
 
 	if status != "" {
-		tasks, err = s.repo.Tasks().FindByUserIDAndStatus(ctx, userID, status, channelID, offset, limit)
+		tasks, err = s.repo.Tasks().FindByUserIDAndStatus(ctx, userID, status, projectID, offset, limit)
 	} else {
-		tasks, err = s.repo.Tasks().FindByUserID(ctx, userID, channelID, offset, limit)
+		tasks, err = s.repo.Tasks().FindByUserID(ctx, userID, projectID, offset, limit)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("list tasks: %w", err)
@@ -527,9 +562,9 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 
 	var total int64
 	if status != "" {
-		total, err = s.repo.Tasks().CountByUserIDAndStatus(ctx, userID, status, channelID)
+		total, err = s.repo.Tasks().CountByUserIDAndStatus(ctx, userID, status, projectID)
 	} else {
-		total, err = s.repo.Tasks().CountByUserID(ctx, userID, channelID)
+		total, err = s.repo.Tasks().CountByUserID(ctx, userID, projectID)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("count tasks: %w", err)
@@ -538,9 +573,9 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 	return tasks, total, nil
 }
 
-// ListTitles returns all recorded titles for a channel, ordered by creation time descending.
-func (s *TaskService) ListTitles(ctx context.Context, channelID string) ([]string, error) {
-	return s.repo.Tasks().FindTitlesByChannelID(ctx, channelID)
+// ListTitles returns all recorded titles for a project, ordered by creation time descending.
+func (s *TaskService) ListTitles(ctx context.Context, projectID string) ([]string, error) {
+	return s.repo.Tasks().FindTitlesByProjectID(ctx, projectID)
 }
 
 var artifactTaskTitles = map[string]struct{}{
@@ -571,7 +606,7 @@ func (s *TaskService) FinalizeTitle(ctx context.Context, userID, taskID, title s
 		return "", fmt.Errorf("task not found")
 	}
 
-	tasks, err := s.repo.Tasks().FindTitleTasksByChannelID(ctx, task.ChannelID)
+	tasks, err := s.repo.Tasks().FindTitleTasksByProjectID(ctx, task.ProjectID)
 	if err != nil {
 		return "", fmt.Errorf("list existing title tasks: %w", err)
 	}
@@ -645,14 +680,14 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	}
 	// Release concurrency slot.
 	if s.pubsub != nil {
-		var channelID string
+		var projectID string
 		if taskErr == nil && task != nil {
-			channelID = task.ChannelID
+			projectID = task.ProjectID
 		} else if t, err := s.repo.Tasks().FindByID(ctx, id); err == nil {
-			channelID = t.ChannelID
+			projectID = t.ProjectID
 		}
-		if channelID != "" {
-			s.pubsub.ReleaseSlot(ctx, channelID)
+		if projectID != "" {
+			s.pubsub.ReleaseSlot(ctx, projectID)
 		}
 	}
 	// Signal the running execution (if any) to cancel via its context.
@@ -755,20 +790,20 @@ func (s *TaskService) RebuildWorkflowStatus(ctx context.Context, taskID string) 
 
 // EnqueueExecution enqueues a task for async execution.
 // If no enqueuer is available (nil), it runs synchronously in a goroutine.
-// If the channel's concurrent task limit is reached, the task stays in DB as "pending"
+// If the project's concurrent task limit is reached, the task stays in DB as "pending"
 // and will be dispatched later when a slot opens up.
-func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, channel *model.Channel) error {
-	// Load channel if not provided, for concurrency check.
-	if channel == nil && task.ChannelID != "" {
-		ch, err := s.repo.Channels().FindByID(ctx, task.ChannelID)
+func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, project *model.Project) error {
+	// Load project if not provided, for concurrency check.
+	if project == nil && task.ProjectID != "" {
+		ch, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
 		if err == nil {
-			channel = ch
+			project = ch
 		}
 	}
 
-	// Check per-channel concurrency limit.
-	if channel != nil {
-		maxConcurrent := channel.MaxConcurrentTasks
+	// Check per-project concurrency limit.
+	if project != nil {
+		maxConcurrent := project.MaxConcurrentTasks
 		if maxConcurrent <= 0 {
 			maxConcurrent = DefaultMaxConcurrentTasks
 		}
@@ -776,22 +811,22 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 		slotReserved := false
 		if s.pubsub != nil && s.pubsub.Available() {
 			// Atomic check-and-reserve via Redis to prevent TOCTOU races.
-			count, ok, err := s.pubsub.TryReserveSlot(ctx, channel.ID, maxConcurrent)
+			count, ok, err := s.pubsub.TryReserveSlot(ctx, project.ID, maxConcurrent)
 			if err != nil {
 				s.logger.Warn().Err(err).
-					Str("channel_id", channel.ID).
+					Str("project_id", project.ID).
 					Msg("failed to reserve concurrency slot via Redis, falling back to DB check")
 			} else if !ok {
 				s.logger.Info().
 					Str("task_id", task.ID).
-					Str("channel_id", channel.ID).
+					Str("project_id", project.ID).
 					Int("max", maxConcurrent).
-					Msg("channel concurrency limit reached (Redis), task will be dispatched later")
+					Msg("project concurrency limit reached (Redis), task will be dispatched later")
 				return nil
 			} else {
 				s.logger.Debug().
 					Str("task_id", task.ID).
-					Str("channel_id", channel.ID).
+					Str("project_id", project.ID).
 					Int64("running", count).
 					Int("max", maxConcurrent).
 					Msg("reserved concurrency slot via Redis")
@@ -801,18 +836,18 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 
 		// DB fallback: non-atomic check (when Redis unavailable or errored).
 		if !slotReserved {
-			running, err := s.repo.Tasks().CountRunningByChannel(ctx, channel.ID)
+			running, err := s.repo.Tasks().CountRunningByProject(ctx, project.ID)
 			if err != nil {
 				s.logger.Warn().Err(err).
-					Str("channel_id", channel.ID).
+					Str("project_id", project.ID).
 					Msg("failed to count running tasks, proceeding without limit check")
 			} else if int(running) >= maxConcurrent {
 				s.logger.Info().
 					Str("task_id", task.ID).
-					Str("channel_id", channel.ID).
+					Str("project_id", project.ID).
 					Int64("running", running).
 					Int("max", maxConcurrent).
-					Msg("channel concurrency limit reached, task will be dispatched later")
+					Msg("project concurrency limit reached, task will be dispatched later")
 				return nil
 			}
 		}
@@ -828,8 +863,8 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 		}
 
 		if err := s.enqueuer.Enqueue(TypeContentGenerate, payload); err != nil {
-			if s.pubsub != nil && s.pubsub.Available() && channel != nil {
-				s.pubsub.ReleaseSlot(ctx, channel.ID)
+			if s.pubsub != nil && s.pubsub.Available() && project != nil {
+				s.pubsub.ReleaseSlot(ctx, project.ID)
 			}
 			return fmt.Errorf("enqueue task: %w", err)
 		}
@@ -847,8 +882,8 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 					Str("task_id", task.ID).
 					Interface("panic", r).
 					Msg("panic recovered in fallback task execution")
-				if s.pubsub != nil && s.pubsub.Available() && channel != nil {
-					s.pubsub.ReleaseSlot(context.Background(), channel.ID)
+				if s.pubsub != nil && s.pubsub.Available() && project != nil {
+					s.pubsub.ReleaseSlot(context.Background(), project.ID)
 				}
 			}
 		}()
@@ -858,46 +893,46 @@ func (s *TaskService) EnqueueExecution(ctx context.Context, task *model.Task, ch
 		swapped, _ := s.repo.Tasks().CompareAndSwapStatusAndStartedAt(fallbackCtx, task.ID, model.TaskStatusPending, model.TaskStatusRunning)
 		if !swapped {
 			// Task was cancelled or already running; release the reserved slot.
-			if s.pubsub != nil && s.pubsub.Available() && channel != nil {
-				s.pubsub.ReleaseSlot(fallbackCtx, channel.ID)
+			if s.pubsub != nil && s.pubsub.Available() && project != nil {
+				s.pubsub.ReleaseSlot(fallbackCtx, project.ID)
 			}
 			return
 		}
-		if err := s.HandleExecution(fallbackCtx, task, channel); err != nil {
+		if err := s.HandleExecution(fallbackCtx, task, project); err != nil {
 			s.logger.Error().Err(err).Str("task_id", task.ID).Msg("fallback task execution failed")
 		}
 	}()
 	return nil
 }
 
-// DefaultMaxConcurrentTasks is the default per-channel concurrent task limit.
+// DefaultMaxConcurrentTasks is the default per-project concurrent task limit.
 const DefaultMaxConcurrentTasks = 10
 
-// DispatchPendingTasks checks for pending tasks on a channel and enqueues them
+// DispatchPendingTasks checks for pending tasks on a project and enqueues them
 // if there are available concurrency slots. Called after a task completes or fails.
-func (s *TaskService) DispatchPendingTasks(ctx context.Context, channelID string) error {
-	channel, err := s.repo.Channels().FindByID(ctx, channelID)
+func (s *TaskService) DispatchPendingTasks(ctx context.Context, projectID string) error {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("find channel: %w", err)
+		return fmt.Errorf("find project: %w", err)
 	}
 
-	maxConcurrent := channel.MaxConcurrentTasks
+	maxConcurrent := project.MaxConcurrentTasks
 	if maxConcurrent <= 0 {
 		maxConcurrent = DefaultMaxConcurrentTasks
 	}
 
 	var running int64
 	if s.pubsub != nil && s.pubsub.Available() {
-		key := channelRunningCountPrefix + channelID
+		key := projectRunningCountPrefix + projectID
 		val, err := s.pubsub.rdb.Get(ctx, key).Int64()
 		if err != nil {
 			// Key may not exist; fall back to DB.
-			running, _ = s.repo.Tasks().CountRunningByChannel(ctx, channelID)
+			running, _ = s.repo.Tasks().CountRunningByProject(ctx, projectID)
 		} else {
 			running = val
 		}
 	} else {
-		running, err = s.repo.Tasks().CountRunningByChannel(ctx, channelID)
+		running, err = s.repo.Tasks().CountRunningByProject(ctx, projectID)
 		if err != nil {
 			return fmt.Errorf("count running: %w", err)
 		}
@@ -908,13 +943,13 @@ func (s *TaskService) DispatchPendingTasks(ctx context.Context, channelID string
 		return nil
 	}
 
-	pending, err := s.repo.Tasks().FindPendingByChannel(ctx, channelID, available)
+	pending, err := s.repo.Tasks().FindPendingByProject(ctx, projectID, available)
 	if err != nil {
 		return fmt.Errorf("find pending: %w", err)
 	}
 
 	for _, t := range pending {
-		if err := s.EnqueueExecution(ctx, t, channel); err != nil {
+		if err := s.EnqueueExecution(ctx, t, project); err != nil {
 			s.logger.Error().Err(err).Str("task_id", t.ID).Msg("failed to dispatch pending task")
 		}
 	}
@@ -975,12 +1010,12 @@ type TypeStatEntry struct {
 }
 
 // GetUsageStats returns aggregated token usage and cost stats for a user.
-func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to time.Time, channelID string) (*UsageStats, error) {
+func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to time.Time, projectID string) (*UsageStats, error) {
 	stats := &UsageStats{ByType: make(map[string]*TypeStatEntry)}
 
 	// SQL-level aggregation for totals.
 	totalTasks, totalInput, totalOutput, totalCacheRead, totalCacheCreation, totalCost, err :=
-		s.repo.Tasks().AggregateUsageByUser(ctx, userID, from, to, channelID)
+		s.repo.Tasks().AggregateUsageByUser(ctx, userID, from, to, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate usage: %w", err)
 	}
@@ -992,7 +1027,7 @@ func (s *TaskService) GetUsageStats(ctx context.Context, userID string, from, to
 	stats.TotalCostUSD = totalCost
 
 	// SQL GROUP BY for per-type breakdown.
-	typeRows, err := s.repo.Tasks().AggregateUsageByType(ctx, userID, from, to, channelID)
+	typeRows, err := s.repo.Tasks().AggregateUsageByType(ctx, userID, from, to, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate usage by type: %w", err)
 	}

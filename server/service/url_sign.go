@@ -73,7 +73,7 @@ func SignURL(ctx context.Context, store storage.Provider, log *zerolog.Logger, r
 // avatar) to directly-fetchable signed URLs in place. No-op when t is nil or no
 // store is wired. Centralising the field list keeps every response path that
 // returns a template consistent — the template handlers AND the
-// recommended-templates slice returned by channel create — so adding a new image
+// recommended-templates slice returned by project create — so adding a new image
 // field here updates all of them at once.
 func SignTemplateURLs(ctx context.Context, store storage.Provider, log *zerolog.Logger, t *model.Template) {
 	if t == nil {

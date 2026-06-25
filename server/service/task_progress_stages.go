@@ -24,7 +24,7 @@ var stagePercentByType = map[string]map[string]int{
 		"draft":        100,
 	},
 	model.ScopeSeednote: {
-		"channel":          5,
+		"project":          5,
 		"research":         15,
 		"viral_analysis":   30, // 改写分支：在 writing 之前
 		"writing":          40,

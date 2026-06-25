@@ -69,7 +69,7 @@ func (h *TaskHandler) SetRepository(repo repository.Repository) {
 // Request types.
 
 type createTaskRequest struct {
-	ChannelID          string `json:"channel_id"`
+	ProjectID          string `json:"project_id"`
 	Prompt             string `json:"prompt"`
 	Quantity           int    `json:"quantity"`
 	ImageRatio         string `json:"image_ratio"`
@@ -93,6 +93,17 @@ type createTaskRequest struct {
 	// tail off). Non-seednote task types ignore them.
 	HasContentImage *bool `json:"has_content_image,omitempty"`
 	HasTailImage    *bool `json:"has_tail_image,omitempty"`
+	// E-commerce package fields (project platform = "ecommerce"). SelectedModules
+	// maps a module key (main_images / detail_page / cover_banner / share_image /
+	// sku_images) to its quantity; the task cost = sum(unit price × quantity).
+	// ProductPhotos are server-owned URLs (from /files/upload) materialized into
+	// the agent workspace by the executor.
+	ProductPhotos            []string       `json:"product_photos,omitempty"`
+	SelectedModules          map[string]int `json:"selected_modules,omitempty"`
+	TargetPlatform           string         `json:"target_platform,omitempty"`
+	SellingPoints            string         `json:"selling_points,omitempty"`
+	Language                 string         `json:"language,omitempty"`
+	ProviderStrategyOverride string         `json:"provider_strategy_override,omitempty"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -106,8 +117,8 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
-	if req.ChannelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel_id is required")
+	if req.ProjectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
 
 	prompt := strings.TrimSpace(req.Prompt)
@@ -134,6 +145,11 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 
 	if !validReferenceImageURL(req.ReferenceImageURL) {
 		return Error(c, fiber.StatusBadRequest, "reference_image_url must be an internal file path or an http(s) URL")
+	}
+	for _, u := range req.ProductPhotos {
+		if !validReferenceImageURL(u) {
+			return Error(c, fiber.StatusBadRequest, "product_photos must be internal file paths or http(s) URLs")
+		}
 	}
 
 	// Validate image_model_key against the caller's tier.
@@ -163,9 +179,23 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		templateID = &trimmed
 	}
 
+	// Build the e-commerce package config when any e-commerce field is present.
+	// The service only consults it when the project platform is "ecommerce".
+	var ecommerceCfg *model.EcommerceConfig
+	if len(req.SelectedModules) > 0 || len(req.ProductPhotos) > 0 || req.TargetPlatform != "" || req.SellingPoints != "" {
+		ecommerceCfg = &model.EcommerceConfig{
+			ProductPhotos:            req.ProductPhotos,
+			SelectedModules:          req.SelectedModules,
+			TargetPlatform:           req.TargetPlatform,
+			SellingPoints:            req.SellingPoints,
+			Language:                 req.Language,
+			ProviderStrategyOverride: req.ProviderStrategyOverride,
+		}
+	}
+
 	tasks, err := h.service.CreateManual(c.Context(), service.CreateManualParams{
 		UserID:            userID,
-		ChannelID:         req.ChannelID,
+		ProjectID:         req.ProjectID,
 		Prompt:            prompt,
 		Quantity:          quantity,
 		ImageRatio:        req.ImageRatio,
@@ -184,6 +214,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		TemplateID:        templateID,
 		HasContentImage:   req.HasContentImage,
 		HasTailImage:      req.HasTailImage,
+		Ecommerce:         ecommerceCfg,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
@@ -213,13 +244,13 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	offset, _ := strconv.Atoi(c.Query("offset", "0"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
 	status := c.Query("status", "")
-	channelID := c.Query("channel_id", "")
+	projectID := c.Query("project_id", "")
 
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 
-	tasks, total, err := h.service.List(c.Context(), userID, offset, limit, status, channelID)
+	tasks, total, err := h.service.List(c.Context(), userID, offset, limit, status, projectID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("list tasks failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to list tasks")
@@ -796,8 +827,9 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid file path")
 	}
 
-	// Verify ownership: key format is {userID}/{taskID}/... or uploads/{channels|references}/{userID}/...
-	if !strings.HasPrefix(cleanKey, userID+"/") && !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") && !strings.HasPrefix(cleanKey, "uploads/references/"+userID+"/") {
+	// Verify ownership: key format is {userID}/{taskID}/... or uploads/{projects|references}/{userID}/...
+	// "uploads/channels/" is the legacy prefix from before the channel→project rename.
+	if !strings.HasPrefix(cleanKey, userID+"/") && !strings.HasPrefix(cleanKey, "uploads/projects/"+userID+"/") && !strings.HasPrefix(cleanKey, "uploads/references/"+userID+"/") && !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") {
 		return Forbidden(c, "you do not have access to this file")
 	}
 
@@ -905,9 +937,9 @@ func (h *TaskHandler) UsageStats(c fiber.Ctx) error {
 		to = parsed.AddDate(0, 0, 1)
 	}
 
-	channelID := c.Query("channel_id")
+	projectID := c.Query("project_id")
 
-	stats, err := h.service.GetUsageStats(c.Context(), userID, from, to, channelID)
+	stats, err := h.service.GetUsageStats(c.Context(), userID, from, to, projectID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("get usage stats failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to get usage stats")

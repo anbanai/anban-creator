@@ -42,6 +42,9 @@ export interface AdminGrantRequest {
 export interface CreditPricing {
   task_costs: Record<string, number>
   model_costs: Record<string, Record<string, number>>
+  // E-commerce module unit prices (key → credits per unit). A task's package
+  // cost = Σ(price × quantity) over selected_modules. Absent on older servers.
+  ecommerce_module_prices?: Record<string, number>
   income: {
     daily_sign_in: number
     register_bonus: number

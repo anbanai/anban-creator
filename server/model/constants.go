@@ -41,8 +41,9 @@ const (
 
 // Config scope constants.
 const (
-	ScopeArticle  = "article"
-	ScopeSeednote = "seednote"
+	ScopeArticle   = "article"
+	ScopeSeednote  = "seednote"
+	ScopeEcommerce = "ecommerce"
 )
 
 // File role constants.
@@ -61,16 +62,17 @@ const (
 	FileRoleReview        = "review"
 )
 
-// Channel status constants.
+// Project status constants.
 const (
-	ChannelStatusActive   = "active"
-	ChannelStatusArchived = "archived"
+	ProjectStatusActive   = "active"
+	ProjectStatusArchived = "archived"
 )
 
 // Platform constants.
 const (
-	PlatformArticle  = "article"
-	PlatformSeednote = "seednote"
+	PlatformArticle   = "article"
+	PlatformSeednote  = "seednote"
+	PlatformEcommerce = "ecommerce"
 )
 
 // ValidImageRatios is the set of allowed image aspect ratios.

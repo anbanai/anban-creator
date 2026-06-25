@@ -7,7 +7,7 @@ export const tasksApi = {
     return Array.isArray(result) ? result[0] : result
   },
 
-  list: (params?: { offset?: number; limit?: number; status?: string; channel_id?: string }) =>
+  list: (params?: { offset?: number; limit?: number; status?: string; project_id?: string }) =>
     unwrap<PaginatedResponse<Task>>(http.get('/tasks', { params })),
 
   get: (id: string) =>

@@ -123,7 +123,7 @@ func (e *DockerExecutor) CleanupOrphanedContainers() {
 // Execute runs the standalone abwriter-agent in Docker and returns its final JSON result.
 func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	// Claude Code agent model comes only from config.yaml.
-	model := e.defaultModel
+	agentModel := e.defaultModel
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = DefaultMaxTurns(opts.Task.Type, e.maxTurnsOverrides)
@@ -140,11 +140,11 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if opts.LogWriter != nil {
-		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Prompt, model, maxTurns)
+		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Prompt, agentModel, maxTurns)
 	}
 
-	if opts.Channel != nil {
-		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
+	if opts.Project != nil {
+		cfg, err := BuildAppConfig(opts.Project, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -160,15 +160,24 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
 		// Download effective reference image.
-		// Task-level image takes priority over channel brand image.
+		// Task-level image takes priority over project brand image.
 		if opts.Task.ReferenceImageURL != "" {
 			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download task reference image")
 			}
-		} else if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Channel.ReferenceImageURL); err != nil {
+		} else if opts.Project.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Project.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to download reference image")
 			}
+		}
+	}
+
+	// E-commerce: materialize the task's product photos into the workspace so the
+	// agent can reference local paths (analyze_image / generate_image ref).
+	if opts.Task.Type == model.PlatformEcommerce {
+		photos := opts.Task.Ecommerce.Data().ProductPhotos
+		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, photos); n == 0 && len(photos) > 0 {
+			e.logger.Warn().Str("task_id", opts.Task.ID).Msg("failed to download any product photos, continuing without them")
 		}
 	}
 
@@ -180,8 +189,8 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		Str("task_id", opts.Task.ID).
 		Str("key_prefix", truncateKey(apiKey)).
 		Str("server_url", e.serverURL).
-		Str("model", model).
-		Bool("model_from_config", model != "").
+		Str("model", agentModel).
+		Bool("model_from_config", agentModel != "").
 		Msg("Docker executor: starting agent execution")
 
 	var cmd []string
@@ -191,7 +200,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	} else {
 		workDirInContainer = "/workspace"
 	}
-	cmd = e.buildAgentCommand(opts, model, maxTurns, workDirInContainer, apiKey)
+	cmd = e.buildAgentCommand(opts, agentModel, maxTurns, workDirInContainer, apiKey)
 	env := e.buildAgentEnv(opts)
 
 	var execRes execResult
@@ -215,7 +224,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if execRes.err != nil {
-		result.Model = model
+		result.Model = agentModel
 		if result.Error == "" {
 			result.Error = execRes.err.Error()
 		}
@@ -232,7 +241,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	// (uploadMissingTaskFiles, CountMeaningfulFiles, cleanup) need the
 	// host filesystem path.
 	result.WorkDir = workDir
-	result.Model = model
+	result.Model = agentModel
 
 	if opts.LogWriter != nil {
 		opts.LogWriter.WriteResult(result.Success, result.DurationMs, result.NumTurns, result.TotalCostUSD, result.TokenUsage)
@@ -300,8 +309,8 @@ func (e *DockerExecutor) buildAgentEnv(opts *ExecutionOptions) []string {
 	for k, v := range e.claudeEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
-	if opts.Channel != nil {
-		env = append(env, fmt.Sprintf("ANBANWRITER_DEFAULT_CHANNEL=%s", opts.Channel.ID))
+	if opts.Project != nil {
+		env = append(env, fmt.Sprintf("ANBANWRITER_DEFAULT_PROJECT=%s", opts.Project.ID))
 	}
 	env = append(env, fmt.Sprintf("ANBANWRITER_API_URL=%s", e.serverURL))
 	return env

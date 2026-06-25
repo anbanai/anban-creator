@@ -23,7 +23,7 @@ export const designerApi = {
       http.post('/designer/upload-reference-from-url', { url }),
     ),
 
-  getHistory: (params: { channel_id?: string; page?: number; page_size?: number } = {}) =>
+  getHistory: (params: { project_id?: string; page?: number; page_size?: number } = {}) =>
     unwrap<HistoryResponse>(http.get('/designer/history', { params })),
 
   getGeneration: (id: string) =>

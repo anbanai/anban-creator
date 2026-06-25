@@ -18,7 +18,7 @@ import (
 
 // HandleExecution is called by the async worker to execute a task.
 // It calls the agent executor and updates status in the DB.
-func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, channel *model.Channel) error {
+func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, project *model.Project) error {
 	taskID := task.ID
 	userID := task.UserID
 
@@ -77,41 +77,41 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	// Note: status was already set to "running" and started_at set by
 	// HandleExecutionFromPayload via atomic CAS.
 
-	// Load channel if not provided.
-	if channel == nil {
-		if task.ChannelID == "" {
-			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "task has no channel_id")
+	// Load project if not provided.
+	if project == nil {
+		if task.ProjectID == "" {
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "task has no project_id")
 			if s.pubsub != nil {
-				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+				s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 			}
-			return fmt.Errorf("task has no channel_id, cannot execute")
+			return fmt.Errorf("task has no project_id, cannot execute")
 		}
-		ch, err := s.repo.Channels().FindByID(ctx, task.ChannelID)
+		ch, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
 		if err != nil {
 			s.logger.Error().Err(err).
 				Str("task_id", taskID).
-				Str("channel_id", task.ChannelID).
-				Msg("failed to load channel for task")
-			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to load channel")
-			if task.ChannelID != "" && s.pubsub != nil {
-				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+				Str("project_id", task.ProjectID).
+				Msg("failed to load project for task")
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to load project")
+			if task.ProjectID != "" && s.pubsub != nil {
+				s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 			}
-			return fmt.Errorf("load channel: %w", err)
+			return fmt.Errorf("load project: %w", err)
 		}
 		if ch.UserID != userID {
-			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "channel not owned by user")
-			if task.ChannelID != "" && s.pubsub != nil {
-				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "project not owned by user")
+			if task.ProjectID != "" && s.pubsub != nil {
+				s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 			}
-			return fmt.Errorf("channel not owned by user")
+			return fmt.Errorf("project not owned by user")
 		}
-		channel = ch
+		project = ch
 	}
 
 	// Execute via agent.
 	opts := &agent.ExecutionOptions{
 		Task:      task,
-		Channel:   channel,
+		Project:   project,
 		LogWriter: taskLogWriter,
 		OnProgress: func(id string, message string) {
 			if err := s.AppendProgressLog(ctx, id, message); err != nil {
@@ -174,12 +174,12 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			} else {
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to reload task for refund")
 			}
-			if task.ChannelID != "" && s.pubsub != nil {
-				s.pubsub.ReleaseSlot(persistCtx, task.ChannelID)
+			if task.ProjectID != "" && s.pubsub != nil {
+				s.pubsub.ReleaseSlot(persistCtx, task.ProjectID)
 			}
-			if task.ChannelID != "" {
-				if derr := s.DispatchPendingTasks(persistCtx, task.ChannelID); derr != nil {
-					s.logger.Warn().Err(derr).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after cancellation")
+			if task.ProjectID != "" {
+				if derr := s.DispatchPendingTasks(persistCtx, task.ProjectID); derr != nil {
+					s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after cancellation")
 				}
 			}
 		}
@@ -296,10 +296,10 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 			Msg("workspace contains output files")
 	}
 
-	// Auto-publish if channel has publishing enabled (non-blocking).
+	// Auto-publish if project has publishing enabled (non-blocking).
 	// Extract article data BEFORE launching goroutine to avoid race with
 	// workspace cleanup defer.
-	if s.publishingSvc != nil && channel != nil && channel.GetEnablePublishing() {
+	if s.publishingSvc != nil && project != nil && project.GetEnablePublishing() {
 		published := wasPublishedByAgent(result.LogText)
 		var articles []DraftArticleInput
 		if !published && task.Type == model.ScopeArticle && result.WorkDir != "" {
@@ -312,11 +312,11 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 		if published || len(articles) > 0 {
 			publishCtx, publishCancel := context.WithTimeout(context.Background(), 60*time.Second)
 			taskCopy := *task
-			channelCopy := *channel
+			projectCopy := *project
 			logTextCopy := result.LogText
 			go func() {
 				defer publishCancel()
-				s.autoPublishWithData(publishCtx, &taskCopy, &channelCopy, articles, logTextCopy)
+				s.autoPublishWithData(publishCtx, &taskCopy, &projectCopy, articles, logTextCopy)
 			}()
 		}
 	}
@@ -333,16 +333,16 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, cha
 	}
 
 	// Release concurrency slot.
-	if task.ChannelID != "" {
+	if task.ProjectID != "" {
 		if s.pubsub != nil {
-			s.pubsub.ReleaseSlot(persistCtx, task.ChannelID)
+			s.pubsub.ReleaseSlot(persistCtx, task.ProjectID)
 		}
 	}
 
-	// Dispatch pending tasks for the same channel now that a slot opened.
-	if task.ChannelID != "" {
-		if err := s.DispatchPendingTasks(persistCtx, task.ChannelID); err != nil {
-			s.logger.Warn().Err(err).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after completion")
+	// Dispatch pending tasks for the same project now that a slot opened.
+	if task.ProjectID != "" {
+		if err := s.DispatchPendingTasks(persistCtx, task.ProjectID); err != nil {
+			s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after completion")
 		}
 	}
 
@@ -365,8 +365,8 @@ func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, us
 	if !swapped {
 		s.logger.Warn().Str("task_id", taskID).Str("status", task.Status).Msg("task not in pending state, skipping")
 		// Slot was reserved in EnqueueExecution but task won't run — release it.
-		if s.pubsub != nil && task.ChannelID != "" {
-			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		if s.pubsub != nil && task.ProjectID != "" {
+			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 		}
 		return nil
 	}
@@ -463,16 +463,16 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			}
 
 			// Release concurrency slot.
-			if task.ChannelID != "" && s.pubsub != nil {
-				s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+			if task.ProjectID != "" && s.pubsub != nil {
+				s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 			}
 
 			s.refundTaskByMode(ctx, task, "rate_limit_exhausted")
 
-			// A slot opened on this channel — dispatch pending tasks.
-			if task.ChannelID != "" {
-				if derr := s.DispatchPendingTasks(ctx, task.ChannelID); derr != nil {
-					s.logger.Warn().Err(derr).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after failure")
+			// A slot opened on this project — dispatch pending tasks.
+			if task.ProjectID != "" {
+				if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
+					s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
 				}
 			}
 
@@ -497,8 +497,8 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 		// Set status to pending first, then enqueue. If enqueue fails,
 		// the task stays pending and will be picked up by the plan checker.
 		// Release the concurrency slot since the task is no longer running.
-		if task.ChannelID != "" && s.pubsub != nil {
-			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		if task.ProjectID != "" && s.pubsub != nil {
+			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 		}
 		if err := s.repo.Tasks().IncrementRetryAndSetPending(ctx, taskID, "rate_limit_retry_count"); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task rate limit retry count")
@@ -534,13 +534,13 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 		if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
 		}
-		if task.ChannelID != "" && s.pubsub != nil {
-			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		if task.ProjectID != "" && s.pubsub != nil {
+			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 		}
 		s.refundTaskByMode(ctx, task, "auth_error")
-		if task.ChannelID != "" {
-			if derr := s.DispatchPendingTasks(ctx, task.ChannelID); derr != nil {
-				s.logger.Warn().Err(derr).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after failure")
+		if task.ProjectID != "" {
+			if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
+				s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
 			}
 		}
 		return execErr
@@ -563,17 +563,17 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 		}
 
 		// Release concurrency slot.
-		if task.ChannelID != "" && s.pubsub != nil {
-			s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+		if task.ProjectID != "" && s.pubsub != nil {
+			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 		}
 
 		// Refund credits for failed task (skipped for goal-mode tasks).
 		s.refundTaskByMode(ctx, task, "execution_failed")
 
-		// A slot opened on this channel — dispatch pending tasks.
-		if task.ChannelID != "" {
-			if derr := s.DispatchPendingTasks(ctx, task.ChannelID); derr != nil {
-				s.logger.Warn().Err(derr).Str("channel_id", task.ChannelID).Msg("failed to dispatch pending tasks after failure")
+		// A slot opened on this project — dispatch pending tasks.
+		if task.ProjectID != "" {
+			if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
+				s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
 			}
 		}
 
@@ -598,8 +598,8 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 	// Set status to pending first, then enqueue. If enqueue fails,
 	// the task stays pending and will be picked up by the plan checker.
 	// Release the concurrency slot since the task is no longer running.
-	if task.ChannelID != "" && s.pubsub != nil {
-		s.pubsub.ReleaseSlot(ctx, task.ChannelID)
+	if task.ProjectID != "" && s.pubsub != nil {
+		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 	}
 	if err := s.repo.Tasks().IncrementRetryAndSetPending(ctx, taskID, "retry_count"); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task retry count")
@@ -662,7 +662,7 @@ func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
 
 // autoPublishWithData publishes pre-extracted article data, avoiding filesystem
 // access that could race with workspace cleanup.
-func (s *TaskService) autoPublishWithData(ctx context.Context, task *model.Task, channel *model.Channel, articles []DraftArticleInput, logText string) {
+func (s *TaskService) autoPublishWithData(ctx context.Context, task *model.Task, project *model.Project, articles []DraftArticleInput, logText string) {
 	taskID := task.ID
 
 	if wasPublishedByAgent(logText) {
@@ -674,7 +674,7 @@ func (s *TaskService) autoPublishWithData(ctx context.Context, task *model.Task,
 	}
 
 	s.logger.Info().Str("task_id", taskID).Msg("auto-publishing with pre-extracted articles")
-	result, err := s.publishingSvc.PublishDraft(ctx, task.UserID, channel.ID, articles)
+	result, err := s.publishingSvc.PublishDraft(ctx, task.UserID, project.ID, articles)
 	if err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("auto-publish article draft failed")
 		return

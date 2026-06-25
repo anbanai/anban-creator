@@ -1,20 +1,20 @@
 // Auth
 export type { User, AuthResponse, ApiResponse } from './auth'
 
-// Channel
+// Project
 export type {
-  ChannelPlatform,
-  ChannelStatus,
-  ChannelConfig,
-  Channel,
-  ChannelStats,
-  ChannelDetail,
-  CreateChannelRequest,
-  CreateChannelResponse,
+  ProjectPlatform,
+  ProjectStatus,
+  ProjectConfig,
+  Project,
+  ProjectStats,
+  ProjectDetail,
+  CreateProjectRequest,
+  CreateProjectResponse,
   PlatformFieldConfig,
   PlatformConfig,
   PlatformProfile,
-} from './channel'
+} from './project'
 
 // Plan
 export type {

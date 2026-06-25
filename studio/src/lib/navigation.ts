@@ -24,7 +24,7 @@ export interface NavItem {
 
 export const workflowItems: NavItem[] = [
   { to: '/', label: '仪表盘', icon: LayoutDashboard, end: true },
-  { to: '/channels', label: '账号', icon: Rss },
+  { to: '/projects', label: '项目', icon: Rss },
 
   { to: '/designer', label: '设计师', icon: Palette },
   { to: '/templates', label: '模板库', icon: LayoutGrid },

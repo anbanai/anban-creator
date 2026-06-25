@@ -11,7 +11,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/repository"
 )
 
-func setupTestChannelService(t *testing.T) (*ChannelService, repository.Repository) {
+func setupTestProjectService(t *testing.T) (*ProjectService, repository.Repository) {
 	t.Helper()
 	db := setupTestDB(t)
 	t.Cleanup(func() {
@@ -22,16 +22,16 @@ func setupTestChannelService(t *testing.T) (*ChannelService, repository.Reposito
 	})
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
-	return NewChannelService(repo, &logger), repo
+	return NewProjectService(repo, &logger), repo
 }
 
-func TestChannelServiceDefaultsArticleStyle(t *testing.T) {
+func TestProjectServiceDefaultsArticleStyle(t *testing.T) {
 	for _, platform := range []string{model.PlatformArticle} {
 		t.Run(platform, func(t *testing.T) {
-			svc, _ := setupTestChannelService(t)
-			ch, err := svc.Create(context.Background(), "user-1", &model.Channel{
+			svc, _ := setupTestProjectService(t)
+			ch, err := svc.Create(context.Background(), "user-1", &model.Project{
 				Platform: platform,
-				Name:     "Default Style Channel",
+				Name:     "Default Style Project",
 			})
 			if err != nil {
 				t.Fatalf("Create: %v", err)
@@ -49,11 +49,11 @@ func TestChannelServiceDefaultsArticleStyle(t *testing.T) {
 	}
 }
 
-func TestChannelServiceDoesNotDefaultSeednoteStyle(t *testing.T) {
-	svc, _ := setupTestChannelService(t)
-	ch, err := svc.Create(context.Background(), "user-1", &model.Channel{
+func TestProjectServiceDoesNotDefaultSeednoteStyle(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	ch, err := svc.Create(context.Background(), "user-1", &model.Project{
 		Platform: model.PlatformSeednote,
-		Name:     "Seednote Channel",
+		Name:     "Seednote Project",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -63,19 +63,19 @@ func TestChannelServiceDoesNotDefaultSeednoteStyle(t *testing.T) {
 	}
 }
 
-func TestChannelServiceUpdateDefaultsArticleStyle(t *testing.T) {
-	svc, _ := setupTestChannelService(t)
-	created, err := svc.Create(context.Background(), "user-1", &model.Channel{
+func TestProjectServiceUpdateDefaultsArticleStyle(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	created, err := svc.Create(context.Background(), "user-1", &model.Project{
 		Platform: model.PlatformArticle,
-		Name:     "Article Channel",
+		Name:     "Article Project",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Channel{
+	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
 		Platform: model.PlatformArticle,
-		Name:     "Article Channel",
+		Name:     "Article Project",
 		Style:    "",
 	})
 	if err != nil {
@@ -91,20 +91,20 @@ func TestChannelServiceUpdateDefaultsArticleStyle(t *testing.T) {
 	}
 }
 
-func TestChannelServiceUpdatePreservesExistingArticleStyleWhenStyleOmitted(t *testing.T) {
-	svc, _ := setupTestChannelService(t)
-	created, err := svc.Create(context.Background(), "user-1", &model.Channel{
+func TestProjectServiceUpdatePreservesExistingArticleStyleWhenStyleOmitted(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	created, err := svc.Create(context.Background(), "user-1", &model.Project{
 		Platform: model.PlatformArticle,
-		Name:     "Article Channel",
+		Name:     "Article Project",
 		Style:    "casual-science",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Channel{
+	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
 		Platform: model.PlatformArticle,
-		Name:     "Renamed Article Channel",
+		Name:     "Renamed Article Project",
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)

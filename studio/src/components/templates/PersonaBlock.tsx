@@ -12,17 +12,17 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/Select'
-import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
+import { ReferenceImageUpload } from '@/components/projects/ReferenceImageUpload'
 import { SignedImage } from '@/components/ui/SignedImage'
 import type { ResourceEntry } from '@/types/resource'
 
-// PersonaBlock — 公众号「写作风格」统一区块，被模板编辑器、公众号频道编辑器、
+// PersonaBlock — 公众号「写作风格」统一区块，被模板编辑器、公众号项目编辑器、
 // 任务/计划编辑器（只读）共用，保证几处 UI 完全一致。把「名称（署名）」+「写作风格」+「头像」聚合在一起，
 // 并提供「从写作风格库导入」一键填充（选中写作风格 → 名字取中文名、简介取其描述）。
 //
-// 名称即署名：保存后落到 author_name/author（频道为 author），经 get_channel_profile
+// 名称即署名：保存后落到 author_name/author（项目为 author），经 get_project_profile
 // 作为发布作者名下发；写作风格落到 author_style_intro（template_writing_style）。
-// readOnly=true 时渲染为只读摘要（频道绑定模板、任务/计划选了模板时，写作风格随模板同步展示）。
+// readOnly=true 时渲染为只读摘要（项目绑定模板、任务/计划选了模板时，写作风格随模板同步展示）。
 interface PersonaBlockProps {
   authorName: string
   onAuthorName: (v: string) => void
@@ -55,7 +55,7 @@ export function PersonaBlock({
   const writerLabel = (w: ResourceEntry) =>
     w.category_cn ? `${w.name}（${w.category_cn}）` : w.name
 
-  // 只读摘要：频道绑定模板、任务/计划选了模板时，写作风格随模板同步展示。
+  // 只读摘要：项目绑定模板、任务/计划选了模板时，写作风格随模板同步展示。
   if (readOnly) {
     const hasAny = authorName || authorStyleIntro || authorAvatarUrl
     if (!hasAny) {

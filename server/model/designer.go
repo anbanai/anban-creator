@@ -12,7 +12,7 @@ const (
 type ImageGeneration struct {
 	ID                string                  `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID            string                  `gorm:"type:char(36);index;not null" json:"user_id"`
-	ChannelID         string                  `gorm:"type:char(36);index;not null" json:"channel_id"`
+	ProjectID         string                  `gorm:"type:char(36);index;not null" json:"project_id"`
 	Prompt            string                  `gorm:"type:text;not null" json:"prompt"`
 	RevisedPrompt     string                  `gorm:"type:text" json:"revised_prompt,omitempty"`
 	Provider          string                  `gorm:"type:varchar(32);not null" json:"provider"`

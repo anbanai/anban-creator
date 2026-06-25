@@ -49,7 +49,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.User{},
-		&model.LoginSession{}, &model.TaskFile{}, &model.Channel{},
+		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
@@ -72,37 +72,37 @@ func setupTestPlanService(t *testing.T) (*PlanService, repository.Repository) {
 	return svc, repo
 }
 
-// createTestChannel creates a test channel for the given user and returns its ID.
-func createTestChannel(t *testing.T, repo repository.Repository, userID, platform string) string {
+// createTestProject creates a test project for the given user and returns its ID.
+func createTestProject(t *testing.T, repo repository.Repository, userID, platform string) string {
 	t.Helper()
-	ch := &model.Channel{
+	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
 		Platform: platform,
-		Name:     "Test Channel " + platform,
-		Status:   model.ChannelStatusActive,
+		Name:     "Test Project " + platform,
+		Status:   model.ProjectStatusActive,
 	}
-	if err := repo.Channels().Create(context.Background(), ch); err != nil {
-		t.Fatalf("create test channel: %v", err)
+	if err := repo.Projects().Create(context.Background(), ch); err != nil {
+		t.Fatalf("create test project: %v", err)
 	}
 	return ch.ID
 }
 
-func createTestWechatChannel(t *testing.T, repo repository.Repository, userID string) string {
+func createTestWechatProject(t *testing.T, repo repository.Repository, userID string) string {
 	t.Helper()
-	ch := &model.Channel{
+	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
 		Platform: model.PlatformArticle,
-		Name:     "Test WeChat Channel",
-		Status:   model.ChannelStatusActive,
-		Config: model.ChannelConfig{
+		Name:     "Test WeChat Project",
+		Status:   model.ProjectStatusActive,
+		Config: model.ProjectConfig{
 			WechatAppID:  "app-id",
 			WechatSecret: "secret",
 		},
 	}
-	if err := repo.Channels().Create(context.Background(), ch); err != nil {
-		t.Fatalf("create test wechat channel: %v", err)
+	if err := repo.Projects().Create(context.Background(), ch); err != nil {
+		t.Fatalf("create test wechat project: %v", err)
 	}
 	return ch.ID
 }
@@ -111,53 +111,53 @@ func TestPlanService_Create(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	// Create test channels for the user.
-	chID1 := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	chID2 := createTestChannel(t, repo, "user-1", model.PlatformArticle)
+	// Create test projects for the user.
+	chID1 := createTestProject(t, repo, "user-1", model.PlatformSeednote)
+	chID2 := createTestProject(t, repo, "user-1", model.PlatformArticle)
 
 	tests := []struct {
 		name      string
-		channelID string
+		projectID string
 		cronExpr  string
 		wantErr   bool
 		errSubstr string
 	}{
 		{
 			name:      "valid plan",
-			channelID: chID1,
+			projectID: chID1,
 			cronExpr:  "0 9 * * 1-5",
 			wantErr:   false,
 		},
 		{
 			name:      "every minute",
-			channelID: chID2,
+			projectID: chID2,
 			cronExpr:  "* * * * *",
 			wantErr:   false,
 		},
 		{
-			name:      "empty channel_id",
-			channelID: "",
+			name:      "empty project_id",
+			projectID: "",
 			cronExpr:  "0 9 * * *",
 			wantErr:   true,
-			errSubstr: "channel_id is required",
+			errSubstr: "project_id is required",
 		},
 		{
 			name:      "empty cron",
-			channelID: chID1,
+			projectID: chID1,
 			cronExpr:  "",
 			wantErr:   true,
 			errSubstr: "cron_expr is required",
 		},
 		{
 			name:      "invalid cron",
-			channelID: chID1,
+			projectID: chID1,
 			cronExpr:  "invalid cron",
 			wantErr:   true,
 			errSubstr: "invalid cron expression",
 		},
 		{
 			name:      "invalid cron fields",
-			channelID: chID1,
+			projectID: chID1,
 			cronExpr:  "60 25 * * *",
 			wantErr:   true,
 			errSubstr: "invalid cron expression",
@@ -168,7 +168,7 @@ func TestPlanService_Create(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			plan, err := svc.Create(ctx, CreatePlanParams{
 				UserID:    "user-1",
-				ChannelID: tt.channelID,
+				ProjectID: tt.projectID,
 				CronExpr:  tt.cronExpr,
 				Prompt:    "topic hint",
 			})
@@ -196,8 +196,8 @@ func TestPlanService_Create(t *testing.T) {
 			if plan.CronExpr != tt.cronExpr {
 				t.Errorf("expected cron_expr %q, got %q", tt.cronExpr, plan.CronExpr)
 			}
-			if plan.ChannelID != tt.channelID {
-				t.Errorf("expected channel_id %q, got %q", tt.channelID, plan.ChannelID)
+			if plan.ProjectID != tt.projectID {
+				t.Errorf("expected project_id %q, got %q", tt.projectID, plan.ProjectID)
 			}
 		})
 	}
@@ -206,14 +206,14 @@ func TestPlanService_Create(t *testing.T) {
 func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
-	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 
 	skipRef := true
 	plan, err := svc.Create(ctx, CreatePlanParams{
-		UserID:            "user-1",
-		ChannelID:         chID,
-		CronExpr:          "0 9 * * *",
-		Prompt:            "topic hint",
+		UserID:             "user-1",
+		ProjectID:          chID,
+		CronExpr:           "0 9 * * *",
+		Prompt:             "topic hint",
 		SkipReferenceImage: &skipRef,
 	})
 	if err != nil {
@@ -228,11 +228,11 @@ func TestPlanService_GetByID(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	// Create a test channel and plan.
-	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	// Create a test project and plan.
+	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	created, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    "user-1",
-		ChannelID: chID,
+		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
 		Prompt:    "hint",
 	})
@@ -260,16 +260,16 @@ func TestPlanService_List(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	// Create a test channel for the user.
-	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
-	// Create a different channel for user-2.
-	chID2 := createTestChannel(t, repo, "user-2", model.PlatformArticle)
+	// Create a test project for the user.
+	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
+	// Create a different project for user-2.
+	chID2 := createTestProject(t, repo, "user-2", model.PlatformArticle)
 
 	// Create multiple plans for user-1.
 	for i := 0; i < 5; i++ {
 		_, err := svc.Create(ctx, CreatePlanParams{
 			UserID:    "user-1",
-			ChannelID: chID,
+			ProjectID: chID,
 			CronExpr:  "0 9 * * *",
 			Prompt:    "hint",
 		})
@@ -281,7 +281,7 @@ func TestPlanService_List(t *testing.T) {
 	// Create plans for another user.
 	_, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    "user-2",
-		ChannelID: chID2,
+		ProjectID: chID2,
 		CronExpr:  "0 10 * * *",
 		Prompt:    "hint",
 	})
@@ -324,10 +324,10 @@ func TestPlanService_Update(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	created, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    "user-1",
-		ChannelID: chID,
+		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
 		Prompt:    "old hint",
 	})
@@ -382,10 +382,10 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	created, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    "user-1",
-		ChannelID: chID,
+		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
 		Prompt:    "old hint",
 	})
@@ -398,8 +398,8 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 
 	skipRef := true
 	updated, err := svc.Update(ctx, UpdatePlanParams{
-		ID:                  created.ID,
-		Prompt:              "new hint",
+		ID:                 created.ID,
+		Prompt:             "new hint",
 		SkipReferenceImage: &skipRef,
 	})
 	if err != nil {
@@ -422,8 +422,8 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 
 	skipRef = false
 	updated, err = svc.Update(ctx, UpdatePlanParams{
-		ID:                  created.ID,
-		Prompt:              "final hint",
+		ID:                 created.ID,
+		Prompt:             "final hint",
 		SkipReferenceImage: &skipRef,
 	})
 	if err != nil {
@@ -438,13 +438,13 @@ func TestPlanService_Update_Style(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 
 	// Create with an initial style.
 	initialStyle := "暖色"
 	created, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    "user-1",
-		ChannelID: chID,
+		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
 		Prompt:    "hint",
 		Style:     initialStyle,
@@ -501,11 +501,11 @@ func TestPlanService_Update_ReferenceImageURL(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	initialRef := "https://example.com/ref.png"
 	created, err := svc.Create(ctx, CreatePlanParams{
 		UserID:            "user-1",
-		ChannelID:         chID,
+		ProjectID:         chID,
 		CronExpr:          "0 9 * * *",
 		Prompt:            "hint",
 		ReferenceImageURL: initialRef,
@@ -563,10 +563,10 @@ func TestPlanService_Pause_Resume(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	created, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    "user-1",
-		ChannelID: chID,
+		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
 		Prompt:    "hint",
 	})
@@ -611,10 +611,10 @@ func TestPlanService_Delete(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
-	chID := createTestChannel(t, repo, "user-1", model.PlatformSeednote)
+	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	created, err := svc.Create(ctx, CreatePlanParams{
 		UserID:    "user-1",
-		ChannelID: chID,
+		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
 		Prompt:    "hint",
 	})
@@ -638,10 +638,10 @@ func TestPlanService_Delete(t *testing.T) {
 func TestPublishingService_ListDrafts_DegradesWechat48001(t *testing.T) {
 	_, repo := setupTestPlanService(t)
 	ctx := context.Background()
-	chID := createTestWechatChannel(t, repo, "user-1")
+	chID := createTestWechatProject(t, repo, "user-1")
 	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
 	svc := NewPublishingService(repo, &logger)
-	svc.createDraftServiceFn = func(*model.Channel) (draftClient, error) {
+	svc.createDraftServiceFn = func(*model.Project) (draftClient, error) {
 		return &stubDraftClient{
 			listDraftsErr: &wechat.WechatAPIError{ErrCode: 48001, UserMsg: "API 功能未授权"},
 		}, nil
@@ -662,10 +662,10 @@ func TestPublishingService_ListDrafts_DegradesWechat48001(t *testing.T) {
 func TestPublishingService_ListPublished_DegradesWrappedWechat48001(t *testing.T) {
 	_, repo := setupTestPlanService(t)
 	ctx := context.Background()
-	chID := createTestWechatChannel(t, repo, "user-1")
+	chID := createTestWechatProject(t, repo, "user-1")
 	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
 	svc := NewPublishingService(repo, &logger)
-	svc.createDraftServiceFn = func(*model.Channel) (draftClient, error) {
+	svc.createDraftServiceFn = func(*model.Project) (draftClient, error) {
 		return &stubDraftClient{
 			listPublishedErr: fmt.Errorf("list published: %w", &wechat.WechatAPIError{ErrCode: 48001, UserMsg: "API 功能未授权"}),
 		}, nil
@@ -686,10 +686,10 @@ func TestPublishingService_ListPublished_DegradesWrappedWechat48001(t *testing.T
 func TestPublishingService_ListDrafts_ReturnsNon48001Error(t *testing.T) {
 	_, repo := setupTestPlanService(t)
 	ctx := context.Background()
-	chID := createTestWechatChannel(t, repo, "user-1")
+	chID := createTestWechatProject(t, repo, "user-1")
 	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
 	svc := NewPublishingService(repo, &logger)
-	svc.createDraftServiceFn = func(*model.Channel) (draftClient, error) {
+	svc.createDraftServiceFn = func(*model.Project) (draftClient, error) {
 		return &stubDraftClient{
 			listDraftsErr: &wechat.WechatAPIError{ErrCode: 40164, UserMsg: "IP 不在白名单"},
 		}, nil

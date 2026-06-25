@@ -46,7 +46,7 @@ type Services struct {
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	AgentHandler             *handler.AgentHandler
 	CreditHandler            *handler.CreditHandler
-	ChannelHandler           *handler.ChannelHandler
+	ProjectHandler           *handler.ProjectHandler
 	TimelineHandler          *handler.TimelineHandler
 	APIKeyHandler            *handler.APIKeyHandler
 	FileHandler              *handler.FileHandler
@@ -189,11 +189,11 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	// ---------------------------------------------------------------------------
-	// Public channel config endpoint (no auth required — returns static data).
+	// Public project config endpoint (no auth required — returns static data).
 	// ---------------------------------------------------------------------------
 
-	if svc.ChannelHandler != nil {
-		app.Get("/api/v1/channels/platform-configs", svc.ChannelHandler.GetPlatformConfigs)
+	if svc.ProjectHandler != nil {
+		app.Get("/api/v1/projects/platform-configs", svc.ProjectHandler.GetPlatformConfigs)
 	}
 
 	// Public resource catalog endpoint (no auth required).
@@ -224,36 +224,36 @@ func NewRouter(svc *Services) *fiber.App {
 	// Seednote login status
 	// ---------------------------------------------------------------------------
 
-	if svc.ChannelHandler != nil {
-		apiV1.Get("/seednote/login-status", svc.ChannelHandler.SeednoteLoginStatus)
+	if svc.ProjectHandler != nil {
+		apiV1.Get("/seednote/login-status", svc.ProjectHandler.SeednoteLoginStatus)
 	}
 
 	// ---------------------------------------------------------------------------
-	// Channel management
+	// Project management
 	// ---------------------------------------------------------------------------
 
-	if svc.ChannelHandler != nil {
-		apiV1.Get("/channels", svc.ChannelHandler.List)
-		apiV1.Get("/channels/stats", svc.ChannelHandler.Stats)
-		apiV1.Post("/channels", svc.ChannelHandler.Create)
-		apiV1.Post("/channels/fetch-profile", svc.ChannelHandler.FetchProfile)
-		apiV1.Post("/channels/analyze-image", svc.ChannelHandler.AnalyzeImage)
-		apiV1.Get("/channels/:id", svc.ChannelHandler.Get)
-		apiV1.Put("/channels/:id", svc.ChannelHandler.Update)
-		apiV1.Patch("/channels/:id/archive", svc.ChannelHandler.Archive)
-		apiV1.Patch("/channels/:id/restore", svc.ChannelHandler.Restore)
-		apiV1.Delete("/channels/:id", svc.ChannelHandler.Delete)
+	if svc.ProjectHandler != nil {
+		apiV1.Get("/projects", svc.ProjectHandler.List)
+		apiV1.Get("/projects/stats", svc.ProjectHandler.Stats)
+		apiV1.Post("/projects", svc.ProjectHandler.Create)
+		apiV1.Post("/projects/fetch-profile", svc.ProjectHandler.FetchProfile)
+		apiV1.Post("/projects/analyze-image", svc.ProjectHandler.AnalyzeImage)
+		apiV1.Get("/projects/:id", svc.ProjectHandler.Get)
+		apiV1.Put("/projects/:id", svc.ProjectHandler.Update)
+		apiV1.Patch("/projects/:id/archive", svc.ProjectHandler.Archive)
+		apiV1.Patch("/projects/:id/restore", svc.ProjectHandler.Restore)
+		apiV1.Delete("/projects/:id", svc.ProjectHandler.Delete)
 	}
 
 	// ---------------------------------------------------------------------------
-	// Topic pool endpoints (nested under channels)
+	// Topic pool endpoints (nested under projects)
 	// ---------------------------------------------------------------------------
 
 	if svc.TopicPoolHandler != nil {
-		apiV1.Get("/channels/:channel_id/topics", svc.TopicPoolHandler.List)
-		apiV1.Post("/channels/:channel_id/topics", svc.TopicPoolHandler.Create)
-		apiV1.Delete("/channels/:channel_id/topics/:id", svc.TopicPoolHandler.Delete)
-		apiV1.Patch("/channels/:channel_id/topics/:id/reset", svc.TopicPoolHandler.Reset)
+		apiV1.Get("/projects/:project_id/topics", svc.TopicPoolHandler.List)
+		apiV1.Post("/projects/:project_id/topics", svc.TopicPoolHandler.Create)
+		apiV1.Delete("/projects/:project_id/topics/:id", svc.TopicPoolHandler.Delete)
+		apiV1.Patch("/projects/:project_id/topics/:id/reset", svc.TopicPoolHandler.Reset)
 	}
 
 	// ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ export const plansApi = {
   create: (data: CreatePlanRequest) =>
     unwrap<Plan>(http.post('/plans', data)),
 
-  list: (params?: { offset?: number; limit?: number; channel_id?: string }) =>
+  list: (params?: { offset?: number; limit?: number; project_id?: string }) =>
     unwrap<PaginatedResponse<Plan>>(http.get('/plans', { params })),
 
   get: (id: string) =>

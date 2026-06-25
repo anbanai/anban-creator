@@ -2,21 +2,21 @@ export const queryKeys = {
   auth: {
     me: ['auth', 'me'] as const,
   },
-  channels: {
-    all: ['channels'] as const,
-    list: (filters?: { status?: string; platform?: string }) => ['channels', filters] as const,
-    details: (filter?: string) => ['channel-details', filter] as const,
-    detail: (id: string) => ['channel', id] as const,
+  projects: {
+    all: ['projects'] as const,
+    list: (filters?: { status?: string; platform?: string }) => ['projects', filters] as const,
+    details: (filter?: string) => ['project-details', filter] as const,
+    detail: (id: string) => ['project', id] as const,
     platformConfigs: ['platform-configs'] as const,
   },
   plans: {
     all: ['plans'] as const,
-    list: (filters?: { offset?: number; limit?: number; channel_id?: string }) => ['plans', filters] as const,
+    list: (filters?: { offset?: number; limit?: number; project_id?: string }) => ['plans', filters] as const,
     detail: (id: string) => ['plan', id] as const,
   },
   tasks: {
     all: ['tasks'] as const,
-    list: (filters?: { status?: string; channel_id?: string }) => ['tasks', filters] as const,
+    list: (filters?: { status?: string; project_id?: string }) => ['tasks', filters] as const,
     detail: (id: string) => ['task', id] as const,
     files: (id: string) => ['task-files', id] as const,
     seednoteAnalytics: (id: string) => ['task', id, 'seednote-analytics'] as const,
@@ -44,16 +44,16 @@ export const queryKeys = {
     imagePresets: ['resources', 'image_presets'] as const,
   },
   usage: {
-    stats: (params?: { from?: string; to?: string; channel_id?: string }) =>
+    stats: (params?: { from?: string; to?: string; project_id?: string }) =>
       ['usage', 'stats', params] as const,
   },
   topicPool: {
-    all: (channelId: string) => ['topic-pool', channelId] as const,
-    list: (channelId: string, status?: string) => ['topic-pool', channelId, status] as const,
+    all: (projectId: string) => ['topic-pool', projectId] as const,
+    list: (projectId: string, status?: string) => ['topic-pool', projectId, status] as const,
   },
   designer: {
     all: ['designer'] as const,
-    history: (params?: { channel_id?: string; page?: number; page_size?: number }) =>
+    history: (params?: { project_id?: string; page?: number; page_size?: number }) =>
       ['designer', 'history', params] as const,
     generation: (id: string) => ['designer', 'generation', id] as const,
   },

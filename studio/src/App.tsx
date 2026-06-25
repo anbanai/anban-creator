@@ -18,7 +18,7 @@ const LoginPage = React.lazy(() => import('@/pages/LoginPage'))
 const RegisterPage = React.lazy(() => import('@/pages/RegisterPage'))
 const DashboardPage = React.lazy(() => import('@/pages/DashboardPage'))
 const TimelinePage = React.lazy(() => import('@/pages/TimelinePage'))
-const ChannelsPage = React.lazy(() => import('@/pages/ChannelsPage'))
+const ProjectsPage = React.lazy(() => import('@/pages/ProjectsPage'))
 const PlansPage = React.lazy(() => import('@/pages/PlansPage'))
 const TasksPage = React.lazy(() => import('@/pages/TasksPage'))
 const TaskDetailPage = React.lazy(() => import('@/pages/TaskDetailPage'))
@@ -127,7 +127,7 @@ function AppRoutes() {
         >
           <Route index element={<LazyPage component={DashboardPage} />} />
           <Route path="timeline" element={<LazyPage component={TimelinePage} />} />
-          <Route path="channels" element={<LazyPage component={ChannelsPage} />} />
+          <Route path="projects" element={<LazyPage component={ProjectsPage} />} />
           <Route path="plans" element={<LazyPage component={PlansPage} />} />
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />

@@ -32,7 +32,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.User{},
-		&model.LoginSession{}, &model.TaskFile{}, &model.Channel{},
+		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
 		&model.CreditTransaction{}, &model.TopicPool{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
@@ -90,11 +90,11 @@ func TestTaskService_FinalizeTitleUpdatesCanonicalTitle(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusRunning,
 	}
@@ -122,11 +122,11 @@ func TestTaskService_FinalizeTitleRejectsInvalidTitles(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusRunning,
 	}
@@ -159,11 +159,11 @@ func TestTaskService_FinalizeTitleRejectsForeignTask(t *testing.T) {
 	ctx := context.Background()
 	ownerID := uuid.New().String()
 	otherID := uuid.New().String()
-	channelID := createTestChannel(t, repo, ownerID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, ownerID, model.PlatformSeednote)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    ownerID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusRunning,
 	}
@@ -181,11 +181,11 @@ func TestTaskService_FinalizeTitleRejectsUserKeyForUnownedTask(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    "",
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusRunning,
 	}
@@ -199,17 +199,17 @@ func TestTaskService_FinalizeTitleRejectsUserKeyForUnownedTask(t *testing.T) {
 	}
 }
 
-func TestTaskService_FinalizeTitleRejectsDuplicateWithinChannel(t *testing.T) {
+func TestTaskService_FinalizeTitleRejectsDuplicateWithinProject(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
-	otherChannelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	otherProjectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 
 	existing := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 		Title:     "新手咖啡豆怎么选",
@@ -218,18 +218,18 @@ func TestTaskService_FinalizeTitleRejectsDuplicateWithinChannel(t *testing.T) {
 	current := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusRunning,
 	}
-	foreignChannel := &model.Task{
+	foreignProject := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: otherChannelID,
+		ProjectID: otherProjectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusRunning,
 	}
-	for _, task := range []*model.Task{existing, current, foreignChannel} {
+	for _, task := range []*model.Task{existing, current, foreignProject} {
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			t.Fatalf("create task: %v", err)
 		}
@@ -240,8 +240,8 @@ func TestTaskService_FinalizeTitleRejectsDuplicateWithinChannel(t *testing.T) {
 		t.Fatalf("FinalizeTitle error = %v, want duplicate title", err)
 	}
 
-	if _, err := svc.FinalizeTitle(ctx, userID, foreignChannel.ID, "新手咖啡豆怎么选"); err != nil {
-		t.Fatalf("other channel duplicate should be allowed: %v", err)
+	if _, err := svc.FinalizeTitle(ctx, userID, foreignProject.ID, "新手咖啡豆怎么选"); err != nil {
+		t.Fatalf("other project duplicate should be allowed: %v", err)
 	}
 }
 
@@ -249,13 +249,13 @@ func TestTaskService_FinalizeTitleRejectsDuplicateEvenWhenCurrentTaskAlreadyHasT
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 
 	for _, task := range []*model.Task{
 		{
 			ID:        uuid.New().String(),
 			UserID:    userID,
-			ChannelID: channelID,
+			ProjectID: projectID,
 			Type:      model.PlatformSeednote,
 			Status:    model.TaskStatusCompleted,
 			Title:     "新手咖啡豆怎么选",
@@ -264,7 +264,7 @@ func TestTaskService_FinalizeTitleRejectsDuplicateEvenWhenCurrentTaskAlreadyHasT
 		{
 			ID:        "task-current-with-same-title",
 			UserID:    userID,
-			ChannelID: channelID,
+			ProjectID: projectID,
 			Type:      model.PlatformSeednote,
 			Status:    model.TaskStatusRunning,
 			Title:     "新手咖啡豆怎么选",
@@ -286,12 +286,12 @@ func TestTaskService_ClearArtifactTitles(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	for _, task := range []*model.Task{
 		{
 			ID:        uuid.New().String(),
 			UserID:    userID,
-			ChannelID: channelID,
+			ProjectID: projectID,
 			Type:      model.PlatformSeednote,
 			Status:    model.TaskStatusCompleted,
 			Title:     "图片内容规划",
@@ -300,7 +300,7 @@ func TestTaskService_ClearArtifactTitles(t *testing.T) {
 		{
 			ID:        uuid.New().String(),
 			UserID:    userID,
-			ChannelID: channelID,
+			ProjectID: projectID,
 			Type:      model.PlatformSeednote,
 			Status:    model.TaskStatusCompleted,
 			Title:     "真实茶饮标题",
@@ -319,7 +319,7 @@ func TestTaskService_ClearArtifactTitles(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("count = %d, want 1", count)
 	}
-	titles, err := svc.ListTitles(ctx, channelID)
+	titles, err := svc.ListTitles(ctx, projectID)
 	if err != nil {
 		t.Fatalf("ListTitles: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestTaskService_ExecuteDoesNotExtractTitleFromWorkspace(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	workDir := t.TempDir()
 	outputDir := filepath.Join(workDir, "output")
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -364,7 +364,7 @@ func TestTaskService_ExecuteDoesNotExtractTitleFromWorkspace(t *testing.T) {
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusRunning,
 		Title:     "AI 已上报标题",
@@ -404,11 +404,11 @@ func TestTaskService_HandleExecutionFailure_PermanentAuthErrorDoesNotRetry(t *te
 
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{
 		ID:                  uuid.New().String(),
 		UserID:              userID,
-		ChannelID:           channelID,
+		ProjectID:           projectID,
 		Type:                model.PlatformArticle,
 		Status:              model.TaskStatusRunning,
 		Prompt:              "auth failure",
@@ -490,11 +490,11 @@ func TestBuildNoOutputFilesErrorWithoutToolErrorKeepsFallback(t *testing.T) {
 func TestTaskService_CreateManual(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 
 	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Prompt:    "Test topic",
 	})
 	if err != nil {
@@ -510,8 +510,8 @@ func TestTaskService_CreateManual(t *testing.T) {
 	if task.UserID != userID {
 		t.Errorf("UserID = %q, want %q", task.UserID, userID)
 	}
-	if task.ChannelID != channelID {
-		t.Errorf("ChannelID = %q, want %q", task.ChannelID, channelID)
+	if task.ProjectID != projectID {
+		t.Errorf("ProjectID = %q, want %q", task.ProjectID, projectID)
 	}
 	if task.Status != model.TaskStatusPending {
 		t.Errorf("Status = %q, want %q", task.Status, model.TaskStatusPending)
@@ -521,27 +521,27 @@ func TestTaskService_CreateManual(t *testing.T) {
 	}
 }
 
-func TestTaskService_CreateManual_NoChannel(t *testing.T) {
+func TestTaskService_CreateManual_NoProject(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
 	_, err := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    "user1",
-		ChannelID: "",
+		ProjectID: "",
 		Prompt:    "topic",
 	})
 	if err == nil {
-		t.Error("expected error for empty channel_id")
+		t.Error("expected error for empty project_id")
 	}
 }
 
 func TestTaskService_CreateManual_PersistsTemplateID(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 	templateID := uuid.New().String()
 
 	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:     userID,
-		ChannelID:  channelID,
+		ProjectID:  projectID,
 		Prompt:     "topic",
 		TemplateID: &templateID,
 	})
@@ -576,11 +576,11 @@ func TestTaskService_CreateManual_PersistsTemplateID(t *testing.T) {
 func TestTaskService_CreateManual_NullTemplateIDByDefault(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 
 	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Prompt:    "topic",
 	})
 	if err != nil {
@@ -593,19 +593,19 @@ func TestTaskService_CreateManual_NullTemplateIDByDefault(t *testing.T) {
 
 // TestTaskService_CreateFromPlan_PropagatesTemplateID: a plan with a TemplateID
 // must copy it onto the spawned task, so the agent can surface the template's
-// content scaffold via get_channel_profile(task_id). This is the link that closes
+// content scaffold via get_project_profile(task_id). This is the link that closes
 // the plan→task→agent loop for templates.
 func TestTaskService_CreateFromPlan_PropagatesTemplateID(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 	templateID := uuid.New().String()
 
 	plan := &model.Plan{
 		ID:         uuid.New().String(),
 		UserID:     userID,
-		ChannelID:  channelID,
+		ProjectID:  projectID,
 		Type:       model.PlatformArticle,
 		Prompt:     "plan topic",
 		Status:     model.PlanStatusActive,
@@ -644,12 +644,12 @@ func TestTaskService_CreateFromPlan_NoTemplateIDByDefault(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 
 	plan := &model.Plan{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Prompt:    "plan topic",
 		Status:    model.PlanStatusActive,
@@ -670,11 +670,11 @@ func TestTaskService_CreateFromPlan_NoTemplateIDByDefault(t *testing.T) {
 func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 
 	_, err := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    "wrong-user",
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Prompt:    "topic",
 	})
 	if err == nil {
@@ -685,11 +685,11 @@ func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 func TestTaskService_GetByID(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 
 	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Prompt:    "Find me",
 	})
 	task := taskSlice[0]
@@ -714,11 +714,11 @@ func TestTaskService_GetByID_NotFound(t *testing.T) {
 func TestTaskService_Cancel(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 
 	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Prompt:    "Cancel me",
 	})
 	task := taskSlice[0]
@@ -737,16 +737,16 @@ func TestTaskService_Cancel(t *testing.T) {
 func TestTaskService_List(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 
 	svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Prompt:    "Task 1",
 	})
 	svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Prompt:    "Task 2",
 	})
 
@@ -765,11 +765,11 @@ func TestTaskService_List(t *testing.T) {
 func TestTaskService_List_ByStatus(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, "wechat")
+	projectID := createTestProject(t, repo, userID, "wechat")
 
 	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Prompt:    "Pending task",
 	})
 	task := taskSlice[0]
@@ -815,11 +815,11 @@ func TestTaskService_SetPublishedCreatesSeednoteTracking(t *testing.T) {
 
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 	}
@@ -846,11 +846,11 @@ func TestTaskService_SetPublishedSkipsTrackingForNonSeednoteOrUnpublish(t *testi
 
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusCompleted,
 	}
@@ -880,13 +880,13 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	otherUserID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformSeednote)
-	otherChannelID := createTestChannel(t, repo, otherUserID, model.PlatformSeednote)
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	otherProjectID := createTestProject(t, repo, otherUserID, model.PlatformSeednote)
 
 	completed := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "A finished task",
@@ -895,7 +895,7 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 	pending := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusPending,
 		Prompt:    "A pending task",
@@ -903,7 +903,7 @@ func TestTaskService_DownloadTasksZip(t *testing.T) {
 	foreign := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    otherUserID,
-		ChannelID: otherChannelID,
+		ProjectID: otherProjectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "Foreign task",
@@ -992,11 +992,11 @@ func TestTaskService_RebuildWorkflowStatus(t *testing.T) {
 
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "workflow task",

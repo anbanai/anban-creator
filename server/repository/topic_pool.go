@@ -35,11 +35,11 @@ func (r *topicPoolRepository) FindByID(ctx context.Context, id uint) (*model.Top
 	return &topic, nil
 }
 
-func (r *topicPoolRepository) FindByChannel(ctx context.Context, channelID, status string, offset, limit int) ([]*model.TopicPool, int64, error) {
+func (r *topicPoolRepository) FindByProject(ctx context.Context, projectID, status string, offset, limit int) ([]*model.TopicPool, int64, error) {
 	var topics []*model.TopicPool
 	var total int64
 
-	q := r.db.WithContext(ctx).Model(&model.TopicPool{}).Where("channel_id = ?", channelID)
+	q := r.db.WithContext(ctx).Model(&model.TopicPool{}).Where("project_id = ?", projectID)
 	if status != "" {
 		q = q.Where("status = ?", status)
 	}
@@ -55,10 +55,10 @@ func (r *topicPoolRepository) FindByChannel(ctx context.Context, channelID, stat
 
 // ClaimOne atomically claims the earliest unused topic using SELECT FOR UPDATE
 // to prevent race conditions when multiple plans trigger simultaneously.
-func (r *topicPoolRepository) ClaimOne(ctx context.Context, userID, channelID string) (*model.TopicPool, error) {
+func (r *topicPoolRepository) ClaimOne(ctx context.Context, userID, projectID string) (*model.TopicPool, error) {
 	var topic model.TopicPool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ? AND channel_id = ? AND status = ?", userID, channelID, model.TopicStatusUnused).
+		if err := tx.Where("user_id = ? AND project_id = ? AND status = ?", userID, projectID, model.TopicStatusUnused).
 			Order("created_at ASC").
 			Limit(1).
 			Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -84,10 +84,10 @@ func (r *topicPoolRepository) ClaimOne(ctx context.Context, userID, channelID st
 
 // ClaimWithTask atomically claims a topic and associates it with a task using
 // SELECT FOR UPDATE to prevent race conditions.
-func (r *topicPoolRepository) ClaimWithTask(ctx context.Context, userID, channelID, taskID string) (*model.TopicPool, error) {
+func (r *topicPoolRepository) ClaimWithTask(ctx context.Context, userID, projectID, taskID string) (*model.TopicPool, error) {
 	var topic model.TopicPool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ? AND channel_id = ? AND status = ?", userID, channelID, model.TopicStatusUnused).
+		if err := tx.Where("user_id = ? AND project_id = ? AND status = ?", userID, projectID, model.TopicStatusUnused).
 			Order("created_at ASC").
 			Limit(1).
 			Clauses(clause.Locking{Strength: "UPDATE"}).

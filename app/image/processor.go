@@ -73,7 +73,7 @@ func (p *Processor) wechatUpload(filePath string) (*wechat.UploadMaterialResult,
 	if p.ws == nil {
 		return nil, &ProcessorError{
 			Message:  "wechat credentials not configured, cannot upload image",
-			HintText: "请先在频道配置中填写 WeChat App ID 和 Secret",
+			HintText: "请先在项目配置中填写 WeChat App ID 和 Secret",
 		}
 	}
 	return p.ws.UploadMaterialWithRetry(filePath, 3)

@@ -7,9 +7,9 @@ import { Plus, FileText, Stamp, Target, Loader2, Images } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { Channel, Plan, PlanType, CreatePlanRequest, Template } from '@/types'
+import type { Project, Plan, PlanType, CreatePlanRequest, Template } from '@/types'
 import type { Resolver } from 'react-hook-form'
-import { ChannelSelector } from '@/components/ChannelSelector'
+import { ProjectSelector } from '@/components/ProjectSelector'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
@@ -38,7 +38,7 @@ import EmptyState from '@/components/EmptyState'
 
 function planToFormValues(plan: Plan): PlanFormValues {
   return {
-    channel_id: plan.channel_id || '',
+    project_id: plan.project_id || '',
     type: plan.type,
     cron_expr: plan.cron_expr,
     prompt: plan.prompt || '',
@@ -60,7 +60,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
 
 export default function PlansPage() {
   const queryClient = useQueryClient()
-  const [channelFilter, setChannelFilter] = useState('')
+  const [projectFilter, setProjectFilter] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
   const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
@@ -74,7 +74,7 @@ export default function PlansPage() {
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
     defaultValues: {
-      channel_id: '',
+      project_id: '',
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
@@ -106,14 +106,14 @@ export default function PlansPage() {
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
 
-  useEffect(() => { setPage(1) }, [channelFilter, searchFilter])
+  useEffect(() => { setPage(1) }, [projectFilter, searchFilter])
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['plans', channelFilter, page],
+    queryKey: ['plans', projectFilter, page],
     queryFn: () => api.plans.list({
       limit: 50,
       offset: (page - 1) * 50,
-      channel_id: channelFilter || undefined,
+      project_id: projectFilter || undefined,
     }),
   })
 
@@ -126,22 +126,22 @@ export default function PlansPage() {
     return plans.filter((p) => (p.prompt || '').toLowerCase().includes(q))
   }, [plans, searchFilter])
 
-  // Fetch channels for name/avatar display
-  const { data: allChannels } = useQuery({
-    queryKey: ['channels-for-plans'],
-    queryFn: () => api.channels.list(),
+  // Fetch projects for name/avatar display
+  const { data: allProjects } = useQuery({
+    queryKey: ['projects-for-plans'],
+    queryFn: () => api.projects.list(),
     staleTime: 60_000,
   })
 
-  const channelMap = useMemo(() => {
-    const map: Record<string, Channel> = {}
-    if (allChannels) {
-      for (const ch of allChannels) {
+  const projectMap = useMemo(() => {
+    const map: Record<string, Project> = {}
+    if (allProjects) {
+      for (const ch of allProjects) {
         map[ch.id] = ch
       }
     }
     return map
-  }, [allChannels])
+  }, [allProjects])
 
   const createMutation = useMutation({
     mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
@@ -195,7 +195,7 @@ export default function PlansPage() {
   function openCreate() {
     setEditingPlan(null)
     form.reset({
-      channel_id: '',
+      project_id: '',
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
@@ -244,7 +244,7 @@ export default function PlansPage() {
     setShowDirtyDialog(false)
     setEditingPlan(null)
     form.reset({
-      channel_id: '',
+      project_id: '',
       type: 'seednote',
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
@@ -268,7 +268,7 @@ export default function PlansPage() {
     setSelectedTemplate(template)
     // Template thumbnail is a UI preview only — it is not a generation reference image.
     // The three orthogonal style dimensions flow into the plan; spawned tasks inherit
-    // them and the agent surfaces them via get_channel_profile(task_id).
+    // them and the agent surfaces them via get_project_profile(task_id).
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
     form.setValue('writing_style', template.writing_style || '', { shouldDirty: true })
     form.setValue('theme', template.theme || '', { shouldDirty: true })
@@ -287,7 +287,7 @@ export default function PlansPage() {
       type: values.type,
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
-      channel_id: values.channel_id || undefined,
+      project_id: values.project_id || undefined,
       image_model_key: values.image_model_key,
       style: values.style || undefined,
       writing_style: values.writing_style || undefined,
@@ -301,7 +301,7 @@ export default function PlansPage() {
       has_content_image: values.type === 'seednote' ? values.has_content_image : undefined,
       has_tail_image: values.type === 'seednote' ? values.has_tail_image : undefined,
       // template_id 透传给后端，由 CreateFromPlan 复制到派生任务，从而让 Agent 通过
-      // get_channel_profile(task_id) 拿到模板的内容脚手架。
+      // get_project_profile(task_id) 拿到模板的内容脚手架。
       template_id: selectedTemplate?.id || undefined,
     }
 
@@ -323,12 +323,12 @@ export default function PlansPage() {
         </Button>
       </PageHeader>
 
-      {/* Channel filter + Search */}
+      {/* Project filter + Search */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="w-full sm:w-48">
-          <ChannelSelector
-            value={channelFilter}
-            onChange={(id) => setChannelFilter(id)}
+          <ProjectSelector
+            value={projectFilter}
+            onChange={(id) => setProjectFilter(id)}
           />
         </div>
         <div className="w-full sm:w-48 sm:ml-auto">
@@ -371,7 +371,7 @@ export default function PlansPage() {
         <>
         <div className="space-y-3">
           {filteredPlans.map((plan) => {
-            const channel = channelMap[plan.channel_id]
+            const project = projectMap[plan.project_id]
             const borderColor = platformBorderColor[plan.type] || ''
             const hoverBorderColor = platformHoverBorderColor[plan.type] || ''
             const platformBadge = platformBadgeVariant[plan.type] || ('neutral' as const)
@@ -382,7 +382,7 @@ export default function PlansPage() {
                 className={`group rounded-lg border border-border bg-card p-4 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md`}
               >
                 <div className="flex items-start gap-3">
-                  <PlatformAvatar avatarUrl={channel?.avatar_url} name={channel?.name} platform={plan.type} />
+                  <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={plan.type} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <span className="truncate text-sm font-medium text-foreground">
@@ -392,8 +392,8 @@ export default function PlansPage() {
                         {planStatusLabel[plan.status] || plan.status}
                       </Badge>
                     </div>
-                    {channel?.name && (
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{channel.name}</p>
+                    {project?.name && (
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
                     )}
                     <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant={platformBadge} className="text-[10px]">
@@ -451,11 +451,11 @@ export default function PlansPage() {
           </DialogHeader>
           <Form {...form}>
             <form id="plan-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
-              <FormField control={form.control} name="channel_id" render={({ field }) => (
+              <FormField control={form.control} name="project_id" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>账号</FormLabel>
+                  <FormLabel>项目</FormLabel>
                   <FormControl>
-                    <ChannelSelector
+                    <ProjectSelector
                       value={field.value || ''}
                       onChange={(id, platform) => {
                         field.onChange(id)
@@ -471,7 +471,7 @@ export default function PlansPage() {
                 <FormItem>
                   <FormLabel>内容类型</FormLabel>
                   <FormControl>
-                    <Select value={field.value} onValueChange={(v) => field.onChange(v as PlanType)} disabled={!!form.watch('channel_id')}>
+                    <Select value={field.value} onValueChange={(v) => field.onChange(v as PlanType)} disabled={!!form.watch('project_id')}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="选择类型" />
                       </SelectTrigger>
@@ -482,8 +482,8 @@ export default function PlansPage() {
                       </SelectContent>
                     </Select>
                   </FormControl>
-                  {form.watch('channel_id') && (
-                    <FormDescription>内容类型随所选账号自动确定</FormDescription>
+                  {form.watch('project_id') && (
+                    <FormDescription>内容类型随所选项目自动确定</FormDescription>
                   )}
                   <FormMessage />
                 </FormItem>
@@ -503,7 +503,7 @@ export default function PlansPage() {
                 <FormItem>
                   <FormLabel>Prompt（可选）</FormLabel>
                   <FormControl>
-                    <Input placeholder="留空则根据账号信息自动生成" {...field} />
+                    <Input placeholder="留空则根据项目信息自动生成" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -548,8 +548,8 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑（覆盖模板/账号）。
-                  计划级 author_* 字段经后端解析链 plan > template > channel 下发到 spawned task。 */}
+              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑（覆盖模板/项目）。
+                  计划级 author_* 字段经后端解析链 plan > template > project 下发到 spawned task。 */}
               {watchedType === 'article' && (
                 <>
                   <PersonaBlock
@@ -562,7 +562,7 @@ export default function PlansPage() {
                   />
                   <ThemePicker theme={watchedTheme ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
                   {!selectedTemplate && (
-                    <p className="text-xs text-muted-foreground">未选模板时默认随账号设置，也可在此覆盖。</p>
+                    <p className="text-xs text-muted-foreground">未选模板时默认随项目设置，也可在此覆盖。</p>
                   )}
                 </>
               )}

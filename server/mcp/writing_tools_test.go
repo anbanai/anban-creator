@@ -42,11 +42,11 @@ func repositoryTestDB(t *testing.T) *gorm.DB {
 // ---------------------------------------------------------------------------
 
 func TestParseArgs_ValidJSON(t *testing.T) {
-	raw := json.RawMessage(`{"channel_id":"ch-1","markdown":"# Hello","theme":"autumn-warm"}`)
+	raw := json.RawMessage(`{"project_id":"ch-1","markdown":"# Hello","theme":"autumn-warm"}`)
 	args := parseArgs(raw)
 
-	if v, _ := args["channel_id"].(string); v != "ch-1" {
-		t.Errorf("channel_id = %q, want %q", v, "ch-1")
+	if v, _ := args["project_id"].(string); v != "ch-1" {
+		t.Errorf("project_id = %q, want %q", v, "ch-1")
 	}
 	if v, _ := args["markdown"].(string); v != "# Hello" {
 		t.Errorf("markdown = %q, want %q", v, "# Hello")
@@ -644,7 +644,7 @@ func TestConvertMarkdownHandler_NoService(t *testing.T) {
 	defer cleanup()
 
 	text := callMCPTool(t, handler, "convert_markdown",
-		`{"channel_id":"ch-1","markdown":"# Test"}`,
+		`{"project_id":"ch-1","markdown":"# Test"}`,
 		"test-api-key")
 
 	if !strings.Contains(text, "writing service not available") {
@@ -653,7 +653,7 @@ func TestConvertMarkdownHandler_NoService(t *testing.T) {
 	t.Logf("  [NO SERVICE] error: %q", text)
 }
 
-func TestConvertMarkdownHandler_MissingChannelID(t *testing.T) {
+func TestConvertMarkdownHandler_MissingProjectID(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
 
@@ -664,10 +664,10 @@ func TestConvertMarkdownHandler_MissingChannelID(t *testing.T) {
 		`{"markdown":"# Hello"}`,
 		"test-api-key")
 
-	if !strings.Contains(text, "channel_id is required") {
-		t.Errorf("expected 'channel_id is required', got: %q", text)
+	if !strings.Contains(text, "project_id is required") {
+		t.Errorf("expected 'project_id is required', got: %q", text)
 	}
-	t.Logf("  [MISSING CHANNEL] error: %q", text)
+	t.Logf("  [MISSING PROJECT] error: %q", text)
 }
 
 func TestConvertMarkdownHandler_MissingMarkdown(t *testing.T) {
@@ -677,7 +677,7 @@ func TestConvertMarkdownHandler_MissingMarkdown(t *testing.T) {
 	SetServices(&Services{WritingSvc: stubWritingSvc})
 
 	text := callMCPTool(t, handler, "convert_markdown",
-		`{"channel_id":"ch-1"}`,
+		`{"project_id":"ch-1"}`,
 		"test-api-key")
 
 	if !strings.Contains(text, "markdown is required") {
@@ -693,12 +693,12 @@ func TestConvertMarkdownHandler_EmptyStrings(t *testing.T) {
 	SetServices(&Services{WritingSvc: stubWritingSvc})
 
 	text := callMCPTool(t, handler, "convert_markdown",
-		`{"channel_id":"","markdown":""}`,
+		`{"project_id":"","markdown":""}`,
 		"test-api-key")
 
 	t.Logf("  [EMPTY STRINGS] error: %q", text)
-	if !strings.Contains(text, "channel_id is required") {
-		t.Errorf("expected channel_id error, got: %q", text)
+	if !strings.Contains(text, "project_id is required") {
+		t.Errorf("expected project_id error, got: %q", text)
 	}
 }
 
@@ -732,7 +732,7 @@ func TestWriteArticleHandler_MissingTopic(t *testing.T) {
 	SetServices(&Services{WritingSvc: stubWritingSvc})
 
 	text := callMCPTool(t, handler, "write_article",
-		`{"channel_id":"ch-1"}`,
+		`{"project_id":"ch-1"}`,
 		"test-api-key")
 
 	if !strings.Contains(text, "topic is required") {
@@ -740,7 +740,7 @@ func TestWriteArticleHandler_MissingTopic(t *testing.T) {
 	}
 }
 
-func TestWriteArticleHandler_MissingChannelID(t *testing.T) {
+func TestWriteArticleHandler_MissingProjectID(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
 
@@ -750,8 +750,8 @@ func TestWriteArticleHandler_MissingChannelID(t *testing.T) {
 		`{"topic":"专注力"}`,
 		"test-api-key")
 
-	if !strings.Contains(text, "channel_id is required") {
-		t.Errorf("expected 'channel_id is required', got: %q", text)
+	if !strings.Contains(text, "project_id is required") {
+		t.Errorf("expected 'project_id is required', got: %q", text)
 	}
 }
 
@@ -766,7 +766,7 @@ func TestHumanizeArticleHandler_MissingContent(t *testing.T) {
 	SetServices(&Services{WritingSvc: stubWritingSvc})
 
 	text := callMCPTool(t, handler, "humanize_article",
-		`{"channel_id":"ch-1"}`,
+		`{"project_id":"ch-1"}`,
 		"test-api-key")
 
 	if !strings.Contains(text, "content is required") {
@@ -778,7 +778,7 @@ func TestHumanizeArticleHandler_MissingContent(t *testing.T) {
 // researchTopicsHandler tests (argument validation only)
 // ---------------------------------------------------------------------------
 
-func TestResearchTopicsHandler_MissingChannelID(t *testing.T) {
+func TestResearchTopicsHandler_MissingProjectID(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
 
@@ -788,8 +788,8 @@ func TestResearchTopicsHandler_MissingChannelID(t *testing.T) {
 		`{}`,
 		"test-api-key")
 
-	if !strings.Contains(text, "channel_id is required") {
-		t.Errorf("expected 'channel_id is required', got: %q", text)
+	if !strings.Contains(text, "project_id is required") {
+		t.Errorf("expected 'project_id is required', got: %q", text)
 	}
 }
 
@@ -804,7 +804,7 @@ func TestOptimizeSEOHandler_MissingContent(t *testing.T) {
 	SetServices(&Services{WritingSvc: stubWritingSvc})
 
 	text := callMCPTool(t, handler, "optimize_seo",
-		`{"channel_id":"ch-1","title":"测试标题"}`,
+		`{"project_id":"ch-1","title":"测试标题"}`,
 		"test-api-key")
 
 	if !strings.Contains(text, "content is required") {
@@ -819,7 +819,7 @@ func TestOptimizeSEOHandler_MissingTitle(t *testing.T) {
 	SetServices(&Services{WritingSvc: stubWritingSvc})
 
 	text := callMCPTool(t, handler, "optimize_seo",
-		`{"channel_id":"ch-1","content":"一些内容"}`,
+		`{"project_id":"ch-1","content":"一些内容"}`,
 		"test-api-key")
 
 	if !strings.Contains(text, "title is required") {
@@ -838,7 +838,7 @@ func TestGenerateOutlineHandler_MissingTopic(t *testing.T) {
 	SetServices(&Services{WritingSvc: stubWritingSvc})
 
 	text := callMCPTool(t, handler, "generate_outline",
-		`{"channel_id":"ch-1"}`,
+		`{"project_id":"ch-1"}`,
 		"test-api-key")
 
 	if !strings.Contains(text, "topic is required") {
@@ -846,14 +846,14 @@ func TestGenerateOutlineHandler_MissingTopic(t *testing.T) {
 	}
 }
 
-func TestListChannelTitlesHandler_ReturnsTitlesOnly(t *testing.T) {
+func TestListProjectTitlesHandler_ReturnsTitlesOnly(t *testing.T) {
 	db := repositoryTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
 	log := zerolog.New(zerolog.NewTestWriter(t))
 
 	userID := "user-title-mcp"
-	channelID := "channel-title-mcp"
+	projectID := "project-title-mcp"
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:       userID,
 		Email:    "title-mcp@example.com",
@@ -862,20 +862,20 @@ func TestListChannelTitlesHandler_ReturnsTitlesOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{
-		ID:       channelID,
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
 		UserID:   "",
 		Platform: model.PlatformSeednote,
 		Name:     "Seednote",
-		Status:   model.ChannelStatusActive,
+		Status:   model.ProjectStatusActive,
 	}); err != nil {
-		t.Fatalf("create channel: %v", err)
+		t.Fatalf("create project: %v", err)
 	}
 	for _, task := range []*model.Task{
 		{
 			ID:        "task-title-mcp-1",
 			UserID:    userID,
-			ChannelID: channelID,
+			ProjectID: projectID,
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusCompleted,
 			Prompt:    "prompt should not leak",
@@ -885,7 +885,7 @@ func TestListChannelTitlesHandler_ReturnsTitlesOnly(t *testing.T) {
 		{
 			ID:        "task-title-mcp-2",
 			UserID:    userID,
-			ChannelID: channelID,
+			ProjectID: projectID,
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusCompleted,
 			Prompt:    "empty title prompt should not leak",
@@ -901,12 +901,12 @@ func TestListChannelTitlesHandler_ReturnsTitlesOnly(t *testing.T) {
 	handler, cleanup := setupMCPHandlerWithServices(t)
 	defer cleanup()
 	SetServices(&Services{
-		ChannelSvc: service.NewChannelService(repo, &log),
+		ProjectSvc: service.NewProjectService(repo, &log),
 		TaskSvc:    service.NewTaskService(repo, nil, nil, nil, nil, &log, "", nil, "", nil, nil),
 	})
 
-	text := callMCPTool(t, handler, "list_channel_titles",
-		fmt.Sprintf(`{"channel_id":%q}`, channelID),
+	text := callMCPTool(t, handler, "list_project_titles",
+		fmt.Sprintf(`{"project_id":%q}`, projectID),
 		"test-api-key")
 
 	var payload map[string]any
@@ -932,7 +932,7 @@ func TestFinalizeTaskTitleHandler_ViaMCP(t *testing.T) {
 	log := zerolog.New(zerolog.NewTestWriter(t))
 
 	userID := "user-finalize-title-mcp"
-	channelID := "channel-finalize-title-mcp"
+	projectID := "project-finalize-title-mcp"
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:       userID,
 		Email:    "finalize-title@example.com",
@@ -941,19 +941,19 @@ func TestFinalizeTaskTitleHandler_ViaMCP(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{
-		ID:       channelID,
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
 		UserID:   userID,
 		Platform: model.PlatformSeednote,
 		Name:     "Seednote",
-		Status:   model.ChannelStatusActive,
+		Status:   model.ProjectStatusActive,
 	}); err != nil {
-		t.Fatalf("create channel: %v", err)
+		t.Fatalf("create project: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
 		ID:        "task-finalize-title-mcp",
 		UserID:    "",
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.ScopeSeednote,
 		Status:    model.TaskStatusRunning,
 	}); err != nil {
@@ -995,12 +995,12 @@ func TestFinalizeTaskTitleHandler_RejectsDuplicateViaMCP(t *testing.T) {
 	log := zerolog.New(zerolog.NewTestWriter(t))
 
 	userID := "user-finalize-duplicate-mcp"
-	channelID := "channel-finalize-duplicate-mcp"
+	projectID := "project-finalize-duplicate-mcp"
 	for _, task := range []*model.Task{
 		{
 			ID:        "task-finalize-duplicate-existing",
 			UserID:    userID,
-			ChannelID: channelID,
+			ProjectID: projectID,
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusCompleted,
 			Title:     "新手咖啡豆怎么选",
@@ -1009,7 +1009,7 @@ func TestFinalizeTaskTitleHandler_RejectsDuplicateViaMCP(t *testing.T) {
 		{
 			ID:        "task-finalize-duplicate-current",
 			UserID:    "",
-			ChannelID: channelID,
+			ProjectID: projectID,
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusRunning,
 			CreatedAt: time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC),

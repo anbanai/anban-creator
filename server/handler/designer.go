@@ -186,11 +186,11 @@ func (h *DesignerHandler) GetHistory(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Query("channel_id", "")
+	projectID := c.Query("project_id", "")
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
 
-	generations, total, err := h.svc.GetHistory(c.Context(), userID, channelID, page, pageSize)
+	generations, total, err := h.svc.GetHistory(c.Context(), userID, projectID, page, pageSize)
 	if err != nil {
 		return Error(c, fiber.StatusInternalServerError, err.Error())
 	}
