@@ -115,6 +115,21 @@ func (s *PublishingService) PublishDraft(ctx context.Context, userID, channelID 
 		return nil, err
 	}
 
+	// Pre-publish gate: reject drafts whose body images collapse to a single
+	// URL — the mechanical backstop for "all content images identical" caused
+	// by agents reusing one image when generation fails. This runs before the
+	// draft client is built so a bad draft never reaches the WeChat API.
+	for i, a := range articles {
+		if err := validateContentImageDiversity(a.Content); err != nil {
+			s.logger.Warn().
+				Str("user_id", userID).
+				Str("channel_id", channelID).
+				Int("article_index", i).
+				Msg("publish_draft rejected: duplicate content images")
+			return nil, err
+		}
+	}
+
 	ds, err := s.createDraftServiceFn(ch)
 	if err != nil {
 		return nil, err

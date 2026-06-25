@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -206,6 +207,8 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				Str("user_id", userID).
 				Str("stage", "generate").
 				Str("image_model_key", imageModelKey).
+				Str("failure_reason", categorizeImageGenFailure(err, refPath)).
+				Bool("ref_image_mode", refPath != "").
 				Err(err).
 				Msg("MCP generate_image failed")
 		}
@@ -353,6 +356,32 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	}
 
 	return textResult(result)
+}
+
+// categorizeImageGenFailure classifies a generate-stage error into an actionable
+// failure_reason for logs, distinguishing the three failure modes that need
+// different operator responses: timeouts (extend/retry), ref-image / i2i mode
+// failures (the reference image pins the scene — see Seedream strong-i2i), and
+// generic provider errors. Timeout takes precedence since it is the most
+// actionable. Used only for diagnostics; it never changes the returned error.
+func categorizeImageGenFailure(err error, refPath string) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	if refPath != "" {
+		return "ref_image_mode"
+	}
+	return "provider"
 }
 
 // taskFileRegistrar is the subset of TaskService used to register a generated

@@ -33,7 +33,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Channel{},
-		&model.CreditTransaction{},
+		&model.CreditTransaction{}, &model.TopicPool{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
