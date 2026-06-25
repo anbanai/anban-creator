@@ -908,7 +908,7 @@ export default function TasksPage() {
                 return false
               })()}
             >
-              创建
+              {quantity > 1 ? `创建 ${quantity} 个任务` : '创建'}
             </Button>
           </DialogFooter>
         </DialogContent>
