@@ -37,13 +37,13 @@ type UserPromptParams struct {
 	TaskType  string // model.PlatformArticle / model.PlatformSeednote
 	Topic     string // user prompt; empty triggers autonomous research mode
 	AgentName string
-	Style     string // effective visual style (task > plan > channel); empty = no override
+	Style     string // effective visual style (task > plan > project); empty = no override
 	Goal      string // goal-mode condition; empty = no /goal prefix
 	TaskID    string // injected as task_id=<x> into the prompt body
-	ChannelID string // injected as channel_id=<x> into the prompt body
+	ProjectID string // injected as project_id=<x> into the prompt body
 	// HasTemplate indicates the task references a content template. When true, a
 	// pointer is appended telling the agent to fetch the template's writing style /
-	// structure / example via get_channel_profile(task_id) and follow them.
+	// structure / example via get_project_profile(task_id) and follow them.
 	HasTemplate bool
 	// HasContentImage / HasTailImage toggle seednote image composition. Cover is
 	// always generated. Ignored for non-seednote task types.
@@ -56,10 +56,10 @@ type UserPromptParams struct {
 // message only needs to provide the topic or an autonomous execution instruction.
 //
 // p.Style, when non-empty, is the effective visual style resolved at task creation
-// (task > plan > channel). It is injected into the prompt as the image-gen style
+// (task > plan > project). It is injected into the prompt as the image-gen style
 // override; the agent picks this up naturally when composing image prompts and
 // calls generate_image with a full prompt string. This keeps BuildAppConfig pure
-// (channel-only) — task-specific overrides flow through the prompt, not config.
+// (project-only) — task-specific overrides flow through the prompt, not config.
 //
 // p.Goal, when non-empty, is prepended as a /goal slash command so Claude Code's
 // built-in goal loop drives turn-by-turn evaluation inside the same session.
@@ -79,7 +79,7 @@ func BuildUserPrompt(p UserPromptParams) string {
 	if p.Topic == "" {
 		base = fmt.Sprintf(
 			"Use the %s agent to research and create content. "+
-				"Analyze the channel profile, keywords, and historical topics "+
+				"Analyze the project profile, keywords, and historical topics "+
 				"to choose the optimal theme, then execute the full creation workflow.",
 			p.AgentName)
 	} else {
@@ -94,23 +94,23 @@ func BuildUserPrompt(p UserPromptParams) string {
 	if p.TaskType == model.PlatformSeednote {
 		base += "\n\n" + describeSeednoteImageComposition(p.HasContentImage, p.HasTailImage)
 	}
-	if p.TaskID != "" || p.ChannelID != "" {
+	if p.TaskID != "" || p.ProjectID != "" {
 		parts := make([]string, 0, 2)
 		if p.TaskID != "" {
 			parts = append(parts, "task_id="+p.TaskID)
 		}
-		if p.ChannelID != "" {
-			parts = append(parts, "channel_id="+p.ChannelID)
+		if p.ProjectID != "" {
+			parts = append(parts, "project_id="+p.ProjectID)
 		}
 		base += "\n\n本任务上下文：" + strings.Join(parts, ", ")
 	}
 	if p.HasTemplate {
-		// The article skill historically calls get_channel_profile WITHOUT task_id;
+		// The article skill historically calls get_project_profile WITHOUT task_id;
 		// without it the server cannot resolve the linked template. The pointer
 		// explicitly demands task_id so the template_* scaffold fields are returned.
-		base += "\n\n本任务已关联内容模板：请调用 get_channel_profile（带 task_id）获取模板字段。" +
+		base += "\n\n本任务已关联内容模板：请调用 get_project_profile（带 task_id）获取模板字段。" +
 			"注意「作者」与「写作风格」是两个独立维度，切勿混淆——" +
-			"① 作者（返回顶层的 `author`，已按 模板>频道 解析）仅用于发布署名：发布草稿时填入 publish_draft 的 author；" +
+			"① 作者（返回顶层的 `author`，已按 模板>项目 解析）仅用于发布署名：发布草稿时填入 publish_draft 的 author；" +
 			"② 写作风格（`template_writing_style`，模仿内容的框架/写作方式/笔迹）驱动正文口吻，若返回则严格遵守；" +
 			"`template_author_avatar` 是写作人设的可选头像（仅人设参考，不入署名）。" +
 			"若还返回 template_structure（内容结构）/template_example（示例），一并遵守。"
@@ -303,7 +303,7 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 // ExecutionOptions configures a single agent execution.
 type ExecutionOptions struct {
 	Task          *model.Task
-	Channel       *model.Channel
+	Project       *model.Project
 	MaxTurns      int
 	OnProgress    func(taskID string, message string) // callback for SSE
 	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
@@ -346,7 +346,7 @@ type ExecutionResult struct {
 
 // Execute runs the Claude Code agent for the given task.
 //
-// It creates a per-task workspace directory, writes the channel config as
+// It creates a per-task workspace directory, writes the project config as
 // .anbanwriter/settings.json, loads the abwriter plugin with the matching
 // agent definition, and launches execution via the claude-agent-sdk-go SDK.
 func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
@@ -406,9 +406,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		opts.LogWriter.WriteHeader(opts.Task.Type, opts.Task.Prompt, agentModel, maxTurns)
 	}
 
-	// 3. Write channel config to workspace settings.json.
-	if opts.Channel != nil {
-		cfg, err := BuildAppConfig(opts.Channel, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
+	// 3. Write project config to workspace settings.json.
+	if opts.Project != nil {
+		cfg, err := BuildAppConfig(opts.Project, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -425,8 +425,8 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		}
 
 		// Download effective reference image.
-		// Task-level image takes priority over channel brand image.
-		// SkipReferenceImage only controls the channel brand image, not task-level.
+		// Task-level image takes priority over project brand image.
+		// SkipReferenceImage only controls the project brand image, not task-level.
 		if opts.Task.ReferenceImageURL != "" {
 			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Task.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
@@ -434,13 +434,22 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 					Str("url", opts.Task.ReferenceImageURL).
 					Msg("failed to download task reference image, continuing without it")
 			}
-		} else if opts.Channel.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
-			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Channel.ReferenceImageURL); err != nil {
+		} else if opts.Project.ReferenceImageURL != "" && !opts.Task.SkipReferenceImage {
+			if err := DownloadReferenceImage(ctx, e.store, e.logger, workDir, opts.Project.ReferenceImageURL); err != nil {
 				e.logger.Warn().Err(err).
 					Str("task_id", opts.Task.ID).
-					Str("url", opts.Channel.ReferenceImageURL).
+					Str("url", opts.Project.ReferenceImageURL).
 					Msg("failed to download reference image, continuing without it")
 			}
+		}
+	}
+
+	// E-commerce: materialize the task's product photos into the workspace so the
+	// agent can reference local paths (analyze_image / generate_image ref).
+	if opts.Task.Type == model.PlatformEcommerce {
+		photos := opts.Task.Ecommerce.Data().ProductPhotos
+		if n := DownloadProductImages(ctx, e.store, e.logger, workDir, photos); n == 0 && len(photos) > 0 {
+			e.logger.Warn().Str("task_id", opts.Task.ID).Msg("failed to download any product photos, continuing without them")
 		}
 	}
 
@@ -490,9 +499,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	agentName := TaskTypeToAgent(opts.Task.Type)
 
 	// 5. Build user prompt that references the agent by name.
-	channelID := ""
-	if opts.Channel != nil {
-		channelID = opts.Channel.ID
+	projectID := ""
+	if opts.Project != nil {
+		projectID = opts.Project.ID
 	}
 	userPrompt := BuildUserPrompt(UserPromptParams{
 		TaskType:        opts.Task.Type,
@@ -501,7 +510,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		Style:           opts.Task.Style,
 		Goal:            opts.Task.Goal,
 		TaskID:          opts.Task.ID,
-		ChannelID:       channelID,
+		ProjectID:       projectID,
 		HasTemplate:     opts.Task.TemplateID != nil && *opts.Task.TemplateID != "",
 		HasContentImage: opts.Task.HasContentImage,
 		HasTailImage:    opts.Task.HasTailImage,
@@ -552,11 +561,11 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_API_URL", e.serverBaseURL))
 	}
 
-	// Inject the task's channel ID so the agent definition can use it directly
-	// instead of discovering channels via list_channels (which may pick the wrong
-	// one when the user has multiple channels of the same platform type).
-	if opts.Channel != nil {
-		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_DEFAULT_CHANNEL", opts.Channel.ID))
+	// Inject the task's project ID so the agent definition can use it directly
+	// instead of discovering projects via list_projects (which may pick the wrong
+	// one when the user has multiple projects of the same platform type).
+	if opts.Project != nil {
+		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBANWRITER_DEFAULT_PROJECT", opts.Project.ID))
 	}
 
 	// Inject MCP server config directly via SDK (--mcp-config), bypassing
@@ -567,7 +576,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	mcpInjected := e.serverBaseURL != ""
 	if mcpInjected {
 		sdkOpts = append(sdkOpts, claudecode.WithMcpServers(map[string]claudecode.McpServerConfig{
-			"anbanwriter": &claudecode.McpHTTPServerConfig{
+			"anban": &claudecode.McpHTTPServerConfig{
 				Type: claudecode.McpServerTypeHTTP,
 				URL:  e.serverBaseURL + "/mcp",
 				Headers: map[string]string{

@@ -262,10 +262,10 @@ func (s *WritingService) AnalyzeImage(ctx context.Context, userID, imageSource, 
 
 // resolveWriterKey returns the 写作风格 (writer resource key) for a writing
 // operation. When taskID is supplied, the task's resolved writer wins; otherwise
-// the channel's writing_style is used. Article defaults to the platform default
+// the project's writing_style is used. Article defaults to the platform default
 // writer. It NEVER reads ch.Style — that is the 图片视觉 (visual) dimension and
 // must not leak into writer selection (the dan-koe → Victorian-woodcut bug).
-func (s *WritingService) resolveWriterKey(ctx context.Context, taskID string, ch *model.Channel) string {
+func (s *WritingService) resolveWriterKey(ctx context.Context, taskID string, ch *model.Project) string {
 	key := ch.WritingStyle
 	if taskID != "" {
 		if task, terr := s.repo.Tasks().FindByID(ctx, taskID); terr == nil && task.WritingStyle != "" {
@@ -280,8 +280,8 @@ func (s *WritingService) resolveWriterKey(ctx context.Context, taskID string, ch
 
 // resolveEffectiveTheme returns the 排版样式 (theme resource key) for a render
 // operation. When taskID is supplied, the task's resolved theme wins; otherwise
-// the channel's theme is used. Falls back to the platform default "autumn-warm".
-func (s *WritingService) resolveEffectiveTheme(ctx context.Context, taskID string, ch *model.Channel) string {
+// the project's theme is used. Falls back to the platform default "autumn-warm".
+func (s *WritingService) resolveEffectiveTheme(ctx context.Context, taskID string, ch *model.Project) string {
 	theme := ch.Theme
 	if taskID != "" {
 		if task, terr := s.repo.Tasks().FindByID(ctx, taskID); terr == nil && task.Theme != "" {
@@ -384,18 +384,18 @@ type OutlineResult struct {
 // ---------------------------------------------------------------------------
 
 // WriteArticle generates an article using the writer assistant and LLM.
-// taskID optionally resolves the 写作风格 from the task (task > channel); empty
-// falls back to the channel's writing_style.
+// taskID optionally resolves the 写作风格 from the task (task > project); empty
+// falls back to the project's writing_style.
 func (s *WritingService) WriteArticle(
 	ctx context.Context,
-	userID, channelID, topic, inputType, articleType, length, taskID string,
+	userID, projectID, topic, inputType, articleType, length, taskID string,
 ) (*WriteArticleResult, error) {
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 	if ch.UserID != userID {
-		return nil, fmt.Errorf("channel not owned by user")
+		return nil, fmt.Errorf("project not owned by user")
 	}
 
 	assistant := writer.NewAssistant()
@@ -433,7 +433,7 @@ func (s *WritingService) WriteArticle(
 
 	s.logger.Info().
 		Str("user_id", userID).
-		Str("channel_id", channelID).
+		Str("project_id", projectID).
 		Int("word_count", utf8.RuneCountInString(article)).
 		Msg("article generated")
 
@@ -450,22 +450,22 @@ func (s *WritingService) WriteArticle(
 // converter package and LLM.
 func (s *WritingService) ConvertMarkdown(
 	ctx context.Context,
-	userID, channelID, markdown, theme, taskID string,
+	userID, projectID, markdown, theme, taskID string,
 ) (*ConvertMarkdownResult, error) {
 	if markdown == "" {
 		return nil, fmt.Errorf("markdown content is required")
 	}
 
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 	if ch.UserID != userID {
-		return nil, fmt.Errorf("channel not owned by user")
+		return nil, fmt.Errorf("project not owned by user")
 	}
 
 	// Resolve 排版样式: explicit caller theme wins, else the task's resolved
-	// theme (task > channel), else the platform default.
+	// theme (task > project), else the platform default.
 	if theme == "" {
 		theme = s.resolveEffectiveTheme(ctx, taskID, ch)
 	}
@@ -496,7 +496,7 @@ func (s *WritingService) ConvertMarkdown(
 
 	s.logger.Info().
 		Str("user_id", userID).
-		Str("channel_id", channelID).
+		Str("project_id", projectID).
 		Str("theme", theme).
 		Int("image_count", len(imageDTOs)).
 		Msg("markdown converted")
@@ -512,7 +512,7 @@ func (s *WritingService) ConvertMarkdown(
 // or the 6-dimension authentic rewrite rules depending on intensity.
 func (s *WritingService) HumanizeArticle(
 	ctx context.Context,
-	userID, channelID, content, intensity string,
+	userID, projectID, content, intensity string,
 ) (*HumanizeArticleResult, error) {
 	if content == "" {
 		return nil, fmt.Errorf("content is required")
@@ -563,10 +563,10 @@ func (s *WritingService) HumanizeArticle(
 	return result, nil
 }
 
-// ResearchTopics generates topic suggestions based on a channel's positioning.
+// ResearchTopics generates topic suggestions based on a project's positioning.
 func (s *WritingService) ResearchTopics(
 	ctx context.Context,
-	userID, channelID string,
+	userID, projectID string,
 	keywords []string,
 	domain string,
 	count int,
@@ -578,15 +578,15 @@ func (s *WritingService) ResearchTopics(
 		count = 20
 	}
 
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 	if ch.UserID != userID {
-		return nil, fmt.Errorf("channel not owned by user")
+		return nil, fmt.Errorf("project not owned by user")
 	}
 
-	// Fall back to channel keywords if none provided.
+	// Fall back to project keywords if none provided.
 	if len(keywords) == 0 {
 		for _, kw := range strings.Split(ch.Keywords, ",") {
 			kw = strings.TrimSpace(kw)
@@ -629,7 +629,7 @@ func (s *WritingService) ResearchTopics(
 // OptimizeSEO optimizes a title and keywords for search ranking.
 func (s *WritingService) OptimizeSEO(
 	ctx context.Context,
-	userID, channelID, content, title string,
+	userID, projectID, content, title string,
 	keywords []string,
 ) (*OptimizeSEOResult, error) {
 	if content == "" {
@@ -658,7 +658,7 @@ func (s *WritingService) OptimizeSEO(
 // GenerateOutline generates a structured article outline using an LLM.
 func (s *WritingService) GenerateOutline(
 	ctx context.Context,
-	userID, channelID, topic, template, style, taskID string,
+	userID, projectID, topic, template, style, taskID string,
 ) (*OutlineResult, error) {
 	if topic == "" {
 		return nil, fmt.Errorf("topic is required")
@@ -667,21 +667,21 @@ func (s *WritingService) GenerateOutline(
 		template = "authoritative"
 	}
 
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 	if ch.UserID != userID {
-		return nil, fmt.Errorf("channel not owned by user")
+		return nil, fmt.Errorf("project not owned by user")
 	}
 
 	// Resolve 写作风格: explicit caller style wins, else the task's resolved
-	// writer (task > channel). Never read ch.Style (that is the visual dimension).
+	// writer (task > project). Never read ch.Style (that is the visual dimension).
 	if style == "" {
 		style = s.resolveWriterKey(ctx, taskID, ch)
 	}
 
-	// Extract keywords from the channel.
+	// Extract keywords from the project.
 	var keywords []string
 	for _, kw := range strings.Split(ch.Keywords, ",") {
 		kw = strings.TrimSpace(kw)
@@ -704,7 +704,7 @@ func (s *WritingService) GenerateOutline(
 
 	s.logger.Info().
 		Str("user_id", userID).
-		Str("channel_id", channelID).
+		Str("project_id", projectID).
 		Str("topic", topic).
 		Int("section_count", len(result.Sections)).
 		Msg("outline generated")

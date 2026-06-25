@@ -191,7 +191,7 @@ export default function DesignerPage() {
       // Start async generation
       const sizeWithTier = settings.resolution === '2K' ? settings.size : `${settings.size}:${settings.resolution}`
       const { generation_id } = await designerApi.generate({
-        channel_id: '',
+        project_id: '',
         prompt,
         provider: effectiveProvider.provider,
         provider_id: effectiveProvider.id,
@@ -269,7 +269,7 @@ export default function DesignerPage() {
       ])
 
       const { generation_id } = await designerApi.generate({
-        channel_id: '',
+        project_id: '',
         prompt: prompt.trim(),
         provider: effectiveProvider.provider,
         provider_id: effectiveProvider.id,

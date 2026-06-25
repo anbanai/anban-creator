@@ -24,16 +24,16 @@ type createTopicsRequest struct {
 	Topics []string `json:"topics"`
 }
 
-// List handles GET /api/v1/channels/:channel_id/topics.
+// List handles GET /api/v1/projects/:project_id/topics.
 func (h *TopicPoolHandler) List(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Params("channel_id")
-	if channelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel_id is required")
+	projectID := c.Params("project_id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
 
 	status := c.Query("status", "")
@@ -43,25 +43,25 @@ func (h *TopicPoolHandler) List(c fiber.Ctx) error {
 		limit = 50
 	}
 
-	topics, total, err := h.service.List(c.Context(), userID, channelID, status, offset, limit)
+	topics, total, err := h.service.List(c.Context(), userID, projectID, status, offset, limit)
 	if err != nil {
-		h.logger.Error().Err(err).Str("user_id", userID).Str("channel_id", channelID).Msg("list topics failed")
+		h.logger.Error().Err(err).Str("user_id", userID).Str("project_id", projectID).Msg("list topics failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to list topics")
 	}
 
 	return Success(c, fiber.Map{"items": topics, "total": total})
 }
 
-// Create handles POST /api/v1/channels/:channel_id/topics.
+// Create handles POST /api/v1/projects/:project_id/topics.
 func (h *TopicPoolHandler) Create(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Params("channel_id")
-	if channelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel_id is required")
+	projectID := c.Params("project_id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
 
 	var req createTopicsRequest
@@ -72,25 +72,25 @@ func (h *TopicPoolHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "topics array is required")
 	}
 
-	topics, err := h.service.Add(c.Context(), userID, channelID, req.Topics)
+	topics, err := h.service.Add(c.Context(), userID, projectID, req.Topics)
 	if err != nil {
-		h.logger.Error().Err(err).Str("user_id", userID).Str("channel_id", channelID).Msg("add topics failed")
+		h.logger.Error().Err(err).Str("user_id", userID).Str("project_id", projectID).Msg("add topics failed")
 		return Error(c, fiber.StatusInternalServerError, err.Error())
 	}
 
 	return Success(c, fiber.Map{"items": topics, "count": len(topics)})
 }
 
-// Delete handles DELETE /api/v1/channels/:channel_id/topics/:id.
+// Delete handles DELETE /api/v1/projects/:project_id/topics/:id.
 func (h *TopicPoolHandler) Delete(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Params("channel_id")
-	if channelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel_id is required")
+	projectID := c.Params("project_id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
 
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
@@ -98,7 +98,7 @@ func (h *TopicPoolHandler) Delete(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid topic id")
 	}
 
-	if err := h.service.Delete(c.Context(), userID, channelID, uint(id)); err != nil {
+	if err := h.service.Delete(c.Context(), userID, projectID, uint(id)); err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Uint("topic_id", uint(id)).Msg("delete topic failed")
 		return Error(c, fiber.StatusInternalServerError, err.Error())
 	}
@@ -106,16 +106,16 @@ func (h *TopicPoolHandler) Delete(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"deleted": true})
 }
 
-// Reset handles PATCH /api/v1/channels/:channel_id/topics/:id/reset.
+// Reset handles PATCH /api/v1/projects/:project_id/topics/:id/reset.
 func (h *TopicPoolHandler) Reset(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	channelID := c.Params("channel_id")
-	if channelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel_id is required")
+	projectID := c.Params("project_id")
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
 
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
@@ -123,7 +123,7 @@ func (h *TopicPoolHandler) Reset(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid topic id")
 	}
 
-	if err := h.service.Reset(c.Context(), userID, channelID, uint(id)); err != nil {
+	if err := h.service.Reset(c.Context(), userID, projectID, uint(id)); err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Uint("topic_id", uint(id)).Msg("reset topic failed")
 		return Error(c, fiber.StatusInternalServerError, err.Error())
 	}

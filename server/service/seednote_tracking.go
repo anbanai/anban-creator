@@ -110,16 +110,16 @@ func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Con
 		return nil
 	}
 
-	channel, err := s.repo.Channels().FindByID(ctx, task.ChannelID)
+	project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
 	if err != nil {
-		return fmt.Errorf("find channel: %w", err)
+		return fmt.Errorf("find project: %w", err)
 	}
-	if channel.UserID != userID {
-		return fmt.Errorf("channel does not belong to user")
+	if project.UserID != userID {
+		return fmt.Errorf("project does not belong to user")
 	}
-	profileURL := strings.TrimSpace(channel.ProfileURL)
+	profileURL := strings.TrimSpace(project.ProfileURL)
 	if profileURL == "" {
-		return s.ensureFailedTracking(ctx, task, userID, "seednote channel profile URL is required")
+		return s.ensureFailedTracking(ctx, task, userID, "seednote project profile URL is required")
 	}
 
 	now := time.Now()
@@ -159,7 +159,7 @@ func (s *SeednoteTrackingService) EnsureTrackingForPublishedTask(ctx context.Con
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
-		ChannelID:         task.ChannelID,
+		ProjectID:         task.ProjectID,
 		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
 		ProfileURL:        profileURL,
 		PublishedMarkedAt: now,
@@ -176,7 +176,7 @@ func (s *SeednoteTrackingService) ensureFailedTracking(ctx context.Context, task
 	existing, err := s.repo.SeednoteTrackings().FindByTaskID(ctx, task.ID)
 	if err == nil {
 		existing.UserID = userID
-		existing.ChannelID = task.ChannelID
+		existing.ProjectID = task.ProjectID
 		existing.Status = model.SeednoteTrackingStatusFailed
 		existing.ProfileURL = ""
 		existing.PublishedMarkedAt = now
@@ -209,7 +209,7 @@ func (s *SeednoteTrackingService) ensureFailedTracking(ctx context.Context, task
 		ID:                uuid.New().String(),
 		TaskID:            task.ID,
 		UserID:            userID,
-		ChannelID:         task.ChannelID,
+		ProjectID:         task.ProjectID,
 		Status:            model.SeednoteTrackingStatusFailed,
 		PublishedMarkedAt: now,
 		TrackingStoppedAt: &now,

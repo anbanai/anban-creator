@@ -8,9 +8,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { Channel, ChannelStats, CreateChannelRequest, PlatformConfig, Template } from '@/types'
+import type { Project, ProjectStats, CreateProjectRequest, PlatformConfig, Template } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
-import { ChannelCard } from '@/components/ChannelCard'
+import { ProjectCard } from '@/components/ProjectCard'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -18,14 +18,14 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
-import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
+import { ReferenceImageUpload } from '@/components/projects/ReferenceImageUpload'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
 import { ThemePicker } from '@/components/templates/ThemePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { channelSchema, type ChannelFormValues } from '@/lib/schemas'
+import { projectSchema, type ProjectFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
@@ -35,6 +35,7 @@ import { renderPlatformIcon } from '@/lib/PlatformIcon'
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
+  { value: 'ecommerce', label: '电商出图' },
 ]
 
 const statusTabs: { label: string; value: string }[] = [
@@ -43,7 +44,7 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已归档', value: 'archived' },
 ]
 
-const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
+const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   platform: 'article',
   name: '',
   profile_url: '',
@@ -64,7 +65,7 @@ const CHANNEL_FORM_DEFAULTS: ChannelFormValues = {
   enable_publishing: false,
 }
 
-function channelToForm(ch: Channel): ChannelFormValues {
+function projectToForm(ch: Project): ProjectFormValues {
   return {
     platform: ch.platform,
     name: ch.name || '',
@@ -87,26 +88,26 @@ function channelToForm(ch: Channel): ChannelFormValues {
   }
 }
 
-export default function ChannelsPage() {
+export default function ProjectsPage() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState('all')
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
-  const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [fetchingProfile, setFetchingProfile] = useState(false)
   const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [analyzingStyle, setAnalyzingStyle] = useState(false)
-  // 导入模型：频道 Owns 自己的人设（视觉/写作风格/排版/作者）。selectedTemplate 仅
+  // 导入模型：项目 Owns 自己的人设（视觉/写作风格/排版/作者）。selectedTemplate 仅
   // 用于 TemplatePicker 的高亮，标记"当前按哪个模板导入"——不写入表单，提交时也不发送
-  // template_id（后端 Update 无条件清空，存量绑定频道保存即迁移为自有值）。
+  // template_id（后端 Update 无条件清空，存量绑定项目保存即迁移为自有值）。
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const styleManuallyEditedRef = useRef(false)
   const { submit } = useSubmitLock()
 
-  const form = useForm<ChannelFormValues>({
-    resolver: zodResolver(channelSchema) as Resolver<ChannelFormValues>,
+  const form = useForm<ProjectFormValues>({
+    resolver: zodResolver(projectSchema) as Resolver<ProjectFormValues>,
     defaultValues: CHANNEL_FORM_DEFAULTS,
   })
 
@@ -131,7 +132,7 @@ export default function ChannelsPage() {
 
   const { data: platformConfigs } = useQuery({
     queryKey: ['platform-configs'],
-    queryFn: () => api.channels.platformConfigs(),
+    queryFn: () => api.projects.platformConfigs(),
     staleTime: Infinity,
   })
 
@@ -158,9 +159,9 @@ export default function ChannelsPage() {
   }
 
   const skipAutoFetchRef = useRef(false)
-  // 递增令牌：openEdit 触发的模板异步回填在 .then 中比对，若对话框已切到别的频道则丢弃，
-  // 避免陈旧回填串改其他频道的表单（与上方 cancelled 取消防护同一思路）。
-  const channelEditTokenRef = useRef(0)
+  // 递增令牌：openEdit 触发的模板异步回填在 .then 中比对，若对话框已切到别的项目则丢弃，
+  // 避免陈旧回填串改其他项目的表单（与上方 cancelled 取消防护同一思路）。
+  const projectEditTokenRef = useRef(0)
 
   useEffect(() => {
     if (skipAutoFetchRef.current) {
@@ -180,14 +181,14 @@ export default function ChannelsPage() {
   useEffect(() => {
     if (!modalOpen || !referenceImageUrl || selectedPlatform !== 'seednote') return
     if (styleManuallyEditedRef.current) return
-    // Skip if URL matches the channel's saved value — don't clobber existing style on edit
-    if (editingChannel && referenceImageUrl === editingChannel.reference_image_url) return
+    // Skip if URL matches the project's saved value — don't clobber existing style on edit
+    if (editingProject && referenceImageUrl === editingProject.reference_image_url) return
 
     let cancelled = false
     const timer = setTimeout(async () => {
       setAnalyzingStyle(true)
       try {
-        const result = await api.channels.analyzeImage(referenceImageUrl)
+        const result = await api.projects.analyzeImage(referenceImageUrl)
         if (!cancelled && result.style && !styleManuallyEditedRef.current) {
           form.setValue('style', result.style)
         }
@@ -201,7 +202,7 @@ export default function ChannelsPage() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [modalOpen, referenceImageUrl, selectedPlatform, editingChannel, form])
+  }, [modalOpen, referenceImageUrl, selectedPlatform, editingProject, form])
 
   // Reset manual-edit flag when modal reopens
   useEffect(() => {
@@ -219,135 +220,135 @@ export default function ChannelsPage() {
     try {
       const appId = form.getValues('wechat_app_id')
       const secret = form.getValues('wechat_secret')
-      const profile = await api.channels.fetchProfile(selectedPlatform, url, appId, secret)
+      const profile = await api.projects.fetchProfile(selectedPlatform, url, appId, secret)
       if (profile.name) form.setValue('name', profile.name)
       if (profile.avatar_url) form.setValue('avatar_url', profile.avatar_url)
       if (profile.positioning) form.setValue('positioning', profile.positioning)
       if (profile.keywords) form.setValue('keywords', profile.keywords)
       if (profile.style) form.setValue('style', profile.style)
-      setProfileFetchHint('已更新账号信息')
+      setProfileFetchHint('已更新项目信息')
       if (!options?.silent) {
-        toast.success('已自动获取账号信息')
+        toast.success('已自动获取项目信息')
       }
     } catch {
       setProfileFetchHint('暂时无法自动获取，请继续手动填写')
       if (!options?.silent) {
-        toast.error('获取账号信息失败，请手动填写')
+        toast.error('获取项目信息失败，请手动填写')
       }
     } finally {
       setFetchingProfile(false)
     }
   }
 
-  const { data: channels, isLoading, isError, refetch } = useQuery({
-    queryKey: ['channels', statusFilter],
+  const { data: projects, isLoading, isError, refetch } = useQuery({
+    queryKey: ['projects', statusFilter],
     queryFn: () =>
-      api.channels.list({
+      api.projects.list({
         status: statusFilter === 'all' ? undefined : statusFilter,
       }),
   })
 
-  const filteredChannels = useMemo(() => {
-    if (!channels) return []
-    if (!searchFilter.trim()) return channels
+  const filteredProjects = useMemo(() => {
+    if (!projects) return []
+    if (!searchFilter.trim()) return projects
     const q = searchFilter.toLowerCase()
-    return channels.filter((ch) => ch.name.toLowerCase().includes(q))
-  }, [channels, searchFilter])
+    return projects.filter((ch) => ch.name.toLowerCase().includes(q))
+  }, [projects, searchFilter])
 
-  const { data: channelStats = {} } = useQuery({
-    queryKey: ['channel-stats', statusFilter, channels?.map((channel) => channel.id).join(',')],
+  const { data: projectStats = {} } = useQuery({
+    queryKey: ['project-stats', statusFilter, projects?.map((project) => project.id).join(',')],
     queryFn: async () => {
-      if (!channels || channels.length === 0) return {} as Record<string, ChannelStats>
-      return api.channels.stats(channels.map((channel) => channel.id))
+      if (!projects || projects.length === 0) return {} as Record<string, ProjectStats>
+      return api.projects.stats(projects.map((project) => project.id))
     },
-    enabled: Boolean(channels && channels.length > 0),
+    enabled: Boolean(projects && projects.length > 0),
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: CreateChannelRequest) => api.channels.create(data),
+    mutationFn: (data: CreateProjectRequest) => api.projects.create(data),
     onSuccess: () => {
-      toast.success('账号创建成功')
-      queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
+      toast.success('项目创建成功')
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       resetModal()
     },
     onError: (err) => {
-      toast.error(getApiErrorMessage(err, '创建账号失败，请重试'))
+      toast.error(getApiErrorMessage(err, '创建项目失败，请重试'))
     },
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<CreateChannelRequest> }) =>
-      api.channels.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: Partial<CreateProjectRequest> }) =>
+      api.projects.update(id, data),
     onSuccess: () => {
-      toast.success('账号更新成功')
-      queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
+      toast.success('项目更新成功')
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       resetModal()
     },
     onError: () => {
-      toast.error('更新账号失败，请重试')
+      toast.error('更新项目失败，请重试')
     },
   })
 
   const archiveMutation = useMutation({
-    mutationFn: (id: string) => api.channels.archive(id),
+    mutationFn: (id: string) => api.projects.archive(id),
     onSuccess: () => {
-      toast.success('账号已归档')
-      queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
+      toast.success('项目已归档')
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
   })
 
   const restoreMutation = useMutation({
-    mutationFn: (id: string) => api.channels.restore(id),
+    mutationFn: (id: string) => api.projects.restore(id),
     onSuccess: () => {
-      toast.success('账号已恢复')
-      queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
+      toast.success('项目已恢复')
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.channels.delete(id),
+    mutationFn: (id: string) => api.projects.delete(id),
     onSuccess: () => {
-      toast.success('账号已删除')
-      queryClient.invalidateQueries({ queryKey: ['channels'] })
-      queryClient.invalidateQueries({ queryKey: ['channel-stats'] })
+      toast.success('项目已删除')
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       setDeleteTarget(null)
     },
     onError: () => {
-      toast.error('删除账号失败，请重试')
+      toast.error('删除项目失败，请重试')
     },
   })
 
   function openCreate() {
-    setEditingChannel(null)
+    setEditingProject(null)
     setProfileFetchHint(null)
     form.reset(CHANNEL_FORM_DEFAULTS)
     setSelectedTemplate(null)
     setModalOpen(true)
   }
 
-  function openEdit(channel: Channel) {
-    setEditingChannel(channel)
+  function openEdit(project: Project) {
+    setEditingProject(project)
     setProfileFetchHint(null)
-    form.reset(channelToForm(channel))
+    form.reset(projectToForm(project))
     skipAutoFetchRef.current = true
     setSelectedTemplate(null)
     setModalOpen(true)
 
-    // 导入模型存量兼容：旧"绑定模板"频道的人设字段历史上为空（运行时由模板下发）。
+    // 导入模型存量兼容：旧"绑定模板"项目的人设字段历史上为空（运行时由模板下发）。
     // 打开编辑时把模板人设作为默认值回填到当前为空的字段，让用户看到生效中的人设并可
-    // 编辑。保存后 template_id 由后端清空（迁移为频道自有值）。shouldDirty:false 避免
+    // 编辑。保存后 template_id 由后端清空（迁移为项目自有值）。shouldDirty:false 避免
     // 未改动时触发脏检查弹窗。模板已删则静默留空，用户可手动选其他模板。
-    if (channel.template_id) {
-      const token = ++channelEditTokenRef.current
+    if (project.template_id) {
+      const token = ++projectEditTokenRef.current
       api.templates
-        .get(channel.template_id)
+        .get(project.template_id)
         .then((t) => {
-          // 对话框已切到别的频道（或重开）则丢弃这条陈旧回填，避免串改。
-          if (channelEditTokenRef.current !== token) return
+          // 对话框已切到别的项目（或重开）则丢弃这条陈旧回填，避免串改。
+          if (projectEditTokenRef.current !== token) return
           setSelectedTemplate(t)
           if (!form.getValues('style')) form.setValue('style', t.style_prompt || '', { shouldDirty: false })
           if (!form.getValues('author')) form.setValue('author', t.author_name || '', { shouldDirty: false })
@@ -372,7 +373,7 @@ export default function ChannelsPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    setEditingChannel(null)
+    setEditingProject(null)
     setProfileFetchHint(null)
     setSelectedTemplate(null)
     form.reset(CHANNEL_FORM_DEFAULTS)
@@ -380,7 +381,7 @@ export default function ChannelsPage() {
 
   // 选模板=一次性把模板风格导入表单（视觉/作者/写作风格/排版，可编辑）。再次点击同一
   // 卡片为 no-op（保留用户对风格文本框的改动），切换到别的模板则覆盖。
-  function handleChannelTemplateImport(template: Template) {
+  function handleProjectTemplateImport(template: Template) {
     if (selectedTemplate?.id === template.id) return
     setSelectedTemplate(template)
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
@@ -390,8 +391,8 @@ export default function ChannelsPage() {
     form.setValue('theme', template.theme || '', { shouldDirty: true })
   }
 
-  async function onSubmit(values: ChannelFormValues) {
-    const payload: CreateChannelRequest = {
+  async function onSubmit(values: ProjectFormValues) {
+    const payload: CreateProjectRequest = {
       platform: values.platform,
       name: values.name?.trim() || undefined,
       profile_url: values.profile_url?.trim() || undefined,
@@ -404,8 +405,8 @@ export default function ChannelsPage() {
       author: values.author?.trim() || undefined,
       author_style_intro: values.author_style_intro?.trim() || undefined,
       author_avatar_url: values.author_avatar_url?.trim() || undefined,
-      // 导入模型：频道 Owns 自己的人设。不发送 template_id——后端 Update 无条件清空，
-      // 存量"绑定模板"频道保存后即迁移为自有值（运行时 task>template>channel 解析）。
+      // 导入模型：项目 Owns 自己的人设。不发送 template_id——后端 Update 无条件清空，
+      // 存量"绑定模板"项目保存后即迁移为自有值（运行时 task>template>project 解析）。
       reference_image_url: values.reference_image_url?.trim() || undefined,
       image_ratio: values.image_ratio || undefined,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
@@ -426,8 +427,8 @@ export default function ChannelsPage() {
     if (!values.enable_publishing) {
       payload.enable_publishing = false
     }
-    if (editingChannel) {
-      await submit(async () => updateMutation.mutateAsync({ id: editingChannel.id, data: payload }))
+    if (editingProject) {
+      await submit(async () => updateMutation.mutateAsync({ id: editingProject.id, data: payload }))
     } else {
       await submit(async () => createMutation.mutateAsync(payload))
     }
@@ -440,13 +441,14 @@ export default function ChannelsPage() {
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   const isWechat = selectedPlatform === 'article'
   const isSeednote = selectedPlatform === 'seednote'
+  const isEcommerce = selectedPlatform === 'ecommerce'
 
   return (
     <div className="space-y-6">
-      <PageHeader title="账号" description="管理你的内容账号和发布配置。">
+      <PageHeader title="项目" description="管理你的内容项目和发布配置。">
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4" />
-          新建账号
+          新建项目
         </Button>
       </PageHeader>
 
@@ -468,7 +470,7 @@ export default function ChannelsPage() {
       <SearchInput
         value={searchFilter}
         onChange={setSearchFilter}
-        placeholder="搜索账号名称..."
+        placeholder="搜索项目名称..."
         className="w-full max-w-xs"
       />
 
@@ -494,21 +496,21 @@ export default function ChannelsPage() {
             </div>
           ))}
         </div>
-      ) : filteredChannels.length === 0 ? (
+      ) : filteredProjects.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title={!channels?.length ? (statusFilter === 'all' ? '还没有账号' : statusFilter === 'active' ? '没有活跃的账号' : '没有已归档的账号') : '未找到匹配的账号'}
-          description={!channels?.length ? '创建你的第一个内容账号开始创作。' : '尝试其他搜索关键词'}
-          action={!channels?.length ? { label: '新建账号', onClick: openCreate } : undefined}
-          note={!channels?.length ? '配置好账号后，任务和计划都会自动继承对应的平台参数。' : undefined}
+          title={!projects?.length ? (statusFilter === 'all' ? '还没有项目' : statusFilter === 'active' ? '没有活跃的项目' : '没有已归档的项目') : '未找到匹配的项目'}
+          description={!projects?.length ? '创建你的第一个内容项目开始创作。' : '尝试其他搜索关键词'}
+          action={!projects?.length ? { label: '新建项目', onClick: openCreate } : undefined}
+          note={!projects?.length ? '配置好项目后，任务和计划都会自动继承对应的平台参数。' : undefined}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredChannels.map((channel) => (
-            <ChannelCard
-              key={channel.id}
-              channel={channel}
-              stats={channelStats[channel.id]}
+          {filteredProjects.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              stats={projectStats[project.id]}
               onEdit={openEdit}
               archiving={archiveMutation.isPending}
               restoring={restoreMutation.isPending}
@@ -524,10 +526,10 @@ export default function ChannelsPage() {
       <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editingChannel ? '编辑账号' : '新建账号'}</DialogTitle>
+            <DialogTitle>{editingProject ? '编辑项目' : '新建项目'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
-            <form id="channel-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto p-1">
+            <form id="project-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="platform" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">平台</FormLabel>
@@ -540,7 +542,7 @@ export default function ChannelsPage() {
                         form.setValue('wechat_secret', '')
                         form.setValue('enable_publishing', false)
                       }}
-                      disabled={!!editingChannel}
+                      disabled={!!editingProject}
                     >
                       <SelectTrigger className="w-full">
                         {selectedPlatform ? (
@@ -571,7 +573,7 @@ export default function ChannelsPage() {
               {hasProfileField && <FormField control={form.control} name="profile_url" render={({ field }) => (
                 <FormItem>
                   <div className="flex items-start gap-3">
-                    <FormLabel className="shrink-0 w-20 text-right pt-2">账号主页</FormLabel>
+                    <FormLabel className="shrink-0 w-20 text-right pt-2">项目主页</FormLabel>
                     <FormControl>
                       <div className="flex gap-2 flex-1">
                         <Textarea
@@ -596,7 +598,7 @@ export default function ChannelsPage() {
                   </div>
                   {currentPlatformConfig?.supports_auto_fetch && (
                     <FormDescription>
-                      {profileFetchHint || '粘贴种草笔记分享文本后会自动提取链接、分析账号和代表作品。'}
+                      {profileFetchHint || '粘贴种草笔记分享文本后会自动提取链接、分析项目和代表作品。'}
                     </FormDescription>
                   )}
                   <FormMessage />
@@ -605,7 +607,7 @@ export default function ChannelsPage() {
 
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
-                  <FormLabel className="shrink-0 w-20 text-right">账号名称</FormLabel>
+                  <FormLabel className="shrink-0 w-20 text-right">项目名称</FormLabel>
                   <FormControl>
                     <Input className="flex-1 min-w-0" placeholder="例如 我的科技博客" {...field} />
                   </FormControl>
@@ -625,7 +627,7 @@ export default function ChannelsPage() {
 
               <FormField control={form.control} name="positioning" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>账号定位</FormLabel>
+                  <FormLabel>项目定位</FormLabel>
                   <FormControl>
                     <Textarea placeholder="例如 面向开发者的实用 AI 教程" {...field} />
                   </FormControl>
@@ -688,11 +690,11 @@ export default function ChannelsPage() {
                           <FormControl>
                             <Input
                               type="password"
-                              placeholder={editingChannel ? '留空则保持原有密钥不变' : '创建后不可查看'}
+                              placeholder={editingProject ? '留空则保持原有密钥不变' : '创建后不可查看'}
                               {...field}
                             />
                           </FormControl>
-                          {editingChannel && (
+                          {editingProject && (
                             <FormDescription>留空则保持原有密钥不变</FormDescription>
                           )}
                           <FormMessage />
@@ -726,11 +728,11 @@ export default function ChannelsPage() {
                 <FormItem>
                   <div className="flex items-center justify-between gap-2">
                     <FormLabel>视觉风格</FormLabel>
-                    {isSeednote && (
+                    {(isSeednote || isEcommerce) && (
                       <ReferenceImageUpload
                         value={referenceImageUrl}
                         onChange={(url) => form.setValue('reference_image_url', url, { shouldDirty: true })}
-                        purpose="channel"
+                        purpose="project"
                         compact
                       />
                     )}
@@ -756,27 +758,38 @@ export default function ChannelsPage() {
                           <p className="text-xs text-muted-foreground">正在分析参考图...</p>
                         )}
                       </div>
+                    ) : isEcommerce ? (
+                      <Textarea
+                        placeholder="描述品牌视觉风格基线，如：高端极简白底、国潮暖橙插画、电商爆款高饱和促销感。作为主图/详情/封面跨图一致的视觉锚点"
+                        {...field}
+                      />
                     ) : (
                       <Textarea
-                        placeholder="描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由账号定位与内容主题三维分析自动确定"
+                        placeholder="描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由项目定位与内容主题三维分析自动确定"
                         {...field}
                       />
                     )}
                   </FormControl>
-                  <FormDescription>{isSeednote ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示' : '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'}</FormDescription>
+                  <FormDescription>
+                    {isSeednote
+                      ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示'
+                      : isEcommerce
+                        ? '品牌视觉维度——作为电商素材跨图一致的视觉基线（产品图在任务级上传）'
+                        : '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />
 
-              {!isSeednote && (
+              {isWechat && (
                 <>
                   {/* 公众号模板：像小红书一样左右滑动选模板；选中后一次性把视觉/作者/写作
-                      风格/排版导入表单，可继续自行调整（导入模型，频道 Owns 自己的人设）。
-                      运行时解析优先级：task > task-template > plan > channel 自身。 */}
-                  <TemplatePicker type="article" selected={selectedTemplate} onSelect={handleChannelTemplateImport} />
+                      风格/排版导入表单，可继续自行调整（导入模型，项目 Owns 自己的人设）。
+                      运行时解析优先级：task > task-template > plan > project 自身。 */}
+                  <TemplatePicker type="article" selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
 
                   {/* 写作风格（作者署名 + 写作风格模仿 + 可选头像）与排版：始终可编辑，
-                      绑定到频道自身字段。选模板后自动填入，用户可覆盖。 */}
+                      绑定到项目自身字段。选模板后自动填入，用户可覆盖。 */}
                   <PersonaBlock
                     authorName={authorName ?? ''}
                     onAuthorName={(v) => form.setValue('author', v, { shouldDirty: true })}
@@ -803,8 +816,8 @@ export default function ChannelsPage() {
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="channel-form" loading={isSubmitting}>
-              {editingChannel ? '更新' : '创建'}
+            <Button type="submit" form="project-form" loading={isSubmitting}>
+              {editingProject ? '更新' : '创建'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -814,8 +827,8 @@ export default function ChannelsPage() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确定要删除此账号吗？</AlertDialogTitle>
-            <AlertDialogDescription>此操作不可撤销。删除后账号及其所有配置将永久移除。</AlertDialogDescription>
+            <AlertDialogTitle>确定要删除此项目吗？</AlertDialogTitle>
+            <AlertDialogDescription>此操作不可撤销。删除后项目及其所有配置将永久移除。</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>

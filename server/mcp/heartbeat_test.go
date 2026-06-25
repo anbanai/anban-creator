@@ -122,7 +122,7 @@ func TestStartProgressHeartbeat_StopsOnContextCancel(t *testing.T) {
 // TestStartProgressHeartbeat_StopIsIdempotent verifies the returned stop
 // function can be called multiple times without panicking. Important because
 // callers may legitimately double-defer (e.g., explicit stop + defer stop).
-// Regression guard for the close-on-already-closed-channel panic.
+// Regression guard for the close-on-already-closed-project panic.
 func TestStartProgressHeartbeat_StopIsIdempotent(t *testing.T) {
 	fake := &fakeNotifier{}
 	stop := startProgressHeartbeat(context.Background(), fake, "tok-1", "write_article", time.Second)

@@ -54,7 +54,7 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := uuid.New().String()
+	projectID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      "prompt-limit@example.com",
@@ -63,14 +63,14 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{
-		ID:       channelID,
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
 		UserID:   userID,
 		Platform: model.PlatformSeednote,
 		Name:     "Seednote",
-		Status:   model.ChannelStatusActive,
+		Status:   model.ProjectStatusActive,
 	}); err != nil {
-		t.Fatalf("create channel: %v", err)
+		t.Fatalf("create project: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -95,7 +95,7 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body := `{"channel_id":"` + channelID + `","prompt":"` + tt.prompt + `"}`
+			body := `{"project_id":"` + projectID + `","prompt":"` + tt.prompt + `"}`
 			req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 
@@ -118,7 +118,7 @@ func TestCreateTask_TemplateIDValidation(t *testing.T) {
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := uuid.New().String()
+	projectID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      "tmpl-validate@example.com",
@@ -127,14 +127,14 @@ func TestCreateTask_TemplateIDValidation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{
-		ID:       channelID,
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
 		UserID:   userID,
 		Platform: model.PlatformSeednote,
 		Name:     "Seednote",
-		Status:   model.ChannelStatusActive,
+		Status:   model.ProjectStatusActive,
 	}); err != nil {
-		t.Fatalf("create channel: %v", err)
+		t.Fatalf("create project: %v", err)
 	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -148,7 +148,7 @@ func TestCreateTask_TemplateIDValidation(t *testing.T) {
 	})
 
 	t.Run("rejects malformed template_id", func(t *testing.T) {
-		body := `{"channel_id":"` + channelID + `","template_id":"not-a-uuid"}`
+		body := `{"project_id":"` + projectID + `","template_id":"not-a-uuid"}`
 		req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 
@@ -163,7 +163,7 @@ func TestCreateTask_TemplateIDValidation(t *testing.T) {
 
 	t.Run("accepts valid template_id and persists it", func(t *testing.T) {
 		templateID := uuid.New().String()
-		body := `{"channel_id":"` + channelID + `","template_id":"` + templateID + `"}`
+		body := `{"project_id":"` + projectID + `","template_id":"` + templateID + `"}`
 		req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 
@@ -193,7 +193,7 @@ func TestCreateTask_TemplateIDValidation(t *testing.T) {
 	})
 
 	t.Run("omits template_id when not provided", func(t *testing.T) {
-		body := `{"channel_id":"` + channelID + `"}`
+		body := `{"project_id":"` + projectID + `"}`
 		req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 
@@ -216,7 +216,7 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := uuid.New().String()
+	projectID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
 		Email:      "tier-forbidden@example.com",
@@ -226,14 +226,14 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{
-		ID:       channelID,
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
 		UserID:   userID,
 		Platform: model.PlatformSeednote,
 		Name:     "Seednote",
-		Status:   model.ChannelStatusActive,
+		Status:   model.ProjectStatusActive,
 	}); err != nil {
-		t.Fatalf("create channel: %v", err)
+		t.Fatalf("create project: %v", err)
 	}
 
 	presets := []config.ImageModelPreset{
@@ -260,27 +260,27 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 	}{
 		{
 			name:       "free tier + free preset accepted",
-			body:       `{"channel_id":"` + channelID + `","image_model_key":"volcengine-standard"}`,
+			body:       `{"project_id":"` + projectID + `","image_model_key":"volcengine-standard"}`,
 			wantStatus: fiber.StatusOK,
 		},
 		{
 			name:       "free tier + empty key accepted",
-			body:       `{"channel_id":"` + channelID + `"}`,
+			body:       `{"project_id":"` + projectID + `"}`,
 			wantStatus: fiber.StatusOK,
 		},
 		{
 			name:       "free tier + pro preset rejected",
-			body:       `{"channel_id":"` + channelID + `","image_model_key":"gemini-pro"}`,
+			body:       `{"project_id":"` + projectID + `","image_model_key":"gemini-pro"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 		{
 			name:       "free tier + custom rejected",
-			body:       `{"channel_id":"` + channelID + `","image_model_key":"custom"}`,
+			body:       `{"project_id":"` + projectID + `","image_model_key":"custom"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 		{
 			name:       "free tier + unknown key rejected",
-			body:       `{"channel_id":"` + channelID + `","image_model_key":"made-up"}`,
+			body:       `{"project_id":"` + projectID + `","image_model_key":"made-up"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 	}

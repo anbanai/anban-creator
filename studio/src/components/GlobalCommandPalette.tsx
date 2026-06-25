@@ -15,7 +15,7 @@ import { allNavItems, type NavItem } from '@/lib/navigation'
 
 const shortcutMap: Record<string, string> = {
   '仪表盘': 'g d',
-  '账号': 'g c',
+  '项目': 'g c',
   '计划': 'g p',
   '任务': 'g t',
   '时间轴': 'g l',
@@ -82,9 +82,9 @@ export default function GlobalCommandPalette() {
             <span className="mr-2 text-primary">+</span>
             新建任务
           </CommandItem>
-          <CommandItem onSelect={() => handleSelect(() => navigate('/channels'))}>
+          <CommandItem onSelect={() => handleSelect(() => navigate('/projects'))}>
             <span className="mr-2 text-primary">+</span>
-            新建账号
+            新建项目
           </CommandItem>
           <CommandItem onSelect={() => handleSelect(() => setTheme('light'))}>
             亮色模式

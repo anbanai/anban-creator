@@ -18,7 +18,7 @@ import {
   SelectItem,
 } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
-import { ReferenceImageUpload } from '@/components/channels/ReferenceImageUpload'
+import { ReferenceImageUpload } from '@/components/projects/ReferenceImageUpload'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
 import { ThemePicker } from '@/components/templates/ThemePicker'
 import type { Template, TemplateType, TemplateVisibility, CreateTemplateRequest, UpdateTemplateRequest } from '@/types'
@@ -74,7 +74,7 @@ export function TemplateCreateDialog({
   const [analyzing, setAnalyzing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   // Content scaffold (optional, separate from visual style_prompt). The agent
-  // receives these via get_channel_profile(task_id) as template_writing_style /
+  // receives these via get_project_profile(task_id) as template_writing_style /
   // template_structure / template_example. structure/example wrap as
   // { text: <markdown> } on submit (matches the backend JSON column shape).
   const [writingStyle, setWritingStyle] = useState('')
@@ -88,11 +88,11 @@ export function TemplateCreateDialog({
   // the existing tags joined by ", ".
   const [tagsText, setTagsText] = useState('')
   // 公众号 (article) 写作风格 — 统一区块（名称即署名 + 写作风格 + 可选头像）：
-  //   - authorName：名称 = 发布作者名（get_channel_profile.author，precedence
-  //     template > channel）。
+  //   - authorName：名称 = 发布作者名（get_project_profile.author，precedence
+  //     template > project）。
   //   - authorStyleIntro：写作风格（自由文本 框架/写作方式/笔迹）= template_writing_style。
   //   - authorAvatarUrl：可选头像（不入署名）。三者聚合在 PersonaBlock，
-  //     可从写作风格库一键导入；与公众号频道编辑器 UI 完全一致。
+  //     可从写作风格库一键导入；与公众号项目编辑器 UI 完全一致。
   const [authorName, setAuthorName] = useState('')
   const [authorAvatarUrl, setAuthorAvatarUrl] = useState('')
   const [authorStyleIntro, setAuthorStyleIntro] = useState('')
@@ -165,7 +165,7 @@ export function TemplateCreateDialog({
     const reqId = ++analyzeReqIdRef.current
     setAnalyzing(true)
     try {
-      const res = await api.channels.analyzeImage(imageUrl)
+      const res = await api.projects.analyzeImage(imageUrl)
       if (reqId !== analyzeReqIdRef.current) return
       if (!res.style) return
       setStylePrompt((prev) => (force || !prev.trim()) ? res.style : prev)
@@ -496,7 +496,7 @@ export function TemplateCreateDialog({
           {/* 公众号 (article) — 写作风格（名称即署名 + 写作风格 + 可选头像，统一区块）
               + 排版风格（实时预览）。名称落到 author_name（=发布作者名），写作风格落到
               author_style_intro（=template_writing_style）。二者共用 PersonaBlock /
-              ThemePicker，与公众号频道编辑器 UI 完全一致。 */}
+              ThemePicker，与公众号项目编辑器 UI 完全一致。 */}
           {type === 'article' && (
             <>
               <PersonaBlock

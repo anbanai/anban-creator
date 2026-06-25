@@ -58,7 +58,7 @@ func NewDesignerService(
 }
 
 type DesignerGenerateRequest struct {
-	ChannelID         string   `json:"channel_id"`
+	ProjectID         string   `json:"project_id"`
 	Prompt            string   `json:"prompt"`
 	Provider          string   `json:"provider"`
 	ProviderID        string   `json:"provider_id,omitempty"`
@@ -80,8 +80,8 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	if req.Prompt == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
-	if req.ChannelID == "" {
-		req.ChannelID = "default"
+	if req.ProjectID == "" {
+		req.ProjectID = "default"
 	}
 	if req.N < 1 {
 		req.N = 1
@@ -147,7 +147,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 	gen := &model.ImageGeneration{
 		ID:                genID,
 		UserID:            userID,
-		ChannelID:         req.ChannelID,
+		ProjectID:         req.ProjectID,
 		Prompt:            req.Prompt,
 		Provider:          provider,
 		ProviderID:        req.ProviderID,
@@ -595,7 +595,7 @@ func (s *DesignerService) UploadReferenceFromURL(ctx context.Context, userID, ra
 	return s.registerReferenceFile(ctx, userID, "source"+ext, data)
 }
 
-func (s *DesignerService) GetHistory(ctx context.Context, userID, channelID string, page, pageSize int) ([]model.ImageGeneration, int64, error) {
+func (s *DesignerService) GetHistory(ctx context.Context, userID, projectID string, page, pageSize int) ([]model.ImageGeneration, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -607,8 +607,8 @@ func (s *DesignerService) GetHistory(ctx context.Context, userID, channelID stri
 	var generations []model.ImageGeneration
 
 	query := s.db.Where("user_id = ?", userID)
-	if channelID != "" {
-		query = query.Where("channel_id = ?", channelID)
+	if projectID != "" {
+		query = query.Where("project_id = ?", projectID)
 	}
 
 	if err := query.Model(&model.ImageGeneration{}).Count(&total).Error; err != nil {

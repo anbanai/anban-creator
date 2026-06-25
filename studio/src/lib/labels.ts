@@ -213,6 +213,7 @@ export const operationLabel: Record<string, string> = {
 export const taskTypeLabelCN: Record<string, string> = {
   article: '公众号',
   seednote: '种草笔记',
+  ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
 }
 
@@ -221,6 +222,7 @@ export const taskTypeLabelCN: Record<string, string> = {
 export const contentTypeLabel: Record<string, string> = {
   seednote: '种草笔记',
   article: '公众号文章',
+  ecommerce: '电商素材',
 }
 
 // Pipeline stage → 中文标签。stage 取值来自 server/service/task_progress_stages.go
@@ -239,7 +241,7 @@ export const progressStageLabel: Record<string, string> = {
   html: 'HTML 转换',
   draft: '草稿提交',
   // seednote-only
-  channel: '账号信息',
+  project: '项目信息',
   viral_analysis: '爆文拆解',
   image_generation: '图片生成',
   compliance: '合规检查',
@@ -250,22 +252,65 @@ export const progressStageLabel: Record<string, string> = {
 export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
+  { value: 'ecommerce', label: '电商出图' },
 ]
 
 export const platformLabels: Record<string, string> = {
   seednote: '种草笔记',
   article: '公众号',
+  ecommerce: '电商出图',
 }
 
 export const platformDefaultRatio: Record<string, string> = {
   article: '16:9',
   seednote: '3:4',
+  ecommerce: '1:1',
 }
 
 export const platformRatioLabel: Record<string, string> = {
   article: '16:9（公众号默认）',
   seednote: '3:4（种草笔记默认）',
+  ecommerce: '1:1（电商主图默认）',
 }
+
+// --- E-commerce module catalog ---
+// Keys match server credits.ecommerce_module_prices + model.EcommerceConfig.SelectedModules.
+// `defaultQty` is the suggested quantity when the module is toggled on; the live
+// credit estimate sums price × qty over the enabled modules using pricing data.
+
+export interface EcommerceModuleDef {
+  key: string
+  label: string
+  hint: string
+  ratio: string
+  defaultQty: number
+  minQty: number
+  maxQty: number
+  qtyStep: number
+  qtyLabel: string
+}
+
+export const ecommerceModuleCatalog: EcommerceModuleDef[] = [
+  { key: 'main_images', label: '主图套', hint: '点击主图 + 细节/场景/对比/资质', ratio: '1:1', defaultQty: 5, minQty: 1, maxQty: 10, qtyStep: 1, qtyLabel: '张' },
+  { key: 'detail_page', label: '详情页（商详）', hint: '黄金结构叙事节拍，移动优先', ratio: '3:4', defaultQty: 8, minQty: 1, maxQty: 20, qtyStep: 1, qtyLabel: '节' },
+  { key: 'cover_banner', label: '封面 / 类目 banner', hint: '品牌氛围 + 类目信息', ratio: '16:9', defaultQty: 1, minQty: 1, maxQty: 5, qtyStep: 1, qtyLabel: '张' },
+  { key: 'share_image', label: '分享图', hint: '社交钩子，站外引流', ratio: '1:1', defaultQty: 1, minQty: 1, maxQty: 5, qtyStep: 1, qtyLabel: '张' },
+  { key: 'sku_images', label: 'SKU 变体图', hint: '同构不同色/款', ratio: '1:1', defaultQty: 1, minQty: 1, maxQty: 20, qtyStep: 1, qtyLabel: '张' },
+]
+
+// Target sales platform — informs size/compliance spec injected into the agent.
+export const ecommerceTargetPlatformOptions = [
+  { value: 'taobao', label: '淘宝 / 天猫' },
+  { value: 'jd', label: '京东' },
+  { value: 'douyin', label: '抖音电商' },
+  { value: 'xhs', label: '小红书电商' },
+  { value: 'general', label: '通用' },
+]
+
+export const ecommerceLanguageOptions = [
+  { value: 'zh', label: '中文' },
+  { value: 'en', label: 'English' },
+]
 
 // --- Option Arrays ---
 

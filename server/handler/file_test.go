@@ -13,7 +13,7 @@ func setupFileHandlerTest(userID string) *fiber.App {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeStorageProvider{data: map[string][]byte{
 		"user-1/designer/gen-1/0.png":              []byte("png-bytes"),
-		"uploads/channels/user-1/ref.png":          []byte("channel-png"),
+		"uploads/projects/user-1/ref.png":          []byte("project-png"),
 		"uploads/references/user-1/source.png":     []byte("ref-png"),
 		"user-2/designer/gen-2/0.png":              []byte("other-user-png"),
 		"user-1/anbanwriter_ref_fileid_source.png": []byte("ref-bytes"),
@@ -61,7 +61,7 @@ func TestServeFile_StillAllowsUploadsPath(t *testing.T) {
 	app := setupFileHandlerTest("user-1")
 
 	for _, path := range []string{
-		"/files/uploads/channels/user-1/ref.png",
+		"/files/uploads/projects/user-1/ref.png",
 		"/files/uploads/references/user-1/source.png",
 	} {
 		resp, err := app.Test(httptest.NewRequest("GET", path, nil))

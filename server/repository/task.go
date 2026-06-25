@@ -31,11 +31,11 @@ func (r *taskRepository) FindByID(ctx context.Context, id string) (*model.Task, 
 	return &task, nil
 }
 
-func (r *taskRepository) FindByUserID(ctx context.Context, userID string, channelID string, offset, limit int) ([]*model.Task, error) {
+func (r *taskRepository) FindByUserID(ctx context.Context, userID string, projectID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
 	q := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC")
-	if channelID != "" {
-		q = q.Where("channel_id = ?", channelID)
+	if projectID != "" {
+		q = q.Where("project_id = ?", projectID)
 	}
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
@@ -46,11 +46,11 @@ func (r *taskRepository) FindByUserID(ctx context.Context, userID string, channe
 	return tasks, nil
 }
 
-func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, channelID string, offset, limit int) ([]*model.Task, error) {
+func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
 	q := r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, status).Order("created_at DESC")
-	if channelID != "" {
-		q = q.Where("channel_id = ?", channelID)
+	if projectID != "" {
+		q = q.Where("project_id = ?", projectID)
 	}
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
@@ -93,13 +93,13 @@ func (r *taskRepository) FindRunning(ctx context.Context) ([]*model.Task, error)
 	return tasks, nil
 }
 
-func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string, channelID string) ([]*model.Task, error) {
+func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string, projectID string) ([]*model.Task, error) {
 	var tasks []*model.Task
 	q := r.db.WithContext(ctx).
 		Where("user_id = ?", userID).
 		Where("status = ?", model.TaskStatusRunning)
-	if channelID != "" {
-		q = q.Where("channel_id = ?", channelID)
+	if projectID != "" {
+		q = q.Where("project_id = ?", projectID)
 	}
 	if err := q.Find(&tasks).Error; err != nil {
 		return nil, err
@@ -234,11 +234,11 @@ func (r *taskRepository) UpdateHeartbeat(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("last_heartbeat_at", now).Error
 }
 
-func (r *taskRepository) CountByUserID(ctx context.Context, userID string, channelID string) (int64, error) {
+func (r *taskRepository) CountByUserID(ctx context.Context, userID string, projectID string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ?", userID)
-	if channelID != "" {
-		q = q.Where("channel_id = ?", channelID)
+	if projectID != "" {
+		q = q.Where("project_id = ?", projectID)
 	}
 	if err := q.Count(&count).Error; err != nil {
 		return 0, err
@@ -246,11 +246,11 @@ func (r *taskRepository) CountByUserID(ctx context.Context, userID string, chann
 	return count, nil
 }
 
-func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, status string, channelID string) (int64, error) {
+func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, status string, projectID string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ? AND status = ?", userID, status)
-	if channelID != "" {
-		q = q.Where("channel_id = ?", channelID)
+	if projectID != "" {
+		q = q.Where("project_id = ?", projectID)
 	}
 	if err := q.Count(&count).Error; err != nil {
 		return 0, err
@@ -258,18 +258,18 @@ func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, sta
 	return count, nil
 }
 
-func (r *taskRepository) CountRunningByChannel(ctx context.Context, channelID string) (int64, error) {
+func (r *taskRepository) CountRunningByProject(ctx context.Context, projectID string) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.Task{}).
-		Where("channel_id = ? AND status = ?", channelID, model.TaskStatusRunning).
+		Where("project_id = ? AND status = ?", projectID, model.TaskStatusRunning).
 		Count(&count).Error
 	return count, err
 }
 
-func (r *taskRepository) FindPendingByChannel(ctx context.Context, channelID string, limit int) ([]*model.Task, error) {
+func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID string, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
 	err := r.db.WithContext(ctx).
-		Where("channel_id = ? AND status = ?", channelID, model.TaskStatusPending).
+		Where("project_id = ? AND status = ?", projectID, model.TaskStatusPending).
 		Where("NOT (retry_count > 0 AND updated_at > DATE_SUB(NOW(), INTERVAL 2 MINUTE))").
 		Order("created_at ASC").
 		Limit(limit).
@@ -277,12 +277,12 @@ func (r *taskRepository) FindPendingByChannel(ctx context.Context, channelID str
 	return tasks, err
 }
 
-// FindTitlesByChannelID returns all recorded titles for a channel, ordered by creation time descending.
-func (r *taskRepository) FindTitlesByChannelID(ctx context.Context, channelID string) ([]string, error) {
+// FindTitlesByProjectID returns all recorded titles for a project, ordered by creation time descending.
+func (r *taskRepository) FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error) {
 	var titles []string
 	err := r.db.WithContext(ctx).
 		Model(&model.Task{}).
-		Where("channel_id = ? AND title != ''", channelID).
+		Where("project_id = ? AND title != ''", projectID).
 		Group("title").
 		Order("MAX(created_at) DESC").
 		Limit(200).
@@ -290,10 +290,10 @@ func (r *taskRepository) FindTitlesByChannelID(ctx context.Context, channelID st
 	return titles, err
 }
 
-func (r *taskRepository) FindTitleTasksByChannelID(ctx context.Context, channelID string) ([]*model.Task, error) {
+func (r *taskRepository) FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error) {
 	var tasks []*model.Task
 	err := r.db.WithContext(ctx).
-		Where("channel_id = ? AND title != ''", channelID).
+		Where("project_id = ? AND title != ''", projectID).
 		Order("created_at DESC").
 		Limit(200).
 		Find(&tasks).Error
@@ -396,7 +396,7 @@ var usageStatuses = []string{
 }
 
 // AggregateUsageByUser returns SQL-level SUM aggregates for token usage and cost.
-func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, channelID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error) {
+func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, totalCost float64, err error) {
 	type row struct {
 		Tasks        int64
 		Input        int64
@@ -418,8 +418,8 @@ func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string
 		Where("user_id = ?", userID).
 		Where("created_at >= ? AND created_at <= ?", from, to).
 		Where("status IN ?", usageStatuses)
-	if channelID != "" {
-		q = q.Where("channel_id = ?", channelID)
+	if projectID != "" {
+		q = q.Where("project_id = ?", projectID)
 	}
 	if err = q.Scan(&r2).Error; err != nil {
 		return
@@ -439,7 +439,7 @@ type TypeUsageRow struct {
 }
 
 // AggregateUsageByType returns per-type token usage and cost via SQL GROUP BY.
-func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, channelID string) ([]TypeUsageRow, error) {
+func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error) {
 	var rows []TypeUsageRow
 	q := r.db.WithContext(ctx).Model(&model.Task{}).
 		Select(
@@ -454,8 +454,8 @@ func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string
 		Where("user_id = ?", userID).
 		Where("created_at >= ? AND created_at <= ?", from, to).
 		Where("status IN ?", usageStatuses)
-	if channelID != "" {
-		q = q.Where("channel_id = ?", channelID)
+	if projectID != "" {
+		q = q.Where("project_id = ?", projectID)
 	}
 	if err := q.Group("type").Scan(&rows).Error; err != nil {
 		return nil, err

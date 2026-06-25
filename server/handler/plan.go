@@ -75,7 +75,7 @@ func validReferenceImageURL(url string) bool {
 // Request types.
 
 type createPlanRequest struct {
-	ChannelID          string `json:"channel_id"`
+	ProjectID          string `json:"project_id"`
 	CronExpr           string `json:"cron_expr"`
 	Prompt             string `json:"prompt"`
 	ImageModelKey      string `json:"image_model_key"`
@@ -129,8 +129,8 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
-	if req.ChannelID == "" {
-		return Error(c, fiber.StatusBadRequest, "channel_id is required")
+	if req.ProjectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
 
 	if !validReferenceImageURL(req.ReferenceImageURL) {
@@ -153,7 +153,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 
 	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
 		UserID:             userID,
-		ChannelID:          req.ChannelID,
+		ProjectID:          req.ProjectID,
 		CronExpr:           req.CronExpr,
 		Prompt:             req.Prompt,
 		ImageModelKey:      req.ImageModelKey,
@@ -190,13 +190,13 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 
 	offset, _ := strconv.Atoi(c.Query("offset", "0"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
-	channelID := c.Query("channel_id", "")
+	projectID := c.Query("project_id", "")
 
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 
-	plans, total, err := h.service.List(c.Context(), userID, offset, limit, channelID)
+	plans, total, err := h.service.List(c.Context(), userID, offset, limit, projectID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("list plans failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to list plans")

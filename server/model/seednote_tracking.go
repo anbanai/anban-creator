@@ -29,7 +29,7 @@ type SeednotePostTracking struct {
 	ID                        string     `gorm:"type:char(36);primaryKey" json:"id"`
 	TaskID                    string     `gorm:"type:char(36);uniqueIndex;not null" json:"task_id"`
 	UserID                    string     `gorm:"type:char(36);index;not null" json:"user_id"`
-	ChannelID                 string     `gorm:"type:char(36);index;not null" json:"channel_id"`
+	ProjectID                 string     `gorm:"type:char(36);index;not null" json:"project_id"`
 	Status                    string     `gorm:"type:varchar(32);index;not null" json:"status"`
 	ProfileURL                string     `gorm:"type:varchar(500)" json:"profile_url"`
 	NoteID                    string     `gorm:"type:varchar(100);index" json:"note_id"`

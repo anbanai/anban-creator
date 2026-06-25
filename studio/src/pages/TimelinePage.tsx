@@ -31,7 +31,7 @@ import { Card } from '@/components/ui/card'
 import EmptyState from '@/components/EmptyState'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { CalendarRangePicker } from '@/components/CalendarRangePicker'
-import { ChannelSelector } from '@/components/ChannelSelector'
+import { ProjectSelector } from '@/components/ProjectSelector'
 
 // --- Helpers ---
 
@@ -68,7 +68,7 @@ export default function TimelinePage() {
   const itemType = searchParams.get('item_type') || ''
   const contentType = searchParams.get('content_type') || ''
   const status = searchParams.get('status') || ''
-  const channelId = searchParams.get('channel_id') || ''
+  const projectId = searchParams.get('project_id') || ''
   const sort = searchParams.get('sort') || 'date_desc'
 
   // Derived date range
@@ -96,13 +96,13 @@ export default function TimelinePage() {
 
   // Data fetching with filters
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['timeline', dateRange.from, dateRange.to, itemType, contentType, status, channelId],
+    queryKey: ['timeline', dateRange.from, dateRange.to, itemType, contentType, status, projectId],
     queryFn: () =>
       api.timeline.get(dateRange.from, dateRange.to, {
         item_type: itemType || undefined,
         content_type: contentType || undefined,
         status: status || undefined,
-        channel_id: channelId || undefined,
+        project_id: projectId || undefined,
       }),
     refetchInterval: (query) => {
       const items = query.state.data?.items
@@ -247,11 +247,11 @@ export default function TimelinePage() {
             </SelectContent>
           </Select>
 
-          {/* Channel Filter */}
+          {/* Project Filter */}
           <div className="w-36">
-            <ChannelSelector
-              value={channelId}
-              onChange={(id) => updateFilter('channel_id', id)}
+            <ProjectSelector
+              value={projectId}
+              onChange={(id) => updateFilter('project_id', id)}
             />
           </div>
 
@@ -268,7 +268,7 @@ export default function TimelinePage() {
           </Select>
 
           {/* Clear all filters */}
-          {(itemType || contentType || status || channelId || hasCustomDates) && (
+          {(itemType || contentType || status || projectId || hasCustomDates) && (
             <Button
               variant="ghost"
               size="xs"
@@ -364,9 +364,9 @@ export default function TimelinePage() {
                                     <Badge variant="outline" className="text-[10px]">
                                       {timelineItemTypeLabel[item.type] || item.type}
                                     </Badge>
-                                    {item.channel_name && (
+                                    {item.project_name && (
                                       <Badge variant="secondary" className="text-[10px]">
-                                        {item.channel_name}
+                                        {item.project_name}
                                       </Badge>
                                     )}
                                     {item.type === 'task' && item.status === 'running' && (

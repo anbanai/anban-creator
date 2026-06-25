@@ -23,37 +23,37 @@ import (
 func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
-		Description: "Generate a single image using the channel's configured image provider (OpenAI GPT Image, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns a fetchable download_url (always a storage URL — never an inline base64 data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and file_path when output_path is provided. When task_id is provided the image is also registered as a task_file in the same call, so list_task_files returns it immediately. When verify_with_vision=true, also runs a post-generation vision check using verification_prompt and returns a verification object {passed, score, missing_entities, notes, raw}. When upload_to_cdn=true, the server ALSO uploads the saved image to the channel's CDN (WeChat material library for article channels, returning wechat_url + media_id) in the SAME call, right after a passing vision check — this makes each image durable the moment it is generated and removes the need for a separate, interruptible upload_image step. Upload is skipped when verify_with_vision=true but verification fails (so a rejected image never consumes a material slot); on a post-generation upload failure the response carries upload_error instead of wechat_url so the caller can retry just the upload via upload_image without regenerating.",
+		Description: "Generate a single image using the project's configured image provider (OpenAI GPT Image, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns a fetchable download_url (always a storage URL — never an inline base64 data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and file_path when output_path is provided. When task_id is provided the image is also registered as a task_file in the same call, so list_task_files returns it immediately. When verify_with_vision=true, also runs a post-generation vision check using verification_prompt and returns a verification object {passed, score, missing_entities, notes, raw}. When upload_to_cdn=true, the server ALSO uploads the saved image to the project's CDN (WeChat material library for article projects, returning wechat_url + media_id) in the SAME call, right after a passing vision check — this makes each image durable the moment it is generated and removes the need for a separate, interruptible upload_image step. Upload is skipped when verify_with_vision=true but verification fails (so a rejected image never consumes a material slot); on a post-generation upload failure the response carries upload_error instead of wechat_url so the caller can retry just the upload via upload_image without regenerating.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id":          map[string]any{"type": "string", "description": "Channel ID (determines which image API config to use)"},
+				"project_id":          map[string]any{"type": "string", "description": "Project ID (determines which image API config to use)"},
 				"prompt":              map[string]any{"type": "string", "description": "Image generation prompt"},
 				"image_type":          map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
 				"output_path":         map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, but required when upload_to_cdn=true since the upload reads this file). Use a writable server path such as /tmp/...; this is not the agent client's current working directory."},
-				"size":                map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides channel default when provided; providers may still return a different crop/ratio."},
+				"size":                map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides project default when provided; providers may still return a different crop/ratio."},
 				"ref_image_path":      map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
 				"task_id":             map[string]any{"type": "string", "description": "Task ID (for logging, credit tracking, and per-task image model lookup)"},
 				"image_model_key":     map[string]any{"type": "string", "description": "Optional image model key selected at task creation time. When provided, overrides user/server defaults for this single call. Resolution: '' = server default; 'custom' = user model-config override (Enterprise only); any other value must match a server-managed image preset key. If task_id is also provided and task_id has its own image_model_key, the explicit image_model_key parameter takes precedence."},
 				"watermark":           map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
 				"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities/matches the chapter content. No extra credit deduction for the vision call.", "default": false},
 				"verification_prompt": map[string]any{"type": "string", "description": "Prompt for the post-generation vision check (required when verify_with_vision=true). Should ask the vision model to verify required entities are present and return JSON {all_entities_present, missing_entities, relevance_entities, relevance_score, overall_pass}."},
-				"upload_to_cdn":       map[string]any{"type": "boolean", "description": "When true (requires output_path), upload the saved image to the channel's CDN in the same call and return wechat_url + media_id on the result. For article channels this uploads to the WeChat material library. Upload runs only after a passing vision check (or when verify_with_vision is false), so rejected images are never uploaded. On upload failure the result carries upload_error instead — retry the upload alone via upload_image, no regeneration needed.", "default": false},
+				"upload_to_cdn":       map[string]any{"type": "boolean", "description": "When true (requires output_path), upload the saved image to the project's CDN in the same call and return wechat_url + media_id on the result. For article projects this uploads to the WeChat material library. Upload runs only after a passing vision check (or when verify_with_vision is false), so rejected images are never uploaded. On upload failure the result carries upload_error instead — retry the upload alone via upload_image, no regeneration needed.", "default": false},
 			},
-			"required": []any{"channel_id", "prompt"},
+			"required": []any{"project_id", "prompt"},
 		},
 	}, generateImageHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "upload_image",
-		Description: "Upload a local image. For WeChat channels, uploads to WeChat CDN; for other platforms, uploads to configured storage. Returns the URL.",
+		Description: "Upload a local image. For WeChat projects, uploads to WeChat CDN; for other platforms, uploads to configured storage. Returns the URL.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID (determines WeChat credentials)"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID (determines WeChat credentials)"},
 				"file_path":  map[string]any{"type": "string", "description": "Local file path of the image to upload"},
 			},
-			"required": []any{"channel_id", "file_path"},
+			"required": []any{"project_id", "file_path"},
 		},
 	}, uploadImageHandler)
 
@@ -76,11 +76,11 @@ func registerImageTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID (determines WeChat credentials)"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID (determines WeChat credentials)"},
 				"url":        map[string]any{"type": "string", "description": "URL of the image to download"},
 				"upload":     map[string]any{"type": "boolean", "description": "Upload to WeChat CDN after download", "default": false},
 			},
-			"required": []any{"channel_id", "url"},
+			"required": []any{"project_id", "url"},
 		},
 	}, downloadImageHandler)
 
@@ -90,12 +90,12 @@ func registerImageTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID (determines vision model config)"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID (determines vision model config)"},
 				"image_url":  map[string]any{"type": "string", "description": "Remote HTTPS URL of the image to analyze"},
 				"file_path":  map[string]any{"type": "string", "description": "Server-local file path (from generate_image/download_image file_path result), max 10MB"},
 				"prompt":     map[string]any{"type": "string", "description": "Detailed analysis prompt describing what to analyze"},
 			},
-			"required": []any{"channel_id", "prompt"},
+			"required": []any{"project_id", "prompt"},
 		},
 	}, analyzeImageHandler)
 }
@@ -107,10 +107,10 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	prompt, _ := args["prompt"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if prompt == "" {
 		return errorResult("prompt is required"), nil
@@ -161,7 +161,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			Str("tool", "generate_image").
 			Str("task_id", taskID).
 			Str("user_id", userID).
-			Str("channel_id", channelID).
+			Str("project_id", projectID).
 			Str("image_type", imageType).
 			Str("size", size).
 			Str("image_model_key", imageModelKey).
@@ -184,11 +184,11 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, provider, mdl, 1); err != nil {
 		if mcpLog != nil {
 			// billingError below also logs the err with tool name; this entry
-			// adds task_id/channel_id/stage so concurrent-task greps can land.
+			// adds task_id/project_id/stage so concurrent-task greps can land.
 			mcpLog.Warn().
 				Str("tool", "generate_image").
 				Str("task_id", taskID).
-				Str("channel_id", channelID).
+				Str("project_id", projectID).
 				Str("user_id", userID).
 				Str("stage", "deduct").
 				Err(err).
@@ -197,13 +197,13 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		return billingError("generate image", err), nil
 	}
 
-	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, channelID, prompt, imageType, outputPath, refPath, taskID, size, imageModelKey, watermark)
+	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, projectID, prompt, imageType, outputPath, refPath, taskID, size, imageModelKey, watermark)
 	if err != nil {
 		if mcpLog != nil {
 			mcpLog.Warn().
 				Str("tool", "generate_image").
 				Str("task_id", taskID).
-				Str("channel_id", channelID).
+				Str("project_id", projectID).
 				Str("user_id", userID).
 				Str("stage", "generate").
 				Str("image_model_key", imageModelKey).
@@ -243,7 +243,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		// result.Provider/Model reflect what the provider actually ran (built
 		// from its response in image.go buildImageResult), which may differ
 		// from resolveImageModel() used for billing at line 168 — e.g. when
-		// the channel overrides the user-level config. result.* is the source
+		// the project overrides the user-level config. result.* is the source
 		// of truth for "what generated this image".
 		// On the task path DownloadURL is now a short fetchable storage URL
 		// (rewritten above by registerGeneratedImageTaskFile); for ad-hoc
@@ -256,7 +256,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		mcpLog.Info().
 			Str("tool", "generate_image").
 			Str("task_id", taskID).
-			Str("channel_id", channelID).
+			Str("project_id", projectID).
 			Str("provider", result.Provider).
 			Str("model", result.Model).
 			Str("size", result.Size).
@@ -287,7 +287,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				mcpLog.Warn().
 					Str("tool", "generate_image").
 					Str("task_id", taskID).
-					Str("channel_id", channelID).
+					Str("project_id", projectID).
 					Err(vErr).
 					Msg("MCP generate_image vision verification failed")
 			}
@@ -302,7 +302,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			mcpLog.Info().
 				Str("tool", "generate_image").
 				Str("task_id", taskID).
-				Str("channel_id", channelID).
+				Str("project_id", projectID).
 				Bool("verification_passed", verification.Passed).
 				Str("verification_score", verification.Score).
 				Strs("missing_entities", verification.MissingEntities).
@@ -311,21 +311,21 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	}
 
 	// upload_to_cdn: make image upload atomic with generation. Each image
-	// becomes durable on the channel's CDN the instant it is generated,
+	// becomes durable on the project's CDN the instant it is generated,
 	// eliminating the lost-results window of the old separate upload_image
 	// batch. Upload is gated on a passing vision check (when requested) so a
 	// rejected image never consumes a material slot; a post-generation upload
 	// failure surfaces as upload_error so the caller retries just the upload
 	// via upload_image without paying for regeneration.
 	if shouldUploadAfterVerification(uploadToCDN, verifyWithVision, result.Verification) {
-		uploaded, upErr := svcs.ImageSvc.UploadImage(ctx, userID, channelID, result.FilePath)
+		uploaded, upErr := svcs.ImageSvc.UploadImage(ctx, userID, projectID, result.FilePath)
 		if upErr != nil {
 			result.UploadError = upErr.Error()
 			if mcpLog != nil {
 				mcpLog.Warn().
 					Str("tool", "generate_image").
 					Str("task_id", taskID).
-					Str("channel_id", channelID).
+					Str("project_id", projectID).
 					Str("file_path", result.FilePath).
 					Err(upErr).
 					Msg("MCP generate_image CDN upload failed (generation kept; retry upload via upload_image)")
@@ -337,7 +337,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				mcpLog.Info().
 					Str("tool", "generate_image").
 					Str("task_id", taskID).
-					Str("channel_id", channelID).
+					Str("project_id", projectID).
 					Str("wechat_url", uploaded.WechatURL).
 					Msg("MCP generate_image uploaded to CDN")
 			}
@@ -350,7 +350,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			mcpLog.Info().
 				Str("tool", "generate_image").
 				Str("task_id", taskID).
-				Str("channel_id", channelID).
+				Str("project_id", projectID).
 				Msg("MCP generate_image skipped CDN upload (vision verification did not pass)")
 		}
 	}
@@ -595,16 +595,16 @@ func uploadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	filePath, _ := args["file_path"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if filePath == "" {
 		return errorResult("file_path is required"), nil
 	}
 
-	result, err := svcs.ImageSvc.UploadImage(ctx, userID, channelID, filePath)
+	result, err := svcs.ImageSvc.UploadImage(ctx, userID, projectID, filePath)
 	if err != nil {
 		return errorResult(fmt.Sprintf("upload image: %v", err)), nil
 	}
@@ -646,10 +646,10 @@ func downloadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	url, _ := args["url"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if url == "" {
 		return errorResult("url is required"), nil
@@ -660,7 +660,7 @@ func downloadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		upload = "true"
 	}
 
-	result, err := svcs.ImageSvc.DownloadImage(ctx, userID, channelID, url, upload)
+	result, err := svcs.ImageSvc.DownloadImage(ctx, userID, projectID, url, upload)
 	if err != nil {
 		return errorResult(fmt.Sprintf("download image: %v", err)), nil
 	}
@@ -675,10 +675,10 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	prompt, _ := args["prompt"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 	if prompt == "" {
 		return errorResult("prompt is required"), nil

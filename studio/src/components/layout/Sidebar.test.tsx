@@ -28,7 +28,7 @@ describe('Sidebar', () => {
     renderSidebar()
 
     expect(screen.getByText('仪表盘')).toBeInTheDocument()
-    expect(screen.getByText('账号')).toBeInTheDocument()
+    expect(screen.getByText('项目')).toBeInTheDocument()
     expect(screen.getByText('计划')).toBeInTheDocument()
     expect(screen.getByText('任务')).toBeInTheDocument()
   })

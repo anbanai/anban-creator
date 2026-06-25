@@ -50,7 +50,7 @@ func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskSer
 		}
 	})
 
-	if err := db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Plan{}, &model.Task{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Plan{}, &model.Task{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 	ctx := context.Background()
 
 	userID := uuid.New().String()
-	channelID := uuid.New().String()
+	projectID := uuid.New().String()
 	originalNextRun := time.Now().Add(-time.Hour).Truncate(time.Second)
 
 	if err := repo.Users().Create(ctx, &model.User{
@@ -77,20 +77,20 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{
-		ID:                 channelID,
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:                 projectID,
 		UserID:             userID,
 		Platform:           model.PlatformSeednote,
 		Name:               "Seednote",
 		MaxConcurrentTasks: 1,
-		Status:             model.ChannelStatusActive,
+		Status:             model.ProjectStatusActive,
 	}); err != nil {
-		t.Fatalf("create channel: %v", err)
+		t.Fatalf("create project: %v", err)
 	}
 	plan := &model.Plan{
 		ID:                 uuid.New().String(),
 		UserID:             userID,
-		ChannelID:          channelID,
+		ProjectID:          projectID,
 		Type:               model.PlatformArticle,
 		Title:              "Fallback title",
 		CronExpr:           "0 * * * *",
@@ -109,7 +109,7 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 		t.Fatalf("TriggerPlanNow: %v", err)
 	}
 
-	tasks, total, err := taskSvc.List(ctx, userID, 0, 10, "", channelID)
+	tasks, total, err := taskSvc.List(ctx, userID, 0, 10, "", projectID)
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 	}
 	task := tasks[0]
 	if task.Type != model.PlatformSeednote {
-		t.Fatalf("task type = %q, want channel platform %q", task.Type, model.PlatformSeednote)
+		t.Fatalf("task type = %q, want project platform %q", task.Type, model.PlatformSeednote)
 	}
 	if task.Prompt != plan.Prompt {
 		t.Fatalf("task prompt = %q, want %q", task.Prompt, plan.Prompt)

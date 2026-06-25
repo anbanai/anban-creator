@@ -93,7 +93,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		"name: live-slicer",
 		"直播切片",
 		"mcpServers:",
-		"- anbanwriter",
+		"- anban",
 		"skills:",
 		"- live-slice",
 		"- TaskCreate",

@@ -32,7 +32,7 @@ func ParseConfig() (*Config, error) {
 	flag.StringVar(&cfg.TaskID, "task-id", "", "task ID")
 	flag.StringVar(&cfg.TaskType, "task-type", "", "task type")
 	flag.StringVar(&cfg.Topic, "topic", "", "task topic/prompt")
-	flag.StringVar(&cfg.Style, "style", "", "effective visual style for image generation (overrides channel default)")
+	flag.StringVar(&cfg.Style, "style", "", "effective visual style for image generation (overrides project default)")
 	flag.StringVar(&cfg.Goal, "goal", "", "goal-mode condition (prepended as /goal slash command so Claude Code runs its built-in goal loop)")
 	flag.StringVar(&cfg.Workspace, "workspace", "/workspace", "workspace directory")
 	flag.StringVar(&cfg.Model, "model", "", "Claude model override")
@@ -90,7 +90,7 @@ func (c *Config) UserPrompt() string {
 		Style:           c.Style,
 		Goal:            c.Goal,
 		TaskID:          c.TaskID,
-		ChannelID:       os.Getenv("ANBANWRITER_DEFAULT_CHANNEL"),
+		ProjectID:       os.Getenv("ANBANWRITER_DEFAULT_PROJECT"),
 		HasContentImage: c.HasContentImage,
 		HasTailImage:    c.HasTailImage,
 	})

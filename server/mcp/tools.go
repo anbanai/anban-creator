@@ -17,7 +17,7 @@ import (
 
 // Services holds the service instances needed by MCP tools.
 type Services struct {
-	ChannelSvc       *service.ChannelService
+	ProjectSvc       *service.ProjectService
 	TaskSvc          *service.TaskService
 	CreditSvc        *service.CreditService
 	PlanSvc          *service.PlanService
@@ -34,7 +34,7 @@ type Services struct {
 
 // RegisterTools registers all MCP tools on the server.
 func RegisterTools(server *mcp.Server) {
-	registerChannelTools(server)
+	registerProjectTools(server)
 	registerTaskTools(server)
 	registerCreditTools(server)
 	registerPlanTools(server)
@@ -61,10 +61,10 @@ func parseArgs(raw json.RawMessage) map[string]any {
 	return args
 }
 
-func registerChannelTools(server *mcp.Server) {
+func registerProjectTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
-		Name:        "list_channels",
-		Description: "List the authenticated user's channels (WeChat accounts). Each channel represents a WeChat Official Account or Seednote account.",
+		Name:        "list_projects",
+		Description: "List the authenticated user's projects (WeChat accounts). Each project represents a WeChat Official Account or Seednote account.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -72,31 +72,31 @@ func registerChannelTools(server *mcp.Server) {
 				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote"}, "description": "Filter by platform type"},
 			},
 		},
-	}, channelListHandler)
+	}, projectListHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "get_channel",
-		Description: "Get details of a specific channel by ID, including its configuration (WeChat AppID, positioning, style, theme, etc.).",
+		Name:        "get_project",
+		Description: "Get details of a specific project by ID, including its configuration (WeChat AppID, positioning, style, theme, etc.).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 			},
-			"required": []any{"channel_id"},
+			"required": []any{"project_id"},
 		},
-	}, channelGetHandler)
+	}, projectGetHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "get_channel_profile",
+		Name:        "get_project_profile",
 		Description: "Get formatted account information for AI content creation context. Returns positioning, keywords, and three INDEPENDENT style dimensions: `style` (图片视觉 image visual style, free text), `writing_style` (写作风格 writer resource key e.g. dan-koe), `theme` (排版样式 theme resource key e.g. autumn-warm). These three never derive from each other. Does NOT expose sensitive credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote"}, "description": "Filter output by content type"},
-				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, the task is the single source of truth: its resolved `style`/`writing_style`/`theme` (precedence task > template > plan > channel) are returned with *_source=\"task\"; otherwise the channel's values are returned with *_source=\"channel\". The task must belong to the same channel and user, otherwise the call is rejected. Always pass task_id when one exists so template-derived dimensions surface correctly."},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "ecommerce"}, "description": "Filter output by content type"},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, the task is the single source of truth: its resolved `style`/`writing_style`/`theme` (precedence task > template > plan > project) are returned with *_source=\"task\"; otherwise the project's values are returned with *_source=\"project\". The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists so template-derived dimensions surface correctly."},
 			},
-			"required": []any{"channel_id"},
+			"required": []any{"project_id"},
 		},
 	}, accountInfoHandler)
 }
@@ -109,7 +109,7 @@ func registerTaskTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"status":     map[string]any{"type": "string", "enum": []any{"pending", "running", "completed", "failed", "cancelled"}, "description": "Filter by status"},
-				"channel_id": map[string]any{"type": "string", "description": "Filter by channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Filter by project ID"},
 				"limit":      map[string]any{"type": "integer", "description": "Max results (default 20, max 100)", "default": 20},
 			},
 		},
@@ -140,14 +140,14 @@ func registerTaskTools(server *mcp.Server) {
 	}, taskCancelHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "list_channel_titles",
-		Description: "List all recorded content titles for a channel. Use this before selecting a new title to avoid duplicates within the same channel.",
+		Name:        "list_project_titles",
+		Description: "List all recorded content titles for a project. Use this before selecting a new title to avoid duplicates within the same project.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 			},
-			"required": []any{"channel_id"},
+			"required": []any{"project_id"},
 		},
 	}, titleListHandler)
 
@@ -195,7 +195,7 @@ func registerPlanTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Filter by channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Filter by project ID"},
 			},
 		},
 	}, planListHandler)
@@ -206,11 +206,11 @@ func registerPlanTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"channel_id": map[string]any{"type": "string", "description": "Channel ID"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"cron_expr":  map[string]any{"type": "string", "description": "Cron expression (e.g. '0 9 * * *' for daily at 9am)"},
 				"prompt":     map[string]any{"type": "string", "description": "Optional prompt/instructions for auto-generated content"},
 			},
-			"required": []any{"channel_id", "cron_expr"},
+			"required": []any{"project_id", "cron_expr"},
 		},
 	}, planCreateHandler)
 }
@@ -226,41 +226,41 @@ func SetServices(s *Services) {
 	svcs = s
 }
 
-func channelListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func projectListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 
-	opts := repository.ChannelListOptions{}
+	opts := repository.ProjectListOptions{}
 	if v, ok := args["status"].(string); ok {
 		opts.Status = v
 	}
 	if v, ok := args["platform"].(string); ok {
 		opts.Platform = v
 	}
-	channels, err := svcs.ChannelSvc.List(context.Background(), userID, opts)
+	projects, err := svcs.ProjectSvc.List(context.Background(), userID, opts)
 	if err != nil {
-		return errorResult(fmt.Sprintf("list channels: %v", err)), nil
+		return errorResult(fmt.Sprintf("list projects: %v", err)), nil
 	}
-	for _, ch := range channels {
-		service.SanitizeChannel(ch)
+	for _, ch := range projects {
+		service.SanitizeProject(ch)
 	}
-	return textResult(channels)
+	return textResult(projects)
 }
 
-func channelGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func projectGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-	channelID, _ := args["channel_id"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	projectID, _ := args["project_id"].(string)
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 
-	ch, stats, err := svcs.ChannelSvc.Get(context.Background(), userID, channelID)
+	ch, stats, err := svcs.ProjectSvc.Get(context.Background(), userID, projectID)
 	if err != nil {
-		return errorResult(fmt.Sprintf("get channel: %v", err)), nil
+		return errorResult(fmt.Sprintf("get project: %v", err)), nil
 	}
-	service.SanitizeChannel(ch)
-	return textResult(map[string]any{"channel": ch, "stats": stats})
+	service.SanitizeProject(ch)
+	return textResult(map[string]any{"project": ch, "stats": stats})
 }
 
 func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -272,42 +272,42 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	return textResult(info)
 }
 
-// buildAccountInfo is the testable core of get_channel_profile. It resolves the
+// buildAccountInfo is the testable core of get_project_profile. It resolves the
 // three orthogonal style dimensions (图片视觉 / 写作风格 / 排版样式). When a task_id
-// is supplied and the task belongs to the requesting user+channel, the task is the
+// is supplied and the task belongs to the requesting user+project, the task is the
 // single source of truth (its Style/WritingStyle/Theme are already resolved at
-// creation); otherwise the channel's values are used. The three dimensions never
+// creation); otherwise the project's values are used. The three dimensions never
 // derive from one another.
 func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (map[string]any, string) {
-	channelID, _ := args["channel_id"].(string)
-	if channelID == "" {
-		return nil, "channel_id is required"
+	projectID, _ := args["project_id"].(string)
+	if projectID == "" {
+		return nil, "project_id is required"
 	}
 	scope, _ := args["scope"].(string)
 	taskID, _ := args["task_id"].(string)
 
-	if svcs.ChannelSvc == nil {
-		return nil, "channel service not available"
+	if svcs.ProjectSvc == nil {
+		return nil, "project service not available"
 	}
-	ch, _, err := svcs.ChannelSvc.Get(ctx, userID, channelID)
+	ch, _, err := svcs.ProjectSvc.Get(ctx, userID, projectID)
 	if err != nil {
-		return nil, fmt.Sprintf("get channel: %v", err)
+		return nil, fmt.Sprintf("get project: %v", err)
 	}
-	service.SanitizeChannel(ch)
+	service.SanitizeProject(ch)
 
 	// Resolve the three orthogonal style dimensions. Each is independent — the
 	// writer never drives the visual style. When a task_id is supplied, the task is
 	// the single source of truth: Task.Style / Task.WritingStyle / Task.Theme are
 	// already the resolved effective values (precedence task > template > plan >
-	// channel, computed at creation). Without a task_id we fall back to the channel.
+	// project, computed at creation). Without a task_id we fall back to the project.
 	effectiveVisual := ch.Style
 	effectiveWriter := ch.WritingStyle
 	effectiveTheme := ch.Theme
-	visualSource := "channel"
-	writerSource := "channel"
-	themeSource := "channel"
+	visualSource := "project"
+	writerSource := "project"
+	themeSource := "project"
 	// 公众号人设维度（作者署名 + 写作风格模仿 + 可选头像），与视觉/写作key/排版正交，
-	// 同样按 task > template > channel 解析。
+	// 同样按 task > template > project 解析。
 	effectiveAuthor := ch.Author
 	effectiveAuthorIntro := ch.AuthorStyleIntro
 	effectiveAuthorAvatar := ch.AuthorAvatarURL
@@ -322,17 +322,17 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		if terr != nil {
 			return nil, fmt.Sprintf("get task: %v", terr)
 		}
-		// Guard against cross-channel/cross-user injection.
-		if task.UserID != userID || task.ChannelID != channelID {
-			return nil, "task does not belong to the requested channel"
+		// Guard against cross-project/cross-user injection.
+		if task.UserID != userID || task.ProjectID != projectID {
+			return nil, "task does not belong to the requested project"
 		}
 		// Task fields hold the resolved effective values (precedence
-		// task > template > plan > channel, computed at creation). We still fall
-		// back to the channel PER DIMENSION when a task field is empty, and
+		// task > template > plan > project, computed at creation). We still fall
+		// back to the project PER DIMENSION when a task field is empty, and
 		// report each dimension's source honestly — so a task that only set its
-		// writer doesn't silently clobber the channel's visual/theme.
+		// writer doesn't silently clobber the project's visual/theme.
 		// (Persona Author/AuthorStyleIntro/AuthorAvatarURL is resolved centrally
-		// below via task > template > channel, so it is not folded here.)
+		// below via task > template > project, so it is not folded here.)
 		if task.Style != "" {
 			effectiveVisual = task.Style
 			visualSource = "task"
@@ -373,13 +373,48 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		info["image_config"] = map[string]any{
 			"reference_image_url": ch.ReferenceImageURL,
 		}
+	case "ecommerce":
+		// E-commerce: surface the package config (selected modules, target
+		// platform, selling points, language, provider-strategy override) plus the
+		// workspace path where the executor materialized the product photos.
+		// Product photos are downloaded by the executor into .anbanwriter/products/
+		// (see agent.DownloadProductImages); the agent reads index.json there for
+		// the exact filenames. provider_strategy is advisory — per-module provider
+		// switching depends on the generate_image tool's provider support; the
+		// override lets the agent adjust course.
+		ec := map[string]any{
+			"product_photo_dir": ".anbanwriter/products",
+			"provider_strategy": map[string]any{
+				"primary":           "openai",     // 多参考图保真：主图①/详情核心场景
+				"fallback":          "volcengine", // 辅图/SKU 同构变体
+				"consistency_audit": true,         // verify_with_vision 自检循环
+			},
+		}
+		if task != nil {
+			cfg := task.Ecommerce.Data()
+			ec["selected_modules"] = cfg.SelectedModules
+			ec["product_photo_count"] = len(cfg.ProductPhotos)
+			if cfg.TargetPlatform != "" {
+				ec["target_platform"] = cfg.TargetPlatform
+			}
+			if cfg.SellingPoints != "" {
+				ec["selling_points"] = cfg.SellingPoints
+			}
+			if cfg.Language != "" {
+				ec["language"] = cfg.Language
+			}
+			if cfg.ProviderStrategyOverride != "" {
+				ec["provider_strategy_override"] = cfg.ProviderStrategyOverride
+			}
+		}
+		info["ecommerce"] = ec
 	}
 
 	// Add available resource options for the platform.
 	info["available_themes"] = resources.Manager().ListByPlatform(resources.CategoryTheme, ch.Platform)
 	info["available_writers"] = resources.Manager().ListByPlatform(resources.CategoryWriter, ch.Platform)
 
-	// Descriptions for the RESOLVED theme / writer (not the raw channel fields).
+	// Descriptions for the RESOLVED theme / writer (not the raw project fields).
 	if effectiveTheme != "" {
 		if e := resources.Manager().Get(resources.CategoryTheme, effectiveTheme); e != nil {
 			info["theme_description"] = e.Description
@@ -396,23 +431,23 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 
 	// Surface the effective template's content. The effective template is the
 	// task's template if present (precedence task > task-template > plan), else
-	// the channel's bound 公众号 template (channel-template). Three things are
+	// the project's bound 公众号 template (project-template). Three things are
 	// delivered, kept as STRICTLY INDEPENDENT concepts (the article 作者/byline
 	// must never be conflated with 写作风格/writing imitation):
 	//
-	//   - 作者 (byline): the template's AuthorName overrides the channel byline
+	//   - 作者 (byline): the template's AuthorName overrides the project byline
 	//     and surfaces as the top-level `author` (passed to publish_draft).
 	//   - 写作风格 (writing imitation, free text): AuthorStyleIntro for article,
 	//     falling back to the writer-key scaffold WritingStyle (poster). Surfaced
 	//     as template_writing_style.
 	//   - template_author_avatar: the optional 写作风格 persona avatar.
-	//   - For a channel-level template, its theme is folded into the resolved
+	//   - For a project-level template, its theme is folded into the resolved
 	//     `theme` so convert_markdown uses it (a task-level template already had
 	//     its theme folded into Task.Theme at creation).
 	//
-	// When NO template is bound (task or channel), the channel's own persona
+	// When NO template is bound (task or project), the project's own persona
 	// (author_style_intro / author_avatar_url) is surfaced instead, so a writing
-	// direction defined directly on the channel still reaches the agent. Errors
+	// direction defined directly on the project still reaches the agent. Errors
 	// (template deleted) are logged-and-skipped so a stale id never breaks the
 	// profile — the keys simply stay absent.
 	effectiveTemplateID := ""
@@ -436,14 +471,14 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			info["template_theme"] = tmpl.Theme
 			info["template_structure"] = extractScaffoldText(tmpl.Structure)
 			info["template_example"] = extractScaffoldText(tmpl.ExampleContent)
-			// Channel-level template (no task template): fold its theme into the
+			// Project-level template (no task template): fold its theme into the
 			// resolved theme so convert_markdown uses it. A task template's theme was
 			// already folded into Task.Theme at creation (and set effectiveTheme above),
-			// so we only fold for the channel-template path — never clobbering a task's
+			// so we only fold for the project-template path — never clobbering a task's
 			// explicit theme override. Persona is resolved centrally below.
 			if !templateFromTask && tmpl.Theme != "" {
 				effectiveTheme = tmpl.Theme
-				themeSource = "channel-template"
+				themeSource = "project-template"
 				info["theme"] = effectiveTheme
 				info["theme_source"] = themeSource
 				if e := resources.Manager().Get(resources.CategoryTheme, effectiveTheme); e != nil {
@@ -456,9 +491,9 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		}
 	}
 
-	// 人设维度（作者署名 + 写作风格模仿 + 可选头像）按 task > template > channel 解析。
-	// 这对 task-template 与 channel-template 两条路径都成立：task 字段在创建时已解析
-	// （task > template > channel），tmpl 为有效模板（缺失则为 nil）。写作风格模仿优先取
+	// 人设维度（作者署名 + 写作风格模仿 + 可选头像）按 task > template > project 解析。
+	// 这对 task-template 与 project-template 两条路径都成立：task 字段在创建时已解析
+	// （task > template > project），tmpl 为有效模板（缺失则为 nil）。写作风格模仿优先取
 	// AuthorStyleIntro，回退 writer-key scaffold WritingStyle（poster）。逐维度独立，作者
 	// 署名绝不与写作模仿混用。author 透传给 publish_draft；template_writing_style 供写作
 	// 模仿；template_author_avatar 为人设参考（不入署名）。
@@ -493,7 +528,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 
 // firstNonEmptyStr returns the first non-empty argument, or "" when all are empty.
 // Local mirror of service.firstNonEmpty (which is unexported) so package mcp can
-// resolve persona dimensions with task > template > channel precedence without an
+// resolve persona dimensions with task > template > project precedence without an
 // export cycle. Pure helper; all args must be plain strings.
 func firstNonEmptyStr(vals ...string) string {
 	for _, v := range vals {
@@ -531,9 +566,9 @@ func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTo
 		limit = int(v)
 	}
 	status, _ := args["status"].(string)
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 
-	tasks, total, err := svcs.TaskSvc.List(context.Background(), userID, 0, limit, status, channelID)
+	tasks, total, err := svcs.TaskSvc.List(context.Background(), userID, 0, limit, status, projectID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("list tasks: %v", err)), nil
 	}
@@ -586,16 +621,16 @@ func taskCancelHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 func titleListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-	channelID, _ := args["channel_id"].(string)
-	if channelID == "" {
-		return errorResult("channel_id is required"), nil
+	projectID, _ := args["project_id"].(string)
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
 	}
 
-	if _, _, err := svcs.ChannelSvc.Get(context.Background(), userID, channelID); err != nil {
-		return errorResult(fmt.Sprintf("get channel: %v", err)), nil
+	if _, _, err := svcs.ProjectSvc.Get(context.Background(), userID, projectID); err != nil {
+		return errorResult(fmt.Sprintf("get project: %v", err)), nil
 	}
 
-	titles, err := svcs.TaskSvc.ListTitles(context.Background(), channelID)
+	titles, err := svcs.TaskSvc.ListTitles(context.Background(), projectID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("list titles: %v", err)), nil
 	}
@@ -647,9 +682,9 @@ func creditsGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 func planListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 
-	plans, total, err := svcs.PlanSvc.List(context.Background(), userID, 0, 50, channelID)
+	plans, total, err := svcs.PlanSvc.List(context.Background(), userID, 0, 50, projectID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("list plans: %v", err)), nil
 	}
@@ -659,17 +694,17 @@ func planListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTo
 func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
-	channelID, _ := args["channel_id"].(string)
+	projectID, _ := args["project_id"].(string)
 	cronExpr, _ := args["cron_expr"].(string)
 	prompt, _ := args["prompt"].(string)
 
-	if channelID == "" || cronExpr == "" {
-		return errorResult("channel_id and cron_expr are required"), nil
+	if projectID == "" || cronExpr == "" {
+		return errorResult("project_id and cron_expr are required"), nil
 	}
 
 	plan, err := svcs.PlanSvc.Create(context.Background(), service.CreatePlanParams{
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		CronExpr:  cronExpr,
 		Prompt:    prompt,
 	})

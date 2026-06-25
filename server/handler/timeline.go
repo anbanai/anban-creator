@@ -18,8 +18,8 @@ type TimelineItem struct {
 	ContentType string     `json:"content_type"` // "seednote", "article"
 	Title       string     `json:"title"`
 	Status      string     `json:"status"`
-	ChannelID   string     `json:"channel_id,omitempty"`
-	ChannelName string     `json:"channel_name,omitempty"`
+	ProjectID   string     `json:"project_id,omitempty"`
+	ProjectName string     `json:"project_name,omitempty"`
 	Platform    string     `json:"platform,omitempty"`
 	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
@@ -38,7 +38,7 @@ func NewTimelineHandler(repo repository.Repository, logger *zerolog.Logger) *Tim
 }
 
 // GetTimeline handles GET /api/v1/timeline.
-// Query params: from (date), to (date). Both required. Optional: channel_id.
+// Query params: from (date), to (date). Both required. Optional: project_id.
 // Returns a merged timeline of tasks and active plans within the date range.
 func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	userID := GetUserID(c)
@@ -65,22 +65,22 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	// Ensure 'to' covers the full day.
 	to = to.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
 
-	channelID := c.Query("channel_id", "")
+	projectID := c.Query("project_id", "")
 	itemType := c.Query("item_type", "")       // "task" or "plan"
 	contentType := c.Query("content_type", "") // "article", "seednote"
 	statusFilter := c.Query("status", "")      // any valid task or plan status
 
 	ctx := c.Context()
 
-	// Fetch all user's channels once for lookup.
-	channels, err := h.repo.Channels().ListByUserID(ctx, userID, repository.ChannelListOptions{})
+	// Fetch all user's projects once for lookup.
+	projects, err := h.repo.Projects().ListByUserID(ctx, userID, repository.ProjectListOptions{})
 	if err != nil {
-		h.logger.Error().Err(err).Msg("failed to fetch channels for timeline")
-		// Non-fatal: proceed without channel info.
+		h.logger.Error().Err(err).Msg("failed to fetch projects for timeline")
+		// Non-fatal: proceed without project info.
 	}
-	channelMap := make(map[string]*model.Channel)
-	for _, ch := range channels {
-		channelMap[ch.ID] = ch
+	projectMap := make(map[string]*model.Project)
+	for _, ch := range projects {
+		projectMap[ch.ID] = ch
 	}
 
 	var items []TimelineItem
@@ -93,7 +93,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	}
 
 	for _, t := range tasks {
-		if channelID != "" && t.ChannelID != channelID {
+		if projectID != "" && t.ProjectID != projectID {
 			continue
 		}
 		title := t.Title
@@ -103,9 +103,9 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 		if title == "" {
 			title = t.Type + " task"
 		}
-		var channelName, platform string
-		if ch, ok := channelMap[t.ChannelID]; ok {
-			channelName = ch.Name
+		var projectName, platform string
+		if ch, ok := projectMap[t.ProjectID]; ok {
+			projectName = ch.Name
 			platform = ch.Platform
 		}
 		items = append(items, TimelineItem{
@@ -114,8 +114,8 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 			ContentType: t.Type,
 			Title:       title,
 			Status:      t.Status,
-			ChannelID:   t.ChannelID,
-			ChannelName: channelName,
+			ProjectID:   t.ProjectID,
+			ProjectName: projectName,
 			Platform:    platform,
 			CompletedAt: t.CompletedAt,
 			CreatedAt:   t.CreatedAt,
@@ -123,7 +123,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	}
 
 	// 2. Active plans with next_run_at within range.
-	plans, err := h.repo.Plans().ListActiveByUserID(ctx, userID, channelID)
+	plans, err := h.repo.Plans().ListActiveByUserID(ctx, userID, projectID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to fetch plans for timeline")
 		// Non-fatal: return what we have.
@@ -137,9 +137,9 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 				if title == "" {
 					title = p.Type + " plan"
 				}
-				var channelName, platform string
-				if ch, ok := channelMap[p.ChannelID]; ok {
-					channelName = ch.Name
+				var projectName, platform string
+				if ch, ok := projectMap[p.ProjectID]; ok {
+					projectName = ch.Name
 					platform = ch.Platform
 				}
 				items = append(items, TimelineItem{
@@ -148,8 +148,8 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 					ContentType: p.Type,
 					Title:       title,
 					Status:      p.Status,
-					ChannelID:   p.ChannelID,
-					ChannelName: channelName,
+					ProjectID:   p.ProjectID,
+					ProjectName: projectName,
 					Platform:    platform,
 					ScheduledAt: p.NextRunAt,
 					CreatedAt:   p.CreatedAt,
@@ -159,7 +159,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	}
 
 	// 3. Running tasks for this user (scoped query to prevent information leak).
-	running, err := h.repo.Tasks().FindRunningByUser(ctx, userID, channelID)
+	running, err := h.repo.Tasks().FindRunningByUser(ctx, userID, projectID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to fetch running tasks")
 	} else {
@@ -182,9 +182,9 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 			if title == "" {
 				title = t.Type + " task"
 			}
-			var channelName, platform string
-			if ch, ok := channelMap[t.ChannelID]; ok {
-				channelName = ch.Name
+			var projectName, platform string
+			if ch, ok := projectMap[t.ProjectID]; ok {
+				projectName = ch.Name
 				platform = ch.Platform
 			}
 			items = append(items, TimelineItem{
@@ -193,8 +193,8 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 				ContentType: t.Type,
 				Title:       title,
 				Status:      t.Status,
-				ChannelID:   t.ChannelID,
-				ChannelName: channelName,
+				ProjectID:   t.ProjectID,
+				ProjectName: projectName,
 				Platform:    platform,
 				CreatedAt:   t.CreatedAt,
 			})

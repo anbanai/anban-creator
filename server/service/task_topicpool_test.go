@@ -22,24 +22,24 @@ func setupTaskServiceWithTopicPool(t *testing.T) (*TaskService, *TopicPoolServic
 	return svc, topicSvc
 }
 
-// TestCreateFromPlan_ClaimsTopicFromPool_Article: an article-channel plan with
-// no Prompt/Title must claim the channel's next unused topic and use it as the
+// TestCreateFromPlan_ClaimsTopicFromPool_Article: an article-project plan with
+// no Prompt/Title must claim the project's next unused topic and use it as the
 // task prompt.
 func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
 
 	const seeded = "三个月喝懂普洱：从生普到熟普的进阶路线"
-	if _, err := topicSvc.Add(ctx, userID, channelID, []string{seeded}); err != nil {
+	if _, err := topicSvc.Add(ctx, userID, projectID, []string{seeded}); err != nil {
 		t.Fatalf("seed topic: %v", err)
 	}
 
 	plan := &model.Plan{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Status:    model.PlanStatusActive,
 		// Prompt and Title intentionally empty → must claim from pool.
@@ -57,7 +57,7 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 	}
 
 	// The claimed topic must be marked used and bound to the spawned task.
-	used, _, err := topicSvc.List(ctx, userID, channelID, model.TopicStatusUsed, 0, 10)
+	used, _, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUsed, 0, 10)
 	if err != nil {
 		t.Fatalf("list used topics: %v", err)
 	}
@@ -70,23 +70,23 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 }
 
 // TestCreateFromPlan_ClaimsTopicFromPool_Seednote: the topic pool is keyed by
-// channel_id and is platform-agnostic at the data layer, so a seednote-channel
-// plan claims just like an article-channel plan.
+// project_id and is platform-agnostic at the data layer, so a seednote-project
+// plan claims just like an article-project plan.
 func TestCreateFromPlan_ClaimsTopicFromPool_Seednote(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, svc.repo, userID, model.PlatformSeednote)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformSeednote)
 
 	const seeded = "早C晚A 精华实测：油皮亲测两周真实记录"
-	if _, err := topicSvc.Add(ctx, userID, channelID, []string{seeded}); err != nil {
+	if _, err := topicSvc.Add(ctx, userID, projectID, []string{seeded}); err != nil {
 		t.Fatalf("seed topic: %v", err)
 	}
 
 	plan := &model.Plan{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.PlanStatusActive,
 	}
@@ -110,11 +110,11 @@ func TestCreateFromPlan_DoesNotClaimWhenPromptSet(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
 
 	// Seed a topic that must remain UNUSED.
 	const seeded = "不应被消费的选题"
-	if _, err := topicSvc.Add(ctx, userID, channelID, []string{seeded}); err != nil {
+	if _, err := topicSvc.Add(ctx, userID, projectID, []string{seeded}); err != nil {
 		t.Fatalf("seed topic: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestCreateFromPlan_DoesNotClaimWhenPromptSet(t *testing.T) {
 	plan := &model.Plan{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Prompt:    explicit,
 		Status:    model.PlanStatusActive,
@@ -138,7 +138,7 @@ func TestCreateFromPlan_DoesNotClaimWhenPromptSet(t *testing.T) {
 	if task.Prompt != explicit {
 		t.Fatalf("task.Prompt = %q, want explicit %q", task.Prompt, explicit)
 	}
-	used, _, err := topicSvc.List(ctx, userID, channelID, model.TopicStatusUsed, 0, 10)
+	used, _, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUsed, 0, 10)
 	if err != nil {
 		t.Fatalf("list used topics: %v", err)
 	}
@@ -153,9 +153,9 @@ func TestCreateFromPlan_TitleAlsoBlocksClaim(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
 
-	if _, err := topicSvc.Add(ctx, userID, channelID, []string{"不应被消费"}); err != nil {
+	if _, err := topicSvc.Add(ctx, userID, projectID, []string{"不应被消费"}); err != nil {
 		t.Fatalf("seed topic: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestCreateFromPlan_TitleAlsoBlocksClaim(t *testing.T) {
 	plan := &model.Plan{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Title:     titleTopic,
 		Status:    model.PlanStatusActive,
@@ -188,13 +188,13 @@ func TestCreateFromPlan_EmptyPoolFallsBack(t *testing.T) {
 	svc, _ := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
 
 	// No topic seeded → pool empty.
 	plan := &model.Plan{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Status:    model.PlanStatusActive,
 	}

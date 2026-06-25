@@ -96,25 +96,25 @@ func createSeednoteTrackingFixtures(t *testing.T, repo repository.Repository) (s
 	t.Helper()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := uuid.New().String()
+	projectID := uuid.New().String()
 	taskID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Nickname: "User", Password: "hashed"}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Channels().Create(ctx, &model.Channel{
-		ID:         channelID,
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:         projectID,
 		UserID:     userID,
 		Platform:   model.PlatformSeednote,
 		Name:       "SeedNote",
 		ProfileURL: "https://www.xiaohongshu.com/user/profile/profile-1",
-		Status:     model.ChannelStatusActive,
+		Status:     model.ProjectStatusActive,
 	}); err != nil {
-		t.Fatalf("create channel: %v", err)
+		t.Fatalf("create project: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
 		ID:        taskID,
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 		Title:     "早起效率翻倍的方法",
@@ -123,7 +123,7 @@ func createSeednoteTrackingFixtures(t *testing.T, repo repository.Repository) (s
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	return userID, channelID, taskID
+	return userID, projectID, taskID
 }
 
 func TestSeednoteTrackingService_EnsureTrackingForPublishedTask(t *testing.T) {
@@ -148,14 +148,14 @@ func TestSeednoteTrackingService_EnsureTrackingForPublishedTask(t *testing.T) {
 
 func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskMissingProfileCreatesFailedTracking(t *testing.T) {
 	svc, repo, enq := setupSeednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
-	channel, err := repo.Channels().FindByID(context.Background(), channelID)
+	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
+	project, err := repo.Projects().FindByID(context.Background(), projectID)
 	if err != nil {
-		t.Fatalf("FindByID channel: %v", err)
+		t.Fatalf("FindByID project: %v", err)
 	}
-	channel.ProfileURL = ""
-	if err := repo.Channels().Update(context.Background(), channel); err != nil {
-		t.Fatalf("update channel: %v", err)
+	project.ProfileURL = ""
+	if err := repo.Projects().Update(context.Background(), project); err != nil {
+		t.Fatalf("update project: %v", err)
 	}
 
 	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err != nil {
@@ -182,7 +182,7 @@ func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskMissingProfileCre
 
 func TestSeednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testing.T) {
 	_, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
 	platformFake := &fakeSeednotePlatform{
 		posts: []platform.SeednotePost{
 			{Title: "早起效率翻倍的方法", URL: "https://www.xiaohongshu.com/explore/note-1", NoteID: "note-1", CoverURL: "https://img.example/1.jpg"},
@@ -197,7 +197,7 @@ func TestSeednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testin
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
-		ChannelID:         channelID,
+		ProjectID:         projectID,
 		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
@@ -228,7 +228,7 @@ func TestSeednoteTrackingService_DiscoverPublishedNoteBindsAndCaptures(t *testin
 
 func TestSeednoteTrackingService_DiscoverPublishedNoteRejectsMismatchedIdentifiers(t *testing.T) {
 	_, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
 	url1 := "https://www.xiaohongshu.com/explore/note-1"
 	url2 := "https://www.xiaohongshu.com/explore/note-2"
 	platformFake := &fakeSeednotePlatform{
@@ -247,7 +247,7 @@ func TestSeednoteTrackingService_DiscoverPublishedNoteRejectsMismatchedIdentifie
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
-		ChannelID:         channelID,
+		ProjectID:         projectID,
 		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		PublishedMarkedAt: time.Now().Add(-24 * time.Hour),
@@ -284,7 +284,7 @@ func TestSeednoteTrackingService_DiscoverPublishedNoteRejectsMismatchedIdentifie
 
 func TestSeednoteTrackingService_StaleJobsNoopForTerminalStatuses(t *testing.T) {
 	_, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
 	platformFake := &fakeSeednotePlatform{
 		posts: []platform.SeednotePost{
 			{Title: "早起效率翻倍的方法", URL: "https://www.xiaohongshu.com/explore/note-1", NoteID: "note-1"},
@@ -300,7 +300,7 @@ func TestSeednoteTrackingService_StaleJobsNoopForTerminalStatuses(t *testing.T) 
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
-		ChannelID:         channelID,
+		ProjectID:         projectID,
 		Status:            model.SeednoteTrackingStatusStopped,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
@@ -335,7 +335,7 @@ func TestSeednoteTrackingService_StaleJobsNoopForTerminalStatuses(t *testing.T) 
 
 func TestSeednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *testing.T) {
 	_, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
 	platformFake := &fakeSeednotePlatform{metrics: platform.SeednotePostMetrics{LikeCount: 99}}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
@@ -347,7 +347,7 @@ func TestSeednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *t
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
-		ChannelID:         channelID,
+		ProjectID:         projectID,
 		Status:            model.SeednoteTrackingStatusTracking,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
@@ -392,7 +392,7 @@ func TestSeednoteTrackingService_CaptureMetricsNoopsWhenTodaySnapshotExists(t *t
 
 func TestSeednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLifecycle(t *testing.T) {
 	_, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
 	platformFake := &fakeSeednotePlatform{metrics: platform.SeednotePostMetrics{LikeCount: 99}}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{}
@@ -403,7 +403,7 @@ func TestSeednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLif
 		ID:                        uuid.New().String(),
 		TaskID:                    taskID,
 		UserID:                    userID,
-		ChannelID:                 channelID,
+		ProjectID:                 projectID,
 		Status:                    model.SeednoteTrackingStatusTracking,
 		ProfileURL:                "https://www.xiaohongshu.com/user/profile/profile-1",
 		NoteURL:                   "https://www.xiaohongshu.com/explore/note-1",
@@ -460,7 +460,7 @@ func TestSeednoteTrackingService_CaptureMetricsRepairsIncompleteTodaySnapshotLif
 
 func TestSeednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueueFailure(t *testing.T) {
 	_, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
 	platformFake := &fakeSeednotePlatform{metrics: platform.SeednotePostMetrics{LikeCount: 99}}
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enq := &fakeTrackingEnqueuer{err: errors.New("queue temporarily unavailable")}
@@ -471,7 +471,7 @@ func TestSeednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueue
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
-		ChannelID:         channelID,
+		ProjectID:         projectID,
 		Status:            model.SeednoteTrackingStatusTracking,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/profile-1",
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-1",
@@ -531,14 +531,14 @@ func TestSeednoteTrackingService_CaptureMetricsRetriesEnqueueAfterSameDayEnqueue
 
 func TestSeednoteTrackingService_ResetHidesOldSnapshotsFromAnalytics(t *testing.T) {
 	svc, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
 	oldStartedAt := time.Now().Add(-72 * time.Hour)
 	oldCapturedAt := oldStartedAt.Add(time.Hour)
 	tracking := &model.SeednotePostTracking{
 		ID:                uuid.New().String(),
 		TaskID:            taskID,
 		UserID:            userID,
-		ChannelID:         channelID,
+		ProjectID:         projectID,
 		Status:            model.SeednoteTrackingStatusStopped,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/old",
 		NoteURL:           "https://www.xiaohongshu.com/explore/note-old",
@@ -572,27 +572,27 @@ func TestSeednoteTrackingService_ResetHidesOldSnapshotsFromAnalytics(t *testing.
 	}
 }
 
-func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskRejectsForeignChannel(t *testing.T) {
+func TestSeednoteTrackingService_EnsureTrackingForPublishedTaskRejectsForeignProject(t *testing.T) {
 	svc, repo, _ := setupSeednoteTrackingServiceTest(t)
-	userID, channelID, taskID := createSeednoteTrackingFixtures(t, repo)
+	userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
 	otherUserID := uuid.New().String()
 	if err := repo.Users().Create(context.Background(), &model.User{ID: otherUserID, Email: otherUserID + "@example.com", Nickname: "Other", Password: "hashed", InviteCode: "other123"}); err != nil {
 		t.Fatalf("create other user: %v", err)
 	}
-	channel, err := repo.Channels().FindByID(context.Background(), channelID)
+	project, err := repo.Projects().FindByID(context.Background(), projectID)
 	if err != nil {
-		t.Fatalf("FindByID channel: %v", err)
+		t.Fatalf("FindByID project: %v", err)
 	}
-	channel.UserID = otherUserID
-	if err := repo.Channels().Update(context.Background(), channel); err != nil {
-		t.Fatalf("update channel: %v", err)
+	project.UserID = otherUserID
+	if err := repo.Projects().Update(context.Background(), project); err != nil {
+		t.Fatalf("update project: %v", err)
 	}
 
 	if err := svc.EnsureTrackingForPublishedTask(context.Background(), userID, taskID); err == nil {
-		t.Fatal("expected channel ownership error")
+		t.Fatal("expected project ownership error")
 	}
 	if _, err := repo.SeednoteTrackings().FindByTaskID(context.Background(), taskID); err == nil {
-		t.Fatal("tracking should not be created for a foreign channel")
+		t.Fatal("tracking should not be created for a foreign project")
 	}
 }
 

@@ -10,7 +10,7 @@ import {
 interface ReferenceImageUploadProps {
   value?: string
   onChange?: (url: string) => void
-  purpose?: "channel" | "reference"
+  purpose?: "project" | "reference"
   compact?: boolean
 }
 

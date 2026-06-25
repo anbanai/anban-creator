@@ -17,18 +17,18 @@ import (
 	"github.com/royalrick/anbanwriter/server/storage"
 )
 
-type fakeChannelLLM struct {
+type fakeProjectLLM struct {
 	response string
 	err      error
 	prompt   string
 }
 
-func (f *fakeChannelLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+func (f *fakeProjectLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	f.prompt = userPrompt
 	return f.response, f.err
 }
 
-func (f *fakeChannelLLM) CompleteWithImage(_ context.Context, systemPrompt, userPrompt, imageURL string) (string, error) {
+func (f *fakeProjectLLM) CompleteWithImage(_ context.Context, systemPrompt, userPrompt, imageURL string) (string, error) {
 	f.prompt = userPrompt
 	return f.response, f.err
 }
@@ -78,14 +78,14 @@ func (f *fakeStorageProvider) IsOwnedURL(rawURL string) bool {
 		strings.HasPrefix(rawURL, "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/")
 }
 
-func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {
-	llm := &fakeChannelLLM{response: `{
+func TestProjectFetchProfileAIAnalysisMergesFields(t *testing.T) {
+	llm := &fakeProjectLLM{response: `{
 		"positioning": "面向职场人的高效生活方式账号",
 		"keywords": ["职场", "效率", "生活方式"],
 		"style": "清爽明亮的实拍封面，搭配高对比标题字",
 		"content_summary": "围绕职场效率和日常习惯做可执行分享"
 	}`}
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetLLMClient(llm, 0)
 	profile := &platform.PlatformProfile{
 		Name:        "测试账号",
@@ -120,9 +120,9 @@ func TestChannelFetchProfileAIAnalysisMergesFields(t *testing.T) {
 	}
 }
 
-func TestChannelFetchProfileAIAnalysisFallbackOnInvalidJSON(t *testing.T) {
-	llm := &fakeChannelLLM{response: `not json`}
-	h := NewChannelHandler(nil, testChannelLogger(t))
+func TestProjectFetchProfileAIAnalysisFallbackOnInvalidJSON(t *testing.T) {
+	llm := &fakeProjectLLM{response: `not json`}
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetLLMClient(llm, 0)
 	profile := &platform.PlatformProfile{
 		Name:        "测试账号",
@@ -140,8 +140,8 @@ func TestChannelFetchProfileAIAnalysisFallbackOnInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestChannelFetchProfileRejectsNonSeednoteAutoFetch(t *testing.T) {
-	h := NewChannelHandler(nil, testChannelLogger(t))
+func TestProjectFetchProfileRejectsNonSeednoteAutoFetch(t *testing.T) {
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	app := fiber.New()
 	app.Post("/fetch", func(c fiber.Ctx) error {
 		c.Locals("user_id", "user-1")
@@ -160,11 +160,11 @@ func TestChannelFetchProfileRejectsNonSeednoteAutoFetch(t *testing.T) {
 func TestAnalyzeImageRejectsInternalFileFromDifferentUser(t *testing.T) {
 	store := &fakeStorageProvider{
 		data: map[string][]byte{
-			"uploads/channels/user-2/reference.png": tinyPNG(),
+			"uploads/projects/user-2/reference.png": tinyPNG(),
 		},
 	}
-	llm := &fakeChannelLLM{response: "清爽自然的视觉风格"}
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	llm := &fakeProjectLLM{response: "清爽自然的视觉风格"}
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetLLMClient(llm, 0)
 
@@ -174,7 +174,7 @@ func TestAnalyzeImageRejectsInternalFileFromDifferentUser(t *testing.T) {
 		return h.AnalyzeImage(c)
 	})
 
-	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/uploads/channels/user-2/reference.png"}`))
+	resp, err := app.Test(httptestJSON("POST", "/analyze", `{"image_url":"/api/v1/files/uploads/projects/user-2/reference.png"}`))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -187,14 +187,14 @@ func TestAnalyzeImageRejectsInternalFileFromDifferentUser(t *testing.T) {
 }
 
 func TestAnalyzeImageAllowsOwnedInternalFile(t *testing.T) {
-	key := "uploads/channels/user-1/reference.png"
+	key := "uploads/projects/user-1/reference.png"
 	store := &fakeStorageProvider{
 		data: map[string][]byte{
 			key: tinyPNG(),
 		},
 	}
-	llm := &fakeChannelLLM{response: "清爽自然的视觉风格"}
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	llm := &fakeProjectLLM{response: "清爽自然的视觉风格"}
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetLLMClient(llm, 0)
 
@@ -221,15 +221,15 @@ func TestAnalyzeImageAllowsOwnedInternalFile(t *testing.T) {
 
 // Regression: template uploads use purpose="reference" → key prefix is
 // "uploads/references/{user}/". Previously cleanOwnedUploadKey only allowed
-// "uploads/channels/{user}/" so this path returned 403.
+// "uploads/projects/{user}/" so this path returned 403.
 func TestAnalyzeImageAllowsReferenceUploadPrefix(t *testing.T) {
 	key := "uploads/references/user-1/abc.png"
 	store := &fakeStorageProvider{
 		data: map[string][]byte{key: tinyPNG()},
 	}
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(&fakeChannelLLM{response: "风格"}, 0)
+	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -258,9 +258,9 @@ func TestAnalyzeImageAllowsOwnedOSSURL(t *testing.T) {
 	store := &fakeStorageProvider{
 		data: map[string][]byte{key: tinyPNG()},
 	}
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(&fakeChannelLLM{response: "风格"}, 0)
+	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -283,15 +283,15 @@ func TestAnalyzeImageAllowsOwnedOSSURL(t *testing.T) {
 
 // Cross-user isolation on the Local references/ prefix (the new prefix
 // added by this fix). Mirrors TestAnalyzeImageRejectsInternalFileFromDifferentUser
-// which only covers uploads/channels/.
+// which only covers uploads/projects/.
 func TestAnalyzeImageRejectsReferenceUploadFromDifferentUser(t *testing.T) {
 	key := "uploads/references/user-2/abc.png"
 	store := &fakeStorageProvider{
 		data: map[string][]byte{key: tinyPNG()},
 	}
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(&fakeChannelLLM{response: "风格"}, 0)
+	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -318,9 +318,9 @@ func TestAnalyzeImageRejectsOwnedOSSURLFromDifferentUser(t *testing.T) {
 	store := &fakeStorageProvider{
 		data: map[string][]byte{key: tinyPNG()},
 	}
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
-	h.SetLLMClient(&fakeChannelLLM{response: "风格"}, 0)
+	h.SetLLMClient(&fakeProjectLLM{response: "风格"}, 0)
 
 	app := fiber.New()
 	app.Post("/analyze", func(c fiber.Ctx) error {
@@ -348,10 +348,10 @@ func TestAnalyzeImageRejectsOwnedOSSURLFromDifferentUser(t *testing.T) {
 func TestAnalyzeImagePrefersVisionClient(t *testing.T) {
 	key := "uploads/references/user-1/abc.png"
 	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
-	writingLLM := &fakeChannelLLM{response: "from-writing"}
-	visionLLM := &fakeChannelLLM{response: "from-vision"}
+	writingLLM := &fakeProjectLLM{response: "from-writing"}
+	visionLLM := &fakeProjectLLM{response: "from-vision"}
 
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetLLMClient(writingLLM, 0)
 	h.SetVisionClient(visionLLM)
@@ -382,9 +382,9 @@ func TestAnalyzeImagePrefersVisionClient(t *testing.T) {
 func TestAnalyzeImageFallsBackToWritingLLM(t *testing.T) {
 	key := "uploads/references/user-1/abc.png"
 	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
-	writingLLM := &fakeChannelLLM{response: "from-writing"}
+	writingLLM := &fakeProjectLLM{response: "from-writing"}
 
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetLLMClient(writingLLM, 0)
 	// No SetVisionClient call.
@@ -412,9 +412,9 @@ func TestAnalyzeImageFallsBackToWritingLLM(t *testing.T) {
 func TestAnalyzeImageReturns503OnDeadlineExceeded(t *testing.T) {
 	key := "uploads/references/user-1/abc.png"
 	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
-	visionLLM := &fakeChannelLLM{err: context.DeadlineExceeded}
+	visionLLM := &fakeProjectLLM{err: context.DeadlineExceeded}
 
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetVisionClient(visionLLM)
 
@@ -440,9 +440,9 @@ func TestAnalyzeImageReturns503OnDeadlineExceeded(t *testing.T) {
 func TestAnalyzeImageReturns503OnCanceled(t *testing.T) {
 	key := "uploads/references/user-1/abc.png"
 	store := &fakeStorageProvider{data: map[string][]byte{key: tinyPNG()}}
-	visionLLM := &fakeChannelLLM{err: context.Canceled}
+	visionLLM := &fakeProjectLLM{err: context.Canceled}
 
-	h := NewChannelHandler(nil, testChannelLogger(t))
+	h := NewProjectHandler(nil, testProjectLogger(t))
 	h.SetStore(store)
 	h.SetVisionClient(visionLLM)
 
@@ -503,7 +503,7 @@ func httptestJSON(method, target, body string) *http.Request {
 	return req
 }
 
-func testChannelLogger(t *testing.T) *zerolog.Logger {
+func testProjectLogger(t *testing.T) *zerolog.Logger {
 	t.Helper()
 	logger := zerolog.New(zerolog.NewTestWriter(t)).With().Timestamp().Logger()
 	return &logger

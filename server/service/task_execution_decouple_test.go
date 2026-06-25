@@ -47,7 +47,7 @@ func TestHandleExecution_PersistsOutcomeOnExpiredContext(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	bgCtx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestChannel(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 
 	// Workspace with a real output file so uploadMissingTaskFiles has work to do.
 	workDir := t.TempDir()
@@ -62,7 +62,7 @@ func TestHandleExecution_PersistsOutcomeOnExpiredContext(t *testing.T) {
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusRunning,
 	}

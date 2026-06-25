@@ -7,44 +7,44 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import type { Channel, TopicPool } from '@/types'
+import type { Project, TopicPool } from '@/types'
 
 interface TopicPoolDialogProps {
-  channel: Channel
+  project: Project
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-export function TopicPoolDialog({ channel, open, onOpenChange }: TopicPoolDialogProps) {
+export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialogProps) {
   const [statusFilter, setStatusFilter] = useState<string>('unused')
   const [newTopics, setNewTopics] = useState('')
   const queryClient = useQueryClient()
 
   const { data, isLoading } = useQuery({
-    queryKey: queryKeys.topicPool.list(channel.id, statusFilter),
-    queryFn: () => api.topicPool.list(channel.id, { status: statusFilter || undefined }),
+    queryKey: queryKeys.topicPool.list(project.id, statusFilter),
+    queryFn: () => api.topicPool.list(project.id, { status: statusFilter || undefined }),
     enabled: open,
   })
 
   const addMutation = useMutation({
-    mutationFn: (topics: string[]) => api.topicPool.create(channel.id, { topics }),
+    mutationFn: (topics: string[]) => api.topicPool.create(project.id, { topics }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(channel.id) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(project.id) })
       setNewTopics('')
     },
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.topicPool.delete(channel.id, id),
+    mutationFn: (id: number) => api.topicPool.delete(project.id, id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(channel.id) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(project.id) })
     },
   })
 
   const resetMutation = useMutation({
-    mutationFn: (id: number) => api.topicPool.reset(channel.id, id),
+    mutationFn: (id: number) => api.topicPool.reset(project.id, id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(channel.id) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(project.id) })
     },
   })
 
@@ -65,7 +65,7 @@ export function TopicPoolDialog({ channel, open, onOpenChange }: TopicPoolDialog
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>选题池 - {channel.name}</DialogTitle>
+          <DialogTitle>选题池 - {project.name}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">

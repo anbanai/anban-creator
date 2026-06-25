@@ -42,8 +42,8 @@ type ImageResult struct {
 	ResponsePreview string `json:"response_preview,omitempty"`
 	OutputMIME      string `json:"output_mime,omitempty"`
 	// WeChatURL/MediaID are populated when generate_image is called with
-	// upload_to_cdn=true and the image is uploaded to the channel's CDN
-	// (WeChat material library for article channels) in the same call.
+	// upload_to_cdn=true and the image is uploaded to the project's CDN
+	// (WeChat material library for article projects) in the same call.
 	// This collapses the old fragile two-step generate→upload into one
 	// atomic round-trip, so each image is durable the moment it is generated.
 	WeChatURL string `json:"wechat_url,omitempty"`
@@ -167,7 +167,7 @@ func saveGeneratedImageBytes(outputPath string, data []byte) (string, error) {
 	return outputMIME, nil
 }
 
-// resolveAppImageAPI extracts the ImageAPI config from a channel-aware appCfg
+// resolveAppImageAPI extracts the ImageAPI config from a project-aware appCfg
 // (built by BuildAppConfig) based on platform and image type.
 func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *appconfig.ImageAPI {
 	switch platform {
@@ -188,11 +188,11 @@ func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *a
 	return nil
 }
 
-// buildProcessor creates a new image.Processor for the given channel and image type.
+// buildProcessor creates a new image.Processor for the given project and image type.
 // imageModelKey (optional) routes through ResolveImageConfigForKey so that per-task
 // model selection takes effect: empty = server default / user override;
 // "custom" = user override; preset key = system-managed preset.
-func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, imageType, imageModelKey string) (*image.Processor, error) {
+func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, imageType, imageModelKey string) (*image.Processor, error) {
 	// Resolve the effective image config: per-task key → user override → server default.
 	effectiveCfg := s.imageCfg
 	if s.modelConfigSvc != nil && imageModelKey != "" {
@@ -230,7 +230,7 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, im
 	return image.NewProcessor(appCfg, apiCfg, s.logger), nil
 }
 
-// GenerateImage generates a single image using the channel's image provider.
+// GenerateImage generates a single image using the project's image provider.
 // Returns the download URL (remote CDN URL or data URL) for the agent to download.
 // If outputPath is provided, also saves the image to that path and returns file_path.
 //
@@ -239,12 +239,12 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Channel, im
 // responsible for having validated that the user's tier permits this key.
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
-	userID, channelID, prompt, imageType, outputPath, refPath, taskID, size, imageModelKey string,
+	userID, projectID, prompt, imageType, outputPath, refPath, taskID, size, imageModelKey string,
 	watermark *bool,
 ) (*ImageResult, error) {
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 
 	processor, err := s.buildProcessor(ctx, ch, imageType, imageModelKey)
@@ -270,7 +270,7 @@ func (s *ImageService) GenerateImage(
 	result := buildImageResult(rawResult, imageType)
 
 	s.logger.Info().
-		Str("channel_id", channelID).
+		Str("project_id", projectID).
 		Str("provider", result.Provider).
 		Str("model", result.Model).
 		Str("size", result.Size).
@@ -305,11 +305,11 @@ func (s *ImageService) GenerateImage(
 // to WeChat CDN. For other platforms (seednote), uploads to the configured storage provider.
 func (s *ImageService) UploadImage(
 	ctx context.Context,
-	userID, channelID, filePath string,
+	userID, projectID, filePath string,
 ) (*UploadImageResult, error) {
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 
 	// Non-WeChat platforms: upload to storage provider (local/OSS).
@@ -402,11 +402,11 @@ func (s *ImageService) CompressImage(filePath string, maxWidth int) (string, boo
 // Otherwise the image is saved to a temp directory.
 func (s *ImageService) DownloadImage(
 	ctx context.Context,
-	userID, channelID, url, upload string,
+	userID, projectID, url, upload string,
 ) (*DownloadImageResult, error) {
-	ch, err := s.repo.Channels().FindByID(ctx, channelID)
+	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("find channel: %w", err)
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 
 	if strings.EqualFold(upload, "true") || strings.EqualFold(upload, "wechat") {

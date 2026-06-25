@@ -117,12 +117,12 @@ func TestPublishDraft_RejectsDuplicateContentImages(t *testing.T) {
 	svc, repo := setupPublishingTest(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestWechatChannel(t, repo, userID)
+	projectID := createTestWechatProject(t, repo, userID)
 
 	fake := &fakeDraftClient{}
-	svc.createDraftServiceFn = func(*model.Channel) (draftClient, error) { return fake, nil }
+	svc.createDraftServiceFn = func(*model.Project) (draftClient, error) { return fake, nil }
 
-	_, err := svc.PublishDraft(ctx, userID, channelID, []DraftArticleInput{
+	_, err := svc.PublishDraft(ctx, userID, projectID, []DraftArticleInput{
 		{Title: "dup", Content: `<p>intro</p><img src="https://cdn/same.png"/><p>mid</p><img src="https://cdn/same.png"/>`},
 	})
 	if err == nil {
@@ -137,12 +137,12 @@ func TestPublishDraft_AllowsDistinctContentImages(t *testing.T) {
 	svc, repo := setupPublishingTest(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestWechatChannel(t, repo, userID)
+	projectID := createTestWechatProject(t, repo, userID)
 
 	fake := &fakeDraftClient{}
-	svc.createDraftServiceFn = func(*model.Channel) (draftClient, error) { return fake, nil }
+	svc.createDraftServiceFn = func(*model.Project) (draftClient, error) { return fake, nil }
 
-	res, err := svc.PublishDraft(ctx, userID, channelID, []DraftArticleInput{
+	res, err := svc.PublishDraft(ctx, userID, projectID, []DraftArticleInput{
 		{Title: "ok", Content: `<img src="https://cdn/a.png"/><img src="https://cdn/b.png"/>`},
 	})
 	if err != nil {
@@ -160,17 +160,17 @@ func TestPublishDraft_AllowsNoAndSingleImage(t *testing.T) {
 	svc, repo := setupPublishingTest(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	channelID := createTestWechatChannel(t, repo, userID)
+	projectID := createTestWechatProject(t, repo, userID)
 
 	fake := &fakeDraftClient{}
-	svc.createDraftServiceFn = func(*model.Channel) (draftClient, error) { return fake, nil }
+	svc.createDraftServiceFn = func(*model.Project) (draftClient, error) { return fake, nil }
 
 	for _, content := range []string{
 		`<p>text only, no images</p>`,
 		`<p>one</p><img src="https://cdn/only.png"/>`,
 	} {
 		fake.createCalled = false
-		if _, err := svc.PublishDraft(ctx, userID, channelID, []DraftArticleInput{
+		if _, err := svc.PublishDraft(ctx, userID, projectID, []DraftArticleInput{
 			{Title: "t", Content: content},
 		}); err != nil {
 			t.Fatalf("expected publish to succeed for content %q, got %v", content, err)

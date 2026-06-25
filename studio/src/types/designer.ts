@@ -88,7 +88,7 @@ export interface DesignerSettings {
 }
 
 export interface GenerateRequest {
-  channel_id: string
+  project_id: string
   prompt: string
   provider: string
   provider_id?: string
@@ -114,7 +114,7 @@ export interface GenerateImage {
 export interface ImageGeneration {
   id: string
   user_id: string
-  channel_id: string
+  project_id: string
   prompt: string
   revised_prompt?: string
   provider: string

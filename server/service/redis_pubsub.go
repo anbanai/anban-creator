@@ -15,12 +15,12 @@ const (
 	cancelChannelPrefix   = "anban:task:cancel:"
 	progressChannelPrefix = "anban:task:progress:"
 
-	// channelRunningCountPrefix is the Redis key prefix for per-channel running task counters.
-	channelRunningCountPrefix = "anban:channel:running:"
-	channelRunningCountTTL    = 1 * time.Hour
+	// projectRunningCountPrefix is the Redis key prefix for per-project running task counters.
+	projectRunningCountPrefix = "anban:project:running:"
+	projectRunningCountTTL    = 1 * time.Hour
 )
 
-// reserveSlotScript is a Lua script that atomically increments a channel's running
+// reserveSlotScript is a Lua script that atomically increments a project's running
 // counter and checks if it exceeds the max. If so, decrements back and returns 0.
 // Otherwise returns the new count. Sets a TTL to prevent key leaks.
 var reserveSlotScript = redis.NewScript(`
@@ -214,15 +214,15 @@ func (ps *RedisPubSub) Available() bool {
 	return ps.rdb != nil
 }
 
-// TryReserveSlot atomically increments the running count for a channel and returns
+// TryReserveSlot atomically increments the running count for a project and returns
 // true if the slot was reserved (new count <= maxConcurrent). Returns (0, false) if
 // no slot available. When Redis is nil, returns (0, true) to allow fallback to DB check.
-func (ps *RedisPubSub) TryReserveSlot(ctx context.Context, channelID string, maxConcurrent int) (int64, bool, error) {
+func (ps *RedisPubSub) TryReserveSlot(ctx context.Context, projectID string, maxConcurrent int) (int64, bool, error) {
 	if ps.rdb == nil {
 		return 0, true, nil
 	}
-	key := channelRunningCountPrefix + channelID
-	result, err := reserveSlotScript.Run(ctx, ps.rdb, []string{key}, maxConcurrent, int(channelRunningCountTTL.Seconds())).Int64()
+	key := projectRunningCountPrefix + projectID
+	result, err := reserveSlotScript.Run(ctx, ps.rdb, []string{key}, maxConcurrent, int(projectRunningCountTTL.Seconds())).Int64()
 	if err != nil {
 		return 0, false, fmt.Errorf("reserve slot: %w", err)
 	}
@@ -243,34 +243,34 @@ end
 return redis.call('GET', key) or 0
 `)
 
-// ReleaseSlot decrements the running count for a channel, clamping at 0.
+// ReleaseSlot decrements the running count for a project, clamping at 0.
 // No-op if Redis is nil.
-func (ps *RedisPubSub) ReleaseSlot(ctx context.Context, channelID string) error {
+func (ps *RedisPubSub) ReleaseSlot(ctx context.Context, projectID string) error {
 	if ps.rdb == nil {
 		return nil
 	}
-	key := channelRunningCountPrefix + channelID
+	key := projectRunningCountPrefix + projectID
 	if err := releaseSlotScript.Run(ctx, ps.rdb, []string{key}).Err(); err != nil {
-		ps.logger.Warn().Err(err).Str("channel_id", channelID).Msg("failed to release concurrency slot")
+		ps.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to release concurrency slot")
 	}
 	return nil
 }
 
-// SyncChannelCount sets the Redis counter to the actual DB count for reconciliation.
+// SyncProjectCount sets the Redis counter to the actual DB count for reconciliation.
 // No-op if Redis is nil.
-func (ps *RedisPubSub) SyncChannelCount(ctx context.Context, channelID string, dbCount int64) error {
+func (ps *RedisPubSub) SyncProjectCount(ctx context.Context, projectID string, dbCount int64) error {
 	if ps.rdb == nil {
 		return nil
 	}
-	key := channelRunningCountPrefix + channelID
+	key := projectRunningCountPrefix + projectID
 	if dbCount <= 0 {
 		if err := ps.rdb.Del(ctx, key).Err(); err != nil {
-			ps.logger.Warn().Err(err).Str("channel_id", channelID).Msg("failed to sync concurrency counter")
+			ps.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to sync concurrency counter")
 		}
 		return nil
 	}
-	if err := ps.rdb.Set(ctx, key, dbCount, channelRunningCountTTL).Err(); err != nil {
-		ps.logger.Warn().Err(err).Str("channel_id", channelID).Msg("failed to sync concurrency counter")
+	if err := ps.rdb.Set(ctx, key, dbCount, projectRunningCountTTL).Err(); err != nil {
+		ps.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to sync concurrency counter")
 	}
 	return nil
 }

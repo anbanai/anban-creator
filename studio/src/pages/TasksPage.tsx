@@ -4,13 +4,13 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { TaskType, TaskStatus, CreateTaskRequest, Channel, WorkflowStatus, Template } from '@/types'
+import type { TaskType, TaskStatus, CreateTaskRequest, Project, WorkflowStatus, Template } from '@/types'
 import type { Resolver } from 'react-hook-form'
-import { ChannelSelector } from '@/components/ChannelSelector'
+import { ProjectSelector } from '@/components/ProjectSelector'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
 import { ThemePicker } from '@/components/templates/ThemePicker'
@@ -27,8 +27,9 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
-import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel } from '@/lib/labels'
+import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel, ecommerceModuleCatalog, ecommerceTargetPlatformOptions, ecommerceLanguageOptions } from '@/lib/labels'
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
+import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
@@ -69,7 +70,7 @@ export default function TasksPage() {
   const shouldCreate = searchParams.get('create') === 'true'
 
   const [statusFilter, setStatusFilter] = useState(initialStatus)
-  const [channelFilter, setChannelFilter] = useState('')
+  const [projectFilter, setProjectFilter] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
   const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
@@ -79,30 +80,30 @@ export default function TasksPage() {
   const [hasContentImage, setHasContentImage] = useState(true)
   const [hasTailImage, setHasTailImage] = useState(false)
   const [goalText, setGoalText] = useState('')
-  const [channelImageRatio, setChannelImageRatio] = useState('')
+  const [projectImageRatio, setProjectImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   // 递增令牌：openCreate 的模板异步回填在 .then 中比对，若对话框已重开/切走则丢弃，
-  // 避免陈旧回填串改表单（与 ChannelsPage 同一防护思路）。
+  // 避免陈旧回填串改表单（与 ProjectsPage 同一防护思路）。
   const taskCreateTokenRef = useRef(0)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
 
-  useEffect(() => { setPage(1) }, [statusFilter, channelFilter, searchFilter])
+  useEffect(() => { setPage(1) }, [statusFilter, projectFilter, searchFilter])
 
-  const { data: channels = [], isLoading: channelsLoading } = useQuery({
-    queryKey: ['channels', 'active'],
-    queryFn: () => api.channels.list({ status: 'active' }),
+  const { data: projects = [], isLoading: projectsLoading } = useQuery({
+    queryKey: ['projects', 'active'],
+    queryFn: () => api.projects.list({ status: 'active' }),
   })
 
-  const channelMap = useMemo(() => {
-    const map: Record<string, Channel> = {}
-    for (const ch of channels) {
+  const projectMap = useMemo(() => {
+    const map: Record<string, Project> = {}
+    for (const ch of projects) {
       map[ch.id] = ch
     }
     return map
-  }, [channels])
+  }, [projects])
 
   const { data: creditsBalance } = useQuery({
     queryKey: ['credits', 'balance'],
@@ -118,7 +119,7 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', channel_id: '', quantity: 1, image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '' },
+    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', provider_strategy_override: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
@@ -126,6 +127,37 @@ export default function TasksPage() {
   const watchedAuthorIntro = useWatch({ control: form.control, name: 'author_style_intro' })
   const watchedAuthorAvatar = useWatch({ control: form.control, name: 'author_avatar_url' })
   const watchedTheme = useWatch({ control: form.control, name: 'theme' })
+  const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
+  const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
+
+  // E-commerce package cost = Σ(module price × quantity), mirroring the server's
+  // CreditService.EcommercePackageCost. `known=false` when pricing lacks a selected
+  // module (older server / unconfigured) — surfaced in the estimate UI so the user
+  // is never silently undercharged.
+  const ecommercePackageCost = useMemo(() => {
+    const prices = pricing?.ecommerce_module_prices
+    const modules = watchedSelectedModules ?? {}
+    if (!prices) return { total: 0, known: false }
+    let total = 0
+    let known = true
+    for (const [key, qty] of Object.entries(modules)) {
+      if (!qty || qty < 1) continue
+      const price = prices[key]
+      if (price == null) { known = false; continue }
+      total += price * qty
+    }
+    return { total, known }
+  }, [pricing, watchedSelectedModules])
+
+  // Toggle a module on/off or adjust its quantity. Removing the key (vs storing 0)
+  // keeps selected_modules clean and matches the server's "active module" semantics.
+  const setModuleQty = (key: string, qty: number) => {
+    const cur = form.getValues('selected_modules') ?? {}
+    const next = { ...cur }
+    if (qty >= 1) next[key] = qty
+    else delete next[key]
+    form.setValue('selected_modules', next, { shouldDirty: true })
+  }
 
   // Auto-focus prompt field when dialog opens
   useEffect(() => {
@@ -137,30 +169,30 @@ export default function TasksPage() {
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
 
-  // Resolve create intent after channel prerequisites are known.
+  // Resolve create intent after project prerequisites are known.
   useEffect(() => {
-    if (!shouldCreate || channelsLoading) return
+    if (!shouldCreate || projectsLoading) return
     openCreate()
     setSearchParams({}, { replace: true })
-  }, [shouldCreate, channelsLoading, setSearchParams])
+  }, [shouldCreate, projectsLoading, setSearchParams])
 
   useEffect(() => {
     if (!modalOpen) return
-    if (channels.length > 0) return
+    if (projects.length > 0) return
 
     setModalOpen(false)
-    toast.error('请先创建一个账号，再开始新建任务。')
-    navigate('/channels')
-  }, [channels.length, modalOpen, navigate])
+    toast.error('请先创建一个项目，再开始新建任务。')
+    navigate('/projects')
+  }, [projects.length, modalOpen, navigate])
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['tasks', statusFilter, channelFilter, page],
+    queryKey: ['tasks', statusFilter, projectFilter, page],
     queryFn: () =>
       api.tasks.list({
         limit: 50,
         offset: (page - 1) * 50,
         status: statusFilter === 'all' ? undefined : statusFilter,
-        channel_id: channelFilter || undefined,
+        project_id: projectFilter || undefined,
       }),
     refetchInterval: statusFilter === 'all' || statusFilter === 'running' ? 10000 : undefined,
   })
@@ -227,16 +259,16 @@ export default function TasksPage() {
   })
 
   function openCreate() {
-    if (channels.length === 0) {
-      toast.error('请先创建一个账号，再开始新建任务。')
-      navigate('/channels')
+    if (projects.length === 0) {
+      toast.error('请先创建一个项目，再开始新建任务。')
+      navigate('/projects')
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '' })
+    form.reset({ type: defaultType, prompt: '', project_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', provider_strategy_override: '' })
     setQuantity(1)
     setWatermark(false)
-    setChannelImageRatio('')
+    setProjectImageRatio('')
     setSelectedTemplate(null)
     setHasContentImage(true)
     setHasTailImage(false)
@@ -278,12 +310,12 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', channel_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '' })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', style: '', writing_style: '', theme: '', author: '', author_style_intro: '', author_avatar_url: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '', provider_strategy_override: '' })
     setQuantity(1)
     setWatermark(false)
     setGoalMode(false)
     setGoalText('')
-    setChannelImageRatio('')
+    setProjectImageRatio('')
     setSelectedTemplate(null)
     setHasContentImage(true)
     setHasTailImage(false)
@@ -293,7 +325,7 @@ export default function TasksPage() {
     await submit(async () => createMutation.mutateAsync({
       type: values.type as import('@/types').TaskType,
       prompt: values.prompt?.trim() || undefined,
-      channel_id: values.channel_id,
+      project_id: values.project_id,
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
       image_model_key: values.image_model_key || undefined,
@@ -309,6 +341,14 @@ export default function TasksPage() {
       template_id: selectedTemplate?.id || undefined,
       has_content_image: values.type === 'seednote' ? hasContentImage : undefined,
       has_tail_image: values.type === 'seednote' ? hasTailImage : undefined,
+      // E-commerce package (server forces quantity=1 and bills the package sum).
+      // The schema guarantees ≥1 module + ≥1 photo for ecommerce; strip empties.
+      product_photos: values.type === 'ecommerce' && values.product_photos?.length ? values.product_photos : undefined,
+      selected_modules: values.type === 'ecommerce' && values.selected_modules && Object.values(values.selected_modules).some((q) => q >= 1) ? values.selected_modules : undefined,
+      target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
+      selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
+      language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
+      provider_strategy_override: values.type === 'ecommerce' ? (values.provider_strategy_override?.trim() || undefined) : undefined,
     }))
   }
 
@@ -319,7 +359,7 @@ export default function TasksPage() {
     setSelectedTemplate(template)
     // Template thumbnail is a UI preview only — it is not a generation reference image.
     // The three orthogonal style dimensions flow into the task; the agent picks them up
-    // via get_channel_profile(task_id) (template_style / template_writing_style / template_theme).
+    // via get_project_profile(task_id) (template_style / template_writing_style / template_theme).
     form.setValue('style', template.style_prompt || '', { shouldDirty: true })
     form.setValue('writing_style', template.writing_style || '', { shouldDirty: true })
     form.setValue('theme', template.theme || '', { shouldDirty: true })
@@ -399,11 +439,11 @@ export default function TasksPage() {
           ))}
         </div>
 
-        {/* Channel filter */}
+        {/* Project filter */}
         <div className="w-full sm:w-48">
-          <ChannelSelector
-            value={channelFilter}
-            onChange={(id) => setChannelFilter(id)}
+          <ProjectSelector
+            value={projectFilter}
+            onChange={(id) => setProjectFilter(id)}
           />
         </div>
 
@@ -444,15 +484,15 @@ export default function TasksPage() {
           title={statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
           description={
             statusFilter === 'all'
-              ? channels.length === 0
-                ? '先创建一个账号，再开始生成内容。'
+              ? projects.length === 0
+                ? '先创建一个项目，再开始生成内容。'
                 : '创建任务开始生成内容。'
               : '尝试其他筛选条件或创建新任务。'
           }
           action={
             statusFilter === 'all'
-              ? channels.length === 0
-                ? { label: '去创建账号', onClick: () => navigate('/channels') }
+              ? projects.length === 0
+                ? { label: '去创建项目', onClick: () => navigate('/projects') }
                 : { label: '新建任务', onClick: openCreate }
               : undefined
           }
@@ -491,7 +531,7 @@ export default function TasksPage() {
             </div>
           </div>
           {filteredTasks.map((task) => {
-            const channel = channelMap[task.channel_id]
+            const project = projectMap[task.project_id]
             const borderColor = platformBorderColor[task.type] || ''
             const hoverBorderColor = platformHoverBorderColor[task.type] || ''
             const selected = selectedTaskIdSet.has(task.id)
@@ -515,7 +555,7 @@ export default function TasksPage() {
                     >
                       {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
-                    <PlatformAvatar avatarUrl={channel?.avatar_url} name={channel?.name} platform={task.type} />
+                    <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={task.type} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
@@ -553,8 +593,8 @@ export default function TasksPage() {
                           )}
                         </div>
                       </div>
-                      {channel?.name && (
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{channel.name}</p>
+                      {project?.name && (
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
                       )}
                       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <Badge variant="outline" className="text-[10px]">
@@ -606,21 +646,21 @@ export default function TasksPage() {
           </DialogHeader>
           <Form {...form}>
             <form id="task-create-form" onSubmit={form.handleSubmit(onSubmit)} className="max-h-[60vh] space-y-4 overflow-y-auto">
-              <FormField control={form.control} name="channel_id" render={({ field }) => (
+              <FormField control={form.control} name="project_id" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>账号</FormLabel>
+                  <FormLabel>项目</FormLabel>
                   <FormControl>
-                    <ChannelSelector
+                    <ProjectSelector
                       value={field.value || ''}
                       onChange={(id, platform) => {
                         field.onChange(id)
                         if (id) {
                           form.setValue('type', platform as TaskType)
                           form.setValue('image_ratio', '')
-                          const ch = channels.find((c) => c.id === id)
-                          setChannelImageRatio(ch?.image_ratio || platformDefaultRatio[platform] || '3:4')
+                          const ch = projects.find((c) => c.id === id)
+                          setProjectImageRatio(ch?.image_ratio || platformDefaultRatio[platform] || '3:4')
                         } else {
-                          setChannelImageRatio('')
+                          setProjectImageRatio('')
                         }
                       }}
                     />
@@ -633,13 +673,14 @@ export default function TasksPage() {
                 <FormItem>
                   <FormLabel>创作要求（可选）</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="描述你的创作要求，留空则根据账号信息自动生成" {...field} />
+                    <Textarea placeholder="描述你的创作要求，留空则根据项目信息自动生成" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
 
-              {/* Quantity selector */}
+              {/* Quantity selector (ecommerce bills a fixed package at qty=1) */}
+              {watchedType !== 'ecommerce' && (
               <div className="space-y-2">
                 <FormLabel>数量</FormLabel>
                 <div className="flex gap-2">
@@ -656,10 +697,12 @@ export default function TasksPage() {
                   ))}
                 </div>
               </div>
+              )}
 
-              {/* Image ratio selector */}
+              {/* Image ratio selector (ecommerce uses per-module ratios from platform specs) */}
+              {watchedType !== 'ecommerce' && (
               <FormField control={form.control} name="image_ratio" render={({ field }) => {
-                const defaultRatio = channelImageRatio || platformDefaultRatio[watchedType] || '3:4'
+                const defaultRatio = projectImageRatio || platformDefaultRatio[watchedType] || '3:4'
                 const defaultLabel = platformRatioLabel[watchedType] || `${defaultRatio}（默认）`
                 const ratioOptions = [
                   { value: '3:4', label: '3:4 竖版' },
@@ -689,6 +732,7 @@ export default function TasksPage() {
                 </FormItem>
                 )
               }} />
+              )}
 
               {/* Image model selector */}
               <FormField control={form.control} name="image_model_key" render={({ field }) => (
@@ -709,7 +753,7 @@ export default function TasksPage() {
                 </FormItem>
               )} />
 
-              {watchedType !== 'viral_analysis' && (
+              {(watchedType === 'article' || watchedType === 'seednote') && (
                 <TemplatePicker
                   type={watchedType as import('@/types').TemplateType}
                   selected={selectedTemplate}
@@ -734,8 +778,8 @@ export default function TasksPage() {
                 )} />
               )}
 
-              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑（覆盖模板/账号）。
-                  任务级 author_* 字段经后端解析链 task > template > channel 下发。 */}
+              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑（覆盖模板/项目）。
+                  任务级 author_* 字段经后端解析链 task > template > project 下发。 */}
               {watchedType === 'article' && (
                 <>
                   <PersonaBlock
@@ -748,7 +792,7 @@ export default function TasksPage() {
                   />
                   <ThemePicker theme={watchedTheme ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
                   {!selectedTemplate && (
-                    <p className="text-xs text-muted-foreground">未选模板时默认随账号设置，也可在此覆盖。</p>
+                    <p className="text-xs text-muted-foreground">未选模板时默认随项目设置，也可在此覆盖。</p>
                   )}
                 </>
               )}
@@ -813,8 +857,144 @@ export default function TasksPage() {
                 </div>
               )}
 
+              {/* E-commerce package: product photos + selectable modules + platform/compliance.
+                  Billing = Σ(module price × qty); quantity is fixed at 1 server-side. */}
+              {watchedType === 'ecommerce' && (
+                <div className="space-y-4 rounded-lg border border-border p-3">
+                  <div className="flex items-start gap-3">
+                    <Package className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">电商素材包</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        上传产品图，选择交付模块。积分按所选模块求和扣除，保证产品跨图一致。
+                      </p>
+                    </div>
+                  </div>
 
-              {/* Goal mode toggle */}
+                  <FormField control={form.control} name="product_photos" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>产品图（必填）</FormLabel>
+                      <FormControl>
+                        <MultiImageUpload
+                          value={field.value ?? []}
+                          onChange={(urls) => field.onChange(urls)}
+                          purpose="reference"
+                          max={16}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <div className="space-y-2">
+                    <FormLabel>交付模块（至少选一项）</FormLabel>
+                    <div className="divide-y divide-border">
+                      {ecommerceModuleCatalog.map((mod) => {
+                        const qty = watchedSelectedModules?.[mod.key] ?? 0
+                        const enabled = qty >= 1
+                        const price = pricing?.ecommerce_module_prices?.[mod.key]
+                        return (
+                          <div key={mod.key} className="flex items-center justify-between gap-3 py-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-medium text-foreground">{mod.label}</p>
+                                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{mod.ratio}</span>
+                                {price != null && (
+                                  <span className="text-[10px] text-muted-foreground">{price} 积分/{mod.qtyLabel}</span>
+                                )}
+                              </div>
+                              <p className="mt-0.5 text-xs text-muted-foreground">{mod.hint}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {enabled && (
+                                <div className="flex items-center gap-1">
+                                  <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setModuleQty(mod.key, Math.max(mod.minQty, qty - mod.qtyStep))} aria-label="减少">
+                                    <Minus className="h-3 w-3" />
+                                  </Button>
+                                  <span className="w-8 text-center text-sm tabular-nums">{qty}{mod.qtyLabel}</span>
+                                  <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setModuleQty(mod.key, Math.min(mod.maxQty, qty + mod.qtyStep))} aria-label="增加">
+                                    <Plus className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              )}
+                              <Switch checked={enabled} onCheckedChange={(on) => setModuleQty(mod.key, on ? mod.defaultQty : 0)} aria-label={`启用 ${mod.label}`} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {(!watchedSelectedModules || Object.values(watchedSelectedModules).every((q) => !q || q < 1)) && (
+                      <p className="text-xs text-destructive">请至少选择一个交付模块</p>
+                    )}
+                  </div>
+
+                  <FormField control={form.control} name="target_platform" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>目标平台</FormLabel>
+                      <Select value={field.value || undefined} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger className="w-full"><SelectValue placeholder="选择投放平台（影响尺寸与合规规范）" /></SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {ecommerceTargetPlatformOptions.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="selling_points" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>核心卖点（可选）</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="列出产品核心卖点（材质 / 功能 / 使用场景 / 价格优势等）。留空则由 AI 从产品图分析提炼" className="min-h-[72px] resize-y" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <FormField control={form.control} name="language" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>语言</FormLabel>
+                        <Select value={field.value || undefined} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger className="w-full"><SelectValue placeholder="中文" /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {ecommerceLanguageOptions.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+
+                    <FormField control={form.control} name="provider_strategy_override" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Provider 策略（可选）</FormLabel>
+                        <Select value={field.value || undefined} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger className="w-full"><SelectValue placeholder="跟随项目默认" /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="openai">OpenAI 多参考（一致性优先）</SelectItem>
+                            <SelectItem value="seedream">Seedream 锚点（速度优先）</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                </div>
+              )}
+
+
+              {/* Goal mode toggle (ecommerce bills a fixed package; no ×3 retry multiplier) */}
+              {watchedType !== 'ecommerce' && (
               <div className={`rounded-lg border p-3 transition-colors ${
                 goalMode ? 'border-primary bg-primary/5' : 'border-border'
               }`}>
@@ -863,21 +1043,30 @@ export default function TasksPage() {
                   </div>
                 )}
               </div>
+              )}
 
               {/* Cost display */}
               {(() => {
+                const isEcom = watchedType === 'ecommerce'
                 const cost = taskCostFor(watchedType)
                 const multiplier = goalMode ? 3 : 1
-                const totalCost = cost * quantity * multiplier
+                const totalCost = isEcom ? ecommercePackageCost.total : cost * quantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
                 const remaining = balance - totalCost
                 return (
                   <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
-                    <p className="text-muted-foreground">
-                      预估消耗：{cost} x {quantity}
-                      {multiplier > 1 && ` x ${multiplier}`} = <span className="font-medium text-foreground">{totalCost}</span> 积分
-                      {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
-                    </p>
+                    {isEcom ? (
+                      <p className="text-muted-foreground">
+                        套餐预估：Σ（模块价 × 数量）= <span className="font-medium text-foreground">{totalCost}</span> 积分
+                        {!ecommercePackageCost.known && <span className="ml-1 text-xs text-amber-600">（部分模块未定价，以实际扣费为准）</span>}
+                      </p>
+                    ) : (
+                      <p className="text-muted-foreground">
+                        预估消耗：{cost} x {quantity}
+                        {multiplier > 1 && ` x ${multiplier}`} = <span className="font-medium text-foreground">{totalCost}</span> 积分
+                        {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
+                      </p>
+                    )}
                     <p className="text-muted-foreground">
                       余额：{balance.toLocaleString()} →{' '}
                       <span className={`font-medium ${remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
@@ -899,12 +1088,17 @@ export default function TasksPage() {
               form="task-create-form"
               loading={createMutation.isPending}
               disabled={(() => {
+                const isEcom = watchedType === 'ecommerce'
                 const cost = taskCostFor(watchedType)
                 const multiplier = goalMode ? 3 : 1
-                const totalCost = cost * quantity * multiplier
+                const totalCost = isEcom ? ecommercePackageCost.total : cost * quantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
                 if (balance - totalCost < 0) return true
                 if (goalMode && !goalText.trim()) return true
+                if (isEcom) {
+                  if (totalCost <= 0) return true
+                  if (!watchedProductPhotos || watchedProductPhotos.length === 0) return true
+                }
                 return false
               })()}
             >

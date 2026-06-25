@@ -16,24 +16,24 @@ import (
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
-func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ChannelService, repository.Repository, func()) {
+func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectService, repository.Repository, func()) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "account_info_test.db")
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Task{}, &model.Template{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.Template{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := repository.New(db)
 	logger := zerolog.Nop()
-	channelSvc := service.NewChannelService(repo, &logger)
+	projectSvc := service.NewProjectService(repo, &logger)
 	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
 	templateSvc := service.NewTemplateService(repo, &logger)
 
 	old := svcs
-	svcs = &Services{ChannelSvc: channelSvc, TaskSvc: taskSvc, TemplateSvc: templateSvc}
+	svcs = &Services{ProjectSvc: projectSvc, TaskSvc: taskSvc, TemplateSvc: templateSvc}
 
 	cleanup := func() {
 		sqlDB, _ := db.DB()
@@ -42,32 +42,32 @@ func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ChannelS
 		}
 		svcs = old
 	}
-	return taskSvc, channelSvc, repo, cleanup
+	return taskSvc, projectSvc, repo, cleanup
 }
 
-func createAccountInfoChannel(t *testing.T, repo repository.Repository, userID, style string) *model.Channel {
+func createAccountInfoProject(t *testing.T, repo repository.Repository, userID, style string) *model.Project {
 	t.Helper()
 	ctx := context.Background()
-	ch := &model.Channel{
+	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
 		Platform: model.PlatformSeednote,
-		Name:     "test-channel",
+		Name:     "test-project",
 		Style:    style,
 	}
-	if err := repo.Channels().Create(ctx, ch); err != nil {
-		t.Fatalf("create channel: %v", err)
+	if err := repo.Projects().Create(ctx, ch); err != nil {
+		t.Fatalf("create project: %v", err)
 	}
 	return ch
 }
 
-func createAccountInfoTask(t *testing.T, repo repository.Repository, userID, channelID, style string) *model.Task {
+func createAccountInfoTask(t *testing.T, repo repository.Repository, userID, projectID, style string) *model.Task {
 	t.Helper()
 	ctx := context.Background()
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ChannelID: channelID,
+		ProjectID: projectID,
 		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusPending,
 		Style:     style,
@@ -78,17 +78,17 @@ func createAccountInfoTask(t *testing.T, repo repository.Repository, userID, cha
 	return task
 }
 
-// TestBuildAccountInfo_NoTaskID_FallsBackToChannel: without task_id the channel's
-// own style is returned with style_source="channel".
-func TestBuildAccountInfo_NoTaskID_FallsBackToChannel(t *testing.T) {
+// TestBuildAccountInfo_NoTaskID_FallsBackToProject: without task_id the project's
+// own style is returned with style_source="project".
+func TestBuildAccountInfo_NoTaskID_FallsBackToProject(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "seednote",
 	})
 	if errMsg != "" {
@@ -97,23 +97,23 @@ func TestBuildAccountInfo_NoTaskID_FallsBackToChannel(t *testing.T) {
 	if got := info["style"]; got != "极简扁平，蓝白配色" {
 		t.Errorf("style = %v, want 极简扁平，蓝白配色", got)
 	}
-	if got := info["style_source"]; got != "channel" {
-		t.Errorf("style_source = %v, want channel", got)
+	if got := info["style_source"]; got != "project" {
+		t.Errorf("style_source = %v, want project", got)
 	}
 }
 
 // TestBuildAccountInfo_TaskStyleOverride: a task with its own style overrides
-// the channel's style when task_id is supplied.
+// the project's style when task_id is supplied.
 func TestBuildAccountInfo_TaskStyleOverride(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
 	task := createAccountInfoTask(t, repo, userID, ch.ID, "温暖治愈系，柔光摄影")
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "seednote",
 		"task_id":    task.ID,
 	})
@@ -126,7 +126,7 @@ func TestBuildAccountInfo_TaskStyleOverride(t *testing.T) {
 	if got := info["style_source"]; got != "task" {
 		t.Errorf("style_source = %v, want task", got)
 	}
-	// seednote branch must still surface the channel's reference_image_url unchanged.
+	// seednote branch must still surface the project's reference_image_url unchanged.
 	imgCfg, ok := info["image_config"].(map[string]any)
 	if !ok {
 		t.Fatalf("image_config missing or wrong type: %T", info["image_config"])
@@ -136,18 +136,18 @@ func TestBuildAccountInfo_TaskStyleOverride(t *testing.T) {
 	}
 }
 
-// TestBuildAccountInfo_TaskStyleEmpty_FallsBackToChannel: task_id supplied but
-// task.Style is empty → channel style still wins, source is "channel".
-func TestBuildAccountInfo_TaskStyleEmpty_FallsBackToChannel(t *testing.T) {
+// TestBuildAccountInfo_TaskStyleEmpty_FallsBackToProject: task_id supplied but
+// task.Style is empty → project style still wins, source is "project".
+func TestBuildAccountInfo_TaskStyleEmpty_FallsBackToProject(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
 	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "seednote",
 		"task_id":    task.ID,
 	})
@@ -157,30 +157,30 @@ func TestBuildAccountInfo_TaskStyleEmpty_FallsBackToChannel(t *testing.T) {
 	if got := info["style"]; got != "极简扁平，蓝白配色" {
 		t.Errorf("style = %v, want 极简扁平，蓝白配色", got)
 	}
-	if got := info["style_source"]; got != "channel" {
-		t.Errorf("style_source = %v, want channel (empty task.Style falls back)", got)
+	if got := info["style_source"]; got != "project" {
+		t.Errorf("style_source = %v, want project (empty task.Style falls back)", got)
 	}
 }
 
-// TestBuildAccountInfo_CrossChannel_Rejected: a task that belongs to a different
-// channel must not leak its style into this profile response.
-func TestBuildAccountInfo_CrossChannel_Rejected(t *testing.T) {
+// TestBuildAccountInfo_CrossProject_Rejected: a task that belongs to a different
+// project must not leak its style into this profile response.
+func TestBuildAccountInfo_CrossProject_Rejected(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	chA := createAccountInfoChannel(t, repo, userID, "A风格")
-	chB := createAccountInfoChannel(t, repo, userID, "B风格")
-	// task belongs to channel B, but we query channel A.
+	chA := createAccountInfoProject(t, repo, userID, "A风格")
+	chB := createAccountInfoProject(t, repo, userID, "B风格")
+	// task belongs to project B, but we query project A.
 	taskOnB := createAccountInfoTask(t, repo, userID, chB.ID, "B的task风格")
 
 	_, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": chA.ID,
+		"project_id": chA.ID,
 		"scope":      "seednote",
 		"task_id":    taskOnB.ID,
 	})
 	if errMsg == "" {
-		t.Fatal("expected error for cross-channel task, got nil")
+		t.Fatal("expected error for cross-project task, got nil")
 	}
 	if !strings.Contains(errMsg, "does not belong") {
 		t.Errorf("error message = %q, want it to mention 'does not belong'", errMsg)
@@ -195,17 +195,17 @@ func TestBuildAccountInfo_ArticleScope_TaskStyleOverride(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	// Use a wechat-article channel so article scope is meaningful. The setup helper
-	// creates seednote channels by default; override the platform here.
-	ch := &model.Channel{
+	// Use a wechat-article project so article scope is meaningful. The setup helper
+	// creates seednote projects by default; override the platform here.
+	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
 		Platform: model.PlatformArticle,
-		Name:     "article-channel",
-		Style:    "channel-article-style",
+		Name:     "article-project",
+		Style:    "project-article-style",
 	}
-	if err := repo.Channels().Create(ctx, ch); err != nil {
-		t.Fatalf("create channel: %v", err)
+	if err := repo.Projects().Create(ctx, ch); err != nil {
+		t.Fatalf("create project: %v", err)
 	}
 	task := createAccountInfoTask(t, repo, userID, ch.ID, "task-article-style")
 	// Task.Type defaults to seednote in the helper; flip to article for realism.
@@ -215,7 +215,7 @@ func TestBuildAccountInfo_ArticleScope_TaskStyleOverride(t *testing.T) {
 	}
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
 	})
@@ -234,34 +234,34 @@ func TestBuildAccountInfo_ArticleScope_TaskStyleOverride(t *testing.T) {
 	}
 }
 
-// TestBuildAccountInfo_CrossUser_RejectedAtChannelLookup: a request from a
-// different user is rejected at the channel-ownership check (ChannelSvc.Get
+// TestBuildAccountInfo_CrossUser_RejectedAtProjectLookup: a request from a
+// different user is rejected at the project-ownership check (ProjectSvc.Get
 // enforces ch.UserID == userID before we ever reach the task lookup). This means
 // the inner `task.UserID != userID` guard in buildAccountInfo is defense-in-depth
 // — it cannot be exercised through the public API surface today because
-// ChannelSvc.Get short-circuits first. We keep the test to lock in the
-// user-facing guarantee and to flag the day ChannelSvc.Get changes shape.
-func TestBuildAccountInfo_CrossUser_RejectedAtChannelLookup(t *testing.T) {
+// ProjectSvc.Get short-circuits first. We keep the test to lock in the
+// user-facing guarantee and to flag the day ProjectSvc.Get changes shape.
+func TestBuildAccountInfo_CrossUser_RejectedAtProjectLookup(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	ownerID := uuid.New().String()
 	otherUserID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, ownerID, "owner风格")
+	ch := createAccountInfoProject(t, repo, ownerID, "owner风格")
 	task := createAccountInfoTask(t, repo, ownerID, ch.ID, "owner的task风格")
 
 	_, errMsg := buildAccountInfo(ctx, otherUserID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "seednote",
 		"task_id":    task.ID,
 	})
 	if errMsg == "" {
 		t.Fatal("expected error for cross-user access, got nil")
 	}
-	// The rejection surfaces as the channel-ownership error, NOT the task-belong
-	// error, because ChannelSvc.Get runs first.
-	if !strings.Contains(errMsg, "channel not owned") && !strings.Contains(errMsg, "owned by user") {
-		t.Errorf("error message = %q, want it to mention channel ownership rejection", errMsg)
+	// The rejection surfaces as the project-ownership error, NOT the task-belong
+	// error, because ProjectSvc.Get runs first.
+	if !strings.Contains(errMsg, "project not owned") && !strings.Contains(errMsg, "owned by user") {
+		t.Errorf("error message = %q, want it to mention project ownership rejection", errMsg)
 	}
 }
 
@@ -296,7 +296,7 @@ func TestBuildAccountInfo_TemplateScaffold(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
 	tmpl := createAccountInfoTemplate(t, repo, userID)
 	task := createAccountInfoTask(t, repo, userID, ch.ID, "温暖治愈系，柔光摄影")
 	task.TemplateID = &tmpl.ID
@@ -305,7 +305,7 @@ func TestBuildAccountInfo_TemplateScaffold(t *testing.T) {
 	}
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
 	})
@@ -327,7 +327,7 @@ func TestBuildAccountInfo_TemplateScaffold(t *testing.T) {
 	if got := info["template_example"]; got != "示例正文片段……" {
 		t.Errorf("template_example = %v, want example text", got)
 	}
-	// Visual style channel is untouched by the scaffold.
+	// Visual style project is untouched by the scaffold.
 	if got := info["style"]; got != "温暖治愈系，柔光摄影" {
 		t.Errorf("style = %v, want task visual style (unchanged)", got)
 	}
@@ -336,8 +336,8 @@ func TestBuildAccountInfo_TemplateScaffold(t *testing.T) {
 // TestBuildAccountInfo_AuthorBylineAndWritingStyle: a 公众号 template carries TWO
 // independent dimensions — 作者 (AuthorName, the published byline) and 写作风格
 // (AuthorStyleIntro + optional AuthorAvatarURL, the writing imitation). The template
-// AuthorName OVERRIDES the channel byline and surfaces as the resolved top-level
-// `author` (precedence template > channel). AuthorStyleIntro surfaces as
+// AuthorName OVERRIDES the project byline and surfaces as the resolved top-level
+// `author` (precedence template > project). AuthorStyleIntro surfaces as
 // template_writing_style (writing direction); AuthorAvatarURL as template_author_avatar
 // (persona avatar, NOT the byline). The two never derive from each other.
 func TestBuildAccountInfo_AuthorBylineAndWritingStyle(t *testing.T) {
@@ -345,7 +345,7 @@ func TestBuildAccountInfo_AuthorBylineAndWritingStyle(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
 
 	// Template WITH 作者 (byline) + 写作风格 (imitation + avatar).
 	tmpl := &model.Template{
@@ -370,17 +370,17 @@ func TestBuildAccountInfo_AuthorBylineAndWritingStyle(t *testing.T) {
 	}
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
 	})
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	// 作者 (byline): template AuthorName overrides the (empty) channel author and
+	// 作者 (byline): template AuthorName overrides the (empty) project author and
 	// surfaces as the resolved top-level `author` that the agent passes to publish_draft.
 	if got := info["author"]; got != "老李" {
-		t.Errorf("author = %v, want 老李 (template byline overrides channel)", got)
+		t.Errorf("author = %v, want 老李 (template byline overrides project)", got)
 	}
 	if got := info["template_author_name"]; got != "老李" {
 		t.Errorf("template_author_name = %v, want 老李", got)
@@ -395,19 +395,19 @@ func TestBuildAccountInfo_AuthorBylineAndWritingStyle(t *testing.T) {
 	}
 }
 
-// TestBuildAccountInfo_BylineFallbackToChannel: when the linked template has NO
-// AuthorName, the channel's own byline (channel.Author) must be preserved as the
-// top-level `author` — a template must never clobber the channel byline with an
-// empty value. (precedence template > channel, but only when the template defines one.)
-func TestBuildAccountInfo_BylineFallbackToChannel(t *testing.T) {
+// TestBuildAccountInfo_BylineFallbackToProject: when the linked template has NO
+// AuthorName, the project's own byline (project.Author) must be preserved as the
+// top-level `author` — a template must never clobber the project byline with an
+// empty value. (precedence template > project, but only when the template defines one.)
+func TestBuildAccountInfo_BylineFallbackToProject(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
-	ch.Author = "频道作者"
-	if err := repo.Channels().Update(ctx, ch); err != nil {
-		t.Fatalf("update channel author: %v", err)
+	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
+	ch.Author = "项目作者"
+	if err := repo.Projects().Update(ctx, ch); err != nil {
+		t.Fatalf("update project author: %v", err)
 	}
 	// Template WITHOUT an 作者 (AuthorName) — only a writing-style intro.
 	tmpl := &model.Template{
@@ -428,32 +428,32 @@ func TestBuildAccountInfo_BylineFallbackToChannel(t *testing.T) {
 		t.Fatalf("update task template_id: %v", err)
 	}
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
 	})
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	if got := info["author"]; got != "频道作者" {
-		t.Errorf("author = %v, want 频道作者 (template without AuthorName keeps channel byline)", got)
+	if got := info["author"]; got != "项目作者" {
+		t.Errorf("author = %v, want 项目作者 (template without AuthorName keeps project byline)", got)
 	}
 }
 
 // TestBuildAccountInfo_TaskAuthorOverridesTemplateByline: the TOP rung of the author
 // precedence chain — a task carrying its OWN Author wins over both the linked
-// template's AuthorName and the channel byline. This rung was never asserted before
+// template's AuthorName and the project byline. This rung was never asserted before
 // (the test helpers create tasks with empty Author), so a refactor dropping the task
-// rung of firstNonEmptyStr(task, template, channel) would slip through.
+// rung of firstNonEmptyStr(task, template, project) would slip through.
 func TestBuildAccountInfo_TaskAuthorOverridesTemplateByline(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
-	ch.Author = "频道作者"
-	if err := repo.Channels().Update(ctx, ch); err != nil {
-		t.Fatalf("update channel author: %v", err)
+	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
+	ch.Author = "项目作者"
+	if err := repo.Projects().Update(ctx, ch); err != nil {
+		t.Fatalf("update project author: %v", err)
 	}
 	tmpl := &model.Template{
 		ID:         uuid.New().String(),
@@ -474,7 +474,7 @@ func TestBuildAccountInfo_TaskAuthorOverridesTemplateByline(t *testing.T) {
 		t.Fatalf("update task author: %v", err)
 	}
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
 	})
@@ -482,25 +482,25 @@ func TestBuildAccountInfo_TaskAuthorOverridesTemplateByline(t *testing.T) {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
 	if got := info["author"]; got != "任务作者" {
-		t.Errorf("author = %v, want 任务作者 (task byline wins over template and channel)", got)
+		t.Errorf("author = %v, want 任务作者 (task byline wins over template and project)", got)
 	}
 }
 
-// TestBuildAccountInfo_TemplateBylineOverridesChannelWhenTaskEmpty: the MIDDLE rung —
+// TestBuildAccountInfo_TemplateBylineOverridesProjectWhenTaskEmpty: the MIDDLE rung —
 // when the task has no Author of its own but links a template that does, the template's
-// AuthorName wins over the channel byline. This is the exact case the centralization
+// AuthorName wins over the project byline. This is the exact case the centralization
 // fixed: persona used to be folded only in the !templateFromTask branch, so a task with
-// template_id silently fell back to the channel byline instead of the template's.
+// template_id silently fell back to the project byline instead of the template's.
 // Together with _TaskAuthorOverridesTemplateByline this pins the full chain.
-func TestBuildAccountInfo_TemplateBylineOverridesChannelWhenTaskEmpty(t *testing.T) {
+func TestBuildAccountInfo_TemplateBylineOverridesProjectWhenTaskEmpty(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
-	ch.Author = "频道作者"
-	if err := repo.Channels().Update(ctx, ch); err != nil {
-		t.Fatalf("update channel author: %v", err)
+	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
+	ch.Author = "项目作者"
+	if err := repo.Projects().Update(ctx, ch); err != nil {
+		t.Fatalf("update project author: %v", err)
 	}
 	tmpl := &model.Template{
 		ID:         uuid.New().String(),
@@ -520,7 +520,7 @@ func TestBuildAccountInfo_TemplateBylineOverridesChannelWhenTaskEmpty(t *testing
 		t.Fatalf("update task template_id: %v", err)
 	}
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
 	})
@@ -528,7 +528,7 @@ func TestBuildAccountInfo_TemplateBylineOverridesChannelWhenTaskEmpty(t *testing
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
 	if got := info["author"]; got != "老李" {
-		t.Errorf("author = %v, want 老李 (template byline wins over channel when task author is empty)", got)
+		t.Errorf("author = %v, want 老李 (template byline wins over project when task author is empty)", got)
 	}
 }
 
@@ -540,7 +540,7 @@ func TestBuildAccountInfo_TemplateDeleted_NoScaffold(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
-	ch := createAccountInfoChannel(t, repo, userID, "极简扁平，蓝白配色")
+	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
 	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
 	ghostID := uuid.New().String() // no template row exists for this id
 	task.TemplateID = &ghostID
@@ -549,7 +549,7 @@ func TestBuildAccountInfo_TemplateDeleted_NoScaffold(t *testing.T) {
 	}
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "article",
 		"task_id":    task.ID,
 	})
@@ -563,13 +563,13 @@ func TestBuildAccountInfo_TemplateDeleted_NoScaffold(t *testing.T) {
 	}
 }
 
-// TestBuildAccountInfo_ChannelTemplateFallback: a 公众号 channel that BINDS a template
-// (channel.TemplateID) — with no task-level template — resolves the persona (byline +
-// writing style + avatar) and theme from the channel's bound template. This is the
-// channel-template precedence rung: task > task-template > plan > channel-template >
-// channel own fields. The bound template's theme is folded into the resolved `theme`
-// with source "channel-template" so convert_markdown uses it.
-func TestBuildAccountInfo_ChannelTemplateFallback(t *testing.T) {
+// TestBuildAccountInfo_ProjectTemplateFallback: a 公众号 project that BINDS a template
+// (project.TemplateID) — with no task-level template — resolves the persona (byline +
+// writing style + avatar) and theme from the project's bound template. This is the
+// project-template precedence rung: task > task-template > plan > project-template >
+// project own fields. The bound template's theme is folded into the resolved `theme`
+// with source "project-template" so convert_markdown uses it.
+func TestBuildAccountInfo_ProjectTemplateFallback(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -579,7 +579,7 @@ func TestBuildAccountInfo_ChannelTemplateFallback(t *testing.T) {
 		ID:               uuid.New().String(),
 		UserID:           userID,
 		Type:             model.PlatformArticle,
-		Name:             "频道绑定模板",
+		Name:             "项目绑定模板",
 		Visibility:       "public",
 		AuthorName:       "老李",
 		AuthorStyleIntro: "犀利、接地气、像朋友聊天",
@@ -591,83 +591,83 @@ func TestBuildAccountInfo_ChannelTemplateFallback(t *testing.T) {
 		t.Fatalf("create template: %v", err)
 	}
 
-	// Article channel bound to the template; no task and no own persona/theme.
-	ch := &model.Channel{
+	// Article project bound to the template; no task and no own persona/theme.
+	ch := &model.Project{
 		ID:         uuid.New().String(),
 		UserID:     userID,
 		Platform:   model.PlatformArticle,
-		Name:       "article-channel",
+		Name:       "article-project",
 		TemplateID: tmpl.ID,
 	}
-	if err := repo.Channels().Create(ctx, ch); err != nil {
-		t.Fatalf("create channel: %v", err)
+	if err := repo.Projects().Create(ctx, ch); err != nil {
+		t.Fatalf("create project: %v", err)
 	}
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "article",
 	})
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	// 作者 (byline): channel-template AuthorName overrides the empty channel byline.
+	// 作者 (byline): project-template AuthorName overrides the empty project byline.
 	if got := info["author"]; got != "老李" {
-		t.Errorf("author = %v, want 老李 (channel-template byline)", got)
+		t.Errorf("author = %v, want 老李 (project-template byline)", got)
 	}
 	if got := info["template_writing_style"]; got != "犀利、接地气、像朋友聊天" {
-		t.Errorf("template_writing_style = %v, want intro from channel-template", got)
+		t.Errorf("template_writing_style = %v, want intro from project-template", got)
 	}
 	if got := info["template_author_avatar"]; got != "https://example.com/li.png" {
-		t.Errorf("template_author_avatar = %v, want avatar url from channel-template", got)
+		t.Errorf("template_author_avatar = %v, want avatar url from project-template", got)
 	}
-	// Theme is folded into the resolved theme (channel-template rung).
+	// Theme is folded into the resolved theme (project-template rung).
 	if got := info["theme"]; got != "autumn-warm" {
-		t.Errorf("theme = %v, want autumn-warm (folded from channel-template)", got)
+		t.Errorf("theme = %v, want autumn-warm (folded from project-template)", got)
 	}
-	if got := info["theme_source"]; got != "channel-template" {
-		t.Errorf("theme_source = %v, want channel-template", got)
+	if got := info["theme_source"]; got != "project-template" {
+		t.Errorf("theme_source = %v, want project-template", got)
 	}
 }
 
-// TestBuildAccountInfo_NoTemplate_ChannelPersonaFallback: a channel with its OWN persona
+// TestBuildAccountInfo_NoTemplate_ProjectPersonaFallback: a project with its OWN persona
 // (author_style_intro / author_avatar_url) but no bound template surfaces that persona so
-// a writing direction defined directly on the channel still reaches the agent. The
-// channel's own byline (channel.Author) is the top-level `author` (lowest precedence rung).
-func TestBuildAccountInfo_NoTemplate_ChannelPersonaFallback(t *testing.T) {
+// a writing direction defined directly on the project still reaches the agent. The
+// project's own byline (project.Author) is the top-level `author` (lowest precedence rung).
+func TestBuildAccountInfo_NoTemplate_ProjectPersonaFallback(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
 
-	ch := &model.Channel{
+	ch := &model.Project{
 		ID:               uuid.New().String(),
 		UserID:           userID,
 		Platform:         model.PlatformArticle,
-		Name:             "article-channel",
-		Author:           "频道作者",
+		Name:             "article-project",
+		Author:           "项目作者",
 		AuthorStyleIntro: "平实、克制、重数据",
 		AuthorAvatarURL:  "https://example.com/ch.png",
 	}
-	if err := repo.Channels().Create(ctx, ch); err != nil {
-		t.Fatalf("create channel: %v", err)
+	if err := repo.Projects().Create(ctx, ch); err != nil {
+		t.Fatalf("create project: %v", err)
 	}
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
-		"channel_id": ch.ID,
+		"project_id": ch.ID,
 		"scope":      "article",
 	})
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	// Channel's own byline (no template to override it).
-	if got := info["author"]; got != "频道作者" {
-		t.Errorf("author = %v, want 频道作者 (channel own byline)", got)
+	// Project's own byline (no template to override it).
+	if got := info["author"]; got != "项目作者" {
+		t.Errorf("author = %v, want 项目作者 (project own byline)", got)
 	}
-	// Channel's own persona surfaces as the writing direction / avatar fallback.
+	// Project's own persona surfaces as the writing direction / avatar fallback.
 	if got := info["template_writing_style"]; got != "平实、克制、重数据" {
-		t.Errorf("template_writing_style = %v, want channel author_style_intro fallback", got)
+		t.Errorf("template_writing_style = %v, want project author_style_intro fallback", got)
 	}
 	if got := info["template_author_avatar"]; got != "https://example.com/ch.png" {
-		t.Errorf("template_author_avatar = %v, want channel avatar fallback", got)
+		t.Errorf("template_author_avatar = %v, want project avatar fallback", got)
 	}
 }

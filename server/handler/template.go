@@ -38,7 +38,7 @@ func (h *TemplateHandler) SetStore(s storage.Provider) {
 // its images regardless of which user originally uploaded them. No-op when no
 // store is wired (e.g. unit tests) or the URL is external/empty. Delegates the
 // field list to the shared service.SignTemplateURLs so it stays in sync with the
-// recommended-templates path in channel create.
+// recommended-templates path in project create.
 func (h *TemplateHandler) signTemplateURLs(ctx context.Context, t *model.Template) {
 	service.SignTemplateURLs(ctx, h.store, h.logger, t)
 }

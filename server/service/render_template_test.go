@@ -237,7 +237,7 @@ func TestApplySlotsToMarkdown_InlineDetailAfterParagraph(t *testing.T) {
 func TestRenderTemplate_LongFormEssay(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-render-001"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
 	markdown := "# 标题\n\n引言。\n\n## 第一节\n\n正文一。\n\n## 第二节\n\n正文二。\n"
 
@@ -251,7 +251,7 @@ func TestRenderTemplate_LongFormEssay(t *testing.T) {
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "", "")
+	result, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestRenderTemplate_LongFormEssay(t *testing.T) {
 func TestRenderTemplate_Listicle(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-listicle-001"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
 	markdown := "# 三个清单\n\n## 第一项\n\nA.\n\n## 第二项\n\nB.\n\n## 第三项\n\nC.\n"
 
@@ -298,7 +298,7 @@ func TestRenderTemplate_Listicle(t *testing.T) {
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "", "")
+	result, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestRenderTemplate_Listicle(t *testing.T) {
 func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-all-rendered-001"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
 	markdown := "# T\n\n## S1\n\nbody.\n\n## S2\n\nbody.\n"
 	plan := &LayoutPlan{
@@ -331,7 +331,7 @@ func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "", "")
+	result, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
@@ -350,11 +350,11 @@ func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
 	}
 }
 
-func TestRenderTemplate_ThemeFallbackToChannelTheme(t *testing.T) {
+func TestRenderTemplate_ThemeFallbackToProjectTheme(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-theme-fallback-001"
-	// Channel has no theme set → should default to "autumn-warm".
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	// Project has no theme set → should default to "autumn-warm".
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
 	markdown := "# Title\n"
 	plan := &LayoutPlan{
@@ -364,7 +364,7 @@ func TestRenderTemplate_ThemeFallbackToChannelTheme(t *testing.T) {
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "", "")
+	result, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
@@ -373,11 +373,11 @@ func TestRenderTemplate_ThemeFallbackToChannelTheme(t *testing.T) {
 	}
 }
 
-func TestRenderTemplate_ThemeArgOverridesChannelTheme(t *testing.T) {
+func TestRenderTemplate_ThemeArgOverridesProjectTheme(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-theme-override-001"
-	// Channel has autumn-warm but we override to spring-fresh.
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	// Project has autumn-warm but we override to spring-fresh.
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
 
 	markdown := "# Title\n"
 	plan := &LayoutPlan{
@@ -387,7 +387,7 @@ func TestRenderTemplate_ThemeArgOverridesChannelTheme(t *testing.T) {
 		},
 	}
 
-	result, err := svc.RenderTemplate(context.Background(), userID, channelID, markdown, plan, "spring-fresh", "")
+	result, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "spring-fresh", "")
 	if err != nil {
 		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestRenderTemplate_ThemeArgOverridesChannelTheme(t *testing.T) {
 func TestRenderTemplate_EmptyMarkdown(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-empty-md"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
 	plan := &LayoutPlan{
 		ArticleType: "long-form-essay",
@@ -407,7 +407,7 @@ func TestRenderTemplate_EmptyMarkdown(t *testing.T) {
 			{SlotID: "hero", SectionIndex: 0, ImageURL: "https://cdn/h.png"},
 		},
 	}
-	_, err := svc.RenderTemplate(context.Background(), userID, channelID, "", plan, "", "")
+	_, err := svc.RenderTemplate(context.Background(), userID, projectID, "", plan, "", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for empty markdown")
 	}
@@ -416,9 +416,9 @@ func TestRenderTemplate_EmptyMarkdown(t *testing.T) {
 func TestRenderTemplate_NilPlan(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-nil-plan"
-	channelID := createChannelWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
 
-	_, err := svc.RenderTemplate(context.Background(), userID, channelID, "# Hello", nil, "", "")
+	_, err := svc.RenderTemplate(context.Background(), userID, projectID, "# Hello", nil, "", "")
 	if err == nil {
 		t.Fatal("[FAIL] Expected error for nil plan")
 	}

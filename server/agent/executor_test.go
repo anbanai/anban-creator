@@ -45,19 +45,19 @@ func TestExecutionOptionsDoesNotExposeModelOverride(t *testing.T) {
 func TestBuildAppConfig(t *testing.T) {
 	tests := []struct {
 		name         string
-		ch           *model.Channel
+		ch           *model.Project
 		wantErr      bool
 		skipRefImage bool
 		check        func(t *testing.T, cfg map[string]any)
 	}{
 		{
 			name: "basic article config",
-			ch: &model.Channel{
+			ch: &model.Project{
 				Platform:    model.ScopeArticle,
 				Name:        "Test Account",
 				Keywords:    "写作,效率",
 				Positioning: "个人成长",
-				Config: model.ChannelConfig{
+				Config: model.ProjectConfig{
 					WechatAppID:  "test_appid",
 					WechatSecret: "test_secret",
 				},
@@ -78,7 +78,7 @@ func TestBuildAppConfig(t *testing.T) {
 		},
 		{
 			name: "seednote config with image API",
-			ch: &model.Channel{
+			ch: &model.Project{
 				Platform: model.ScopeSeednote,
 				Name:     "SeedNote Account",
 				Style:    "cute-doodle",
@@ -92,7 +92,7 @@ func TestBuildAppConfig(t *testing.T) {
 		},
 		{
 			name: "skip_reference_image omits refer path",
-			ch: &model.Channel{
+			ch: &model.Project{
 				Platform:          model.ScopeSeednote,
 				Name:              "SkipRef Account",
 				ReferenceImageURL: "http://example.com/ref.png",
@@ -110,7 +110,7 @@ func TestBuildAppConfig(t *testing.T) {
 		},
 		{
 			name: "reference_image sets refer path when not skipped",
-			ch: &model.Channel{
+			ch: &model.Project{
 				Platform:          model.ScopeSeednote,
 				Name:              "WithRef Account",
 				ReferenceImageURL: "http://example.com/ref.png",
@@ -213,7 +213,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ch := &model.Channel{
+			ch := &model.Project{
 				Platform: tt.platform,
 				Name:     "Test",
 			}
@@ -258,7 +258,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		channel         *model.Channel
+		project         *model.Project
 		imageAPICfg     *srvconfig.ImageAPIConfig
 		taskImageRatio  string
 		wantCoverSize   string
@@ -266,7 +266,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 	}{
 		{
 			name: "both empty falls back to YAML defaults",
-			channel: &model.Channel{
+			project: &model.Project{
 				Platform:   model.ScopeArticle,
 				Name:       "Test",
 				ImageRatio: "",
@@ -277,8 +277,8 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 			wantContentSize: "16:9",
 		},
 		{
-			name: "channel ratio overrides YAML defaults",
-			channel: &model.Channel{
+			name: "project ratio overrides YAML defaults",
+			project: &model.Project{
 				Platform:   model.ScopeArticle,
 				Name:       "Test",
 				ImageRatio: "1:1",
@@ -289,8 +289,8 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 			wantContentSize: "1:1",
 		},
 		{
-			name: "task ratio overrides channel ratio",
-			channel: &model.Channel{
+			name: "task ratio overrides project ratio",
+			project: &model.Project{
 				Platform:   model.ScopeArticle,
 				Name:       "Test",
 				ImageRatio: "1:1",
@@ -301,8 +301,8 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 			wantContentSize: "4:3",
 		},
 		{
-			name: "task ratio without channel ratio overrides YAML",
-			channel: &model.Channel{
+			name: "task ratio without project ratio overrides YAML",
+			project: &model.Project{
 				Platform:   model.ScopeSeednote,
 				Name:       "Test",
 				ImageRatio: "",
@@ -316,12 +316,12 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.channel, tt.imageAPICfg, tt.taskImageRatio, false, "")
+			cfg, err := BuildAppConfig(tt.project, tt.imageAPICfg, tt.taskImageRatio, false, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			coverSize, contentSize := getPlatformSizes(cfg, tt.channel.Platform)
+			coverSize, contentSize := getPlatformSizes(cfg, tt.project.Platform)
 			if coverSize != tt.wantCoverSize {
 				t.Errorf("cover size = %q, want %q", coverSize, tt.wantCoverSize)
 			}
@@ -339,6 +339,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 	}{
 		{model.ScopeArticle, "wechatarticle"},
 		{model.ScopeSeednote, "seednote"},
+		{model.ScopeEcommerce, "ecommerce"},
 		{"unknown", "seednote"},
 	}
 
@@ -684,16 +685,16 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 }
 
 func TestBuildUserPrompt_TaskContext(t *testing.T) {
-	// Both task_id and channel_id present.
-	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", TaskID: "task-123", ChannelID: "chan-abc"})
+	// Both task_id and project_id present.
+	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", TaskID: "task-123", ProjectID: "chan-abc"})
 	if !strings.Contains(got, "本任务上下文：") {
 		t.Errorf("missing 任务上下文 line; got %q", got)
 	}
 	if !strings.Contains(got, "task_id=task-123") {
 		t.Errorf("missing task_id; got %q", got)
 	}
-	if !strings.Contains(got, "channel_id=chan-abc") {
-		t.Errorf("missing channel_id; got %q", got)
+	if !strings.Contains(got, "project_id=chan-abc") {
+		t.Errorf("missing project_id; got %q", got)
 	}
 
 	// Only task_id.
@@ -701,14 +702,14 @@ func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	if !strings.Contains(got, "本任务上下文：task_id=task-123") {
 		t.Errorf("expected only task_id in context line; got %q", got)
 	}
-	if strings.Contains(got, "channel_id=") {
-		t.Errorf("channel_id= should be absent when empty; got %q", got)
+	if strings.Contains(got, "project_id=") {
+		t.Errorf("project_id= should be absent when empty; got %q", got)
 	}
 
-	// Only channel_id.
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", ChannelID: "chan-abc"})
-	if !strings.Contains(got, "本任务上下文：channel_id=chan-abc") {
-		t.Errorf("expected only channel_id in context line; got %q", got)
+	// Only project_id.
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", ProjectID: "chan-abc"})
+	if !strings.Contains(got, "本任务上下文：project_id=chan-abc") {
+		t.Errorf("expected only project_id in context line; got %q", got)
 	}
 
 	// Both empty — line omitted entirely.

@@ -120,7 +120,7 @@ type WriterStyle struct {
 
 	// 注：封面/视觉相关字段（cover_style / cover_prompt / cover_mood /
 	// cover_color_scheme）已移除。图片视觉是与写作风格正交的独立维度，由
-	// Channel/Template/Plan/Task 的 style 字段承载（见服务端三维度解析链）。
+	// Project/Template/Plan/Task 的 style 字段承载（见服务端三维度解析链）。
 	// writer 不再携带任何视觉身份，避免 writer key（如 dan-koe）将其封面风格
 	// 泄漏为图片生成指令（曾经的 dan-koe → 维多利亚木刻 bug）。
 }

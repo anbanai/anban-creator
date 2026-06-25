@@ -31,8 +31,8 @@ export const registerSchema = z.object({
 export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
-  channel_id: z.string().optional().default(""),
-  type: z.enum(["seednote", "article", "viral_analysis"]),
+  project_id: z.string().optional().default(""),
+  type: z.enum(["seednote", "article", "viral_analysis", "ecommerce"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -61,6 +61,15 @@ export const createTaskSchema = z.object({
   // Non-seednote task types ignore these fields server-side.
   has_content_image: z.boolean().default(true),
   has_tail_image: z.boolean().default(false),
+  // E-commerce package (server ignores for non-ecommerce). selected_modules maps
+  // module key → quantity; product_photos are /files/upload URLs materialized
+  // into the agent workspace by the executor.
+  product_photos: z.array(z.string()).default([]),
+  selected_modules: z.record(z.string(), z.number().int().min(0)).default({}),
+  target_platform: z.string().optional(),
+  selling_points: z.string().max(2000, "卖点不能超过 2000 个字符").optional(),
+  language: z.string().optional(),
+  provider_strategy_override: z.string().optional(),
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -74,11 +83,30 @@ export const createTaskSchema = z.object({
     return
   }
 
-  if (!data.channel_id?.trim()) {
+  if (data.type === "ecommerce") {
+    const modules = data.selected_modules ?? {}
+    const activeModules = Object.entries(modules).filter(([, q]) => q >= 1)
+    if (activeModules.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "请至少选择一个交付模块",
+        path: ["selected_modules"],
+      })
+    }
+    if ((data.product_photos ?? []).length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "请至少上传一张产品图",
+        path: ["product_photos"],
+      })
+    }
+  }
+
+  if (!data.project_id?.trim()) {
     ctx.addIssue({
       code: "custom",
-      message: "请选择账号",
-      path: ["channel_id"],
+      message: "请选择项目",
+      path: ["project_id"],
     })
   }
 
@@ -96,7 +124,7 @@ export const createTaskSchema = z.object({
 export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
 export const planSchema = z.object({
-  channel_id: z.string().optional(),
+  project_id: z.string().optional(),
   type: z.enum(["seednote", "article"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
@@ -136,8 +164,8 @@ export const planSchema = z.object({
 })
 export type PlanFormValues = z.infer<typeof planSchema>
 
-export const channelSchema = z.object({
-  platform: z.enum(["seednote", "article"]),
+export const projectSchema = z.object({
+  platform: z.enum(["seednote", "article", "ecommerce"]),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
@@ -145,7 +173,7 @@ export const channelSchema = z.object({
   wechat_app_id: z.string().optional(),
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
-  positioning: z.string().max(1024, "账号定位不能超过 1024 个字符").optional(),
+  positioning: z.string().max(1024, "项目定位不能超过 1024 个字符").optional(),
   style: z.string().max(1024, "视觉风格不能超过 1024 个字符").optional(),
   writing_style: z.string().max(100, "写作风格不能超过 100 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
@@ -173,7 +201,7 @@ export const channelSchema = z.object({
   message: "启用自动发布时，微信 AppID 为必填项",
   path: ["wechat_app_id"],
 })
-export type ChannelFormValues = z.infer<typeof channelSchema>
+export type ProjectFormValues = z.infer<typeof projectSchema>
 
 export const changePasswordSchema = z.object({
   old_password: z.string().min(1, '请输入当前密码'),

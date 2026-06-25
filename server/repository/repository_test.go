@@ -73,7 +73,7 @@ func TestSeednoteTrackingRepository_CRUD(t *testing.T) {
 		ID:                "tracking-1",
 		TaskID:            "task-1",
 		UserID:            "user-1",
-		ChannelID:         "channel-1",
+		ProjectID:         "project-1",
 		Status:            model.SeednoteTrackingStatusWaitingDiscovery,
 		ProfileURL:        "https://www.xiaohongshu.com/user/profile/abc",
 		PublishedMarkedAt: now,
@@ -445,7 +445,7 @@ func TestTaskRepository_CRUD(t *testing.T) {
 	}
 }
 
-func TestTaskRepository_FindTitlesByChannelID(t *testing.T) {
+func TestTaskRepository_FindTitlesByProjectID(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)
 	ctx := context.Background()
@@ -454,7 +454,7 @@ func TestTaskRepository_FindTitlesByChannelID(t *testing.T) {
 		{
 			ID:        "task-title-1",
 			UserID:    "user-title-1",
-			ChannelID: "channel-title-1",
+			ProjectID: "project-title-1",
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusCompleted,
 			Prompt:    "this prompt must not be returned",
@@ -464,7 +464,7 @@ func TestTaskRepository_FindTitlesByChannelID(t *testing.T) {
 		{
 			ID:        "task-title-2",
 			UserID:    "user-title-1",
-			ChannelID: "channel-title-1",
+			ProjectID: "project-title-1",
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusCompleted,
 			Prompt:    "empty title prompt must not be returned",
@@ -474,7 +474,7 @@ func TestTaskRepository_FindTitlesByChannelID(t *testing.T) {
 		{
 			ID:        "task-title-3",
 			UserID:    "user-title-1",
-			ChannelID: "channel-title-1",
+			ProjectID: "project-title-1",
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusCompleted,
 			Prompt:    "another prompt must not be returned",
@@ -484,11 +484,11 @@ func TestTaskRepository_FindTitlesByChannelID(t *testing.T) {
 		{
 			ID:        "task-title-4",
 			UserID:    "user-title-1",
-			ChannelID: "other-channel",
+			ProjectID: "other-project",
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusCompleted,
-			Prompt:    "other channel prompt",
-			Title:     "其他频道标题",
+			Prompt:    "other project prompt",
+			Title:     "其他项目标题",
 			CreatedAt: time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC),
 		},
 	}
@@ -499,9 +499,9 @@ func TestTaskRepository_FindTitlesByChannelID(t *testing.T) {
 		}
 	}
 
-	titles, err := repo.Tasks().FindTitlesByChannelID(ctx, "channel-title-1")
+	titles, err := repo.Tasks().FindTitlesByProjectID(ctx, "project-title-1")
 	if err != nil {
-		t.Fatalf("FindTitlesByChannelID: %v", err)
+		t.Fatalf("FindTitlesByProjectID: %v", err)
 	}
 
 	want := []string{"咖啡探店避坑指南", "早餐店爆款标题"}
@@ -524,7 +524,7 @@ func TestTaskRepository_ClearArtifactTitles(t *testing.T) {
 		{
 			ID:        "task-artifact-title-1",
 			UserID:    "user-artifact-title",
-			ChannelID: "channel-artifact-title",
+			ProjectID: "project-artifact-title",
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusCompleted,
 			Title:     "图片内容规划",
@@ -533,7 +533,7 @@ func TestTaskRepository_ClearArtifactTitles(t *testing.T) {
 		{
 			ID:        "task-artifact-title-2",
 			UserID:    "user-artifact-title",
-			ChannelID: "channel-artifact-title",
+			ProjectID: "project-artifact-title",
 			Type:      model.ScopeSeednote,
 			Status:    model.TaskStatusCompleted,
 			Title:     "真实标题",
@@ -552,9 +552,9 @@ func TestTaskRepository_ClearArtifactTitles(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("count = %d, want 1", count)
 	}
-	titles, err := repo.Tasks().FindTitlesByChannelID(ctx, "channel-artifact-title")
+	titles, err := repo.Tasks().FindTitlesByProjectID(ctx, "project-artifact-title")
 	if err != nil {
-		t.Fatalf("FindTitlesByChannelID: %v", err)
+		t.Fatalf("FindTitlesByProjectID: %v", err)
 	}
 	if len(titles) != 1 || titles[0] != "真实标题" {
 		t.Fatalf("titles = %v, want [真实标题]", titles)

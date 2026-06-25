@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,10 +23,10 @@ import (
 // unbounded memory/disk usage. Mirrors the upload limit in handler/file.go.
 const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 
-// BuildAppConfig constructs an app/config.Config from a Channel DB record.
+// BuildAppConfig constructs an app/config.Config from a Project DB record.
 // This bridges the multi-user server config to the single-account app config
 // used by the abwriter CLI binary.
-func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, skipRefImage bool, taskReferenceImageURL string) (*appconfig.Config, error) {
+func BuildAppConfig(ch *model.Project, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, skipRefImage bool, taskReferenceImageURL string) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
 		Name:        ch.Name,
 		Positioning: ch.Positioning,
@@ -41,7 +42,7 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		}
 	}
 
-	// WeChat credentials from Channel.
+	// WeChat credentials from Project.
 	cfg.Wechat.AppID = ch.GetWechatAppID()
 	cfg.Wechat.Secret = ch.GetWechatSecret()
 
@@ -52,7 +53,7 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		// After the 3-dimension split, Wechat.Article.Style is the WRITING style
 		// (writer resource key, e.g. "dan-koe") — NOT the image visual style. The
 		// visual style is orthogonal and flows through the user prompt
-		// (BuildUserPrompt) and get_channel_profile, never through settings.json.
+		// (BuildUserPrompt) and get_project_profile, never through settings.json.
 		cfg.Wechat.Article.Style = ch.WritingStyle
 		cfg.Wechat.Article.Theme = ch.Theme
 	case model.ScopeSeednote:
@@ -102,7 +103,7 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 		}
 	}
 
-	// Apply image ratio override: task-level > channel-level > server YAML defaults.
+	// Apply image ratio override: task-level > project-level > server YAML defaults.
 	effectiveRatio := taskImageRatio
 	if effectiveRatio == "" {
 		effectiveRatio = ch.ImageRatio
@@ -119,7 +120,7 @@ func BuildAppConfig(ch *model.Channel, imageAPICfg *srvconfig.ImageAPIConfig, ta
 	}
 
 	// Set reference image path for image generation (downloaded by executor).
-	// Task-level reference image takes priority over channel brand image.
+	// Task-level reference image takes priority over project brand image.
 	effectiveReferURL := taskReferenceImageURL
 	if effectiveReferURL == "" && !skipRefImage {
 		effectiveReferURL = ch.ReferenceImageURL
@@ -157,12 +158,14 @@ func TaskTypeToAgent(taskType string) string {
 		return "wechatarticle"
 	case model.ScopeSeednote:
 		return "seednote"
+	case model.ScopeEcommerce:
+		return "ecommerce"
 	default:
 		return "seednote"
 	}
 }
 
-// DownloadReferenceImage downloads a channel's brand reference image to the
+// DownloadReferenceImage downloads a project's brand reference image to the
 // workspace's .anbanwriter directory. The image is saved as reference.png for
 // use by both Claude Code (visual context) and abwriter CLI (--ref flag).
 //
@@ -237,3 +240,100 @@ func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger 
 	return nil
 }
 
+// DownloadProductImages downloads each product photo URL into the workspace's
+// .anbanwriter/products/ directory (used by e-commerce tasks), preserving upload
+// order with 1-indexed names (product_01.<ext>, product_02.<ext>, ...). It also
+// writes index.json listing the exact filenames so the agent can reference them
+// deterministically (extensions vary by upload). Returns the count successfully
+// materialized; per-image failures are logged and skipped (best-effort), matching
+// DownloadReferenceImage's non-fatal posture.
+//
+// The resolution path mirrors DownloadReferenceImage (store.Read for URLs owned
+// by this backend — works on private OSS buckets; direct HTTP otherwise) so it
+// behaves identically under the local and docker executors.
+func DownloadProductImages(ctx context.Context, store storage.Provider, logger *zerolog.Logger, workDir string, urls []string) int {
+	if len(urls) == 0 {
+		return 0
+	}
+	destDir := filepath.Join(workDir, appconfig.ConfigDir, "products")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("create products dir failed")
+		}
+		return 0
+	}
+
+	names := make([]string, 0, len(urls))
+	for i, imageURL := range urls {
+		data, err := fetchImageBytes(ctx, store, imageURL)
+		if err != nil {
+			if logger != nil {
+				logger.Warn().Err(err).Str("url", imageURL).Int("index", i+1).Msg("failed to download product photo, skipping")
+			}
+			continue
+		}
+		name := fmt.Sprintf("product_%02d%s", i+1, imageExtFromURL(imageURL))
+		if err := os.WriteFile(filepath.Join(destDir, name), data, 0o644); err != nil {
+			if logger != nil {
+				logger.Warn().Err(err).Str("name", name).Msg("write product photo failed, skipping")
+			}
+			continue
+		}
+		names = append(names, name)
+	}
+
+	if len(names) > 0 {
+		if indexBytes, err := json.Marshal(names); err == nil {
+			if err := os.WriteFile(filepath.Join(destDir, "index.json"), indexBytes, 0o644); err != nil {
+				if logger != nil {
+					logger.Warn().Err(err).Msg("write products index.json failed")
+				}
+			}
+		}
+	}
+	return len(names)
+}
+
+// fetchImageBytes resolves an image URL to its bytes. For URLs owned by this
+// backend (OSS / local storage) it reads via the storage provider (works on
+// private buckets); otherwise it downloads via HTTP. Mirrors the resolution logic
+// inside DownloadReferenceImage, extracted here so the multi-file product-photo
+// flow can reuse it without touching the well-tested reference-image path.
+func fetchImageBytes(ctx context.Context, store storage.Provider, imageURL string) ([]byte, error) {
+	if store != nil && store.IsOwnedURL(imageURL) {
+		if key, ok := storage.StorageKeyFromURL(imageURL); ok {
+			if data, err := store.Read(ctx, key); err == nil {
+				if int64(len(data)) > maxReferenceImageBytes {
+					return nil, fmt.Errorf("download: file too large (%d bytes)", len(data))
+				}
+				return data, nil
+			}
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download: HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, maxReferenceImageBytes))
+}
+
+// imageExtFromURL infers a lowercase image extension from the URL path, defaulting
+// to .png when unknown. Extension is taken from the URL (the canonical source for
+// /files/upload and OSS object keys) rather than sniffing bytes.
+func imageExtFromURL(imageURL string) string {
+	switch ext := strings.ToLower(filepath.Ext(imageURL)); ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
+		return ext
+	default:
+		return ".png"
+	}
+}

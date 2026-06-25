@@ -67,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // which would otherwise trigger a wasteful full refetch.
   const prevUserIdRef = useRef<string | null>(state.user?.id ?? null)
 
-  // Drop all cached queries (templates/channels/plans carry the previous user's
+  // Drop all cached queries (templates/projects/plans carry the previous user's
   // image URLs) and reset the identity tracker. Used on logout / token expiry.
   const clearUserCache = useCallback(() => {
     prevUserIdRef.current = null

@@ -6,7 +6,7 @@ export const timelineApi = {
     item_type?: string
     content_type?: string
     status?: string
-    channel_id?: string
+    project_id?: string
   }) =>
     unwrap<TimelineResponse>(http.get('/timeline', { params: { from, to, ...filters } })),
 }

@@ -15,17 +15,17 @@ import type { ResourceEntry } from '@/types/resource'
 
 const NONE = '_none'
 
-// ThemePicker — 公众号「排版风格」选择器 + 实时预览，被模板编辑器与公众号频道编辑器共用。
+// ThemePicker — 公众号「排版风格」选择器 + 实时预览，被模板编辑器与公众号项目编辑器共用。
 //
 // - 选中后下拉触发器显示中文名（用 Base UI SelectValue 的 function child 渲染
 //   description||name，不依赖隐式 label 映射，避免显示英文 key）。
 // - 实时预览：选了主题即在下方即时渲染 ThemePreview（iframe），无需点按钮。
-// - readOnly=true（频道绑定模板、排版随模板同步）时只展示当前主题名 + 预览。
+// - readOnly=true（项目绑定模板、排版随模板同步）时只展示当前主题名 + 预览。
 interface ThemePickerProps {
   theme: string
   onTheme: (v: string) => void
   readOnly?: boolean
-  /** 默认占位文案；频道侧用「用频道默认排版」，模板侧用「用频道默认排版」。 */
+  /** 默认占位文案；项目侧用「用项目默认排版」，模板侧用「用项目默认排版」。 */
   noneLabel?: string
 }
 
@@ -33,7 +33,7 @@ export function ThemePicker({
   theme,
   onTheme,
   readOnly = false,
-  noneLabel = '不设置（用频道默认排版）',
+  noneLabel = '不设置（用项目默认排版）',
 }: ThemePickerProps) {
   const { data: themeResources } = useQuery({
     queryKey: queryKeys.resources.themes,

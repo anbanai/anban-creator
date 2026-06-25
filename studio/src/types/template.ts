@@ -13,7 +13,7 @@ export interface Template {
   structure: Record<string, unknown>
   style_prompt: string
   // writing_style is the legacy writer-key scaffold (poster). Surfaced to the
-  // agent via get_channel_profile(task_id). Old rows omit it.
+  // agent via get_project_profile(task_id). Old rows omit it.
   writing_style?: string
   // theme is the 排版样式 dimension (Markdown→HTML layout theme). Surfaced to
   // the agent as template_theme. Old rows omit it.

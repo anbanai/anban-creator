@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Channel, ChannelStats } from '@/types'
+import type { Project, ProjectStats } from '@/types'
 import { platformLabels } from '@/lib/labels'
 import { renderPlatformIcon, platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
@@ -7,10 +7,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TopicPoolDialog } from '@/components/TopicPoolDialog'
 
-interface ChannelCardProps {
-  channel: Channel
-  stats?: ChannelStats
-  onEdit?: (channel: Channel) => void
+interface ProjectCardProps {
+  project: Project
+  stats?: ProjectStats
+  onEdit?: (project: Project) => void
   archiving?: boolean
   restoring?: boolean
   onArchive?: (id: string) => void
@@ -18,32 +18,32 @@ interface ChannelCardProps {
   onDelete?: (id: string) => void
 }
 
-export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ChannelCardProps) {
+export function ProjectCard({ project, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
-  const platformLabel = platformLabels[channel.platform] || channel.platform
-  const platformBadge = platformBadgeVariant[channel.platform] || ('secondary' as const)
-  const borderColor = platformBorderColor[channel.platform] || ''
-  const hoverBorderColor = platformHoverBorderColor[channel.platform] || ''
+  const platformLabel = platformLabels[project.platform] || project.platform
+  const platformBadge = platformBadgeVariant[project.platform] || ('secondary' as const)
+  const borderColor = platformBorderColor[project.platform] || ''
+  const hoverBorderColor = platformHoverBorderColor[project.platform] || ''
 
   return (
     <div className={`group rounded-lg border border-border bg-card p-5 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md active:scale-[0.98]`}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <PlatformAvatar avatarUrl={channel.avatar_url} name={channel.name} platform={channel.platform} size="lg" />
+          <PlatformAvatar avatarUrl={project.avatar_url} name={project.name} platform={project.platform} size="lg" />
           <div>
-            <h3 className="text-sm font-semibold text-foreground">{channel.name}</h3>
+            <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
             <Badge variant={platformBadge} className="mt-1 text-[10px]">
-              {renderPlatformIcon(channel.platform)}
+              {renderPlatformIcon(project.platform)}
               {platformLabel}
             </Badge>
           </div>
         </div>
-        {channel.status === 'archived' && (
+        {project.status === 'archived' && (
           <Badge variant="outline" className="text-[10px]">已归档</Badge>
         )}
       </div>
-      {channel.positioning && (
-        <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{channel.positioning}</p>
+      {project.positioning && (
+        <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{project.positioning}</p>
       )}
       {stats && (
         <div className="mt-4 flex gap-4 border-t border-border pt-3 text-xs text-muted-foreground">
@@ -54,22 +54,22 @@ export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onAr
       )}
       <div className="mt-3 flex gap-1.5">
         {onEdit && (
-          <Button variant="ghost" size="xs" onClick={() => onEdit(channel)} aria-label="编辑账号">
+          <Button variant="ghost" size="xs" onClick={() => onEdit(project)} aria-label="编辑项目">
             编辑
           </Button>
         )}
-        {channel.status === 'active' && onArchive && (
-          <Button variant="ghost" size="xs" disabled={archiving} onClick={() => onArchive(channel.id)} aria-label="归档账号">
+        {project.status === 'active' && onArchive && (
+          <Button variant="ghost" size="xs" disabled={archiving} onClick={() => onArchive(project.id)} aria-label="归档项目">
             归档
           </Button>
         )}
-        {channel.status === 'archived' && onRestore && (
-          <Button variant="ghost" size="xs" disabled={restoring} onClick={() => onRestore(channel.id)} aria-label="恢复账号">
+        {project.status === 'archived' && onRestore && (
+          <Button variant="ghost" size="xs" disabled={restoring} onClick={() => onRestore(project.id)} aria-label="恢复项目">
             恢复
           </Button>
         )}
         {onDelete && (
-          <Button variant="destructive" size="xs" onClick={() => onDelete(channel.id)} aria-label="删除账号">
+          <Button variant="destructive" size="xs" onClick={() => onDelete(project.id)} aria-label="删除项目">
             删除
           </Button>
         )}
@@ -77,7 +77,7 @@ export function ChannelCard({ channel, stats, onEdit, archiving, restoring, onAr
           选题池
         </Button>
       </div>
-      <TopicPoolDialog channel={channel} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
+      <TopicPoolDialog project={project} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
     </div>
   )
 }

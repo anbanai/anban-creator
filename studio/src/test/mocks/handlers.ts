@@ -7,8 +7,8 @@ import type {
   CreditTransaction,
   Plan,
   Task,
-  Channel,
-  ChannelDetail,
+  Project,
+  ProjectDetail,
   PlatformConfig,
   APIKey,
 } from '@/types'
@@ -61,7 +61,7 @@ export const mockPlans: PaginatedResponse<Plan> = {
       prompt: '',
       status: 'active',
       next_run_at: '2025-01-20T09:00:00Z',
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       created_at: '2025-01-10T00:00:00Z',
       updated_at: '2025-01-10T00:00:00Z',
     },
@@ -79,7 +79,7 @@ export const mockTasks: PaginatedResponse<Task> = {
       progress: 100,
       error: null,
       plan_id: null,
-      channel_id: 'ch-1',
+      project_id: 'ch-1',
       result: { files: null, output: '测试输出' },
       published: false,
       published_at: null,
@@ -91,12 +91,12 @@ export const mockTasks: PaginatedResponse<Task> = {
   total: 1,
 }
 
-export const mockChannels: Channel[] = [
+export const mockProjects: Project[] = [
   {
     id: 'ch-1',
     user_id: '1',
     platform: 'article',
-    name: '测试账号',
+    name: '测试项目',
     avatar_url: '',
     profile_url: 'https://mp.weixin.qq.com/test',
     positioning: '测试定位',
@@ -118,8 +118,8 @@ export const mockChannels: Channel[] = [
   },
 ]
 
-export const mockChannelDetail: ChannelDetail = {
-  channel: mockChannels[0],
+export const mockProjectDetail: ProjectDetail = {
+  project: mockProjects[0],
   stats: {
     total_tasks: 10,
     completed_tasks: 8,
@@ -314,46 +314,46 @@ export const handlers = [
     })
   }),
 
-  // Channels
-  http.get('/api/v1/channels', async () => {
-    return HttpResponse.json({ code: 0, msg: 'ok', data: mockChannels })
+  // Projects
+  http.get('/api/v1/projects', async () => {
+    return HttpResponse.json({ code: 0, msg: 'ok', data: mockProjects })
   }),
 
-  http.get('/api/v1/channels/stats', async () => {
+  http.get('/api/v1/projects/stats', async () => {
     return HttpResponse.json({
       code: 0,
       msg: 'ok',
       data: {
-        'ch-1': mockChannelDetail.stats,
+        'ch-1': mockProjectDetail.stats,
       },
     })
   }),
 
-  http.get('/api/v1/channels/:id', async () => {
-    return HttpResponse.json({ code: 0, msg: 'ok', data: mockChannelDetail })
+  http.get('/api/v1/projects/:id', async () => {
+    return HttpResponse.json({ code: 0, msg: 'ok', data: mockProjectDetail })
   }),
 
-  http.post('/api/v1/channels', async () => {
-    return HttpResponse.json({ code: 0, msg: 'ok', data: mockChannels[0] })
+  http.post('/api/v1/projects', async () => {
+    return HttpResponse.json({ code: 0, msg: 'ok', data: mockProjects[0] })
   }),
 
-  http.put('/api/v1/channels/:id', async () => {
-    return HttpResponse.json({ code: 0, msg: 'ok', data: mockChannels[0] })
+  http.put('/api/v1/projects/:id', async () => {
+    return HttpResponse.json({ code: 0, msg: 'ok', data: mockProjects[0] })
   }),
 
-  http.patch('/api/v1/channels/:id/archive', async () => {
+  http.patch('/api/v1/projects/:id/archive', async () => {
     return HttpResponse.json({ code: 0, msg: 'ok', data: null })
   }),
 
-  http.patch('/api/v1/channels/:id/restore', async () => {
+  http.patch('/api/v1/projects/:id/restore', async () => {
     return HttpResponse.json({ code: 0, msg: 'ok', data: null })
   }),
 
-  http.delete('/api/v1/channels/:id', async () => {
+  http.delete('/api/v1/projects/:id', async () => {
     return HttpResponse.json({ code: 0, msg: 'ok', data: null })
   }),
 
-  http.get('/api/v1/channels/platform-configs', async () => {
+  http.get('/api/v1/projects/platform-configs', async () => {
     return HttpResponse.json({ code: 0, msg: 'ok', data: mockPlatformConfigs })
   }),
 

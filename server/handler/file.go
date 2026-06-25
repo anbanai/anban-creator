@@ -101,11 +101,11 @@ func (h *FileHandler) Upload(c fiber.Ctx) error {
 
 	// Determine storage path prefix based on purpose.
 	purpose := c.FormValue("purpose")
-	prefix := "uploads/channels"
+	prefix := "uploads/projects"
 	switch purpose {
 	case "reference":
 		prefix = "uploads/references"
-	case "channel", "":
+	case "project", "":
 	default:
 		return Error(c, fiber.StatusBadRequest, "invalid purpose value")
 	}
@@ -146,8 +146,11 @@ func (h *FileHandler) ServeFile(c fiber.Ctx) error {
 
 	// Verify ownership: allow user's uploads AND user's designer-generated images
 	// (OSS object keys for designer results are shaped "{userID}/designer/{genID}/{index}{ext}").
-	if !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") &&
+	// "uploads/channels/" is the legacy prefix from before the channel→project rename;
+	// keep accepting it so existing user uploads remain accessible.
+	if !strings.HasPrefix(cleanKey, "uploads/projects/"+userID+"/") &&
 		!strings.HasPrefix(cleanKey, "uploads/references/"+userID+"/") &&
+		!strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") &&
 		!strings.HasPrefix(cleanKey, userID+"/designer/") {
 		return Forbidden(c, "you do not have access to this file")
 	}

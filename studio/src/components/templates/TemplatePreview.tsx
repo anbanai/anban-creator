@@ -71,7 +71,7 @@ function scaffoldText(value: Record<string, unknown> | undefined): string {
 }
 
 // Readable scaffold block: renders the .text as preformatted text. Used for the
-// writing_style / structure / example channels that the agent consumes.
+// writing_style / structure / example projects that the agent consumes.
 function ScaffoldBlock({ label, text }: { label: string; text: string }) {
   if (!text.trim()) return null
   return (
