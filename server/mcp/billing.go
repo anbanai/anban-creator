@@ -133,6 +133,33 @@ func resolveImageModel(ctx context.Context, userID string) (provider, mdl string
 	return "", ""
 }
 
+// resolveEcommerceImageProvider returns the provider/model the agent's
+// generate_image calls will actually use for this e-commerce task, so the agent
+// can adapt its reference-image strategy to the provider's capability rather
+// than a fixed per-module split:
+//   - openai: pass all product photos as reference images (≤16) for fidelity;
+//   - volcengine/seedream: single anchor reference + the product-bible text
+//     block — reusing one reference across many images repeats the scene (see
+//     the Seedream strong-i2i limitation).
+//
+// Resolution mirrors generate_image's generation path: Task.ImageModelKey (a
+// system image_preset or "custom", chosen by the user at task creation) wins,
+// else the user override, else the server image_api.cover default. Returns
+// ("","") only when nothing is configured.
+func resolveEcommerceImageProvider(ctx context.Context, userID string, task *model.Task) (provider, mdl string) {
+	if task != nil && task.ImageModelKey != "" && billSvc != nil && billSvc.modelConfigSvc != nil {
+		if cfg, _ := billSvc.modelConfigSvc.ResolveImageConfigForKey(ctx, userID, task.ImageModelKey); cfg != nil {
+			if cfg.Cover != nil && cfg.Cover.Provider != "" {
+				return cfg.Cover.Provider, cfg.Cover.Model
+			}
+			if cfg.Content != nil && cfg.Content.Provider != "" {
+				return cfg.Content.Provider, cfg.Content.Model
+			}
+		}
+	}
+	return resolveImageModel(ctx, userID)
+}
+
 // resolveTextModel returns the effective text model for a user.
 func resolveTextModel(ctx context.Context, userID string) (provider, mdl string) {
 	if billSvc == nil || billSvc.config == nil {

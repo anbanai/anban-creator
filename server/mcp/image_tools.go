@@ -33,6 +33,7 @@ func registerImageTools(server *mcp.Server) {
 				"output_path":         map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, but required when upload_to_cdn=true since the upload reads this file). Use a writable server path such as /tmp/...; this is not the agent client's current working directory."},
 				"size":                map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides project default when provided; providers may still return a different crop/ratio."},
 				"ref_image_path":      map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
+				"ref_image_paths":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Additional server-local reference image paths for multi-reference fidelity (optional). OpenAI/Gemini merge these with ref_image_path (up to ~16 total) as a multi-image edit request — ideal for e-commerce product-photo consistency (pass all product photos as refs when the task model is OpenAI). Volcengine/Seedream only use ref_image_path (or paths[0] if no single ref). Use file_path values returned by generate_image/download_image."},
 				"task_id":             map[string]any{"type": "string", "description": "Task ID (for logging, credit tracking, and per-task image model lookup)"},
 				"image_model_key":     map[string]any{"type": "string", "description": "Optional image model key selected at task creation time. When provided, overrides user/server defaults for this single call. Resolution: '' = server default; 'custom' = user model-config override (Enterprise only); any other value must match a server-managed image preset key. If task_id is also provided and task_id has its own image_model_key, the explicit image_model_key parameter takes precedence."},
 				"watermark":           map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
@@ -123,6 +124,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	outputPath, _ := args["output_path"].(string)
 	size, _ := args["size"].(string)
 	refPath, _ := args["ref_image_path"].(string)
+	refPaths := parseStringArray(args, "ref_image_paths")
 	taskID, _ := args["task_id"].(string)
 	imageModelKey, _ := args["image_model_key"].(string)
 	verifyWithVision, _ := args["verify_with_vision"].(bool)
@@ -166,6 +168,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			Str("size", size).
 			Str("image_model_key", imageModelKey).
 			Str("ref_image_path", refPath).
+			Int("ref_image_paths_count", len(refPaths)).
 			Str("output_path", outputPath)
 		if watermark != nil {
 			evt = evt.Bool("watermark", *watermark)
@@ -197,7 +200,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		return billingError("generate image", err), nil
 	}
 
-	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, projectID, prompt, imageType, outputPath, refPath, taskID, size, imageModelKey, watermark)
+	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, projectID, prompt, imageType, outputPath, refPath, refPaths, taskID, size, imageModelKey, watermark)
 	if err != nil {
 		if mcpLog != nil {
 			mcpLog.Warn().

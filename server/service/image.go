@@ -223,6 +223,23 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 	}
 
 	apiCfg := resolveAppImageAPI(appCfg, ch.Platform, imageType)
+	if apiCfg == nil && ch.Platform == model.ScopeEcommerce {
+		// Ecommerce has no platform-specific app-config section (unlike
+		// article/seednote): it reuses the generic image_api and resolves the
+		// provider/model per-task via imageModelKey, surfaced to the agent by
+		// get_project_profile (resolveEcommerceImageProvider). Use the already-
+		// resolved effectiveCfg directly — Cover first, then Content — mirroring
+		// resolveEcommerceImageProvider so the provider the agent is told about
+		// is exactly the one generate_image uses. Without this branch every
+		// ecommerce generate_image call errors "no image API config available".
+		if effectiveCfg != nil {
+			if effectiveCfg.Cover != nil {
+				apiCfg = effectiveCfg.Cover
+			} else if effectiveCfg.Content != nil {
+				apiCfg = effectiveCfg.Content
+			}
+		}
+	}
 	if apiCfg == nil {
 		return nil, fmt.Errorf("no image API config available for type %q", imageType)
 	}
@@ -239,7 +256,7 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 // responsible for having validated that the user's tier permits this key.
 func (s *ImageService) GenerateImage(
 	ctx context.Context,
-	userID, projectID, prompt, imageType, outputPath, refPath, taskID, size, imageModelKey string,
+	userID, projectID, prompt, imageType, outputPath, refPath string, refPaths []string, taskID, size, imageModelKey string,
 	watermark *bool,
 ) (*ImageResult, error) {
 	ch, err := s.repo.Projects().FindByID(ctx, projectID)
@@ -254,6 +271,9 @@ func (s *ImageService) GenerateImage(
 
 	if refPath != "" {
 		processor.SetRefImage(refPath)
+	}
+	if len(refPaths) > 0 {
+		processor.SetRefImages(refPaths)
 	}
 	processor.SetWatermark(watermark)
 

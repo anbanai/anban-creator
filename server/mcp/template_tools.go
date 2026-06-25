@@ -13,9 +13,10 @@ import (
 
 // validTemplateTypes defines the allowed template type values.
 var validTemplateTypes = map[string]bool{
-	"poster":   true,
-	"seednote": true,
-	"article":  true,
+	"poster":    true,
+	"seednote":  true,
+	"article":   true,
+	"ecommerce": true,
 }
 
 func registerTemplateTools(server *mcp.Server) {

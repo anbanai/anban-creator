@@ -38,8 +38,19 @@ type EcommerceConfig struct {
 	ProductPhotos            []string       `json:"product_photos,omitempty"`
 	TargetPlatform           string         `json:"target_platform,omitempty"`
 	SellingPoints            string         `json:"selling_points,omitempty"`
-	Language                 string         `json:"language,omitempty"`
-	ProviderStrategyOverride string         `json:"provider_strategy_override,omitempty"`
+	// BrandBrief is the brand positioning/voice, resolved from the selected
+	// e-commerce template's BrandBrief at task creation (task-level override
+	// rare; this is template/project-level brand context, distinct from the
+	// product-specific SellingPoints). Surfaced to the agent via
+	// get_project_profile(scope="ecommerce") so product imagery respects brand.
+	BrandBrief string `json:"brand_brief,omitempty"`
+	Language   string `json:"language,omitempty"`
+	// ProviderStrategyOverride is deprecated/superseded: provider selection now
+	// flows through Task.ImageModelKey (user picks the image preset at task
+	// creation). Retained on the column for backward compatibility with existing
+	// rows; no longer surfaced to the agent (get_project_profile returns the
+	// resolved image_model instead).
+	ProviderStrategyOverride string `json:"provider_strategy_override,omitempty"`
 }
 
 // Task represents a content generation task.

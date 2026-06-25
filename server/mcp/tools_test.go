@@ -671,3 +671,25 @@ func TestBuildAccountInfo_NoTemplate_ProjectPersonaFallback(t *testing.T) {
 		t.Errorf("template_author_avatar = %v, want project avatar fallback", got)
 	}
 }
+
+func TestParseStringArray(t *testing.T) {
+	args := map[string]any{
+		"refs":   []any{"/a.png", "/b.png", "", 123, "/c.png"},
+		"raw":    []string{"/x.png", "/y.png"},
+		"scalar": "/not-array.png",
+	}
+	got := parseStringArray(args, "refs")
+	if len(got) != 3 || got[0] != "/a.png" || got[1] != "/b.png" || got[2] != "/c.png" {
+		t.Errorf("refs = %v, want [/a /b /c] (empty + non-string dropped)", got)
+	}
+	gotRaw := parseStringArray(args, "raw")
+	if len(gotRaw) != 2 || gotRaw[1] != "/y.png" {
+		t.Errorf("raw = %v, want [/x /y]", gotRaw)
+	}
+	if gotNil := parseStringArray(args, "absent"); gotNil != nil {
+		t.Errorf("absent key = %v, want nil", gotNil)
+	}
+	if gotScalar := parseStringArray(args, "scalar"); gotScalar != nil {
+		t.Errorf("scalar (non-array) = %v, want nil", gotScalar)
+	}
+}

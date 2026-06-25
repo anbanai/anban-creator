@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -11,7 +12,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	appconfig "github.com/royalrick/anbanwriter/app/config"
 	appimage "github.com/royalrick/anbanwriter/app/image"
+	srvconfig "github.com/royalrick/anbanwriter/server/config"
+	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/rs/zerolog"
 )
 
 func TestBuildImageResultIncludesGenerationMetadata(t *testing.T) {
@@ -98,5 +103,76 @@ func TestDetectTaskFileMIMEUsesImageContentBeforeExtension(t *testing.T) {
 
 	if got := DetectTaskFileMIME(path); got != "image/jpeg" {
 		t.Fatalf("DetectTaskFileMIME() = %q, want image/jpeg", got)
+	}
+}
+
+// TestBuildProcessor_EcommerceResolvesImageAPI is a regression test for the
+// ecommerce gap-closure blocker: ecommerce has no platform-specific app-config
+// section (unlike article/seednote), so resolveAppImageAPI returns nil.
+// buildProcessor must fall back to the already-resolved effectiveCfg or every
+// ecommerce generate_image MCP call errors with "no image API config available".
+func TestBuildProcessor_EcommerceResolvesImageAPI(t *testing.T) {
+	logger := zerolog.Nop()
+	svc := &ImageService{
+		imageCfg: &srvconfig.ImageAPIConfig{
+			Cover: &appconfig.ImageAPI{
+				Provider: "openai",
+				Key:      "test-key",
+				Model:    "gpt-image-2",
+			},
+		},
+		logger: &logger,
+	}
+	ch := &model.Project{Platform: model.ScopeEcommerce, UserID: "u1"}
+
+	proc, err := svc.buildProcessor(context.Background(), ch, "cover", "")
+	if err != nil {
+		t.Fatalf("buildProcessor(ecommerce) error = %v, want nil (Cover fallback should resolve a config)", err)
+	}
+	if proc == nil {
+		t.Fatal("buildProcessor(ecommerce) returned nil processor, want non-nil")
+	}
+}
+
+// TestBuildProcessor_EcommerceFallsBackToContent verifies the Cover→Content
+// precedence matches resolveEcommerceImageProvider (billing.go), so the provider
+// get_project_profile reports is the one generate_image actually uses.
+func TestBuildProcessor_EcommerceFallsBackToContent(t *testing.T) {
+	logger := zerolog.Nop()
+	svc := &ImageService{
+		imageCfg: &srvconfig.ImageAPIConfig{
+			Content: &appconfig.ImageAPI{
+				Provider: "volcengine",
+				Key:      "test-key",
+				Model:    "seedream-3.0",
+			},
+		},
+		logger: &logger,
+	}
+	ch := &model.Project{Platform: model.ScopeEcommerce, UserID: "u1"}
+
+	proc, err := svc.buildProcessor(context.Background(), ch, "cover", "")
+	if err != nil {
+		t.Fatalf("buildProcessor(ecommerce, content-only) error = %v, want nil", err)
+	}
+	if proc == nil {
+		t.Fatal("buildProcessor(ecommerce, content-only) returned nil processor, want non-nil")
+	}
+}
+
+// TestBuildProcessor_EcommerceErrorsWhenNoImageAPI ensures degraded config
+// (no image API configured at all) still surfaces a clear error rather than
+// silently producing a processor with no provider.
+func TestBuildProcessor_EcommerceErrorsWhenNoImageAPI(t *testing.T) {
+	logger := zerolog.Nop()
+	svc := &ImageService{imageCfg: nil, logger: &logger}
+	ch := &model.Project{Platform: model.ScopeEcommerce, UserID: "u1"}
+
+	proc, err := svc.buildProcessor(context.Background(), ch, "cover", "")
+	if err == nil {
+		t.Fatal("buildProcessor(ecommerce, no image API) error = nil, want error")
+	}
+	if proc != nil {
+		t.Fatal("buildProcessor(ecommerce, no image API) returned non-nil processor, want nil")
 	}
 }

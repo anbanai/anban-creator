@@ -277,6 +277,30 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	effectiveAuthor := firstNonEmpty(p.Author, templateAuthorName(tmpl), project.Author)
 	effectiveAuthorIntro := firstNonEmpty(p.AuthorStyleIntro, templateAuthorStyleIntro(tmpl), project.AuthorStyleIntro)
 	effectiveAuthorAvatar := firstNonEmpty(p.AuthorAvatarURL, templateAuthorAvatar(tmpl), project.AuthorAvatarURL)
+	// E-commerce: merge the selected template's defaults (default modules, target
+	// platform, brand brief, image model key) into the task config with task-level
+	// explicit values winning. Product photos and selling points stay per-task (a
+	// template pre-selects modules/style/platform/model, never the photos). Done
+	// before billing so the package cost reflects the merged module selection.
+	effectiveImageModelKey := p.ImageModelKey
+	if taskType == model.PlatformEcommerce && tmpl != nil {
+		tplEc := tmpl.Ecommerce.Data()
+		if p.Ecommerce == nil {
+			p.Ecommerce = &model.EcommerceConfig{}
+		}
+		if len(p.Ecommerce.SelectedModules) == 0 && len(tplEc.DefaultSelectedModules) > 0 {
+			p.Ecommerce.SelectedModules = tplEc.DefaultSelectedModules
+		}
+		if p.Ecommerce.TargetPlatform == "" {
+			p.Ecommerce.TargetPlatform = tplEc.TargetPlatform
+		}
+		if p.Ecommerce.BrandBrief == "" {
+			p.Ecommerce.BrandBrief = tplEc.BrandBrief
+		}
+		if effectiveImageModelKey == "" {
+			effectiveImageModelKey = tplEc.ImageModelKey
+		}
+	}
 	// Article always carries a writing voice (seednote has none).
 	if effectiveWriter == "" && taskType == model.PlatformArticle {
 		effectiveWriter = writer.DefaultStyleName
@@ -373,7 +397,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Status:             model.TaskStatusPending,
 			Prompt:             p.Prompt,
 			ImageRatio:         p.ImageRatio,
-			ImageModelKey:      p.ImageModelKey,
+			ImageModelKey:      effectiveImageModelKey,
 			ReferenceImageURL:  p.ReferenceImageURL,
 			Style:              effectiveVisual,
 			WritingStyle:       effectiveWriter,

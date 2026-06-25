@@ -139,6 +139,10 @@ type createTemplateRequest struct {
 	AuthorName       string `json:"author_name"`
 	AuthorAvatarURL  string `json:"author_avatar_url"`
 	AuthorStyleIntro string `json:"author_style_intro"`
+	// Ecommerce defaults (type="ecommerce" only): default modules/quantities,
+	// target platform, brand brief, default image model key. Pointer so nil =
+	// leave unchanged on PATCH (Update); non-nil = set (Create or Update).
+	Ecommerce *model.EcommerceTemplateDefaults `json:"ecommerce,omitempty"`
 }
 
 // scaffoldText wraps a plain-text scaffold value into the model's {"text": ...}
@@ -166,9 +170,9 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "type is required")
 	}
 	switch req.Type {
-	case "poster", "seednote", "article":
+	case "poster", "seednote", "article", "ecommerce":
 	default:
-		return Error(c, fiber.StatusBadRequest, "type must be one of: poster, seednote, article")
+		return Error(c, fiber.StatusBadRequest, "type must be one of: poster, seednote, article, ecommerce")
 	}
 	if req.Visibility != "public" && req.Visibility != "private" {
 		req.Visibility = "public"
@@ -190,6 +194,9 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 		AuthorAvatarURL:  req.AuthorAvatarURL,
 		AuthorStyleIntro: req.AuthorStyleIntro,
 		IsActive:         true,
+	}
+	if req.Ecommerce != nil {
+		tmpl.SetEcommerce(*req.Ecommerce)
 	}
 
 	created, err := h.service.Create(c.Context(), tmpl, userID)
@@ -228,9 +235,9 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 	// type must still be a known value.
 	if req.Type != "" {
 		switch req.Type {
-		case "poster", "seednote", "article":
+		case "poster", "seednote", "article", "ecommerce":
 		default:
-			return Error(c, fiber.StatusBadRequest, "type must be one of: poster, seednote, article")
+			return Error(c, fiber.StatusBadRequest, "type must be one of: poster, seednote, article, ecommerce")
 		}
 	}
 
@@ -249,6 +256,9 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 		AuthorName:       req.AuthorName,
 		AuthorAvatarURL:  req.AuthorAvatarURL,
 		AuthorStyleIntro: req.AuthorStyleIntro,
+	}
+	if req.Ecommerce != nil {
+		patch.SetEcommerce(*req.Ecommerce)
 	}
 
 	updated, err := h.service.Update(c.Context(), id, userID, patch)

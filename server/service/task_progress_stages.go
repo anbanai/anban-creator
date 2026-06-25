@@ -33,6 +33,18 @@ var stagePercentByType = map[string]map[string]int{
 		"archive":          95,
 		"finalize":         100,
 	},
+	// Ecommerce stage slugs come from claudecode/agents/ecommerce.md
+	// update_task_progress calls (project → analysis → copywriting →
+	// image_generation → compliance → archive). The bulk of work is image
+	// generation; archive is the last progress event before the task completes.
+	model.ScopeEcommerce: {
+		"project":          5,
+		"analysis":         20,
+		"copywriting":      35,
+		"image_generation": 70,
+		"compliance":       90,
+		"archive":          97,
+	},
 }
 
 // defaultPercentForStage returns the percent for a (taskType, stage) pair.

@@ -155,6 +155,12 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	if len(patch.ExampleContent) > 0 {
 		existing.ExampleContent = patch.ExampleContent
 	}
+	// Ecommerce defaults (type="ecommerce" templates). Copied when the patch
+	// carries a non-empty config — the handler only sets it when the client sent
+	// one, so an all-zero JSONType correctly means "leave unchanged" (PATCH).
+	if ec := patch.Ecommerce.Data(); len(ec.DefaultSelectedModules) > 0 || ec.TargetPlatform != "" || ec.BrandBrief != "" || ec.ImageModelKey != "" {
+		existing.Ecommerce = patch.Ecommerce
+	}
 
 	ensureTagsNotNil(existing)
 	if err := s.repo.Templates().Update(ctx, existing); err != nil {

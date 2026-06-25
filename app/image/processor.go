@@ -31,8 +31,9 @@ type Processor struct {
 	compressor   *Compressor
 	provider     Provider
 	stylePrompt  string
-	refImagePath string // 参考图本地路径（可选）
-	watermark    *bool  // 是否启用水印
+	refImagePath  string   // 参考图本地路径（可选，单张）
+	refImagePaths []string // 多张参考图本地路径（可选，OpenAI 多 ref 保真用）
+	watermark     *bool    // 是否启用水印
 }
 
 // NewProcessor 创建图片处理器
@@ -87,6 +88,13 @@ func (p *Processor) SetStylePrompt(prompt string) {
 // SetRefImage 设置参考图路径（CLI --ref 传入）
 func (p *Processor) SetRefImage(path string) {
 	p.refImagePath = path
+}
+
+// SetRefImages 设置多张参考图路径（多参考图模式）。
+// 与 SetRefImage 可并存：OpenAI/Gemini 合并单张 + 多张全部作为参考图输入（≤16）；
+// Volcengine/Seedream 仅取单张（refImagePath），无单张时退回多张首张。
+func (p *Processor) SetRefImages(paths []string) {
+	p.refImagePaths = paths
 }
 
 // SetWatermark 设置水印开关
@@ -244,7 +252,7 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 	}
 
 	ctx := context.Background()
-	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, Watermark: p.watermark}
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark}
 	finalPrompt := p.buildPrompt(prompt)
 	result, err := p.provider.Generate(ctx, finalPrompt, genOpts)
 	if err != nil {
@@ -299,7 +307,7 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 	}
 
 	ctx := context.Background()
-	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, Watermark: p.watermark}
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark}
 	finalPrompt := p.buildPrompt(prompt)
 	result, err := activeProvider.Generate(ctx, finalPrompt, genOpts)
 	if err != nil {
@@ -461,7 +469,7 @@ func (p *Processor) generateOnly(prompt, size, outputPath string) (*GenerateOnly
 
 	// 调用图片生成 API
 	ctx := context.Background()
-	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, Watermark: p.watermark}
+	genOpts := &GenerateOptions{RefImagePath: p.refImagePath, RefImagePaths: p.refImagePaths, Watermark: p.watermark}
 	result, err := activeProvider.Generate(ctx, p.buildPrompt(prompt), genOpts)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)

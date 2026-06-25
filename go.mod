@@ -3,7 +3,7 @@ module github.com/royalrick/anbanwriter
 go 1.26.0
 
 require (
-	github.com/alibabacloud-go/darabonba-openapi/v2 v2.2.1
+	github.com/alibabacloud-go/darabonba-openapi/v2 v2.2.2
 	github.com/alibabacloud-go/tingwu-20230930/v2 v2.0.24
 	github.com/aliyun/aliyun-oss-go-sdk v3.0.2+incompatible
 	github.com/aliyun/credentials-go v1.4.12
@@ -16,7 +16,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hibiken/asynq v0.26.0
-	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260611083731-7b320846c910
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260623020923-1068bf05a315
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/openai/openai-go/v3 v3.41.0
 	github.com/redis/go-redis/v9 v9.21.0
@@ -24,18 +24,18 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/severity1/claude-agent-sdk-go v0.6.22
 	github.com/silenceper/wechat/v2 v2.1.13
-	github.com/volcengine/volcengine-go-sdk v1.2.36
+	github.com/volcengine/volcengine-go-sdk v1.2.37
 	github.com/wneessen/go-mail v0.7.3
 	github.com/yuin/goldmark v1.8.2
 	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.56.0
 	golang.org/x/sync v0.21.0
-	google.golang.org/genai v1.61.0
+	google.golang.org/genai v1.62.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/sqlite v1.6.0
-	gorm.io/gorm v1.31.1
+	gorm.io/gorm v1.31.2
 )
 
 require (
@@ -46,7 +46,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.5 // indirect
 	github.com/alibabacloud-go/debug v1.0.1 // indirect
-	github.com/alibabacloud-go/tea v1.5.1 // indirect
+	github.com/alibabacloud-go/tea v1.5.2 // indirect
 	github.com/alibabacloud-go/tea-utils/v2 v2.0.9 // indirect
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c // indirect
@@ -73,7 +73,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.16 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.17 // indirect
 	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect

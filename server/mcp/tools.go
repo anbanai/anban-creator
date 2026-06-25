@@ -61,6 +61,34 @@ func parseArgs(raw json.RawMessage) map[string]any {
 	return args
 }
 
+// parseStringArray reads a JSON string-array argument (e.g. ["a","b"]) into a
+// []string. It accepts both []any (the shape json.Unmarshal produces for a JSON
+// array) and []string; empty/non-string items are silently dropped. Returns nil
+// when the key is absent or not an array, so callers can treat "unset" and
+// "empty" uniformly via len().
+func parseStringArray(args map[string]any, key string) []string {
+	v, ok := args[key]
+	if !ok {
+		return nil
+	}
+	var out []string
+	switch vv := v.(type) {
+	case []any:
+		for _, item := range vv {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+	case []string:
+		for _, s := range vv {
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
 func registerProjectTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "list_projects",
@@ -375,22 +403,27 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		}
 	case "ecommerce":
 		// E-commerce: surface the package config (selected modules, target
-		// platform, selling points, language, provider-strategy override) plus the
+		// platform, brand brief, language) plus the resolved image model and the
 		// workspace path where the executor materialized the product photos.
-		// Product photos are downloaded by the executor into .anbanwriter/products/
-		// (see agent.DownloadProductImages); the agent reads index.json there for
-		// the exact filenames. provider_strategy is advisory — per-module provider
-		// switching depends on the generate_image tool's provider support; the
-		// override lets the agent adjust course.
+		// The image model is chosen by the user at task creation (Task.ImageModelKey)
+		// and resolved here to a concrete provider/model so the agent can adapt its
+		// reference-image strategy: OpenAI/Gemini accept multiple refs (≤16 via
+		// generate_image's ref_image_paths) for max product fidelity; Volcengine/
+		// Seedream take a single ref (strong i2i), so the agent uses one anchor ref
+		// + product-bible text block. Product photos are downloaded by the executor
+		// into .anbanwriter/products/ (see agent.DownloadProductImages); the agent
+		// reads index.json there for the exact filenames.
 		ec := map[string]any{
 			"product_photo_dir": ".anbanwriter/products",
-			"provider_strategy": map[string]any{
-				"primary":           "openai",     // 多参考图保真：主图①/详情核心场景
-				"fallback":          "volcengine", // 辅图/SKU 同构变体
-				"consistency_audit": true,         // verify_with_vision 自检循环
-			},
+			"consistency_audit": true, // verify_with_vision self-check loop
 		}
 		if task != nil {
+			provider, mdl := resolveEcommerceImageProvider(ctx, userID, task)
+			ec["image_model"] = map[string]any{
+				"provider": provider,
+				"model":    mdl,
+				"key":      task.ImageModelKey,
+			}
 			cfg := task.Ecommerce.Data()
 			ec["selected_modules"] = cfg.SelectedModules
 			ec["product_photo_count"] = len(cfg.ProductPhotos)
@@ -403,8 +436,8 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 			if cfg.Language != "" {
 				ec["language"] = cfg.Language
 			}
-			if cfg.ProviderStrategyOverride != "" {
-				ec["provider_strategy_override"] = cfg.ProviderStrategyOverride
+			if cfg.BrandBrief != "" {
+				ec["brand_brief"] = cfg.BrandBrief
 			}
 		}
 		info["ecommerce"] = ec

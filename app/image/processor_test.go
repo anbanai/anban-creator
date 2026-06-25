@@ -56,6 +56,29 @@ func TestProcessor_SetRefImage(t *testing.T) {
 	}
 }
 
+func TestProcessor_SetRefImages(t *testing.T) {
+	p := newTestProcessor(&config.ImageAPI{})
+	p.SetRefImages([]string{"/a.png", "/b.png", "/c.png"})
+	if got := p.refImagePaths; len(got) != 3 || got[0] != "/a.png" || got[2] != "/c.png" {
+		t.Errorf("SetRefImages() refImagePaths = %v, want 3-item [/a /b /c]", got)
+	}
+	// Multi-ref field is independent of the single-ref field.
+	if p.refImagePath != "" {
+		t.Errorf("SetRefImages should not touch refImagePath, got %q", p.refImagePath)
+	}
+	// Single + multi coexist (provider merges both).
+	p.SetRefImage("/anchor.png")
+	p.SetRefImages([]string{"/extra.png"})
+	if p.refImagePath != "/anchor.png" || len(p.refImagePaths) != 1 {
+		t.Errorf("single+multi coexistence: refImagePath=%q refImagePaths=%v", p.refImagePath, p.refImagePaths)
+	}
+	// Zero-value should be empty.
+	p2 := newTestProcessor(&config.ImageAPI{})
+	if len(p2.refImagePaths) != 0 {
+		t.Errorf("default refImagePaths should be empty, got %v", p2.refImagePaths)
+	}
+}
+
 func TestProcessor_buildPrompt(t *testing.T) {
 	tests := []struct {
 		name          string
