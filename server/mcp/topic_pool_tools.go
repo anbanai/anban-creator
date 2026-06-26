@@ -10,11 +10,12 @@ import (
 func registerTopicPoolTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "claim_topic",
-		Description: "Claim the next unused topic from the project's topic pool. Returns the topic text and its ID, or null if the pool is empty. The topic is atomically marked as used.",
+		Description: "Claim the next unused topic from the project's topic pool. Returns the topic text and its ID, or null if the pool is empty. The topic is atomically marked as used. Pass task_id to associate the claimed topic with the calling task for provenance.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task ID — when set, the claimed topic is linked to this task for provenance."},
 			},
 			"required": []any{"project_id"},
 		},
@@ -53,6 +54,21 @@ func claimTopicHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	projectID, _ := args["project_id"].(string)
 	if projectID == "" {
 		return errorResult("project_id is required"), nil
+	}
+	taskID, _ := args["task_id"].(string)
+
+	// When the caller passes a task_id (the generation skill knows its task),
+	// associate the claimed topic with that task for provenance; otherwise claim
+	// without linkage.
+	if taskID != "" {
+		topic, err := svcs.TopicPoolSvc.ClaimForTask(ctx, userID, projectID, taskID)
+		if err != nil {
+			return errorResult(fmt.Sprintf("claim topic: %v", err)), nil
+		}
+		if topic == "" {
+			return textResult(map[string]any{"topic": nil, "id": nil, "task_id": taskID, "message": "topic pool is empty"})
+		}
+		return textResult(map[string]any{"topic": topic, "id": nil, "task_id": taskID, "claimed": true})
 	}
 
 	topic, topicID, err := svcs.TopicPoolSvc.Claim(ctx, userID, projectID)
