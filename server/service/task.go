@@ -378,6 +378,24 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			taskID = generateTaskID()
 		}
 
+		// Topic pool: when the caller supplied no prompt and the project is a
+		// topic-driven platform (article/seednote), claim the next unused topic
+		// from the pool as this task's prompt — mirroring CreateFromPlan. Ecommerce
+		// is product-image based with no topic semantics, so it is skipped. The pool
+		// may run out mid-batch; remaining tasks keep an empty prompt and fall back
+		// to the agent's auto-research path. The generation skill respects an
+		// already-set topic, so it will not re-claim during execution.
+		taskPrompt := p.Prompt
+		if taskPrompt == "" && s.topicPoolSvc != nil &&
+			(taskType == model.PlatformArticle || taskType == model.PlatformSeednote) {
+			claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, p.UserID, p.ProjectID, taskID)
+			if claimErr != nil {
+				s.logger.Warn().Err(claimErr).Str("task_id", taskID).Msg("claim topic from pool failed, leaving prompt empty")
+			} else if claimed != "" {
+				taskPrompt = claimed
+			}
+		}
+
 		// Seednote image composition: honor caller's explicit choice, otherwise rely
 		// on the model's column defaults (content on, tail off).
 		hasContent := true
@@ -395,7 +413,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ProjectID:          p.ProjectID,
 			Type:               taskType,
 			Status:             model.TaskStatusPending,
-			Prompt:             p.Prompt,
+			Prompt:             taskPrompt,
 			ImageRatio:         p.ImageRatio,
 			ImageModelKey:      effectiveImageModelKey,
 			ReferenceImageURL:  p.ReferenceImageURL,
