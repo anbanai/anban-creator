@@ -11,7 +11,6 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/royalrick/anbanwriter/server/agent"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
@@ -189,26 +188,15 @@ type CreateManualParams struct {
 	ImageModelKey     string
 	SkipRefImage      *bool
 	ReferenceImageURL string
-	Style             string
-	// WritingStyle / Theme carry the task-level 写作风格 / 排版样式 overrides (the
-	// other two orthogonal dimensions). Resolved alongside Style with precedence
-	// task > template > plan > project.
-	WritingStyle string
-	Theme        string
-	// Author / AuthorStyleIntro / AuthorAvatarURL carry the task-level 作者（署名）
-	// + 写作风格（free-text imitation） + 可选人设头像 overrides. Resolved alongside
-	// Style/WritingStyle/Theme with precedence task > template > plan > project.
-	Author           string
-	AuthorStyleIntro string
-	AuthorAvatarURL  string
-	Watermark        *bool
-	Goal             string
-	GoalMode         bool
-	// TemplateID optionally records which template was selected. It does NOT enter
-	// the style resolution chain (visual style is already copied to Style by the
-	// caller); instead the agent surfaces the template's content scaffold via
-	// get_project_profile(task_id).
-	TemplateID *string
+	// Overrides carries the task-level per-dimension overrides. Only the fields the
+	// user explicitly overrode are populated; empty fields = inherit the project
+	// value (resolved two-layer task.Overrides.X ?? project.X at execution via
+	// ResolveStyle). nil = fully inherit the project. The task no longer snapshots
+	// resolved values — editing the project immediately affects pending tasks.
+	Overrides *model.StyleOverrides
+	Watermark *bool
+	Goal      string
+	GoalMode  bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to task model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -225,7 +213,12 @@ type CreateManualParams struct {
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The Quantity field (1-5) determines how many tasks to create, each independently billed.
 // ImageModelKey optionally selects a per-task image model (validated upstream by the handler).
-// Style optionally overrides the project's style (e.g. from a selected template).
+//
+// Style/persona/theme dimensions are NOT resolved or snapshotted here: the task
+// stores only the explicitly-overridden slots (p.Overrides) and inherits the rest
+// from the project at execution via ResolveStyle (task.Overrides.X ?? project.X).
+// This is the live-inheritance model — editing the project immediately affects
+// pending tasks.
 //
 // When GoalMode is true, each task charges GoalMultiplier() × base cost upfront
 // and never refunds. The goal condition is propagated to the agent process and
@@ -259,51 +252,30 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 	taskType := project.Platform
 
-	// Resolve the three orthogonal style dimensions with precedence
-	// task > template > project (manual tasks have no plan level). Each dimension
-	// is independent — the writer never drives the visual style.
-	var tmpl *model.Template
-	if p.TemplateID != nil && *p.TemplateID != "" {
-		if t, terr := s.repo.Templates().FindByID(ctx, *p.TemplateID); terr == nil {
-			tmpl = t
-		} else {
-			s.logger.Warn().Err(terr).Str("template_id", *p.TemplateID).Msg("template not found during style resolution")
-		}
-	}
-	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), project.Style)
-	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), project.WritingStyle)
-	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), project.Theme)
-	// 公众号人设维度（作者署名 + 写作风格模仿 + 可选头像），与视觉/排版正交，同链解析。
-	effectiveAuthor := firstNonEmpty(p.Author, templateAuthorName(tmpl), project.Author)
-	effectiveAuthorIntro := firstNonEmpty(p.AuthorStyleIntro, templateAuthorStyleIntro(tmpl), project.AuthorStyleIntro)
-	effectiveAuthorAvatar := firstNonEmpty(p.AuthorAvatarURL, templateAuthorAvatar(tmpl), project.AuthorAvatarURL)
-	// E-commerce: merge the selected template's defaults (default modules, target
-	// platform, brand brief, image model key) into the task config with task-level
-	// explicit values winning. Product photos and selling points stay per-task (a
-	// template pre-selects modules/style/platform/model, never the photos). Done
-	// before billing so the package cost reflects the merged module selection.
+	// E-commerce: merge the PROJECT's reusable e-commerce defaults (default
+	// modules, target platform, brand brief, image model key) into the task config
+	// with task-level explicit values winning. Product photos and selling points
+	// stay per-task. Done before billing so the package cost reflects the merged
+	// module selection. The project is the single source of truth — there is no
+	// template layer in the runtime resolution chain.
 	effectiveImageModelKey := p.ImageModelKey
-	if taskType == model.PlatformEcommerce && tmpl != nil {
-		tplEc := tmpl.Ecommerce.Data()
+	if taskType == model.PlatformEcommerce {
+		projEc := project.EcommerceDefaults.Data()
 		if p.Ecommerce == nil {
 			p.Ecommerce = &model.EcommerceConfig{}
 		}
-		if len(p.Ecommerce.SelectedModules) == 0 && len(tplEc.DefaultSelectedModules) > 0 {
-			p.Ecommerce.SelectedModules = tplEc.DefaultSelectedModules
+		if len(p.Ecommerce.SelectedModules) == 0 && len(projEc.DefaultSelectedModules) > 0 {
+			p.Ecommerce.SelectedModules = projEc.DefaultSelectedModules
 		}
 		if p.Ecommerce.TargetPlatform == "" {
-			p.Ecommerce.TargetPlatform = tplEc.TargetPlatform
+			p.Ecommerce.TargetPlatform = projEc.TargetPlatform
 		}
 		if p.Ecommerce.BrandBrief == "" {
-			p.Ecommerce.BrandBrief = tplEc.BrandBrief
+			p.Ecommerce.BrandBrief = projEc.BrandBrief
 		}
 		if effectiveImageModelKey == "" {
-			effectiveImageModelKey = tplEc.ImageModelKey
+			effectiveImageModelKey = projEc.ImageModelKey
 		}
-	}
-	// Article always carries a writing voice (seednote has none).
-	if effectiveWriter == "" && taskType == model.PlatformArticle {
-		effectiveWriter = writer.DefaultStyleName
 	}
 
 	// Pre-calculate total credit cost and deduct upfront to avoid race conditions.
@@ -417,19 +389,15 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ImageRatio:         p.ImageRatio,
 			ImageModelKey:      effectiveImageModelKey,
 			ReferenceImageURL:  p.ReferenceImageURL,
-			Style:              effectiveVisual,
-			WritingStyle:       effectiveWriter,
-			Theme:              effectiveTheme,
-			Author:             effectiveAuthor,
-			AuthorStyleIntro:   effectiveAuthorIntro,
-			AuthorAvatarURL:    effectiveAuthorAvatar,
 			SkipReferenceImage: p.SkipRefImage != nil && *p.SkipRefImage,
 			Watermark:          p.Watermark != nil && *p.Watermark,
 			Goal:               p.Goal,
 			GoalMode:           p.GoalMode,
-			TemplateID:         p.TemplateID,
 			HasContentImage:    hasContent,
 			HasTailImage:       hasTail,
+		}
+		if p.Overrides != nil {
+			task.SetOverrides(*p.Overrides)
 		}
 		if p.Ecommerce != nil {
 			task.SetEcommerce(*p.Ecommerce)
@@ -443,6 +411,13 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 					if refundErr := s.creditSvc.RefundForTask(ctx, deductedTaskIDs[j]); refundErr != nil {
 						s.logger.Error().Err(refundErr).Str("task_id", deductedTaskIDs[j]).Msg("failed to refund credits during rollback")
 					}
+				}
+			}
+			// Release this iteration's pre-claimed topic back to the pool so it
+			// isn't orphaned (a no-op when no topic was claimed for this task).
+			if s.topicPoolSvc != nil {
+				if relErr := s.topicPoolSvc.ReleaseForTask(ctx, taskID); relErr != nil {
+					s.logger.Error().Err(relErr).Str("task_id", taskID).Msg("failed to release topic during rollback")
 				}
 			}
 			return nil, fmt.Errorf("create task: %w", err)
@@ -461,6 +436,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 }
 
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
+//
+// A plan is a pure scheduler under a project: it carries no style/persona/theme
+// fields, so the spawned task carries NO overrides and fully inherits every
+// style/persona/theme dimension from the project at execution (ResolveStyle).
+// Only the plan's scheduling-adjacent "what to produce" params (image model,
+// reference image, watermark, goal, seednote image composition) flow to the task.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
 	taskID := generateTaskID()
 
@@ -480,36 +461,11 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	// Derive task type from the project if ProjectID is set.
-	var ch *model.Project
 	taskType := plan.Type
 	if plan.ProjectID != "" {
 		if found, err := s.repo.Projects().FindByID(ctx, plan.ProjectID); err == nil {
-			ch = found
-			taskType = ch.Platform
+			taskType = found.Platform
 		}
-	}
-
-	// Resolve the three orthogonal style dimensions. The plan already resolved
-	// them at creation (plan > template > project); fall back to the project when
-	// the plan fields are empty (e.g. legacy rows pre-migration). Each dimension
-	// is independent — the writer never drives the visual style.
-	var chVisual, chWriter, chTheme, chAuthor, chAuthorIntro, chAvatar string
-	if ch != nil {
-		chVisual = ch.Style
-		chWriter = ch.WritingStyle
-		chTheme = ch.Theme
-		chAuthor = ch.Author
-		chAuthorIntro = ch.AuthorStyleIntro
-		chAvatar = ch.AuthorAvatarURL
-	}
-	effectiveVisual := firstNonEmpty(plan.Style, chVisual)
-	effectiveWriter := firstNonEmpty(plan.WritingStyle, chWriter)
-	effectiveTheme := firstNonEmpty(plan.Theme, chTheme)
-	effectiveAuthor := firstNonEmpty(plan.Author, chAuthor)
-	effectiveAuthorIntro := firstNonEmpty(plan.AuthorStyleIntro, chAuthorIntro)
-	effectiveAuthorAvatar := firstNonEmpty(plan.AuthorAvatarURL, chAvatar)
-	if effectiveWriter == "" && taskType == model.PlatformArticle {
-		effectiveWriter = writer.DefaultStyleName
 	}
 
 	// Deduct credits for the plan task.
@@ -545,13 +501,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		Prompt:             prompt,
 		ImageModelKey:      plan.ImageModelKey,
 		ReferenceImageURL:  plan.ReferenceImageURL,
-		Style:              effectiveVisual,
-		WritingStyle:       effectiveWriter,
-		Theme:              effectiveTheme,
-		Author:             effectiveAuthor,
-		AuthorStyleIntro:   effectiveAuthorIntro,
-		AuthorAvatarURL:    effectiveAuthorAvatar,
-		TemplateID:         plan.TemplateID,
 		SkipReferenceImage: plan.SkipReferenceImage,
 		Watermark:          plan.Watermark,
 		Goal:               plan.Goal,
@@ -565,6 +514,13 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		if s.creditSvc != nil {
 			if refundErr := s.creditSvc.RefundForTask(ctx, taskID); refundErr != nil {
 				s.logger.Error().Err(refundErr).Str("task_id", taskID).Msg("failed to refund credits during plan task rollback")
+			}
+		}
+		// Release the pre-claimed topic back to the pool so it isn't orphaned
+		// (a no-op when no topic was claimed for this task).
+		if s.topicPoolSvc != nil {
+			if relErr := s.topicPoolSvc.ReleaseForTask(ctx, taskID); relErr != nil {
+				s.logger.Error().Err(relErr).Str("task_id", taskID).Msg("failed to release topic during plan task rollback")
 			}
 		}
 		return nil, fmt.Errorf("create task from plan: %w", err)

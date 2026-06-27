@@ -102,6 +102,7 @@ export default function PlansPage() {
   const watchedAuthorIntro = useWatch({ control: form.control, name: 'author_style_intro' })
   const watchedAuthorAvatar = useWatch({ control: form.control, name: 'author_avatar_url' })
   const watchedTheme = useWatch({ control: form.control, name: 'theme' })
+  const watchedGoalMode = useWatch({ control: form.control, name: 'goal_mode' })
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -142,6 +143,20 @@ export default function PlansPage() {
     }
     return map
   }, [allProjects])
+
+  // 每次执行（单次触发）的预估积分消耗。计划是定时单任务生成器，无 quantity；
+  // 仅强目标模式 ×3。镜像 TasksPage 的 taskCostFor，缺定价时回落默认 3200。
+  const { data: pricing } = useQuery({
+    queryKey: ['credits', 'pricing'],
+    queryFn: () => api.credits.pricing(),
+    staleTime: 60_000,
+  })
+  const { data: creditsBalance } = useQuery({
+    queryKey: ['credits', 'balance'],
+    queryFn: () => api.credits.balance(),
+    staleTime: 30_000,
+  })
+  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3200
 
   const createMutation = useMutation({
     mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
@@ -682,6 +697,34 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {/* 每次执行（每次触发）的预估积分消耗。计划无 quantity，仅强目标 ×3。
+                  定价为预扣积分；图片生成等额外消耗按实际用量结算。 */}
+              {(() => {
+                const cost = taskCostFor(watchedType as string)
+                const multiplier = watchedGoalMode ? 3 : 1
+                const perRun = cost * multiplier
+                const balance = creditsBalance?.balance ?? 0
+                const remaining = balance - perRun
+                return (
+                  <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
+                    <p className="text-muted-foreground">
+                      每次执行预估：{cost}{multiplier > 1 ? ` × ${multiplier}` : ''} ={' '}
+                      <span className="font-medium text-foreground">{perRun.toLocaleString()}</span> 积分
+                      {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
+                    </p>
+                    <p className="text-muted-foreground">
+                      余额：{balance.toLocaleString()} →{' '}
+                      <span className={`font-medium ${remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
+                        {remaining.toLocaleString()}
+                      </span>
+                    </p>
+                    {remaining < 0 && (
+                      <p className="text-sm font-medium text-red-500">积分不足，将无法触发执行</p>
+                    )}
+                  </div>
+                )
+              })()}
             </form>
           </Form>
           <DialogFooter>

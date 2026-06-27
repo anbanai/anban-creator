@@ -33,6 +33,8 @@ export type {
   TaskResult,
   TaskFile,
   CreateTaskRequest,
+  BulkTaskResult,
+  BulkTasksResponse,
   WorkflowStatus,
   WorkflowStage,
   WorkflowWarning,

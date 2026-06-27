@@ -84,9 +84,26 @@ func (r *topicPoolRepository) ClaimOne(ctx context.Context, userID, projectID st
 
 // ClaimWithTask atomically claims a topic and associates it with a task using
 // SELECT FOR UPDATE to prevent race conditions.
+//
+// Idempotent per task: if taskID already has a topic bound to it, that same
+// topic is returned and no second topic is consumed. This is the server-side
+// anti-double-consume guard — the server pre-claims a topic into the task prompt
+// and a research skill may independently call claim_topic; both must resolve to
+// the one topic already assigned to the task rather than burning a second.
 func (r *topicPoolRepository) ClaimWithTask(ctx context.Context, userID, projectID, taskID string) (*model.TopicPool, error) {
 	var topic model.TopicPool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Re-claim short-circuit: a topic already bound to this task wins.
+		var existing model.TopicPool
+		if err := tx.Where("task_id = ? AND status = ?", taskID, model.TopicStatusUsed).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&existing).Error; err == nil {
+			topic = existing
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
 		if err := tx.Where("user_id = ? AND project_id = ? AND status = ?", userID, projectID, model.TopicStatusUnused).
 			Order("created_at ASC").
 			Limit(1).
@@ -126,6 +143,20 @@ func (r *topicPoolRepository) MarkUsed(ctx context.Context, id uint, taskID stri
 func (r *topicPoolRepository) ResetStatus(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Model(&model.TopicPool{}).
 		Where("id = ? AND status = ?", id, model.TopicStatusUsed).
+		Updates(map[string]any{
+			"status":  model.TopicStatusUnused,
+			"task_id": nil,
+			"used_at": nil,
+		}).Error
+}
+
+// ResetByTask releases the topic bound to the given task back to the pool
+// (status unused, task_id/used_at cleared). Used when a task that pre-claimed a
+// topic fails to persist, so the topic isn't permanently orphaned. A no-op
+// (rows=0, no error) when no topic is bound to the task.
+func (r *topicPoolRepository) ResetByTask(ctx context.Context, taskID string) error {
+	return r.db.WithContext(ctx).Model(&model.TopicPool{}).
+		Where("task_id = ? AND status = ?", taskID, model.TopicStatusUsed).
 		Updates(map[string]any{
 			"status":  model.TopicStatusUnused,
 			"task_id": nil,

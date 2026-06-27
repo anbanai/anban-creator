@@ -434,69 +434,6 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	}
 }
 
-func TestPlanService_Update_Style(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-
-	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-
-	// Create with an initial style.
-	initialStyle := "暖色"
-	created, err := svc.Create(ctx, CreatePlanParams{
-		UserID:    "user-1",
-		ProjectID: chID,
-		CronExpr:  "0 9 * * *",
-		Prompt:    "hint",
-		Style:     initialStyle,
-	})
-	if err != nil {
-		t.Fatalf("create plan: %v", err)
-	}
-	if created.Style != initialStyle {
-		t.Fatalf("expected initial style %q, got %q", initialStyle, created.Style)
-	}
-
-	// nil style = leave unchanged.
-	updated, err := svc.Update(ctx, UpdatePlanParams{
-		ID:     created.ID,
-		Prompt: "hint",
-	})
-	if err != nil {
-		t.Fatalf("update with nil style: %v", err)
-	}
-	if updated.Style != initialStyle {
-		t.Errorf("nil style should leave unchanged; got %q, want %q", updated.Style, initialStyle)
-	}
-
-	// &"" = clear.
-	emptyStyle := ""
-	updated, err = svc.Update(ctx, UpdatePlanParams{
-		ID:     created.ID,
-		Prompt: "hint",
-		Style:  &emptyStyle,
-	})
-	if err != nil {
-		t.Fatalf("update with empty style: %v", err)
-	}
-	if updated.Style != "" {
-		t.Errorf("empty &\"\" style should clear; got %q, want empty", updated.Style)
-	}
-
-	// &"new" = set.
-	newStyle := "冷色"
-	updated, err = svc.Update(ctx, UpdatePlanParams{
-		ID:     created.ID,
-		Prompt: "hint",
-		Style:  &newStyle,
-	})
-	if err != nil {
-		t.Fatalf("update with new style: %v", err)
-	}
-	if updated.Style != newStyle {
-		t.Errorf("new style should set; got %q, want %q", updated.Style, newStyle)
-	}
-}
-
 func TestPlanService_Update_ReferenceImageURL(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()

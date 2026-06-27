@@ -25,7 +25,13 @@ func setupTestProjectService(t *testing.T) (*ProjectService, repository.Reposito
 	return NewProjectService(repo, &logger), repo
 }
 
-func TestProjectServiceDefaultsArticleStyle(t *testing.T) {
+// Create/Update store ONLY what the user set — they do NOT bake the article
+// writer default. The platform writer default (writer.DefaultStyleName) is
+// injected at RESOLUTION time (resolver.ResolveStyle) so every consumer (MCP,
+// prompt, settings.json) agrees on the single source of truth. These tests pin
+// that contract: the stored fields stay empty, and the default surfaces only via
+// ResolveStyle.
+func TestProjectServiceDoesNotBakeArticleWriterKey(t *testing.T) {
 	for _, platform := range []string{model.PlatformArticle} {
 		t.Run(platform, func(t *testing.T) {
 			svc, _ := setupTestProjectService(t)
@@ -36,14 +42,19 @@ func TestProjectServiceDefaultsArticleStyle(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			// The writer dimension (写作风格) defaults to the platform writer;
-			// the visual dimension (图片视觉) must stay empty — it must NEVER
-			// be seeded with a writer key (the dan-koe → Victorian-woodcut bug).
-			if ch.WritingStyle != writer.DefaultStyleName {
-				t.Fatalf("WritingStyle = %q, want %q", ch.WritingStyle, writer.DefaultStyleName)
+			// The visual dimension (图片视觉) must NEVER be seeded with a writer key
+			// (the dan-koe → Victorian-woodcut bug), and the writer key is empty on
+			// the stored project too — the default is applied at resolution, not here.
+			if ch.WriterKey != "" {
+				t.Fatalf("WriterKey = %q, want empty — Create must not bake the default", ch.WriterKey)
 			}
-			if ch.Style != "" {
-				t.Fatalf("Style (visual) = %q, want empty — writer key must not leak into visual style", ch.Style)
+			if ch.VisualStyle != "" {
+				t.Fatalf("VisualStyle = %q, want empty — writer key must not leak into visual style", ch.VisualStyle)
+			}
+			// The article writer default surfaces at resolution, the single place
+			// every delivery channel reads it.
+			if got := ResolveStyle(ch, nil).WriterKey; got != writer.DefaultStyleName {
+				t.Fatalf("ResolveStyle WriterKey = %q, want %q", got, writer.DefaultStyleName)
 			}
 		})
 	}
@@ -58,12 +69,12 @@ func TestProjectServiceDoesNotDefaultSeednoteStyle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if ch.Style != "" {
-		t.Fatalf("Style = %q, want empty", ch.Style)
+	if ch.VisualStyle != "" {
+		t.Fatalf("VisualStyle = %q, want empty", ch.VisualStyle)
 	}
 }
 
-func TestProjectServiceUpdateDefaultsArticleStyle(t *testing.T) {
+func TestProjectServiceUpdateDoesNotBakeArticleWriterKey(t *testing.T) {
 	svc, _ := setupTestProjectService(t)
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
 		Platform: model.PlatformArticle,
@@ -74,34 +85,38 @@ func TestProjectServiceUpdateDefaultsArticleStyle(t *testing.T) {
 	}
 
 	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
-		Platform: model.PlatformArticle,
-		Name:     "Article Project",
-		Style:    "",
+		Platform:    model.PlatformArticle,
+		Name:        "Article Project",
+		VisualStyle: "",
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	// Update re-applies defaults: the writer dimension is defaulted, the visual
-	// dimension stays empty.
-	if updated.WritingStyle != writer.DefaultStyleName {
-		t.Fatalf("WritingStyle = %q, want %q", updated.WritingStyle, writer.DefaultStyleName)
+	// Update does not bake the default either; it surfaces at resolution.
+	if updated.WriterKey != "" {
+		t.Fatalf("WriterKey = %q, want empty", updated.WriterKey)
 	}
-	if updated.Style != "" {
-		t.Fatalf("Style (visual) = %q, want empty", updated.Style)
+	if updated.VisualStyle != "" {
+		t.Fatalf("VisualStyle = %q, want empty", updated.VisualStyle)
+	}
+	if got := ResolveStyle(updated, nil).WriterKey; got != writer.DefaultStyleName {
+		t.Fatalf("ResolveStyle WriterKey = %q, want %q", got, writer.DefaultStyleName)
 	}
 }
 
-func TestProjectServiceUpdatePreservesExistingArticleStyleWhenStyleOmitted(t *testing.T) {
+func TestProjectServiceUpdatePreservesExistingWriterKeyWhenOmitted(t *testing.T) {
 	svc, _ := setupTestProjectService(t)
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
-		Name:     "Article Project",
-		Style:    "casual-science",
+		Platform:  model.PlatformArticle,
+		Name:      "Article Project",
+		WriterKey: "casual-science",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
+	// Update omits WriterKey entirely; the stored value must be preserved
+	// (PATCH "non-empty = set" semantics).
 	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
 		Platform: model.PlatformArticle,
 		Name:     "Renamed Article Project",
@@ -109,7 +124,7 @@ func TestProjectServiceUpdatePreservesExistingArticleStyleWhenStyleOmitted(t *te
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.Style != "casual-science" {
-		t.Fatalf("Style = %q, want casual-science", updated.Style)
+	if updated.WriterKey != "casual-science" {
+		t.Fatalf("WriterKey = %q, want casual-science", updated.WriterKey)
 	}
 }

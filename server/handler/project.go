@@ -81,7 +81,7 @@ func (h *ProjectHandler) signProjectURLs(ctx context.Context, ch *model.Project)
 	}
 	ch.AvatarURL = service.SignURL(ctx, h.store, h.logger, ch.AvatarURL, service.DefaultSignedURLTTL)
 	ch.ReferenceImageURL = service.SignURL(ctx, h.store, h.logger, ch.ReferenceImageURL, service.DefaultSignedURLTTL)
-	ch.AuthorAvatarURL = service.SignURL(ctx, h.store, h.logger, ch.AuthorAvatarURL, service.DefaultSignedURLTTL)
+	ch.PersonaAvatar = service.SignURL(ctx, h.store, h.logger, ch.PersonaAvatar, service.DefaultSignedURLTTL)
 }
 
 // SetSeednoteClient injects the Seednote SDK client.
@@ -116,22 +116,22 @@ type projectRequest struct {
 // toProject converts a request to a Project model.
 func (req *projectRequest) toProject() *model.Project {
 	return &model.Project{
-		Platform:           req.Platform,
-		Name:               req.Name,
-		ProfileURL:         req.ProfileURL,
-		AvatarURL:          req.AvatarURL,
-		Positioning:        req.Positioning,
-		Keywords:           req.Keywords,
-		Style:              req.Style,
-		WritingStyle:       req.WritingStyle,
-		Theme:              req.Theme,
-		Author:             req.Author,
-		AuthorStyleIntro:   req.AuthorStyleIntro,
-		AuthorAvatarURL:    req.AuthorAvatarURL,
-		TemplateID:         req.TemplateID,
-		ReferenceImageURL:  req.ReferenceImageURL,
-		ImageRatio:         req.ImageRatio,
-		MaxConcurrentTasks: req.MaxConcurrentTasks,
+		Platform:              req.Platform,
+		Name:                  req.Name,
+		ProfileURL:            req.ProfileURL,
+		AvatarURL:             req.AvatarURL,
+		Positioning:           req.Positioning,
+		Keywords:              req.Keywords,
+		VisualStyle:           req.Style,
+		WriterKey:             req.WritingStyle,
+		Theme:                 req.Theme,
+		Byline:                req.Author,
+		WritingVoice:          req.AuthorStyleIntro,
+		PersonaAvatar:         req.AuthorAvatarURL,
+		CreatedFromTemplateID: req.TemplateID,
+		ReferenceImageURL:     req.ReferenceImageURL,
+		ImageRatio:            req.ImageRatio,
+		MaxConcurrentTasks:    req.MaxConcurrentTasks,
 		Config: model.ProjectConfig{
 			WechatAppID:      req.WechatAppID,
 			WechatSecret:     req.WechatSecret,

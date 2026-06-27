@@ -99,7 +99,7 @@ func createTemplateRow(t *testing.T, repo repository.Repository, ownerID, visibi
 		Visibility:   visibility,
 		IsActive:     true,
 		ThumbnailURL: "https://example.com/x.png",
-		StylePrompt:  "暖色",
+		VisualStyle:  "暖色",
 	}
 	if err := repo.Templates().Create(t.Context(), tmpl); err != nil {
 		t.Fatalf("seed template: %v", err)
@@ -247,15 +247,19 @@ func TestTemplateHandler_Create_ArticleAuthorPersona(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
+	// Request body still uses the legacy input keys (author_name / author_avatar_url /
+	// author_style_intro); the P1 rename keeps the input wire contract stable. But the
+	// RESPONSE serializes the model with the renamed JSON tags (byline / persona_avatar
+	// / writing_voice), so we assert those here.
 	data := decodeBody(t, resp)["data"].(map[string]any)
-	if data["author_name"] != "老李" {
-		t.Errorf("author_name = %v, want 老李", data["author_name"])
+	if data["byline"] != "老李" {
+		t.Errorf("byline = %v, want 老李", data["byline"])
 	}
-	if data["author_avatar_url"] != "https://example.com/avatar.png" {
-		t.Errorf("author_avatar_url = %v", data["author_avatar_url"])
+	if data["persona_avatar"] != "https://example.com/avatar.png" {
+		t.Errorf("persona_avatar = %v", data["persona_avatar"])
 	}
-	if data["author_style_intro"] != "犀利、接地气、像朋友聊天" {
-		t.Errorf("author_style_intro = %v", data["author_style_intro"])
+	if data["writing_voice"] != "犀利、接地气、像朋友聊天" {
+		t.Errorf("writing_voice = %v", data["writing_voice"])
 	}
 }
 

@@ -273,7 +273,6 @@ func (r *detRenderer) renderAlert(n *ast.Blockquote, alertType string, sb *strin
 // whitespace) so it can be stripped from an alert's first paragraph.
 var alertLeadingMarker = regexp.MustCompile(`^\s*\[!(?:info|tip|warning|danger|success|note|important|caution)\]\s*`)
 
-
 // renderCodeBlock emits a <pre><code> block.
 func (r *detRenderer) renderCodeBlock(node ast.Node, sb *strings.Builder) {
 	var code strings.Builder
@@ -461,10 +460,13 @@ func (r *detRenderer) emitImage(n *ast.Image, sb *strings.Builder) {
 // renders (the YAML is authoritative but every value has a sane fallback).
 // ---------------------------------------------------------------------------
 
-func (r *detRenderer) textColor() string       { return r.colorOf("text", "#333333") }
-func (r *detRenderer) primaryColor() string    { return r.colorOf("primary", "#d97758") }
-func (r *detRenderer) secondaryColor() string  { return r.colorOf("secondary", "#c06b4d") }
-func (r *detRenderer) strongColor() string     { c := r.theme.Modules.Strong.Color; return r.firstNonEmpty(c, r.secondaryColor()) }
+func (r *detRenderer) textColor() string      { return r.colorOf("text", "#333333") }
+func (r *detRenderer) primaryColor() string   { return r.colorOf("primary", "#d97758") }
+func (r *detRenderer) secondaryColor() string { return r.colorOf("secondary", "#c06b4d") }
+func (r *detRenderer) strongColor() string {
+	c := r.theme.Modules.Strong.Color
+	return r.firstNonEmpty(c, r.secondaryColor())
+}
 
 func (r *detRenderer) colorOf(key, fallback string) string {
 	if v, ok := r.theme.Colors[key]; ok && v != "" {

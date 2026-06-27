@@ -16,8 +16,8 @@ const (
 	// ConfigFileName 配置文件名
 	ConfigFileName = "settings.json"
 
-	// DefaultArticleStyle 默认写作风格
-	DefaultArticleStyle = "dan-koe"
+	// DefaultArticleWriterKey 默认写作者 key（writer 资源 key，如 dan-koe）
+	DefaultArticleWriterKey = "dan-koe"
 	// DefaultArticleTheme 默认图文文章主题
 	DefaultArticleTheme = "default"
 	// DefaultImageProvider 默认图片生成服务商
@@ -112,11 +112,11 @@ type CountedImageSection struct {
 
 // ArticleConfig 图文文章配置
 type ArticleConfig struct {
-	Style   string       `json:"style,omitempty" yaml:"style,omitempty"`
-	Theme   string       `json:"theme,omitempty" yaml:"theme,omitempty"`
-	Author  string       `json:"author,omitempty" yaml:"author,omitempty"`
-	Cover   ImageSection `json:"cover,omitempty" yaml:"cover,omitempty"`
-	Content ImageSection `json:"content,omitempty" yaml:"content,omitempty"`
+	WriterKey string       `json:"writer_key,omitempty" yaml:"writer_key,omitempty"`
+	Theme     string       `json:"theme,omitempty" yaml:"theme,omitempty"`
+	Byline    string       `json:"byline,omitempty" yaml:"byline,omitempty"`
+	Cover     ImageSection `json:"cover,omitempty" yaml:"cover,omitempty"`
+	Content   ImageSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
 // WechatConfig 微信公众号配置
@@ -128,10 +128,10 @@ type WechatConfig struct {
 
 // SeednoteConfig 种草笔记配置
 type SeednoteConfig struct {
-	// Style 视觉风格描述，用于图片生成时的风格提示
-	Style   string              `json:"style,omitempty" yaml:"style,omitempty"`
-	Cover   ImageSection        `json:"cover,omitempty" yaml:"cover,omitempty"`
-	Content CountedImageSection `json:"content,omitempty" yaml:"content,omitempty"`
+	// VisualStyle 视觉风格描述，用于图片生成时的风格提示
+	VisualStyle string              `json:"visual_style,omitempty" yaml:"visual_style,omitempty"`
+	Cover       ImageSection        `json:"cover,omitempty" yaml:"cover,omitempty"`
+	Content     CountedImageSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
 // Config 应用配置（嵌套结构，直接对应 JSON 文件）

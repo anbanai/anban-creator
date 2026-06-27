@@ -25,6 +25,16 @@ func IsTerminalTaskStatus(s string) bool {
 	return slices.Contains(TerminalTaskStatuses, s)
 }
 
+// Publish-approval state constants (Batch 4A). PublishApprovalStateEmpty means
+// the task never entered the gate (the common case: project does not require
+// approval, or the task is not an auto-publishable article).
+const (
+	PublishApprovalStateEmpty    = ""
+	PublishApprovalStatePending  = "pending"
+	PublishApprovalStateApproved = "approved"
+	PublishApprovalStateRejected = "rejected"
+)
+
 // Plan status constants.
 const (
 	PlanStatusActive    = "active"

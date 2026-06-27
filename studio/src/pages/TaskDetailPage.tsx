@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Streamdown } from 'streamdown'
-import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2 } from 'lucide-react'
+import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -152,6 +152,25 @@ export default function TaskDetailPage() {
       if (id) {
         queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(id) })
       }
+    },
+  })
+
+  // Publish-approval gate (Batch 4A): resume a held publish or close the gate.
+  const approvePublish = useMutation({
+    mutationFn: () => api.tasks.publishApprove(id!),
+    onSuccess: () => {
+      toast.success('已放行，正在发布到公众号草稿箱')
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+    },
+  })
+
+  const rejectPublish = useMutation({
+    mutationFn: () => api.tasks.publishReject(id!),
+    onSuccess: () => {
+      toast.success('已驳回发布审核')
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
     },
   })
 
@@ -482,6 +501,70 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
+      {/* Publish-approval gate (Batch 4A): the project requires human review
+          before publishing, so a completed article draft is held here until the
+          user explicitly approves (→ WeChat draft box) or rejects it. */}
+      {task.publish_approval_state === 'pending' && (
+        <Card className="border-amber-500/40 bg-amber-500/10">
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              <div>
+                <p className="text-sm font-medium text-foreground">发布待审核</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  文章草稿已完成，已暂停自动发布。确认无误后放行，将发布到公众号草稿箱（非直接群发）。
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                size="sm"
+                loading={approvePublish.isPending}
+                onClick={() => submit(async () => approvePublish.mutateAsync())}
+              >
+                <Send className="h-4 w-4" />
+                放行发布
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                loading={rejectPublish.isPending}
+                onClick={() => submit(async () => rejectPublish.mutateAsync())}
+              >
+                <Ban className="h-4 w-4" />
+                驳回
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {task.publish_approval_state === 'approved' && (
+        <Card className="border-emerald-500/40 bg-emerald-500/10">
+          <CardContent className="flex items-start gap-3">
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+            <div>
+              <p className="text-sm font-medium text-foreground">已通过发布审核</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {task.published
+                  ? '草稿已放行，已发布到公众号草稿箱。'
+                  : '草稿已放行，正在发布到公众号草稿箱…'}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {task.publish_approval_state === 'rejected' && (
+        <Card className="bg-muted/30">
+          <CardContent className="flex items-start gap-3">
+            <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium text-foreground">已驳回发布</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">该文章未发布，可修改后重新执行任务。</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Details (stats) */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -732,7 +815,21 @@ export default function TaskDetailPage() {
           </div>
           <div ref={logContainerRef} className="max-h-96 overflow-y-auto bg-background/50 px-4 py-3">
             {sseError && (
-              <p className="mb-2 text-xs text-amber-400">{sseError}</p>
+              <div className="mb-2 flex items-center gap-2">
+                <p className="text-xs text-amber-400">{sseError}</p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-xs text-amber-400 hover:text-amber-300"
+                  onClick={() => {
+                    setSseError(null)
+                    connectSSE(0)
+                  }}
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  重新连接
+                </Button>
+              </div>
             )}
             {displayLogs.length === 0 ? (
               <p className="text-xs text-muted-foreground">等待输出中...</p>

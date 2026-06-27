@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 )
@@ -42,24 +41,13 @@ func (s *ProjectService) SetTemplateService(svc *TemplateService) {
 	s.templateSvc = svc
 }
 
-// applyStyleDefaults normalizes the two text/style dimensions on a project:
-//   - style (图片视觉) is free text and NEVER defaults to a writer resource key.
-//     Previously the article platform defaulted ch.Style to writer.DefaultStyleName,
-//     which seeded the bug where a writer key ("dan-koe") leaked into the visual
-//     style field and was injected as an image-gen style. Visual style stays empty
-//     unless the user sets one.
-//   - writingStyle (写作风格) defaults to the platform's default writer
-//     (article → writer.DefaultStyleName) when empty, so article projects always
-//     carry a writing voice. Seednote has no writer dimension.
-func applyStyleDefaults(platform, style, writingStyle string) (string, string) {
-	if platform == model.PlatformArticle && writingStyle == "" {
-		writingStyle = writer.DefaultStyleName
-	}
-	return style, writingStyle
-}
-
 // Create creates a new project for the given user.
 // It sets UserID and Status, validates the platform, then persists via the repository.
+//
+// Style dimensions are NOT defaulted here: VisualStyle (图片视觉) is free text and
+// never defaults, and the article writer voice default (writer.DefaultStyleName)
+// is injected at RESOLUTION time (resolver.ResolveStyle) so every consumer agrees
+// on the single source of truth. The project stores only what the user set.
 func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Project) (*model.Project, error) {
 	if !validPlatforms[ch.Platform] {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
@@ -76,7 +64,6 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	ch.ID = uuid.New().String()
 	ch.UserID = userID
 	ch.Status = model.ProjectStatusActive
-	ch.Style, ch.WritingStyle = applyStyleDefaults(ch.Platform, ch.Style, ch.WritingStyle)
 
 	if err := s.repo.Projects().Create(ctx, ch); err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
@@ -154,23 +141,23 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	if ch.Keywords != "" {
 		existing.Keywords = ch.Keywords
 	}
-	if ch.Style != "" {
-		existing.Style = ch.Style
+	if ch.VisualStyle != "" {
+		existing.VisualStyle = ch.VisualStyle
 	}
-	if ch.WritingStyle != "" {
-		existing.WritingStyle = ch.WritingStyle
+	if ch.WriterKey != "" {
+		existing.WriterKey = ch.WriterKey
 	}
 	if ch.Theme != "" {
 		existing.Theme = ch.Theme
 	}
-	// 作者署名（byline）：unconditional assign 以支持清空，与 AuthorStyleIntro/
-	// AuthorAvatarURL 一致。导入模型下"导入模板→清空署名"是合法操作，guarded assign
+	// 作者署名（byline）：unconditional assign 以支持清空，与 WritingVoice/
+	// PersonaAvatar 一致。导入模型下"导入模板→清空署名"是合法操作，guarded assign
 	// 会让清空后的保存静默回填旧署名。
-	existing.Author = ch.Author
-	// 公众号人设字段 + 绑定模板：unconditional assign 以支持清空（解除绑定、清头像/写作风格）。
-	existing.AuthorStyleIntro = ch.AuthorStyleIntro
-	existing.AuthorAvatarURL = ch.AuthorAvatarURL
-	existing.TemplateID = ch.TemplateID
+	existing.Byline = ch.Byline
+	// 公众号人设字段 + 建项来源模板：unconditional assign 以支持清空（清头像/写作笔迹、解除来源记录）。
+	existing.WritingVoice = ch.WritingVoice
+	existing.PersonaAvatar = ch.PersonaAvatar
+	existing.CreatedFromTemplateID = ch.CreatedFromTemplateID
 	// ReferenceImageURL: unconditional assign to support clearing.
 	existing.ReferenceImageURL = ch.ReferenceImageURL
 	// ImageRatio: unconditional assign to support clearing.
@@ -185,7 +172,6 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	if ch.Config.WechatSecret != "" {
 		existing.Config.WechatSecret = ch.Config.WechatSecret
 	}
-	existing.Style, existing.WritingStyle = applyStyleDefaults(existing.Platform, existing.Style, existing.WritingStyle)
 
 	if err := s.repo.Projects().Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("update project: %w", err)

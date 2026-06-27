@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus } from 'lucide-react'
+import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus, Ban, RotateCcw, Trash2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -211,6 +211,9 @@ export default function TasksPage() {
     [filteredTasks, selectedTaskIdSet],
   )
   const selectedCompletedTasks = selectedTasks.filter((task) => task.status === 'completed')
+  const selectedCancellable = selectedTasks.filter((task) => task.status === 'pending' || task.status === 'running')
+  const selectedRetryable = selectedTasks.filter((task) => task.status === 'failed' || task.status === 'cancelled')
+  const selectedDeletable = selectedTasks.filter((task) => task.status !== 'running')
   const completedTasksOnPage = filteredTasks.filter((task) => task.status === 'completed')
   const allCompletedSelected = completedTasksOnPage.length > 0 && completedTasksOnPage.every((task) => selectedTaskIdSet.has(task.id))
 
@@ -257,6 +260,50 @@ export default function TasksPage() {
     },
     onError: () => toast.error('批量下载失败，请稍后重试'),
   })
+
+  // Bulk cancel / retry / delete — best-effort; the server returns a per-task
+  // summary. Each operates only on the subset it can act on; on success we toast
+  // the succeeded/skipped counts, invalidate the list, and clear the selection.
+  const [bulkAction, setBulkAction] = useState<'cancel' | 'retry' | 'delete' | null>(null)
+  const toastBulk = (verb: string, res: { succeeded: number; skipped: number }) =>
+    toast.success(`已${verb} ${res.succeeded} 个任务${res.skipped ? `，跳过 ${res.skipped} 个` : ''}`)
+  const onBulkDone = (res: { succeeded: number; skipped: number }) => {
+    setSelectedTaskIds([])
+    setBulkAction(null)
+    return res
+  }
+  const bulkCancelMutation = useMutation({
+    mutationFn: (taskIds: string[]) => api.tasks.bulkCancel(taskIds),
+    onSuccess: (res) => {
+      toastBulk('取消', res)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      onBulkDone(res)
+    },
+    onError: () => toast.error('批量取消失败，请稍后重试'),
+  })
+  const bulkRetryMutation = useMutation({
+    mutationFn: (taskIds: string[]) => api.tasks.bulkRetry(taskIds),
+    onSuccess: (res) => {
+      toastBulk('重新创建', res)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      onBulkDone(res)
+    },
+    onError: () => toast.error('批量重试失败，请稍后重试'),
+  })
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (taskIds: string[]) => api.tasks.bulkDelete(taskIds),
+    onSuccess: (res) => {
+      toastBulk('删除', res)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      onBulkDone(res)
+    },
+    onError: () => toast.error('批量删除失败，请稍后重试'),
+  })
+  const bulkAnyPending =
+    bulkDownloadMutation.isPending ||
+    bulkCancelMutation.isPending ||
+    bulkRetryMutation.isPending ||
+    bulkDeleteMutation.isPending
 
   function openCreate() {
     if (projects.length === 0) {
@@ -405,6 +452,29 @@ export default function TasksPage() {
     bulkDownloadMutation.mutate(taskIds)
   }
 
+  // Run the bulk action currently awaiting confirmation. Each sends only the
+  // subset it can act on (matching the button counts the user saw).
+  function confirmBulkAction() {
+    if (bulkAction === 'cancel') bulkCancelMutation.mutate(selectedCancellable.map((t) => t.id))
+    else if (bulkAction === 'retry') bulkRetryMutation.mutate(selectedRetryable.map((t) => t.id))
+    else if (bulkAction === 'delete') bulkDeleteMutation.mutate(selectedDeletable.map((t) => t.id))
+  }
+
+  const bulkActionCopy: Record<string, { title: string; desc: string }> = {
+    cancel: {
+      title: '批量取消任务？',
+      desc: `将取消 ${selectedCancellable.length} 个待执行/运行中的任务。未消耗的部分将退还积分，此操作不可撤销。`,
+    },
+    retry: {
+      title: '批量重试任务？',
+      desc: `将为 ${selectedRetryable.length} 个失败/已取消任务重新创建（按新任务重新计费），原任务保留。`,
+    },
+    delete: {
+      title: '批量删除任务？',
+      desc: `将永久删除 ${selectedDeletable.length} 个任务及其产出文件，不可恢复。运行中的任务需先取消。`,
+    },
+  }
+
   const runningCount = tasks.filter((t) => t.status === 'running').length
 
   return (
@@ -525,17 +595,46 @@ export default function TasksPage() {
                 <span className="text-xs text-muted-foreground">仅打包已完成任务</span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {selectedTaskIds.length > 0 && (
-                <Button variant="ghost" size="sm" onClick={() => setSelectedTaskIds([])}>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedTaskIds([])} disabled={bulkAnyPending}>
                   清空选择
                 </Button>
               )}
+              {/* 批量操作：每个按钮只对它能作用的子集生效（计数即实际提交数），
+                  点击进入二次确认。cancel/retry=outline，delete=destructive 以示不可逆。 */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBulkAction('cancel')}
+                disabled={selectedCancellable.length === 0 || bulkAnyPending}
+              >
+                <Ban className="h-4 w-4" />
+                取消{selectedCancellable.length > 0 ? ` (${selectedCancellable.length})` : ''}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBulkAction('retry')}
+                disabled={selectedRetryable.length === 0 || bulkAnyPending}
+              >
+                <RotateCcw className="h-4 w-4" />
+                重试{selectedRetryable.length > 0 ? ` (${selectedRetryable.length})` : ''}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setBulkAction('delete')}
+                disabled={selectedDeletable.length === 0 || bulkAnyPending}
+              >
+                <Trash2 className="h-4 w-4" />
+                删除{selectedDeletable.length > 0 ? ` (${selectedDeletable.length})` : ''}
+              </Button>
               <Button
                 size="sm"
                 onClick={handleBulkDownload}
                 loading={bulkDownloadMutation.isPending}
-                disabled={selectedCompletedTasks.length === 0}
+                disabled={selectedCompletedTasks.length === 0 || bulkAnyPending}
               >
                 <Download className="h-4 w-4" />
                 下载选中文件
@@ -597,6 +696,16 @@ export default function TasksPage() {
                               ) : null}
                               {task.published ? '已发布' : '标记发布'}
                             </button>
+                          )}
+                          {task.publish_approval_state === 'pending' && (
+                            <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-500">
+                              待审核发布
+                            </Badge>
+                          )}
+                          {task.publish_approval_state === 'rejected' && (
+                            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                              已驳回发布
+                            </Badge>
                           )}
                           {task.status === 'completed' && workflowReadinessLabel(task.workflow_status) && (
                             <Badge variant="outline">
@@ -1112,6 +1221,29 @@ export default function TasksPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>继续编辑</AlertDialogCancel>
             <AlertDialogAction onClick={resetModal}>放弃</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 批量操作二次确认：文案/按钮随 bulkAction 变化。取消与删除不可逆 → destructive。 */}
+      <AlertDialog
+        open={bulkAction !== null}
+        onOpenChange={(open) => { if (!open) setBulkAction(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{bulkAction ? bulkActionCopy[bulkAction].title : ''}</AlertDialogTitle>
+            <AlertDialogDescription>{bulkAction ? bulkActionCopy[bulkAction].desc : ''}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkAnyPending}>再想想</AlertDialogCancel>
+            <AlertDialogAction
+              variant={bulkAction === 'delete' || bulkAction === 'cancel' ? 'destructive' : 'default'}
+              disabled={bulkAnyPending}
+              onClick={confirmBulkAction}
+            >
+              确认{bulkAction === 'delete' ? '删除' : bulkAction === 'cancel' ? '取消任务' : bulkAction === 'retry' ? '重试' : ''}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

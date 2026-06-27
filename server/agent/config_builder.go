@@ -16,6 +16,7 @@ import (
 	appconfig "github.com/royalrick/anbanwriter/app/config"
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/resolver"
 	"github.com/royalrick/anbanwriter/server/storage"
 )
 
@@ -23,10 +24,15 @@ import (
 // unbounded memory/disk usage. Mirrors the upload limit in handler/file.go.
 const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 
-// BuildAppConfig constructs an app/config.Config from a Project DB record.
-// This bridges the multi-user server config to the single-account app config
-// used by the abwriter CLI binary.
-func BuildAppConfig(ch *model.Project, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, skipRefImage bool, taskReferenceImageURL string) (*appconfig.Config, error) {
+// BuildAppConfig constructs an app/config.Config from a Project DB record plus the
+// resolved (task ?? project) style dimensions. This bridges the multi-user server
+// config to the single-account app config used by the abwriter CLI binary.
+//
+// resolved carries the two-layer effective values (resolver.ResolveStyle); only
+// the dimensions each platform's settings.json slot consumes are read here:
+// Article.WriterKey / Article.Byline / Article.Theme and Seednote.VisualStyle,
+// each driven by the resolved value (not the raw project column).
+func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, skipRefImage bool, taskReferenceImageURL string) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
 		Name:        ch.Name,
 		Positioning: ch.Positioning,
@@ -46,20 +52,23 @@ func BuildAppConfig(ch *model.Project, imageAPICfg *srvconfig.ImageAPIConfig, ta
 	cfg.Wechat.AppID = ch.GetWechatAppID()
 	cfg.Wechat.Secret = ch.GetWechatSecret()
 
-	// Platform-specific fields.
+	// Platform-specific fields. The style/persona/theme values come from the
+	// two-layer resolved set (task.Overrides.X ?? project.X), NOT the raw project
+	// columns — so a per-task override reaches settings.json correctly.
 	switch ch.Platform {
 	case model.ScopeArticle:
-		cfg.Wechat.Article.Author = ch.Author
-		// After the 3-dimension split, Wechat.Article.Style is the WRITING style
-		// (writer resource key, e.g. "dan-koe") — NOT the image visual style. The
-		// visual style is orthogonal and flows through the user prompt
-		// (BuildUserPrompt) and get_project_profile, never through settings.json.
-		cfg.Wechat.Article.Style = ch.WritingStyle
-		cfg.Wechat.Article.Theme = ch.Theme
+		// Byline is the publish署名 (goes to draft.json's author key at publish).
+		cfg.Wechat.Article.Byline = resolved.Byline
+		// WriterKey is the writer RESOURCE key (e.g. "dan-koe") — NOT the image
+		// visual style. The article visual style is orthogonal and is read by the
+		// agent solely from get_project_profile (MCP); it never enters the user
+		// prompt nor settings.json.
+		cfg.Wechat.Article.WriterKey = resolved.WriterKey
+		cfg.Wechat.Article.Theme = resolved.Theme
 	case model.ScopeSeednote:
 		cfg.Seednote = &appconfig.SeednoteConfig{}
-		// Seednote style is a visual/image description (no separate writer dimension).
-		cfg.Seednote.Style = ch.Style
+		// Seednote visual style is an image description (no separate writer dimension).
+		cfg.Seednote.VisualStyle = resolved.VisualStyle
 	}
 
 	// Apply global image API config from server config.

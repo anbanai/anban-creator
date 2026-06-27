@@ -75,7 +75,7 @@ func deriveNameFromStyle(style string) string {
 // visibility must be "public" or "private"; an empty value defaults to "public".
 func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, userID string) (*model.Template, error) {
 	if tmpl.Name == "" {
-		tmpl.Name = deriveNameFromStyle(tmpl.StylePrompt)
+		tmpl.Name = deriveNameFromStyle(tmpl.VisualStyle)
 	}
 	if tmpl.Name == "" {
 		return nil, ErrTemplateNameMissing
@@ -121,7 +121,7 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	if patch.ThumbnailURL != "" {
 		existing.ThumbnailURL = patch.ThumbnailURL
 	}
-	existing.StylePrompt = patch.StylePrompt
+	existing.VisualStyle = patch.VisualStyle
 	if patch.Visibility == "public" || patch.Visibility == "private" {
 		existing.Visibility = patch.Visibility
 	}
@@ -129,8 +129,8 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	// (matching Name/Type/ThumbnailURL). This means PATCH cannot CLEAR them — the
 	// Studio edit form always round-trips the current values, so clearing in the
 	// UI sends "" which is treated as "unchanged". Acceptable for v1.
-	if patch.WritingStyle != "" {
-		existing.WritingStyle = patch.WritingStyle
+	if patch.WriterKey != "" {
+		existing.WriterKey = patch.WriterKey
 	}
 	// 排版样式 (Theme). Same "non-empty = set" PATCH rule as the scaffold/author
 	// fields — the repo writes ALL columns, so omitting this silently keeps the
@@ -141,14 +141,14 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	}
 	// Author persona (公众号 写作风格). Same "non-empty = set" PATCH rule as the
 	// scaffold fields above; the Studio edit form round-trips current values.
-	if patch.AuthorName != "" {
-		existing.AuthorName = patch.AuthorName
+	if patch.Byline != "" {
+		existing.Byline = patch.Byline
 	}
-	if patch.AuthorAvatarURL != "" {
-		existing.AuthorAvatarURL = patch.AuthorAvatarURL
+	if patch.PersonaAvatar != "" {
+		existing.PersonaAvatar = patch.PersonaAvatar
 	}
-	if patch.AuthorStyleIntro != "" {
-		existing.AuthorStyleIntro = patch.AuthorStyleIntro
+	if patch.WritingVoice != "" {
+		existing.WritingVoice = patch.WritingVoice
 	}
 	if patch.Category != "" {
 		existing.Category = patch.Category

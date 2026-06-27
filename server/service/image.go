@@ -217,7 +217,10 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 		}
 	}
 
-	appCfg, err := agent.BuildAppConfig(ch, effectiveCfg, "", false, "")
+	// BuildAppConfig only needs the image-API/sizing slots here; the style
+	// dimensions are irrelevant for provider resolution but the signature requires
+	// a resolved set, so pass the project-only resolution (no task).
+	appCfg, err := agent.BuildAppConfig(ch, ResolveStyle(ch, nil), effectiveCfg, "", false, "")
 	if err != nil {
 		return nil, fmt.Errorf("build app config: %w", err)
 	}

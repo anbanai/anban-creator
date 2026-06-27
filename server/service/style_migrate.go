@@ -40,19 +40,20 @@ func MigrateArticleStyleOverload(ctx context.Context, db *gorm.DB, log *zerolog.
 
 	migrated := 0
 	for _, ch := range projects {
-		if mgr.Get(resources.CategoryWriter, ch.Style) == nil {
-			continue // Style is not a writer key — it is a real visual style; keep it.
+		if mgr.Get(resources.CategoryWriter, ch.VisualStyle) == nil {
+			continue // VisualStyle is not a writer key — it is a real visual style; keep it.
 		}
-		// Move the writer key into WritingStyle (only when empty, to avoid
-		// clobbering an explicitly configured writer) and clear Style. Use a
-		// map so the empty-string Style is actually written (gorm skips zero
-		// values in struct Updates but writes them in map Updates).
+		// Move the writer key into WriterKey (only when empty, to avoid
+		// clobbering an explicitly configured writer) and clear VisualStyle. Use a
+		// map so the empty-string style is actually written (gorm skips zero
+		// values in struct Updates but writes them in map Updates). The DB column
+		// names (style / writing_style) are retained from the pre-rename schema.
 		updates := map[string]any{"style": ""}
-		if ch.WritingStyle == "" {
-			updates["writing_style"] = ch.Style
+		if ch.WriterKey == "" {
+			updates["writing_style"] = ch.VisualStyle
 		}
 		if err := db.Model(&model.Project{}).Where("id = ?", ch.ID).Updates(updates).Error; err != nil {
-			log.Error().Err(err).Str("project_id", ch.ID).Str("style", ch.Style).
+			log.Error().Err(err).Str("project_id", ch.ID).Str("style", ch.VisualStyle).
 				Msg("style backfill: failed to update project")
 			continue
 		}

@@ -100,7 +100,7 @@ func isByok(ctx context.Context, userID, opType string) bool {
 	case model.CreditTypeImageGen:
 		return billSvc.modelConfigSvc.HasCompleteImageOverride(ctx, userID)
 	case model.CreditTypeArticleWrite, model.CreditTypeConvert,
-		model.CreditTypeHumanize, model.CreditTypeTopicResearch,
+		model.CreditTypeTopicResearch,
 		model.CreditTypeSEO, model.CreditTypeOutline:
 		// GetEffectiveWritingConfig already checks all required fields (base_url + api_key + model).
 		_, _, _, ok := billSvc.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID)

@@ -245,7 +245,7 @@ Content.
 	plan := &LayoutPlan{
 		ArticleType: "long-form-essay",
 		Slots: []LayoutPlanSlot{
-			{SlotID: "hero", SectionIndex: 0, ImageURL: "https://cdn/hero.png"}, // already inlined → skip
+			{SlotID: "hero", SectionIndex: 0, ImageURL: "https://cdn/hero.png"},         // already inlined → skip
 			{SlotID: "section_opener", SectionIndex: 1, ImageURL: "https://cdn/s1.png"}, // fresh → inject
 		},
 	}

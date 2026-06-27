@@ -24,8 +24,9 @@ type ProgressPayload struct {
 // Task.Ecommerce as a typed JSON column (datatypes.JSONType) so the agent reads it
 // via get_project_profile(task_id, scope="ecommerce") and Studio renders it.
 //
-// Visual style is NOT duplicated here — it flows through the orthogonal Task.Style
-// dimension (resolved task > template > project), exactly like seednote/article.
+// Visual style is NOT duplicated here — it flows through the orthogonal
+// Task.Overrides.VisualStyle dimension (resolved task > project), exactly like
+// seednote/article.
 //
 // SelectedModules maps a module key to its quantity:
 //   - main_images / detail_page / cover_banner / share_image / sku_images
@@ -34,10 +35,10 @@ type ProgressPayload struct {
 // once at creation via CreditService.DeductForTaskWithAmount and refunded on failure
 // via RefundForTask (amount-agnostic, keyed by task_id).
 type EcommerceConfig struct {
-	SelectedModules          map[string]int `json:"selected_modules,omitempty"`
-	ProductPhotos            []string       `json:"product_photos,omitempty"`
-	TargetPlatform           string         `json:"target_platform,omitempty"`
-	SellingPoints            string         `json:"selling_points,omitempty"`
+	SelectedModules map[string]int `json:"selected_modules,omitempty"`
+	ProductPhotos   []string       `json:"product_photos,omitempty"`
+	TargetPlatform  string         `json:"target_platform,omitempty"`
+	SellingPoints   string         `json:"selling_points,omitempty"`
 	// BrandBrief is the brand positioning/voice, resolved from the selected
 	// e-commerce template's BrandBrief at task creation (task-level override
 	// rare; this is template/project-level brand context, distinct from the
@@ -53,6 +54,23 @@ type EcommerceConfig struct {
 	ProviderStrategyOverride string `json:"provider_strategy_override,omitempty"`
 }
 
+// StyleOverrides holds per-task overrides for the dimensions a task otherwise
+// inherits from its project. Only fields the user explicitly overrode are set;
+// empty/absent = inherit the project value. Resolution at execution is the
+// two-layer task.Overrides.X ?? project.X (no template/plan layer).
+//
+// Stored on Task.Overrides as a typed JSON column (datatypes.JSONType) so the
+// zero value serializes to a valid JSON null and the "only overridden keys"
+// semantics are expressed by presence rather than by nullable columns.
+type StyleOverrides struct {
+	VisualStyle   string `json:"visual_style,omitempty"`   // 图片视觉 (free text)
+	WriterKey     string `json:"writer_key,omitempty"`     // 写作者 YAML resource key
+	WritingVoice  string `json:"writing_voice,omitempty"`  // 写作笔迹 (free-text imitation)
+	Byline        string `json:"byline,omitempty"`         // 作者署名 (publish byline)
+	PersonaAvatar string `json:"persona_avatar,omitempty"` // 人设头像 (never part of byline)
+	Theme         string `json:"theme,omitempty"`          // 排版主题 key
+}
+
 // Task represents a content generation task.
 type Task struct {
 	ID                string `gorm:"type:char(36);primaryKey" json:"id"`
@@ -66,39 +84,14 @@ type Task struct {
 	ImageRatio        string `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageModelKey     string `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL string `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
-	// Style is the effective 图片视觉 (image visual style) for this task, one of
-	// three orthogonal dimensions (visual / writing / theme). Resolved at creation
-	// with precedence task > template > plan > project. Propagated to the agent
-	// via the user prompt (BuildUserPrompt).
-	Style string `gorm:"type:varchar(1024);default:''" json:"style,omitempty"`
-	// WritingStyle is the effective 写作风格 (writer resource key, e.g. "dan-koe"),
-	// orthogonal to Style/Theme. Resolved task > template > plan > project.
-	// Consumed by write_article / GenerateOutline (never injected as visual style).
-	WritingStyle string `gorm:"type:varchar(100);default:''" json:"writing_style,omitempty"`
-	// Theme is the effective 排版样式 (theme resource key), orthogonal to
-	// Style/WritingStyle. Resolved task > template > plan > project. Consumed by
-	// the deterministic HTML renderer (convert_markdown / render_template).
-	Theme string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`
-	// Author is the effective 作者（署名 byline）for this task, surfaced as the
-	// top-level `author` via get_project_profile(task_id). Resolved task > template
-	// > plan > project. Independent of the writing-imitation intro below.
-	Author string `gorm:"type:varchar(50);default:''" json:"author,omitempty"`
-	// AuthorStyleIntro is the effective 写作风格 (free-text writing imitation),
-	// surfaced as template_writing_style via get_project_profile(task_id). Resolved
-	// task > template > plan > project. Orthogonal to Style/Theme and to the byline.
-	AuthorStyleIntro string `gorm:"type:text" json:"author_style_intro,omitempty"`
-	// AuthorAvatarURL is the optional 写作风格 persona avatar (not part of the
-	// byline), surfaced as template_author_avatar. Resolved task > template > plan
-	// > project.
-	AuthorAvatarURL string `gorm:"type:varchar(500);default:''" json:"author_avatar_url,omitempty"`
-	// TemplateID records which template was selected when creating this task
-	// (manual task, or a plan-spawned task inheriting plan.TemplateID). It does
-	// NOT enter the style resolution chain (visual style lives in Style) —
-	// instead the agent surfaces the template's content scaffold (writing style /
-	// structure / example) via get_project_profile(task_id). Old rows → NULL.
-	TemplateID         *string `gorm:"type:char(36);index" json:"template_id,omitempty"`
-	SkipReferenceImage bool    `gorm:"default:false" json:"skip_reference_image,omitempty"`
-	Watermark          bool    `gorm:"default:false" json:"watermark,omitempty"`
+	// Overrides carries per-task overrides for the style/persona/theme dimensions
+	// the task otherwise inherits from its project. Only keys the user explicitly
+	// overrode are set; empty/absent = inherit the project value. Effective value
+	// at execution = task.Overrides.X ?? project.X (two-layer, no template/plan
+	// layer). See StyleOverrides.
+	Overrides          datatypes.JSONType[StyleOverrides] `gorm:"type:json" json:"overrides"`
+	SkipReferenceImage bool                               `gorm:"default:false" json:"skip_reference_image,omitempty"`
+	Watermark          bool                               `gorm:"default:false" json:"watermark,omitempty"`
 	// HasContentImage / HasTailImage control seednote image composition. Cover is
 	// always generated; these two flags decide whether image_01.png and tail.png
 	// follow. Default matches the seednote form default (content on, tail off).
@@ -135,12 +128,25 @@ type Task struct {
 	Goal     string `gorm:"type:text" json:"goal,omitempty"`
 	GoalMode bool   `gorm:"default:false" json:"goal_mode"`
 
-	Published      bool       `gorm:"default:false" json:"published"`
-	PublishedAt    *time.Time `gorm:"index" json:"published_at,omitempty"`
-	WorkflowStatus *string    `gorm:"type:json" json:"workflow_status,omitempty"`
-	CreatedAt      time.Time  `gorm:"index:idx_user_created,priority:2" json:"created_at"`
-	UpdatedAt      time.Time  `gorm:"index" json:"updated_at"`
-	Plan           *Plan      `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
+	Published   bool       `gorm:"default:false" json:"published"`
+	PublishedAt *time.Time `gorm:"index" json:"published_at,omitempty"`
+	// PublishApprovalState drives the publish-approval gate (Batch 4A): "", then
+	// "pending" when a completed article task froze its draft data awaiting human
+	// review, "approved"/"rejected" once acted on. Only meaningful when the owning
+	// project has RequirePublishApproval && EnablePublishing. Empty for all other
+	// tasks and all pre-gate projects, so existing rows need no migration.
+	PublishApprovalState string `gorm:"type:varchar(20);default:''" json:"publish_approval_state,omitempty"`
+	// PendingDraftArticles is the frozen []service.DraftArticleInput (marshaled)
+	// captured at task completion when the approval gate holds. Stored here so the
+	// resume path (ApprovePublish) can publish without re-extracting from the
+	// (possibly cleaned-up) workspace. Opaque datatypes.JSON rather than
+	// JSONType[T] because the element type lives in package service — model may
+	// not import service (cycle). The service boundary (un)marshals it.
+	PendingDraftArticles datatypes.JSON `gorm:"type:json" json:"pending_draft_articles,omitempty"`
+	WorkflowStatus       *string        `gorm:"type:json" json:"workflow_status,omitempty"`
+	CreatedAt            time.Time      `gorm:"index:idx_user_created,priority:2" json:"created_at"`
+	UpdatedAt            time.Time      `gorm:"index" json:"updated_at"`
+	Plan                 *Plan          `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
 }
 
 // TableName returns the database table name for Task.
@@ -151,4 +157,11 @@ func (Task) TableName() string { return "tasks" }
 // plan-spawned tasks) don't each need to import gorm.io/datatypes.
 func (t *Task) SetEcommerce(ec EcommerceConfig) {
 	t.Ecommerce = datatypes.NewJSONType(ec)
+}
+
+// SetOverrides stores per-task style/persona/theme overrides into the Overrides
+// JSON column. Thin wrapper over datatypes.NewJSONType so call sites (task
+// creation, retry) don't each need to import gorm.io/datatypes.
+func (t *Task) SetOverrides(o StyleOverrides) {
+	t.Overrides = datatypes.NewJSONType(o)
 }

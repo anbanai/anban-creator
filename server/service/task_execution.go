@@ -309,7 +309,17 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 				s.logger.Error().Err(extractErr).Str("task_id", taskID).Msg("failed to extract article draft for auto-publish")
 			}
 		}
-		if published || len(articles) > 0 {
+
+		// Publish-approval gate (Batch 4A): when the project requires human
+		// review before publishing, freeze the extracted draft data into the
+		// task and enter the "pending" approval state instead of auto-publishing
+		// — the user must explicitly approve (ApprovePublish) to land it in the
+		// WeChat draft box. Only applies when the server is the publisher (the
+		// agent has not already published) and there is extractable article
+		// data; otherwise fall through to the immediate auto-publish path.
+		if project.GetRequirePublishApproval() && !published && len(articles) > 0 {
+			s.holdPublishForApproval(persistCtx, taskID, articles)
+		} else if published || len(articles) > 0 {
 			publishCtx, publishCancel := context.WithTimeout(context.Background(), 60*time.Second)
 			taskCopy := *task
 			projectCopy := *project

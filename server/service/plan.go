@@ -9,7 +9,6 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
 )
@@ -38,26 +37,9 @@ type CreatePlanParams struct {
 	ImageModelKey      string
 	SkipReferenceImage *bool
 	ReferenceImageURL  string
-	Style              string
-	// WritingStyle / Theme carry the plan-level 写作风格 / 排版样式 (the other two
-	// orthogonal dimensions). Resolved alongside Style with precedence
-	// plan > template > project, then copied to spawned tasks by CreateFromPlan.
-	WritingStyle string
-	Theme        string
-	// Author / AuthorStyleIntro / AuthorAvatarURL carry the plan-level 作者（署名）
-	// + 写作风格（free-text imitation） + 可选人设头像 overrides. Resolved alongside
-	// Style/WritingStyle/Theme with precedence plan > template > project, then
-	// copied to Task by CreateFromPlan (task-level override wins).
-	Author           string
-	AuthorStyleIntro string
-	AuthorAvatarURL  string
-	Watermark        *bool
-	Goal             string
-	GoalMode         bool
-	// TemplateID records the template selected during plan creation. Propagated to
-	// spawned tasks by CreateFromPlan so the agent can surface the template's
-	// content scaffold via get_project_profile(task_id). nil = no template.
-	TemplateID *string
+	Watermark          *bool
+	Goal               string
+	GoalMode           bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -120,29 +102,11 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		hasTail = *p.HasTailImage
 	}
 
-	// Resolve the three orthogonal style dimensions with precedence
-	// plan > template > project. Each dimension is independent — the writer never
-	// drives the visual style. A missing template is logged and treated as "no
-	// template override" so a stale template_id never blocks plan creation.
-	var tmpl *model.Template
-	if p.TemplateID != nil && *p.TemplateID != "" {
-		if t, terr := s.repo.Templates().FindByID(ctx, *p.TemplateID); terr == nil {
-			tmpl = t
-		} else {
-			s.logger.Warn().Err(terr).Str("template_id", *p.TemplateID).Msg("template not found during style resolution")
-		}
-	}
-	effectiveVisual := firstNonEmpty(p.Style, templateVisual(tmpl), project.Style)
-	effectiveWriter := firstNonEmpty(p.WritingStyle, templateWritingStyle(tmpl), project.WritingStyle)
-	effectiveTheme := firstNonEmpty(p.Theme, templateTheme(tmpl), project.Theme)
-	// 公众号人设维度（作者署名 + 写作风格模仿 + 可选头像），与视觉/排版正交，同链解析。
-	effectiveAuthor := firstNonEmpty(p.Author, templateAuthorName(tmpl), project.Author)
-	effectiveAuthorIntro := firstNonEmpty(p.AuthorStyleIntro, templateAuthorStyleIntro(tmpl), project.AuthorStyleIntro)
-	effectiveAuthorAvatar := firstNonEmpty(p.AuthorAvatarURL, templateAuthorAvatar(tmpl), project.AuthorAvatarURL)
-	if effectiveWriter == "" && project.Platform == model.PlatformArticle {
-		effectiveWriter = writer.DefaultStyleName
-	}
-
+	// A plan is a pure scheduler under a project: it carries NO style/persona/theme
+	// fields. Spawned tasks fully inherit every dimension from the project at
+	// execution (resolver.ResolveStyle, task.Overrides ?? project). The plan only
+	// owns scheduling + the scheduling-adjacent "what to produce" image params +
+	// goal mode that flow to spawned tasks.
 	plan := &model.Plan{
 		ID:                 uuid.New().String(),
 		UserID:             p.UserID,
@@ -154,13 +118,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		NextRunAt:          nextRun,
 		ImageModelKey:      p.ImageModelKey,
 		ReferenceImageURL:  p.ReferenceImageURL,
-		Style:              effectiveVisual,
-		WritingStyle:       effectiveWriter,
-		Theme:              effectiveTheme,
-		Author:             effectiveAuthor,
-		AuthorStyleIntro:   effectiveAuthorIntro,
-		AuthorAvatarURL:    effectiveAuthorAvatar,
-		TemplateID:         p.TemplateID,
 		SkipReferenceImage: p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:          p.Watermark != nil && *p.Watermark,
 		Goal:               p.Goal,
@@ -207,15 +164,16 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //     (use model.ImageModelKeySystemDefault / ImageModelKeyCustom for clarity)
 //   - SkipReferenceImage: nil = leave unchanged; &true/&false = set
 //   - ReferenceImageURL: nil = leave unchanged; &"" = clear; &"value" = set
-//   - Style: nil = leave unchanged; &"" = clear; &"value" = set
-//   - WritingStyle / Theme: nil = leave unchanged; &"" = clear; &"value" = set
-//   - TemplateID: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
 //
 // ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
 // unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
+//
+// Style/persona/theme dimensions are intentionally ABSENT: a plan is a pure
+// scheduler and carries no style fields (tasks inherit from the project). Removed
+// fields: Style/WritingStyle/Theme/Author/AuthorStyleIntro/AuthorAvatarURL/TemplateID.
 type UpdatePlanParams struct {
 	ID                 string
 	CronExpr           string
@@ -223,21 +181,11 @@ type UpdatePlanParams struct {
 	ImageModelKey      *string
 	SkipReferenceImage *bool
 	ReferenceImageURL  *string
-	Style              *string
-	WritingStyle       *string
-	Theme              *string
-	// Author / AuthorStyleIntro / AuthorAvatarURL: leave-unchanged semantics
-	// (nil = unchanged; &"" = clear; &"value" = set), same as Style/WritingStyle/Theme.
-	Author           *string
-	AuthorStyleIntro *string
-	AuthorAvatarURL  *string
-	Watermark        *bool
-	Goal             string
-	GoalMode         *bool
-	// TemplateID: nil = leave unchanged; &"" = clear; &"value" = set.
-	TemplateID      *string
-	HasContentImage *bool
-	HasTailImage    *bool
+	Watermark          *bool
+	Goal               string
+	GoalMode           *bool
+	HasContentImage    *bool
+	HasTailImage       *bool
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -253,27 +201,6 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		plan.ReferenceImageURL = *p.ReferenceImageURL
 	}
 	plan.Goal = p.Goal
-	if p.Style != nil {
-		plan.Style = *p.Style
-	}
-	if p.WritingStyle != nil {
-		plan.WritingStyle = *p.WritingStyle
-	}
-	if p.Theme != nil {
-		plan.Theme = *p.Theme
-	}
-	if p.Author != nil {
-		plan.Author = *p.Author
-	}
-	if p.AuthorStyleIntro != nil {
-		plan.AuthorStyleIntro = *p.AuthorStyleIntro
-	}
-	if p.AuthorAvatarURL != nil {
-		plan.AuthorAvatarURL = *p.AuthorAvatarURL
-	}
-	if p.TemplateID != nil {
-		plan.TemplateID = p.TemplateID
-	}
 	if p.ImageModelKey != nil {
 		plan.ImageModelKey = *p.ImageModelKey
 	}

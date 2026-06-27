@@ -1,10 +1,30 @@
 package service
 
-import "github.com/royalrick/anbanwriter/server/model"
+import (
+	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/resolver"
+)
+
+// ResolveStyle and Resolved live in the leaf resolver package so the agent package
+// (which service imports) can share the single resolution primitive without an
+// import cycle. Re-exported here so service-internal callers and tests reference
+// service.* and stay decoupled from the resolver import.
+//
+// Resolution is two-layer: task.Overrides.X (when non-empty) > project.X. See
+// resolver.ResolveStyle for the full contract.
+type Resolved = resolver.Resolved
+
+// ResolveStyle resolves a task's effective style/persona/theme dimensions
+// (task override > project). Thin pass-through to the single primitive in the
+// resolver package.
+func ResolveStyle(project *model.Project, task *model.Task) resolver.Resolved {
+	return resolver.ResolveStyle(project, task)
+}
 
 // firstNonEmpty returns the first non-empty string in args, or "" if all empty.
-// Used to resolve each style dimension through its precedence chain
-// (task → template → plan → project).
+// Used by the few resolution call sites that still compose values from more than
+// two layers (e.g. legacy migration, project-creation merging a template snapshot
+// into the project). Runtime task>project resolution uses ResolveStyle above.
 func firstNonEmpty(args ...string) string {
 	for _, s := range args {
 		if s != "" {
@@ -12,54 +32,4 @@ func firstNonEmpty(args ...string) string {
 		}
 	}
 	return ""
-}
-
-// templateVisual returns the template's 图片视觉 (StylePrompt), nil-safe.
-func templateVisual(t *model.Template) string {
-	if t == nil {
-		return ""
-	}
-	return t.StylePrompt
-}
-
-// templateWritingStyle returns the template's 写作风格, nil-safe.
-func templateWritingStyle(t *model.Template) string {
-	if t == nil {
-		return ""
-	}
-	return t.WritingStyle
-}
-
-// templateTheme returns the template's 排版样式, nil-safe.
-func templateTheme(t *model.Template) string {
-	if t == nil {
-		return ""
-	}
-	return t.Theme
-}
-
-// templateAuthorName returns the template's 作者（署名 byline）, nil-safe.
-func templateAuthorName(t *model.Template) string {
-	if t == nil {
-		return ""
-	}
-	return t.AuthorName
-}
-
-// templateAuthorStyleIntro returns the template's 写作风格 (free-text writing
-// imitation), nil-safe.
-func templateAuthorStyleIntro(t *model.Template) string {
-	if t == nil {
-		return ""
-	}
-	return t.AuthorStyleIntro
-}
-
-// templateAuthorAvatar returns the template's optional 写作风格 persona avatar,
-// nil-safe.
-func templateAuthorAvatar(t *model.Template) string {
-	if t == nil {
-		return ""
-	}
-	return t.AuthorAvatarURL
 }

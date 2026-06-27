@@ -169,6 +169,7 @@ export const projectSchema = z.object({
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
   enable_publishing: z.boolean().default(false),
+  require_publish_approval: z.boolean().default(false),
   wechat_app_id: z.string().optional(),
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),

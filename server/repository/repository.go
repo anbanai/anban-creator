@@ -112,6 +112,18 @@ type TaskRepository interface {
 	FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error)
 	ClearTitles(ctx context.Context, titles []string) (int64, error)
 	SetPublished(ctx context.Context, id string, published bool) error
+	// UpdatePublishApproval writes the publish-approval state and the frozen
+	// pending-draft-articles blob for a task (Batch 4A). Used by holdPublishForApproval
+	// to enter the pending state. pendingArticles may be nil only if state is non-pending.
+	UpdatePublishApproval(ctx context.Context, id, state string, pendingArticles []byte) error
+	// CompareAndSwapPublishApproval atomically transitions publish_approval_state
+	// from expected to newState, clearing the frozen pending-draft-articles blob
+	// in the same update when clearArticles is true (spec: approve/reject clear
+	// the blob). Returns true only if the task was in the expected state and is
+	// now newState — the single atomic winner among concurrent approve/reject
+	// calls. Used by ApprovePublish/RejectPublish to prevent a double-publish
+	// race: only the goroutine whose CAS wins actually publishes.
+	CompareAndSwapPublishApproval(ctx context.Context, id, expected, newState string, clearArticles bool) (bool, error)
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	Delete(ctx context.Context, id string) error
 	UpdateTokenUsage(ctx context.Context, id string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64, costUSD float64) error
@@ -167,6 +179,7 @@ type TopicPoolRepository interface {
 	ClaimWithTask(ctx context.Context, userID, projectID, taskID string) (*model.TopicPool, error)
 	MarkUsed(ctx context.Context, id uint, taskID string) error
 	ResetStatus(ctx context.Context, id uint) error
+	ResetByTask(ctx context.Context, taskID string) error
 	Delete(ctx context.Context, id uint) error
 }
 

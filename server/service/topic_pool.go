@@ -95,6 +95,17 @@ func (s *TopicPoolService) ClaimForTask(ctx context.Context, userID, projectID, 
 	return topic.Topic, nil
 }
 
+// ReleaseForTask releases the topic bound to the given task back to the pool.
+// Called when a task that pre-claimed a topic (server-side ClaimForTask) fails to
+// persist, so the topic is reclaimable instead of permanently orphaned. Idempotent
+// and safe to call when no topic is bound to the task.
+func (s *TopicPoolService) ReleaseForTask(ctx context.Context, taskID string) error {
+	if err := s.repo.TopicPools().ResetByTask(ctx, taskID); err != nil {
+		return fmt.Errorf("release topic for task: %w", err)
+	}
+	return nil
+}
+
 // Reset marks a used topic as unused again.
 func (s *TopicPoolService) Reset(ctx context.Context, userID, projectID string, id uint) error {
 	topic, err := s.repo.TopicPools().FindByID(ctx, id)

@@ -13,10 +13,10 @@ import (
 // refundTaskByMode), so a retry is billed as a brand-new run with zero
 // double-charge risk.
 //
-// Only failed tasks may be retried. The cloned task carries the original's
-// already-resolved three-dimensional style values (Style / WritingStyle / Theme)
-// and author/persona fields, passed back through CreateManual's explicit
-// task-level overrides so they win the task > template > project resolution.
+// Only failed (or cancelled) tasks may be retried. The cloned task carries the
+// original's per-dimension overrides (src.Overrides) verbatim, so it inherits
+// the same project dimensions and applies the same task-level overrides as the
+// failed run (live inheritance: task.Overrides.X ?? project.X).
 func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, error) {
 	src, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -38,6 +38,7 @@ func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, er
 	hasContent := src.HasContentImage
 	hasTail := src.HasTailImage
 
+	overrides := src.Overrides.Data()
 	params := CreateManualParams{
 		UserID:            src.UserID,
 		ProjectID:         src.ProjectID,
@@ -47,16 +48,10 @@ func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, er
 		ImageModelKey:     src.ImageModelKey,
 		SkipRefImage:      &skipRef,
 		ReferenceImageURL: src.ReferenceImageURL,
-		Style:             src.Style,
-		WritingStyle:      src.WritingStyle,
-		Theme:             src.Theme,
-		Author:            src.Author,
-		AuthorStyleIntro:  src.AuthorStyleIntro,
-		AuthorAvatarURL:   src.AuthorAvatarURL,
+		Overrides:         &overrides,
 		Watermark:         &watermark,
 		Goal:              src.Goal,
 		GoalMode:          src.GoalMode,
-		TemplateID:        src.TemplateID,
 		HasContentImage:   &hasContent,
 		HasTailImage:      &hasTail,
 	}

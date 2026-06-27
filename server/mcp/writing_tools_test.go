@@ -756,25 +756,6 @@ func TestWriteArticleHandler_MissingProjectID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// humanizeArticleHandler tests (argument validation only)
-// ---------------------------------------------------------------------------
-
-func TestHumanizeArticleHandler_MissingContent(t *testing.T) {
-	handler, cleanup := setupMCPHandlerWithServices(t)
-	defer cleanup()
-
-	SetServices(&Services{WritingSvc: stubWritingSvc})
-
-	text := callMCPTool(t, handler, "humanize_article",
-		`{"project_id":"ch-1"}`,
-		"test-api-key")
-
-	if !strings.Contains(text, "content is required") {
-		t.Errorf("expected 'content is required', got: %q", text)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // researchTopicsHandler tests (argument validation only)
 // ---------------------------------------------------------------------------
 
@@ -1124,7 +1105,7 @@ func TestStreamingProgressRelayer_ThrottlesAndAccumulates(t *testing.T) {
 	// Rapid subsequent deltas within the window are coalesced: no extra notify.
 	cb("四五六") // +3
 	cb("七八九") // +3
-	cb("十")    // +1
+	cb("十")   // +1
 
 	if len(rec.messages) != 1 {
 		t.Fatalf("throttled burst: got %d notifications, want 1", len(rec.messages))
