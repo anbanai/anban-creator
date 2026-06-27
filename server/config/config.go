@@ -785,7 +785,7 @@ func (c *Config) applyEnvOverrides() {
 		c.Writing.Model = v
 	}
 	if c.Writing.Timeout == 0 {
-		c.Writing.Timeout = 5 * time.Minute
+		c.Writing.Timeout = 10 * time.Minute
 	}
 	if v := os.Getenv(prefix + "WRITING_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {

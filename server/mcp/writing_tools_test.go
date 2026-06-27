@@ -1076,3 +1076,71 @@ func TestConvertMarkdownHandler_WrongAPIKey(t *testing.T) {
 		t.Errorf("expected 401 with wrong key, got %d", rec.Code)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// streaming progress relayer tests
+// ---------------------------------------------------------------------------
+
+// recordingNotifier captures NotifyProgress messages for inspection. The
+// relayer is single-threaded (see newStreamingProgressRelayer doc), so the test
+// drives it from one goroutine and no lock is needed.
+type recordingNotifier struct {
+	messages []string
+}
+
+func (r *recordingNotifier) NotifyProgress(_ context.Context, p *mcp.ProgressNotificationParams) error {
+	r.messages = append(r.messages, p.Message)
+	return nil
+}
+
+// TestStreamingProgressRelayer_NoRouteIsNoop verifies the relayer degrades to a
+// no-op when there is no progress routing target (token nil or session nil),
+// mirroring the heartbeat's graceful-degradation path.
+func TestStreamingProgressRelayer_NoRouteIsNoop(t *testing.T) {
+	rec := &recordingNotifier{}
+
+	cb := newStreamingProgressRelayer(context.Background(), rec, nil)
+	for range 5 {
+		cb("一些增量文本")
+	}
+	if len(rec.messages) != 0 {
+		t.Fatalf("nil token: got %d notifications, want 0", len(rec.messages))
+	}
+
+	// Nil session must likewise never notify (defense against mis-wired callers).
+	cb2 := newStreamingProgressRelayer(context.Background(), nil, "tok")
+	cb2("x")
+}
+
+// TestStreamingProgressRelayer_ThrottlesAndAccumulates verifies that a burst of
+// deltas coalesces into a single notification, and that after the throttle
+// window elapses the next notification reports the cumulative rune count.
+func TestStreamingProgressRelayer_ThrottlesAndAccumulates(t *testing.T) {
+	rec := &recordingNotifier{}
+	cb := newStreamingProgressRelayer(context.Background(), rec, "session-1")
+
+	// First delta fires immediately (lastNotify zero-value → since() huge).
+	cb("一二三") // 3 runes
+	// Rapid subsequent deltas within the window are coalesced: no extra notify.
+	cb("四五六") // +3
+	cb("七八九") // +3
+	cb("十")    // +1
+
+	if len(rec.messages) != 1 {
+		t.Fatalf("throttled burst: got %d notifications, want 1", len(rec.messages))
+	}
+	if rec.messages[0] != "write_article 生成中… 已生成 3 字" {
+		t.Errorf("first message = %q, want %q", rec.messages[0], "write_article 生成中… 已生成 3 字")
+	}
+
+	// After crossing the window, the next delta notifies again with cumulative count.
+	time.Sleep(streamingProgressInterval + 100*time.Millisecond)
+	cb("十一十二") // +4 → cumulative 3+3+3+1+4 = 14
+
+	if len(rec.messages) != 2 {
+		t.Fatalf("after window: got %d notifications, want 2", len(rec.messages))
+	}
+	if rec.messages[1] != "write_article 生成中… 已生成 14 字" {
+		t.Errorf("cumulative message = %q, want %q", rec.messages[1], "write_article 生成中… 已生成 14 字")
+	}
+}

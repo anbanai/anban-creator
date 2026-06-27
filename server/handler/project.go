@@ -245,6 +245,11 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
 	}
 
+	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
+	if err := service.RejectWriterNameAsByline(req.Author); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+
 	ch := req.toProject()
 
 	// Force max_concurrent_tasks based on user tier.
@@ -330,6 +335,11 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
 		return Error(c, fiber.StatusBadRequest, "image_ratio must be one of: 3:4, 1:1, 4:3, 16:9")
+	}
+
+	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
+	if err := service.RejectWriterNameAsByline(req.Author); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
 	ch := req.toProject()

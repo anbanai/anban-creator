@@ -168,6 +168,11 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
+	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
+	if err := service.RejectWriterNameAsByline(req.Author); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+
 	// Validate template_id format if provided. Existence is not checked — the
 	// template may be deleted later, in which case Studio renders a fallback.
 	var templateID *string
