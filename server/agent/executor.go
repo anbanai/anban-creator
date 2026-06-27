@@ -110,9 +110,11 @@ func BuildUserPrompt(p UserPromptParams) string {
 		// explicitly demands task_id so the template_* scaffold fields are returned.
 		base += "\n\n本任务已关联内容模板：请调用 get_project_profile（带 task_id）获取模板字段。" +
 			"注意「作者」与「写作风格」是两个独立维度，切勿混淆——" +
-			"① 作者（返回顶层的 `author`，已按 模板>项目 解析）仅用于发布署名：发布草稿时填入 publish_draft 的 author；" +
-			"② 写作风格（`template_writing_style`，模仿内容的框架/写作方式/笔迹）驱动正文口吻，若返回则严格遵守；" +
+			"① 作者（返回顶层的 `author`，已按 task>模板>项目 解析，含 `author_source` 标注来源层）仅用于发布署名：发布草稿时填入 publish_draft 的 author；" +
+			"② 写作风格（`template_writing_style`，模仿内容的框架/写作方式/笔迹）驱动正文口吻，若返回则严格遵守，但**绝不**写入 author；" +
 			"`template_author_avatar` 是写作人设的可选头像（仅人设参考，不入署名）。" +
+			"③ 若顶层 `author` 为空，draft.json 的 author 留空或省略，**绝不**用 `template_writing_style`/`template_author_avatar` 顶替署名。" +
+			"映射示例：profile 顶层 author=\"张三\"→draft 的 author=\"张三\"；template_writing_style=\"幽默犀利、善用反问\"→只驱动正文口吻，不入 author。" +
 			"若还返回 template_structure（内容结构）/template_example（示例），一并遵守。"
 	}
 	if trimmedGoal := normalizeGoalCondition(p.Goal); trimmedGoal != "" {

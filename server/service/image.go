@@ -318,6 +318,31 @@ func (s *ImageService) GenerateImage(
 		result.OutputMIME = outputMIME
 	}
 
+	// Force WeChat ARTICLE covers to the exact 900×383 (2.35:1) spec. No
+	// provider natively emits this ratio (the skill requests 21:9 as the nearest
+	// supported generation hint; 2.35:1 itself is silently downgraded to 1:1 by
+	// ParseSize), so we center-crop the saved file here. This guarantees WeChat
+	// never re-crops the cover thumbnail. Gated on platform==article &&
+	// imageType=="cover" so seednote (3:4), short-video and portrait covers are
+	// unaffected. Done before vision verification / upload so the checked and
+	// uploaded bytes are the exact-ratio result.
+	if ch.Platform == model.PlatformArticle && imageType == "cover" && outputPath != "" {
+		if err := image.CropToSize(outputPath, image.WeChatCoverWidth, image.WeChatCoverHeight); err != nil {
+			return nil, fmt.Errorf("crop cover to %dx%d: %w", image.WeChatCoverWidth, image.WeChatCoverHeight, err)
+		}
+		w, h, err := image.GetImageDimensions(outputPath)
+		if err != nil {
+			return nil, fmt.Errorf("verify cover dimensions: %w", err)
+		}
+		if w != image.WeChatCoverWidth || h != image.WeChatCoverHeight {
+			return nil, fmt.Errorf("cover dimensions %dx%d, expected %dx%d", w, h, image.WeChatCoverWidth, image.WeChatCoverHeight)
+		}
+		s.logger.Info().
+			Str("project_id", projectID).
+			Int("width", w).Int("height", h).
+			Msg("article cover cropped to exact 900x383 (2.35:1)")
+	}
+
 	return result, nil
 }
 

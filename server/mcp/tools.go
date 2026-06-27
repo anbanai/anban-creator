@@ -116,7 +116,7 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get formatted account information for AI content creation context. Returns positioning, keywords, and three INDEPENDENT style dimensions: `style` (图片视觉 image visual style, free text), `writing_style` (写作风格 writer resource key e.g. dan-koe), `theme` (排版样式 theme resource key e.g. autumn-warm). These three never derive from each other. Does NOT expose sensitive credentials.",
+		Description: "Get formatted account information for AI content creation context. Returns positioning, keywords, and three INDEPENDENT style dimensions: `style` (图片视觉 image visual style, free text), `writing_style` (写作风格 writer resource key e.g. dan-koe), `theme` (排版样式 theme resource key e.g. autumn-warm). These three never derive from each other. Also returns `author` — the WeChat byline (署名, resolved task > template > project, with an `author_source` field). `author` is ONLY the published byline: pass it verbatim to publish_draft's author field, leave it empty/omit if it is empty. It is strictly independent of `writing_style` / `template_writing_style` (those drive the WRITING VOICE and must NEVER be used as the byline) and of `template_author_avatar` (an optional persona avatar, also never the byline). Does NOT expose sensitive credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -539,16 +539,35 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		}
 		tmplAvatar = tmpl.AuthorAvatarURL
 	}
+	// 作者署名解析为 task > template > project（与 firstNonEmptyStr 等价），同时记录来源
+	// author_source 供追溯——让消费方一眼看出 byline 取自哪一层，彻底消除「这值哪来的」歧义。
+	// 解析结果与优先级与此前完全一致，仅多暴露一个来源字段。
+	var authorSource string
 	if task != nil {
-		effectiveAuthor = firstNonEmptyStr(task.Author, tmplAuthor, ch.Author)
+		switch {
+		case task.Author != "":
+			effectiveAuthor, authorSource = task.Author, "task"
+		case tmplAuthor != "":
+			effectiveAuthor, authorSource = tmplAuthor, "template"
+		default:
+			effectiveAuthor, authorSource = ch.Author, "project"
+		}
 		effectiveAuthorIntro = firstNonEmptyStr(task.AuthorStyleIntro, tmplIntro, ch.AuthorStyleIntro)
 		effectiveAuthorAvatar = firstNonEmptyStr(task.AuthorAvatarURL, tmplAvatar, ch.AuthorAvatarURL)
 	} else {
-		effectiveAuthor = firstNonEmptyStr(tmplAuthor, ch.Author)
+		switch {
+		case tmplAuthor != "":
+			effectiveAuthor, authorSource = tmplAuthor, "template"
+		default:
+			effectiveAuthor, authorSource = ch.Author, "project"
+		}
 		effectiveAuthorIntro = firstNonEmptyStr(tmplIntro, ch.AuthorStyleIntro)
 		effectiveAuthorAvatar = firstNonEmptyStr(tmplAvatar, ch.AuthorAvatarURL)
 	}
 	info["author"] = effectiveAuthor
+	if effectiveAuthor != "" && authorSource != "" {
+		info["author_source"] = authorSource
+	}
 	if effectiveAuthorIntro != "" {
 		info["template_writing_style"] = effectiveAuthorIntro
 	}
