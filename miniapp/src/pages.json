@@ -8,7 +8,7 @@
 			}
 		},
 		{
-			"path": "pages/channels/index",
+			"path": "pages/projects/index",
 			"style": {
 				"navigationBarTitleText": "账号"
 			}
@@ -33,7 +33,7 @@
 			}
 		},
 		{
-			"path": "pages/channels/detail",
+			"path": "pages/projects/detail",
 			"style": {
 				"navigationBarTitleText": "账号详情"
 			}
@@ -84,6 +84,13 @@
 			"path": "pages/timeline/index",
 			"style": {
 				"navigationBarTitleText": "时间线",
+				"enablePullDownRefresh": true
+			}
+		},
+		{
+			"path": "pages/credits/index",
+			"style": {
+				"navigationBarTitleText": "积分中心",
 				"enablePullDownRefresh": true
 			}
 		},
@@ -148,6 +155,12 @@
 			"style": {
 				"navigationBarTitleText": "OpenClaw"
 			}
+		},
+		{
+			"path": "pages/connect/codex",
+			"style": {
+				"navigationBarTitleText": "Codex 接入指南"
+			}
 		}
 	],
 	"globalStyle": {
@@ -169,7 +182,7 @@
 				"selectedIconPath": "static/tab-icons/home-active.png"
 			},
 			{
-				"pagePath": "pages/channels/index",
+				"pagePath": "pages/projects/index",
 				"text": "账号",
 				"iconPath": "static/tab-icons/account.png",
 				"selectedIconPath": "static/tab-icons/account-active.png"

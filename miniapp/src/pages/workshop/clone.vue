@@ -80,12 +80,12 @@
     <!-- Target account selector -->
     <view class="cp-section">
       <text class="field-label">目标账号 <text class="field-required">*</text></text>
-      <ChannelSelector
-        v-model="form.channel_id"
+      <ProjectSelector
+        v-model="form.project_id"
         placeholder="选择要发布的账号..."
-        @change="onChannelChange"
+        @change="onProjectChange"
       />
-      <text v-if="errors.channel" class="field-error">{{ errors.channel }}</text>
+      <text v-if="errors.project" class="field-error">{{ errors.project }}</text>
     </view>
 
     <!-- Additional prompt (optional) -->
@@ -117,13 +117,13 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import type { Channel, Template } from '@/types'
+import type { Project, Template } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
 import AbBadge from '@/components/common/AbBadge.vue'
-import ChannelSelector from '@/components/business/ChannelSelector.vue'
+import ProjectSelector from '@/components/business/ProjectSelector.vue'
 
 const depthOptions = [
   {
@@ -154,10 +154,10 @@ const sourceUrl = ref('')
 const selectedTemplate = ref<Template | null>(null)
 const cloneDepth = ref('medium')
 const submitting = ref(false)
-const selectedChannel = ref<Channel | null>(null)
+const selectedProject = ref<Project | null>(null)
 
 const form = reactive({
-  channel_id: '',
+  project_id: '',
   extra_prompt: '',
 })
 
@@ -167,7 +167,7 @@ const canSubmit = computed(() => {
   const hasSource = sourceType.value === 'url'
     ? !!sourceUrl.value.trim()
     : !!selectedTemplate.value
-  return hasSource && !!form.channel_id && !submitting.value
+  return hasSource && !!form.project_id && !submitting.value
 })
 
 function goToTemplates() {
@@ -177,9 +177,9 @@ function goToTemplates() {
   })
 }
 
-function onChannelChange(channel: Channel) {
-  selectedChannel.value = channel
-  delete errors.channel
+function onProjectChange(project: Project) {
+  selectedProject.value = project
+  delete errors.project
 }
 
 function validate(): boolean {
@@ -195,8 +195,8 @@ function validate(): boolean {
     return false
   }
 
-  if (!form.channel_id) {
-    errors.channel = '请选择目标账号'
+  if (!form.project_id) {
+    errors.project = '请选择目标账号'
     return false
   }
 
@@ -205,7 +205,7 @@ function validate(): boolean {
 
 async function onClone() {
   if (!validate()) return
-  if (!selectedChannel.value) return
+  if (!selectedProject.value) return
 
   submitting.value = true
   try {
@@ -228,8 +228,8 @@ async function onClone() {
     prompt += `\n请参考来源内容的风格和结构，为目标账号创作新的内容。`
 
     const task = await tasksApi.create({
-      type: selectedChannel.value.platform as any,
-      channel_id: form.channel_id,
+      type: selectedProject.value.platform as any,
+      project_id: form.project_id,
       prompt: prompt.trim(),
     })
 
@@ -247,11 +247,11 @@ async function onClone() {
 
 onMounted(() => {
   // Check if returning from template selection with a selected template
-  const eventChannel = (uni as typeof uni & {
-    getOpenerEventChannel?: () => { on: (event: string, callback: (data: { template: Template }) => void) => void }
-  }).getOpenerEventChannel?.()
-  if (eventChannel) {
-    eventChannel.on('selectTemplate', (data: { template: Template }) => {
+  const eventProject = (uni as typeof uni & {
+    getOpenerEventProject?: () => { on: (event: string, callback: (data: { template: Template }) => void) => void }
+  }).getOpenerEventProject?.()
+  if (eventProject) {
+    eventProject.on('selectTemplate', (data: { template: Template }) => {
       if (data?.template) {
         selectedTemplate.value = data.template
         sourceType.value = 'template'

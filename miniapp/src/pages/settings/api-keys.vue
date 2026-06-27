@@ -41,6 +41,10 @@
         <text>OpenClaw</text>
         <text>›</text>
       </view>
+      <view class="guide-link" @tap="goGuide('/pages/connect/codex')">
+        <text>Codex</text>
+        <text>›</text>
+      </view>
     </view>
   </view>
 </template>

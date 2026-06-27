@@ -4,7 +4,6 @@ export const USER_KEY = 'anbanwriter_user'
 export const API_BASE_URL = '/api/v1'
 
 export const POLL_INTERVAL_RUNNING = 3000
-export const POLL_INTERVAL_PENDING = 5000
 export const AUTO_REFRESH_TOKEN_THRESHOLD = 5 * 60 * 1000 // 5 minutes before expiry
 
 export const DEFAULT_PAGE_SIZE = 20

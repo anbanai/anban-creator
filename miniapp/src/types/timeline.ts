@@ -9,8 +9,8 @@ export interface TimelineItem {
   content_type: TaskType | PlanType
   title: string
   status: TaskStatus | PlanStatus
-  channel_id?: string
-  channel_name?: string
+  project_id?: string
+  project_name?: string
   platform?: string
   scheduled_at: string
   completed_at: string

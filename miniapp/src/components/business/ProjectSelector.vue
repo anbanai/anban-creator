@@ -1,18 +1,18 @@
 <template>
-  <view class="channel-selector" @tap="showPicker">
-    <view class="channel-selector__display" v-if="selectedChannel">
-      <PlatformAvatar :platform="selectedChannel.platform" :size="32" />
-      <text class="channel-selector__name">{{ selectedChannel.name }}</text>
+  <view class="project-selector" @tap="showPicker">
+    <view class="project-selector__display" v-if="selectedProject">
+      <PlatformAvatar :platform="selectedProject.platform" :size="32" />
+      <text class="project-selector__name">{{ selectedProject.name }}</text>
     </view>
-    <text class="channel-selector__placeholder" v-else>{{ placeholder }}</text>
-    <text class="channel-selector__arrow">›</text>
+    <text class="project-selector__placeholder" v-else>{{ placeholder }}</text>
+    <text class="project-selector__arrow">›</text>
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import type { Channel } from '@/types'
-import { channelsApi } from '@/api/channels'
+import type { Project } from '@/types'
+import { projectsApi } from '@/api/projects'
 import PlatformAvatar from './PlatformAvatar.vue'
 
 const props = defineProps<{
@@ -23,49 +23,49 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
-  change: [channel: Channel]
+  change: [project: Project]
 }>()
 
-const channels = ref<Channel[]>([])
+const projects = ref<Project[]>([])
 
-const selectedChannel = computed(() =>
-  channels.value.find((c) => c.id === props.modelValue),
+const selectedProject = computed(() =>
+  projects.value.find((c) => c.id === props.modelValue),
 )
 
-async function loadChannels() {
+async function loadProjects() {
   try {
-    channels.value = await channelsApi.list({ status: 'active', platform: props.platformFilter })
+    projects.value = await projectsApi.list({ status: 'active', platform: props.platformFilter })
   } catch (err) {
-    console.error('Failed to load channels:', err)
+    console.error('Failed to load projects:', err)
   }
 }
 
 function showPicker() {
-  if (channels.value.length === 0) {
+  if (projects.value.length === 0) {
     uni.showToast({ title: '暂无可用账号', icon: 'none' })
     return
   }
 
-  const names = channels.value.map((c) => c.name)
+  const names = projects.value.map((c) => c.name)
   uni.showActionSheet({
     itemList: names,
     success: (res) => {
-      const channel = channels.value[res.tapIndex]
-      if (channel) {
-        emit('update:modelValue', channel.id)
-        emit('change', channel)
+      const project = projects.value[res.tapIndex]
+      if (project) {
+        emit('update:modelValue', project.id)
+        emit('change', project)
       }
     },
   })
 }
 
-onMounted(loadChannels)
+onMounted(loadProjects)
 
-defineExpose({ loadChannels })
+defineExpose({ loadProjects })
 </script>
 
 <style lang="scss" scoped>
-.channel-selector {
+.project-selector {
   display: flex;
   align-items: center;
   justify-content: space-between;

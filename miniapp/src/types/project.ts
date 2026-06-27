@@ -1,23 +1,32 @@
-export type ChannelPlatform = 'article' | 'seednote'
-export type ChannelStatus = 'active' | 'archived'
+export type ProjectPlatform = 'article' | 'seednote' | 'ecommerce' | 'xls'
+export type ProjectStatus = 'active' | 'archived'
 
-export interface ChannelConfig {
+export interface ProjectConfig {
   wechat_app_id?: string
   wechat_secret?: string
   enable_publishing?: boolean
 }
 
-export interface Channel {
+export interface Project {
   id: string
   user_id: string
-  platform: ChannelPlatform
+  platform: ProjectPlatform
   name: string
   avatar_url: string
   profile_url: string
   description?: string
   positioning: string
   keywords: string
+  // Visual style dimension — independent from writing_style/theme.
   style: string
+  // Optional template binding (article/ecommerce). When set, persona fields may
+  // be sourced from the bound template at runtime (task>template>project chain).
+  template_id?: string
+  // Article-only persona fields — author (署名) is DISTINCT from writing_style.
+  // Per project memory: byline NEVER auto-fills from persona.
+  writing_style?: string
+  author_style_intro?: string
+  author_avatar_url?: string
   theme: string
   author: string
   reference_image_url: string
@@ -25,14 +34,14 @@ export interface Channel {
   layout: string
   image_preset: string
   max_concurrent_tasks: number
-  config: ChannelConfig
-  status: ChannelStatus
-  stats?: ChannelStats
+  config: ProjectConfig
+  status: ProjectStatus
+  stats?: ProjectStats
   created_at: string
   updated_at: string
 }
 
-export interface ChannelStats {
+export interface ProjectStats {
   total_tasks: number
   completed_tasks: number
   failed_tasks: number
@@ -42,12 +51,12 @@ export interface ChannelStats {
   last_activity_at: string
 }
 
-export interface ChannelDetail {
-  channel: Channel
-  stats: ChannelStats
+export interface ProjectDetail {
+  project: Project
+  stats: ProjectStats
 }
 
-export interface CreateChannelRequest {
+export interface CreateProjectRequest {
   platform: string
   name?: string
   profile_url?: string
@@ -55,6 +64,11 @@ export interface CreateChannelRequest {
   positioning?: string
   keywords?: string
   style?: string
+  // Article-only persona (orthogonal: author ≠ writing_style persona).
+  writing_style?: string
+  author_style_intro?: string
+  author_avatar_url?: string
+  template_id?: string
   theme?: string
   author?: string
   reference_image_url?: string
@@ -67,8 +81,19 @@ export interface CreateChannelRequest {
   enable_publishing?: boolean
 }
 
-export interface CreateChannelResponse {
-  channel: Channel
+export interface AnalyzeImageResponse {
+  style: string
+}
+
+export interface FileUploadResponse {
+  url: string
+  key: string
+  size: number
+  type: string
+}
+
+export interface CreateProjectResponse {
+  project: Project
   recommended_templates?: import('./template').Template[]
 }
 

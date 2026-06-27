@@ -3,8 +3,9 @@
     <view class="plan-card__header">
       <PlatformAvatar :platform="plan.type" :size="36" />
       <view class="plan-card__info">
-        <text class="plan-card__title">{{ plan.title || '未命名计划' }}</text>
+        <text class="plan-card__title">{{ displayTitle }}</text>
         <text class="plan-card__meta">{{ platformLabel }} · {{ cronHuman }}</text>
+        <text v-if="projectName" class="plan-card__project">{{ projectName }}</text>
       </view>
       <text :class="['plan-card__status', `status-${plan.status}`]">
         {{ statusLabel }}
@@ -23,20 +24,23 @@
       <text class="plan-card__action" @tap.stop="$emit('edit')">
         编辑
       </text>
+      <text class="plan-card__action plan-card__action--danger" @tap.stop="$emit('delete')">
+        删除
+      </text>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Plan } from '@/types'
-import { planStatusLabel, contentTypeLabel } from '@/utils/labels'
-import { cronToHuman } from '@/utils/labels'
+import type { Plan, Project } from '@/types'
+import { planStatusLabel, contentTypeLabel, cronToHuman } from '@/utils/labels'
 import { formatDateTimeCN } from '@/utils/format'
 import PlatformAvatar from './PlatformAvatar.vue'
 
 const props = defineProps<{
   plan: Plan
+  project?: Project
 }>()
 
 defineEmits<{
@@ -44,11 +48,19 @@ defineEmits<{
   pause: []
   resume: []
   edit: []
+  delete: []
 }>()
+
+// Mirror studio: fall back to "<type>计划" when no prompt; otherwise show prompt.
+const displayTitle = computed(() => {
+  if (props.plan.prompt?.trim()) return props.plan.prompt
+  return `${contentTypeLabel[props.plan.type] || props.plan.type}计划`
+})
 
 const platformLabel = computed(() => contentTypeLabel[props.plan.type] || props.plan.type)
 const statusLabel = computed(() => planStatusLabel[props.plan.status])
 const cronHuman = computed(() => cronToHuman(props.plan.cron_expr))
+const projectName = computed(() => props.project?.name || '')
 </script>
 
 <style lang="scss" scoped>
@@ -61,7 +73,7 @@ const cronHuman = computed(() => cronToHuman(props.plan.cron_expr))
 
   &__header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: $ab-space-sm;
     margin-bottom: $ab-space-xs;
   }
@@ -86,6 +98,16 @@ const cronHuman = computed(() => cronToHuman(props.plan.cron_expr))
     color: $ab-text-secondary;
     display: block;
     margin-top: 2rpx;
+  }
+
+  &__project {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+    display: block;
+    margin-top: 2rpx;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &__status {
@@ -120,12 +142,18 @@ const cronHuman = computed(() => cronToHuman(props.plan.cron_expr))
     gap: $ab-space-lg;
     padding-left: 56rpx;
     margin-top: $ab-space-xs;
+    border-top: 2rpx solid $ab-divider;
+    padding-top: $ab-space-xs;
   }
 
   &__action {
     font-size: $ab-text-xs;
     color: $ab-text-secondary;
     padding: 4rpx 0;
+
+    &--danger {
+      color: $ab-danger;
+    }
   }
 }
 </style>

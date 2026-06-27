@@ -1,23 +1,34 @@
 <template>
   <view class="page task-create">
-    <!-- Channel selector -->
+    <!-- Project selector -->
     <view class="task-create__section">
       <text class="field-label">选择账号 <text class="field-required">*</text></text>
-      <ChannelSelector
-        v-model="form.channel_id"
+      <ProjectSelector
+        v-model="form.project_id"
         placeholder="搜索账号..."
-        @change="onChannelChange"
+        @change="onProjectChange"
       />
-      <text v-if="errors.channel" class="field-error">{{ errors.channel }}</text>
+      <text v-if="errors.project" class="field-error">{{ errors.project }}</text>
     </view>
 
-    <!-- Content type (locked from channel) -->
-    <view class="task-create__section" v-if="selectedChannel">
+    <!-- Content type (locked from project) -->
+    <view class="task-create__section" v-if="selectedProject">
       <text class="field-label">内容类型</text>
       <view class="locked-field">
-        <PlatformAvatar :platform="selectedChannel.platform" :size="32" />
-        <text class="locked-field__text">{{ contentTypeLabel[selectedChannel.platform] || '未知' }}</text>
+        <PlatformAvatar :platform="selectedProject.platform" :size="32" />
+        <text class="locked-field__text">{{ contentTypeLabel[selectedProject.platform] || '未知' }}</text>
         <text class="locked-field__hint">（跟随账号平台）</text>
+      </view>
+    </view>
+
+    <!-- Template (optional) -->
+    <view class="task-create__section">
+      <text class="field-label">使用模板</text>
+      <view class="picker-row" @tap="pickTemplate">
+        <text v-if="selectedTemplateName" class="picker-row__value">{{ selectedTemplateName }}</text>
+        <text v-else class="picker-row__placeholder">可选，套用预设风格</text>
+        <text v-if="form.template_id" class="picker-row__clear" @tap.stop="clearTemplate">清除</text>
+        <text v-else class="picker-row__arrow">›</text>
       </view>
     </view>
 
@@ -31,17 +42,186 @@
         :maxlength="2000"
         :error="errors.prompt"
       />
-      <!-- Inspiration hint -->
       <view class="inspiration-hint" @tap="applyInspiration">
         <text class="inspiration-hint__icon">💡</text>
-        <text class="inspiration-hint__text">
-          试试: {{ currentInspiration }}
-        </text>
+        <text class="inspiration-hint__text">试试: {{ currentInspiration }}</text>
       </view>
     </view>
 
-    <!-- Quantity selector -->
+    <!-- Image model -->
     <view class="task-create__section">
+      <text class="field-label">图片模型 <text class="field-required" v-if="hasImageModels">*</text></text>
+      <ImageModelSelector v-model="form.image_model_key" placeholder="选择生图模型" />
+      <text v-if="errors.image_model_key" class="field-error">{{ errors.image_model_key }}</text>
+    </view>
+
+    <!-- Visual style -->
+    <view class="task-create__section" v-if="!isEcommerce">
+      <text class="field-label">视觉风格</text>
+      <AbTextarea
+        v-model="form.style"
+        placeholder="描述画面风格，如：清新自然、暖色调、生活化场景..."
+        :rows="3"
+        :maxlength="1024"
+      />
+      <text class="field-hint">留空则使用账号默认视觉风格</text>
+    </view>
+
+    <!-- Writing style (article only) -->
+    <view class="task-create__section" v-if="isArticle">
+      <text class="field-label">写作风格</text>
+      <AbTextarea
+        v-model="form.writing_style"
+        placeholder="描述文章的写作风格、语气、结构..."
+        :rows="3"
+        :maxlength="1024"
+      />
+    </view>
+
+    <!-- Theme (article only) -->
+    <view class="task-create__section" v-if="isArticle">
+      <text class="field-label">排版主题</text>
+      <view class="picker-row" @tap="pickTheme">
+        <text v-if="selectedThemeName" class="picker-row__value">{{ selectedThemeName }}</text>
+        <text v-else class="picker-row__placeholder">可选，选择公众号排版主题</text>
+        <text v-if="form.theme" class="picker-row__clear" @tap.stop="form.theme = ''">清除</text>
+        <text v-else class="picker-row__arrow">›</text>
+      </view>
+    </view>
+
+    <!-- Persona (article / seednote) -->
+    <view class="task-create__section" v-if="isArticle || isSeednote">
+      <text class="field-label">作者人设</text>
+      <view class="field-spacer">
+        <text class="field-sublabel">作者署名</text>
+        <AbInput v-model="form.author" placeholder="显示在文章/笔记的作者名" />
+      </view>
+      <view class="field-spacer">
+        <text class="field-sublabel">写作风格模仿</text>
+        <AbTextarea
+          v-model="form.author_style_intro"
+          placeholder="模仿某位作者/博主的文风，描述其语言习惯、句式特点..."
+          :rows="2"
+          :maxlength="1024"
+        />
+      </view>
+      <view class="field-spacer">
+        <text class="field-sublabel">人设头像 URL</text>
+        <AbInput v-model="form.author_avatar_url" placeholder="可选，作者头像图片地址" />
+      </view>
+    </view>
+
+    <!-- Seednote image composition (seednote only) -->
+    <view class="task-create__section" v-if="isSeednote">
+      <text class="field-label">图片组合</text>
+      <view class="switch-row">
+        <view class="switch-row__text">
+          <text class="field-label switch-row__label">生成内容图</text>
+          <text class="field-hint">除封面外，额外生成正文配图</text>
+        </view>
+        <AbSwitch v-model="form.has_content_image" />
+      </view>
+      <view class="switch-row field-spacer">
+        <view class="switch-row__text">
+          <text class="field-label switch-row__label">生成尾图</text>
+          <text class="field-hint">在笔记末尾生成引导/总结图</text>
+        </view>
+        <AbSwitch v-model="form.has_tail_image" />
+      </view>
+    </view>
+
+    <!-- E-commerce package (ecommerce only): product photos + delivery modules -->
+    <view class="task-create__section" v-if="isEcommerce">
+      <text class="field-label">电商素材包</text>
+      <text class="field-hint">上传产品图，选择交付模块。积分按所选模块求和扣除，保证产品跨图一致。</text>
+
+      <!-- Product photos (required) -->
+      <view class="field-spacer">
+        <text class="field-sublabel">产品图（必填）<text class="field-sublabel-count">{{ form.product_photos.length }}/16</text></text>
+        <view class="product-grid">
+          <view
+            v-for="(url, i) in form.product_photos"
+            :key="i"
+            class="product-thumb"
+          >
+            <image class="product-thumb__img" :src="url" mode="aspectFill" />
+            <view class="product-thumb__remove" @tap.stop="removeProductPhoto(i)">×</view>
+          </view>
+          <view
+            v-if="form.product_photos.length < 16"
+            class="product-add"
+            :class="{ 'product-add--disabled': uploadingPhoto }"
+            @tap="chooseProductPhoto"
+          >
+            <text class="product-add__icon">＋</text>
+            <text class="product-add__text">{{ uploadingPhoto ? '上传中' : '添加' }}</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Delivery modules (at least one required) -->
+      <view class="field-spacer">
+        <text class="field-sublabel">交付模块（至少选一项）</text>
+        <view class="module-list">
+          <view
+            v-for="mod in ecommerceModuleCatalog"
+            :key="mod.key"
+            class="module-row"
+            :class="{ 'module-row--active': moduleQty(mod.key) >= 1 }"
+          >
+            <view class="module-row__main" @tap="toggleModule(mod.key, moduleQty(mod.key) < 1)">
+              <view class="module-row__head">
+                <text class="module-row__label">{{ mod.label }}</text>
+                <text class="module-row__ratio">{{ mod.ratio }}</text>
+                <text v-if="modulePrice(mod.key) != null" class="module-row__price">{{ modulePrice(mod.key) }} 积分/{{ mod.qtyLabel }}</text>
+              </view>
+              <text class="module-row__hint">{{ mod.hint }}</text>
+            </view>
+            <view class="module-row__controls">
+              <view v-if="moduleQty(mod.key) >= 1" class="qty-stepper">
+                <text class="qty-stepper__btn" @tap.stop="setModuleQty(mod.key, moduleQty(mod.key) - mod.qtyStep)">−</text>
+                <text class="qty-stepper__value">{{ moduleQty(mod.key) }}{{ mod.qtyLabel }}</text>
+                <text class="qty-stepper__btn" @tap.stop="setModuleQty(mod.key, moduleQty(mod.key) + mod.qtyStep)">＋</text>
+              </view>
+              <AbSwitch
+                :model-value="moduleQty(mod.key) >= 1"
+                @update:model-value="(on: boolean) => toggleModule(mod.key, on)"
+              />
+            </view>
+          </view>
+        </view>
+        <text v-if="enabledModuleCount === 0" class="field-error">请至少选择一个交付模块</text>
+      </view>
+
+      <view class="field-spacer">
+        <text class="field-sublabel">目标平台</text>
+        <view class="picker-row" @tap="pickTargetPlatform">
+          <text v-if="form.target_platform" class="picker-row__value">{{ targetPlatformLabel }}</text>
+          <text v-else class="picker-row__placeholder">选择投放平台</text>
+          <text class="picker-row__arrow">›</text>
+        </view>
+      </view>
+      <view class="field-spacer">
+        <text class="field-sublabel">核心卖点（可选）</text>
+        <AbTextarea
+          v-model="form.selling_points"
+          placeholder="产品核心卖点（材质 / 功能 / 使用场景 / 价格优势等）。留空则由 AI 从产品图分析提炼"
+          :rows="3"
+          :maxlength="2000"
+        />
+      </view>
+      <view class="field-spacer">
+        <text class="field-sublabel">语言</text>
+        <view class="picker-row" @tap="pickLanguage">
+          <text v-if="form.language" class="picker-row__value">{{ languageLabel }}</text>
+          <text v-else class="picker-row__placeholder">默认中文</text>
+          <text class="picker-row__arrow">›</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- Quantity selector (hidden for ecommerce) -->
+    <view class="task-create__section" v-if="!isEcommerce">
       <text class="field-label">生成数量</text>
       <view class="quantity-group">
         <view
@@ -99,14 +279,33 @@
       </view>
     </view>
 
+    <!-- Goal mode -->
+    <view class="task-create__section">
+      <view class="switch-row">
+        <view class="switch-row__text">
+          <text class="field-label switch-row__label">强目标模式</text>
+          <text class="field-hint">设定明确的成功标准，循环优化直到达标</text>
+        </view>
+        <AbSwitch v-model="form.goal_mode" />
+      </view>
+      <view class="field-spacer" v-if="form.goal_mode">
+        <text class="field-label">成功目标 <text class="field-required">*</text></text>
+        <AbTextarea
+          v-model="form.goal"
+          placeholder="描述明确的完成标准，如：字数 800+、包含 3 个小标题、CTA 引导关注..."
+          :rows="3"
+          :maxlength="4000"
+          :error="errors.goal"
+        />
+      </view>
+    </view>
+
     <!-- Credit info -->
     <view class="task-create__section">
       <view class="credit-info">
         <view class="credit-info__row">
           <text class="credit-info__label">预计消耗</text>
-          <text class="credit-info__value credit-info__value--cost">
-            约 {{ estimatedCost }} 积分
-          </text>
+          <text class="credit-info__value credit-info__value--cost">约 {{ estimatedCost }} 积分</text>
         </view>
         <view class="credit-info__row">
           <text class="credit-info__label">当前余额</text>
@@ -115,9 +314,7 @@
           </text>
         </view>
       </view>
-      <text v-if="balance > 0 && balance < estimatedCost" class="field-error">
-        积分不足，请先充值
-      </text>
+      <text v-if="balance > 0 && balance < estimatedCost" class="field-error">积分不足，请先充值</text>
     </view>
 
     <!-- Fixed bottom button -->
@@ -138,16 +335,25 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import type { Channel, CreditPricing } from '@/types'
+import type { Project, CreditPricing, Template, ResourceEntry } from '@/types'
 import { tasksApi } from '@/api/tasks'
+import { templatesApi } from '@/api/templates'
+import { resourcesApi } from '@/api/resources'
 import { creditsApi } from '@/api/credits'
+import { projectsApi } from '@/api/projects'
 import { TASK_QUANTITIES, IMAGE_RATIOS } from '@/utils/constants'
-import { contentTypeLabel } from '@/utils/labels'
+import {
+  contentTypeLabel,
+  ecommerceModuleCatalog,
+  ecommerceTargetPlatformOptions,
+  ecommerceLanguageOptions,
+} from '@/utils/labels'
 import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
 import AbSwitch from '@/components/common/AbSwitch.vue'
 import AbTextarea from '@/components/common/AbTextarea.vue'
-import ChannelSelector from '@/components/business/ChannelSelector.vue'
+import ProjectSelector from '@/components/business/ProjectSelector.vue'
+import ImageModelSelector from '@/components/business/ImageModelSelector.vue'
 import PlatformAvatar from '@/components/business/PlatformAvatar.vue'
 
 const inspirations = [
@@ -157,17 +363,45 @@ const inspirations = [
   '分享一周穿搭灵感，适合通勤和约会',
 ]
 
-const selectedChannel = ref<Channel | null>(null)
+const TARGET_PLATFORM_LABELS = ecommerceTargetPlatformOptions.map((o) => o.label)
+const LANGUAGE_LABELS = ecommerceLanguageOptions.map((o) => o.label)
+
+const selectedProject = ref<Project | null>(null)
 const balance = ref(0)
 const pricing = ref<CreditPricing | null>(null)
 const submitting = ref(false)
 const inspirationIndex = ref(0)
 
+// Loaded on platform change
+const platformTemplates = ref<Template[]>([])
+const platformThemes = ref<ResourceEntry[]>([])
+const hasImageModels = ref(true)
+
 const form = reactive({
-  channel_id: '',
+  project_id: '',
   prompt: '',
   quantity: 1,
   image_ratio: '3:4',
+  image_model_key: '',
+  style: '',
+  writing_style: '',
+  theme: '',
+  author: '',
+  author_style_intro: '',
+  author_avatar_url: '',
+  goal_mode: false,
+  goal: '',
+  template_id: '',
+  template_name: '',
+  has_content_image: false,
+  has_tail_image: false,
+  // ecommerce
+  target_platform: '',
+  selling_points: '',
+  language: '',
+  product_photos: [] as string[],
+  selected_modules: {} as Record<string, number>,
+  // image options
   skip_reference_image: false,
   reference_image_url: '',
   watermark: false,
@@ -175,36 +409,208 @@ const form = reactive({
 
 const errors = reactive<Record<string, string>>({})
 
+const platform = computed(() => selectedProject.value?.platform || '')
+const isArticle = computed(() => platform.value === 'article')
+const isSeednote = computed(() => platform.value === 'seednote')
+const isEcommerce = computed(() => platform.value === 'ecommerce')
+
+// ---- E-commerce: product photos + delivery modules ----
+const uploadingPhoto = ref(false)
+
+function modulePrice(key: string): number | undefined {
+  return pricing.value?.ecommerce_module_prices?.[key]
+}
+
+function moduleQty(key: string): number {
+  return form.selected_modules[key] ?? 0
+}
+
+function setModuleQty(key: string, qty: number) {
+  const mod = ecommerceModuleCatalog.find((m) => m.key === key)
+  if (!mod) return
+  const clamped = Math.max(mod.minQty, Math.min(mod.maxQty, qty))
+  // Use a fresh object so Vue reactivity picks up the nested change.
+  form.selected_modules = { ...form.selected_modules, [key]: clamped }
+}
+
+function toggleModule(key: string, on: boolean) {
+  const mod = ecommerceModuleCatalog.find((m) => m.key === key)
+  if (!mod) return
+  setModuleQty(key, on ? mod.defaultQty : 0)
+}
+
+const enabledModuleCount = computed(
+  () => Object.values(form.selected_modules).filter((q) => q >= 1).length,
+)
+
+const targetPlatformLabel = computed(
+  () => ecommerceTargetPlatformOptions.find((o) => o.value === form.target_platform)?.label || '',
+)
+const languageLabel = computed(
+  () => ecommerceLanguageOptions.find((o) => o.value === form.language)?.label || '',
+)
+
+// Credit cost for ecommerce = Σ price × qty over enabled modules (matches studio).
+const ecommerceCreditCost = computed(() => {
+  let total = 0
+  for (const mod of ecommerceModuleCatalog) {
+    const qty = form.selected_modules[mod.key] ?? 0
+    if (qty < 1) continue
+    const price = modulePrice(mod.key)
+    if (typeof price === 'number') total += price * qty
+  }
+  return total
+})
+
+async function chooseProductPhoto() {
+  if (form.product_photos.length >= 16) {
+    uni.showToast({ title: '最多上传 16 张产品图', icon: 'none' })
+    return
+  }
+  try {
+    const pick = await uni.chooseImage({ count: 16 - form.product_photos.length, sourceType: ['album', 'camera'] })
+    const paths = pick.tempFilePaths || []
+    if (paths.length === 0) return
+    uploadingPhoto.value = true
+    uni.showLoading({ title: '上传中...' })
+    for (const p of paths) {
+      const res = await projectsApi.uploadImage(p, 'reference')
+      if (res.url) form.product_photos.push(res.url)
+    }
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '上传失败', icon: 'none' })
+  } finally {
+    uploadingPhoto.value = false
+    uni.hideLoading()
+  }
+}
+
+function removeProductPhoto(index: number) {
+  form.product_photos.splice(index, 1)
+}
+
 const currentInspiration = computed(() => inspirations[inspirationIndex.value % inspirations.length])
 
+const selectedTemplateName = computed(() => form.template_name)
+const selectedThemeName = computed(() => {
+  const t = platformThemes.value.find((x) => x.name === form.theme)
+  return t?.display_name || t?.name || form.theme || ''
+})
+
 const estimatedCost = computed(() => {
+  if (!selectedProject.value) return 0
+  // Ecommerce bills by module (Σ price × qty), not per-task unit cost.
+  if (isEcommerce.value) return ecommerceCreditCost.value
   if (!pricing.value?.task_costs) return 0
-  if (!selectedChannel.value) return 0
-  const costPerTask = pricing.value.task_costs[selectedChannel.value.platform] || 500
+  const costPerTask = pricing.value.task_costs[selectedProject.value.platform] || 500
   return costPerTask * form.quantity
 })
 
 const canSubmit = computed(() => {
-  return !!form.channel_id && !!form.prompt.trim() && balance.value >= estimatedCost.value && !submitting.value
+  if (!form.project_id || !form.prompt.trim()) return false
+  if (form.goal_mode && !form.goal.trim()) return false
+  if (balance.value < estimatedCost.value) return false
+  return !submitting.value
 })
 
-function onChannelChange(channel: Channel) {
-  selectedChannel.value = channel
+function onProjectChange(project: Project) {
+  selectedProject.value = project
 
-  // Set image ratio to channel default
-  if (channel.image_ratio) {
-    form.image_ratio = channel.image_ratio
+  if (project.image_ratio) {
+    form.image_ratio = project.image_ratio
   } else {
     const defaults: Record<string, string> = {
       article: '16:9',
       seednote: '3:4',
+      ecommerce: '1:1',
       xls: '3:4',
     }
-    form.image_ratio = defaults[channel.platform] || '3:4'
+    form.image_ratio = defaults[project.platform] || '3:4'
   }
 
-  // Clear error
-  delete errors.channel
+  delete errors.project
+  loadPlatformResources()
+}
+
+async function loadPlatformResources() {
+  if (!selectedProject.value) return
+  const plat = selectedProject.value.platform
+  // Templates for this platform/type
+  try {
+    const res = await templatesApi.list({ type: plat, limit: 50 })
+    platformTemplates.value = res.items || []
+  } catch {
+    platformTemplates.value = []
+  }
+  // Themes (article)
+  if (plat === 'article') {
+    try {
+      const res = await resourcesApi.list('themes', plat)
+      platformThemes.value = res.items || []
+    } catch {
+      platformThemes.value = []
+    }
+  } else {
+    platformThemes.value = []
+  }
+}
+
+function pickTemplate() {
+  if (platformTemplates.value.length === 0) {
+    uni.showToast({ title: '暂无可用模板', icon: 'none' })
+    return
+  }
+  const labels = platformTemplates.value.map((t) => t.name)
+  uni.showActionSheet({
+    itemList: labels,
+    success: (res) => {
+      const tpl = platformTemplates.value[res.tapIndex]
+      if (tpl) {
+        form.template_id = tpl.id
+        form.template_name = tpl.name
+      }
+    },
+  })
+}
+
+function clearTemplate() {
+  form.template_id = ''
+  form.template_name = ''
+}
+
+function pickTheme() {
+  if (platformThemes.value.length === 0) {
+    uni.showToast({ title: '暂无可用主题', icon: 'none' })
+    return
+  }
+  const labels = platformThemes.value.map((t) => t.display_name || t.name)
+  uni.showActionSheet({
+    itemList: labels,
+    success: (res) => {
+      const theme = platformThemes.value[res.tapIndex]
+      if (theme) form.theme = theme.name
+    },
+  })
+}
+
+function pickTargetPlatform() {
+  uni.showActionSheet({
+    itemList: TARGET_PLATFORM_LABELS,
+    success: (res) => {
+      const opt = ecommerceTargetPlatformOptions[res.tapIndex]
+      if (opt) form.target_platform = opt.value
+    },
+  })
+}
+
+function pickLanguage() {
+  uni.showActionSheet({
+    itemList: LANGUAGE_LABELS,
+    success: (res) => {
+      const opt = ecommerceLanguageOptions[res.tapIndex]
+      if (opt) form.language = opt.value
+    },
+  })
 }
 
 function applyInspiration() {
@@ -216,37 +622,68 @@ function applyInspiration() {
 function validate(): boolean {
   Object.keys(errors).forEach((k) => delete errors[k])
 
-  if (!form.channel_id) {
-    errors.channel = '请选择账号'
+  if (!form.project_id) {
+    errors.project = '请选择账号'
     return false
   }
-
   if (!form.prompt.trim()) {
     errors.prompt = '请输入创作要求'
     return false
   }
-
+  if (form.goal_mode && !form.goal.trim()) {
+    errors.goal = '强目标模式需填写成功目标'
+    return false
+  }
+  // Ecommerce requires product photos + at least one delivery module
+  // (matches studio's createTaskSchema superRefine).
+  if (isEcommerce.value) {
+    if (form.product_photos.length === 0) {
+      uni.showToast({ title: '请至少上传一张产品图', icon: 'none' })
+      return false
+    }
+    if (enabledModuleCount.value === 0) {
+      uni.showToast({ title: '请至少选择一个交付模块', icon: 'none' })
+      return false
+    }
+  }
   if (balance.value < estimatedCost.value) {
     uni.showToast({ title: '积分不足，请先充值', icon: 'none' })
     return false
   }
-
   return true
 }
 
 async function onSubmit() {
   if (!validate()) return
-
-  if (!selectedChannel.value) return
+  if (!selectedProject.value) return
 
   submitting.value = true
   try {
     const task = await tasksApi.create({
-      type: selectedChannel.value.platform as any,
-      channel_id: form.channel_id,
+      type: selectedProject.value.platform as any,
+      project_id: form.project_id,
       prompt: form.prompt.trim(),
-      quantity: form.quantity,
+      quantity: isEcommerce.value ? undefined : form.quantity,
       image_ratio: form.image_ratio,
+      image_model_key: form.image_model_key || undefined,
+      style: form.style.trim() || undefined,
+      writing_style: isArticle.value && form.writing_style.trim() ? form.writing_style.trim() : undefined,
+      theme: isArticle.value && form.theme ? form.theme : undefined,
+      template_id: form.template_id || undefined,
+      author: form.author.trim() || undefined,
+      author_style_intro: form.author_style_intro.trim() || undefined,
+      author_avatar_url: form.author_avatar_url.trim() || undefined,
+      has_content_image: isSeednote.value && form.has_content_image ? true : undefined,
+      has_tail_image: isSeednote.value && form.has_tail_image ? true : undefined,
+      // ecommerce basic fields
+      target_platform: isEcommerce.value && form.target_platform ? form.target_platform : undefined,
+      selling_points: isEcommerce.value && form.selling_points.trim() ? form.selling_points.trim() : undefined,
+      language: isEcommerce.value && form.language ? form.language : undefined,
+      product_photos: isEcommerce.value && form.product_photos.length ? form.product_photos : undefined,
+      selected_modules:
+        isEcommerce.value && enabledModuleCount.value > 0 ? form.selected_modules : undefined,
+      goal: form.goal_mode && form.goal.trim() ? form.goal.trim() : undefined,
+      goal_mode: form.goal_mode || undefined,
       skip_reference_image: form.skip_reference_image || undefined,
       reference_image_url: form.reference_image_url.trim() || undefined,
       watermark: form.watermark || undefined,
@@ -323,6 +760,13 @@ onMounted(() => {
   margin-bottom: $ab-space-xs;
 }
 
+.field-sublabel {
+  font-size: $ab-text-sm;
+  color: $ab-text-secondary;
+  display: block;
+  margin-bottom: $ab-space-xs;
+}
+
 .field-required {
   color: $ab-danger;
 }
@@ -355,6 +799,47 @@ onMounted(() => {
   }
 }
 
+// Picker row (template / theme / platform)
+.picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-sm;
+  padding: $ab-space-sm $ab-space-md;
+  min-height: 80rpx;
+
+  &__value {
+    font-size: $ab-text-base;
+    color: $ab-text;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__placeholder {
+    font-size: $ab-text-base;
+    color: $ab-text-tertiary;
+    flex: 1;
+  }
+
+  &__arrow {
+    font-size: $ab-text-lg;
+    color: $ab-text-tertiary;
+    margin-left: $ab-space-sm;
+  }
+
+  &__clear {
+    font-size: $ab-text-xs;
+    color: $ab-primary;
+    margin-left: $ab-space-sm;
+    padding: $ab-space-xs $ab-space-sm;
+  }
+}
+
 // Inspiration hint
 .inspiration-hint {
   display: flex;
@@ -364,7 +849,6 @@ onMounted(() => {
   background-color: $ab-primary-bg;
   border-radius: $ab-radius-sm;
   margin-top: $ab-space-xs;
-  cursor: pointer;
 
   &__icon {
     font-size: $ab-text-base;
@@ -414,23 +898,6 @@ onMounted(() => {
   }
 }
 
-// Collapsible
-.collapsible-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-}
-
-.collapsible-arrow {
-  font-size: $ab-text-sm;
-  color: $ab-text-tertiary;
-}
-
-.advanced-options {
-  margin-top: $ab-space-md;
-}
-
 .switch-row {
   display: flex;
   align-items: center;
@@ -456,6 +923,7 @@ onMounted(() => {
   font-size: $ab-text-xs;
   color: $ab-text-tertiary;
   line-height: 1.4;
+  margin-top: $ab-space-xs;
 }
 
 // Credit info
@@ -487,6 +955,168 @@ onMounted(() => {
     &--low {
       color: $ab-danger;
     }
+  }
+}
+
+// ---- E-commerce: product photos + delivery modules ----
+.field-sublabel-count {
+  margin-left: $ab-space-xs;
+  font-size: $ab-text-xs;
+  color: $ab-text-tertiary;
+  font-weight: $ab-font-normal;
+}
+
+.product-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $ab-space-sm;
+  margin-top: $ab-space-xs;
+}
+
+.product-thumb {
+  position: relative;
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: $ab-radius-sm;
+  overflow: hidden;
+  background-color: $ab-divider;
+
+  &__img {
+    width: 100%;
+    height: 100%;
+  }
+
+  &__remove {
+    position: absolute;
+    top: 4rpx;
+    right: 4rpx;
+    width: 36rpx;
+    height: 36rpx;
+    line-height: 32rpx;
+    text-align: center;
+    border-radius: 50%;
+    background-color: rgba(0, 0, 0, 0.55);
+    color: #ffffff;
+    font-size: $ab-text-lg;
+  }
+}
+
+.product-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 160rpx;
+  height: 160rpx;
+  border: 2rpx dashed $ab-border;
+  border-radius: $ab-radius-sm;
+  color: $ab-text-tertiary;
+  gap: $ab-space-xs;
+
+  &__icon {
+    font-size: 44rpx;
+    line-height: 1;
+  }
+
+  &__text {
+    font-size: $ab-text-xs;
+  }
+
+  &--disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+}
+
+.module-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: $ab-space-xs;
+}
+
+.module-row {
+  display: flex;
+  align-items: center;
+  gap: $ab-space-sm;
+  padding: $ab-space-sm 0;
+  border-bottom: 2rpx solid $ab-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &--active {
+    // subtle emphasis when enabled
+  }
+
+  &__main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: $ab-space-xs;
+  }
+
+  &__label {
+    font-size: $ab-text-sm;
+    font-weight: $ab-font-medium;
+    color: $ab-text;
+  }
+
+  &__ratio {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+    background-color: $ab-divider;
+    border-radius: $ab-radius-full;
+    padding: 2rpx 12rpx;
+  }
+
+  &__price {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__hint {
+    display: block;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+    margin-top: 4rpx;
+  }
+
+  &__controls {
+    display: flex;
+    align-items: center;
+    gap: $ab-space-sm;
+    flex-shrink: 0;
+  }
+}
+
+.qty-stepper {
+  display: flex;
+  align-items: center;
+  gap: $ab-space-xs;
+
+  &__btn {
+    width: 48rpx;
+    height: 48rpx;
+    line-height: 44rpx;
+    text-align: center;
+    border: 2rpx solid $ab-border;
+    border-radius: $ab-radius-sm;
+    font-size: $ab-text-md;
+    color: $ab-text;
+  }
+
+  &__value {
+    min-width: 64rpx;
+    text-align: center;
+    font-size: $ab-text-sm;
+    color: $ab-text;
+    font-weight: $ab-font-medium;
   }
 }
 </style>

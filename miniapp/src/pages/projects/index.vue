@@ -1,12 +1,12 @@
 <template>
-  <view class="page channels-page">
+  <view class="page projects-page">
     <!-- Platform filter tabs -->
-    <view class="channels-page__tabs">
+    <view class="projects-page__tabs">
       <AbTabs v-model="activePlatform" :tabs="platformTabs" />
     </view>
 
     <!-- Loading skeleton -->
-    <view v-if="loading && channels.length === 0" class="channels-page__skeleton">
+    <view v-if="loading && projects.length === 0" class="projects-page__skeleton">
       <view v-for="i in 3" :key="i" class="skeleton-card">
         <view class="skeleton-card__header">
           <view class="skeleton-card__avatar" />
@@ -21,93 +21,93 @@
       </view>
     </view>
 
-    <!-- Channel list -->
-    <view v-else-if="filteredActive.length > 0" class="channels-page__list">
+    <!-- Project list -->
+    <view v-else-if="filteredActive.length > 0" class="projects-page__list">
       <view
-        v-for="channel in filteredActive"
-        :key="channel.id"
-        class="channel-item"
-        @tap="goToDetail(channel.id)"
+        v-for="project in filteredActive"
+        :key="project.id"
+        class="project-item"
+        @tap="goToDetail(project.id)"
       >
-        <view class="channel-item__body" :style="{ borderLeftColor: platformColor(channel.platform) }">
-          <view class="channel-item__header">
-            <view class="channel-item__avatar">
+        <view class="project-item__body" :style="{ borderLeftColor: platformColor(project.platform) }">
+          <view class="project-item__header">
+            <view class="project-item__avatar">
               <image
-                v-if="channel.avatar_url"
-                :src="channel.avatar_url"
-                class="channel-item__avatar-img"
+                v-if="project.avatar_url"
+                :src="project.avatar_url"
+                class="project-item__avatar-img"
                 mode="aspectFill"
               />
-              <PlatformAvatar v-else :platform="channel.platform" :size="48" />
+              <PlatformAvatar v-else :platform="project.platform" :size="48" />
             </view>
-            <view class="channel-item__info">
-              <text class="channel-item__name">{{ channel.name }}</text>
-              <text class="channel-item__platform">
-                {{ platformLabel(channel.platform) }}
-                <text v-if="channel.positioning"> · {{ channel.positioning }}</text>
+            <view class="project-item__info">
+              <text class="project-item__name">{{ project.name }}</text>
+              <text class="project-item__platform">
+                {{ platformLabel(project.platform) }}
+                <text v-if="project.positioning"> · {{ project.positioning }}</text>
               </text>
             </view>
           </view>
 
           <!-- Stats row -->
-          <view class="channel-item__stats" v-if="channel.stats">
-            <text class="channel-item__stat channel-item__stat--success">
-              {{ channel.stats.completed_tasks }} 完成
+          <view class="project-item__stats" v-if="project.stats">
+            <text class="project-item__stat project-item__stat--success">
+              {{ project.stats.completed_tasks }} 完成
             </text>
-            <text class="channel-item__stat channel-item__stat--danger" v-if="channel.stats.failed_tasks > 0">
-              {{ channel.stats.failed_tasks }} 失败
+            <text class="project-item__stat project-item__stat--danger" v-if="project.stats.failed_tasks > 0">
+              {{ project.stats.failed_tasks }} 失败
             </text>
-            <text class="channel-item__stat channel-item__stat--rate" v-if="channel.stats.success_rate != null">
-              {{ channel.stats.success_rate }}% 成功
+            <text class="project-item__stat project-item__stat--rate" v-if="project.stats.success_rate != null">
+              {{ project.stats.success_rate }}% 成功
             </text>
-            <text class="channel-item__stat channel-item__stat--time" v-if="channel.stats.last_activity_at">
-              最近活跃: {{ relativeTime(channel.stats.last_activity_at) }}
+            <text class="project-item__stat project-item__stat--time" v-if="project.stats.last_activity_at">
+              最近活跃: {{ relativeTime(project.stats.last_activity_at) }}
             </text>
           </view>
 
           <!-- Action buttons -->
-          <view class="channel-item__actions">
-            <text class="channel-item__action" @tap.stop="goToDetail(channel.id)">编辑</text>
-            <text class="channel-item__action channel-item__action--warn" @tap.stop="onArchive(channel)">归档</text>
+          <view class="project-item__actions">
+            <text class="project-item__action" @tap.stop="goToDetail(project.id)">编辑</text>
+            <text class="project-item__action project-item__action--warn" @tap.stop="onArchive(project)">归档</text>
           </view>
         </view>
       </view>
     </view>
 
-    <!-- Archived channels -->
-    <view v-if="filteredArchived.length > 0" class="channels-page__archived">
-      <view class="channels-page__archived-header" @tap="showArchived = !showArchived">
-        <text class="channels-page__archived-title">
+    <!-- Archived projects -->
+    <view v-if="filteredArchived.length > 0" class="projects-page__archived">
+      <view class="projects-page__archived-header" @tap="showArchived = !showArchived">
+        <text class="projects-page__archived-title">
           已归档 ({{ filteredArchived.length }})
         </text>
-        <text class="channels-page__archived-arrow">{{ showArchived ? '收起' : '展开' }}</text>
+        <text class="projects-page__archived-arrow">{{ showArchived ? '收起' : '展开' }}</text>
       </view>
-      <view v-if="showArchived" class="channels-page__list">
+      <view v-if="showArchived" class="projects-page__list">
         <view
-          v-for="channel in filteredArchived"
-          :key="channel.id"
-          class="channel-item channel-item--archived"
-          @tap="goToDetail(channel.id)"
+          v-for="project in filteredArchived"
+          :key="project.id"
+          class="project-item project-item--archived"
+          @tap="goToDetail(project.id)"
         >
-          <view class="channel-item__body">
-            <view class="channel-item__header">
-              <view class="channel-item__avatar">
+          <view class="project-item__body">
+            <view class="project-item__header">
+              <view class="project-item__avatar">
                 <image
-                  v-if="channel.avatar_url"
-                  :src="channel.avatar_url"
-                  class="channel-item__avatar-img"
+                  v-if="project.avatar_url"
+                  :src="project.avatar_url"
+                  class="project-item__avatar-img"
                   mode="aspectFill"
                 />
-                <PlatformAvatar v-else :platform="channel.platform" :size="48" />
+                <PlatformAvatar v-else :platform="project.platform" :size="48" />
               </view>
-              <view class="channel-item__info">
-                <text class="channel-item__name">{{ channel.name }}</text>
-                <text class="channel-item__platform">{{ platformLabel(channel.platform) }}</text>
+              <view class="project-item__info">
+                <text class="project-item__name">{{ project.name }}</text>
+                <text class="project-item__platform">{{ platformLabel(project.platform) }}</text>
               </view>
             </view>
-            <view class="channel-item__actions">
-              <text class="channel-item__action" @tap.stop="onRestore(channel)">恢复</text>
-              <text class="channel-item__action channel-item__action--danger" @tap.stop="onDelete(channel)">删除</text>
+            <view class="project-item__actions">
+              <text class="project-item__action" @tap.stop="onRestore(project)">恢复</text>
+              <text class="project-item__action project-item__action--danger" @tap.stop="onDelete(project)">删除</text>
             </view>
           </view>
         </view>
@@ -124,15 +124,15 @@
     />
 
     <!-- Load more indicator -->
-    <view v-if="loading" class="channels-page__loading">
+    <view v-if="loading" class="projects-page__loading">
       <AbLoading size="sm" text="加载中" />
     </view>
-    <text v-if="!hasMore && channels.length > 0" class="channels-page__end">
+    <text v-if="!hasMore && projects.length > 0" class="projects-page__end">
       — 已经到底了 —
     </text>
 
     <!-- Fixed bottom button -->
-    <view v-if="filteredActive.length > 0 || filteredArchived.length > 0" class="channels-page__fab">
+    <view v-if="filteredActive.length > 0 || filteredArchived.length > 0" class="projects-page__fab">
       <AbButton type="primary" block size="lg" @click="goToDetail()">
         + 新建账号
       </AbButton>
@@ -143,8 +143,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
-import type { Channel, ChannelStats } from '@/types'
-import { channelsApi } from '@/api/channels'
+import type { Project, ProjectStats } from '@/types'
+import { projectsApi } from '@/api/projects'
 import { contentTypeLabel } from '@/utils/labels'
 import { relativeTime } from '@/utils/format'
 import AbTabs from '@/components/common/AbTabs.vue'
@@ -157,12 +157,13 @@ const platformTabs = [
   { key: '', label: '全部' },
   { key: 'seednote', label: '种草笔记' },
   { key: 'article', label: '公众号' },
+  { key: 'ecommerce', label: '电商出图' },
   { key: 'xls', label: '小绿书' },
 ]
 
 const activePlatform = ref('')
-const channels = ref<Channel[]>([])
-const statsMap = ref<Record<string, ChannelStats>>({})
+const projects = ref<Project[]>([])
+const statsMap = ref<Record<string, ProjectStats>>({})
 const loading = ref(false)
 const refreshing = ref(false)
 const hasMore = ref(true)
@@ -171,13 +172,13 @@ const page = ref(0)
 const pageSize = 20
 
 const filteredActive = computed(() => {
-  if (!activePlatform.value) return channels.value.filter((c) => c.status === 'active')
-  return channels.value.filter((c) => c.status === 'active' && c.platform === activePlatform.value)
+  if (!activePlatform.value) return projects.value.filter((c) => c.status === 'active')
+  return projects.value.filter((c) => c.status === 'active' && c.platform === activePlatform.value)
 })
 
 const filteredArchived = computed(() => {
-  if (!activePlatform.value) return channels.value.filter((c) => c.status === 'archived')
-  return channels.value.filter((c) => c.status === 'archived' && c.platform === activePlatform.value)
+  if (!activePlatform.value) return projects.value.filter((c) => c.status === 'archived')
+  return projects.value.filter((c) => c.status === 'archived' && c.platform === activePlatform.value)
 })
 
 function platformLabel(platform: string): string {
@@ -188,12 +189,13 @@ function platformColor(platform: string): string {
   const map: Record<string, string> = {
     seednote: '#FF2442',
     article: '#07C160',
+    ecommerce: '#FF6900',
     xls: '#07C160',
   }
   return map[platform] || '#6B7280'
 }
 
-async function fetchChannels(reset = false) {
+async function fetchProjects(reset = false) {
   if (reset) {
     page.value = 0
     hasMore.value = true
@@ -208,7 +210,7 @@ async function fetchChannels(reset = false) {
   }
 
   try {
-    const res = await channelsApi.list({
+    const res = await projectsApi.list({
       status: undefined,
       platform: activePlatform.value || undefined,
     })
@@ -217,27 +219,27 @@ async function fetchChannels(reset = false) {
     // For a real paginated API, use offset/limit params
     if (Array.isArray(res)) {
       if (reset) {
-        channels.value = res
+        projects.value = res
       } else {
-        channels.value = [...channels.value, ...res]
+        projects.value = [...projects.value, ...res]
       }
       hasMore.value = false // full list loaded
     } else if (res && 'items' in res) {
       const items = (res as any).items || []
       if (reset) {
-        channels.value = items
+        projects.value = items
       } else {
-        channels.value = [...channels.value, ...items]
+        projects.value = [...projects.value, ...items]
       }
       hasMore.value = items.length >= pageSize
     }
 
-    // Load stats for active channels
+    // Load stats for active projects
     await loadStats()
   } catch (err) {
-    console.error('Failed to load channels:', err)
+    console.error('Failed to load projects:', err)
     uni.showToast({ title: '加载失败', icon: 'none' })
-    if (reset) channels.value = []
+    if (reset) projects.value = []
   } finally {
     loading.value = false
     refreshing.value = false
@@ -245,16 +247,16 @@ async function fetchChannels(reset = false) {
 }
 
 async function loadStats() {
-  const activeIds = channels.value
+  const activeIds = projects.value
     .filter((c) => c.status === 'active')
     .map((c) => c.id)
 
   if (activeIds.length === 0) return
 
   try {
-    statsMap.value = await channelsApi.stats(activeIds)
-    // Attach stats to channels
-    channels.value = channels.value.map((c) => ({
+    statsMap.value = await projectsApi.stats(activeIds)
+    // Attach stats to projects
+    projects.value = projects.value.map((c) => ({
       ...c,
       stats: statsMap.value[c.id] || c.stats,
     }))
@@ -265,19 +267,19 @@ async function loadStats() {
 }
 
 function goToDetail(id?: string) {
-  const url = id ? `/pages/channels/detail?id=${id}` : '/pages/channels/detail'
+  const url = id ? `/pages/projects/detail?id=${id}` : '/pages/projects/detail'
   uni.navigateTo({ url })
 }
 
-function onArchive(channel: Channel) {
+function onArchive(project: Project) {
   uni.showModal({
     title: '归档账号',
-    content: `确定归档「${channel.name}」吗？归档后可随时恢复。`,
+    content: `确定归档「${project.name}」吗？归档后可随时恢复。`,
     success: async (res) => {
       if (res.confirm) {
         try {
-          await channelsApi.archive(channel.id)
-          channel.status = 'archived'
+          await projectsApi.archive(project.id)
+          project.status = 'archived'
           uni.showToast({ title: '已归档', icon: 'success' })
         } catch (err) {
           uni.showToast({ title: '归档失败', icon: 'none' })
@@ -287,26 +289,26 @@ function onArchive(channel: Channel) {
   })
 }
 
-function onRestore(channel: Channel) {
+function onRestore(project: Project) {
   try {
-    channelsApi.restore(channel.id)
-    channel.status = 'active'
+    projectsApi.restore(project.id)
+    project.status = 'active'
     uni.showToast({ title: '已恢复', icon: 'success' })
   } catch (err) {
     uni.showToast({ title: '恢复失败', icon: 'none' })
   }
 }
 
-function onDelete(channel: Channel) {
+function onDelete(project: Project) {
   uni.showModal({
     title: '删除账号',
-    content: `确定删除「${channel.name}」吗？此操作不可恢复。`,
+    content: `确定删除「${project.name}」吗？此操作不可恢复。`,
     confirmColor: '#DC2626',
     success: async (res) => {
       if (res.confirm) {
         try {
-          await channelsApi.delete(channel.id)
-          channels.value = channels.value.filter((c) => c.id !== channel.id)
+          await projectsApi.delete(project.id)
+          projects.value = projects.value.filter((c) => c.id !== project.id)
           uni.showToast({ title: '已删除', icon: 'success' })
         } catch (err) {
           uni.showToast({ title: '删除失败', icon: 'none' })
@@ -318,25 +320,25 @@ function onDelete(channel: Channel) {
 
 // Watch platform filter change
 watch(activePlatform, () => {
-  fetchChannels(true)
+  fetchProjects(true)
 })
 
 // Pull-down refresh
 onPullDownRefresh(async () => {
-  await fetchChannels(true)
+  await fetchProjects(true)
   uni.stopPullDownRefresh()
 })
 
 // Reach bottom load more
 onReachBottom(() => {
   if (!loading.value && hasMore.value) {
-    fetchChannels(false)
+    fetchProjects(false)
   }
 })
 </script>
 
 <style lang="scss" scoped>
-.channels-page {
+.projects-page {
   min-height: 100vh;
   background-color: $ab-background;
   padding-bottom: 160rpx;
@@ -459,8 +461,8 @@ onReachBottom(() => {
   }
 }
 
-// Channel item
-.channel-item {
+// Project item
+.project-item {
   margin-bottom: $ab-space-sm;
 
   &__body {

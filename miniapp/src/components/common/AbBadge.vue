@@ -56,7 +56,7 @@ withDefaults(defineProps<{
   }
 
   &--neutral {
-    background-color: #F3F4F6;
+    background-color: $ab-divider;
     color: $ab-text-secondary;
   }
 }

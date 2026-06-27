@@ -25,6 +25,52 @@ onShow(() => {
 </script>
 
 <style>
+/* ---- Theme tokens (light defaults) ----
+ * Neutrals / surfaces / text / tints / shadows as CSS custom properties so the
+ * whole app follows the system color scheme. Defined on `page` (mp-weixin root)
+ * and `:root` (H5 html). Accent colors stay compile-time SCSS hex (see uni.scss).
+ */
+page,
+:root {
+  --ab-background: #F9FAFB;
+  --ab-surface: #FFFFFF;
+  --ab-text: #111827;
+  --ab-text-secondary: #6B7280;
+  --ab-text-tertiary: #9CA3AF;
+  --ab-border: #E5E7EB;
+  --ab-divider: #F3F4F6;
+  --ab-primary-bg: #EEF2FF;
+  --ab-success-bg: #ECFDF5;
+  --ab-danger-bg: #FEF2F2;
+  --ab-warning-bg: #FFFBEB;
+  --ab-info-bg: #EFF6FF;
+  --ab-shadow-sm: 0 1rpx 2rpx rgba(0, 0, 0, 0.05);
+  --ab-shadow-md: 0 4rpx 12rpx rgba(0, 0, 0, 0.08);
+  --ab-shadow-lg: 0 8rpx 24rpx rgba(0, 0, 0, 0.12);
+}
+
+/* ---- Dark theme (follows OS via prefers-color-scheme, Zinc palette) ---- */
+@media (prefers-color-scheme: dark) {
+  page,
+  :root {
+    --ab-background: #0E0E11;
+    --ab-surface: #18181B;
+    --ab-text: #F4F4F5;
+    --ab-text-secondary: #A1A1AA;
+    --ab-text-tertiary: #71717A;
+    --ab-border: #27272A;
+    --ab-divider: #1F1F23;
+    --ab-primary-bg: #1E1B4B;
+    --ab-success-bg: #052E1B;
+    --ab-danger-bg: #2A1212;
+    --ab-warning-bg: #2A1C08;
+    --ab-info-bg: #0C1A2E;
+    --ab-shadow-sm: 0 1rpx 2rpx rgba(0, 0, 0, 0.4);
+    --ab-shadow-md: 0 4rpx 12rpx rgba(0, 0, 0, 0.5);
+    --ab-shadow-lg: 0 8rpx 24rpx rgba(0, 0, 0, 0.6);
+  }
+}
+
 page {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
@@ -41,6 +87,14 @@ view, text {
 .page {
   min-height: 100vh;
   padding: $ab-space-md;
+  /* Subtle content fade-in on navigation (opacity-only: transform would break
+   * position:fixed children like bottom action bars). */
+  animation: ab-page-in 0.26s ease-out;
+}
+
+@keyframes ab-page-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .section-header {

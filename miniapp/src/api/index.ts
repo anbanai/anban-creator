@@ -1,8 +1,9 @@
 import { apiKeysApi } from './api-keys'
 import { authApi } from './auth'
-import { channelsApi } from './channels'
+import { projectsApi } from './projects'
 import { creditsApi } from './credits'
 import { designerApi } from './designer'
+import { imageModelsApi } from './image-models'
 import { modelConfigApi } from './model-config'
 import { plansApi } from './plans'
 import { postersApi } from './posters'
@@ -19,9 +20,10 @@ export { del, get, getApiErrorMessage, patch, post, put } from './request'
 export const api = {
   apiKeys: apiKeysApi,
   auth: authApi,
-  channels: channelsApi,
+  projects: projectsApi,
   credits: creditsApi,
   designer: designerApi,
+  imageModels: imageModelsApi,
   modelConfig: modelConfigApi,
   plans: plansApi,
   posters: postersApi,

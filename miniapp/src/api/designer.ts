@@ -35,7 +35,7 @@ export const designerApi = {
       })
     }),
 
-  getHistory: (params: { channel_id?: string; page?: number; page_size?: number } = {}) =>
+  getHistory: (params: { project_id?: string; page?: number; page_size?: number } = {}) =>
     get<HistoryResponse>('/designer/history', params as Record<string, any>),
 
   getGeneration: (id: string) =>

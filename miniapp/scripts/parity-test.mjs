@@ -68,7 +68,7 @@ assertContains('src/types/task.ts', [
   'watermark?: boolean',
 ])
 
-assertContains('src/types/channel.ts', [
+assertContains('src/types/project.ts', [
   'description?: string',
   'layout: string',
   'image_preset: string',
@@ -94,7 +94,7 @@ assertContains('src/types/designer.ts', [
   'provider_id?: string',
 ])
 
-assertContains('src/pages/channels/detail.vue', [
+assertContains('src/pages/projects/detail.vue', [
   "resourcesApi.list('themes'",
   "resourcesApi.list('layouts'",
   "resourcesApi.list('image_presets'",
@@ -106,11 +106,11 @@ assertContains('src/pages/channels/detail.vue', [
   'image_preset',
 ])
 
+// Task detail clone is now server-side (tasksApi.retry preserves ALL fields —
+// 3D style/persona/ecommerce/model/watermark/goal — replacing the old partial
+// client-side create() that forwarded only a subset). File handling stays intact.
 assertContains('src/pages/tasks/detail.vue', [
-  'topic: task.value.topic',
-  'skip_reference_image: task.value.skip_reference_image',
-  'reference_image_url: task.value.reference_image_url',
-  'watermark: task.value.watermark',
+  'tasksApi.retry',
   'tasksApi.getFiles',
   'tasksApi.getSeednoteAnalytics',
   'tasksApi.fileDownloadUrl',
@@ -142,5 +142,68 @@ assertContains('src/pages/plans/create.vue', [
   'skip_reference_image: form.skipReferenceImage',
   'reference_image_url: form.referenceImageUrl',
 ])
+
+// === channel→project migration (2026-06-27): miniapp must call /projects, never /channels ===
+// The Go server renamed channels→projects (router/router.go registers only /projects/*,
+// task/plan handlers require project_id). The miniapp must follow or every project/task/plan
+// call 404s. These assertions lock the migration in and catch regressions.
+assertFile('src/api/projects.ts')
+assertFile('src/types/project.ts')
+assertFile('src/pages/projects/index.vue')
+assertFile('src/pages/projects/detail.vue')
+assertFile('src/components/business/ProjectSelector.vue')
+assertFile('src/components/business/ProjectCard.vue')
+
+assertContains('src/api/projects.ts', [
+  'export const projectsApi',
+  "'/projects'",
+  "'/projects/stats'",
+  "'/projects/fetch-profile'",
+  'get<ProjectDetail>(`/projects/${id}`)',
+])
+assertContains('src/api/topic-pool.ts', [
+  '`/projects/${projectId}/topics`',
+])
+assertContains('src/api/tasks.ts', [
+  'project_id?: string',
+])
+assertContains('src/api/plans.ts', [
+  'project_id?: string',
+])
+assertContains('src/types/task.ts', [
+  'project_id: string',
+])
+assertContains('src/types/plan.ts', [
+  'project_id: string',
+])
+assertContains('src/types/topic-pool.ts', [
+  'project_id: string',
+])
+assertContains('src/types/project.ts', [
+  'export interface ProjectDetail',
+  'project: Project',
+])
+assertContains('src/types/index.ts', [
+  "from './project'",
+])
+assertContains('src/api/index.ts', [
+  "from './projects'",
+  'projects: projectsApi',
+])
+assertContains('src/pages.json', [
+  '"path": "pages/projects/index"',
+  '"path": "pages/projects/detail"',
+])
+assertContains('src/types/timeline.ts', [
+  'project_id?: string',
+  'project_name?: string',
+])
+
+// OLD names must be GONE — no /channels API, no channel_id, no Channel type
+assert.equal(existsSync(resolve(root, 'src/api/channels.ts')), false, 'src/api/channels.ts must be removed (renamed to projects.ts)')
+assert.equal(existsSync(resolve(root, 'src/types/channel.ts')), false, 'src/types/channel.ts must be removed (renamed to project.ts)')
+assert.equal(existsSync(resolve(root, 'src/pages/channels')), false, 'src/pages/channels/ must be removed (renamed to projects/)')
+assert.equal(existsSync(resolve(root, 'src/components/business/ChannelSelector.vue')), false, 'ChannelSelector.vue must be removed (renamed to ProjectSelector.vue)')
+assert.equal(existsSync(resolve(root, 'src/components/business/ChannelCard.vue')), false, 'ChannelCard.vue must be removed (renamed to ProjectCard.vue)')
 
 console.log('miniapp parity contracts passed')
