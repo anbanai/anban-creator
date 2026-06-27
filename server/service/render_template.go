@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -186,12 +187,38 @@ func (s *WritingService) RenderTemplate(
 // ---------------------------------------------------------------------------
 
 func applySlotsToMarkdown(markdown string, plan *LayoutPlan) string {
+	// Idempotency guard: drop any slot whose image URL is ALREADY inlined in the
+	// source markdown. Injecting it again would make the deterministic renderer
+	// emit a duplicate <img> (inline image + slot image, same URL). The existing
+	// inline keeps its position; we add no second copy. This makes the render
+	// resilient to upstream callers that both inline images and pass them as
+	// slots (the wechatarticle workflow did this and had to manually clean up).
+	//
+	// Contract: each slot image URL is unique within an article (the rhythm plan
+	// requires pairwise-distinct content images, never reusing one as cover/other).
+	// So a URL appearing both inline and in a slot is always the SAME image the
+	// caller placed twice, never two legitimately-distinct slots — dropping the
+	// duplicate never loses a distinct image.
+	existing := collectInlineImageURLs(markdown)
+	slots := make([]LayoutPlanSlot, 0, len(plan.Slots))
+	for _, slot := range plan.Slots {
+		if slot.ImageURL != "" && existing[slot.ImageURL] {
+			continue
+		}
+		slots = append(slots, slot)
+	}
+	var footer *LayoutPlanSlot
+	if plan.Footer != nil && !(plan.Footer.ImageURL != "" && existing[plan.Footer.ImageURL]) {
+		f := *plan.Footer
+		footer = &f
+	}
+
 	sections := splitMarkdownByH2(markdown)
 
 	openers := map[int][]LayoutPlanSlot{}
 	inlines := map[int][]LayoutPlanSlot{}
 	var hero string
-	for _, slot := range plan.Slots {
+	for _, slot := range slots {
 		switch slot.SlotID {
 		case "hero":
 			if hero == "" {
@@ -213,14 +240,34 @@ func applySlotsToMarkdown(markdown string, plan *LayoutPlan) string {
 		b.WriteString(renderSection(section, openers[i], inlines[i]))
 		b.WriteString("\n")
 	}
-	if plan.Footer != nil {
-		if img := slotImageMarkdown(*plan.Footer); img != "" {
+	if footer != nil {
+		if img := slotImageMarkdown(*footer); img != "" {
 			b.WriteString("\n")
 			b.WriteString(img)
 			b.WriteString("\n")
 		}
 	}
 	return b.String()
+}
+
+// mdInlineImageRe matches a markdown image's URL: ![alt](url). Captures the URL
+// (no whitespace, no closing paren). Used only to dedup slot injection against
+// already-inlined images — not a full markdown parser.
+var mdInlineImageRe = regexp.MustCompile(`!\[[^\]]*\]\(([^)\s]+)[^)]*\)`)
+
+// collectInlineImageURLs returns the set of image URLs referenced as markdown
+// images (![alt](url)) anywhere in the source. Slot injection consults this to
+// avoid emitting a duplicate <img> for an image that is already inlined.
+func collectInlineImageURLs(markdown string) map[string]bool {
+	set := make(map[string]bool)
+	for _, m := range mdInlineImageRe.FindAllStringSubmatch(markdown, -1) {
+		if len(m) > 1 {
+			if u := strings.TrimSpace(m[1]); u != "" {
+				set[u] = true
+			}
+		}
+	}
+	return set
 }
 
 // renderSection emits one section: its heading line, then section_opener images

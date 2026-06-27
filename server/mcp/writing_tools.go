@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -16,6 +17,44 @@ import (
 // progress notification to keep the SSE stream alive. Must stay well under the
 // Claude Code 60s first-byte budget. See startProgressHeartbeat.
 const longTextHeartbeatInterval = 15 * time.Second
+
+// streamingProgressInterval is the minimum gap between two stream-progress
+// notifications during a streaming write_article. A token stream fires many
+// small deltas per second; we coalesce into at most one NotifyProgress per
+// interval so the client gets a real, character-count-based progress signal
+// without flooding the SSE stream. The 15s heartbeat still runs underneath as a
+// floor for non-streaming tools.
+const streamingProgressInterval = time.Second
+
+// newStreamingProgressRelayer returns an onDelta callback that relays article
+// generation progress to the MCP client, throttled to at most one
+// NotifyProgress per streamingProgressInterval. Each notification carries how
+// many characters have been generated so far — a real progress signal, unlike
+// the heartbeat's static "生成中…". No-op when there is no progress routing
+// target (token nil / sess nil). The returned callback is invoked only from the
+// single-threaded stream loop inside CompleteStream, so its throttling state
+// needs no lock.
+func newStreamingProgressRelayer(ctx context.Context, sess progressNotifier, token any) func(string) {
+	if token == nil || sess == nil {
+		return func(string) {}
+	}
+	var (
+		chars      int
+		lastNotify time.Time
+	)
+	return func(delta string) {
+		chars += utf8.RuneCountInString(delta)
+		if time.Since(lastNotify) < streamingProgressInterval {
+			return
+		}
+		lastNotify = time.Now()
+		n := chars
+		_ = sess.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+			ProgressToken: token,
+			Message:       fmt.Sprintf("write_article 生成中… 已生成 %d 字", n),
+		})
+	}
+}
 
 // registerWritingTools registers article writing, conversion, humanization, topic research, SEO, outline generation, and scoring tools.
 func registerWritingTools(server *mcp.Server) {
@@ -210,7 +249,11 @@ func writeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		return billingError("write article", err), nil
 	}
 
-	result, err := svcs.WritingSvc.WriteArticle(ctx, userID, projectID, topic, inputType, articleType, length, taskID)
+	// Stream the generation so a long article writes progress to the client
+	// chunk-by-chunk (no single blocking deadline). Falls back to blocking
+	// Complete when the resolved client can't stream.
+	onDelta := newStreamingProgressRelayer(ctx, req.Session, req.Params.GetProgressToken())
+	result, err := svcs.WritingSvc.WriteArticleStream(ctx, userID, projectID, topic, inputType, articleType, length, taskID, onDelta)
 	if err != nil {
 		return billingError("write article", err), nil
 	}

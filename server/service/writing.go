@@ -32,6 +32,15 @@ type LLMClient interface {
 	CompleteWithImage(ctx context.Context, systemPrompt, userPrompt, imageURL string) (string, error)
 }
 
+// streamingLLMClient is the OPTIONAL streaming capability of an LLMClient. Real
+// OpenAI-compatible clients implement it; test fakes need not — callers detect
+// support via a type assertion and fall back to the blocking Complete path. Used
+// by write_article so a long generation streams progress to the client instead
+// of blocking on a single deadline.
+type streamingLLMClient interface {
+	CompleteStream(ctx context.Context, systemPrompt, userPrompt string, onDelta func(string)) (string, error)
+}
+
 // ---------------------------------------------------------------------------
 // OpenAI-compatible LLM client
 // ---------------------------------------------------------------------------
@@ -52,6 +61,41 @@ func NewOpenAILLMClient(baseURL, apiKey, modelName string, timeout time.Duration
 	return &openaiLLMClient{client: client, model: modelName, timeout: timeout}
 }
 
+// chatCompletionParams assembles the system+user chat params for this client's
+// model. Shared by the blocking Complete and the streaming CompleteStream so the
+// two stay in lockstep (incl. the Kimi thinking-disabled tweak for speed).
+func (c *openaiLLMClient) chatCompletionParams(systemPrompt, userPrompt string) openai.ChatCompletionNewParams {
+	messages := []openai.ChatCompletionMessageParamUnion{}
+	if systemPrompt != "" {
+		messages = append(messages, openai.ChatCompletionMessageParamUnion{
+			OfSystem: &openai.ChatCompletionSystemMessageParam{
+				Content: openai.ChatCompletionSystemMessageParamContentUnion{
+					OfString: openai.String(systemPrompt),
+				},
+			},
+		})
+	}
+	messages = append(messages, openai.ChatCompletionMessageParamUnion{
+		OfUser: &openai.ChatCompletionUserMessageParam{
+			Content: openai.ChatCompletionUserMessageParamContentUnion{
+				OfString: openai.String(userPrompt),
+			},
+		},
+	})
+	params := openai.ChatCompletionNewParams{
+		Messages: messages,
+		Model:    shared.ChatModel(c.model),
+	}
+	// Kimi K2.6/K2.5 thinking models default to thinking:enabled which causes
+	// slow responses and 504 timeouts on non-reasoning tasks (e.g. HTML conversion).
+	if isKimiThinkingModel(c.model) {
+		params.SetExtraFields(map[string]any{
+			"thinking": map[string]string{"type": "disabled"},
+		})
+	}
+	return params
+}
+
 // Complete sends a system + user message to the configured model and returns the
 // assistant's text content.
 func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
@@ -65,40 +109,7 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 		}
 	}
 
-	messages := []openai.ChatCompletionMessageParamUnion{}
-
-	if systemPrompt != "" {
-		messages = append(messages, openai.ChatCompletionMessageParamUnion{
-			OfSystem: &openai.ChatCompletionSystemMessageParam{
-				Content: openai.ChatCompletionSystemMessageParamContentUnion{
-					OfString: openai.String(systemPrompt),
-				},
-			},
-		})
-	}
-
-	messages = append(messages, openai.ChatCompletionMessageParamUnion{
-		OfUser: &openai.ChatCompletionUserMessageParam{
-			Content: openai.ChatCompletionUserMessageParamContentUnion{
-				OfString: openai.String(userPrompt),
-			},
-		},
-	})
-
-	params := openai.ChatCompletionNewParams{
-		Messages: messages,
-		Model:    shared.ChatModel(c.model),
-	}
-
-	// Kimi K2.6/K2.5 thinking models default to thinking:enabled which causes
-	// slow responses and 504 timeouts on non-reasoning tasks (e.g. HTML conversion).
-	if isKimiThinkingModel(c.model) {
-		params.SetExtraFields(map[string]any{
-			"thinking": map[string]string{"type": "disabled"},
-		})
-	}
-
-	resp, err := c.client.Chat.Completions.New(ctx, params)
+	resp, err := c.client.Chat.Completions.New(ctx, c.chatCompletionParams(systemPrompt, userPrompt))
 	if err != nil {
 		return "", fmt.Errorf("llm completion: %w", err)
 	}
@@ -109,6 +120,42 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 	}
 
 	return resp.Choices[0].Message.Content, nil
+}
+
+// CompleteStream sends a system + user message and returns the accumulated
+// assistant text, invoking onDelta for each content chunk as it arrives. It is
+// the streaming capability used by write_article: a slow generation streams
+// progress to the client instead of blocking on a single deadline. If onDelta is
+// nil it behaves like Complete minus the per-call timeout.
+//
+// Streaming intentionally does NOT apply c.timeout: the whole point is that a
+// long generation stays alive chunk-by-chunk, bounded only by the caller's
+// context (the MCP client/session budget) rather than being cut mid-generation
+// at a fixed wall-clock deadline.
+func (c *openaiLLMClient) CompleteStream(ctx context.Context, systemPrompt, userPrompt string, onDelta func(string)) (string, error) {
+	stream := c.client.Chat.Completions.NewStreaming(ctx, c.chatCompletionParams(systemPrompt, userPrompt))
+	// The stream owns the underlying HTTP response body; Close returns it to the
+	// transport pool. Idempotent (no-op once the decoder is drained), so defer is
+	// safe on every return path — without it every write_article leaks a conn.
+	defer stream.Close()
+	var b strings.Builder
+	for stream.Next() {
+		chunk := stream.Current()
+		for i := range chunk.Choices {
+			delta := chunk.Choices[i].Delta.Content
+			if delta == "" {
+				continue
+			}
+			b.WriteString(delta)
+			if onDelta != nil {
+				onDelta(delta)
+			}
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return b.String(), fmt.Errorf("llm stream completion: %w", err)
+	}
+	return b.String(), nil
 }
 
 // CompleteWithImage sends a system + user message with an image to the configured
@@ -390,6 +437,19 @@ func (s *WritingService) WriteArticle(
 	ctx context.Context,
 	userID, projectID, topic, inputType, articleType, length, taskID string,
 ) (*WriteArticleResult, error) {
+	return s.WriteArticleStream(ctx, userID, projectID, topic, inputType, articleType, length, taskID, nil)
+}
+
+// WriteArticleStream is the streaming variant of WriteArticle: it invokes onDelta
+// for each generated content chunk, so the MCP handler can relay real-time
+// progress to the client. A nil onDelta makes it identical to WriteArticle. When
+// the resolved LLM client does not support streaming, it falls back to the
+// blocking Complete path (test fakes, future non-OpenAI clients).
+func (s *WritingService) WriteArticleStream(
+	ctx context.Context,
+	userID, projectID, topic, inputType, articleType, length, taskID string,
+	onDelta func(string),
+) (*WriteArticleResult, error) {
 	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("find project: %w", err)
@@ -426,7 +486,17 @@ func (s *WritingService) WriteArticle(
 		}, nil
 	}
 
-	article, err := s.getLLMClient(ctx, userID).Complete(ctx, "", result.Prompt)
+	client := s.getLLMClient(ctx, userID)
+	var article string
+	if onDelta != nil {
+		if sc, ok := client.(streamingLLMClient); ok {
+			article, err = sc.CompleteStream(ctx, "", result.Prompt, onDelta)
+		} else {
+			article, err = client.Complete(ctx, "", result.Prompt)
+		}
+	} else {
+		article, err = client.Complete(ctx, "", result.Prompt)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("llm generate article: %w", err)
 	}

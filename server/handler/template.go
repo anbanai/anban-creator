@@ -178,6 +178,11 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 		req.Visibility = "public"
 	}
 
+	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
+	if err := service.RejectWriterNameAsByline(req.AuthorName); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+
 	tmpl := &model.Template{
 		Name:             req.Name,
 		Type:             req.Type,
@@ -239,6 +244,11 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 		default:
 			return Error(c, fiber.StatusBadRequest, "type must be one of: poster, seednote, article, ecommerce")
 		}
+	}
+
+	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
+	if err := service.RejectWriterNameAsByline(req.AuthorName); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
 	patch := &model.Template{

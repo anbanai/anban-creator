@@ -230,6 +230,50 @@ func TestApplySlotsToMarkdown_InlineDetailAfterParagraph(t *testing.T) {
 	}
 }
 
+// Regression: a slot whose image URL is ALREADY inlined in the source markdown
+// must be skipped, otherwise the renderer emits a duplicate <img> (the
+// wechatarticle workflow hit this and had to manually clean up repeated img).
+func TestApplySlotsToMarkdown_DedupAlreadyInlinedURL(t *testing.T) {
+	markdown := `# Title
+
+![hero](https://cdn/hero.png)
+
+## Section 1
+
+Content.
+`
+	plan := &LayoutPlan{
+		ArticleType: "long-form-essay",
+		Slots: []LayoutPlanSlot{
+			{SlotID: "hero", SectionIndex: 0, ImageURL: "https://cdn/hero.png"}, // already inlined → skip
+			{SlotID: "section_opener", SectionIndex: 1, ImageURL: "https://cdn/s1.png"}, // fresh → inject
+		},
+	}
+	augmented := applySlotsToMarkdown(markdown, plan)
+	if got := strings.Count(augmented, "https://cdn/hero.png"); got != 1 {
+		t.Errorf("[FAIL] inlined hero URL count = %d, want 1 (slot must not duplicate):\n%s", got, augmented)
+	}
+	if got := strings.Count(augmented, "https://cdn/s1.png"); got != 1 {
+		t.Errorf("[FAIL] fresh section_opener URL count = %d, want 1:\n%s", got, augmented)
+	}
+}
+
+// Footer dedup: a footer slot whose URL is already inlined must not be appended again.
+func TestApplySlotsToMarkdown_DedupFooterAlreadyInlined(t *testing.T) {
+	markdown := "## Section\n\n![footer](https://cdn/f.png)\n"
+	plan := &LayoutPlan{
+		ArticleType: "long-form-essay",
+		Slots: []LayoutPlanSlot{
+			{SlotID: "section_opener", SectionIndex: 0, ImageURL: "https://cdn/s.png"},
+		},
+		Footer: &LayoutPlanSlot{SlotID: "footer", ImageURL: "https://cdn/f.png"}, // already inlined → skip
+	}
+	augmented := applySlotsToMarkdown(markdown, plan)
+	if got := strings.Count(augmented, "https://cdn/f.png"); got != 1 {
+		t.Errorf("[FAIL] inlined footer URL count = %d, want 1 (no duplicate):\n%s", got, augmented)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Integration: RenderTemplate (deterministic — no LLM)
 // ---------------------------------------------------------------------------
@@ -347,6 +391,32 @@ func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
 	}
 	if renderedCount != 3 {
 		t.Errorf("[FAIL] rendered slot count = %d, want 3", renderedCount)
+	}
+}
+
+// Regression: when the source markdown already inlines an image AND a slot
+// carries the same URL, the rendered HTML must contain exactly ONE <img> for
+// that URL — the slot is deduped against the inline image.
+func TestRenderTemplate_DedupInlineAndSlotSameURL(t *testing.T) {
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	userID := "user-dedup-int-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+
+	markdown := "# 标题\n\n![hero](https://cdn/hero.png)\n\n## 第一节\n\n正文。\n"
+	plan := &LayoutPlan{
+		ArticleType: "long-form-essay",
+		Slots: []LayoutPlanSlot{
+			// Same URL as the inline hero above → must NOT render a 2nd <img>.
+			{SlotID: "hero", SectionIndex: 0, ImageURL: "https://cdn/hero.png"},
+		},
+	}
+
+	result, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "", "")
+	if err != nil {
+		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
+	}
+	if got := strings.Count(result.HTML, "https://cdn/hero.png"); got != 1 {
+		t.Errorf("[FAIL] hero URL appears %d times in HTML, want exactly 1 (inline + slot dedup):\n%s", got, result.HTML)
 	}
 }
 

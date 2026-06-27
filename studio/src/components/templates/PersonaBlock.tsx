@@ -16,13 +16,14 @@ import { ReferenceImageUpload } from '@/components/projects/ReferenceImageUpload
 import { SignedImage } from '@/components/ui/SignedImage'
 import type { ResourceEntry } from '@/types/resource'
 
-// PersonaBlock — 公众号「写作风格」统一区块，被模板编辑器、公众号项目编辑器、
-// 任务/计划编辑器（只读）共用，保证几处 UI 完全一致。把「名称（署名）」+「写作风格」+「头像」聚合在一起，
-// 并提供「从写作风格库导入」一键填充（选中写作风格 → 名字取中文名、简介取其描述）。
-//
-// 名称即署名：保存后落到 author_name/author（项目为 author），经 get_project_profile
-// 作为发布作者名下发；写作风格落到 author_style_intro（template_writing_style）。
-// readOnly=true 时渲染为只读摘要（项目绑定模板、任务/计划选了模板时，写作风格随模板同步展示）。
+// PersonaBlock — 公众号「人设」统一区块，被模板编辑器、公众号项目编辑器、
+// 任务/计划编辑器（只读）共用，保证几处 UI 完全一致。聚合三件事，三者语义严格不同、互不派生：
+//   - 名称（署名）：真实发布者姓名，保存后落到 author_name/author（项目为 author），
+//     经 get_project_profile 作为发布作者名下发到微信。纯手填，绝不来自写作风格人设名。
+//   - 写作风格：供 AI 模仿的口吻/笔迹，落到 author_style_intro（template_writing_style）。
+//     「从写作风格库导入」只回填此项（取所选 writer 的 description），不触碰署名。
+//   - 头像（可选）：人设头像，仅参考。
+// readOnly=true 时渲染为只读摘要（项目绑定模板、任务/计划选了模板时，随模板同步展示）。
 interface PersonaBlockProps {
   authorName: string
   onAuthorName: (v: string) => void
@@ -103,7 +104,7 @@ export function PersonaBlock({
     <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
       <div className="flex items-center justify-between">
         <Label className="text-sm font-medium">写作风格</Label>
-        <span className="text-xs text-muted-foreground">名称即署名 · 写作风格供 AI 模仿</span>
+        <span className="text-xs text-muted-foreground">名称=真实发布署名 · 写作风格供 AI 模仿（二者互不填充）</span>
       </div>
       {sortedWriters.length > 0 && (
         <div className="flex items-center gap-2">
@@ -113,12 +114,13 @@ export function PersonaBlock({
             onValueChange={(v) => {
               const w = sortedWriters.find((x) => x.name === v || x.english_name === v)
               if (!w) return
-              if (w.name) onAuthorName(w.name)
+              // 仅导入「写作风格简介」供 AI 模仿。作者署名是真实发布者姓名，与写作风格人设名无关，
+              // 导入绝不覆盖署名——否则会把人设名（如 Dan Koe）当成发布作者发到公众号。
               if (w.description) onAuthorStyleIntro(w.description)
             }}
           >
             <SelectTrigger className="h-7 w-full max-w-xs text-xs">
-              <SelectValue placeholder="选择写作风格，自动填入名称与简介" />
+              <SelectValue placeholder="选择写作风格，自动填入写作风格简介" />
             </SelectTrigger>
             <SelectContent>
               {sortedWriters.map((w) => (
@@ -147,7 +149,7 @@ export function PersonaBlock({
           <Input
             value={authorName}
             onChange={(e) => onAuthorName(e.target.value)}
-            placeholder="名称（署名），例如：Dan Koe"
+            placeholder="名称（署名）：发布后显示在文章作者位的真实姓名/品牌"
             maxLength={100}
           />
           <Textarea
