@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
 import type { TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
@@ -346,17 +347,26 @@ export default function TaskDetailPage() {
   const canRetry = task.status === 'failed' || task.status === 'cancelled'
   const currentTask = task
 
+  // Retry re-runs this task as a fresh billed task. The server clones the full
+  // configuration (three-dimensional style, author/persona, ecommerce package,
+  // image model, watermark, goal mode…) so nothing is lost — unlike the previous
+  // client-side create() which only forwarded type/prompt/project/ratio.
   async function handleRetry() {
     await submit(async () => {
-      const nextTask = await api.tasks.create({
-        type: currentTask.type,
-        prompt: currentTask.prompt || undefined,
-        project_id: currentTask.project_id,
-        image_ratio: currentTask.image_ratio || undefined,
-      })
-      toast.success('已重新创建任务')
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-      navigate(`/tasks/${nextTask.id}`)
+      try {
+        const nextTask = await api.tasks.retry(currentTask.id)
+        toast.success('已重新创建任务，全部设置已保留')
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+        navigate(`/tasks/${nextTask.id}`)
+      } catch (err: unknown) {
+        const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
+        const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
+        if (status === 402 || code === 40200) {
+          toast.error('积分不足，无法重试')
+        } else {
+          toast.error(getApiErrorMessage(err, '重试失败，请稍后再试'))
+        }
+      }
     })
   }
 
