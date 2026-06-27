@@ -105,32 +105,6 @@ export function PersonaBlock({
         <Label className="text-sm font-medium">写作风格</Label>
         <span className="text-xs text-muted-foreground">名称即署名 · 写作风格供 AI 模仿</span>
       </div>
-      <div className="flex items-stretch gap-3">
-        <div className="shrink-0">
-          <ReferenceImageUpload
-            value={authorAvatarUrl}
-            onChange={onAuthorAvatarUrl}
-            purpose="reference"
-          />
-          <p className="mt-1 text-center text-[11px] text-muted-foreground">头像（可选）</p>
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <Input
-            value={authorName}
-            onChange={(e) => onAuthorName(e.target.value)}
-            placeholder="名称（署名），例如：Dan Koe"
-            maxLength={100}
-          />
-          <Textarea
-            value={authorStyleIntro}
-            onChange={(e) => onAuthorStyleIntro(e.target.value)}
-            placeholder="写作风格：例如犀利、接地气、像朋友聊天；多用短句和反问；爱用具体数字和案例"
-            maxLength={1024}
-            className="resize-none"
-            rows={3}
-          />
-        </div>
-      </div>
       {sortedWriters.length > 0 && (
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">从写作风格库导入</span>
@@ -160,6 +134,32 @@ export function PersonaBlock({
           </Select>
         </div>
       )}
+      <div className="flex items-stretch gap-3">
+        <div className="shrink-0">
+          <ReferenceImageUpload
+            value={authorAvatarUrl}
+            onChange={onAuthorAvatarUrl}
+            purpose="reference"
+          />
+          <p className="mt-1 text-center text-[11px] text-muted-foreground">头像（可选）</p>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Input
+            value={authorName}
+            onChange={(e) => onAuthorName(e.target.value)}
+            placeholder="名称（署名），例如：Dan Koe"
+            maxLength={100}
+          />
+          <Textarea
+            value={authorStyleIntro}
+            onChange={(e) => onAuthorStyleIntro(e.target.value)}
+            placeholder="写作风格：例如犀利、接地气、像朋友聊天；多用短句和反问；爱用具体数字和案例"
+            maxLength={1024}
+            className="resize-none"
+            rows={3}
+          />
+        </div>
+      </div>
     </div>
   )
 }
