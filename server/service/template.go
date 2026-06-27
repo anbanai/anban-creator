@@ -132,6 +132,13 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	if patch.WritingStyle != "" {
 		existing.WritingStyle = patch.WritingStyle
 	}
+	// 排版样式 (Theme). Same "non-empty = set" PATCH rule as the scaffold/author
+	// fields — the repo writes ALL columns, so omitting this silently keeps the
+	// OLD theme (the "编辑后保存无效" bug). The Studio edit form round-trips the
+	// current value, so empty = leave unchanged is safe.
+	if patch.Theme != "" {
+		existing.Theme = patch.Theme
+	}
 	// Author persona (公众号 写作风格). Same "non-empty = set" PATCH rule as the
 	// scaffold fields above; the Studio edit form round-trips current values.
 	if patch.AuthorName != "" {

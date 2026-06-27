@@ -304,6 +304,42 @@ func TestTemplateService_Update_PersistsAuthorPersona(t *testing.T) {
 	}
 }
 
+// TestTemplateService_Update_PersistsTheme: the 公众号 排版样式 (Theme) set via
+// Update must round-trip through the repository. Same footgun guard as the
+// scaffold/author-persona tests: the repo writes ALL columns, so the service
+// must copy patch.Theme onto existing — forgetting it silently keeps the OLD
+// theme, which is exactly the "编辑后保存无效" bug.
+func TestTemplateService_Update_PersistsTheme(t *testing.T) {
+	svc, _, _ := setupTemplateService(t)
+	ctx := context.Background()
+	ownerID := uuid.New().String()
+
+	created, err := svc.Create(ctx, &model.Template{Name: "排版模板", Type: "article"}, ownerID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	patch := &model.Template{
+		Theme: "autumn-warm",
+	}
+	updated, err := svc.Update(ctx, created.ID, ownerID, patch)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Theme != "autumn-warm" {
+		t.Errorf("Theme = %q, want autumn-warm", updated.Theme)
+	}
+
+	// Re-fetch to confirm persistence (not just in-memory).
+	refetched, err := svc.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if refetched.Theme != "autumn-warm" {
+		t.Errorf("persisted Theme = %q, want autumn-warm", refetched.Theme)
+	}
+}
+
 func TestTemplateService_Delete_OwnerOnly(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	ctx := context.Background()
