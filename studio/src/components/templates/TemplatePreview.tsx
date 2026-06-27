@@ -152,141 +152,146 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
           )}
         </DialogHeader>
 
-        {/* Body: 左右两栏 */}
-        <div className="flex flex-col gap-4 sm:flex-row">
-          {/* Left: image */}
-          <div className="sm:w-48 sm:flex-shrink-0">
-            <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-border bg-muted">
-              {loading ? (
-                <div className="flex h-full w-full items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        {/* Body: 顶部「缩略图 + 基础元信息」两栏；文章专属的写作风格/排版预览与操作按钮
+            放到下方全宽区——避免 440px 的排版预览 iframe 挤在右栏导致「没拉满全宽」且
+            撑出横向滚动条。poster/seednote/ecommerce 的内容块仍在顶部两栏右列，布局不变。 */}
+        <div className="space-y-4">
+          {/* 顶部两栏：缩略图 + 基础元信息 */}
+          <div className="flex flex-col gap-4 sm:flex-row">
+            {/* Left: image */}
+            <div className="sm:w-48 sm:flex-shrink-0">
+              <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-border bg-muted">
+                {loading ? (
+                  <div className="flex h-full w-full items-center justify-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : data.thumbnail_url ? (
+                  <SignedImage
+                    src={data.thumbnail_url}
+                    alt={data.name}
+                    className="h-full w-full object-cover"
+                    showLoading={false}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center">
+                    <ImageIcon className="h-10 w-10 text-muted-foreground/40" />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right: 基础元信息（min-w-0 兜底，防止任意子内容撑爆弹窗触发横向滚动） */}
+            <div className="flex-1 min-w-0 space-y-3">
+              {/* Tags */}
+              {(data.tags ?? []).length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {(data.tags ?? []).map((tag) => (
+                    <Badge key={tag} variant="secondary" className="text-xs">
+                      {tag}
+                    </Badge>
+                  ))}
                 </div>
-              ) : data.thumbnail_url ? (
-                <SignedImage
-                  src={data.thumbnail_url}
-                  alt={data.name}
-                  className="h-full w-full object-cover"
-                  showLoading={false}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center">
-                  <ImageIcon className="h-10 w-10 text-muted-foreground/40" />
+              )}
+
+              {/* Style prompt (视觉风格) */}
+              {data.style_prompt && (
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">视觉风格</p>
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{data.style_prompt}</p>
                 </div>
+              )}
+
+              {/* 海报 (poster): 内容脚手架（写作风格 / 内容结构 / 示例）—— 保留原展示 */}
+              {data.type === 'poster' && (
+                <>
+                  <ScaffoldBlock label="写作风格" text={data.writing_style ?? ''} />
+
+                  {/* 内容结构 —— 优先渲染 .text，无 .text 时回退到 JSON 展开（poster 旧结构） */}
+                  {scaffoldText(data.structure) ? (
+                    <ScaffoldBlock label="内容结构" text={scaffoldText(data.structure)} />
+                  ) : (
+                    data.structure &&
+                    Object.keys(data.structure).length > 0 && (
+                      <JsonDisplay data={data.structure} title="模板结构" />
+                    )
+                  )}
+
+                  {/* 示例内容 —— 同上 */}
+                  {scaffoldText(data.example_content) ? (
+                    <ScaffoldBlock label="示例内容" text={scaffoldText(data.example_content)} />
+                  ) : (
+                    data.example_content &&
+                    Object.keys(data.example_content).length > 0 && (
+                      <JsonDisplay data={data.example_content} title="示例内容" />
+                    )
+                  )}
+                </>
               )}
             </div>
           </div>
 
-          {/* Right: text content */}
-          <div className="flex-1 space-y-3">
-            {/* Tags */}
-            {(data.tags ?? []).length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {(data.tags ?? []).map((tag) => (
-                  <Badge key={tag} variant="secondary" className="text-xs">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            )}
-
-            {/* Style prompt (视觉风格) */}
-            {data.style_prompt && (
-              <div className="rounded-lg border border-border px-3 py-2">
-                <p className="text-xs font-medium text-muted-foreground mb-1">视觉风格</p>
-                <p className="text-sm text-foreground whitespace-pre-wrap">{data.style_prompt}</p>
-              </div>
-            )}
-
-            {/* 公众号 (article): 写作风格（名称即署名 + 写作风格 + 可选头像，同框）+ 排版预览 */}
-            {data.type === 'article' && (
-              <>
-                {/* 写作风格 —— 名称(署名) + 写作风格 + 可选头像，放在一起（与编辑器一致） */}
-                {(data.author_name || data.author_style_intro || data.author_avatar_url) && (
-                  <div className="rounded-lg border border-border px-3 py-2">
-                    <p className="text-xs font-medium text-muted-foreground mb-2">写作风格</p>
-                    <div className="flex items-start gap-3">
-                      {data.author_avatar_url && (
-                        <SignedImage
-                          src={data.author_avatar_url}
-                          alt="头像"
-                          className="h-12 w-12 shrink-0 rounded-full object-cover"
-                          showLoading={false}
-                        />
+          {/* 公众号 (article): 写作风格 + 排版预览，全宽（移出两栏右列，iframe 不再撑爆 flex 行） */}
+          {data.type === 'article' && (
+            <div className="space-y-3">
+              {/* 写作风格 —— 名称(署名) + 写作风格 + 可选头像，放在一起（与编辑器一致） */}
+              {(data.author_name || data.author_style_intro || data.author_avatar_url) && (
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">写作风格</p>
+                  <div className="flex items-start gap-3">
+                    {data.author_avatar_url && (
+                      <SignedImage
+                        src={data.author_avatar_url}
+                        alt="头像"
+                        className="h-12 w-12 shrink-0 rounded-full object-cover"
+                        showLoading={false}
+                      />
+                    )}
+                    <div className="min-w-0 flex-1 space-y-1">
+                      {data.author_name && (
+                        <p className="text-sm font-medium text-foreground">{data.author_name}</p>
                       )}
-                      <div className="min-w-0 flex-1 space-y-1">
-                        {data.author_name && (
-                          <p className="text-sm font-medium text-foreground">{data.author_name}</p>
-                        )}
-                        {data.author_style_intro && (
-                          <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-                            {data.author_style_intro}
-                          </p>
-                        )}
-                      </div>
+                      {data.author_style_intro && (
+                        <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
+                          {data.author_style_intro}
+                        </p>
+                      )}
                     </div>
                   </div>
-                )}
-                {data.theme && (
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-medium text-muted-foreground">排版预览</p>
-                    <ThemePreview theme={data.theme} />
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* 海报 (poster): 内容脚手架（写作风格 / 内容结构 / 示例）—— 保留原展示 */}
-            {data.type === 'poster' && (
-              <>
-                <ScaffoldBlock label="写作风格" text={data.writing_style ?? ''} />
-
-                {/* 内容结构 —— 优先渲染 .text，无 .text 时回退到 JSON 展开（poster 旧结构） */}
-                {scaffoldText(data.structure) ? (
-                  <ScaffoldBlock label="内容结构" text={scaffoldText(data.structure)} />
-                ) : (
-                  data.structure &&
-                  Object.keys(data.structure).length > 0 && (
-                    <JsonDisplay data={data.structure} title="模板结构" />
-                  )
-                )}
-
-                {/* 示例内容 —— 同上 */}
-                {scaffoldText(data.example_content) ? (
-                  <ScaffoldBlock label="示例内容" text={scaffoldText(data.example_content)} />
-                ) : (
-                  data.example_content &&
-                  Object.keys(data.example_content).length > 0 && (
-                    <JsonDisplay data={data.example_content} title="示例内容" />
-                  )
-                )}
-              </>
-            )}
-
-            {/* Action buttons */}
-            <div className="flex flex-wrap gap-2 pt-2">
-              {(data.type === 'poster' || data.type === 'article') && (
-                <Button size="sm" onClick={() => { onOpenChange(false); navigate(`/tasks?create=true&type=article&template_id=${data.id}`) }}>
-                  用于公众号
-                </Button>
+                </div>
               )}
-              {(data.type === 'seednote' || data.type === 'poster') && (
-                <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); navigate(`/tasks?create=true&type=seednote&template_id=${data.id}`) }}>
-                  用于种草笔记
-                </Button>
-              )}
-              {isOwner && onEdit && (
-                <Button size="sm" variant="outline" onClick={() => onEdit(data)}>
-                  <Pencil className="h-3.5 w-3.5" />
-                  编辑
-                </Button>
-              )}
-              {isOwner && (
-                <Button size="sm" variant="outline" onClick={() => setDeleteOpen(true)} className="text-destructive hover:bg-destructive/5">
-                  <Trash2 className="h-3.5 w-3.5" />
-                  删除
-                </Button>
+              {data.theme && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">排版预览</p>
+                  <ThemePreview theme={data.theme} />
+                </div>
               )}
             </div>
+          )}
+
+          {/* Action buttons —— 底部全宽（保持在文章区块之下，DOM 顺序不变） */}
+          <div className="flex flex-wrap gap-2 pt-2">
+            {(data.type === 'poster' || data.type === 'article') && (
+              <Button size="sm" onClick={() => { onOpenChange(false); navigate(`/tasks?create=true&type=article&template_id=${data.id}`) }}>
+                用于公众号
+              </Button>
+            )}
+            {(data.type === 'seednote' || data.type === 'poster') && (
+              <Button size="sm" variant="outline" onClick={() => { onOpenChange(false); navigate(`/tasks?create=true&type=seednote&template_id=${data.id}`) }}>
+                用于种草笔记
+              </Button>
+            )}
+            {isOwner && onEdit && (
+              <Button size="sm" variant="outline" onClick={() => onEdit(data)}>
+                <Pencil className="h-3.5 w-3.5" />
+                编辑
+              </Button>
+            )}
+            {isOwner && (
+              <Button size="sm" variant="outline" onClick={() => setDeleteOpen(true)} className="text-destructive hover:bg-destructive/5">
+                <Trash2 className="h-3.5 w-3.5" />
+                删除
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>
