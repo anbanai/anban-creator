@@ -21,12 +21,12 @@ export interface Project {
   description?: string
   positioning: string
   keywords: string
-  style: string
-  writing_style: string
+  visual_style: string
+  writer_key: string
   theme: string
-  author: string
-  author_style_intro: string
-  author_avatar_url: string
+  byline: string
+  writing_voice: string
+  persona_avatar: string
   template_id: string
   reference_image_url: string
   image_ratio: string
@@ -60,12 +60,12 @@ export interface CreateProjectRequest {
   avatar_url?: string
   positioning?: string
   keywords?: string
-  style?: string
-  writing_style?: string
+  visual_style?: string
+  writer_key?: string
   theme?: string
-  author?: string
-  author_style_intro?: string
-  author_avatar_url?: string
+  byline?: string
+  writing_voice?: string
+  persona_avatar?: string
   template_id?: string
   reference_image_url?: string
   image_ratio?: string

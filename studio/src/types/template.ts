@@ -6,7 +6,7 @@ export type TemplateScope = 'all' | 'public' | 'mine'
 // on type="ecommerce" templates and merged into the task at creation
 // (service/task.go CreateManual) when the task omits its own values. Only the
 // visual StylePrompt dimension is used (3-dimension architecture: ecommerce
-// uses Style only, not WritingStyle/Theme/author). Product photos are uploaded
+// uses Style only, not WritingStyle/Theme/byline). Product photos are uploaded
 // per-task and are never part of the template.
 export interface EcommerceTemplateDefaults {
   default_selected_modules?: Record<string, number>
@@ -25,19 +25,21 @@ export interface Template {
   thumbnail_url: string
   structure: Record<string, unknown>
   style_prompt: string
-  // writing_style is the legacy writer-key scaffold (poster). Surfaced to the
-  // agent via get_project_profile(task_id). Old rows omit it.
-  writing_style?: string
-  // theme is the 排版样式 dimension (Markdown→HTML layout theme). Surfaced to
-  // the agent as template_theme. Old rows omit it.
+  // writer_key is the legacy writer-key scaffold (poster). Templates are project-
+  // launchers (imported once, then detached); the agent receives the project's
+  // flat fields via get_project_profile(task_id) — there is no template_* namespace. Old rows omit it.
+  writer_key?: string
+  // theme is the 排版样式 dimension (Markdown→HTML layout theme). Same as above:
+  // pre-fills project.theme; the project surfaces flat — no template_* namespace. Old rows omit it.
   theme?: string
   // Author persona — the 公众号 写作风格 dimension, defined inline on the
-  // template (not a writer key). Surfaced to the agent as template_author_*
-  // (name/avatar) and template_writing_style (= author_style_intro). Old rows
-  // (and non-article types) omit these.
+  // template (not a writer key). author_name=署名(pre-fills project.byline),
+  // writing_voice=自由文本口吻(pre-fills project.writing_voice, ≠ writer_key),
+  // persona_avatar=头像. The project surfaces these flat — no template_* namespace.
+  // Old rows (and non-article types) omit these.
   author_name?: string
-  author_avatar_url?: string
-  author_style_intro?: string
+  persona_avatar?: string
+  writing_voice?: string
   example_content: Record<string, unknown>
   tags: string[]
   // E-commerce template defaults (type="ecommerce" only). Surfaced to the task
@@ -58,7 +60,7 @@ export interface CreateTemplateRequest {
   // Content scaffold (optional, poster). The form wraps structure/example_content
   // as { text: <markdown> } on submit; backend extracts .text when delivering to
   // the agent. Category/tags are passed through verbatim.
-  writing_style?: string
+  writer_key?: string
   theme?: string
   structure?: string
   example_content?: string
@@ -66,8 +68,8 @@ export interface CreateTemplateRequest {
   tags?: string[]
   // Author persona (公众号). Sent only for article templates.
   author_name?: string
-  author_avatar_url?: string
-  author_style_intro?: string
+  persona_avatar?: string
+  writing_voice?: string
   // E-commerce template defaults. Sent only for ecommerce templates.
   ecommerce?: EcommerceTemplateDefaults
 }

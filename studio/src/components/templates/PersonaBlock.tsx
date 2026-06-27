@@ -18,9 +18,9 @@ import type { ResourceEntry } from '@/types/resource'
 
 // PersonaBlock — 公众号「人设」统一区块，被模板编辑器、公众号项目编辑器、
 // 任务/计划编辑器（只读）共用，保证几处 UI 完全一致。聚合三件事，三者语义严格不同、互不派生：
-//   - 名称（署名）：真实发布者姓名，保存后落到 author_name/author（项目为 author），
+//   - 名称（署名）：真实发布者姓名，保存后落到 author_name/byline（项目为 byline），
 //     经 get_project_profile 作为发布作者名下发到微信。纯手填，绝不来自写作风格人设名。
-//   - 写作风格：供 AI 模仿的口吻/笔迹，落到 author_style_intro（template_writing_style）。
+//   - 写作风格：供 AI 模仿的口吻/笔迹，落到 writing_voice（扁平下发，≠ writer_key）。
 //     「从写作风格库导入」只回填此项（取所选 writer 的 description），不触碰署名。
 //   - 头像（可选）：人设头像，仅参考。
 // readOnly=true 时渲染为只读摘要（项目绑定模板、任务/计划选了模板时，随模板同步展示）。

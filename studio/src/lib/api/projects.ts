@@ -50,7 +50,7 @@ export const projectsApi = {
     }, { timeout: 120000 })),
 
   analyzeImage: (imageUrl: string) =>
-    unwrap<{ style: string }>(http.post('/projects/analyze-image', {
+    unwrap<{ visual_style: string }>(http.post('/projects/analyze-image', {
       image_url: imageUrl,
     }, { timeout: 120000 })),
 }

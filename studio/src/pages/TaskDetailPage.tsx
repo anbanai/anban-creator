@@ -368,7 +368,7 @@ export default function TaskDetailPage() {
   const currentTask = task
 
   // Retry re-runs this task as a fresh billed task. The server clones the full
-  // configuration (three-dimensional style, author/persona, ecommerce package,
+  // configuration (three-dimensional style, byline/persona, ecommerce package,
   // image model, watermark, goal mode…) so nothing is lost — unlike the previous
   // client-side create() which only forwarded type/prompt/project/ratio.
   async function handleRetry() {

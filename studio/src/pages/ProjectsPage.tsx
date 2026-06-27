@@ -53,12 +53,12 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   wechat_secret: '',
   keywords: '',
   positioning: '',
-  style: '',
-  writing_style: '',
+  visual_style: '',
+  writer_key: '',
   theme: '',
-  author: '',
-  author_style_intro: '',
-  author_avatar_url: '',
+  byline: '',
+  writing_voice: '',
+  persona_avatar: '',
   template_id: '',
   reference_image_url: '',
   image_ratio: '',
@@ -76,12 +76,12 @@ function projectToForm(ch: Project): ProjectFormValues {
     wechat_secret: '',
     keywords: ch.keywords || '',
     positioning: ch.positioning || '',
-    style: ch.style || '',
-    writing_style: ch.writing_style || '',
+    visual_style: ch.visual_style || '',
+    writer_key: ch.writer_key || '',
     theme: ch.theme || '',
-    author: ch.author || '',
-    author_style_intro: ch.author_style_intro || '',
-    author_avatar_url: ch.author_avatar_url || '',
+    byline: ch.byline || '',
+    writing_voice: ch.writing_voice || '',
+    persona_avatar: ch.persona_avatar || '',
     template_id: ch.template_id || '',
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
@@ -117,9 +117,9 @@ export default function ProjectsPage() {
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
-  const authorName = useWatch({ control: form.control, name: 'author' })
-  const authorStyleIntro = useWatch({ control: form.control, name: 'author_style_intro' })
-  const authorAvatarUrl = useWatch({ control: form.control, name: 'author_avatar_url' })
+  const authorName = useWatch({ control: form.control, name: 'byline' })
+  const authorStyleIntro = useWatch({ control: form.control, name: 'writing_voice' })
+  const authorAvatarUrl = useWatch({ control: form.control, name: 'persona_avatar' })
   const themeValue = useWatch({ control: form.control, name: 'theme' })
 
   // Auto-focus profile_url field when dialog opens
@@ -191,8 +191,8 @@ export default function ProjectsPage() {
       setAnalyzingStyle(true)
       try {
         const result = await api.projects.analyzeImage(referenceImageUrl)
-        if (!cancelled && result.style && !styleManuallyEditedRef.current) {
-          form.setValue('style', result.style)
+        if (!cancelled && result.visual_style && !styleManuallyEditedRef.current) {
+          form.setValue('visual_style', result.visual_style)
         }
       } catch {
         toast.error('风格识别失败，请手动填写或重试')
@@ -227,7 +227,7 @@ export default function ProjectsPage() {
       if (profile.avatar_url) form.setValue('avatar_url', profile.avatar_url)
       if (profile.positioning) form.setValue('positioning', profile.positioning)
       if (profile.keywords) form.setValue('keywords', profile.keywords)
-      if (profile.style) form.setValue('style', profile.style)
+      if (profile.style) form.setValue('visual_style', profile.style)
       setProfileFetchHint('已更新项目信息')
       if (!options?.silent) {
         toast.success('已自动获取项目信息')
@@ -352,10 +352,10 @@ export default function ProjectsPage() {
           // 对话框已切到别的项目（或重开）则丢弃这条陈旧回填，避免串改。
           if (projectEditTokenRef.current !== token) return
           setSelectedTemplate(t)
-          if (!form.getValues('style')) form.setValue('style', t.style_prompt || '', { shouldDirty: false })
-          if (!form.getValues('author')) form.setValue('author', t.author_name || '', { shouldDirty: false })
-          if (!form.getValues('author_style_intro')) form.setValue('author_style_intro', t.author_style_intro || '', { shouldDirty: false })
-          if (!form.getValues('author_avatar_url')) form.setValue('author_avatar_url', t.author_avatar_url || '', { shouldDirty: false })
+          if (!form.getValues('visual_style')) form.setValue('visual_style', t.style_prompt || '', { shouldDirty: false })
+          if (!form.getValues('byline')) form.setValue('byline', t.author_name || '', { shouldDirty: false })
+          if (!form.getValues('writing_voice')) form.setValue('writing_voice', t.writing_voice || '', { shouldDirty: false })
+          if (!form.getValues('persona_avatar')) form.setValue('persona_avatar', t.persona_avatar || '', { shouldDirty: false })
           if (!form.getValues('theme')) form.setValue('theme', t.theme || '', { shouldDirty: false })
         })
         .catch(() => {
@@ -386,10 +386,10 @@ export default function ProjectsPage() {
   function handleProjectTemplateImport(template: Template) {
     if (selectedTemplate?.id === template.id) return
     setSelectedTemplate(template)
-    form.setValue('style', template.style_prompt || '', { shouldDirty: true })
-    form.setValue('author', template.author_name || '', { shouldDirty: true })
-    form.setValue('author_style_intro', template.author_style_intro || '', { shouldDirty: true })
-    form.setValue('author_avatar_url', template.author_avatar_url || '', { shouldDirty: true })
+    form.setValue('visual_style', template.style_prompt || '', { shouldDirty: true })
+    form.setValue('byline', template.author_name || '', { shouldDirty: true })
+    form.setValue('writing_voice', template.writing_voice || '', { shouldDirty: true })
+    form.setValue('persona_avatar', template.persona_avatar || '', { shouldDirty: true })
     form.setValue('theme', template.theme || '', { shouldDirty: true })
   }
 
@@ -401,12 +401,12 @@ export default function ProjectsPage() {
       avatar_url: values.avatar_url?.trim() || undefined,
       positioning: values.positioning?.trim() || undefined,
       keywords: values.keywords?.trim() || undefined,
-      style: values.style?.trim() || undefined,
-      writing_style: values.writing_style?.trim() || undefined,
+      visual_style: values.visual_style?.trim() || undefined,
+      writer_key: values.writer_key?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
-      author: values.author?.trim() || undefined,
-      author_style_intro: values.author_style_intro?.trim() || undefined,
-      author_avatar_url: values.author_avatar_url?.trim() || undefined,
+      byline: values.byline?.trim() || undefined,
+      writing_voice: values.writing_voice?.trim() || undefined,
+      persona_avatar: values.persona_avatar?.trim() || undefined,
       // 导入模型：项目 Owns 自己的人设。不发送 template_id——后端 Update 无条件清空，
       // 存量"绑定模板"项目保存后即迁移为自有值（运行时 task>template>project 解析）。
       reference_image_url: values.reference_image_url?.trim() || undefined,
@@ -756,7 +756,7 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="style" render={({ field }) => (
+              <FormField control={form.control} name="visual_style" render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between gap-2">
                     <FormLabel>视觉风格</FormLabel>
@@ -830,18 +830,18 @@ export default function ProjectsPage() {
                       绑定到项目自身字段。选模板后自动填入，用户可覆盖。 */}
                   <PersonaBlock
                     authorName={authorName ?? ''}
-                    onAuthorName={(v) => form.setValue('author', v, { shouldDirty: true })}
+                    onAuthorName={(v) => form.setValue('byline', v, { shouldDirty: true })}
                     authorStyleIntro={authorStyleIntro ?? ''}
-                    onAuthorStyleIntro={(v) => form.setValue('author_style_intro', v, { shouldDirty: true })}
+                    onAuthorStyleIntro={(v) => form.setValue('writing_voice', v, { shouldDirty: true })}
                     authorAvatarUrl={authorAvatarUrl ?? ''}
-                    onAuthorAvatarUrl={(v) => form.setValue('author_avatar_url', v, { shouldDirty: true })}
+                    onAuthorAvatarUrl={(v) => form.setValue('persona_avatar', v, { shouldDirty: true })}
                   />
                   <ThemePicker theme={themeValue ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
                 </>
               )}
 
               {/* 作者名（署名）：seednote 在此编辑；article 改由上方「公众号模板/写作风格」区块统一维护。 */}
-              {isSeednote && <FormField control={form.control} name="author" render={({ field }) => (
+              {isSeednote && <FormField control={form.control} name="byline" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>
                   <FormControl>

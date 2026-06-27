@@ -235,22 +235,22 @@ func TestTemplateHandler_Create_ArticleAuthorPersona(t *testing.T) {
 	userID := uuid.New().String()
 
 	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
-		"name":               "老李的公众号",
-		"type":               "article",
-		"thumbnail_url":      "https://example.com/x.png",
-		"style_prompt":       "暖色",
-		"visibility":         "public",
-		"author_name":        "老李",
-		"author_avatar_url":  "https://example.com/avatar.png",
-		"author_style_intro": "犀利、接地气、像朋友聊天",
+		"name":           "老李的公众号",
+		"type":           "article",
+		"thumbnail_url":  "https://example.com/x.png",
+		"style_prompt":   "暖色",
+		"visibility":     "public",
+		"author_name":    "老李",
+		"persona_avatar": "https://example.com/avatar.png",
+		"writing_voice":  "犀利、接地气、像朋友聊天",
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	// Request body still uses the legacy input keys (author_name / author_avatar_url /
-	// author_style_intro); the P1 rename keeps the input wire contract stable. But the
-	// RESPONSE serializes the model with the renamed JSON tags (byline / persona_avatar
-	// / writing_voice), so we assert those here.
+	// P4 unified the input wire contract with the model's JSON tags: author_name (input)
+	// maps to byline (the byline never equals the writer-persona name — see
+	// RejectWriterNameAsByline), persona_avatar, and writing_voice. The RESPONSE
+	// serializes the model with the same renamed tags, so we assert those here.
 	data := decodeBody(t, resp)["data"].(map[string]any)
 	if data["byline"] != "老李" {
 		t.Errorf("byline = %v, want 老李", data["byline"])

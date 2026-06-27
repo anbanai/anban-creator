@@ -31,7 +31,7 @@ func registerTemplateTools(server *mcp.Server) {
 				"category":        map[string]any{"type": "string", "description": "Industry/category tag (optional)"},
 				"structure":       map[string]any{"type": "string", "description": "JSON string of template structure (required)"},
 				"style_prompt":    map[string]any{"type": "string", "description": "AI visual style prompt (optional)"},
-				"writing_style":   map[string]any{"type": "string", "description": "Content writing voice/tonality scaffold (optional), distinct from visual style_prompt; delivered to the agent as template_writing_style via get_project_profile(task_id)"},
+				"writing_style":   map[string]any{"type": "string", "description": "Content writing voice/tonality scaffold (optional), distinct from visual style_prompt; stored as the template's writer_key. Templates are project-launchers (imported once, then detached) and do not enter task resolution."},
 				"example_content": map[string]any{"type": "string", "description": "JSON string of example content (optional)"},
 				"tags":            map[string]any{"type": "string", "description": "JSON array string of tags (optional)"},
 			},

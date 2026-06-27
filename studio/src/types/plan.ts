@@ -15,8 +15,8 @@ export interface Plan {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
-  style?: string
-  writing_style?: string
+  visual_style?: string
+  writer_key?: string
   theme?: string
   watermark?: boolean
   goal?: string
@@ -24,9 +24,9 @@ export interface Plan {
   has_content_image?: boolean
   has_tail_image?: boolean
   // 公众号人设（与项目/模板同链解析：plan > template > project），spawned task 继承。
-  author?: string
-  author_style_intro?: string
-  author_avatar_url?: string
+  byline?: string
+  writing_voice?: string
+  persona_avatar?: string
   // template_id records the template selected when creating the plan; spawned
   // tasks inherit it so the agent can surface the template's content scaffold
   // via get_project_profile(task_id).
@@ -43,8 +43,8 @@ export interface CreatePlanRequest {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
-  style?: string
-  writing_style?: string
+  visual_style?: string
+  writer_key?: string
   theme?: string
   watermark?: boolean
   goal?: string
@@ -53,9 +53,9 @@ export interface CreatePlanRequest {
   has_content_image?: boolean
   has_tail_image?: boolean
   // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。
-  author?: string
-  author_style_intro?: string
-  author_avatar_url?: string
+  byline?: string
+  writing_voice?: string
+  persona_avatar?: string
   template_id?: string
 }
 
@@ -65,8 +65,8 @@ export interface UpdatePlanRequest {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
-  style?: string
-  writing_style?: string
+  visual_style?: string
+  writer_key?: string
   theme?: string
   watermark?: boolean
   goal?: string
@@ -74,8 +74,8 @@ export interface UpdatePlanRequest {
   has_content_image?: boolean
   has_tail_image?: boolean
   // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。
-  author?: string
-  author_style_intro?: string
-  author_avatar_url?: string
+  byline?: string
+  writing_voice?: string
+  persona_avatar?: string
   template_id?: string
 }

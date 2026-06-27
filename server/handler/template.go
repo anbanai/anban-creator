@@ -129,16 +129,16 @@ type createTemplateRequest struct {
 	ThumbnailURL   string   `json:"thumbnail_url"`
 	StylePrompt    string   `json:"style_prompt"`
 	Visibility     string   `json:"visibility"`
-	WritingStyle   string   `json:"writing_style"`
+	WriterKey      string   `json:"writer_key"`
 	Theme          string   `json:"theme"`
 	Structure      string   `json:"structure"`
 	ExampleContent string   `json:"example_content"`
 	Category       string   `json:"category"`
 	Tags           []string `json:"tags"`
 	// Author persona (公众号 写作风格 dimension, inline on the template).
-	AuthorName       string `json:"author_name"`
-	AuthorAvatarURL  string `json:"author_avatar_url"`
-	AuthorStyleIntro string `json:"author_style_intro"`
+	AuthorName    string `json:"author_name"`
+	PersonaAvatar string `json:"persona_avatar"`
+	WritingVoice  string `json:"writing_voice"`
 	// Ecommerce defaults (type="ecommerce" only): default modules/quantities,
 	// target platform, brand brief, default image model key. Pointer so nil =
 	// leave unchanged on PATCH (Update); non-nil = set (Create or Update).
@@ -189,15 +189,15 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 		ThumbnailURL:   req.ThumbnailURL,
 		VisualStyle:    req.StylePrompt,
 		Visibility:     req.Visibility,
-		WriterKey:      req.WritingStyle,
+		WriterKey:      req.WriterKey,
 		Theme:          req.Theme,
 		Structure:      scaffoldText(req.Structure),
 		ExampleContent: scaffoldText(req.ExampleContent),
 		Category:       req.Category,
 		Tags:           req.Tags,
 		Byline:         req.AuthorName,
-		PersonaAvatar:  req.AuthorAvatarURL,
-		WritingVoice:   req.AuthorStyleIntro,
+		PersonaAvatar:  req.PersonaAvatar,
+		WritingVoice:   req.WritingVoice,
 		IsActive:       true,
 	}
 	if req.Ecommerce != nil {
@@ -257,15 +257,15 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 		ThumbnailURL:   req.ThumbnailURL,
 		VisualStyle:    req.StylePrompt,
 		Visibility:     req.Visibility,
-		WriterKey:      req.WritingStyle,
+		WriterKey:      req.WriterKey,
 		Theme:          req.Theme,
 		Structure:      scaffoldText(req.Structure),
 		ExampleContent: scaffoldText(req.ExampleContent),
 		Category:       req.Category,
 		Tags:           req.Tags,
 		Byline:         req.AuthorName,
-		PersonaAvatar:  req.AuthorAvatarURL,
-		WritingVoice:   req.AuthorStyleIntro,
+		PersonaAvatar:  req.PersonaAvatar,
+		WritingVoice:   req.WritingVoice,
 	}
 	if req.Ecommerce != nil {
 		patch.SetEcommerce(*req.Ecommerce)
