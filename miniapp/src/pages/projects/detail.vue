@@ -1,30 +1,30 @@
 <template>
-  <view class="page channel-detail">
+  <view class="page project-detail">
     <AbLoading v-if="pageLoading && !isNew" text="加载中" />
 
     <view v-else>
       <!-- Step indicator (new mode only) -->
-      <view v-if="isNew" class="channel-detail__steps">
+      <view v-if="isNew" class="project-detail__steps">
         <view
           v-for="(s, i) in steps"
           :key="i"
-          class="channel-detail__step"
+          class="project-detail__step"
           :class="{
-            'channel-detail__step--active': currentStep === i,
-            'channel-detail__step--done': currentStep > i,
+            'project-detail__step--active': currentStep === i,
+            'project-detail__step--done': currentStep > i,
           }"
         >
-          <view class="channel-detail__step-dot">
-            <text v-if="currentStep > i" class="channel-detail__step-check">✓</text>
+          <view class="project-detail__step-dot">
+            <text v-if="currentStep > i" class="project-detail__step-check">✓</text>
             <text v-else>{{ i + 1 }}</text>
           </view>
-          <text class="channel-detail__step-label">{{ s }}</text>
+          <text class="project-detail__step-label">{{ s }}</text>
         </view>
       </view>
 
       <!-- Step 1: Platform selection -->
-      <view v-if="isNew && currentStep === 0" class="channel-detail__content">
-        <view class="channel-detail__section-title">选择平台</view>
+      <view v-if="isNew && currentStep === 0" class="project-detail__content">
+        <view class="project-detail__section-title">选择平台</view>
 
         <view
           v-for="p in platformOptions"
@@ -45,14 +45,49 @@
       </view>
 
       <!-- Step 2: Basic info -->
-      <view v-if="isNew ? currentStep === 1 : true" class="channel-detail__content">
-        <view v-if="isNew" class="channel-detail__section-title">基础信息</view>
-        <view v-else class="channel-detail__collapsible-header" @tap="sections.basic = !sections.basic">
-          <text class="channel-detail__collapsible-title">基础信息</text>
-          <text class="channel-detail__collapsible-arrow">{{ sections.basic ? '收起' : '展开' }}</text>
+      <view v-if="isNew ? currentStep === 1 : true" class="project-detail__content">
+        <view v-if="isNew" class="project-detail__section-title">基础信息</view>
+        <view v-else class="project-detail__collapsible-header" @tap="sections.basic = !sections.basic">
+          <text class="project-detail__collapsible-title">基础信息</text>
+          <text class="project-detail__collapsible-arrow">{{ sections.basic ? '收起' : '展开' }}</text>
         </view>
 
-        <view v-if="isNew || sections.basic" class="channel-detail__fields">
+        <view v-if="isNew || sections.basic" class="project-detail__fields">
+          <!-- Avatar upload -->
+          <view class="field-group">
+            <text class="field-label">账号头像</text>
+            <view class="avatar-uploader" @tap="onChooseAvatar">
+              <image
+                v-if="form.avatar_url"
+                :src="form.avatar_url"
+                class="avatar-uploader__img"
+                mode="aspectFill"
+              />
+              <view v-else class="avatar-uploader__placeholder">
+                <PlatformAvatar v-if="form.platform" :platform="form.platform" :size="80" />
+                <text v-else class="avatar-uploader__hint">点击上传</text>
+              </view>
+              <view v-if="avatarUploading" class="avatar-uploader__mask">
+                <text>上传中…</text>
+              </view>
+            </view>
+            <view v-if="form.avatar_url" class="avatar-uploader__actions">
+              <text class="avatar-uploader__action" @tap="onChooseAvatar">更换</text>
+              <text
+                class="avatar-uploader__action avatar-uploader__action--danger"
+                @tap="form.avatar_url = ''"
+              >
+                移除
+              </text>
+            </view>
+            <text class="field-hint">支持从相册选择，或填写 URL；留空将使用平台默认头像。</text>
+            <AbInput
+              v-model="form.avatar_url"
+              placeholder="或输入图片 URL"
+              style="margin-top: 8rpx;"
+            />
+          </view>
+
           <!-- Profile URL (seednote only) -->
           <view v-if="isSeednote" class="field-group">
             <text class="field-label">账号链接</text>
@@ -104,14 +139,54 @@
             />
           </view>
 
-          <!-- Writing style -->
+          <!-- Writing style (visual) -->
           <view class="field-group">
-            <text class="field-label">写作风格</text>
-            <AbTextarea
-              v-model="form.style"
-              placeholder="描述你想要的写作风格"
-              :rows="2"
+            <text class="field-label">视觉风格</text>
+            <view class="style-block">
+              <AbTextarea
+                v-model="form.style"
+                :placeholder="stylePlaceholder"
+                :rows="3"
+              />
+              <view v-if="analyzingStyle" class="style-block__analyzing">
+                <text>正在分析参考图…</text>
+              </view>
+            </view>
+            <text class="field-hint">{{ styleHint }}</text>
+          </view>
+
+          <!-- Reference image (seednote/ecommerce): upload + auto-analyze -->
+          <view v-if="isSeednote || isEcommerce" class="field-group">
+            <text class="field-label">参考图片</text>
+            <view class="ref-uploader" @tap="onChooseReference">
+              <image
+                v-if="form.reference_image_url"
+                :src="form.reference_image_url"
+                class="ref-uploader__img"
+                mode="aspectFill"
+              />
+              <view v-else class="ref-uploader__placeholder">
+                <text class="ref-uploader__hint">点击上传参考图</text>
+              </view>
+              <view v-if="referenceUploading" class="ref-uploader__mask">
+                <text>上传中…</text>
+              </view>
+            </view>
+            <AbInput
+              v-model="form.reference_image_url"
+              placeholder="或输入图片 URL"
+              style="margin-top: 8rpx;"
             />
+            <view v-if="form.reference_image_url" class="ref-uploader__actions">
+              <text class="ref-uploader__action" @tap="onAnalyzeReference">识别风格</text>
+              <text
+                class="ref-uploader__action ref-uploader__action--danger"
+                @tap="form.reference_image_url = ''"
+              >
+                清除
+              </text>
+            </view>
+            <text class="field-hint">上传参考图后可自动识别视觉风格（种草笔记）。</text>
           </view>
 
           <!-- Image ratio -->
@@ -132,26 +207,29 @@
         </view>
       </view>
 
-      <!-- Step 3: Publishing config (only for article/xls) -->
+      <!-- Step 3: Publishing config (only for article/xls/ecommerce) -->
       <view v-if="isNew ? currentStep === 2 : true">
         <template v-if="!isSeednote">
-          <view v-if="isNew" class="channel-detail__section-title">发布配置</view>
-          <view v-else class="channel-detail__collapsible-header" @tap="sections.publishing = !sections.publishing">
-            <text class="channel-detail__collapsible-title">发布配置</text>
-            <text class="channel-detail__collapsible-arrow">{{ sections.publishing ? '收起' : '展开' }}</text>
+          <view v-if="isNew" class="project-detail__section-title">发布配置</view>
+          <view v-else class="project-detail__collapsible-header" @tap="sections.publishing = !sections.publishing">
+            <text class="project-detail__collapsible-title">发布配置</text>
+            <text class="project-detail__collapsible-arrow">{{ sections.publishing ? '收起' : '展开' }}</text>
           </view>
 
-          <view v-if="isNew || sections.publishing" class="channel-detail__fields">
-            <!-- Auto-publish switch -->
-            <view class="field-group">
+          <view v-if="isNew || sections.publishing" class="project-detail__fields">
+            <!-- Auto-publish switch (article only — xls/ecommerce don't publish) -->
+            <view v-if="isArticle" class="field-group">
               <view class="switch-row">
                 <text class="field-label" style="margin-bottom: 0;">自动发布到微信</text>
                 <AbSwitch v-model="form.enable_publishing" />
               </view>
+              <text v-if="form.enable_publishing" class="field-hint">
+                开启后任务完成将自动发布到公众号。
+              </text>
             </view>
 
             <!-- WeChat credentials (shown when auto-publish is on) -->
-            <template v-if="form.enable_publishing">
+            <template v-if="isArticle && form.enable_publishing">
               <view class="field-group">
                 <text class="field-label">微信 AppID</text>
                 <AbInput
@@ -165,7 +243,7 @@
                 <AbInput
                   v-model="form.wechat_secret"
                   type="password"
-                  placeholder="输入微信公众号 AppSecret"
+                  :placeholder="isNew ? '输入微信公众号 AppSecret' : '留空则保持原有密钥不变'"
                 />
                 <text class="field-hint">安全提示：AppSecret 仅在服务端使用，请勿在公共设备上填写。</text>
               </view>
@@ -174,27 +252,72 @@
         </template>
       </view>
 
-      <!-- Step 4: Advanced settings -->
+      <!-- Step 4: Persona + Advanced settings -->
       <view v-if="isNew ? currentStep === 3 : true">
-        <view v-if="isNew" class="channel-detail__section-title">高级设置（可选）</view>
-        <view v-else class="channel-detail__collapsible-header" @tap="sections.advanced = !sections.advanced">
-          <text class="channel-detail__collapsible-title">高级设置</text>
-          <text class="channel-detail__collapsible-arrow">{{ sections.advanced ? '收起' : '展开' }}</text>
+        <view v-if="isNew" class="project-detail__section-title">高级设置（可选）</view>
+        <view v-else class="project-detail__collapsible-header" @tap="sections.advanced = !sections.advanced">
+          <text class="project-detail__collapsible-title">高级设置</text>
+          <text class="project-detail__collapsible-arrow">{{ sections.advanced ? '收起' : '展开' }}</text>
         </view>
 
-        <view v-if="isNew || sections.advanced" class="channel-detail__fields">
-          <!-- Reference image URL -->
-          <view class="field-group">
-            <text class="field-label">参考图片</text>
-            <AbInput
-              v-model="form.reference_image_url"
-              placeholder="输入图片URL"
-            />
+        <view v-if="isNew || sections.advanced" class="project-detail__fields">
+          <!-- Template import (article / ecommerce): one-shot import of persona/style -->
+          <view v-if="isArticle || isEcommerce" class="field-group">
+            <text class="field-label">从模板导入</text>
+            <view class="picker-row" @tap="pickTemplate">
+              <text v-if="selectedTemplateName" class="picker-row__value">{{ selectedTemplateName }}</text>
+              <text v-else class="picker-row__placeholder">可选，导入模板风格/人设</text>
+              <text v-if="form.template_id" class="picker-row__clear" @tap.stop="clearTemplateImport">清除</text>
+              <text v-else class="picker-row__arrow">›</text>
+            </view>
+            <text class="field-hint">选择模板后，视觉风格/作者/写作风格/排版将一次性填入，可继续编辑。</text>
           </view>
 
-          <!-- Theme -->
-          <view class="field-group">
-            <text class="field-label">主题</text>
+          <!-- Persona block (article / seednote) — author ≠ writing_style persona -->
+          <view v-if="isArticle || isSeednote" class="persona-block">
+            <text class="field-label persona-block__title">作者人设</text>
+
+            <view class="field-spacer">
+              <text class="field-sublabel">作者署名</text>
+              <AbInput v-model="form.author" placeholder="显示在文章/笔记的作者名（≠ 写作风格）" />
+            </view>
+
+            <view class="field-spacer">
+              <text class="field-sublabel">写作风格模仿</text>
+              <AbTextarea
+                v-model="form.author_style_intro"
+                placeholder="模仿某位作者/博主的文风，描述其语言习惯、句式特点…"
+                :rows="2"
+              />
+            </view>
+
+            <view class="field-spacer">
+              <text class="field-sublabel">人设头像</text>
+              <view class="ref-uploader ref-uploader--sm" @tap="onChooseAuthorAvatar">
+                <image
+                  v-if="form.author_avatar_url"
+                  :src="form.author_avatar_url"
+                  class="ref-uploader__img"
+                  mode="aspectFill"
+                />
+                <view v-else class="ref-uploader__placeholder">
+                  <text class="ref-uploader__hint">点击上传人设头像</text>
+                </view>
+                <view v-if="authorAvatarUploading" class="ref-uploader__mask">
+                  <text>上传中…</text>
+                </view>
+              </view>
+              <AbInput
+                v-model="form.author_avatar_url"
+                placeholder="或输入图片 URL"
+                style="margin-top: 8rpx;"
+              />
+            </view>
+          </view>
+
+          <!-- Theme (article) -->
+          <view v-if="isArticle" class="field-group">
+            <text class="field-label">排版主题</text>
             <AbSelect
               v-model="form.theme"
               :options="themeOptions"
@@ -203,7 +326,7 @@
             />
           </view>
 
-          <view class="field-group">
+          <view v-if="isArticle" class="field-group">
             <text class="field-label">文章版式</text>
             <AbSelect
               v-model="form.layout"
@@ -213,7 +336,7 @@
             />
           </view>
 
-          <view class="field-group">
+          <view v-if="isArticle" class="field-group">
             <text class="field-label">图片预设</text>
             <AbSelect
               v-model="form.image_preset"
@@ -223,25 +346,49 @@
             />
           </view>
 
-          <!-- Author name -->
-          <view class="field-group">
+          <!-- Author name for seednote (article uses the persona block above) -->
+          <view v-if="isSeednote" class="field-group">
             <text class="field-label">作者名</text>
-            <AbInput
-              v-model="form.author"
-              placeholder="署名"
-            />
+            <AbInput v-model="form.author" placeholder="署名" />
+          </view>
+        </view>
+      </view>
+
+      <!-- Stats (edit mode only) -->
+      <view v-if="!isNew && stats" class="project-detail__content">
+        <view class="project-detail__collapsible-header" @tap="sections.stats = !sections.stats">
+          <text class="project-detail__collapsible-title">运行统计</text>
+          <text class="project-detail__collapsible-arrow">{{ sections.stats ? '收起' : '展开' }}</text>
+        </view>
+
+        <view v-if="sections.stats" class="stats-grid">
+          <view class="stats-cell">
+            <text class="stats-cell__num">{{ stats.total_tasks ?? 0 }}</text>
+            <text class="stats-cell__label">总任务</text>
+          </view>
+          <view class="stats-cell">
+            <text class="stats-cell__num stats-cell__num--success">{{ stats.completed_tasks ?? 0 }}</text>
+            <text class="stats-cell__label">已完成</text>
+          </view>
+          <view class="stats-cell">
+            <text class="stats-cell__num stats-cell__num--danger">{{ stats.failed_tasks ?? 0 }}</text>
+            <text class="stats-cell__label">失败</text>
+          </view>
+          <view class="stats-cell">
+            <text class="stats-cell__num stats-cell__num--info">{{ stats.success_rate ?? 0 }}%</text>
+            <text class="stats-cell__label">成功率</text>
           </view>
         </view>
       </view>
 
       <!-- Topic pool (edit mode only) -->
-      <view v-if="!isNew" class="channel-detail__content">
-        <view class="channel-detail__collapsible-header" @tap="sections.topics = !sections.topics">
-          <text class="channel-detail__collapsible-title">选题池</text>
-          <text class="channel-detail__collapsible-arrow">{{ sections.topics ? '收起' : '展开' }}</text>
+      <view v-if="!isNew" class="project-detail__content">
+        <view class="project-detail__collapsible-header" @tap="sections.topics = !sections.topics">
+          <text class="project-detail__collapsible-title">选题池</text>
+          <text class="project-detail__collapsible-arrow">{{ sections.topics ? '收起' : '展开' }}</text>
         </view>
 
-        <view v-if="sections.topics" class="channel-detail__fields">
+        <view v-if="sections.topics" class="project-detail__fields">
           <view class="field-group">
             <text class="field-label">批量添加选题</text>
             <AbTextarea
@@ -306,7 +453,7 @@
     </view>
 
     <!-- Bottom actions -->
-    <view class="channel-detail__bottom">
+    <view class="project-detail__bottom">
       <template v-if="isNew">
         <AbButton v-if="currentStep > 0" type="ghost" size="lg" @click="prevStep" style="flex: 1;">
           上一步
@@ -344,13 +491,21 @@
         >
           保存修改
         </AbButton>
-        <view class="channel-detail__bottom-actions">
+        <view class="project-detail__bottom-actions">
           <AbButton
             type="ghost"
             size="sm"
             @click="onArchive"
           >
             归档账号
+          </AbButton>
+          <AbButton
+            v-if="projectArchived"
+            type="ghost"
+            size="sm"
+            @click="onRestore"
+          >
+            恢复账号
           </AbButton>
           <AbButton
             type="danger"
@@ -366,11 +521,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import type { Channel, CreateChannelRequest, ResourceEntry, TopicPool } from '@/types'
-import { channelsApi } from '@/api/channels'
+import type {
+  Project,
+  ProjectStats,
+  CreateProjectRequest,
+  ResourceEntry,
+  TopicPool,
+  Template,
+} from '@/types'
+import { projectsApi } from '@/api/projects'
 import { resourcesApi } from '@/api/resources'
+import { templatesApi } from '@/api/templates'
 import { topicPoolApi } from '@/api/topic-pool'
 import { IMAGE_RATIOS } from '@/utils/constants'
 import AbButton from '@/components/common/AbButton.vue'
@@ -386,6 +549,7 @@ import TagInput from '@/components/business/TagInput.vue'
 const platformOptions = [
   { value: 'seednote', label: '种草笔记', description: '社交种草，图文笔记' },
   { value: 'article', label: '公众号', description: '长图文深度文章' },
+  { value: 'ecommerce', label: '电商出图', description: '商品主图/详情/封面' },
   { value: 'xls', label: '小绿书', description: '图片帖，轻量分享' },
 ]
 
@@ -396,7 +560,13 @@ const editId = ref('')
 const pageLoading = ref(false)
 const saving = ref(false)
 const fetchingProfile = ref(false)
+const analyzingStyle = ref(false)
+const avatarUploading = ref(false)
+const referenceUploading = ref(false)
+const authorAvatarUploading = ref(false)
+const projectArchived = ref(false)
 const currentStep = ref(0)
+const stats = ref<ProjectStats | null>(null)
 
 const form = reactive({
   platform: '',
@@ -406,10 +576,15 @@ const form = reactive({
   positioning: '',
   keywords: '',
   style: '',
+  // Article persona — orthogonal to byline (project memory invariant).
+  writing_style: '',
+  author: '',
+  author_style_intro: '',
+  author_avatar_url: '',
+  template_id: '',
   theme: '',
   layout: '',
   image_preset: '',
-  author: '',
   reference_image_url: '',
   image_ratio: '3:4',
   enable_publishing: false,
@@ -422,6 +597,7 @@ const themes = ref<ResourceEntry[]>([])
 const layouts = ref<ResourceEntry[]>([])
 const imagePresets = ref<ResourceEntry[]>([])
 const resourcesLoading = ref(false)
+const platformTemplates = ref<Template[]>([])
 const topics = ref<TopicPool[]>([])
 const topicStatus = ref<'unused' | 'used' | ''>('unused')
 const topicsLoading = ref(false)
@@ -434,10 +610,14 @@ const sections = reactive({
   basic: true,
   publishing: false,
   advanced: false,
+  stats: false,
   topics: false,
 })
 
 const isSeednote = computed(() => form.platform === 'seednote')
+const isArticle = computed(() => form.platform === 'article')
+const isEcommerce = computed(() => form.platform === 'ecommerce')
+
 const themeOptions = computed(() => resourceOptions(themes.value))
 const layoutOptions = computed(() => resourceOptions(layouts.value))
 const imagePresetOptions = computed(() => resourceOptions(imagePresets.value))
@@ -446,6 +626,12 @@ const topicStatusOptions = [
   { value: 'used', label: '已使用' },
   { value: '', label: '全部' },
 ]
+
+const selectedTemplateName = computed(() => {
+  const t = platformTemplates.value.find((x) => x.id === form.template_id)
+  return t?.name || ''
+})
+
 const maxStep = computed(() => {
   // Skip step 3 (publishing) for seednote
   return isSeednote.value ? 2 : 3
@@ -454,6 +640,26 @@ const maxStep = computed(() => {
 const canNext = computed(() => {
   if (currentStep.value === 0) return !!form.platform
   return true
+})
+
+const stylePlaceholder = computed(() => {
+  if (isSeednote.value) {
+    return '描述图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格'
+  }
+  if (isEcommerce.value) {
+    return '描述品牌视觉风格基线，如：高端极简白底、国潮暖橙插画、电商爆款高饱和促销感'
+  }
+  if (isArticle.value) {
+    return '描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系'
+  }
+  return '描述你想要的视觉风格'
+})
+
+const styleHint = computed(() => {
+  if (isSeednote.value) return '将用于封面和内容图的风格提示'
+  if (isEcommerce.value) return '品牌视觉维度——作为电商素材跨图一致的视觉基线'
+  if (isArticle.value) return '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'
+  return ''
 })
 
 watch(keywordList, (val) => {
@@ -465,12 +671,14 @@ watch(() => form.platform, (val) => {
   const defaults: Record<string, string> = {
     article: '16:9',
     seednote: '3:4',
+    ecommerce: '1:1',
     xls: '3:4',
   }
   if (val && defaults[val]) {
     form.image_ratio = defaults[val]
   }
   void loadResources(val)
+  void loadPlatformTemplates(val)
 })
 
 watch(topicStatus, () => {
@@ -499,26 +707,38 @@ async function loadResources(platform?: string) {
   resourcesLoading.value = true
   try {
     const [themeRes, layoutRes, presetRes] = await Promise.all([
-      resourcesApi.list('themes', platform),
-      resourcesApi.list('layouts', platform),
-      resourcesApi.list('image_presets', platform),
+      resourcesApi.list('themes', platform).catch(() => ({ items: [] as ResourceEntry[] })),
+      resourcesApi.list('layouts', platform).catch(() => ({ items: [] as ResourceEntry[] })),
+      resourcesApi.list('image_presets', platform).catch(() => ({ items: [] as ResourceEntry[] })),
     ])
     themes.value = themeRes.items || []
     layouts.value = layoutRes.items || []
     imagePresets.value = presetRes.items || []
   } catch (err) {
     console.error('Failed to load resources:', err)
-    uni.showToast({ title: '加载资源配置失败', icon: 'none' })
   } finally {
     resourcesLoading.value = false
   }
 }
 
-async function loadChannel(id: string) {
+async function loadPlatformTemplates(platform?: string) {
+  if (!platform) {
+    platformTemplates.value = []
+    return
+  }
+  try {
+    const res = await templatesApi.list({ type: platform, limit: 50 })
+    platformTemplates.value = res.items || []
+  } catch {
+    platformTemplates.value = []
+  }
+}
+
+async function loadProject(id: string) {
   pageLoading.value = true
   try {
-    const detail = await channelsApi.get(id)
-    const ch = detail.channel || detail as any
+    const detail = await projectsApi.get(id)
+    const ch = detail.project || (detail as any)
     form.platform = ch.platform || ''
     form.name = ch.name || ''
     form.profile_url = ch.profile_url || ''
@@ -526,23 +746,51 @@ async function loadChannel(id: string) {
     form.positioning = ch.positioning || ''
     form.keywords = ch.keywords || ''
     form.style = ch.style || ''
+    form.writing_style = ch.writing_style || ''
+    form.author = ch.author || ''
+    form.author_style_intro = ch.author_style_intro || ''
+    form.author_avatar_url = ch.author_avatar_url || ''
+    form.template_id = ch.template_id || ''
     form.theme = ch.theme || ''
     form.layout = ch.layout || ''
     form.image_preset = ch.image_preset || ''
-    form.author = ch.author || ''
     form.reference_image_url = ch.reference_image_url || ''
     form.image_ratio = ch.image_ratio || '3:4'
     form.enable_publishing = ch.config?.enable_publishing || false
     form.wechat_app_id = ch.config?.wechat_app_id || ''
     form.wechat_secret = ch.config?.wechat_secret || ''
+    projectArchived.value = ch.status === 'archived'
 
     if (ch.keywords) {
       keywordList.value = ch.keywords.split(',').filter(Boolean)
     }
+    stats.value = detail.stats || ch.stats || null
     await loadResources(form.platform)
+    await loadPlatformTemplates(form.platform)
+
+    // Imported-model compat: if a template_id is set, surface its persona as
+    // the default values for any empty project fields (matches studio). The
+    // backend clears template_id on next save (project owns its own persona).
+    if (form.template_id) {
+      try {
+        const tpl = await templatesApi.get(form.template_id)
+        if (!form.style && tpl.style_prompt) form.style = tpl.style_prompt
+        if (!form.author && tpl.author_name) form.author = tpl.author_name
+        if (!form.author_style_intro && tpl.author_style_intro) {
+          form.author_style_intro = tpl.author_style_intro
+        }
+        if (!form.author_avatar_url && tpl.author_avatar_url) {
+          form.author_avatar_url = tpl.author_avatar_url
+        }
+        if (!form.theme && tpl.theme) form.theme = tpl.theme
+      } catch {
+        /* template deleted — leave fields empty */
+      }
+    }
+
     await loadTopics()
   } catch (err) {
-    console.error('Failed to load channel:', err)
+    console.error('Failed to load project:', err)
     uni.showToast({ title: '加载失败', icon: 'none' })
   } finally {
     pageLoading.value = false
@@ -622,7 +870,12 @@ async function onFetchProfile() {
   }
   fetchingProfile.value = true
   try {
-    const profile = await channelsApi.fetchProfile(form.platform, form.profile_url)
+    const profile = await projectsApi.fetchProfile(
+      form.platform,
+      form.profile_url,
+      form.wechat_app_id || undefined,
+      form.wechat_secret || undefined,
+    )
     if (profile.name) form.name = profile.name
     if (profile.avatar_url) form.avatar_url = profile.avatar_url
     if (profile.positioning) form.positioning = profile.positioning
@@ -642,6 +895,105 @@ async function onFetchProfile() {
   }
 }
 
+// Avatar / reference / author-avatar uploads via /files/upload.
+function chooseAndUpload(
+  target: 'avatar' | 'reference' | 'author_avatar',
+  purpose: 'project' | 'reference',
+) {
+  uni.chooseImage({
+    count: 1,
+    success: async (chosen) => {
+      const filePath = chosen.tempFilePaths?.[0]
+      if (!filePath) return
+      const flag =
+        target === 'avatar' ? avatarUploading
+          : target === 'reference' ? referenceUploading
+            : authorAvatarUploading
+      flag.value = true
+      try {
+        const result = await projectsApi.uploadImage(filePath, purpose)
+        if (target === 'avatar') form.avatar_url = result.url
+        else if (target === 'reference') form.reference_image_url = result.url
+        else form.author_avatar_url = result.url
+        uni.showToast({ title: '上传成功', icon: 'success' })
+      } catch (err: any) {
+        uni.showToast({ title: err?.message || '上传失败', icon: 'none' })
+      } finally {
+        flag.value = false
+      }
+    },
+  })
+}
+
+function onChooseAvatar() {
+  if (avatarUploading.value) return
+  chooseAndUpload('avatar', 'project')
+}
+
+function onChooseReference() {
+  if (referenceUploading.value) return
+  chooseAndUpload('reference', 'reference')
+}
+
+function onChooseAuthorAvatar() {
+  if (authorAvatarUploading.value) return
+  chooseAndUpload('author_avatar', 'project')
+}
+
+async function onAnalyzeReference() {
+  if (!form.reference_image_url) {
+    uni.showToast({ title: '请先上传或填写参考图', icon: 'none' })
+    return
+  }
+  if (analyzingStyle.value) return
+  analyzingStyle.value = true
+  try {
+    const result = await projectsApi.analyzeImage(form.reference_image_url)
+    if (result.style) {
+      form.style = result.style
+      uni.showToast({ title: '已识别视觉风格', icon: 'success' })
+    } else {
+      uni.showToast({ title: '未能识别风格', icon: 'none' })
+    }
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '识别失败', icon: 'none' })
+  } finally {
+    analyzingStyle.value = false
+  }
+}
+
+function pickTemplate() {
+  if (platformTemplates.value.length === 0) {
+    uni.showToast({ title: '该平台暂无可用模板', icon: 'none' })
+    return
+  }
+  const labels = platformTemplates.value.map((t) => t.name)
+  uni.showActionSheet({
+    itemList: labels,
+    success: (res) => {
+      const tpl = platformTemplates.value[res.tapIndex]
+      if (tpl) importTemplate(tpl)
+    },
+  })
+}
+
+// One-shot import of persona/style from a template (mirrors studio).
+// Per project memory: do NOT auto-fill author from a writer-persona source
+// unless the template explicitly carries author_name.
+function importTemplate(tpl: Template) {
+  form.template_id = tpl.id
+  if (tpl.style_prompt) form.style = tpl.style_prompt
+  if (tpl.author_name) form.author = tpl.author_name
+  if (tpl.author_style_intro) form.author_style_intro = tpl.author_style_intro
+  if (tpl.author_avatar_url) form.author_avatar_url = tpl.author_avatar_url
+  if (tpl.theme) form.theme = tpl.theme
+  uni.showToast({ title: `已导入「${tpl.name}」`, icon: 'success' })
+}
+
+function clearTemplateImport() {
+  form.template_id = ''
+}
+
 function validate(): boolean {
   Object.keys(errors).forEach((k) => delete errors[k])
 
@@ -649,18 +1001,30 @@ function validate(): boolean {
     errors.name = '请输入账号名称'
     return false
   }
+  if (form.enable_publishing && isArticle.value && !form.wechat_app_id?.trim()) {
+    errors.wechat_app_id = '启用自动发布时，微信 AppID 为必填项'
+    return false
+  }
   return true
 }
 
-function buildPayload(): CreateChannelRequest {
+function buildPayload(): CreateProjectRequest {
   return {
     platform: form.platform,
-    name: form.name.trim(),
+    name: form.name.trim() || undefined,
     profile_url: form.profile_url || undefined,
     avatar_url: form.avatar_url || undefined,
     positioning: form.positioning || undefined,
     keywords: form.keywords || undefined,
     style: form.style || undefined,
+    writing_style: isArticle.value && form.writing_style ? form.writing_style : undefined,
+    author_style_intro: (isArticle.value || isSeednote.value) && form.author_style_intro
+      ? form.author_style_intro
+      : undefined,
+    author_avatar_url: (isArticle.value || isSeednote.value) && form.author_avatar_url
+      ? form.author_avatar_url
+      : undefined,
+    template_id: form.template_id || undefined,
     theme: form.theme || undefined,
     layout: form.layout || undefined,
     image_preset: form.image_preset || undefined,
@@ -680,10 +1044,10 @@ async function onSave() {
   try {
     const payload = buildPayload()
     if (isNew.value) {
-      await channelsApi.create(payload)
+      await projectsApi.create(payload)
       uni.showToast({ title: '创建成功', icon: 'success' })
     } else {
-      await channelsApi.update(editId.value, payload)
+      await projectsApi.update(editId.value, payload)
       uni.showToast({ title: '保存成功', icon: 'success' })
     }
     setTimeout(() => {
@@ -730,9 +1094,27 @@ function onArchive() {
     success: async (res) => {
       if (res.confirm) {
         try {
-          await channelsApi.archive(editId.value)
+          await projectsApi.archive(editId.value)
+          projectArchived.value = true
           uni.showToast({ title: '已归档', icon: 'success' })
-          setTimeout(() => uni.navigateBack(), 500)
+        } catch {
+          uni.showToast({ title: '操作失败', icon: 'none' })
+        }
+      }
+    },
+  })
+}
+
+function onRestore() {
+  uni.showModal({
+    title: '恢复账号',
+    content: '确定恢复该账号吗？',
+    success: async (res) => {
+      if (res.confirm) {
+        try {
+          await projectsApi.restore(editId.value)
+          projectArchived.value = false
+          uni.showToast({ title: '已恢复', icon: 'success' })
         } catch {
           uni.showToast({ title: '操作失败', icon: 'none' })
         }
@@ -749,7 +1131,7 @@ function onDelete() {
     success: async (res) => {
       if (res.confirm) {
         try {
-          await channelsApi.delete(editId.value)
+          await projectsApi.delete(editId.value)
           uni.showToast({ title: '已删除', icon: 'success' })
           setTimeout(() => uni.navigateBack(), 500)
         } catch {
@@ -764,13 +1146,13 @@ onLoad((query) => {
   if (query?.id) {
     isNew.value = false
     editId.value = query.id
-    loadChannel(query.id)
+    loadProject(query.id)
   }
 })
 </script>
 
 <style lang="scss" scoped>
-.channel-detail {
+.project-detail {
   min-height: 100vh;
   background-color: $ab-background;
   padding-bottom: 240rpx;
@@ -953,6 +1335,13 @@ onLoad((query) => {
   margin-bottom: $ab-space-xs;
 }
 
+.field-sublabel {
+  font-size: $ab-text-sm;
+  color: $ab-text-secondary;
+  display: block;
+  margin-bottom: $ab-space-xs;
+}
+
 .field-required {
   color: $ab-danger;
 }
@@ -970,10 +1359,238 @@ onLoad((query) => {
   align-items: center;
 }
 
+.field-spacer {
+  margin-top: $ab-space-md;
+}
+
 .switch-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+// Avatar uploader
+.avatar-uploader {
+  position: relative;
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: 50%;
+  overflow: hidden;
+  background-color: $ab-divider;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: $ab-space-xs;
+
+  &__img {
+    width: 100%;
+    height: 100%;
+  }
+
+  &__placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
+
+  &__hint {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__mask {
+    position: absolute;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: #FFFFFF;
+    font-size: $ab-text-xs;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__actions {
+    display: flex;
+    gap: $ab-space-md;
+    margin-top: $ab-space-xs;
+  }
+
+  &__action {
+    font-size: $ab-text-sm;
+    color: $ab-primary;
+    padding: 4rpx $ab-space-sm;
+
+    &--danger {
+      color: $ab-danger;
+    }
+  }
+}
+
+// Reference image uploader (also used for author avatar, --sm variant)
+.ref-uploader {
+  position: relative;
+  width: 240rpx;
+  height: 180rpx;
+  border: 2rpx dashed $ab-border;
+  border-radius: $ab-radius-sm;
+  overflow: hidden;
+  background-color: $ab-surface;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: $ab-space-xs;
+
+  &--sm {
+    width: 160rpx;
+    height: 160rpx;
+    border-radius: 50%;
+  }
+
+  &__img {
+    width: 100%;
+    height: 100%;
+  }
+
+  &__placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
+
+  &__hint {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__mask {
+    position: absolute;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: #FFFFFF;
+    font-size: $ab-text-xs;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__actions {
+    display: flex;
+    gap: $ab-space-md;
+    margin-top: $ab-space-xs;
+  }
+
+  &__action {
+    font-size: $ab-text-sm;
+    color: $ab-primary;
+    padding: 4rpx $ab-space-sm;
+
+    &--danger {
+      color: $ab-danger;
+    }
+  }
+}
+
+// Persona block
+.persona-block {
+  padding: $ab-space-md;
+  background-color: $ab-primary-bg;
+  border-radius: $ab-radius-sm;
+  margin-bottom: $ab-space-md;
+
+  &__title {
+    font-size: $ab-text-base;
+    font-weight: $ab-font-medium;
+    color: $ab-primary;
+  }
+}
+
+// Style block (with analyzing indicator)
+.style-block {
+  position: relative;
+
+  &__analyzing {
+    margin-top: $ab-space-xs;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+}
+
+// Picker row (template)
+.picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-sm;
+  padding: $ab-space-sm $ab-space-md;
+  min-height: 80rpx;
+
+  &__value {
+    font-size: $ab-text-base;
+    color: $ab-text;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__placeholder {
+    font-size: $ab-text-base;
+    color: $ab-text-tertiary;
+    flex: 1;
+  }
+
+  &__arrow {
+    font-size: $ab-text-lg;
+    color: $ab-text-tertiary;
+    margin-left: $ab-space-sm;
+  }
+
+  &__clear {
+    font-size: $ab-text-xs;
+    color: $ab-primary;
+    margin-left: $ab-space-sm;
+    padding: $ab-space-xs $ab-space-sm;
+  }
+}
+
+// Stats grid
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: $ab-space-sm;
+  padding: $ab-space-md;
+}
+
+.stats-cell {
+  background-color: $ab-surface;
+  border-radius: $ab-radius-sm;
+  padding: $ab-space-sm $ab-space-xs;
+  text-align: center;
+
+  &__num {
+    display: block;
+    font-size: $ab-text-lg;
+    font-weight: $ab-font-medium;
+    color: $ab-text;
+
+    &--success { color: $ab-success; }
+    &--danger { color: $ab-danger; }
+    &--info { color: $ab-info; }
+  }
+
+  &__label {
+    display: block;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+    margin-top: 4rpx;
+  }
 }
 
 .topic-empty {
@@ -1035,6 +1652,7 @@ onLoad((query) => {
 .ratio-group {
   display: flex;
   gap: $ab-space-sm;
+  flex-wrap: wrap;
 }
 
 .ratio-btn {

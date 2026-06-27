@@ -15,10 +15,20 @@
           </view>
         </view>
       </scroll-view>
+      <view class="date-tabs__sort" @tap="showSortSheet">
+        <text class="date-tabs__sort-label">{{ currentSortOption.label }}</text>
+        <text class="date-tabs__sort-icon">&#x25BC;</text>
+      </view>
       <view class="date-tabs__filter" @tap="showFilter = true">
         <text class="date-tabs__filter-icon">&#x25BC;</text>
         <text class="date-tabs__filter-text">筛选</text>
       </view>
+    </view>
+
+    <!-- Auto-refresh Indicator -->
+    <view v-if="hasRunningItems" class="auto-refresh">
+      <view class="auto-refresh__dot" />
+      <text class="auto-refresh__text">自动刷新中（运行中的任务）</text>
     </view>
 
     <!-- Content -->
@@ -183,18 +193,18 @@
           </view>
         </view>
 
-        <!-- Channel -->
+        <!-- Project -->
         <view class="filter-section">
           <text class="filter-section__label">账号</text>
           <picker
-            :value="channelPickerIndex"
-            :range="channelNames"
+            :value="projectPickerIndex"
+            :range="projectNames"
             range-key="name"
-            @change="onChannelPick"
+            @change="onProjectPick"
           >
             <view class="filter-select">
               <text class="filter-select__text">
-                {{ selectedChannelName || '全部账号' }}
+                {{ selectedProjectName || '全部账号' }}
               </text>
               <text class="filter-select__arrow">></text>
             </view>
@@ -212,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { timelineApi } from '@/api/timeline'
 import type { TimelineItem } from '@/types'
 import type { TaskStatus, PlanStatus } from '@/types'
@@ -237,6 +247,58 @@ const dateRangeTabs = [
   { key: 'month', label: '本月' },
 ]
 const activeDateRange = ref('7d')
+
+// Sort options (mirrors studio TimelinePage.tsx timelineSortOptions)
+type TimelineSortKey = 'date_desc' | 'date_asc' | 'status' | 'title'
+const sortOptions: Array<{ key: TimelineSortKey; label: string }> = [
+  { key: 'date_desc', label: '日期 ↓' },
+  { key: 'date_asc', label: '日期 ↑' },
+  { key: 'status', label: '按状态' },
+  { key: 'title', label: '按标题' },
+]
+const activeSort = ref<TimelineSortKey>('date_desc')
+const currentSortOption = computed(
+  () => sortOptions.find((opt) => opt.key === activeSort.value) || sortOptions[0],
+)
+
+function showSortSheet() {
+  uni.showActionSheet({
+    itemList: sortOptions.map((opt) => opt.label),
+    success: (res) => {
+      const picked = sortOptions[res.tapIndex]
+      if (picked) activeSort.value = picked.key
+    },
+  })
+}
+
+// Helper: pick the canonical sort date for a timeline item (mirrors studio getItemDate)
+function getItemDate(item: TimelineItem): string {
+  return item.scheduled_at || item.completed_at || item.created_at || ''
+}
+
+// Sort a copy of the items list according to activeSort
+function sortItems(list: TimelineItem[]): TimelineItem[] {
+  const sorted = [...list]
+  switch (activeSort.value) {
+    case 'date_desc':
+      sorted.sort((a, b) =>
+        new Date(getItemDate(b)).getTime() - new Date(getItemDate(a)).getTime(),
+      )
+      break
+    case 'date_asc':
+      sorted.sort((a, b) =>
+        new Date(getItemDate(a)).getTime() - new Date(getItemDate(b)).getTime(),
+      )
+      break
+    case 'status':
+      sorted.sort((a, b) => (a.status || '').localeCompare(b.status || ''))
+      break
+    case 'title':
+      sorted.sort((a, b) => (a.title || '').localeCompare(b.title || ''))
+      break
+  }
+  return sorted
+}
 
 function getDateRange() {
   const now = new Date()
@@ -292,7 +354,7 @@ const filter = reactive({
   type: '' as string,
   content_type: '' as string,
   status: '' as string,
-  channel_id: '' as string,
+  project_id: '' as string,
 })
 
 const typeOptions = [
@@ -314,22 +376,22 @@ const contentTypeOptions = [
   ...labelContentTypeOptions.map((opt) => ({ key: opt.value, label: opt.label })),
 ]
 
-// Channels for filter picker (populated from timeline items)
-const channels = ref<Array<{ id: string; name: string }>>([])
-const channelPickerIndex = ref(0)
-const selectedChannelName = ref('')
+// Projects for filter picker (populated from timeline items)
+const projects = ref<Array<{ id: string; name: string }>>([])
+const projectPickerIndex = ref(0)
+const selectedProjectName = ref('')
 
-const channelNames = computed(() => {
-  const all = [{ id: '', name: '全部账号' }, ...channels.value]
+const projectNames = computed(() => {
+  const all = [{ id: '', name: '全部账号' }, ...projects.value]
   return all
 })
 
-function onChannelPick(e: any) {
+function onProjectPick(e: any) {
   const idx = e.detail.value as number
-  const all = [{ id: '', name: '全部账号' }, ...channels.value]
+  const all = [{ id: '', name: '全部账号' }, ...projects.value]
   if (idx >= 0 && idx < all.length) {
-    filter.channel_id = all[idx].id
-    selectedChannelName.value = all[idx].name
+    filter.project_id = all[idx].id
+    selectedProjectName.value = all[idx].name
   }
 }
 
@@ -348,8 +410,29 @@ interface MonthGroup {
 const groupedItems = computed<Record<string, MonthGroup>>(() => {
   const result: Record<string, MonthGroup> = {}
 
-  for (const item of items.value) {
-    const dateStr = item.created_at?.slice(0, 10) || ''
+  // Apply the user-selected sort to the flat list before grouping.
+  // For date_desc / date_asc this also drives month + date bucket ordering.
+  // For status / title we keep the natural (desc by date) bucket order so the
+  // visual timeline structure stays meaningful, but items within a date group
+  // follow the chosen sort.
+  const flatSorted = sortItems(items.value)
+  const dateOrder = new Map<string, number>()
+  flatSorted.forEach((item, idx) => {
+    const dateStr = getItemDate(item).slice(0, 10)
+    if (dateStr && !dateOrder.has(dateStr)) dateOrder.set(dateStr, idx)
+  })
+
+  // Compute month + date bucket order. For date_asc we walk ascending by date;
+  // for everything else (incl. date_desc) we walk descending so newest comes first.
+  const ascending = activeSort.value === 'date_asc'
+  const orderedDates = [...dateOrder.keys()].sort((a, b) =>
+    ascending ? a.localeCompare(b) : b.localeCompare(a),
+  )
+
+  // Preserve original fallback: if sort is status/title, still bucket by created_at
+  // date for grouping stability but sort items inside each bucket per user choice.
+  for (const item of flatSorted) {
+    const dateStr = item.created_at?.slice(0, 10) || getItemDate(item).slice(0, 10) || ''
     if (!dateStr) continue
 
     const monthLabel = formatMonthCN(dateStr)
@@ -370,21 +453,43 @@ const groupedItems = computed<Record<string, MonthGroup>>(() => {
     result[monthLabel].dates[dateStr].items.push(item)
   }
 
-  // Sort items within each date group by time (desc)
+  // For status / title sorts, the items were already globally sorted, but items
+  // inside a single date bucket should still reflect that order. For date sorts,
+  // we re-sort within each bucket by the chosen date direction to keep it tidy
+  // (in case the same dateStr had multiple items with different effective timestamps).
   for (const month of Object.values(result)) {
     for (const dateGroup of Object.values(month.dates)) {
-      dateGroup.items.sort((a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      )
+      dateGroup.items = sortItems(dateGroup.items)
     }
   }
 
-  return result
+  // Re-key the result so month and date iteration follows the chosen date order.
+  const ordered: Record<string, MonthGroup> = {}
+  const monthRanks = new Map<string, number>()
+  for (const dateStr of orderedDates) {
+    const monthLabel = formatMonthCN(dateStr)
+    if (!monthRanks.has(monthLabel)) monthRanks.set(monthLabel, monthRanks.size)
+    if (!ordered[monthLabel]) {
+      ordered[monthLabel] = { label: monthLabel, dates: {} }
+    }
+    // Find this date's bucket from any month (the original grouping may have
+    // placed it under any month key, but formatMonthCN is deterministic per date)
+    for (const month of Object.values(result)) {
+      if (month.dates[dateStr]) {
+        ordered[monthLabel].dates[dateStr] = month.dates[dateStr]
+        break
+      }
+    }
+  }
+
+  return ordered
 })
 
 // Fetch
-async function fetchItems(showRefresh = false) {
-  if (showRefresh) {
+async function fetchItems(showRefresh = false, pollMode = false) {
+  if (pollMode) {
+    // Silent: do not touch loading/refreshing UI, swallow errors
+  } else if (showRefresh) {
     refreshing.value = true
   } else {
     loading.value = true
@@ -399,25 +504,31 @@ async function fetchItems(showRefresh = false) {
     if (filter.type) params.type = filter.type
     if (filter.content_type) params.content_type = filter.content_type
     if (filter.status) params.status = filter.status
-    if (filter.channel_id) params.channel_id = filter.channel_id
+    if (filter.project_id) params.project_id = filter.project_id
 
     const res = await timelineApi.get(params as any)
     items.value = res.items || []
 
-    // Extract unique channels from items
-    const channelMap = new Map<string, string>()
+    // Extract unique projects from items
+    const projectMap = new Map<string, string>()
     for (const item of items.value) {
-      if (item.channel_id && item.channel_name && !channelMap.has(item.channel_id)) {
-        channelMap.set(item.channel_id, item.channel_name)
+      if (item.project_id && item.project_name && !projectMap.has(item.project_id)) {
+        projectMap.set(item.project_id, item.project_name)
       }
     }
-    channels.value = Array.from(channelMap.entries()).map(([id, name]) => ({ id, name }))
+    projects.value = Array.from(projectMap.entries()).map(([id, name]) => ({ id, name }))
   } catch (err: any) {
-    uni.showToast({ title: err?.message || '加载失败', icon: 'none' })
-    if (showRefresh) items.value = []
+    if (!pollMode) {
+      uni.showToast({ title: err?.message || '加载失败', icon: 'none' })
+      if (showRefresh) items.value = []
+    }
   } finally {
-    loading.value = false
-    refreshing.value = false
+    if (!pollMode) {
+      loading.value = false
+      refreshing.value = false
+    }
+    // Re-evaluate auto-refresh polling after every fetch (silent or not)
+    evaluatePolling()
   }
 }
 
@@ -430,14 +541,58 @@ function onDateRangeChange(key: string) {
   fetchItems()
 }
 
+// Auto-refresh: when any visible task is running, poll every 12s.
+// Stop polling once no running tasks remain (mirrors studio's
+// refetchInterval logic that returns false when no running tasks).
+const hasRunningItems = computed(() =>
+  items.value.some((item) => item.type === 'task' && item.status === 'running'),
+)
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function startPollingIfRunning() {
+  if (!hasRunningItems.value) {
+    stopPolling()
+    return
+  }
+  if (pollTimer !== null) return // already polling
+  pollTimer = setInterval(() => {
+    // Stop if running tasks disappeared between ticks
+    if (!hasRunningItems.value) {
+      stopPolling()
+      return
+    }
+    // Silently refresh (no loading spinner, no error toast on failure)
+    fetchItems(false, true)
+  }, 12000)
+}
+
+// Watcher equivalent: re-evaluate polling whenever items change.
+// We hook into the post-fetch path inside fetchItems (see pollMode arg) and
+// also kick the evaluation on mount / range / filter changes.
+function evaluatePolling() {
+  if (hasRunningItems.value) {
+    startPollingIfRunning()
+  } else {
+    stopPolling()
+  }
+}
+
 // Filter actions
 function onResetFilters() {
   filter.type = ''
   filter.content_type = ''
   filter.status = ''
-  filter.channel_id = ''
-  selectedChannelName.value = ''
-  channelPickerIndex.value = 0
+  filter.project_id = ''
+  selectedProjectName.value = ''
+  projectPickerIndex.value = 0
 }
 
 function onApplyFilter() {
@@ -486,6 +641,11 @@ async function onResumePlan(item: TimelineItem) {
 
 onMounted(() => {
   fetchItems()
+})
+
+// Guard against interval leaks on page unmount
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 
@@ -555,6 +715,67 @@ onMounted(() => {
   &__filter-text {
     font-size: $ab-text-sm;
     color: $ab-text-secondary;
+  }
+
+  &__sort {
+    display: flex;
+    align-items: center;
+    gap: 4rpx;
+    padding: $ab-space-sm $ab-space-md;
+    margin-left: $ab-space-xs;
+    flex-shrink: 0;
+    border-radius: $ab-radius-full;
+    background-color: $ab-primary-bg;
+  }
+
+  &__sort-label {
+    font-size: $ab-text-sm;
+    color: $ab-primary;
+    font-weight: $ab-font-medium;
+    white-space: nowrap;
+  }
+
+  &__sort-icon {
+    font-size: 16rpx;
+    color: $ab-primary;
+  }
+}
+
+// Auto-refresh Indicator
+.auto-refresh {
+  display: flex;
+  align-items: center;
+  gap: $ab-space-xs;
+  padding: $ab-space-xs $ab-space-md;
+  margin: $ab-space-sm $ab-space-md 0;
+  background-color: $ab-primary-bg;
+  border-radius: $ab-radius-sm;
+  flex-shrink: 0;
+
+  &__dot {
+    width: 12rpx;
+    height: 12rpx;
+    border-radius: 50%;
+    background-color: $ab-primary;
+    animation: auto-refresh-pulse 1.6s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+
+  &__text {
+    font-size: $ab-text-xs;
+    color: $ab-primary;
+    font-weight: $ab-font-medium;
+  }
+}
+
+@keyframes auto-refresh-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
   }
 }
 

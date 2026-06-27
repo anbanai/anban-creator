@@ -1,20 +1,22 @@
 // Auth
 export type { User, AuthResponse, ApiResponse } from './auth'
 
-// Channel
+// Project
 export type {
-  ChannelPlatform,
-  ChannelStatus,
-  ChannelConfig,
-  Channel,
-  ChannelStats,
-  ChannelDetail,
-  CreateChannelRequest,
-  CreateChannelResponse,
+  ProjectPlatform,
+  ProjectStatus,
+  ProjectConfig,
+  Project,
+  ProjectStats,
+  ProjectDetail,
+  CreateProjectRequest,
+  CreateProjectResponse,
   PlatformFieldConfig,
   PlatformConfig,
   PlatformProfile,
-} from './channel'
+  AnalyzeImageResponse,
+  FileUploadResponse,
+} from './project'
 
 // Plan
 export type {
@@ -33,6 +35,7 @@ export type {
   TaskResult,
   TaskFile,
   CreateTaskRequest,
+  EcommerceTaskConfig,
   WorkflowStatus,
   WorkflowStage,
   WorkflowWarning,
@@ -71,7 +74,15 @@ export type { UsageStats, TypeStatEntry } from './usage'
 export type { PaginatedResponse } from './common'
 
 // Template
-export type { TemplateType, Template } from './template'
+export type {
+  TemplateType,
+  TemplateVisibility,
+  TemplateScope,
+  EcommerceTemplateDefaults,
+  Template,
+  CreateTemplateRequest,
+  UpdateTemplateRequest,
+} from './template'
 
 // Poster
 export type {
@@ -116,3 +127,6 @@ export type {
   ImageGenerationResult,
   HistoryResponse,
 } from './designer'
+
+// Image Models
+export type { ImageModelOption, ImageModelListResponse } from './imageModel'

@@ -410,7 +410,7 @@ async function generate() {
     }
 
     const response = await designerApi.generate({
-      channel_id: '',
+      project_id: '',
       prompt: prompt.value.trim(),
       provider: selectedProvider.value.provider,
       provider_id: selectedProvider.value.id,
@@ -445,7 +445,7 @@ async function generateEdit() {
     ])
 
     const response = await designerApi.generate({
-      channel_id: '',
+      project_id: '',
       prompt: editPrompt.value.trim(),
       provider: selectedProvider.value.provider,
       provider_id: selectedProvider.value.id,

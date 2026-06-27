@@ -4,6 +4,7 @@
     <view class="greeting-card">
       <view class="greeting-card__top">
         <text class="greeting-card__greeting">{{ greeting }}{{ nicknameSuffix }}</text>
+        <text class="greeting-card__sub">以下是你的内容工作区概览</text>
       </view>
       <view class="greeting-card__bottom">
         <view class="greeting-card__credits" @tap="goCredits">
@@ -19,7 +20,7 @@
           :loading="signInLoading"
           @click="handleSignIn"
         >
-          签到+10
+          签到 +{{ dailySignInCredits }}
         </AbButton>
         <view v-else class="greeting-card__signed">
           <text class="greeting-card__signed-icon">&#10003;</text>
@@ -31,16 +32,16 @@
     <!-- Stats Grid -->
     <view class="stats-grid">
       <view class="stats-grid__item">
-        <StatsCard :value="activePlans" label="活跃计划" />
+        <StatsCard :value="activePlans" label="活跃计划" :desc="activePlansDesc" />
       </view>
       <view class="stats-grid__item">
-        <StatsCard :value="todayTasks" label="今日任务" />
+        <StatsCard :value="todayTasks" label="今日任务" :desc="todayTasksDesc" />
       </view>
       <view class="stats-grid__item">
-        <StatsCard :value="successRate" label="成功率" />
+        <StatsCard :value="successRate" label="成功率" desc="按今日完成与失败计算" />
       </view>
       <view class="stats-grid__item">
-        <StatsCard :value="inviteCount" label="邀请人数" />
+        <StatsCard :value="totalTasksSample" label="任务样本" desc="最近 100 条任务" />
       </view>
     </view>
 
@@ -52,6 +53,53 @@
 
     <!-- Loading -->
     <AbLoading v-if="pageLoading" text="加载中..." />
+
+    <!-- Invite card -->
+    <view v-if="!pageLoading" class="invite-card">
+      <view class="invite-card__main">
+        <text class="invite-card__label">我的邀请码</text>
+        <text class="invite-card__code">{{ inviteCode || '------' }}</text>
+        <text class="invite-card__count">
+          已邀请 {{ inviteCountDisplay }} / {{ maxInvites }} 人
+        </text>
+      </view>
+      <AbButton
+        type="ghost"
+        size="sm"
+        :disabled="!inviteCode"
+        @click="copyInviteLink"
+      >
+        复制邀请链接
+      </AbButton>
+    </view>
+
+    <!-- Charts -->
+    <view v-if="!pageLoading" class="charts-row">
+      <!-- Trend bar chart (last 30 days) -->
+      <view class="chart-card">
+        <view class="chart-card__head">
+          <text class="chart-card__title">任务趋势</text>
+          <text class="chart-card__hint">近 30 天</text>
+        </view>
+        <TrendBars v-if="trendData.length > 0" :data="trendData" />
+        <view v-else class="chart-card__empty">暂无数据</view>
+      </view>
+
+      <!-- Status distribution donut -->
+      <view class="chart-card">
+        <view class="chart-card__head">
+          <text class="chart-card__title">状态分布</text>
+          <text class="chart-card__hint">近 100 条任务</text>
+        </view>
+        <StatusDonut
+          v-if="statusData.length > 0"
+          :completed="statusCounts.completed"
+          :failed="statusCounts.failed"
+          :cancelled="statusCounts.cancelled"
+        />
+        <view v-else class="chart-card__empty">暂无数据</view>
+      </view>
+    </view>
 
     <!-- Recent Tasks -->
     <view v-if="!pageLoading" class="section">
@@ -93,6 +141,12 @@
           </view>
           <text class="quick-actions__label">新建计划</text>
         </view>
+        <view class="quick-actions__item" @tap="goTimeline">
+          <view class="quick-actions__icon quick-actions__icon--timeline">
+            <text>&#128197;</text>
+          </view>
+          <text class="quick-actions__label">查看时间轴</text>
+        </view>
         <view class="quick-actions__item" @tap="goWorkshop('viral-analysis')">
           <view class="quick-actions__icon quick-actions__icon--viral">
             <text>&#128300;</text>
@@ -104,6 +158,12 @@
             <text>&#127912;</text>
           </view>
           <text class="quick-actions__label">海报制作</text>
+        </view>
+        <view class="quick-actions__item" @tap="goCredits">
+          <view class="quick-actions__icon quick-actions__icon--credits">
+            <text>&#128176;</text>
+          </view>
+          <text class="quick-actions__label">积分明细</text>
         </view>
       </view>
     </view>
@@ -123,6 +183,8 @@ import { plansApi } from '@/api/plans'
 import { getGreeting } from '@/utils/format'
 import TaskCard from '@/components/business/TaskCard.vue'
 import StatsCard from '@/components/business/StatsCard.vue'
+import TrendBars from '@/components/business/TrendBars.vue'
+import StatusDonut from '@/components/business/StatusDonut.vue'
 import AbButton from '@/components/common/AbButton.vue'
 import AbEmpty from '@/components/common/AbEmpty.vue'
 import AbLoading from '@/components/common/AbLoading.vue'
@@ -137,11 +199,12 @@ const nicknameSuffix = computed(() => {
   return name ? `，${name}` : ''
 })
 
-// --- Credits ---
+// --- Credits + pricing (daily sign-in amount) ---
 const creditsBalance = ref(0)
 const signedInToday = ref(false)
 const signInLoading = ref(false)
 const creditsAnimating = ref(false)
+const dailySignInCredits = ref(10)
 
 const displayBalance = computed(() => {
   return creditsBalance.value.toLocaleString()
@@ -160,6 +223,18 @@ async function loadCredits() {
   }
 }
 
+async function loadPricing() {
+  // Best-effort: failures fall back to default reward of 10.
+  try {
+    const pricing = await creditsApi.pricing()
+    if (pricing?.income?.daily_sign_in) {
+      dailySignInCredits.value = pricing.income.daily_sign_in
+    }
+  } catch (err) {
+    console.error('Failed to load pricing:', err)
+  }
+}
+
 async function handleSignIn() {
   if (signInLoading.value || signedInToday.value) return
   signInLoading.value = true
@@ -167,15 +242,18 @@ async function handleSignIn() {
     const res = await creditsApi.signIn()
     signedInToday.value = true
 
-    // Animate balance +10
+    // Animate balance +reward
     const oldBalance = creditsBalance.value
-    creditsBalance.value = oldBalance + (res.reward || 10)
+    creditsBalance.value = oldBalance + (res.reward || dailySignInCredits.value)
     creditsAnimating.value = true
     setTimeout(() => {
       creditsAnimating.value = false
     }, 600)
 
-    uni.showToast({ title: '签到成功 +10积分', icon: 'none' })
+    uni.showToast({
+      title: `签到成功 +${res.reward || dailySignInCredits.value}积分`,
+      icon: 'none',
+    })
   } catch (err: any) {
     const msg = err?.message || '签到失败'
     uni.showToast({ title: msg, icon: 'none' })
@@ -184,11 +262,30 @@ async function handleSignIn() {
   }
 }
 
-// --- Stats ---
+// --- Stats (mirrors studio DashboardPage exact set) ---
 const activePlans = ref(0)
 const todayTasks = ref(0)
 const successRate = ref('--')
-const inviteCount = ref('0/10')
+const totalTasksSample = ref(0)
+const completedToday = ref(0)
+const failedToday = ref(0)
+
+// Today-bound counts for the "今日任务" description.
+const activePlansDesc = computed(() => '当前启用的自动调度')
+const todayTasksDesc = computed(() => `${completedToday.value} 已完成，${failedToday.value} 失败`)
+
+// --- Charts data ---
+interface TrendPoint { date: string; count: number }
+const trendData = ref<TrendPoint[]>([])
+const statusCounts = ref({ completed: 0, failed: 0, cancelled: 0 })
+const statusData = computed(() => {
+  const c = statusCounts.value
+  return [
+    { name: '已完成', value: c.completed },
+    { name: '失败', value: c.failed },
+    { name: '已取消', value: c.cancelled },
+  ].filter((d) => d.value > 0)
+})
 
 async function loadStats() {
   try {
@@ -205,26 +302,61 @@ async function loadStats() {
     const today = new Date()
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
     const tasks = tasksRes.items || []
-    todayTasks.value = tasks.filter((t) => t.created_at && t.created_at.startsWith(todayStr)).length
+    totalTasksSample.value = tasks.length
 
-    // Success rate
-    const completed = tasks.filter((t) => t.status === 'completed').length
-    const failed = tasks.filter((t) => t.status === 'failed').length
-    const finished = completed + failed
-    if (finished > 0) {
-      successRate.value = `${Math.round((completed / finished) * 100)}%`
+    const todayTasksList = tasks.filter(
+      (t) => t.created_at && t.created_at.startsWith(todayStr),
+    )
+    todayTasks.value = todayTasksList.length
+    completedToday.value = todayTasksList.filter((t) => t.status === 'completed').length
+    failedToday.value = todayTasksList.filter((t) => t.status === 'failed').length
+
+    // Success rate: today-based, completed / (completed + failed)
+    const finishedToday = completedToday.value + failedToday.value
+    if (finishedToday > 0) {
+      successRate.value = `${Math.round((completedToday.value / finishedToday) * 100)}%`
     } else {
       successRate.value = '--'
     }
 
-    // Invite count from user info
-    if (authStore.user) {
-      const invited = authStore.user.invite_count ?? 0
-      inviteCount.value = `${invited}/10`
+    // --- Trend (last 30 days, all-task sample) ---
+    buildTrend(tasks)
+
+    // --- Status distribution (all-task sample) ---
+    statusCounts.value = {
+      completed: tasks.filter((t) => t.status === 'completed').length,
+      failed: tasks.filter((t) => t.status === 'failed').length,
+      cancelled: tasks.filter((t) => t.status === 'cancelled').length,
     }
   } catch (err) {
     console.error('Failed to load stats:', err)
   }
+}
+
+function buildTrend(tasks: Task[]) {
+  const now = new Date()
+  const buckets: Record<string, number> = {}
+  const keys: string[] = []
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now)
+    d.setDate(now.getDate() - i)
+    // Use a YYYY-MM-DD key (local) for grouping, matching created_at prefix.
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    buckets[key] = 0
+    keys.push(key)
+  }
+  for (const t of tasks) {
+    if (!t.created_at) continue
+    const key = t.created_at.slice(0, 10)
+    if (key in buckets) buckets[key]++
+  }
+  trendData.value = keys.map((k) => {
+    const d = new Date(k + 'T00:00:00')
+    return {
+      date: `${d.getMonth() + 1}/${d.getDate()}`,
+      count: buckets[k],
+    }
+  })
 }
 
 // --- Recent Tasks ---
@@ -239,6 +371,29 @@ async function loadRecentTasks() {
   }
 }
 
+// --- Invite (mirrors studio invite card; no dedicated endpoint,
+//     derived from user.invite_code) ---
+const inviteCode = computed(() => authStore.user?.invite_code || '')
+const inviteCountDisplay = computed(() => authStore.user?.invite_count ?? 0)
+const maxInvites = computed(() => authStore.user?.max_invites ?? 3)
+
+function copyInviteLink() {
+  if (!inviteCode.value) return
+  // Mini-program has no public web origin; build an H5 register deep-link.
+  // The host is the server's web frontend if configured; otherwise a placeholder.
+  const host = 'https://anbanwriter.com'
+  const link = `${host}/register?invite=${inviteCode.value}`
+  uni.setClipboardData({
+    data: link,
+    success: () => {
+      uni.showToast({ title: '邀请链接已复制', icon: 'none' })
+    },
+    fail: () => {
+      uni.showToast({ title: '复制失败', icon: 'none' })
+    },
+  })
+}
+
 // --- Page state ---
 const pageLoading = ref(true)
 const errorMsg = ref('')
@@ -249,6 +404,7 @@ async function loadAll() {
   try {
     await Promise.all([
       loadCredits(),
+      loadPricing(),
       loadStats(),
       loadRecentTasks(),
     ])
@@ -276,7 +432,7 @@ onPullDownRefresh(async () => {
 
 // --- Navigation ---
 function goCredits() {
-  uni.navigateTo({ url: '/pages/credits/transactions' })
+  uni.navigateTo({ url: '/pages/credits/index' })
 }
 
 function goTasks() {
@@ -293,6 +449,10 @@ function goCreateTask() {
 
 function goCreatePlan() {
   uni.navigateTo({ url: '/pages/plans/create' })
+}
+
+function goTimeline() {
+  uni.navigateTo({ url: '/pages/timeline/index' })
 }
 
 function goWorkshop(tab: string) {
@@ -324,6 +484,14 @@ function goWorkshop(tab: string) {
     font-size: $ab-text-xl;
     font-weight: $ab-font-semibold;
     color: $ab-text;
+    display: block;
+  }
+
+  &__sub {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+    margin-top: 6rpx;
+    display: block;
   }
 
   &__bottom {
@@ -388,14 +556,9 @@ function goWorkshop(tab: string) {
   grid-template-columns: 1fr 1fr;
   gap: $ab-space-sm;
   margin-bottom: $ab-space-md;
-  background-color: $ab-surface;
-  border-radius: $ab-radius-lg;
-  padding: $ab-space-sm 0;
-  box-shadow: $ab-shadow-sm;
 
   &__item {
     display: flex;
-    justify-content: center;
   }
 }
 
@@ -421,6 +584,86 @@ function goWorkshop(tab: string) {
     font-weight: $ab-font-medium;
     flex-shrink: 0;
     margin-left: $ab-space-md;
+  }
+}
+
+// Invite card
+.invite-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: $ab-surface;
+  border-radius: $ab-radius-lg;
+  padding: $ab-space-md $ab-space-lg;
+  margin-bottom: $ab-space-md;
+  box-shadow: $ab-shadow-sm;
+
+  &__main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__label {
+    font-size: $ab-text-sm;
+    color: $ab-text-secondary;
+  }
+
+  &__code {
+    font-size: $ab-text-xl;
+    font-weight: $ab-font-bold;
+    color: $ab-text;
+    letter-spacing: 4rpx;
+    margin-top: 4rpx;
+  }
+
+  &__count {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+    margin-top: 4rpx;
+  }
+}
+
+// Charts row
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $ab-space-sm;
+  margin-bottom: $ab-space-md;
+}
+
+.chart-card {
+  background-color: $ab-surface;
+  border-radius: $ab-radius-lg;
+  padding: $ab-space-md;
+  box-shadow: $ab-shadow-sm;
+
+  &__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: $ab-space-sm;
+  }
+
+  &__title {
+    font-size: $ab-text-md;
+    font-weight: $ab-font-semibold;
+    color: $ab-text;
+  }
+
+  &__hint {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__empty {
+    height: 320rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: $ab-text-sm;
+    color: $ab-text-tertiary;
   }
 }
 
@@ -450,7 +693,7 @@ function goWorkshop(tab: string) {
 // Quick actions
 .quick-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: $ab-space-sm;
 
   &__item {
@@ -460,27 +703,29 @@ function goWorkshop(tab: string) {
     gap: $ab-space-xs;
     background-color: $ab-surface;
     border-radius: $ab-radius-md;
-    padding: $ab-space-lg $ab-space-md;
+    padding: $ab-space-md $ab-space-sm;
     box-shadow: $ab-shadow-sm;
   }
 
   &__icon {
-    width: 80rpx;
-    height: 80rpx;
+    width: 72rpx;
+    height: 72rpx;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 40rpx;
+    font-size: 36rpx;
 
     &--task { background-color: $ab-primary-bg; }
     &--plan { background-color: $ab-success-bg; }
+    &--timeline { background-color: $ab-info-bg; }
     &--viral { background-color: $ab-warning-bg; }
-    &--poster { background-color: $ab-info-bg; }
+    &--poster { background-color: #F3E8FF; }
+    &--credits { background-color: #FEF9C3; }
   }
 
   &__label {
-    font-size: $ab-text-sm;
+    font-size: $ab-text-xs;
     color: $ab-text;
     font-weight: $ab-font-medium;
   }

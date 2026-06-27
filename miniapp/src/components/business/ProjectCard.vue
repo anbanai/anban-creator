@@ -1,30 +1,30 @@
 <template>
-  <view class="channel-card" @tap="$emit('tap')">
-    <view class="channel-card__header">
-      <PlatformAvatar :platform="channel.platform" />
-      <view class="channel-card__info">
-        <text class="channel-card__name">{{ channel.name }}</text>
-        <text class="channel-card__positioning" v-if="channel.positioning">{{ channel.positioning }}</text>
+  <view class="project-card" @tap="$emit('tap')">
+    <view class="project-card__header">
+      <PlatformAvatar :platform="project.platform" />
+      <view class="project-card__info">
+        <text class="project-card__name">{{ project.name }}</text>
+        <text class="project-card__positioning" v-if="project.positioning">{{ project.positioning }}</text>
       </view>
     </view>
-    <view class="channel-card__stats" v-if="stats">
+    <view class="project-card__stats" v-if="stats">
       <text class="stats-item success">✅{{ stats.completed_tasks }}</text>
       <text class="stats-item danger">❌{{ stats.failed_tasks }}</text>
       <text class="stats-item">{{ stats.success_rate }}%成功</text>
     </view>
-    <text class="channel-card__activity" v-if="stats?.last_activity_at">
+    <text class="project-card__activity" v-if="stats?.last_activity_at">
       最近活跃: {{ stats.last_activity_at }}
     </text>
   </view>
 </template>
 
 <script setup lang="ts">
-import type { Channel, ChannelStats } from '@/types'
+import type { Project, ProjectStats } from '@/types'
 import PlatformAvatar from './PlatformAvatar.vue'
 
 defineProps<{
-  channel: Channel
-  stats?: ChannelStats | null
+  project: Project
+  stats?: ProjectStats | null
 }>()
 
 defineEmits<{
@@ -33,7 +33,7 @@ defineEmits<{
 </script>
 
 <style lang="scss" scoped>
-.channel-card {
+.project-card {
   background-color: $ab-surface;
   border-radius: $ab-radius-md;
   padding: $ab-space-md;

@@ -251,7 +251,7 @@ const creativeTools: MenuItem[] = [
 const dataItems: MenuItem[] = [
   { icon: '📊', title: '时间轴', path: '/pages/timeline/index' },
   { icon: '📈', title: '用量统计', path: '/pages/usage/index' },
-  { icon: '💳', title: '积分明细', path: '/pages/credits/transactions' },
+  { icon: '💳', title: '积分中心', path: '/pages/credits/index' },
 ]
 
 const showFeedback = ref(false)
@@ -262,6 +262,7 @@ const otherItems: MenuItem[] = [
   { icon: '🔑', title: '平台密钥', path: '/pages/settings/api-keys' },
   { icon: '🧩', title: 'Claude Code 接入', path: '/pages/connect/claude-code' },
   { icon: '🪄', title: 'OpenClaw 接入', path: '/pages/connect/openclaw' },
+  { icon: '⚡', title: 'Codex 接入', path: '/pages/connect/codex' },
   { icon: '💬', title: '意见反馈', action: () => { showFeedback.value = true } },
   { icon: '📤', title: '分享给好友', action: () => { /* handled by onShareAppMessage */ } },
 ]
@@ -276,7 +277,7 @@ function goSettings() {
 }
 
 function goCredits() {
-  uni.navigateTo({ url: '/pages/credits/transactions' })
+  uni.navigateTo({ url: '/pages/credits/index' })
 }
 
 // --- Share ---

@@ -3,20 +3,50 @@
     <AbLoading v-if="initialLoading" text="加载中" />
 
     <view v-else-if="task">
+      <!-- Goal mode banner -->
+      <view v-if="task.goal_mode" class="task-detail__goal-banner">
+        <text class="task-detail__goal-icon">🎯</text>
+        <view class="task-detail__goal-body">
+          <text class="task-detail__goal-title">强目标模式</text>
+          <text class="task-detail__goal-text">
+            目标条件：{{ task.goal || '(未设置)' }}
+          </text>
+          <text class="task-detail__goal-hint">
+            AI 会自动检查产出是否符合目标条件，未达成会继续修订直到符合（或达到最大尝试次数）。
+          </text>
+        </view>
+      </view>
+
       <!-- Header card -->
       <view class="task-detail__header">
         <view class="task-detail__badges">
           <PlatformAvatar :platform="task.type" :size="36" />
+          <AbBadge variant="neutral" size="sm">{{ typeLabel }}</AbBadge>
           <AbBadge :variant="statusBadgeVariant">{{ statusLabel }}</AbBadge>
         </view>
         <text class="task-detail__title">{{ task.title || '未命名任务' }}</text>
+        <view v-if="project" class="task-detail__project" @tap="goToProjects">
+          <image
+            v-if="project.avatar_url"
+            :src="project.avatar_url"
+            class="task-detail__project-avatar"
+            mode="aspectFill"
+          />
+          <text v-else class="task-detail__project-avatar task-detail__project-avatar--fallback">
+            {{ (project.name || '?').charAt(0) }}
+          </text>
+          <text class="task-detail__project-name">{{ project.name }}</text>
+        </view>
         <view class="task-detail__times">
-          <text class="task-detail__time">创建: {{ formatDateTimeCN(task.created_at) }}</text>
+          <text class="task-detail__time">创建: {{ formatFullDateTimeCN(task.created_at) }}</text>
           <text v-if="task.started_at" class="task-detail__time">
             开始: {{ formatFullDateTimeCN(task.started_at) }}
           </text>
           <text v-if="task.completed_at" class="task-detail__time">
             完成: {{ formatFullDateTimeCN(task.completed_at) }}
+          </text>
+          <text class="task-detail__time">
+            来源: {{ task.plan_id ? '计划任务' : '手动创建' }}
           </text>
         </view>
       </view>
@@ -26,15 +56,24 @@
         v-if="task.status === 'running' || task.status === 'pending'"
         class="task-detail__section"
       >
-        <text class="section-title">执行进度</text>
+        <view class="section-header">
+          <text class="section-title">执行进度</text>
+          <text v-if="progressStage" class="task-detail__stage-chip">
+            阶段：{{ stageLabel(progressStage) }}
+          </text>
+        </view>
+        <view class="task-detail__progress-row">
+          <text class="task-detail__progress-title">{{ progressTitle }}</text>
+          <text class="task-detail__progress-percent">{{ progressValue }}%</text>
+        </view>
         <AbProgress
-          :percent="task.progress ?? 0"
-          :show-text="true"
+          :percent="progressValue"
+          :show-text="false"
           height="16rpx"
           :color="task.status === 'running' ? '#4F46E5' : '#D97706'"
         />
-        <text v-if="progressMessage" class="task-detail__progress-msg">
-          当前步骤: {{ progressMessage }}
+        <text v-if="progressDescription" class="task-detail__progress-desc">
+          {{ progressDescription }}
         </text>
         <text v-if="polling" class="task-detail__polling-indicator">
           <text class="polling-dot" /> 实时更新中
@@ -52,12 +91,33 @@
             <text class="workflow-stage__label">{{ stage.label }}</text>
           </view>
         </view>
+
+        <!-- Workflow warnings -->
+        <view v-if="workflowWarnings.length > 0" class="task-detail__warnings">
+          <view
+            v-for="(w, i) in workflowWarnings"
+            :key="i"
+            class="task-detail__warning"
+          >
+            <text class="task-detail__warning-icon">⚠️</text>
+            <text class="task-detail__warning-text">{{ w.message }}</text>
+          </view>
+        </view>
       </view>
 
       <!-- Error message -->
       <view v-if="task.status === 'failed'" class="task-detail__section task-detail__section--error">
-        <text class="section-title">错误信息</text>
-        <text class="task-detail__error-text">{{ task.error_message || '任务执行失败' }}</text>
+        <view class="section-header">
+          <text class="section-title">错误信息</text>
+          <text
+            v-if="errorMessage"
+            class="section-action"
+            @tap="copyText(errorMessage, '错误信息已复制')"
+          >
+            复制
+          </text>
+        </view>
+        <text class="task-detail__error-text">{{ errorMessage }}</text>
       </view>
 
       <!-- Generated images gallery -->
@@ -65,7 +125,16 @@
         v-if="imageUrls.length > 0"
         class="task-detail__section"
       >
-        <text class="section-title">生成结果</text>
+        <view class="section-header">
+          <text class="section-title">生成结果</text>
+          <text
+            v-if="task.type === 'article' && task.status === 'completed'"
+            class="section-action"
+            @tap="onPreviewArticle"
+          >
+            预览 HTML
+          </text>
+        </view>
         <view class="image-grid">
           <image
             v-for="(url, i) in imageUrls"
@@ -116,14 +185,35 @@
       </view>
 
       <!-- Execution log -->
-      <view v-if="logs.length > 0" class="task-detail__section">
-        <text class="section-title">执行日志</text>
+      <view v-if="showLogs" class="task-detail__section">
+        <view class="section-header">
+          <text class="section-title">执行日志</text>
+          <view class="section-actions">
+            <text
+              class="section-action"
+              :class="{ 'section-action--muted': !followLogs }"
+              @tap="followLogs = !followLogs"
+            >
+              {{ followLogs ? '跟随输出' : '已暂停' }}
+            </text>
+            <text
+              class="section-action"
+              :class="{ 'section-action--disabled': logs.length === 0 }"
+              @tap="copyLogs"
+            >
+              复制
+            </text>
+          </view>
+        </view>
         <scroll-view
           class="log-scroll"
           scroll-y
           :scroll-top="logScrollTop"
           :scroll-with-animation="true"
         >
+          <view v-if="logs.length === 0" class="log-empty">
+            <text class="log-empty__text">等待输出中...</text>
+          </view>
           <view
             v-for="(log, i) in logs"
             :key="i"
@@ -186,7 +276,7 @@
         </view>
         <view v-if="seednoteAnalytics.tracking" class="analytics-card">
           <text class="analytics-card__title">{{ seednoteAnalytics.tracking.note_title || '等待绑定公开笔记' }}</text>
-          <text v-if="seednoteAnalytics.tracking.note_url" class="analytics-card__link" @tap="copyText(seednoteAnalytics.tracking.note_url)">
+          <text v-if="seednoteAnalytics.tracking.note_url" class="analytics-card__link" @tap="copyText(seednoteAnalytics.tracking.note_url, '链接已复制')">
             {{ seednoteAnalytics.tracking.note_url }}
           </text>
           <view v-if="seednoteAnalytics.tracking.note_cover_url" class="analytics-card__cover-wrap">
@@ -225,21 +315,42 @@
           取消任务
         </AbButton>
 
-        <!-- Failed: retry -->
-        <AbButton
-          v-if="task.status === 'failed'"
-          type="primary"
-          size="lg"
-          block
-          :loading="actionLoading"
-          @click="onRetry"
-        >
-          重新执行
-        </AbButton>
+        <!-- Failed / Cancelled: retry + delete -->
+        <template v-if="task.status === 'failed' || task.status === 'cancelled'">
+          <view class="task-detail__bottom-row">
+            <AbButton
+              type="ghost"
+              size="md"
+              :loading="actionLoading"
+              @click="onDelete"
+              style="flex: 1;"
+            >
+              删除
+            </AbButton>
+            <AbButton
+              type="primary"
+              size="md"
+              :loading="actionLoading"
+              @click="onRetry"
+              style="flex: 1;"
+            >
+              重新执行
+            </AbButton>
+          </view>
+        </template>
 
-        <!-- Completed: published + share -->
+        <!-- Completed: published + share + delete + preview -->
         <template v-if="task.status === 'completed'">
           <view class="task-detail__bottom-row">
+            <AbButton
+              type="ghost"
+              size="md"
+              :loading="actionLoading"
+              @click="onDelete"
+              style="flex: 1;"
+            >
+              删除
+            </AbButton>
             <AbButton
               type="ghost"
               size="md"
@@ -247,44 +358,66 @@
               @click="onTogglePublished"
               style="flex: 1;"
             >
-              {{ task.published ? '取消发布标记' : '标记已发布' }}
+              {{ task.published ? '取消发布' : '标记已发布' }}
+            </AbButton>
+          </view>
+          <view class="task-detail__bottom-row" style="margin-top: 12rpx;">
+            <AbButton
+              v-if="task.type === 'article'"
+              type="ghost"
+              size="md"
+              style="flex: 1;"
+              @click="onPreviewArticle"
+            >
+              预览
             </AbButton>
             <AbButton
               type="primary"
               size="md"
-              style="flex: 1;"
+              :style="{ flex: 1 }"
               @click="onShare"
             >
               分享结果
             </AbButton>
           </view>
         </template>
-
-        <!-- Cancelled: retry -->
-        <AbButton
-          v-if="task.status === 'cancelled'"
-          type="primary"
-          size="lg"
-          block
-          :loading="actionLoading"
-          @click="onRetry"
-        >
-          重新执行
-        </AbButton>
       </view>
     </view>
 
     <!-- Task not found -->
     <AbEmpty v-else title="任务不存在" />
+
+    <!-- Article HTML preview overlay (in-page, no separate route) -->
+    <view v-if="previewVisible" class="preview-overlay" @tap="closePreview">
+      <view class="preview-overlay__panel" @tap.stop>
+        <view class="preview-overlay__header">
+          <text class="preview-overlay__title">文章预览</text>
+          <view class="preview-overlay__actions">
+            <text class="preview-overlay__action" @tap="copyPreviewHtml">复制 HTML</text>
+            <text class="preview-overlay__action" @tap="closePreview">关闭</text>
+          </view>
+        </view>
+        <scroll-view scroll-y class="preview-overlay__body">
+          <rich-text v-if="previewHtml" :nodes="sanitizeHtml(previewHtml)" />
+          <view v-else-if="previewLoading" class="preview-overlay__loading">
+            <text>加载中...</text>
+          </view>
+          <view v-else class="preview-overlay__empty">
+            <text>暂无预览内容</text>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
-import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
-import type { SeednoteAnalytics, Task, TaskFile, TaskStatus, WorkflowStage, WorkflowReview } from '@/types'
+import { onLoad, onShareAppMessage, onUnload } from '@dcloudio/uni-app'
+import type { Project, SeednoteAnalytics, Task, TaskFile, TaskStatus, WorkflowStage, WorkflowReview, WorkflowWarning } from '@/types'
 import { tasksApi } from '@/api/tasks'
-import { taskStatusLabel } from '@/utils/labels'
+import { projectsApi } from '@/api/projects'
+import { taskStatusLabel, contentTypeLabel, progressStageLabel, formatUSD } from '@/utils/labels'
 import { formatDateTimeCN, formatFullDateTimeCN, sanitizeHtml } from '@/utils/format'
 import { usePolling } from '@/composables/usePolling'
 import AbBadge from '@/components/common/AbBadge.vue'
@@ -298,9 +431,16 @@ const taskId = ref('')
 const initialLoading = ref(true)
 const actionLoading = ref(false)
 const contentExpanded = ref(false)
+const followLogs = ref(true)
 const logScrollTop = ref(0)
 const taskFiles = ref<TaskFile[]>([])
 const seednoteAnalytics = ref<SeednoteAnalytics | null>(null)
+const project = ref<Project | null>(null)
+
+// In-page article HTML preview overlay
+const previewVisible = ref(false)
+const previewHtml = ref('')
+const previewLoading = ref(false)
 
 const {
   task,
@@ -312,6 +452,11 @@ const {
   startPolling,
   stopPolling,
 } = usePolling()
+
+const typeLabel = computed(() => {
+  const t = task.value?.type
+  return t ? (contentTypeLabel[t] || t) : ''
+})
 
 const statusLabel = computed(() => {
   const taskStatus = task.value?.status
@@ -335,10 +480,22 @@ const workflowStages = computed<WorkflowStage[]>(() => {
   return (ws as any).stages || []
 })
 
+const workflowWarnings = computed<WorkflowWarning[]>(() => {
+  const ws = task.value?.workflow_status
+  if (!ws || typeof ws === 'string') return []
+  return (ws as any).warnings || []
+})
+
 const review = computed<WorkflowReview | null>(() => {
   const ws = task.value?.workflow_status
   if (!ws || typeof ws === 'string') return null
   return (ws as any).review || null
+})
+
+const errorMessage = computed(() => {
+  const t = task.value
+  if (!t) return ''
+  return t.error_message || t.error || '任务执行失败'
 })
 
 const imageUrls = computed(() => {
@@ -347,6 +504,35 @@ const imageUrls = computed(() => {
   return files
     .filter((f) => f.mime_type?.startsWith('image/'))
     .map((f) => f.url)
+})
+
+// Monotonic progress: max(latest_progress.percent, task.progress) — mirrors studio's
+// progressValue logic (UpdateProgressColumn is monotonic server-side).
+const progressValue = computed(() => {
+  const t = task.value
+  if (!t) return 0
+  const live = t.latest_progress?.percent ?? 0
+  const persisted = t.progress ?? 0
+  return Math.max(0, Math.min(100, Math.max(live, persisted)))
+})
+
+const progressStage = computed(() => {
+  return task.value?.latest_progress?.stage ?? null
+})
+
+const progressTitle = computed(() => {
+  const t = task.value
+  if (!t) return ''
+  const fallback = t.status === 'pending' ? '任务等待执行中...' : '任务执行中...'
+  return t.latest_progress?.title ?? fallback
+})
+
+const progressDescription = computed(() => {
+  return task.value?.latest_progress?.description ?? null
+})
+
+const showLogs = computed(() => {
+  return logs.value.length > 0 || task.value?.status === 'running'
 })
 
 const seednoteTrackingLabel = computed(() => {
@@ -383,6 +569,10 @@ function stageIcon(stageStatus: string): string {
   }
 }
 
+function stageLabel(stage: string): string {
+  return progressStageLabel[stage] ?? stage
+}
+
 function onPreviewImage(index: number) {
   if (imageUrls.value.length > 0) {
     uni.previewImage({
@@ -403,8 +593,18 @@ function formatFileSize(bytes?: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function copyText(text: string) {
-  uni.setClipboardData({ data: text })
+function copyText(text: string, toast = '已复制') {
+  uni.setClipboardData({
+    data: text,
+    success() {
+      uni.showToast({ title: toast, icon: 'none' })
+    },
+  })
+}
+
+function copyLogs() {
+  if (logs.value.length === 0) return
+  copyText(logs.value.join('\n'), '已复制执行日志')
 }
 
 function downloadByUrl(url: string, fileName: string, openAfterDownload = false) {
@@ -465,6 +665,51 @@ function downloadZip() {
   downloadByUrl(tasksApi.zipDownloadUrl(taskId.value), `task_${taskId.value}_files.zip`)
 }
 
+async function onPreviewArticle() {
+  if (!taskId.value) return
+  // Open the overlay first (better perceived latency), then fetch HTML.
+  previewVisible.value = true
+  previewLoading.value = true
+  previewHtml.value = ''
+  try {
+    const html = await tasksApi.fetchPreviewHTML(taskId.value)
+    previewHtml.value = html || ''
+  } catch (err) {
+    previewHtml.value = ''
+    const msg = (err as Error)?.message || '预览加载失败'
+    uni.showToast({ title: msg, icon: 'none' })
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function closePreview() {
+  previewVisible.value = false
+}
+
+function copyPreviewHtml() {
+  if (!previewHtml.value) return
+  copyText(previewHtml.value, '预览 HTML 已复制')
+}
+
+function goToProjects() {
+  uni.switchTab({ url: '/pages/projects/index', fail: () => {
+    uni.navigateTo({ url: '/pages/projects/index' })
+  } })
+}
+
+async function loadProject() {
+  const pid = task.value?.project_id
+  if (!pid) return
+  try {
+    const detail = await projectsApi.get(pid)
+    project.value = detail.project
+  } catch (err) {
+    console.error('Failed to load project:', err)
+    project.value = null
+  }
+}
+
 async function loadCompletedDetails() {
   if (!taskId.value || task.value?.status !== 'completed') return
   try {
@@ -482,28 +727,53 @@ async function loadCompletedDetails() {
   }
 }
 
-// Auto-scroll logs to bottom when new entries arrive
+// Auto-scroll logs to bottom when new entries arrive AND follow is on.
 watch(
   () => logs.value.length,
   () => {
+    if (!followLogs.value) return
     nextTick(() => {
-      // Use a very large scrollTop to ensure it scrolls to bottom
-      logScrollTop.value = 99999
+      // Toggle to force scroll-view to re-evaluate scroll-top (uni quirk).
+      logScrollTop.value = logScrollTop.value === 1 ? 99999 : 1
+      nextTick(() => {
+        logScrollTop.value = 99999
+      })
     })
   },
 )
 
 watch(
   () => task.value?.status,
-  () => {
+  (newStatus) => {
     void loadCompletedDetails()
+    if (newStatus && ['completed', 'failed', 'cancelled'].includes(newStatus)) {
+      void loadProject()
+    }
   },
 )
 
+watch(
+  () => task.value?.project_id,
+  () => {
+    void loadProject()
+  },
+  { immediate: false },
+)
+
 async function onCancel() {
+  const t = task.value
+  if (!t) return
+  const refundHint = t.status === 'pending'
+    ? '此任务尚未开始执行，取消后将全额退还已扣积分，不会产生任何费用。'
+    : (t.total_cost_usd && t.total_cost_usd > 0
+        ? `已完成步骤已消耗约 ${formatUSD(t.total_cost_usd)}，不予退还；其余将退还。`
+        : '已完成步骤（如 AI 写作、图片生成）的费用不予退还，其余将退还。')
+
   uni.showModal({
-    title: '取消任务',
-    content: '确定取消该任务吗？',
+    title: '确定取消此任务？',
+    content: `${refundHint}此操作不可撤销。`,
+    confirmText: '确定取消',
+    confirmColor: '#DC2626',
     success: async (res) => {
       if (res.confirm) {
         actionLoading.value = true
@@ -513,6 +783,34 @@ async function onCancel() {
           // Polling will pick up the new status
         } catch {
           uni.showToast({ title: '取消失败', icon: 'none' })
+        } finally {
+          actionLoading.value = false
+        }
+      }
+    },
+  })
+}
+
+async function onDelete() {
+  uni.showModal({
+    title: '确定删除此任务？',
+    content: '删除后任务及所有关联文件将被永久移除，此操作不可撤销。',
+    confirmText: '确定删除',
+    confirmColor: '#DC2626',
+    success: async (res) => {
+      if (res.confirm) {
+        actionLoading.value = true
+        try {
+          await tasksApi.delete(taskId.value)
+          uni.showToast({ title: '任务已删除', icon: 'success' })
+          stopPolling()
+          setTimeout(() => {
+            uni.navigateBack({ fail: () => {
+              uni.switchTab({ url: '/pages/tasks/index' })
+            } })
+          }, 400)
+        } catch {
+          uni.showToast({ title: '删除失败', icon: 'none' })
         } finally {
           actionLoading.value = false
         }
@@ -551,39 +849,42 @@ async function onRetry() {
   if (!task.value) return
   actionLoading.value = true
   try {
-    const newTask = await tasksApi.create({
-      type: task.value.type,
-      channel_id: task.value.channel_id,
-      topic: task.value.topic,
-      prompt: task.value.prompt,
-      image_ratio: task.value.image_ratio || undefined,
-      skip_reference_image: task.value.skip_reference_image,
-      reference_image_url: task.value.reference_image_url,
-      watermark: task.value.watermark,
-    })
+    // Server clones full task configuration (style/author/ecommerce/image
+    // model/watermark/goal mode...) — preserves everything, unlike the old
+    // client-side create() which only forwarded a subset of fields.
+    const newTask = await tasksApi.retry(task.value.id)
 
-    uni.showToast({ title: '已重新创建任务', icon: 'success' })
+    uni.showToast({ title: '已重新创建任务，全部设置已保留', icon: 'success' })
     setTimeout(() => {
       uni.redirectTo({ url: `/pages/tasks/detail?id=${newTask.id}` })
     }, 500)
-  } catch {
-    uni.showToast({ title: '重试失败', icon: 'none' })
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; code?: number }
+    if (e?.statusCode === 402 || e?.code === 40200) {
+      uni.showToast({ title: '积分不足，无法重试', icon: 'none' })
+    } else {
+      uni.showToast({ title: (err as Error)?.message || '重试失败', icon: 'none' })
+    }
   } finally {
     actionLoading.value = false
   }
 }
 
-// Right-top "more" menu via navigation bar
 onLoad((query) => {
   if (query?.id) {
     taskId.value = query.id
     startPolling(query.id).finally(() => {
       initialLoading.value = false
       void loadCompletedDetails()
+      void loadProject()
     })
   } else {
     initialLoading.value = false
   }
+})
+
+onUnload(() => {
+  stopPolling()
 })
 
 // Expose share message
@@ -598,7 +899,7 @@ onShareAppMessage(() => ({
   min-height: 100vh;
   background-color: $ab-background;
   padding: $ab-space-md;
-  padding-bottom: 200rpx;
+  padding-bottom: 240rpx;
 
   &__header {
     background-color: $ab-surface;
@@ -611,6 +912,7 @@ onShareAppMessage(() => ({
   &__badges {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: $ab-space-sm;
     margin-bottom: $ab-space-sm;
   }
@@ -622,6 +924,37 @@ onShareAppMessage(() => ({
     display: block;
     margin-bottom: $ab-space-sm;
     line-height: 1.3;
+  }
+
+  &__project {
+    display: flex;
+    align-items: center;
+    gap: $ab-space-xs;
+    margin-bottom: $ab-space-sm;
+
+    &-avatar {
+      width: 32rpx;
+      height: 32rpx;
+      border-radius: 50%;
+      background-color: $ab-divider;
+
+      &--fallback {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18rpx;
+        color: $ab-text-secondary;
+        background-color: $ab-divider;
+      }
+    }
+
+    &-name {
+      font-size: $ab-text-xs;
+      color: $ab-text-secondary;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
 
   &__times {
@@ -647,11 +980,41 @@ onShareAppMessage(() => ({
     }
   }
 
-  &__progress-msg {
-    font-size: $ab-text-sm;
+  &__progress-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: $ab-space-sm;
+    margin-bottom: $ab-space-xs;
+  }
+
+  &__progress-title {
+    font-size: $ab-text-md;
+    font-weight: $ab-font-semibold;
+    color: $ab-text;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__progress-percent {
+    font-size: $ab-text-md;
+    font-weight: $ab-font-bold;
+    color: $ab-primary;
+  }
+
+  &__progress-desc {
+    font-size: $ab-text-xs;
     color: $ab-text-secondary;
-    margin-top: $ab-space-sm;
+    margin-top: $ab-space-xs;
     display: block;
+  }
+
+  &__stage-chip {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
   }
 
   &__polling-indicator {
@@ -667,6 +1030,75 @@ onShareAppMessage(() => ({
     font-size: $ab-text-sm;
     color: $ab-danger;
     line-height: 1.5;
+    word-break: break-all;
+  }
+
+  &__warnings {
+    margin-top: $ab-space-md;
+    display: flex;
+    flex-direction: column;
+    gap: $ab-space-xs;
+  }
+
+  &__warning {
+    display: flex;
+    align-items: flex-start;
+    gap: $ab-space-xs;
+    padding: $ab-space-sm;
+    border-radius: $ab-radius-sm;
+    background-color: $ab-warning-bg;
+    border-left: 4rpx solid $ab-warning;
+
+    &-icon {
+      font-size: 24rpx;
+      flex-shrink: 0;
+    }
+
+    &-text {
+      font-size: $ab-text-xs;
+      color: $ab-text;
+      line-height: 1.5;
+      flex: 1;
+    }
+  }
+
+  &__goal-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: $ab-space-sm;
+    background-color: $ab-warning-bg;
+    border: 2rpx solid rgba($ab-warning, 0.4);
+    border-radius: $ab-radius-md;
+    padding: $ab-space-md;
+    margin-bottom: $ab-space-sm;
+
+    &-icon {
+      font-size: 36rpx;
+      flex-shrink: 0;
+    }
+
+    &-title {
+      display: block;
+      font-size: $ab-text-base;
+      font-weight: $ab-font-semibold;
+      color: $ab-warning;
+      margin-bottom: 4rpx;
+    }
+
+    &-text {
+      display: block;
+      font-size: $ab-text-sm;
+      color: $ab-text;
+      line-height: 1.5;
+      margin-bottom: 4rpx;
+    }
+
+    &-hint {
+      display: block;
+      font-size: $ab-text-xs;
+      color: $ab-text-secondary;
+      line-height: 1.5;
+    }
   }
 
   &__bottom {
@@ -708,10 +1140,25 @@ onShareAppMessage(() => ({
   }
 }
 
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: $ab-space-md;
+}
+
 .section-action {
   font-size: $ab-text-sm;
   color: $ab-primary;
   font-weight: $ab-font-medium;
+
+  &--muted {
+    color: $ab-text-tertiary;
+  }
+
+  &--disabled {
+    color: $ab-text-tertiary;
+    opacity: 0.5;
+  }
 }
 
 // Polling dot animation
@@ -879,6 +1326,18 @@ onShareAppMessage(() => ({
   overflow: hidden;
 }
 
+.log-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+
+  &__text {
+    font-size: $ab-text-xs;
+    color: rgba(255, 255, 255, 0.4);
+  }
+}
+
 .log-entry {
   padding: 6rpx 0;
   border-bottom: 1rpx solid rgba(255, 255, 255, 0.06);
@@ -1043,6 +1502,69 @@ onShareAppMessage(() => ({
     margin-top: 2rpx;
     font-size: $ab-text-xs;
     color: $ab-success;
+  }
+}
+
+// Article HTML preview overlay
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+
+  &__panel {
+    width: 100%;
+    max-height: 85vh;
+    background-color: $ab-surface;
+    border-radius: $ab-radius-md $ab-radius-md 0 0;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: $ab-space-md;
+    border-bottom: 2rpx solid $ab-divider;
+  }
+
+  &__title {
+    font-size: $ab-text-md;
+    font-weight: $ab-font-semibold;
+    color: $ab-text;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: $ab-space-md;
+  }
+
+  &__action {
+    font-size: $ab-text-sm;
+    color: $ab-primary;
+    font-weight: $ab-font-medium;
+  }
+
+  &__body {
+    flex: 1;
+    padding: $ab-space-md;
+    overflow-y: auto;
+  }
+
+  &__loading,
+  &__empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: $ab-space-lg 0;
+    font-size: $ab-text-sm;
+    color: $ab-text-tertiary;
   }
 }
 </style>

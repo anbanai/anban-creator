@@ -1,31 +1,44 @@
 /**
  * Anbanwriter Mini Program Design Tokens
  * All design variables in one place. Available in all .vue/.scss files without import.
+ *
+ * Theme strategy: neutrals / surfaces / text / background-tints / shadows are
+ * exposed as CSS custom properties (var(--ab-*)), defined on `page` in App.vue
+ * with a `prefers-color-scheme: dark` override — so the entire app follows the
+ * system color scheme automatically. Accent colors stay compile-time hex
+ * because they are used inside rgba() (which can't take a CSS-var hex) and read
+ * fine on dark backgrounds.
  */
 
-// --- Primary ---
+// --- Primary (accent — compile-time hex) ---
 $ab-primary: #4F46E5;
 $ab-primary-light: #6366F1;
-$ab-primary-bg: #EEF2FF;
 
-// --- Semantic Colors ---
+// --- Semantic accent colors (compile-time hex; used in rgba()) ---
 $ab-success: #059669;
-$ab-success-bg: #ECFDF5;
 $ab-danger: #DC2626;
-$ab-danger-bg: #FEF2F2;
 $ab-warning: #D97706;
-$ab-warning-bg: #FFFBEB;
 $ab-info: #2563EB;
-$ab-info-bg: #EFF6FF;
 
-// --- Neutral ---
-$ab-text: #111827;
-$ab-text-secondary: #6B7280;
-$ab-text-tertiary: #9CA3AF;
-$ab-border: #E5E7EB;
-$ab-divider: #F3F4F6;
-$ab-surface: #FFFFFF;
-$ab-background: #F9FAFB;
+// --- Themeable surfaces / text / tints / shadows (CSS custom properties) ---
+// Light defaults + dark overrides live in App.vue (on `page`).
+$ab-primary-bg: var(--ab-primary-bg);
+$ab-success-bg: var(--ab-success-bg);
+$ab-danger-bg: var(--ab-danger-bg);
+$ab-warning-bg: var(--ab-warning-bg);
+$ab-info-bg: var(--ab-info-bg);
+
+$ab-text: var(--ab-text);
+$ab-text-secondary: var(--ab-text-secondary);
+$ab-text-tertiary: var(--ab-text-tertiary);
+$ab-border: var(--ab-border);
+$ab-divider: var(--ab-divider);
+$ab-surface: var(--ab-surface);
+$ab-background: var(--ab-background);
+
+$ab-shadow-sm: var(--ab-shadow-sm);
+$ab-shadow-md: var(--ab-shadow-md);
+$ab-shadow-lg: var(--ab-shadow-lg);
 
 // --- Platform Colors ---
 $ab-platform-seednote: #FF2442;
@@ -58,11 +71,6 @@ $ab-font-normal: 400;
 $ab-font-medium: 500;
 $ab-font-semibold: 600;
 $ab-font-bold: 700;
-
-// --- Shadows ---
-$ab-shadow-sm: 0 1rpx 2rpx rgba(0, 0, 0, 0.05);
-$ab-shadow-md: 0 4rpx 12rpx rgba(0, 0, 0, 0.08);
-$ab-shadow-lg: 0 8rpx 24rpx rgba(0, 0, 0, 0.12);
 
 // --- Override uni-app defaults ---
 $uni-color-primary: $ab-primary;

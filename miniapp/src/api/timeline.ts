@@ -8,7 +8,7 @@ export const timelineApi = {
     type?: string
     content_type?: string
     status?: string
-    channel_id?: string
+    project_id?: string
   }) =>
     get<TimelineResponse>('/timeline', params as Record<string, any>),
 }

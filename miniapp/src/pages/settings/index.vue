@@ -95,6 +95,11 @@
           <text class="list-item__title">OpenClaw 接入</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
+        <view class="list-item" @tap="navigateTo('/pages/connect/codex')">
+          <text class="list-item__icon">⚡</text>
+          <text class="list-item__title">Codex 接入</text>
+          <text class="list-item__arrow">&#8250;</text>
+        </view>
         <view class="list-item" @tap="showFeedback = true">
           <text class="list-item__icon">💬</text>
           <text class="list-item__title">意见反馈</text>

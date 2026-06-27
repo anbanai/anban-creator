@@ -1,8 +1,14 @@
 import { get, post, put, del } from './request'
 import type { Plan, CreatePlanRequest, UpdatePlanRequest, PaginatedResponse } from '@/types'
 
+export interface ListPlansParams {
+  project_id?: string
+  limit?: number
+  offset?: number
+}
+
 export const plansApi = {
-  list: (params?: { channel_id?: string }) =>
+  list: (params?: ListPlansParams) =>
     get<PaginatedResponse<Plan>>('/plans', params as Record<string, any>),
 
   get: (id: string) =>

@@ -3,7 +3,7 @@ export type TopicPoolStatus = 'unused' | 'used'
 export interface TopicPool {
   id: number
   user_id: string
-  channel_id: string
+  project_id: string
   topic: string
   status: TopicPoolStatus
   task_id?: string
