@@ -11,17 +11,19 @@ import (
 )
 
 // createBackfillProject inserts a project with exact field values, bypassing
-// service defaults so the backfill logic is tested in isolation.
+// service defaults so the backfill logic is tested in isolation. The DB column
+// names (style / writing_style) are retained from the pre-rename schema; only the
+// Go accessors changed to VisualStyle / WriterKey.
 func createBackfillProject(t *testing.T, db *gorm.DB, platform, style, writingStyle string) *model.Project {
 	t.Helper()
 	ch := &model.Project{
-		ID:           uuid.NewString(),
-		UserID:       "user-backfill",
-		Platform:     platform,
-		Name:         "Backfill Test " + platform,
-		Style:        style,
-		WritingStyle: writingStyle,
-		Status:       model.ProjectStatusActive,
+		ID:          uuid.NewString(),
+		UserID:      "user-backfill",
+		Platform:    platform,
+		Name:        "Backfill Test " + platform,
+		VisualStyle: style,
+		WriterKey:   writingStyle,
+		Status:      model.ProjectStatusActive,
 	}
 	if err := db.Create(ch).Error; err != nil {
 		t.Fatalf("create project: %v", err)
@@ -40,8 +42,8 @@ func reloadProject(t *testing.T, db *gorm.DB, id string) *model.Project {
 
 // TestMigrateArticleStyleOverload_MovesWriterKey — the core root-cause fix:
 // an article project whose overloaded Style held a writer key ("dan-koe") must
-// move it to WritingStyle and clear Style (visual), so the writer key no longer
-// leaks into image generation as a visual-style anchor.
+// move it to WriterKey and clear VisualStyle, so the writer key no longer leaks
+// into image generation as a visual-style anchor.
 func TestMigrateArticleStyleOverload_MovesWriterKey(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
@@ -52,11 +54,11 @@ func TestMigrateArticleStyleOverload_MovesWriterKey(t *testing.T) {
 	}
 
 	got := reloadProject(t, db, ch.ID)
-	if got.Style != "" {
-		t.Errorf("Style (visual) = %q, want empty — writer key must not remain in visual style", got.Style)
+	if got.VisualStyle != "" {
+		t.Errorf("VisualStyle = %q, want empty — writer key must not remain in visual style", got.VisualStyle)
 	}
-	if got.WritingStyle != "dan-koe" {
-		t.Errorf("WritingStyle = %q, want %q", got.WritingStyle, "dan-koe")
+	if got.WriterKey != "dan-koe" {
+		t.Errorf("WriterKey = %q, want %q", got.WriterKey, "dan-koe")
 	}
 }
 
@@ -72,11 +74,11 @@ func TestMigrateArticleStyleOverload_PreservesRealVisualStyle(t *testing.T) {
 	}
 
 	got := reloadProject(t, db, ch.ID)
-	if got.Style != "温暖自然的生活摄影，柔光大地色系" {
-		t.Errorf("Style = %q, want the original visual description (a non-writer Style must be preserved)", got.Style)
+	if got.VisualStyle != "温暖自然的生活摄影，柔光大地色系" {
+		t.Errorf("VisualStyle = %q, want the original visual description (a non-writer Style must be preserved)", got.VisualStyle)
 	}
-	if got.WritingStyle != "" {
-		t.Errorf("WritingStyle = %q, want empty (no writer key to move)", got.WritingStyle)
+	if got.WriterKey != "" {
+		t.Errorf("WriterKey = %q, want empty (no writer key to move)", got.WriterKey)
 	}
 }
 
@@ -93,14 +95,14 @@ func TestMigrateArticleStyleOverload_LeavesSeednoteUntouched(t *testing.T) {
 	}
 
 	got := reloadProject(t, db, ch.ID)
-	if got.Style != "手绘水彩插画风格" {
-		t.Errorf("seednote Style = %q, want unchanged", got.Style)
+	if got.VisualStyle != "手绘水彩插画风格" {
+		t.Errorf("seednote VisualStyle = %q, want unchanged", got.VisualStyle)
 	}
 }
 
 // TestMigrateArticleStyleOverload_DoesNotClobberExistingWritingStyle — if a
-// project already has a WritingStyle set, the writer key in Style is moved away
-// (Style cleared) but the existing WritingStyle is preserved.
+// project already has a WriterKey set, the writer key in VisualStyle is moved away
+// (VisualStyle cleared) but the existing WriterKey is preserved.
 func TestMigrateArticleStyleOverload_DoesNotClobberExistingWritingStyle(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
@@ -111,11 +113,11 @@ func TestMigrateArticleStyleOverload_DoesNotClobberExistingWritingStyle(t *testi
 	}
 
 	got := reloadProject(t, db, ch.ID)
-	if got.Style != "" {
-		t.Errorf("Style = %q, want empty (stale writer key cleared)", got.Style)
+	if got.VisualStyle != "" {
+		t.Errorf("VisualStyle = %q, want empty (stale writer key cleared)", got.VisualStyle)
 	}
-	if got.WritingStyle != "cultural-depth" {
-		t.Errorf("WritingStyle = %q, want %q (must not be clobbered)", got.WritingStyle, "cultural-depth")
+	if got.WriterKey != "cultural-depth" {
+		t.Errorf("WriterKey = %q, want %q (must not be clobbered)", got.WriterKey, "cultural-depth")
 	}
 }
 
@@ -133,7 +135,7 @@ func TestMigrateArticleStyleOverload_Idempotent(t *testing.T) {
 	}
 
 	got := reloadProject(t, db, ch.ID)
-	if got.Style != "" || got.WritingStyle != "dan-koe" {
-		t.Errorf("after 2 passes: Style=%q WritingStyle=%q, want Style empty + WritingStyle=dan-koe", got.Style, got.WritingStyle)
+	if got.VisualStyle != "" || got.WriterKey != "dan-koe" {
+		t.Errorf("after 2 passes: VisualStyle=%q WriterKey=%q, want VisualStyle empty + WriterKey=dan-koe", got.VisualStyle, got.WriterKey)
 	}
 }

@@ -19,8 +19,8 @@ type progressNotifier interface {
 // a long-running tool call to keep the SSE response stream active.
 //
 // Why this exists: Claude Code's HTTP MCP client has a 60-second first-byte
-// budget. The three long-text tool handlers (write_article, humanize_article,
-// convert_markdown) block on an LLM call for 1–8 minutes without writing any
+// budget. The two long-text tool handlers (write_article, convert_markdown) block on
+// an LLM call for 1–8 minutes without writing any
 // bytes to the SSE stream, so the client gives up at 60s and the tool times
 // out. Pushing a progress notification every 15s rolls the stream and keeps
 // the connection alive. See https://code.claude.com/docs/en/mcp.

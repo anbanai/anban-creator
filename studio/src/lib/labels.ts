@@ -219,10 +219,13 @@ export const taskTypeLabelCN: Record<string, string> = {
 
 // --- Content Types ---
 
+// 电商平台类型统一用「电商出图」，与 contentTypeOptions / platformLabels /
+// taskTypeLabelCN / TemplateCard 等一致。「电商素材包/模块」指的是交付物（按模块
+// 计费的素材包），是另一个语义，保持不变。
 export const contentTypeLabel: Record<string, string> = {
   seednote: '种草笔记',
   article: '公众号文章',
-  ecommerce: '电商素材',
+  ecommerce: '电商出图',
 }
 
 // Pipeline stage → 中文标签。stage 取值来自 server/service/task_progress_stages.go

@@ -110,6 +110,28 @@ type bulkDownloadTaskFilesRequest struct {
 	TaskIDs []string `json:"task_ids"`
 }
 
+// bulkTaskIDsRequest is the shared request body for bulk cancel / retry / delete.
+type bulkTaskIDsRequest struct {
+	TaskIDs []string `json:"task_ids"`
+}
+
+// bulkTaskResult is the per-task outcome of a bulk operation. OK=false tasks
+// carry a machine-readable Reason so the UI can explain what was skipped.
+type bulkTaskResult struct {
+	ID        string `json:"id"`
+	OK        bool   `json:"ok"`
+	Reason    string `json:"reason,omitempty"`
+	NewTaskID string `json:"new_task_id,omitempty"` // retry only
+}
+
+// bulkTasksResponse summarises a best-effort bulk operation.
+type bulkTasksResponse struct {
+	Total     int              `json:"total"`
+	Succeeded int              `json:"succeeded"`
+	Skipped   int              `json:"skipped"`
+	Results   []bulkTaskResult `json:"results"`
+}
+
 // Create handles POST /api/v1/tasks.
 func (h *TaskHandler) Create(c fiber.Ctx) error {
 	var req createTaskRequest
@@ -173,15 +195,24 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
-	// Validate template_id format if provided. Existence is not checked — the
-	// template may be deleted later, in which case Studio renders a fallback.
-	var templateID *string
-	if req.TemplateID != nil && strings.TrimSpace(*req.TemplateID) != "" {
-		trimmed := strings.TrimSpace(*req.TemplateID)
-		if _, err := uuid.Parse(trimmed); err != nil {
-			return Error(c, fiber.StatusBadRequest, "template_id must be a valid UUID")
+	// A task carries only per-dimension style/persona/theme OVERRIDES; every other
+	// dimension is inherited from the project and resolved two-layer at execution
+	// (task.Overrides.X ?? project.X via ResolveStyle). Build the overrides only
+	// when the caller set at least one dimension — an all-empty (nil) override means
+	// "inherit the project verbatim". The task no longer links a template (templates
+	// are project-creation starters only) and no longer snapshots resolved values,
+	// so editing the project immediately affects pending tasks.
+	var overrides *model.StyleOverrides
+	if req.Style != "" || req.WritingStyle != "" || req.Theme != "" ||
+		req.Author != "" || req.AuthorStyleIntro != "" || req.AuthorAvatarURL != "" {
+		overrides = &model.StyleOverrides{
+			VisualStyle:   req.Style,
+			WriterKey:     req.WritingStyle,
+			WritingVoice:  req.AuthorStyleIntro,
+			Byline:        req.Author,
+			PersonaAvatar: req.AuthorAvatarURL,
+			Theme:         req.Theme,
 		}
-		templateID = &trimmed
 	}
 
 	// Build the e-commerce package config when any e-commerce field is present.
@@ -207,16 +238,10 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		ImageModelKey:     req.ImageModelKey,
 		SkipRefImage:      req.SkipReferenceImage,
 		ReferenceImageURL: req.ReferenceImageURL,
-		Style:             req.Style,
-		WritingStyle:      req.WritingStyle,
-		Theme:             req.Theme,
-		Author:            req.Author,
-		AuthorStyleIntro:  req.AuthorStyleIntro,
-		AuthorAvatarURL:   req.AuthorAvatarURL,
+		Overrides:         overrides,
 		Watermark:         req.Watermark,
 		Goal:              req.Goal,
 		GoalMode:          req.GoalMode,
-		TemplateID:        templateID,
 		HasContentImage:   req.HasContentImage,
 		HasTailImage:      req.HasTailImage,
 		Ecommerce:         ecommerceCfg,
@@ -320,6 +345,134 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"message": "task cancelled"})
 }
 
+// Retry handles POST /api/v1/tasks/:id/retry.
+// It creates a fresh task from a failed task's configuration and enqueues it.
+// Only failed tasks can be retried; the original stays failed (already refunded)
+// and the new task is billed as a new run.
+func (h *TaskHandler) Retry(c fiber.Ctx) error {
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Verify ownership before retrying.
+	task, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
+	}
+
+	// Only failed or cancelled tasks can be retried (both are terminal + already
+	// refunded); completed/pending/running cannot.
+	if task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
+		return Error(c, fiber.StatusBadRequest, "只有失败或已取消的任务可以重试")
+	}
+
+	// Re-validate the image model against the caller's current tier (tier may
+	// have changed since the original task was created).
+	if err := h.validateImageModelKeyForUser(c, userID, task.ImageModelKey); err != nil {
+		return Error(c, fiber.StatusForbidden, err.Error())
+	}
+
+	newTask, err := h.service.Retry(c.Context(), id)
+	if err != nil {
+		h.logger.Error().Err(err).Str("task_id", id).Msg("retry task failed")
+		if errors.Is(err, service.ErrInsufficientCredits) {
+			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
+				"code": 40200,
+				"msg":  "insufficient_credits",
+			})
+		}
+		return Error(c, fiber.StatusInternalServerError, "重试任务失败")
+	}
+
+	return Success(c, newTask)
+}
+
+// PublishApprove handles POST /api/v1/tasks/:id/publish-approve: resumes a held
+// publish-approval gate (Batch 4A) and publishes the frozen draft to the WeChat
+// draft box. The actual publish runs asynchronously; this returns once the task
+// is marked approved.
+func (h *TaskHandler) PublishApprove(c fiber.Ctx) error {
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	// Verify ownership before resuming the publish.
+	task, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
+	}
+
+	if err := h.service.ApprovePublish(c.Context(), id); err != nil {
+		h.logger.Error().Err(err).Str("task_id", id).Msg("approve publish failed")
+		switch {
+		case errors.Is(err, service.ErrPublishApprovalNotPending):
+			return Error(c, fiber.StatusConflict, "该任务不在待审核发布状态")
+		case errors.Is(err, service.ErrPublishApprovalUnavailable):
+			return Error(c, fiber.StatusConflict, "无法发布：项目未启用发布或草稿数据缺失")
+		}
+		return Error(c, fiber.StatusInternalServerError, "放行发布失败")
+	}
+
+	return Success(c, fiber.Map{"approved": true})
+}
+
+// PublishReject handles POST /api/v1/tasks/:id/publish-reject: closes the
+// publish-approval gate without publishing. Accepts an optional {"reason": "..."}
+// body; the reason is surfaced to the user via the progress event.
+func (h *TaskHandler) PublishReject(c fiber.Ctx) error {
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	task, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	// Body is optional — a POST with no body simply rejects with no note.
+	_ = c.Bind().Body(&req)
+
+	if err := h.service.RejectPublish(c.Context(), id, req.Reason); err != nil {
+		h.logger.Error().Err(err).Str("task_id", id).Msg("reject publish failed")
+		if errors.Is(err, service.ErrPublishApprovalNotPending) {
+			return Error(c, fiber.StatusConflict, "该任务不在待审核发布状态")
+		}
+		return Error(c, fiber.StatusInternalServerError, "驳回发布失败")
+	}
+
+	return Success(c, fiber.Map{"rejected": true})
+}
+
 // Delete handles DELETE /api/v1/tasks/:id.
 func (h *TaskHandler) Delete(c fiber.Ctx) error {
 	id, err := validateUUIDParam(c, "id")
@@ -350,6 +503,162 @@ func (h *TaskHandler) Delete(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{"message": "task deleted"})
+}
+
+// parseBulkTaskIDs validates the shared bulk request body: 1..100 well-formed
+// UUIDs. Returns the trimmed IDs ready for lookup.
+func (h *TaskHandler) parseBulkTaskIDs(c fiber.Ctx) ([]string, error) {
+	var req bulkTaskIDsRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return nil, Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if len(req.TaskIDs) == 0 {
+		return nil, Error(c, fiber.StatusBadRequest, "task_ids is required")
+	}
+	if len(req.TaskIDs) > 100 {
+		return nil, Error(c, fiber.StatusBadRequest, "task_ids must not exceed 100")
+	}
+	ids := make([]string, 0, len(req.TaskIDs))
+	for _, id := range req.TaskIDs {
+		id = strings.TrimSpace(id)
+		if _, err := uuid.Parse(id); err != nil {
+			return nil, Error(c, fiber.StatusBadRequest, "invalid task_ids format")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// BulkCancel handles POST /api/v1/tasks/bulk-cancel.
+// Best-effort: cancels each pending/running task owned by the caller, skipping
+// the rest (not found / not owned / already terminal) with a per-task reason.
+func (h *TaskHandler) BulkCancel(c fiber.Ctx) error {
+	ids, err := h.parseBulkTaskIDs(c)
+	if err != nil {
+		return err
+	}
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	results := make([]bulkTaskResult, 0, len(ids))
+	succeeded := 0
+	for _, id := range ids {
+		task, err := h.service.GetByID(c.Context(), id)
+		if err != nil {
+			results = append(results, bulkTaskResult{ID: id, Reason: "not_found"})
+			continue
+		}
+		if task.UserID != userID {
+			results = append(results, bulkTaskResult{ID: id, Reason: "forbidden"})
+			continue
+		}
+		if task.Status != model.TaskStatusPending && task.Status != model.TaskStatusRunning {
+			results = append(results, bulkTaskResult{ID: id, Reason: "not_cancellable"})
+			continue
+		}
+		if err := h.service.Cancel(c.Context(), id); err != nil {
+			h.logger.Error().Err(err).Str("task_id", id).Msg("bulk cancel: task failed")
+			results = append(results, bulkTaskResult{ID: id, Reason: "failed"})
+			continue
+		}
+		results = append(results, bulkTaskResult{ID: id, OK: true})
+		succeeded++
+	}
+	return Success(c, bulkTasksResponse{Total: len(ids), Succeeded: succeeded, Skipped: len(ids) - succeeded, Results: results})
+}
+
+// BulkRetry handles POST /api/v1/tasks/bulk-retry.
+// Best-effort: retries each failed/cancelled task owned by the caller into a
+// fresh billed task. Stops charging once credits are insufficient (each Retry
+// re-reserves credits); remaining tasks are skipped with "insufficient_credits".
+func (h *TaskHandler) BulkRetry(c fiber.Ctx) error {
+	ids, err := h.parseBulkTaskIDs(c)
+	if err != nil {
+		return err
+	}
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	results := make([]bulkTaskResult, 0, len(ids))
+	succeeded := 0
+	for _, id := range ids {
+		task, err := h.service.GetByID(c.Context(), id)
+		if err != nil {
+			results = append(results, bulkTaskResult{ID: id, Reason: "not_found"})
+			continue
+		}
+		if task.UserID != userID {
+			results = append(results, bulkTaskResult{ID: id, Reason: "forbidden"})
+			continue
+		}
+		if task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
+			results = append(results, bulkTaskResult{ID: id, Reason: "not_retryable"})
+			continue
+		}
+		// Re-validate the image model against the caller's current tier.
+		if err := h.validateImageModelKeyForUser(c, userID, task.ImageModelKey); err != nil {
+			results = append(results, bulkTaskResult{ID: id, Reason: "image_model_unavailable"})
+			continue
+		}
+		newTask, err := h.service.Retry(c.Context(), id)
+		if err != nil {
+			if errors.Is(err, service.ErrInsufficientCredits) {
+				results = append(results, bulkTaskResult{ID: id, Reason: "insufficient_credits"})
+				continue
+			}
+			h.logger.Error().Err(err).Str("task_id", id).Msg("bulk retry: task failed")
+			results = append(results, bulkTaskResult{ID: id, Reason: "failed"})
+			continue
+		}
+		results = append(results, bulkTaskResult{ID: id, OK: true, NewTaskID: newTask.ID})
+		succeeded++
+	}
+	return Success(c, bulkTasksResponse{Total: len(ids), Succeeded: succeeded, Skipped: len(ids) - succeeded, Results: results})
+}
+
+// BulkDelete handles POST /api/v1/tasks/bulk-delete.
+// Best-effort: deletes each non-running task owned by the caller, skipping the
+// rest (not found / not owned / still running) with a per-task reason. Running
+// tasks must be cancelled first (delete would orphan the in-flight execution).
+func (h *TaskHandler) BulkDelete(c fiber.Ctx) error {
+	ids, err := h.parseBulkTaskIDs(c)
+	if err != nil {
+		return err
+	}
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	results := make([]bulkTaskResult, 0, len(ids))
+	succeeded := 0
+	for _, id := range ids {
+		task, err := h.service.GetByID(c.Context(), id)
+		if err != nil {
+			results = append(results, bulkTaskResult{ID: id, Reason: "not_found"})
+			continue
+		}
+		if task.UserID != userID {
+			results = append(results, bulkTaskResult{ID: id, Reason: "forbidden"})
+			continue
+		}
+		if task.Status == model.TaskStatusRunning {
+			results = append(results, bulkTaskResult{ID: id, Reason: "running_cancel_first"})
+			continue
+		}
+		if err := h.service.Delete(c.Context(), id); err != nil {
+			h.logger.Error().Err(err).Str("task_id", id).Msg("bulk delete: task failed")
+			results = append(results, bulkTaskResult{ID: id, Reason: "failed"})
+			continue
+		}
+		results = append(results, bulkTaskResult{ID: id, OK: true})
+		succeeded++
+	}
+	return Success(c, bulkTasksResponse{Total: len(ids), Succeeded: succeeded, Skipped: len(ids) - succeeded, Results: results})
 }
 
 // MarkPublished handles PATCH /api/v1/tasks/:id/published.

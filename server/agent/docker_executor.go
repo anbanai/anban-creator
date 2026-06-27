@@ -21,6 +21,7 @@ import (
 
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/resolver"
 	"github.com/royalrick/anbanwriter/server/storage"
 )
 
@@ -144,17 +145,13 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if opts.Project != nil {
-		cfg, err := BuildAppConfig(opts.Project, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
+		// Two-layer resolution (task.Overrides ?? project) feeds settings.json so a
+		// per-task override reaches the agent CLI's app/library path. The prompt path
+		// (buildAgentCommand --style) resolves the same way below.
+		resolved := resolver.ResolveStyle(opts.Project, opts.Task)
+		cfg, err := BuildAppConfig(opts.Project, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
-		}
-		// Seednote: the task's visual style (opts.Task.Style) is injected via the
-		// user prompt; clear the settings.json duplicate so the agent sees a single
-		// source of truth. Article is NOT cleared — after the 3-dimension split
-		// cfg.Wechat.Article.Style holds the WRITING style (a different dimension
-		// from the visual style in the prompt), so clearing it would drop the writer.
-		if opts.Task.Style != "" && cfg.Seednote != nil {
-			cfg.Seednote.Style = ""
 		}
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
@@ -288,9 +285,9 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 		"--workspace", workspace,
 		"--agent-flag", "anbanwriter:" + TaskTypeToAgent(opts.Task.Type),
 	}
-	if opts.Task.Style != "" {
-		cmd = append(cmd, "--style", opts.Task.Style)
-	}
+	// Note: visual style is NOT passed as a CLI flag — it reaches the agent
+	// solely via get_project_profile(task_id) (MCP), resolved two-layer
+	// (task.Overrides ?? project) by the server. It never enters the prompt.
 	if strings.TrimSpace(opts.Task.Goal) != "" {
 		cmd = append(cmd, "--goal", opts.Task.Goal)
 	}
@@ -526,7 +523,13 @@ func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, work
 		}
 	}
 
-	logsReader, err := e.dockerCLI.ContainerLogs(context.Background(), resp.ID, container.LogsOptions{
+	// Read logs with a bounded, parent-independent context: by now the wait ctx
+	// may be done (cancel/timeout), so reusing it would silently drop the logs.
+	// A fresh timeout keeps a dead Docker daemon from hanging log retrieval.
+	logsCtx, cancelLogs := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelLogs()
+
+	logsReader, err := e.dockerCLI.ContainerLogs(logsCtx, resp.ID, container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 	})

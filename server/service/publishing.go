@@ -74,8 +74,10 @@ type PublishDraftResult struct {
 }
 
 // buildAppConfig creates an app config from a project (nil image config since publishing doesn't need image API).
+// Style dimensions resolve project-only (no task context) — the byline comes from
+// the project, matching the pre-refactor project-author behavior.
 func (s *PublishingService) buildAppConfig(ch *model.Project) (*appconfig.Config, error) {
-	return agent.BuildAppConfig(ch, nil, "", false, "")
+	return agent.BuildAppConfig(ch, ResolveStyle(ch, nil), nil, "", false, "")
 }
 
 // defaultCreateDraftService creates a draft.Service for the given project.

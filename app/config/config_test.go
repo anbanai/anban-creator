@@ -71,7 +71,7 @@ func TestLoad_JSONConfig_Full(t *testing.T) {
     "appid": "wx123456",
     "secret": "secret123",
     "article": {
-      "style": "dan-koe",
+      "writer_key": "dan-koe",
       "theme": "apple",
       "content": {
         "image": {
@@ -111,8 +111,8 @@ func TestLoad_JSONConfig_Full(t *testing.T) {
 	if len(cfg.Keywords) != 2 || cfg.Keywords[0] != "tea" || cfg.Keywords[1] != "culture" {
 		t.Errorf("Keywords = %v, want [tea culture]", cfg.Keywords)
 	}
-	if cfg.Wechat.Article.Style != "dan-koe" {
-		t.Errorf("Wechat.Article.Style = %v, want dan-koe", cfg.Wechat.Article.Style)
+	if cfg.Wechat.Article.WriterKey != "dan-koe" {
+		t.Errorf("Wechat.Article.WriterKey = %v, want dan-koe", cfg.Wechat.Article.WriterKey)
 	}
 	if cfg.Wechat.Article.Theme != "apple" {
 		t.Errorf("Wechat.Article.Theme = %v, want apple", cfg.Wechat.Article.Theme)
@@ -307,7 +307,7 @@ func TestSaveConfig_JSON(t *testing.T) {
 	cfg.Wechat.AppID = "wx123456"
 	cfg.Wechat.Secret = "secret123"
 	cfg.Keywords = []string{"tea", "culture"}
-	cfg.Wechat.Article.Style = "dan-koe"
+	cfg.Wechat.Article.WriterKey = "dan-koe"
 	cfg.Wechat.Article.Content.Image.Key = "test_key"
 	cfg.Wechat.Article.Content.Image.MaxWidth = 1920
 	cfg.Wechat.Article.Content.Image.MaxSizeMB = 5
@@ -401,8 +401,8 @@ func TestFindConfigFile_PriorityOrder(t *testing.T) {
 func TestNewDefaultConfig(t *testing.T) {
 	c := NewDefaultConfig()
 
-	if c.Wechat.Article.Style != DefaultArticleStyle {
-		t.Errorf("Wechat.Article.Style = %q, want %q", c.Wechat.Article.Style, DefaultArticleStyle)
+	if c.Wechat.Article.WriterKey != DefaultArticleWriterKey {
+		t.Errorf("Wechat.Article.WriterKey = %q, want %q", c.Wechat.Article.WriterKey, DefaultArticleWriterKey)
 	}
 	if c.Wechat.Article.Theme != DefaultArticleTheme {
 		t.Errorf("Wechat.Article.Theme = %q, want %q", c.Wechat.Article.Theme, DefaultArticleTheme)

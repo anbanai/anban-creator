@@ -24,13 +24,13 @@ func (e *ProcessorError) Hint() string  { return e.HintText }
 
 // Processor 图片处理器
 type Processor struct {
-	cfg          *config.Config
-	apiCfg       *config.ImageAPI
-	log          *zerolog.Logger
-	ws           *wechat.Service
-	compressor   *Compressor
-	provider     Provider
-	stylePrompt  string
+	cfg           *config.Config
+	apiCfg        *config.ImageAPI
+	log           *zerolog.Logger
+	ws            *wechat.Service
+	compressor    *Compressor
+	provider      Provider
+	stylePrompt   string
 	refImagePath  string   // 参考图本地路径（可选，单张）
 	refImagePaths []string // 多张参考图本地路径（可选，OpenAI 多 ref 保真用）
 	watermark     *bool    // 是否启用水印

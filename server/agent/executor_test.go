@@ -11,6 +11,7 @@ import (
 	appconfig "github.com/royalrick/anbanwriter/app/config"
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/resolver"
 )
 
 func TestFilterAgentEnvPreservesClaudeConfig(t *testing.T) {
@@ -61,9 +62,9 @@ func TestBuildAppConfig(t *testing.T) {
 					WechatAppID:  "test_appid",
 					WechatSecret: "test_secret",
 				},
-				Author: "TestAuthor",
-				Style:  "dan-koe",
-				Theme:  "default",
+				Byline:      "TestAuthor",
+				VisualStyle: "dan-koe",
+				Theme:       "default",
 			},
 			wantErr: false,
 			check: func(t *testing.T, cfg map[string]any) {
@@ -79,9 +80,9 @@ func TestBuildAppConfig(t *testing.T) {
 		{
 			name: "seednote config with image API",
 			ch: &model.Project{
-				Platform: model.ScopeSeednote,
-				Name:     "SeedNote Account",
-				Style:    "cute-doodle",
+				Platform:    model.ScopeSeednote,
+				Name:        "SeedNote Account",
+				VisualStyle: "cute-doodle",
 			},
 			wantErr: false,
 			check: func(t *testing.T, cfg map[string]any) {
@@ -130,7 +131,7 @@ func TestBuildAppConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.ch, nil, "", tt.skipRefImage, "")
+			cfg, err := BuildAppConfig(tt.ch, resolver.ResolveStyle(tt.ch, nil), nil, "", tt.skipRefImage, "")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -217,7 +218,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 				Platform: tt.platform,
 				Name:     "Test",
 			}
-			cfg, err := BuildAppConfig(ch, tt.imageAPICfg, "", false, "")
+			cfg, err := BuildAppConfig(ch, resolver.ResolveStyle(ch, nil), tt.imageAPICfg, "", false, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -316,7 +317,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := BuildAppConfig(tt.project, tt.imageAPICfg, tt.taskImageRatio, false, "")
+			cfg, err := BuildAppConfig(tt.project, resolver.ResolveStyle(tt.project, nil), tt.imageAPICfg, tt.taskImageRatio, false, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -549,7 +550,6 @@ func TestBuildUserPrompt(t *testing.T) {
 		taskType     string
 		topic        string
 		agentName    string
-		style        string
 		wantContains []string
 		wantAbsence  []string
 	}{
@@ -559,7 +559,9 @@ func TestBuildUserPrompt(t *testing.T) {
 			topic:        "春季穿搭",
 			agentName:    "seednote",
 			wantContains: []string{"Use the seednote agent", "春季穿搭"},
-			wantAbsence:  []string{"视觉风格要求"},
+			// P2: visual style must NEVER enter the prompt (it is read via MCP
+			// get_project_profile). This absence guard is a regression fence.
+			wantAbsence: []string{"视觉风格要求"},
 		},
 		{
 			name:         "article with topic references agent",
@@ -590,22 +592,6 @@ func TestBuildUserPrompt(t *testing.T) {
 			agentName:    "",
 			wantContains: []string{"Use the  agent", "test topic"},
 		},
-		{
-			name:         "style appends 视觉风格要求 line",
-			taskType:     "seednote",
-			topic:        "春季穿搭",
-			agentName:    "seednote",
-			style:        "暖系生活感",
-			wantContains: []string{"视觉风格要求", "暖系生活感", "覆盖账号默认风格"},
-		},
-		{
-			name:        "empty style omits 视觉风格要求 line",
-			taskType:    "seednote",
-			topic:       "春季穿搭",
-			agentName:   "seednote",
-			style:       "",
-			wantAbsence: []string{"视觉风格要求"},
-		},
 	}
 
 	for _, tt := range tests {
@@ -614,7 +600,6 @@ func TestBuildUserPrompt(t *testing.T) {
 				TaskType:  tt.taskType,
 				Topic:     tt.topic,
 				AgentName: tt.agentName,
-				Style:     tt.style,
 			})
 			for _, sub := range tt.wantContains {
 				if !strings.Contains(got, sub) {

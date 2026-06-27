@@ -80,5 +80,5 @@ func SignTemplateURLs(ctx context.Context, store storage.Provider, log *zerolog.
 		return
 	}
 	t.ThumbnailURL = SignURL(ctx, store, log, t.ThumbnailURL, DefaultSignedURLTTL)
-	t.AuthorAvatarURL = SignURL(ctx, store, log, t.AuthorAvatarURL, DefaultSignedURLTTL)
+	t.PersonaAvatar = SignURL(ctx, store, log, t.PersonaAvatar, DefaultSignedURLTTL)
 }

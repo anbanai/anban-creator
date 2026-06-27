@@ -116,13 +116,13 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get formatted account information for AI content creation context. Returns positioning, keywords, and three INDEPENDENT style dimensions: `style` (图片视觉 image visual style, free text), `writing_style` (写作风格 writer resource key e.g. dan-koe), `theme` (排版样式 theme resource key e.g. autumn-warm). These three never derive from each other. Also returns `author` — the WeChat byline (署名, resolved task > template > project, with an `author_source` field). `author` is ONLY the published byline: pass it verbatim to publish_draft's author field, leave it empty/omit if it is empty. It is strictly independent of `writing_style` / `template_writing_style` (those drive the WRITING VOICE and must NEVER be used as the byline) and of `template_author_avatar` (an optional persona avatar, also never the byline). Does NOT expose sensitive credentials.",
+		Description: "Get a project's resolved creation profile for AI content generation. Returns the project's positioning/keywords/name plus the EFFECTIVE (already-resolved) style/persona/theme dimensions, each with its own *_source tag (\"task\" when the task overrode it, else \"project\"): `visual_style` (图片视觉, free text), `writer_key` (写作者 YAML resource key e.g. dan-koe), `writing_voice` (写作笔迹, free-text writing imitation), `byline` (作者署名 — the published author name; pass verbatim to publish_draft's author, omit if empty), `persona_avatar` (人设头像, optional), `theme` (排版 resource key e.g. autumn-warm). These dimensions are independent and never derive from each other. Resolution is two-layer (task override > project); pass task_id when one exists so per-task overrides surface. Does NOT expose credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "ecommerce"}, "description": "Filter output by content type"},
-				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, the task is the single source of truth: its resolved `style`/`writing_style`/`theme` (precedence task > template > plan > project) are returned with *_source=\"task\"; otherwise the project's values are returned with *_source=\"project\". The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists so template-derived dimensions surface correctly."},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, per-task overrides resolve on top of the project (task > project) and each dimension's *_source reflects where it came from. The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists."},
 			},
 			"required": []any{"project_id"},
 		},
@@ -300,12 +300,16 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	return textResult(info)
 }
 
-// buildAccountInfo is the testable core of get_project_profile. It resolves the
-// three orthogonal style dimensions (图片视觉 / 写作风格 / 排版样式). When a task_id
-// is supplied and the task belongs to the requesting user+project, the task is the
-// single source of truth (its Style/WritingStyle/Theme are already resolved at
-// creation); otherwise the project's values are used. The three dimensions never
-// derive from one another.
+// buildAccountInfo is the testable core of get_project_profile. It returns a
+// FLAT, fully-resolved creation profile: every style/persona/theme dimension is
+// resolved two-layer (task override > project) through service.ResolveStyle — the
+// SAME primitive the prompt (BuildUserPrompt) and settings.json (config_builder)
+// channels use — so the three delivery channels to the agent can never disagree.
+// Each dimension carries its own *_source tag ("task" when the task overrode it,
+// else "project"). The old template_* namespace, the task>template>project
+// three-layer resolution, and the project-template theme fold are all GONE: a
+// project is the single source of truth and a task only stores per-dimension
+// overrides.
 func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (map[string]any, string) {
 	projectID, _ := args["project_id"].(string)
 	if projectID == "" {
@@ -323,23 +327,8 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	}
 	service.SanitizeProject(ch)
 
-	// Resolve the three orthogonal style dimensions. Each is independent — the
-	// writer never drives the visual style. When a task_id is supplied, the task is
-	// the single source of truth: Task.Style / Task.WritingStyle / Task.Theme are
-	// already the resolved effective values (precedence task > template > plan >
-	// project, computed at creation). Without a task_id we fall back to the project.
-	effectiveVisual := ch.Style
-	effectiveWriter := ch.WritingStyle
-	effectiveTheme := ch.Theme
-	visualSource := "project"
-	writerSource := "project"
-	themeSource := "project"
-	// 公众号人设维度（作者署名 + 写作风格模仿 + 可选头像），与视觉/写作key/排版正交，
-	// 同样按 task > template > project 解析。
-	effectiveAuthor := ch.Author
-	effectiveAuthorIntro := ch.AuthorStyleIntro
-	effectiveAuthorAvatar := ch.AuthorAvatarURL
-	var taskTemplateID *string
+	// Load the requested task (if any) so per-task overrides surface. The task must
+	// belong to the same user+project, otherwise the call is rejected.
 	var task *model.Task
 	if taskID != "" {
 		if svcs.TaskSvc == nil {
@@ -354,45 +343,38 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		if task.UserID != userID || task.ProjectID != projectID {
 			return nil, "task does not belong to the requested project"
 		}
-		// Task fields hold the resolved effective values (precedence
-		// task > template > plan > project, computed at creation). We still fall
-		// back to the project PER DIMENSION when a task field is empty, and
-		// report each dimension's source honestly — so a task that only set its
-		// writer doesn't silently clobber the project's visual/theme.
-		// (Persona Author/AuthorStyleIntro/AuthorAvatarURL is resolved centrally
-		// below via task > template > project, so it is not folded here.)
-		if task.Style != "" {
-			effectiveVisual = task.Style
-			visualSource = "task"
-		}
-		if task.WritingStyle != "" {
-			effectiveWriter = task.WritingStyle
-			writerSource = "task"
-		}
-		if task.Theme != "" {
-			effectiveTheme = task.Theme
-			themeSource = "task"
-		}
-		taskTemplateID = task.TemplateID
 	}
 
-	// Base account info (always included). The three style dimensions are exposed
-	// as independent fields so the agent never conflates them:
-	//   - style         (图片视觉): free-text image visual style; empty = none
-	//   - writing_style (写作风格): writer resource key, e.g. "dan-koe"
-	//   - theme         (排版样式): theme resource key, e.g. "autumn-warm"
+	// ONE resolution, two layers (task override > project). The dimensions are
+	// independent — the writer key never drives the visual style, the byline never
+	// equals the writing voice — and each carries its provenance.
+	r := service.ResolveStyle(ch, task)
+
+	// Flat profile. Every style/persona/theme dimension is exposed directly (no
+	// template_* namespace) with its own *_source provenance tag:
+	//   - visual_style   (图片视觉): free-text image visual style; empty = none
+	//   - writer_key     (写作者):   writer YAML resource key, e.g. "dan-koe"
+	//   - writing_voice  (写作笔迹): free-text writing imitation
+	//   - byline         (作者署名): published author name; pass to publish_draft's author
+	//   - persona_avatar (人设头像): optional persona avatar reference
+	//   - theme          (排版样式): theme resource key, e.g. "autumn-warm"
 	info := map[string]any{
-		"name":                 ch.Name,
-		"author":               effectiveAuthor,
-		"positioning":          ch.Positioning,
-		"keywords":             ch.Keywords,
-		"style":                effectiveVisual,
-		"writing_style":        effectiveWriter,
-		"theme":                effectiveTheme,
-		"style_source":         visualSource,
-		"writing_style_source": writerSource,
-		"theme_source":         themeSource,
-		"platform":             ch.Platform,
+		"name":                  ch.Name,
+		"positioning":           ch.Positioning,
+		"keywords":              ch.Keywords,
+		"platform":              ch.Platform,
+		"visual_style":          r.VisualStyle,
+		"writer_key":            r.WriterKey,
+		"writing_voice":         r.WritingVoice,
+		"byline":                r.Byline,
+		"persona_avatar":        r.PersonaAvatar,
+		"theme":                 r.Theme,
+		"visual_style_source":   r.VisualStyleSource,
+		"writer_key_source":     r.WriterKeySource,
+		"writing_voice_source":  r.WritingVoiceSource,
+		"byline_source":         r.BylineSource,
+		"persona_avatar_source": r.PersonaAvatarSource,
+		"theme_source":          r.ThemeSource,
 	}
 
 	switch scope {
@@ -443,171 +425,30 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		info["ecommerce"] = ec
 	}
 
-	// Add available resource options for the platform.
-	info["available_themes"] = resources.Manager().ListByPlatform(resources.CategoryTheme, ch.Platform)
-	info["available_writers"] = resources.Manager().ListByPlatform(resources.CategoryWriter, ch.Platform)
+	// Available resource options for the platform (best-effort; the embedded
+	// resource manager may be nil in some test contexts).
+	mgr := resources.Manager()
+	if mgr != nil {
+		info["available_themes"] = mgr.ListByPlatform(resources.CategoryTheme, ch.Platform)
+		info["available_writers"] = mgr.ListByPlatform(resources.CategoryWriter, ch.Platform)
 
-	// Descriptions for the RESOLVED theme / writer (not the raw project fields).
-	if effectiveTheme != "" {
-		if e := resources.Manager().Get(resources.CategoryTheme, effectiveTheme); e != nil {
-			info["theme_description"] = e.Description
-		}
-	}
-	if effectiveWriter != "" {
-		if e := resources.Manager().Get(resources.CategoryWriter, effectiveWriter); e != nil {
-			// writing_style_description describes the writing VOICE (tone/人设/调性)
-			// of the resolved writer resource key. It is independent of `style`
-			// (visual). The two describe different dimensions and must not be conflated.
-			info["writing_style_description"] = e.Description
-		}
-	}
-
-	// Surface the effective template's content. The effective template is the
-	// task's template if present (precedence task > task-template > plan), else
-	// the project's bound 公众号 template (project-template). Three things are
-	// delivered, kept as STRICTLY INDEPENDENT concepts (the article 作者/byline
-	// must never be conflated with 写作风格/writing imitation):
-	//
-	//   - 作者 (byline): the template's AuthorName overrides the project byline
-	//     and surfaces as the top-level `author` (passed to publish_draft).
-	//   - 写作风格 (writing imitation, free text): AuthorStyleIntro for article,
-	//     falling back to the writer-key scaffold WritingStyle (poster). Surfaced
-	//     as template_writing_style.
-	//   - template_author_avatar: the optional 写作风格 persona avatar.
-	//   - For a project-level template, its theme is folded into the resolved
-	//     `theme` so convert_markdown uses it (a task-level template already had
-	//     its theme folded into Task.Theme at creation).
-	//
-	// When NO template is bound (task or project), the project's own persona
-	// (author_style_intro / author_avatar_url) is surfaced instead, so a writing
-	// direction defined directly on the project still reaches the agent. Errors
-	// (template deleted) are logged-and-skipped so a stale id never breaks the
-	// profile — the keys simply stay absent.
-	effectiveTemplateID := ""
-	templateFromTask := false
-	if taskTemplateID != nil && *taskTemplateID != "" {
-		effectiveTemplateID = *taskTemplateID
-		templateFromTask = true
-	} else if ch.TemplateID != "" {
-		effectiveTemplateID = ch.TemplateID
-	}
-
-	var tmpl *model.Template
-	if effectiveTemplateID != "" && svcs.TemplateSvc != nil {
-		if t, terr := svcs.TemplateSvc.GetByID(ctx, effectiveTemplateID); terr == nil {
-			tmpl = t
-			info["template_id"] = tmpl.ID
-			info["template_name"] = tmpl.Name
-			if tmpl.AuthorName != "" {
-				info["template_author_name"] = tmpl.AuthorName
+		// Descriptions for the RESOLVED theme / writer key (not the raw project fields).
+		if r.Theme != "" {
+			if e := mgr.Get(resources.CategoryTheme, r.Theme); e != nil {
+				info["theme_description"] = e.Description
 			}
-			info["template_theme"] = tmpl.Theme
-			info["template_structure"] = extractScaffoldText(tmpl.Structure)
-			info["template_example"] = extractScaffoldText(tmpl.ExampleContent)
-			// Project-level template (no task template): fold its theme into the
-			// resolved theme so convert_markdown uses it. A task template's theme was
-			// already folded into Task.Theme at creation (and set effectiveTheme above),
-			// so we only fold for the project-template path — never clobbering a task's
-			// explicit theme override. Persona is resolved centrally below.
-			if !templateFromTask && tmpl.Theme != "" {
-				effectiveTheme = tmpl.Theme
-				themeSource = "project-template"
-				info["theme"] = effectiveTheme
-				info["theme_source"] = themeSource
-				if e := resources.Manager().Get(resources.CategoryTheme, effectiveTheme); e != nil {
-					info["theme_description"] = e.Description
-				}
+		}
+		if r.WriterKey != "" {
+			if e := mgr.Get(resources.CategoryWriter, r.WriterKey); e != nil {
+				// writer_key_description describes the writing VOICE (tone/人设/调性) of
+				// the resolved writer resource key. It is independent of visual_style;
+				// the two describe different dimensions and must not be conflated.
+				info["writer_key_description"] = e.Description
 			}
-		} else if mcpLog != nil {
-			mcpLog.Warn().Err(terr).Str("template_id", effectiveTemplateID).
-				Msg("linked template not found; skipping content scaffold")
 		}
-	}
-
-	// 人设维度（作者署名 + 写作风格模仿 + 可选头像）按 task > template > project 解析。
-	// 这对 task-template 与 project-template 两条路径都成立：task 字段在创建时已解析
-	// （task > template > project），tmpl 为有效模板（缺失则为 nil）。写作风格模仿优先取
-	// AuthorStyleIntro，回退 writer-key scaffold WritingStyle（poster）。逐维度独立，作者
-	// 署名绝不与写作模仿混用。author 透传给 publish_draft；template_writing_style 供写作
-	// 模仿；template_author_avatar 为人设参考（不入署名）。
-	var tmplAuthor, tmplIntro, tmplAvatar string
-	if tmpl != nil {
-		tmplAuthor = tmpl.AuthorName
-		tmplIntro = tmpl.AuthorStyleIntro
-		if tmplIntro == "" {
-			tmplIntro = tmpl.WritingStyle
-		}
-		tmplAvatar = tmpl.AuthorAvatarURL
-	}
-	// 作者署名解析为 task > template > project（与 firstNonEmptyStr 等价），同时记录来源
-	// author_source 供追溯——让消费方一眼看出 byline 取自哪一层，彻底消除「这值哪来的」歧义。
-	// 解析结果与优先级与此前完全一致，仅多暴露一个来源字段。
-	var authorSource string
-	if task != nil {
-		switch {
-		case task.Author != "":
-			effectiveAuthor, authorSource = task.Author, "task"
-		case tmplAuthor != "":
-			effectiveAuthor, authorSource = tmplAuthor, "template"
-		default:
-			effectiveAuthor, authorSource = ch.Author, "project"
-		}
-		effectiveAuthorIntro = firstNonEmptyStr(task.AuthorStyleIntro, tmplIntro, ch.AuthorStyleIntro)
-		effectiveAuthorAvatar = firstNonEmptyStr(task.AuthorAvatarURL, tmplAvatar, ch.AuthorAvatarURL)
-	} else {
-		switch {
-		case tmplAuthor != "":
-			effectiveAuthor, authorSource = tmplAuthor, "template"
-		default:
-			effectiveAuthor, authorSource = ch.Author, "project"
-		}
-		effectiveAuthorIntro = firstNonEmptyStr(tmplIntro, ch.AuthorStyleIntro)
-		effectiveAuthorAvatar = firstNonEmptyStr(tmplAvatar, ch.AuthorAvatarURL)
-	}
-	info["author"] = effectiveAuthor
-	if effectiveAuthor != "" && authorSource != "" {
-		info["author_source"] = authorSource
-	}
-	if effectiveAuthorIntro != "" {
-		info["template_writing_style"] = effectiveAuthorIntro
-	}
-	if effectiveAuthorAvatar != "" {
-		info["template_author_avatar"] = effectiveAuthorAvatar
 	}
 
 	return info, ""
-}
-
-// firstNonEmptyStr returns the first non-empty argument, or "" when all are empty.
-// Local mirror of service.firstNonEmpty (which is unexported) so package mcp can
-// resolve persona dimensions with task > template > project precedence without an
-// export cycle. Pure helper; all args must be plain strings.
-func firstNonEmptyStr(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// extractScaffoldText pulls the human-editable text out of a template scaffold
-// JSON column. The Studio form stores {"text": "<markdown>"}; the legacy MCP
-// save_template path may store richer JSON. We prefer .text, fall back to a
-// compact stringification of whatever is there, and return "" for empty/nil so
-// the profile omits the key naturally.
-func extractScaffoldText(m map[string]any) string {
-	if len(m) == 0 {
-		return ""
-	}
-	if v, ok := m["text"].(string); ok {
-		return v
-	}
-	out, err := json.Marshal(m)
-	if err != nil {
-		return fmt.Sprintf("%v", m)
-	}
-	return string(out)
 }
 
 func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

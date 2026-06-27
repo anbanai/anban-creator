@@ -15,7 +15,6 @@ type Config struct {
 	TaskID          string
 	TaskType        string
 	Topic           string
-	Style           string
 	Goal            string
 	Workspace       string
 	Model           string
@@ -32,7 +31,6 @@ func ParseConfig() (*Config, error) {
 	flag.StringVar(&cfg.TaskID, "task-id", "", "task ID")
 	flag.StringVar(&cfg.TaskType, "task-type", "", "task type")
 	flag.StringVar(&cfg.Topic, "topic", "", "task topic/prompt")
-	flag.StringVar(&cfg.Style, "style", "", "effective visual style for image generation (overrides project default)")
 	flag.StringVar(&cfg.Goal, "goal", "", "goal-mode condition (prepended as /goal slash command so Claude Code runs its built-in goal loop)")
 	flag.StringVar(&cfg.Workspace, "workspace", "/workspace", "workspace directory")
 	flag.StringVar(&cfg.Model, "model", "", "Claude model override")
@@ -50,7 +48,6 @@ func ParseConfig() (*Config, error) {
 	cfg.TaskID = strings.TrimSpace(cfg.TaskID)
 	cfg.TaskType = strings.TrimSpace(cfg.TaskType)
 	cfg.Topic = strings.TrimSpace(cfg.Topic)
-	cfg.Style = strings.TrimSpace(cfg.Style)
 	cfg.Goal = strings.TrimSpace(cfg.Goal)
 	cfg.Workspace = strings.TrimSpace(cfg.Workspace)
 	cfg.Model = strings.TrimSpace(cfg.Model)
@@ -87,7 +84,6 @@ func (c *Config) UserPrompt() string {
 		TaskType:        c.TaskType,
 		Topic:           c.Topic,
 		AgentName:       agentName,
-		Style:           c.Style,
 		Goal:            c.Goal,
 		TaskID:          c.TaskID,
 		ProjectID:       os.Getenv("ANBAN_DEFAULT_PROJECT"),

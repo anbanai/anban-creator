@@ -4,12 +4,14 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Streamdown } from 'streamdown'
-import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2 } from 'lucide-react'
+import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
+import { formatUSD } from '@/lib/utils'
 import type { TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
@@ -150,6 +152,25 @@ export default function TaskDetailPage() {
       if (id) {
         queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(id) })
       }
+    },
+  })
+
+  // Publish-approval gate (Batch 4A): resume a held publish or close the gate.
+  const approvePublish = useMutation({
+    mutationFn: () => api.tasks.publishApprove(id!),
+    onSuccess: () => {
+      toast.success('已放行，正在发布到公众号草稿箱')
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+    },
+  })
+
+  const rejectPublish = useMutation({
+    mutationFn: () => api.tasks.publishReject(id!),
+    onSuccess: () => {
+      toast.success('已驳回发布审核')
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
     },
   })
 
@@ -346,17 +367,26 @@ export default function TaskDetailPage() {
   const canRetry = task.status === 'failed' || task.status === 'cancelled'
   const currentTask = task
 
+  // Retry re-runs this task as a fresh billed task. The server clones the full
+  // configuration (three-dimensional style, author/persona, ecommerce package,
+  // image model, watermark, goal mode…) so nothing is lost — unlike the previous
+  // client-side create() which only forwarded type/prompt/project/ratio.
   async function handleRetry() {
     await submit(async () => {
-      const nextTask = await api.tasks.create({
-        type: currentTask.type,
-        prompt: currentTask.prompt || undefined,
-        project_id: currentTask.project_id,
-        image_ratio: currentTask.image_ratio || undefined,
-      })
-      toast.success('已重新创建任务')
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
-      navigate(`/tasks/${nextTask.id}`)
+      try {
+        const nextTask = await api.tasks.retry(currentTask.id)
+        toast.success('已重新创建任务，全部设置已保留')
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+        navigate(`/tasks/${nextTask.id}`)
+      } catch (err: unknown) {
+        const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
+        const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
+        if (status === 402 || code === 40200) {
+          toast.error('积分不足，无法重试')
+        } else {
+          toast.error(getApiErrorMessage(err, '重试失败，请稍后再试'))
+        }
+      }
     })
   }
 
@@ -470,6 +500,70 @@ export default function TaskDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Publish-approval gate (Batch 4A): the project requires human review
+          before publishing, so a completed article draft is held here until the
+          user explicitly approves (→ WeChat draft box) or rejects it. */}
+      {task.publish_approval_state === 'pending' && (
+        <Card className="border-amber-500/40 bg-amber-500/10">
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              <div>
+                <p className="text-sm font-medium text-foreground">发布待审核</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  文章草稿已完成，已暂停自动发布。确认无误后放行，将发布到公众号草稿箱（非直接群发）。
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                size="sm"
+                loading={approvePublish.isPending}
+                onClick={() => submit(async () => approvePublish.mutateAsync())}
+              >
+                <Send className="h-4 w-4" />
+                放行发布
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                loading={rejectPublish.isPending}
+                onClick={() => submit(async () => rejectPublish.mutateAsync())}
+              >
+                <Ban className="h-4 w-4" />
+                驳回
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {task.publish_approval_state === 'approved' && (
+        <Card className="border-emerald-500/40 bg-emerald-500/10">
+          <CardContent className="flex items-start gap-3">
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+            <div>
+              <p className="text-sm font-medium text-foreground">已通过发布审核</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {task.published
+                  ? '草稿已放行，已发布到公众号草稿箱。'
+                  : '草稿已放行，正在发布到公众号草稿箱…'}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {task.publish_approval_state === 'rejected' && (
+        <Card className="bg-muted/30">
+          <CardContent className="flex items-start gap-3">
+            <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium text-foreground">已驳回发布</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">该文章未发布，可修改后重新执行任务。</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Details (stats) */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -721,7 +815,21 @@ export default function TaskDetailPage() {
           </div>
           <div ref={logContainerRef} className="max-h-96 overflow-y-auto bg-background/50 px-4 py-3">
             {sseError && (
-              <p className="mb-2 text-xs text-amber-400">{sseError}</p>
+              <div className="mb-2 flex items-center gap-2">
+                <p className="text-xs text-amber-400">{sseError}</p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-xs text-amber-400 hover:text-amber-300"
+                  onClick={() => {
+                    setSseError(null)
+                    connectSSE(0)
+                  }}
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  重新连接
+                </Button>
+              </div>
             )}
             {displayLogs.length === 0 ? (
               <p className="text-xs text-muted-foreground">等待输出中...</p>
@@ -754,8 +862,19 @@ export default function TaskDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确定取消此任务？</AlertDialogTitle>
             <AlertDialogDescription>
-              取消后任务将停止执行，此操作不可撤销。
-              任务创建费用将全额退还，但执行中已消耗的操作费用（如 AI 写作、图片生成）不予退还。
+              {task.status === 'pending' ? (
+                <>此任务尚未开始执行，取消后将<strong className="text-foreground">全额退还已扣积分</strong>，不会产生任何费用。{' '}</>
+              ) : (
+                <>
+                  任务正在执行中，取消后将立即停止未完成的步骤。
+                  {task.total_cost_usd && task.total_cost_usd > 0 ? (
+                    <>已完成步骤（AI 写作、图片生成等）已消耗约 <strong className="text-foreground">{formatUSD(task.total_cost_usd)}</strong>，<strong className="text-foreground">不予退还</strong>；其余将退还。{' '}</>
+                  ) : (
+                    <>已完成步骤（如 AI 写作、图片生成）的费用<strong className="text-foreground">不予退还</strong>，其余将退还。{' '}</>
+                  )}
+                </>
+              )}
+              此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

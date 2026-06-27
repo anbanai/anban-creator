@@ -37,6 +37,11 @@ export interface Task {
   result: TaskResult
   published: boolean
   published_at: string | null
+  // Publish-approval gate state (Batch 4A). Empty unless the owning project has
+  // require_publish_approval + enable_publishing AND the task completed with
+  // draft data: "pending" = held for human review, "approved"/"rejected" =
+  // acted on. Drives the approval card on the task detail page.
+  publish_approval_state?: PublishApprovalState
   workflow_status?: WorkflowStatus | string | null
   // Goal mode: condition is prepended to user prompt as /goal slash command;
   // the loop runs entirely inside Claude Code, server observes only the result.
@@ -50,14 +55,39 @@ export interface Task {
   author_avatar_url?: string
   // E-commerce package config (only present for platform=ecommerce tasks).
   ecommerce?: EcommerceTaskConfig
+  // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）。运行/失败/完成
+  // 态可能填充；刚创建的 pending 任务为空。用于取消对话框展示「已消耗不退还」。
+  total_cost_usd?: number | null
   created_at: string
   started_at: string
   completed_at: string
 }
 
+// Publish-approval gate state (mirrors server model.PublishApprovalState*).
+export type PublishApprovalState = '' | 'pending' | 'approved' | 'rejected'
+
 export interface TaskResult {
   files: TaskFile[] | null
   output: string
+}
+
+// Bulk operation per-task outcome (mirrors server handler.bulkTaskResult).
+// OK=false tasks carry a machine-readable Reason (not_found / forbidden /
+// not_cancellable / not_retryable / running_cancel_first / insufficient_credits / failed).
+export interface BulkTaskResult {
+  id: string
+  ok: boolean
+  reason?: string
+  new_task_id?: string // retry only: the freshly created task id
+}
+
+// Bulk operation summary (mirrors server handler.bulkTasksResponse). Best-effort:
+// Succeeded + Skipped = Total; the UI toasts the counts and details on demand.
+export interface BulkTasksResponse {
+  total: number
+  succeeded: number
+  skipped: number
+  results: BulkTaskResult[]
 }
 
 export interface TaskFile {

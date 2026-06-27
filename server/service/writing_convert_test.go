@@ -79,13 +79,13 @@ func setupConvertTest(t *testing.T, llm *diagnosticLLM) (*WritingService, reposi
 func createProjectWithTheme(t *testing.T, repo repository.Repository, userID, platform, style, theme string) string {
 	t.Helper()
 	ch := &model.Project{
-		ID:       uuid.NewString(),
-		UserID:   userID,
-		Platform: platform,
-		Name:     "Convert Test Project",
-		Style:    style,
-		Theme:    theme,
-		Status:   model.ProjectStatusActive,
+		ID:          uuid.NewString(),
+		UserID:      userID,
+		Platform:    platform,
+		Name:        "Convert Test Project",
+		VisualStyle: style,
+		Theme:       theme,
+		Status:      model.ProjectStatusActive,
 	}
 	if err := repo.Projects().Create(context.Background(), ch); err != nil {
 		t.Fatalf("create project: %v", err)

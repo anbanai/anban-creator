@@ -63,6 +63,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   reference_image_url: '',
   image_ratio: '',
   enable_publishing: false,
+  require_publish_approval: false,
 }
 
 function projectToForm(ch: Project): ProjectFormValues {
@@ -85,6 +86,7 @@ function projectToForm(ch: Project): ProjectFormValues {
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
     enable_publishing: ch.config?.enable_publishing ?? false,
+    require_publish_approval: ch.config?.require_publish_approval ?? false,
   }
 }
 
@@ -412,6 +414,7 @@ export default function ProjectsPage() {
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
       enable_publishing: values.enable_publishing || undefined,
+      require_publish_approval: values.require_publish_approval || undefined,
     }
 
     // Auto-set image_ratio based on platform if not specified
@@ -426,6 +429,9 @@ export default function ProjectsPage() {
     // Disable publishing flag when unchecked (credentials preserved)
     if (!values.enable_publishing) {
       payload.enable_publishing = false
+      // Approval gate is moot when publishing is off; reset it so the stored
+      // config stays consistent (avoids a lingering require flag with no publishing).
+      payload.require_publish_approval = false
     }
     if (editingProject) {
       await submit(async () => updateMutation.mutateAsync({ id: editingProject.id, data: payload }))
@@ -674,6 +680,32 @@ export default function ProjectsPage() {
 
                   {enablePublishing && (
                     <>
+                      <FormField
+                        control={form.control}
+                        name="require_publish_approval"
+                        render={({ field }) => (
+                          <FormItem>
+                            <div className="flex items-center gap-2">
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                              <FormLabel className="!mt-0 cursor-pointer font-normal" onClick={() => field.onChange(!field.value)}>
+                                发布前需人工审核
+                              </FormLabel>
+                            </div>
+                            <FormDescription>
+                              {field.value
+                                ? '任务完成后暂停自动发布，进入「待审核发布」状态，需在任务详情手动放行后才发布到草稿箱'
+                                : '任务完成后直接自动发布到公众号草稿箱'}
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
                       <FormField control={form.control} name="wechat_app_id" render={({ field }) => (
                         <FormItem>
                           <FormLabel>微信 AppID</FormLabel>

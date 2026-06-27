@@ -49,17 +49,17 @@ func setupTestWritingService(t *testing.T, llm *fakeWritingLLM) (*WritingService
 }
 
 // createWritingProject seeds a project with the given 写作风格 (writer key).
-// WriteArticle resolves the writer from WritingStyle, never from ch.Style (the
-// visual dimension), so the helper writes the writer key into WritingStyle.
+// WriteArticle resolves the writer from WriterKey, never from ch.VisualStyle (the
+// visual dimension), so the helper writes the writer key into WriterKey.
 func createWritingProject(t *testing.T, repo repository.Repository, userID, platform, writingStyle string) string {
 	t.Helper()
 	ch := &model.Project{
-		ID:           uuid.NewString(),
-		UserID:       userID,
-		Platform:     platform,
-		Name:         "Writing Project",
-		WritingStyle: writingStyle,
-		Status:       model.ProjectStatusActive,
+		ID:        uuid.NewString(),
+		UserID:    userID,
+		Platform:  platform,
+		Name:      "Writing Project",
+		WriterKey: writingStyle,
+		Status:    model.ProjectStatusActive,
 	}
 	if err := repo.Projects().Create(context.Background(), ch); err != nil {
 		t.Fatalf("create project: %v", err)

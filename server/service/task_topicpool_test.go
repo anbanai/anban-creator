@@ -383,3 +383,110 @@ func TestCreateManual_ClaimsOnePerTask(t *testing.T) {
 		t.Fatalf("expected 2 used topics, got %d", len(used))
 	}
 }
+
+// TestClaimForTask_IdempotentPerTask: claiming twice with the same task ID must
+// return the SAME topic and consume only one — the server-side anti-double-consume
+// guard. Without idempotency, a second claim (server pre-claim + an agent skill
+// calling claim_topic) would consume a second topic and bind both to one task.
+// Idempotency is per-task: a different task still gets the next topic.
+func TestClaimForTask_IdempotentPerTask(t *testing.T) {
+	_, topicSvc := setupTaskServiceWithTopicPool(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformArticle)
+
+	const t1, t2 = "幂等选题一", "幂等选题二"
+	if _, err := topicSvc.Add(ctx, userID, projectID, []string{t1, t2}); err != nil {
+		t.Fatalf("seed topics: %v", err)
+	}
+
+	const taskA = "task-idempotent-A"
+	first, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskA)
+	if err != nil {
+		t.Fatalf("first ClaimForTask: %v", err)
+	}
+	if first == "" {
+		t.Fatal("first claim returned empty topic")
+	}
+
+	// Second claim with the SAME task ID must return the same topic, not a new one.
+	second, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskA)
+	if err != nil {
+		t.Fatalf("second ClaimForTask: %v", err)
+	}
+	if second != first {
+		t.Fatalf("second claim = %q, want same as first %q (idempotent per task)", second, first)
+	}
+
+	// Only ONE topic consumed despite two claims for taskA.
+	used, _, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUsed, 0, 10)
+	if err != nil {
+		t.Fatalf("list used: %v", err)
+	}
+	if len(used) != 1 {
+		t.Fatalf("expected 1 used topic after idempotent re-claim, got %d", len(used))
+	}
+
+	// A DIFFERENT task must still get the next (different) topic.
+	const taskB = "task-idempotent-B"
+	third, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskB)
+	if err != nil {
+		t.Fatalf("third ClaimForTask (taskB): %v", err)
+	}
+	if third == "" || third == first {
+		t.Fatalf("third claim = %q, want a different non-empty topic for taskB", third)
+	}
+}
+
+// TestReleaseForTask_ReturnsTopicToPool: releasing a task-bound topic resets it
+// to unused and clears the binding, so a topic orphaned by a failed task-create
+// (claim succeeded, repo.Tasks().Create failed) is reclaimable instead of
+// permanently consumed. Re-claiming the same task gets the topic back.
+func TestReleaseForTask_ReturnsTopicToPool(t *testing.T) {
+	_, topicSvc := setupTaskServiceWithTopicPool(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformArticle)
+
+	const seeded = "待回滚的选题"
+	if _, err := topicSvc.Add(ctx, userID, projectID, []string{seeded}); err != nil {
+		t.Fatalf("seed topic: %v", err)
+	}
+
+	const taskA = "task-rollback-A"
+	claimed, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskA)
+	if err != nil {
+		t.Fatalf("ClaimForTask: %v", err)
+	}
+	if claimed != seeded {
+		t.Fatalf("claimed = %q, want %q", claimed, seeded)
+	}
+
+	if err := topicSvc.ReleaseForTask(ctx, taskA); err != nil {
+		t.Fatalf("ReleaseForTask: %v", err)
+	}
+
+	used, _, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUsed, 0, 10)
+	if err != nil {
+		t.Fatalf("list used: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected 0 used topics after release, got %d", len(used))
+	}
+	unused, _, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUnused, 0, 10)
+	if err != nil {
+		t.Fatalf("list unused: %v", err)
+	}
+	if len(unused) != 1 || unused[0].Topic != seeded {
+		t.Fatalf("unused topics = %v, want 1 = %q back in pool", unused, seeded)
+	}
+
+	// Re-claiming the same task (e.g. after a retry) returns the topic — it wasn't lost.
+	again, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskA)
+	if err != nil {
+		t.Fatalf("re-claim: %v", err)
+	}
+	if again != seeded {
+		t.Fatalf("re-claimed = %q, want %q", again, seeded)
+	}
+}

@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Calendar, RefreshCw } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -57,6 +57,7 @@ interface MonthGroup {
 // --- Component ---
 
 export default function TimelinePage() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
 
@@ -317,7 +318,9 @@ export default function TimelinePage() {
         <EmptyState
           icon={Calendar}
           title="没有排期内容"
-          description="创建计划或任务开始创作。"
+          description="创建计划或任务后，这里会按时间线展示你的创作排期。"
+          action={{ label: '新建任务', onClick: () => navigate('/tasks?create=true') }}
+          secondaryAction={{ label: '新建计划', onClick: () => navigate('/plans') }}
         />
       ) : (
         <div className="space-y-8">

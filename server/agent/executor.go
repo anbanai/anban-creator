@@ -15,6 +15,7 @@ import (
 
 	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/royalrick/anbanwriter/server/resolver"
 	"github.com/royalrick/anbanwriter/server/storage"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
@@ -33,18 +34,21 @@ func filterAgentEnv(env map[string]string) map[string]string {
 
 // UserPromptParams holds the inputs for BuildUserPrompt. Struct keeps call sites
 // readable as fields are added and prevents argument-order bugs.
+//
+// The prompt is BEHAVIORAL ONLY (agent + topic, task/project ids, seednote
+// image-composition flags, goal condition). The visual / persona / theme
+// dimensions never enter the prompt — they are single-sourced via
+// resolver.ResolveStyle and delivered to the agent through two purposeful
+// projections: get_project_profile (MCP, for agent reasoning) and settings.json
+// (for the app library). Keeping them out of the prompt is what lets the three
+// channels never disagree (P2 contract).
 type UserPromptParams struct {
 	TaskType  string // model.PlatformArticle / model.PlatformSeednote
 	Topic     string // user prompt; empty triggers autonomous research mode
 	AgentName string
-	Style     string // effective visual style (task > plan > project); empty = no override
 	Goal      string // goal-mode condition; empty = no /goal prefix
 	TaskID    string // injected as task_id=<x> into the prompt body
 	ProjectID string // injected as project_id=<x> into the prompt body
-	// HasTemplate indicates the task references a content template. When true, a
-	// pointer is appended telling the agent to fetch the template's writing style /
-	// structure / example via get_project_profile(task_id) and follow them.
-	HasTemplate bool
 	// HasContentImage / HasTailImage toggle seednote image composition. Cover is
 	// always generated. Ignored for non-seednote task types.
 	HasContentImage bool
@@ -55,11 +59,11 @@ type UserPromptParams struct {
 // The agent definition is loaded via WithAgent() (system prompt), so the user
 // message only needs to provide the topic or an autonomous execution instruction.
 //
-// p.Style, when non-empty, is the effective visual style resolved at task creation
-// (task > plan > project). It is injected into the prompt as the image-gen style
-// override; the agent picks this up naturally when composing image prompts and
-// calls generate_image with a full prompt string. This keeps BuildAppConfig pure
-// (project-only) — task-specific overrides flow through the prompt, not config.
+// The prompt is behavioral only — it never carries the visual / persona / theme
+// style dimensions. Those are resolved once (resolver.ResolveStyle, two-layer
+// task ?? project) and read by the agent from get_project_profile(task_id); the
+// app-library projection lands in settings.json. Injecting them here too would
+// create a second, divergent copy of the same values.
 //
 // p.Goal, when non-empty, is prepended as a /goal slash command so Claude Code's
 // built-in goal loop drives turn-by-turn evaluation inside the same session.
@@ -85,12 +89,6 @@ func BuildUserPrompt(p UserPromptParams) string {
 	} else {
 		base = fmt.Sprintf("Use the %s agent to create content about: %s", p.AgentName, p.Topic)
 	}
-	if p.Style != "" {
-		base += fmt.Sprintf(
-			"\n\n视觉风格要求（覆盖账号默认风格，请在生成图片时遵守）：%s",
-			p.Style,
-		)
-	}
 	if p.TaskType == model.PlatformSeednote {
 		base += "\n\n" + describeSeednoteImageComposition(p.HasContentImage, p.HasTailImage)
 	}
@@ -103,19 +101,6 @@ func BuildUserPrompt(p UserPromptParams) string {
 			parts = append(parts, "project_id="+p.ProjectID)
 		}
 		base += "\n\n本任务上下文：" + strings.Join(parts, ", ")
-	}
-	if p.HasTemplate {
-		// The article skill historically calls get_project_profile WITHOUT task_id;
-		// without it the server cannot resolve the linked template. The pointer
-		// explicitly demands task_id so the template_* scaffold fields are returned.
-		base += "\n\n本任务已关联内容模板：请调用 get_project_profile（带 task_id）获取模板字段。" +
-			"注意「作者」与「写作风格」是两个独立维度，切勿混淆——" +
-			"① 作者（返回顶层的 `author`，已按 task>模板>项目 解析，含 `author_source` 标注来源层）仅用于发布署名：发布草稿时填入 publish_draft 的 author；" +
-			"② 写作风格（`template_writing_style`，模仿内容的框架/写作方式/笔迹）驱动正文口吻，若返回则严格遵守，但**绝不**写入 author；" +
-			"`template_author_avatar` 是写作人设的可选头像（仅人设参考，不入署名）。" +
-			"③ 若顶层 `author` 为空，draft.json 的 author 留空或省略，**绝不**用 `template_writing_style`/`template_author_avatar` 顶替署名。" +
-			"映射示例：profile 顶层 author=\"张三\"→draft 的 author=\"张三\"；template_writing_style=\"幽默犀利、善用反问\"→只驱动正文口吻，不入 author。" +
-			"若还返回 template_structure（内容结构）/template_example（示例），一并遵守。"
 	}
 	if trimmedGoal := normalizeGoalCondition(p.Goal); trimmedGoal != "" {
 		return "/goal " + trimmedGoal + "\n\n" + base
@@ -409,18 +394,17 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 3. Write project config to workspace settings.json.
+	// Resolve the effective style dimensions two-layer (task.Overrides ?? project)
+	// ONCE; settings.json here and the user prompt below both read this same
+	// resolution so the two channels can never disagree. (P2 moves the
+	// visual/persona/theme dimensions fully to MCP, but they stay single-sourced
+	// here regardless.) resolved is zero-valued when there is no project.
+	var resolved resolver.Resolved
 	if opts.Project != nil {
-		cfg, err := BuildAppConfig(opts.Project, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
+		resolved = resolver.ResolveStyle(opts.Project, opts.Task)
+		cfg, err := BuildAppConfig(opts.Project, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
-		}
-		// Seednote: the task's visual style (opts.Task.Style) is injected via the
-		// user prompt; clear the settings.json duplicate so the agent sees a single
-		// source of truth. Article is NOT cleared — after the 3-dimension split
-		// cfg.Wechat.Article.Style holds the WRITING style (a different dimension
-		// from the visual style in the prompt), so clearing it would drop the writer.
-		if opts.Task.Style != "" && cfg.Seednote != nil {
-			cfg.Seednote.Style = ""
 		}
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
@@ -514,11 +498,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		TaskType:        opts.Task.Type,
 		Topic:           opts.Task.Prompt,
 		AgentName:       agentName,
-		Style:           opts.Task.Style,
 		Goal:            opts.Task.Goal,
 		TaskID:          opts.Task.ID,
 		ProjectID:       projectID,
-		HasTemplate:     opts.Task.TemplateID != nil && *opts.Task.TemplateID != "",
 		HasContentImage: opts.Task.HasContentImage,
 		HasTailImage:    opts.Task.HasTailImage,
 	})

@@ -56,11 +56,11 @@ func newStreamingProgressRelayer(ctx context.Context, sess progressNotifier, tok
 	}
 }
 
-// registerWritingTools registers article writing, conversion, humanization, topic research, SEO, outline generation, and scoring tools.
+// registerWritingTools registers article writing, conversion, topic research, SEO, outline generation, and scoring tools.
 func registerWritingTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "write_article",
-		Description: "Generate an article using the resolved writing style and an LLM. The writing style is resolved from the task (task > template > plan > project) when task_id is given, falling back to the project's writing_style. The server assembles the writing prompt from the resolved writer resource, calls the LLM, and returns the article text in Markdown format.",
+		Description: "Generate an article using the resolved writing style and an LLM. The writing style is resolved from the task (task > project) when task_id is given, falling back to the project's writer_key. The server assembles the writing prompt from the resolved writer resource, calls the LLM, and returns the article text in Markdown format.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -69,7 +69,7 @@ func registerWritingTools(server *mcp.Server) {
 				"input_type":   map[string]any{"type": "string", "enum": []any{"idea", "fragment", "outline", "title"}, "description": "Type of input content (default: idea)"},
 				"article_type": map[string]any{"type": "string", "enum": []any{"essay", "commentary", "story", "tutorial", "review"}, "description": "Article type (default: essay)"},
 				"length":       map[string]any{"type": "string", "enum": []any{"short", "medium", "long"}, "description": "Desired article length (default: medium)"},
-				"task_id":      map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > template > plan > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project's writing_style."},
+				"task_id":      map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project's writer_key."},
 			},
 			"required": []any{"project_id", "topic"},
 		},
@@ -77,14 +77,14 @@ func registerWritingTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "convert_markdown",
-		Description: "Convert Markdown content to WeChat-compatible HTML. The theme (排版样式) is resolved from the task (task > template > plan > project) when task_id is given, falling back to the project theme. The server renders the HTML with image placeholders.",
+		Description: "Convert Markdown content to WeChat-compatible HTML. The theme (排版样式) is resolved from the task (task > project) when task_id is given, falling back to the project theme. The server renders the HTML with image placeholders.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"markdown":   map[string]any{"type": "string", "description": "Markdown content to convert"},
-				"theme":      map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > template > plan > project), then the project theme."},
-				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > template > plan > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
+				"theme":      map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > project), then the project theme."},
+				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
 			},
 			"required": []any{"project_id", "markdown"},
 		},
@@ -92,7 +92,7 @@ func registerWritingTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "render_template",
-		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the renderer freely decide image placement and layout), render_template annotates the markdown with explicit [SLOT: ...] markers so each image is placed at the planned position and each section is wrapped in the specified layout module. The theme (排版样式) is resolved from the task (task > template > plan > project) when task_id is given, falling back to the project theme. Use this when you have a visual-rhythm-plan that dictates where each image goes (hero / section_opener / inline_detail / footer).",
+		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the renderer freely decide image placement and layout), render_template annotates the markdown with explicit [SLOT: ...] markers so each image is placed at the planned position and each section is wrapped in the specified layout module. The theme (排版样式) is resolved from the task (task > project) when task_id is given, falling back to the project theme. Use this when you have a visual-rhythm-plan that dictates where each image goes (hero / section_opener / inline_detail / footer).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -133,26 +133,12 @@ func registerWritingTools(server *mcp.Server) {
 					},
 					"required": []any{"article_type", "slots"},
 				},
-				"theme":   map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > template > plan > project), then the project theme."},
-				"task_id": map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > template > plan > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
+				"theme":   map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > project), then the project theme."},
+				"task_id": map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
 			},
 			"required": []any{"project_id", "markdown", "layout_plan"},
 		},
 	}, renderTemplateHandler)
-
-	server.AddTool(&mcp.Tool{
-		Name:        "humanize_article",
-		Description: "Remove AI-generated writing traces from content. The server builds a humanization prompt based on the specified intensity, calls an LLM, and returns the naturalized content.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"content":    map[string]any{"type": "string", "description": "Article content to humanize"},
-				"intensity":  map[string]any{"type": "string", "enum": []any{"gentle", "medium", "aggressive", "authentic"}, "description": "Humanization intensity (default: medium). 'authentic' uses 6-dimension rules to rewrite like real human writing."},
-			},
-			"required": []any{"project_id", "content"},
-		},
-	}, humanizeArticleHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "research_topics",
@@ -186,15 +172,15 @@ func registerWritingTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_outline",
-		Description: "Generate a structured article outline/framework based on a topic and template. The writing style is resolved from the task (task > template > plan > project) when task_id is given, falling back to the project's writing_style. Returns title, hook, sections, key points, CTA, and viral elements.",
+		Description: "Generate a structured article outline/framework based on a topic and template. The writing style is resolved from the task (task > project) when task_id is given, falling back to the project's writer_key. Returns title, hook, sections, key points, CTA, and viral elements.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID (uses its keywords)"},
 				"topic":      map[string]any{"type": "string", "description": "Article topic or idea"},
 				"template":   map[string]any{"type": "string", "enum": []any{"authoritative", "comparison", "cultural", "practical"}, "description": "Outline template type (default: authoritative)"},
-				"style":      map[string]any{"type": "string", "description": "Writing style override (optional). When omitted, resolves from task_id (task > template > plan > project), then the project's writing_style."},
-				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > template > plan > project) as the single source of truth. Omit only for direct CLI calls."},
+				"style":      map[string]any{"type": "string", "description": "Writing style override (optional). When omitted, resolves from task_id (task > project), then the project's writer_key."},
+				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > project) as the single source of truth. Omit only for direct CLI calls."},
 			},
 			"required": []any{"project_id", "topic"},
 		},
@@ -335,42 +321,6 @@ func renderTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	result, err := svcs.WritingSvc.RenderTemplate(ctx, userID, projectID, markdown, layoutPlan, theme, taskID)
 	if err != nil {
 		return billingError("render template", err), nil
-	}
-
-	return textResult(result)
-}
-
-func humanizeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.WritingSvc == nil {
-		return errorResult("writing service not available"), nil
-	}
-	userID := getUserID(ctx)
-	args := parseArgs(req.Params.Arguments)
-
-	projectID, _ := args["project_id"].(string)
-	content, _ := args["content"].(string)
-	if projectID == "" {
-		return errorResult("project_id is required"), nil
-	}
-	if content == "" {
-		return errorResult("content is required"), nil
-	}
-
-	intensity, _ := args["intensity"].(string)
-
-	logLongTextToolStart("humanize_article", req)
-	defer logLongTextToolEnd("humanize_article", time.Now())
-	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "humanize_article", longTextHeartbeatInterval)
-	defer stop()
-
-	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeHumanize, provider, mdl, 1); err != nil {
-		return billingError("humanize article", err), nil
-	}
-
-	result, err := svcs.WritingSvc.HumanizeArticle(ctx, userID, projectID, content, intensity)
-	if err != nil {
-		return billingError("humanize article", err), nil
 	}
 
 	return textResult(result)

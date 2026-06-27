@@ -184,21 +184,21 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 	}
 
 	tmpl := &model.Template{
-		Name:             req.Name,
-		Type:             req.Type,
-		ThumbnailURL:     req.ThumbnailURL,
-		StylePrompt:      req.StylePrompt,
-		Visibility:       req.Visibility,
-		WritingStyle:     req.WritingStyle,
-		Theme:            req.Theme,
-		Structure:        scaffoldText(req.Structure),
-		ExampleContent:   scaffoldText(req.ExampleContent),
-		Category:         req.Category,
-		Tags:             req.Tags,
-		AuthorName:       req.AuthorName,
-		AuthorAvatarURL:  req.AuthorAvatarURL,
-		AuthorStyleIntro: req.AuthorStyleIntro,
-		IsActive:         true,
+		Name:           req.Name,
+		Type:           req.Type,
+		ThumbnailURL:   req.ThumbnailURL,
+		VisualStyle:    req.StylePrompt,
+		Visibility:     req.Visibility,
+		WriterKey:      req.WritingStyle,
+		Theme:          req.Theme,
+		Structure:      scaffoldText(req.Structure),
+		ExampleContent: scaffoldText(req.ExampleContent),
+		Category:       req.Category,
+		Tags:           req.Tags,
+		Byline:         req.AuthorName,
+		PersonaAvatar:  req.AuthorAvatarURL,
+		WritingVoice:   req.AuthorStyleIntro,
+		IsActive:       true,
 	}
 	if req.Ecommerce != nil {
 		tmpl.SetEcommerce(*req.Ecommerce)
@@ -252,20 +252,20 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 	}
 
 	patch := &model.Template{
-		Name:             req.Name,
-		Type:             req.Type,
-		ThumbnailURL:     req.ThumbnailURL,
-		StylePrompt:      req.StylePrompt,
-		Visibility:       req.Visibility,
-		WritingStyle:     req.WritingStyle,
-		Theme:            req.Theme,
-		Structure:        scaffoldText(req.Structure),
-		ExampleContent:   scaffoldText(req.ExampleContent),
-		Category:         req.Category,
-		Tags:             req.Tags,
-		AuthorName:       req.AuthorName,
-		AuthorAvatarURL:  req.AuthorAvatarURL,
-		AuthorStyleIntro: req.AuthorStyleIntro,
+		Name:           req.Name,
+		Type:           req.Type,
+		ThumbnailURL:   req.ThumbnailURL,
+		VisualStyle:    req.StylePrompt,
+		Visibility:     req.Visibility,
+		WriterKey:      req.WritingStyle,
+		Theme:          req.Theme,
+		Structure:      scaffoldText(req.Structure),
+		ExampleContent: scaffoldText(req.ExampleContent),
+		Category:       req.Category,
+		Tags:           req.Tags,
+		Byline:         req.AuthorName,
+		PersonaAvatar:  req.AuthorAvatarURL,
+		WritingVoice:   req.AuthorStyleIntro,
 	}
 	if req.Ecommerce != nil {
 		patch.SetEcommerce(*req.Ecommerce)

@@ -15,7 +15,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/royalrick/anbanwriter/app/converter"
-	"github.com/royalrick/anbanwriter/app/humanizer"
 	"github.com/royalrick/anbanwriter/app/writer"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
@@ -238,7 +237,7 @@ func isKimiThinkingModel(model string) bool {
 // WritingService
 // ---------------------------------------------------------------------------
 
-// WritingService wraps prompt assembly packages (writer, converter, humanizer)
+// WritingService wraps prompt assembly packages (writer, converter)
 // and calls an LLM for actual generation.
 type WritingService struct {
 	repo           repository.Repository
@@ -307,34 +306,33 @@ func (s *WritingService) AnalyzeImage(ctx context.Context, userID, imageSource, 
 	return strings.TrimSpace(result), nil
 }
 
-// resolveWriterKey returns the 写作风格 (writer resource key) for a writing
-// operation. When taskID is supplied, the task's resolved writer wins; otherwise
-// the project's writing_style is used. Article defaults to the platform default
-// writer. It NEVER reads ch.Style — that is the 图片视觉 (visual) dimension and
-// must not leak into writer selection (the dan-koe → Victorian-woodcut bug).
+// resolveWriterKey returns the 写作者 (writer resource key) for a writing
+// operation, resolving two-layer via the single ResolveStyle primitive:
+// task.Overrides.WriterKey wins, else project.WriterKey, with the article platform
+// default applied when still empty. It NEVER reads the visual-style dimension —
+// writer key and visual style are orthogonal and must not leak into each other.
 func (s *WritingService) resolveWriterKey(ctx context.Context, taskID string, ch *model.Project) string {
-	key := ch.WritingStyle
+	var task *model.Task
 	if taskID != "" {
-		if task, terr := s.repo.Tasks().FindByID(ctx, taskID); terr == nil && task.WritingStyle != "" {
-			key = task.WritingStyle
+		if t, terr := s.repo.Tasks().FindByID(ctx, taskID); terr == nil {
+			task = t
 		}
 	}
-	if key == "" && ch.Platform == model.PlatformArticle {
-		key = writer.DefaultStyleName
-	}
-	return key
+	return ResolveStyle(ch, task).WriterKey
 }
 
 // resolveEffectiveTheme returns the 排版样式 (theme resource key) for a render
-// operation. When taskID is supplied, the task's resolved theme wins; otherwise
-// the project's theme is used. Falls back to the platform default "autumn-warm".
+// operation, resolving two-layer via ResolveStyle (task.Overrides.Theme ??
+// project.Theme). Falls back to the platform default "autumn-warm" when the
+// resolved theme is empty (ResolveStyle applies no theme default itself).
 func (s *WritingService) resolveEffectiveTheme(ctx context.Context, taskID string, ch *model.Project) string {
-	theme := ch.Theme
+	var task *model.Task
 	if taskID != "" {
-		if task, terr := s.repo.Tasks().FindByID(ctx, taskID); terr == nil && task.Theme != "" {
-			theme = task.Theme
+		if t, terr := s.repo.Tasks().FindByID(ctx, taskID); terr == nil {
+			task = t
 		}
 	}
+	theme := ResolveStyle(ch, task).Theme
 	if theme == "" {
 		theme = "autumn-warm"
 	}
@@ -365,23 +363,6 @@ type ImageRefDTO struct {
 	Index       int    `json:"index"`
 	Original    string `json:"original"`
 	Placeholder string `json:"placeholder,omitempty"`
-}
-
-// HumanizeArticleResult contains the humanized content and optional quality score.
-type HumanizeArticleResult struct {
-	Content string               `json:"content"`
-	Score   *HumanizeScoreResult `json:"score,omitempty"`
-}
-
-// HumanizeScoreResult contains the 5-dimension quality score.
-type HumanizeScoreResult struct {
-	Total        int    `json:"total"`
-	Directness   int    `json:"directness"`
-	Rhythm       int    `json:"rhythm"`
-	Trust        int    `json:"trust"`
-	Authenticity int    `json:"authenticity"`
-	Conciseness  int    `json:"conciseness"`
-	Rating       string `json:"rating"`
 }
 
 // ResearchTopicsResult contains generated topic suggestions.
@@ -575,62 +556,6 @@ func (s *WritingService) ConvertMarkdown(
 		HTML:   convResult.HTML,
 		Images: imageDTOs,
 	}, nil
-}
-
-// HumanizeArticle removes AI-generated writing traces from content.
-// Uses the 24-pattern humanizer prompt system (gentle/medium/aggressive)
-// or the 6-dimension authentic rewrite rules depending on intensity.
-func (s *WritingService) HumanizeArticle(
-	ctx context.Context,
-	userID, projectID, content, intensity string,
-) (*HumanizeArticleResult, error) {
-	if content == "" {
-		return nil, fmt.Errorf("content is required")
-	}
-
-	humanizeIntensity := humanizer.ParseIntensity(intensity)
-
-	req := &humanizer.HumanizeRequest{
-		Content:      content,
-		Intensity:    humanizeIntensity,
-		IncludeScore: true,
-	}
-
-	prompt := humanizer.BuildPrompt(req)
-
-	raw, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
-	if err != nil {
-		return nil, fmt.Errorf("llm humanize: %w", err)
-	}
-
-	// Parse the structured response using the humanizer package.
-	h := humanizer.NewHumanizer()
-	parsed := h.ParseAIResponse(raw, req)
-
-	s.logger.Info().
-		Str("user_id", userID).
-		Str("intensity", intensity).
-		Bool("scored", parsed.Score != nil).
-		Msg("article humanized")
-
-	result := &HumanizeArticleResult{
-		Content: parsed.Content,
-	}
-
-	// Include quality score if available.
-	if parsed.Score != nil {
-		result.Score = &HumanizeScoreResult{
-			Total:        parsed.Score.Total,
-			Directness:   parsed.Score.Directness,
-			Rhythm:       parsed.Score.Rhythm,
-			Trust:        parsed.Score.Trust,
-			Authenticity: parsed.Score.Authenticity,
-			Conciseness:  parsed.Score.Conciseness,
-			Rating:       parsed.Score.Rating(),
-		}
-	}
-
-	return result, nil
 }
 
 // ResearchTopics generates topic suggestions based on a project's positioning.

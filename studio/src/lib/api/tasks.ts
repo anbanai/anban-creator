@@ -1,5 +1,5 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse } from '@/types'
+import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse } from '@/types'
 
 export const tasksApi = {
   create: async (data: CreateTaskRequest): Promise<Task> => {
@@ -16,11 +16,36 @@ export const tasksApi = {
   cancel: (id: string) =>
     unwrap<void>(http.post(`/tasks/${id}/cancel`)),
 
+  // Retry a failed/cancelled task by cloning its full configuration (three-
+  // dimensional style, author/persona, ecommerce config, image model, etc.)
+  // into a fresh billed task on the server. Returns the new task.
+  retry: (id: string) =>
+    unwrap<Task>(http.post(`/tasks/${id}/retry`)),
+
   delete: (id: string) =>
     unwrap<void>(http.delete(`/tasks/${id}`)),
 
+  // Bulk operations — best-effort, ≤100 ids; the server returns a per-task
+  // summary (succeeded/skipped + reasons). Each action only sends the subset it
+  // can act on (cancel: pending/running; retry: failed/cancelled; delete:
+  // non-running), so the count the user sees equals what is actually submitted.
+  bulkCancel: (ids: string[]) =>
+    unwrap<BulkTasksResponse>(http.post('/tasks/bulk-cancel', { task_ids: ids })),
+  bulkRetry: (ids: string[]) =>
+    unwrap<BulkTasksResponse>(http.post('/tasks/bulk-retry', { task_ids: ids })),
+  bulkDelete: (ids: string[]) =>
+    unwrap<BulkTasksResponse>(http.post('/tasks/bulk-delete', { task_ids: ids })),
+
   markPublished: (id: string, published: boolean) =>
     unwrap<{ published: boolean }>(http.patch(`/tasks/${id}/published`, { published })),
+
+  // Publish-approval gate (Batch 4A): resume a held publish (publishes the
+  // frozen draft to the WeChat draft box asynchronously) or close the gate
+  // without publishing. Only valid while publish_approval_state === 'pending'.
+  publishApprove: (id: string) =>
+    unwrap<{ approved: boolean }>(http.post(`/tasks/${id}/publish-approve`)),
+  publishReject: (id: string, reason?: string) =>
+    unwrap<{ rejected: boolean }>(http.post(`/tasks/${id}/publish-reject`, { reason })),
 
   files: (id: string) =>
     unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),

@@ -367,6 +367,41 @@ func (r *taskRepository) SetPublished(ctx context.Context, id string, published 
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Updates(updates).Error
 }
 
+// UpdatePublishApproval writes the publish-approval state column and the frozen
+// pending-draft-articles blob for a task. Used by holdPublishForApproval to enter
+// the pending state (state=pending, blob=marshaled articles).
+func (r *taskRepository) UpdatePublishApproval(ctx context.Context, id, state string, pendingArticles []byte) error {
+	updates := map[string]interface{}{"publish_approval_state": state}
+	if pendingArticles != nil {
+		updates["pending_draft_articles"] = pendingArticles
+	}
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// CompareAndSwapPublishApproval atomically transitions publish_approval_state
+// from expected to newState, clearing the frozen pending-draft-articles blob in
+// the same update when clearArticles is true (spec: approve/reject clear the
+// blob). Returns true only if the task was in the expected state and is now
+// newState — exactly one concurrent caller wins. Mirrors CompareAndSwapStatus:
+// the atomic UPDATE ... WHERE id=? AND publish_approval_state=? guarantees the
+// winner is unique, so ApprovePublish can safely gate its publish goroutine on
+// the returned bool (no double-publish).
+func (r *taskRepository) CompareAndSwapPublishApproval(ctx context.Context, id, expected, newState string, clearArticles bool) (bool, error) {
+	updates := map[string]interface{}{"publish_approval_state": newState}
+	if clearArticles {
+		// datatypes.JSON zero value serializes to SQL NULL → column cleared.
+		updates["pending_draft_articles"] = nil
+	}
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND publish_approval_state = ?", id, expected).
+		Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 func (r *taskRepository) UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("workflow_status", workflowStatus).Error
 }

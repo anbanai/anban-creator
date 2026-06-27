@@ -14,8 +14,8 @@ func NewDefaultConfig() *Config {
 	c.Wechat.Secret = "your_wechat_secret"
 
 	// 图文文章
-	c.Wechat.Article.Author = "your_author_name"
-	c.Wechat.Article.Style = DefaultArticleStyle
+	c.Wechat.Article.Byline = "your_author_name"
+	c.Wechat.Article.WriterKey = DefaultArticleWriterKey
 	c.Wechat.Article.Theme = DefaultArticleTheme
 	// 文章封面图
 	c.Wechat.Article.Cover.Image.Provider = DefaultImageProvider
@@ -36,7 +36,7 @@ func NewDefaultConfig() *Config {
 
 	// 种草笔记（可选平台）
 	c.Seednote = new(SeednoteConfig)
-	c.Seednote.Style = "cute-doodle"
+	c.Seednote.VisualStyle = "cute-doodle"
 	c.Seednote.Cover.Image.Provider = DefaultImageProvider
 	c.Seednote.Cover.Image.Key = "your_image_api_key"
 	c.Seednote.Cover.Image.Model = "gemini-3-pro-image-preview"
