@@ -50,6 +50,9 @@ export interface Task {
   author_avatar_url?: string
   // E-commerce package config (only present for platform=ecommerce tasks).
   ecommerce?: EcommerceTaskConfig
+  // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）。运行/失败/完成
+  // 态可能填充；刚创建的 pending 任务为空。用于取消对话框展示「已消耗不退还」。
+  total_cost_usd?: number | null
   created_at: string
   started_at: string
   completed_at: string

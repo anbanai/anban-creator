@@ -63,7 +63,7 @@ export function PersonaBlock({
       return (
         <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
           <div className="flex items-center justify-between">
-            <Label className="text-sm font-medium">写作风格</Label>
+            <Label className="text-sm font-medium">作者署名 · 写作风格</Label>
             <Badge variant="secondary" className="text-[10px]">随模板同步</Badge>
           </div>
           <p className="text-xs text-muted-foreground">所选模板未设置写作风格。</p>
@@ -73,7 +73,7 @@ export function PersonaBlock({
     return (
       <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
         <div className="flex items-center justify-between">
-          <Label className="text-sm font-medium">写作风格</Label>
+          <Label className="text-sm font-medium">作者署名 · 写作风格</Label>
           <Badge variant="secondary" className="text-[10px]">随模板同步·改模板自动更新</Badge>
         </div>
         <div className="flex items-start gap-3">
@@ -101,10 +101,10 @@ export function PersonaBlock({
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
-      <div className="flex items-center justify-between">
-        <Label className="text-sm font-medium">写作风格</Label>
-        <span className="text-xs text-muted-foreground">名称=真实发布署名 · 写作风格供 AI 模仿（二者互不填充）</span>
+    <div className="space-y-3 rounded-lg border border-dashed border-input p-3">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-sm font-medium">作者署名 · 写作风格</Label>
+        <span className="shrink-0 text-xs text-muted-foreground">署名=发布作者名 · 写作风格=供 AI 模仿的口吻</span>
       </div>
       {sortedWriters.length > 0 && (
         <div className="flex items-center gap-2">
@@ -146,20 +146,32 @@ export function PersonaBlock({
           <p className="mt-1 text-center text-[11px] text-muted-foreground">头像（可选）</p>
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <Input
-            value={authorName}
-            onChange={(e) => onAuthorName(e.target.value)}
-            placeholder="名称（署名）：发布后显示在文章作者位的真实姓名/品牌"
-            maxLength={100}
-          />
-          <Textarea
-            value={authorStyleIntro}
-            onChange={(e) => onAuthorStyleIntro(e.target.value)}
-            placeholder="写作风格：例如犀利、接地气、像朋友聊天；多用短句和反问；爱用具体数字和案例"
-            maxLength={1024}
-            className="resize-none"
-            rows={3}
-          />
+          <div className="space-y-1">
+            <Label htmlFor="persona-author-name" className="text-xs font-medium text-muted-foreground">
+              发布署名 · 文章作者位显示的真实姓名/品牌
+            </Label>
+            <Input
+              id="persona-author-name"
+              value={authorName}
+              onChange={(e) => onAuthorName(e.target.value)}
+              placeholder="例如：李雷、某某实验室"
+              maxLength={100}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="persona-style-intro" className="text-xs font-medium text-muted-foreground">
+              写作风格 · 供 AI 模仿的口吻（自由文本，可从上方风格库导入）
+            </Label>
+            <Textarea
+              id="persona-style-intro"
+              value={authorStyleIntro}
+              onChange={(e) => onAuthorStyleIntro(e.target.value)}
+              placeholder="例如：犀利、接地气、像朋友聊天；多用短句和反问；爱用具体数字和案例"
+              maxLength={1024}
+              className="resize-none"
+              rows={3}
+            />
+          </div>
         </div>
       </div>
     </div>

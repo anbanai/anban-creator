@@ -4,6 +4,7 @@ import StatsCardSkeleton from '@/components/StatsCardSkeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
+import { formatUSD } from '@/lib/utils'
 import { contentTypeLabel } from '@/lib/labels'
 import { formatDateYMD } from '@/lib/labels'
 import { Card } from '@/components/ui/card'
@@ -15,11 +16,6 @@ function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return n.toLocaleString()
-}
-
-function formatUSD(n: number): string {
-  if (n < 0.01) return `$${n.toFixed(4)}`
-  return `$${n.toFixed(2)}`
 }
 
 type DateRange = '7d' | '30d' | '90d' | 'this_month'

@@ -11,6 +11,7 @@ import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
+import { formatUSD } from '@/lib/utils'
 import type { TaskFile } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
@@ -764,8 +765,19 @@ export default function TaskDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确定取消此任务？</AlertDialogTitle>
             <AlertDialogDescription>
-              取消后任务将停止执行，此操作不可撤销。
-              任务创建费用将全额退还，但执行中已消耗的操作费用（如 AI 写作、图片生成）不予退还。
+              {task.status === 'pending' ? (
+                <>此任务尚未开始执行，取消后将<strong className="text-foreground">全额退还已扣积分</strong>，不会产生任何费用。{' '}</>
+              ) : (
+                <>
+                  任务正在执行中，取消后将立即停止未完成的步骤。
+                  {task.total_cost_usd && task.total_cost_usd > 0 ? (
+                    <>已完成步骤（AI 写作、图片生成等）已消耗约 <strong className="text-foreground">{formatUSD(task.total_cost_usd)}</strong>，<strong className="text-foreground">不予退还</strong>；其余将退还。{' '}</>
+                  ) : (
+                    <>已完成步骤（如 AI 写作、图片生成）的费用<strong className="text-foreground">不予退还</strong>，其余将退还。{' '}</>
+                  )}
+                </>
+              )}
+              此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
