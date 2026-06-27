@@ -19,7 +19,7 @@ function Button({
   ...props
 }: ButtonProps) {
   return (
-    <UIButton disabled={disabled || loading} {...props}>
+    <UIButton disabled={disabled || loading} aria-busy={loading || undefined} {...props}>
       {loading && <Loader2 className="animate-spin" />}
       {children}
     </UIButton>

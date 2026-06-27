@@ -44,6 +44,8 @@ page,
   --ab-danger-bg: #FEF2F2;
   --ab-warning-bg: #FFFBEB;
   --ab-info-bg: #EFF6FF;
+  --ab-purple-bg: #F3E8FF;
+  --ab-yellow-bg: #FEF9C3;
   --ab-shadow-sm: 0 1rpx 2rpx rgba(0, 0, 0, 0.05);
   --ab-shadow-md: 0 4rpx 12rpx rgba(0, 0, 0, 0.08);
   --ab-shadow-lg: 0 8rpx 24rpx rgba(0, 0, 0, 0.12);
@@ -65,6 +67,8 @@ page,
     --ab-danger-bg: #2A1212;
     --ab-warning-bg: #2A1C08;
     --ab-info-bg: #0C1A2E;
+    --ab-purple-bg: #231340;
+    --ab-yellow-bg: #2A2308;
     --ab-shadow-sm: 0 1rpx 2rpx rgba(0, 0, 0, 0.4);
     --ab-shadow-md: 0 4rpx 12rpx rgba(0, 0, 0, 0.5);
     --ab-shadow-lg: 0 8rpx 24rpx rgba(0, 0, 0, 0.6);

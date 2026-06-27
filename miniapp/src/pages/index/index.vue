@@ -720,8 +720,8 @@ function goWorkshop(tab: string) {
     &--plan { background-color: $ab-success-bg; }
     &--timeline { background-color: $ab-info-bg; }
     &--viral { background-color: $ab-warning-bg; }
-    &--poster { background-color: #F3E8FF; }
-    &--credits { background-color: #FEF9C3; }
+    &--poster { background-color: $ab-purple-bg; }
+    &--credits { background-color: $ab-yellow-bg; }
   }
 
   &__label {

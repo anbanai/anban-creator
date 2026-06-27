@@ -124,7 +124,7 @@ export default function LoginPage() {
                 )}
               />
               <Button type="submit" className="w-full" loading={passwordForm.formState.isSubmitting}>
-                登 录
+                登录
               </Button>
             </form>
           </Form>
@@ -173,7 +173,7 @@ export default function LoginPage() {
                 )}
               />
               <Button type="submit" className="w-full" loading={codeForm.formState.isSubmitting}>
-                登 录
+                登录
               </Button>
             </form>
           </Form>

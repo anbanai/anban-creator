@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom'
+import { PenLine, ImagePlus, Send, TrendingUp, type LucideIcon } from 'lucide-react'
 
-const featurePills = [
-  { label: 'AI 智能写作', icon: '✍️' },
-  { label: '一键生图', icon: '🎨' },
-  { label: '直接发布', icon: '📱' },
-  { label: 'SEO 优化', icon: '🔍' },
+const featurePills: { label: string; icon: LucideIcon }[] = [
+  { label: 'AI 智能写作', icon: PenLine },
+  { label: '一键生图', icon: ImagePlus },
+  { label: '直接发布', icon: Send },
+  { label: 'SEO 优化', icon: TrendingUp },
 ]
 
 export default function AuthLayout({
@@ -23,7 +24,7 @@ export default function AuthLayout({
   footerLinkTo: string
 }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center xl:justify-end overflow-hidden bg-gradient-to-br from-amber-50 via-amber-100 to-amber-300 dark:from-amber-950 dark:via-amber-900 dark:to-amber-800">
+    <div className="relative flex min-h-dvh items-center justify-center xl:justify-end overflow-hidden bg-gradient-to-br from-amber-50 via-amber-100 to-amber-300 dark:from-amber-950 dark:via-amber-900 dark:to-amber-800">
       {/* Decorative circles */}
       <div className="pointer-events-none absolute -right-16 -top-16 h-52 w-52 rounded-full bg-amber-400/30 dark:bg-amber-600/20" />
       <div className="pointer-events-none absolute -bottom-10 right-80 h-36 w-36 rounded-full bg-amber-500/20 dark:bg-amber-700/20" />
@@ -43,14 +44,18 @@ export default function AuthLayout({
           从灵感到发布，AI 全程陪伴你的内容创作之旅。微信公众号、种草笔记，一站搞定。
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
-          {featurePills.map((pill) => (
-            <span
-              key={pill.label}
-              className="rounded-full border border-amber-300/60 bg-white/70 px-3.5 py-1.5 text-xs font-medium text-amber-800 backdrop-blur-sm dark:border-amber-600/40 dark:bg-amber-800/40 dark:text-amber-200"
-            >
-              {pill.icon} {pill.label}
-            </span>
-          ))}
+          {featurePills.map((pill) => {
+            const Icon = pill.icon
+            return (
+              <span
+                key={pill.label}
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/60 bg-white/70 px-3.5 py-1.5 text-xs font-medium text-amber-800 backdrop-blur-sm dark:border-amber-600/40 dark:bg-amber-800/40 dark:text-amber-200"
+              >
+                <Icon className="size-3.5 text-amber-600 dark:text-amber-400" />
+                {pill.label}
+              </span>
+            )
+          })}
         </div>
       </div>
 
