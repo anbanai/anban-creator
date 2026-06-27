@@ -81,17 +81,17 @@ type createPlanRequest struct {
 	ImageModelKey      string `json:"image_model_key"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
-	Style              string `json:"style"`
-	WritingStyle       string `json:"writing_style"`
+	VisualStyle        string `json:"visual_style"`
+	WriterKey          string `json:"writer_key"`
 	Theme              string `json:"theme"`
-	// Author / AuthorStyleIntro / AuthorAvatarURL: 公众号 作者（署名）+ 写作风格（模仿）
-	// + 可选人设头像 overrides, orthogonal to Style/WritingStyle/Theme.
-	Author           string `json:"author"`
-	AuthorStyleIntro string `json:"author_style_intro"`
-	AuthorAvatarURL  string `json:"author_avatar_url"`
-	Watermark        *bool  `json:"watermark"`
-	Goal             string `json:"goal"`
-	GoalMode         bool   `json:"goal_mode"`
+	// Byline / WritingVoice / PersonaAvatar: 公众号 作者（署名）+ 写作风格（模仿）
+	// + 可选人设头像 overrides, orthogonal to VisualStyle/WriterKey/Theme.
+	Byline        string `json:"byline"`
+	WritingVoice  string `json:"writing_voice"`
+	PersonaAvatar string `json:"persona_avatar"`
+	Watermark     *bool  `json:"watermark"`
+	Goal          string `json:"goal"`
+	GoalMode      bool   `json:"goal_mode"`
 	// TemplateID records the template selected during plan creation. nil/empty = no template.
 	TemplateID *string `json:"template_id,omitempty"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
@@ -106,20 +106,20 @@ type updatePlanRequest struct {
 	ImageModelKey      *string `json:"image_model_key"`
 	SkipReferenceImage *bool   `json:"skip_reference_image"`
 	ReferenceImageURL  *string `json:"reference_image_url"`
-	Style              *string `json:"style"`
-	WritingStyle       *string `json:"writing_style"`
+	VisualStyle        *string `json:"visual_style"`
+	WriterKey          *string `json:"writer_key"`
 	Theme              *string `json:"theme"`
-	// Author / AuthorStyleIntro / AuthorAvatarURL: leave-unchanged semantics
-	// (omitted = unchanged), same as Style/WritingStyle/Theme.
-	Author           *string `json:"author"`
-	AuthorStyleIntro *string `json:"author_style_intro"`
-	AuthorAvatarURL  *string `json:"author_avatar_url"`
-	Watermark        *bool   `json:"watermark"`
-	Goal             string  `json:"goal"`
-	GoalMode         *bool   `json:"goal_mode"`
-	TemplateID       *string `json:"template_id,omitempty"`
-	HasContentImage  *bool   `json:"has_content_image,omitempty"`
-	HasTailImage     *bool   `json:"has_tail_image,omitempty"`
+	// Byline / WritingVoice / PersonaAvatar: leave-unchanged semantics
+	// (omitted = unchanged), same as VisualStyle/WriterKey/Theme.
+	Byline          *string `json:"byline"`
+	WritingVoice    *string `json:"writing_voice"`
+	PersonaAvatar   *string `json:"persona_avatar"`
+	Watermark       *bool   `json:"watermark"`
+	Goal            string  `json:"goal"`
+	GoalMode        *bool   `json:"goal_mode"`
+	TemplateID      *string `json:"template_id,omitempty"`
+	HasContentImage *bool   `json:"has_content_image,omitempty"`
+	HasTailImage    *bool   `json:"has_tail_image,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.

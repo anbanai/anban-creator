@@ -72,7 +72,7 @@ function scaffoldText(value: Record<string, unknown> | undefined): string {
 }
 
 // Readable scaffold block: renders the .text as preformatted text. Used for the
-// writing_style / structure / example projects that the agent consumes.
+// writer_key / structure / example projects that the agent consumes.
 function ScaffoldBlock({ label, text }: { label: string; text: string }) {
   if (!text.trim()) return null
   return (
@@ -204,7 +204,7 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
               {/* 海报 (poster): 内容脚手架（写作风格 / 内容结构 / 示例）—— 保留原展示 */}
               {data.type === 'poster' && (
                 <>
-                  <ScaffoldBlock label="写作风格" text={data.writing_style ?? ''} />
+                  <ScaffoldBlock label="写作风格" text={data.writer_key ?? ''} />
 
                   {/* 内容结构 —— 优先渲染 .text，无 .text 时回退到 JSON 展开（poster 旧结构） */}
                   {scaffoldText(data.structure) ? (
@@ -234,13 +234,13 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
           {data.type === 'article' && (
             <div className="space-y-3">
               {/* 写作风格 —— 名称(署名) + 写作风格 + 可选头像，放在一起（与编辑器一致） */}
-              {(data.author_name || data.author_style_intro || data.author_avatar_url) && (
+              {(data.author_name || data.writing_voice || data.persona_avatar) && (
                 <div className="rounded-lg border border-border px-3 py-2">
                   <p className="text-xs font-medium text-muted-foreground mb-2">写作风格</p>
                   <div className="flex items-start gap-3">
-                    {data.author_avatar_url && (
+                    {data.persona_avatar && (
                       <SignedImage
-                        src={data.author_avatar_url}
+                        src={data.persona_avatar}
                         alt="头像"
                         className="h-12 w-12 shrink-0 rounded-full object-cover"
                         showLoading={false}
@@ -250,9 +250,9 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
                       {data.author_name && (
                         <p className="text-sm font-medium text-foreground">{data.author_name}</p>
                       )}
-                      {data.author_style_intro && (
+                      {data.writing_voice && (
                         <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-                          {data.author_style_intro}
+                          {data.writing_voice}
                         </p>
                       )}
                     </div>

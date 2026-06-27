@@ -77,13 +77,13 @@ export function TemplateCreateDialog({
   const [visibility, setVisibility] = useState<TemplateVisibility>('public')
   const [analyzing, setAnalyzing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  // Content scaffold (optional, separate from visual style_prompt). The agent
-  // receives these via get_project_profile(task_id) as template_writing_style /
-  // template_structure / template_example. structure/example wrap as
+  // Content scaffold (optional, separate from visual style_prompt). Stored on the
+  // template (poster legacy scaffold); structure/example wrap as
   // { text: <markdown> } on submit (matches the backend JSON column shape).
+  // Templates are project-launchers — no template_* agent namespace.
   const [writingStyle, setWritingStyle] = useState('')
   // 排版样式 (theme) — the Markdown→HTML layout theme. Orthogonal to visual
-  // style_prompt and writing_style. Surfaced to the agent as template_theme.
+  // style_prompt and writer_key. Pre-fills project.theme; the project surfaces flat.
   const [theme, setTheme] = useState('')
   const [structure, setStructure] = useState('')
   const [example, setExample] = useState('')
@@ -92,9 +92,9 @@ export function TemplateCreateDialog({
   // the existing tags joined by ", ".
   const [tagsText, setTagsText] = useState('')
   // 公众号 (article) 写作风格 — 统一区块（名称即署名 + 写作风格 + 可选头像）：
-  //   - authorName：名称 = 发布作者名（get_project_profile.author，precedence
-  //     template > project）。
-  //   - authorStyleIntro：写作风格（自由文本 框架/写作方式/笔迹）= template_writing_style。
+  //   - authorName：名称 = 发布作者名（→ author_name，建项目时预填 project.byline；
+  //     运行时两层解析 task > project，byline ≠ 写作风格人设名）。
+  //   - authorStyleIntro：写作风格（自由文本 框架/写作方式/笔迹）→ writing_voice（≠ writer_key）。
   //   - authorAvatarUrl：可选头像（不入署名）。三者聚合在 PersonaBlock，
   //     可从写作风格库一键导入；与公众号项目编辑器 UI 完全一致。
   const [authorName, setAuthorName] = useState('')
@@ -136,11 +136,11 @@ export function TemplateCreateDialog({
       setThumbnailUrl(template.thumbnail_url)
       setStylePrompt(template.style_prompt)
       setVisibility(template.visibility === 'private' ? 'private' : 'public')
-      setWritingStyle(template.writing_style ?? '')
+      setWritingStyle(template.writer_key ?? '')
       setTheme(template.theme ?? '')
       setAuthorName(template.author_name ?? '')
-      setAuthorAvatarUrl(template.author_avatar_url ?? '')
-      setAuthorStyleIntro(template.author_style_intro ?? '')
+      setAuthorAvatarUrl(template.persona_avatar ?? '')
+      setAuthorStyleIntro(template.writing_voice ?? '')
       // structure / example are stored as { text: ... }; fall back to raw for
       // legacy rows that may have stored plain strings.
       setStructure(extractScaffoldText(template.structure))
@@ -187,9 +187,9 @@ export function TemplateCreateDialog({
     try {
       const res = await api.projects.analyzeImage(imageUrl)
       if (reqId !== analyzeReqIdRef.current) return
-      if (!res.style) return
-      setStylePrompt((prev) => (force || !prev.trim()) ? res.style : prev)
-      setName((prev) => (prev.trim() ? prev : deriveTemplateName(res.style)))
+      if (!res.visual_style) return
+      setStylePrompt((prev) => (force || !prev.trim()) ? res.visual_style : prev)
+      setName((prev) => (prev.trim() ? prev : deriveTemplateName(res.visual_style)))
     } catch (err) {
       if (reqId !== analyzeReqIdRef.current) return
       toast.error(getApiErrorMessage(err, '风格识别失败，请手动填写或重试'))
@@ -260,14 +260,14 @@ export function TemplateCreateDialog({
       }
       // Type-aware payload: each type sends ONLY the fields its form renders.
       // This is the definitive guard for the writer-key bug trap — an article or
-      // seednote template must NEVER carry writing_style: style_resolve copies it
+      // seednote template must NEVER carry writer_key: style_resolve copies it
       // into Task.WritingStyle, which config_builder treats as a writer resource
       // key, so a free-text value there silently fails to resolve any writer.
-      // (Editing a legacy article row that backfilled a stale writing_style into
+      // (Editing a legacy article row that backfilled a stale writer_key into
       // state must NOT re-send it on save, since the field isn't rendered.)
       if (type === 'poster') {
         const writingStyleTrimmed = writingStyle.trim()
-        if (writingStyleTrimmed) payload.writing_style = writingStyleTrimmed
+        if (writingStyleTrimmed) payload.writer_key = writingStyleTrimmed
         const structureTrimmed = structure.trim()
         if (structureTrimmed) payload.structure = structureTrimmed
         const exampleTrimmed = example.trim()
@@ -283,9 +283,9 @@ export function TemplateCreateDialog({
         const authorNameTrimmed = authorName.trim()
         if (authorNameTrimmed) payload.author_name = authorNameTrimmed
         const authorAvatarTrimmed = authorAvatarUrl.trim()
-        if (authorAvatarTrimmed) payload.author_avatar_url = authorAvatarTrimmed
+        if (authorAvatarTrimmed) payload.persona_avatar = authorAvatarTrimmed
         const authorIntroTrimmed = authorStyleIntro.trim()
-        if (authorIntroTrimmed) payload.author_style_intro = authorIntroTrimmed
+        if (authorIntroTrimmed) payload.writing_voice = authorIntroTrimmed
       }
       if (type === 'ecommerce') {
         // E-commerce defaults — only the non-empty ones are attached, matching
@@ -531,7 +531,7 @@ export function TemplateCreateDialog({
 
           {/* 公众号 (article) — 写作风格（名称即署名 + 写作风格 + 可选头像，统一区块）
               + 排版风格（实时预览）。名称落到 author_name（=发布作者名），写作风格落到
-              author_style_intro（=template_writing_style）。二者共用 PersonaBlock /
+              writing_voice（≠ writer_key）。二者共用 PersonaBlock /
               ThemePicker，与公众号项目编辑器 UI 完全一致。 */}
           {type === 'article' && (
             <>

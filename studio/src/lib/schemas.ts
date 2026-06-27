@@ -43,13 +43,13 @@ export const createTaskSchema = z.object({
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
-  style: z.string().max(1024).optional(),
-  writing_style: z.string().max(100).optional(),
+  visual_style: z.string().max(1024).optional(),
+  writer_key: z.string().max(100).optional(),
   theme: z.string().max(100).optional(),
   // 公众号人设（作者署名 + 写作风格模仿 + 可选头像），正交于三维风格。
-  author: z.string().max(50).optional(),
-  author_style_intro: z.string().max(1024).optional(),
-  author_avatar_url: z.string().refine(
+  byline: z.string().max(50).optional(),
+  writing_voice: z.string().max(1024).optional(),
+  persona_avatar: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
@@ -133,13 +133,13 @@ export const planSchema = z.object({
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
-  style: z.string().max(1024).optional(),
-  writing_style: z.string().max(100).optional(),
+  visual_style: z.string().max(1024).optional(),
+  writer_key: z.string().max(100).optional(),
   theme: z.string().max(100).optional(),
   // 公众号人设（作者署名 + 写作风格模仿 + 可选头像），spawned task 继承。
-  author: z.string().max(50).optional(),
-  author_style_intro: z.string().max(1024).optional(),
-  author_avatar_url: z.string().refine(
+  byline: z.string().max(50).optional(),
+  writing_voice: z.string().max(1024).optional(),
+  persona_avatar: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
@@ -174,14 +174,14 @@ export const projectSchema = z.object({
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
   positioning: z.string().max(1024, "项目定位不能超过 1024 个字符").optional(),
-  style: z.string().max(1024, "视觉风格不能超过 1024 个字符").optional(),
-  writing_style: z.string().max(100, "写作风格不能超过 100 个字符").optional(),
+  visual_style: z.string().max(1024, "视觉风格不能超过 1024 个字符").optional(),
+  writer_key: z.string().max(100, "写作风格不能超过 100 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
-  author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
-  // 公众号写作风格（自由文本写作风格 + 可选头像）：未绑定模板时自定义写作风格，
-  // 与模板写作风格模型对齐（author_style_intro → template_writing_style 下发）。
-  author_style_intro: z.string().max(1024, "写作风格不能超过 1024 个字符").optional(),
-  author_avatar_url: z.string().refine(
+  byline: z.string().max(50, "作者名不能超过 50 个字符").optional(),
+  // 公众号写作风格（自由文本口吻 + 可选头像）：未绑定模板时自定义，扁平下发为
+  // writing_voice（≠ writer_key 写作者资源 key；无 template_* 命名空间）。
+  writing_voice: z.string().max(1024, "写作风格不能超过 1024 个字符").optional(),
+  persona_avatar: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),

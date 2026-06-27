@@ -97,12 +97,12 @@ type projectRequest struct {
 	AvatarURL          string `json:"avatar_url"`
 	Positioning        string `json:"positioning"`
 	Keywords           string `json:"keywords"`
-	Style              string `json:"style"`
-	WritingStyle       string `json:"writing_style"`
+	VisualStyle        string `json:"visual_style"`
+	WriterKey          string `json:"writer_key"`
 	Theme              string `json:"theme"`
-	Author             string `json:"author"`
-	AuthorStyleIntro   string `json:"author_style_intro"`
-	AuthorAvatarURL    string `json:"author_avatar_url"`
+	Byline             string `json:"byline"`
+	WritingVoice       string `json:"writing_voice"`
+	PersonaAvatar      string `json:"persona_avatar"`
 	TemplateID         string `json:"template_id"`
 	ReferenceImageURL  string `json:"reference_image_url"`
 	ImageRatio         string `json:"image_ratio"`
@@ -122,12 +122,12 @@ func (req *projectRequest) toProject() *model.Project {
 		AvatarURL:             req.AvatarURL,
 		Positioning:           req.Positioning,
 		Keywords:              req.Keywords,
-		VisualStyle:           req.Style,
-		WriterKey:             req.WritingStyle,
+		VisualStyle:           req.VisualStyle,
+		WriterKey:             req.WriterKey,
 		Theme:                 req.Theme,
-		Byline:                req.Author,
-		WritingVoice:          req.AuthorStyleIntro,
-		PersonaAvatar:         req.AuthorAvatarURL,
+		Byline:                req.Byline,
+		WritingVoice:          req.WritingVoice,
+		PersonaAvatar:         req.PersonaAvatar,
 		CreatedFromTemplateID: req.TemplateID,
 		ReferenceImageURL:     req.ReferenceImageURL,
 		ImageRatio:            req.ImageRatio,
@@ -246,7 +246,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
-	if err := service.RejectWriterNameAsByline(req.Author); err != nil {
+	if err := service.RejectWriterNameAsByline(req.Byline); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -338,7 +338,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
-	if err := service.RejectWriterNameAsByline(req.Author); err != nil {
+	if err := service.RejectWriterNameAsByline(req.Byline); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -761,14 +761,14 @@ func (req *projectRequest) getFieldValue(key string) string {
 		return req.Positioning
 	case "keywords":
 		return req.Keywords
-	case "style":
-		return req.Style
-	case "writing_style":
-		return req.WritingStyle
+	case "visual_style":
+		return req.VisualStyle
+	case "writer_key":
+		return req.WriterKey
 	case "theme":
 		return req.Theme
-	case "author":
-		return req.Author
+	case "byline":
+		return req.Byline
 	case "reference_image_url":
 		return req.ReferenceImageURL
 	case "image_ratio":
@@ -945,7 +945,7 @@ func (h *ProjectHandler) AnalyzeImage(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to analyze image style")
 	}
 
-	return Success(c, fiber.Map{"style": style})
+	return Success(c, fiber.Map{"visual_style": style})
 }
 
 func getPublicHTTPSImage(ctx context.Context, imageURL string, maxSize int64) ([]byte, error) {
