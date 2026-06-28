@@ -323,3 +323,17 @@ asynq:
 invitation:
   enabled: false # Master switch for invite-required registration.
   max_per_user: 3 # Max invitation codes each user can generate.
+
+# ---------------------------------------------------------------------------
+# wcfLink: WeChat-bot sidecar (任务通知 + 微信命令)
+# Optional. When enabled, the server drives a wcfLink sidecar (iLink WeChat
+# channel, runs in Docker on Linux — NOT the Windows-only WeChatFerry) to push
+# task success/failure notifications and accept chat commands. Users bind their
+# own WeChat via a QR in Studio. Disabled or unreachable → graceful no-op.
+# Env overrides: ANBAN_WCF_ENABLED / ANBAN_WCF_BASE_URL / ANBAN_WCF_TIMEOUT / ANBAN_WCF_POLL_INTERVAL
+# ---------------------------------------------------------------------------
+wcf:
+  enabled: false # Master switch. ANBAN_WCF_ENABLED=true to enable.
+  base_url: "http://localhost:18070" # wcfLink sidecar HTTP base URL (compose service name in Docker: http://wcflink:18070).
+  timeout: 30 # HTTP client timeout (seconds).
+  poll_interval: 2 # Inbound event poll cadence (seconds).

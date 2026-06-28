@@ -35,6 +35,7 @@ type Config struct {
 	Email        EmailConfig        `yaml:"email"`
 	Invitation   InvitationConfig   `yaml:"invitation"`
 	Seednote     SeednoteConfig     `yaml:"seednote"`
+	WCF          WCFConfig          `yaml:"wcf"`
 }
 
 // ImageModelPreset defines a system-managed image model that users can select
@@ -83,6 +84,18 @@ func ValidateImagePresets(presets []ImageModelPreset) error {
 type SeednoteConfig struct {
 	BaseURL string `yaml:"base_url"` // default "http://localhost:18060"
 	Timeout int    `yaml:"timeout"`  // default 30 (seconds)
+}
+
+// WCFConfig holds the wcfLink WeChat-bot sidecar configuration.
+// wcfLink is a local iLink WeChat channel service (NOT the Windows-only
+// WeChatFerry PC hook) that the server drives over HTTP to send task
+// notifications and receive WeChat commands. Opt-in: when disabled or the
+// sidecar is unreachable, all WeChat features degrade to no-ops.
+type WCFConfig struct {
+	Enabled      bool   `yaml:"enabled"`       // master switch; default false
+	BaseURL      string `yaml:"base_url"`      // default "http://localhost:18070"
+	Timeout      int    `yaml:"timeout"`       // seconds; default 30
+	PollInterval int    `yaml:"poll_interval"` // seconds between /api/events polls; default 2
 }
 
 // EmailConfig holds email/verification code configuration.
@@ -501,6 +514,17 @@ func (c *Config) applyDefaults() {
 		c.Seednote.Timeout = 30
 	}
 
+	// wcfLink WeChat-bot sidecar defaults.
+	if c.WCF.BaseURL == "" {
+		c.WCF.BaseURL = "http://localhost:18070"
+	}
+	if c.WCF.Timeout == 0 {
+		c.WCF.Timeout = 30
+	}
+	if c.WCF.PollInterval == 0 {
+		c.WCF.PollInterval = 2
+	}
+
 	// Claude executor defaults.
 	if c.Claude.Executor == "" {
 		c.Claude.Executor = "local"
@@ -817,6 +841,23 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv(prefix + "SEEDNOTE_TIMEOUT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Seednote.Timeout = n
+		}
+	}
+
+	if v := os.Getenv(prefix + "WCF_ENABLED"); v == "true" || v == "1" {
+		c.WCF.Enabled = true
+	}
+	if v := os.Getenv(prefix + "WCF_BASE_URL"); v != "" {
+		c.WCF.BaseURL = v
+	}
+	if v := os.Getenv(prefix + "WCF_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.WCF.Timeout = n
+		}
+	}
+	if v := os.Getenv(prefix + "WCF_POLL_INTERVAL"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.WCF.PollInterval = n
 		}
 	}
 }

@@ -59,6 +59,7 @@ type Services struct {
 	ResourceHandler          *handler.ResourceHandler
 	TopicPoolHandler         *handler.TopicPoolHandler
 	DesignerHandler          *handler.DesignerHandler
+	WCFHandler               *handler.WCFHandler
 	MCPHandler               http.Handler
 	StorageProvider          storage.Provider
 }
@@ -376,6 +377,19 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.FeedbackHandler != nil {
 		apiV1.Post("/feedback", svc.FeedbackHandler.Create)
+	}
+
+	// ---------------------------------------------------------------------------
+	// WeChat bot (wcfLink) binding endpoints — task notifications + commands
+	// ---------------------------------------------------------------------------
+
+	if svc.WCFHandler != nil {
+		wechat := apiV1.Group("/wechat")
+		wechat.Post("/bind/start", svc.WCFHandler.StartBind)
+		wechat.Get("/bind/status", svc.WCFHandler.PollBindStatus)
+		wechat.Post("/unbind", svc.WCFHandler.Unbind)
+		wechat.Get("/status", svc.WCFHandler.GetStatus)
+		wechat.Put("/default-project", svc.WCFHandler.SetDefaultProject)
 	}
 
 	// Model config endpoints

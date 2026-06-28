@@ -31,6 +31,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/seednote"
 	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/royalrick/anbanwriter/server/wcf"
 )
 
 // defaultConfigPaths lists config file locations to try when -config is not set.
@@ -163,6 +164,23 @@ func main() {
 		} else {
 			hcCancel()
 			log.Info().Str("base_url", cfg.Seednote.BaseURL).Msg("Seednote sidecar client initialized")
+		}
+	}
+
+	// 9.2 Create wcfLink (WeChat bot) sidecar client. Disabled entirely when
+	// cfg.WCF.Enabled is false; constructed-but-niled when the sidecar is
+	// unreachable so the rest of the stack degrades gracefully.
+	var wcfClient *wcf.Client
+	if cfg.WCF.Enabled {
+		wcfClient = wcf.NewClient(cfg.WCF.BaseURL, time.Duration(cfg.WCF.Timeout)*time.Second)
+		hcCtx, hcCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := wcfClient.HealthCheck(hcCtx); err != nil {
+			hcCancel()
+			log.Error().Err(err).Msg("wcfLink sidecar 不可用，微信通知/命令功能将不可用")
+			wcfClient = nil
+		} else {
+			hcCancel()
+			log.Info().Str("base_url", cfg.WCF.BaseURL).Msg("wcfLink sidecar client initialized")
 		}
 	}
 
@@ -338,6 +356,32 @@ func main() {
 		}
 	}
 
+	// 12.2 Wire the wcfLink WeChat bot: outbound task notifications
+	// (WCFNotifier), inbound command poller + dispatcher, and the binding
+	// service the HTTP handler drives. The binding service + handler are built
+	// whenever the DB is up so Studio can self-discover availability; the
+	// notifier/dispatcher/poller only run when the sidecar is reachable.
+	var wcfNotifier *service.WCFNotifier
+	var wcfDispatcher *service.WCFCommandDispatcher
+	var wcfPoller *service.WCFPoller
+	var wcfBindingSvc *service.WCFBindingService
+	if repo != nil {
+		wcfBindingSvc = service.NewWCFBindingService(repo, wcfClient, log)
+		if wcfClient != nil {
+			wcfNotifier = service.NewWCFNotifier(wcfClient, repo, true, log)
+			if taskSvc != nil {
+				taskSvc.SetWCFNotifier(wcfNotifier)
+				wcfDispatcher = service.NewWCFCommandDispatcher(taskSvc, wcfNotifier, log)
+			}
+			wcfPoller = service.NewWCFPoller(
+				wcfClient, repo, wcfDispatcher, rdb,
+				time.Duration(cfg.WCF.PollInterval)*time.Second, log,
+			)
+		} else if cfg.WCF.Enabled {
+			log.Warn().Msg("wcfLink enabled but sidecar unreachable; notifications + commands disabled, binding UI reports unavailable")
+		}
+	}
+
 	// Goal-mode configuration is purely a credit multiplier now — the actual
 	// evaluation loop runs inside Claude Code's built-in /goal mechanism.
 	if taskSvc != nil {
@@ -370,6 +414,7 @@ func main() {
 	var agentFeedbackSvc *service.AgentFeedbackService
 	var designerSvc *service.DesignerService
 	var designerHandler *handler.DesignerHandler
+	var wcfHandler *handler.WCFHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -380,6 +425,9 @@ func main() {
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
 		if seednoteTrackingSvc != nil {
 			seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
+		}
+		if wcfBindingSvc != nil {
+			wcfHandler = handler.NewWCFHandler(wcfBindingSvc, log)
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
 		if modelConfigSvc != nil {
@@ -554,6 +602,15 @@ func main() {
 		go startLocalClaimFallback(reclaimCtx, taskSvc, log)
 	}
 
+	// 15.4 Start the wcfLink inbound-command poller (only when the sidecar is
+	// reachable). Long-polls WeChat events and dispatches recognized commands;
+	// stops on shutdown via the cancellable context.
+	if wcfPoller != nil {
+		wcfPollerCtx, wcfPollerCancel := context.WithCancel(context.Background())
+		defer wcfPollerCancel()
+		go wcfPoller.Run(wcfPollerCtx)
+	}
+
 	// 16. Build Services struct.
 	svcs := &router.Services{
 		Config:                   cfg,
@@ -587,6 +644,7 @@ func main() {
 		ResourceHandler:          resourceHandler,
 		TopicPoolHandler:         topicPoolHandler,
 		DesignerHandler:          designerHandler,
+		WCFHandler:               wcfHandler,
 		MCPHandler:               mcpHandler,
 		StorageProvider:          store,
 	}

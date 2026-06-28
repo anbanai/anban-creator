@@ -28,6 +28,7 @@ type Repository interface {
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
 	AgentFeedbacks() AgentFeedbackRepository
+	WCFBindings() WCFBindingRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -234,6 +235,7 @@ type repository struct {
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
 	agentFeedbacks          AgentFeedbackRepository
+	wcfBindings             WCFBindingRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -255,6 +257,7 @@ func New(db *gorm.DB) Repository {
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
+	wcfBindings := newWCFBindingRepository(db)
 
 	return &repository{
 		db:                      db,
@@ -275,6 +278,7 @@ func New(db *gorm.DB) Repository {
 		posterTasks:             posterTasks,
 		topicPools:              topicPools,
 		agentFeedbacks:          agentFeedbacks,
+		wcfBindings:             wcfBindings,
 	}
 }
 
@@ -298,6 +302,8 @@ func (r *repository) PosterTasks() PosterTaskRepository       { return r.posterT
 func (r *repository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
 func (r *repository) TopicPools() TopicPoolRepository { return r.topicPools }
+
+func (r *repository) WCFBindings() WCFBindingRepository { return r.wcfBindings }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -341,6 +347,7 @@ type txRepository struct {
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
 	agentFeedbacks          AgentFeedbackRepository
+	wcfBindings             WCFBindingRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -363,6 +370,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
+		wcfBindings:             newWCFBindingRepository(tx),
 	}
 }
 
@@ -386,6 +394,8 @@ func (r *txRepository) PosterTasks() PosterTaskRepository       { return r.poste
 func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
 func (r *txRepository) TopicPools() TopicPoolRepository { return r.topicPools }
+
+func (r *txRepository) WCFBindings() WCFBindingRepository { return r.wcfBindings }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

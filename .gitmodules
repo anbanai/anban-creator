@@ -7,3 +7,6 @@
 [submodule "codex"]
 	path = codex
 	url = https://github.com/anbanai/anbanwriter-codex.git
+[submodule "wcflink"]
+	path = wcflink
+	url = https://github.com/lich0821/wcfLink.git
