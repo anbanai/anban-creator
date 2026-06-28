@@ -55,7 +55,9 @@ services:
     networks:
       - abwriter-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:18060/health"]
+      # GET, not --spider (HEAD): this image returns 404 for HEAD /health but
+      # 200 for GET /health, so a HEAD-based probe falsely marks it unhealthy.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:18060/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -148,6 +150,29 @@ services:
       - abwriter-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Studio frontend. Builds the SPA inside the image (dist is gitignored), serves
+  # it with nginx, and reverse-proxies /api (+ /ws) to the backend service. The
+  # web build's axios baseURL is same-origin /api/v1, so the same nginx origin
+  # serves both static assets and the proxied API — access via http://localhost:8081.
+  studio:
+    build:
+      context: ./studio
+      dockerfile: Dockerfile
+    image: abwriter-studio:latest
+    # Local-build-only image (no registry artifact). Without this compose probes
+    # Docker Hub for abwriter-studio and may abort on a registry hiccup instead
+    # of building — same rationale as the wcflink service above.
+    pull_policy: build
+    container_name: abwriter-studio
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    depends_on:
+      server:
+        condition: service_started
+    networks:
+      - abwriter-network
 
 networks:
   abwriter-network:
