@@ -1,17 +1,18 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"math/big"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/royalrick/anbanwriter/server/auth"
 	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
@@ -36,9 +37,8 @@ type AuthHandler struct {
 	inviteEnabled    bool
 	maxInvitePerUser int
 
-	// QR code login state (in-memory).
-	qrStates map[string]*qrCodeState
-	qrMu     sync.RWMutex
+	// QR code login state (Redis-backed when available, in-memory fallback).
+	qrStore QRStateStore
 }
 
 // NewAuthHandler creates a new AuthHandler.
@@ -54,8 +54,9 @@ func NewAuthHandler(
 	maxInvitePerUser int,
 	creditSvc *service.CreditService,
 	creditsCfg *config.CreditsConfig,
+	rdb *redis.Client,
 ) *AuthHandler {
-	h := &AuthHandler{
+	return &AuthHandler{
 		jwtSvc:           jwtSvc,
 		wechatSvc:        wechatSvc,
 		wechatCfg:        wechatCfg,
@@ -67,10 +68,8 @@ func NewAuthHandler(
 		hub:              hub,
 		inviteEnabled:    inviteEnabled,
 		maxInvitePerUser: maxInvitePerUser,
-		qrStates:         make(map[string]*qrCodeState),
+		qrStore:          newQRStateStore(rdb, logger),
 	}
-	go h.cleanupExpiredQRStates()
-	return h
 }
 
 // ---------------------------------------------------------------------------
@@ -138,13 +137,6 @@ type qrLoginCallbackRequest struct {
 	Code     string `json:"code"`
 	Nickname string `json:"nickname,omitempty"`
 	Avatar   string `json:"avatar,omitempty"`
-}
-
-// qrCodeState tracks the lifecycle of a login QR code.
-type qrCodeState struct {
-	Scene     string
-	CreatedAt time.Time
-	Status    string // "pending", "scanned", "expired", "used"
 }
 
 type tokenResponse struct {
@@ -977,13 +969,10 @@ func (h *AuthHandler) GenerateQRCode(c fiber.Ctx) error {
 	scene := generateScene()
 
 	// Store QR state.
-	h.qrMu.Lock()
-	h.qrStates[scene] = &qrCodeState{
-		Scene:     scene,
-		CreatedAt: time.Now(),
-		Status:    "pending",
+	if err := h.qrStore.Create(c.Context(), scene); err != nil {
+		h.logger.Error().Err(err).Msg("failed to store QR state")
+		return Error(c, fiber.StatusInternalServerError, "生成二维码失败")
 	}
-	h.qrMu.Unlock()
 
 	// Determine QR code parameters.
 	width := req.Width
@@ -1015,9 +1004,7 @@ func (h *AuthHandler) GenerateQRCode(c fiber.Ctx) error {
 
 	imgBytes, err := h.wechatSvc.GenerateUnlimitedQRCode(scene, page, envVersion, width, lineColor, isHyaline)
 	if err != nil {
-		h.qrMu.Lock()
-		delete(h.qrStates, scene)
-		h.qrMu.Unlock()
+		_ = h.qrStore.Delete(c.Context(), scene)
 		h.logger.Error().Err(err).Msg("failed to generate QR code")
 		return Error(c, fiber.StatusInternalServerError, "生成二维码失败")
 	}
@@ -1026,18 +1013,14 @@ func (h *AuthHandler) GenerateQRCode(c fiber.Ctx) error {
 	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgBytes)
 	expiresAt := time.Now().Add(2 * time.Minute).Unix()
 
-	// Spawn expiry goroutine.
+	// Spawn expiry goroutine: after the expiry window, declare a still-pending
+	// scene expired and notify the waiting WebSocket client. The request
+	// context is invalid here (the goroutine outlives it), so use Background.
 	go func() {
-		time.Sleep(2 * time.Minute)
-		h.qrMu.Lock()
-		state, ok := h.qrStates[scene]
-		if ok && state.Status == "pending" {
-			state.Status = "expired"
-			if h.hub != nil {
-				h.hub.Broadcast(scene, "qrcode_expired", fiber.Map{"scene": scene})
-			}
+		time.Sleep(qrExpiryNotifyDelay)
+		if _, ok, _ := h.qrStore.CompareAndSet(context.Background(), scene, qrStatusPending, qrStatusExpired); ok && h.hub != nil {
+			h.hub.Broadcast(scene, "qrcode_expired", fiber.Map{"scene": scene})
 		}
-		h.qrMu.Unlock()
 	}()
 
 	return Success(c, fiber.Map{
@@ -1057,19 +1040,17 @@ func (h *AuthHandler) NotifyScanned(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "scene is required")
 	}
 
-	h.qrMu.Lock()
-	state, ok := h.qrStates[req.Scene]
-	if !ok {
-		h.qrMu.Unlock()
-		return Error(c, fiber.StatusNotFound, "invalid or expired QR code")
+	current, transitioned, err := h.qrStore.CompareAndSet(c.Context(), req.Scene, qrStatusPending, qrStatusScanned)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to update QR state to scanned")
+		return Error(c, fiber.StatusInternalServerError, "internal error")
 	}
-	if state.Status != "pending" {
-		status := state.Status
-		h.qrMu.Unlock()
-		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("QR code already %s", status))
+	if !transitioned {
+		if current == "" {
+			return Error(c, fiber.StatusNotFound, "invalid or expired QR code")
+		}
+		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("QR code already %s", current))
 	}
-	state.Status = "scanned"
-	h.qrMu.Unlock()
 
 	if h.hub != nil {
 		h.hub.Broadcast(req.Scene, "qrcode_scanned", fiber.Map{"scene": req.Scene})
@@ -1097,20 +1078,19 @@ func (h *AuthHandler) QRLoginCallback(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "scene and code are required")
 	}
 
-	// Validate QR state.
-	h.qrMu.Lock()
-	state, ok := h.qrStates[req.Scene]
-	if !ok {
-		h.qrMu.Unlock()
-		return Error(c, fiber.StatusNotFound, "invalid or expired QR code")
+	// Validate QR state: atomically transition scanned→used. Fails closed on
+	// any store error — a token is never issued against an uncertain state.
+	current, transitioned, err := h.qrStore.CompareAndSet(c.Context(), req.Scene, qrStatusScanned, qrStatusUsed)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to update QR state to used")
+		return Error(c, fiber.StatusInternalServerError, "internal error")
 	}
-	if state.Status != "scanned" {
-		status := state.Status
-		h.qrMu.Unlock()
-		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("QR code already %s", status))
+	if !transitioned {
+		if current == "" {
+			return Error(c, fiber.StatusNotFound, "invalid or expired QR code")
+		}
+		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("QR code already %s", current))
 	}
-	state.Status = "used"
-	h.qrMu.Unlock()
 
 	// Exchange code for openID.
 	wxSession, err := h.wechatSvc.Code2Session(req.Code)
@@ -1203,27 +1183,13 @@ func (h *AuthHandler) QRLoginCallback(c fiber.Ctx) error {
 }
 
 // HasValidQRScene checks if a scene exists and is in a valid state (for WebSocket auth).
-func (h *AuthHandler) HasValidQRScene(scene string) bool {
-	h.qrMu.RLock()
-	defer h.qrMu.RUnlock()
-	state, ok := h.qrStates[scene]
-	return ok && (state.Status == "pending" || state.Status == "scanned")
-}
-
-// cleanupExpiredQRStates removes QR states older than 5 minutes every 30 seconds.
-func (h *AuthHandler) cleanupExpiredQRStates() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		cutoff := time.Now().Add(-5 * time.Minute)
-		h.qrMu.Lock()
-		for scene, state := range h.qrStates {
-			if state.CreatedAt.Before(cutoff) {
-				delete(h.qrStates, scene)
-			}
-		}
-		h.qrMu.Unlock()
+func (h *AuthHandler) HasValidQRScene(ctx context.Context, scene string) bool {
+	status, ok, err := h.qrStore.Get(ctx, scene)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("failed to read QR state for WS auth")
+		return false
 	}
+	return ok && (status == qrStatusPending || status == qrStatusScanned)
 }
 
 // generateScene produces a 28-character random scene string for WeChat QR codes.
