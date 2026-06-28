@@ -77,7 +77,13 @@ services:
     container_name: abwriter-wcflink
     restart: unless-stopped
     ports:
-      - "18070:18070"
+      # Loopback-only: wcfLink's HTTP API is unauthenticated — anyone who can
+      # reach :18070 can start logins, read every account and inbound event, and
+      # send messages as any logged-in user. The server reaches it over the
+      # compose network via http://wcflink:18070; this host binding exists only
+      # for local debugging (curl localhost:18070). Bind to 127.0.0.1 so the
+      # unauthenticated API is not exposed on the LAN.
+      - "127.0.0.1:18070:18070"
     volumes:
       - ./data/wcflink:/app/state
     environment:

@@ -2,8 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/repository"
@@ -25,10 +31,10 @@ func (d *pollerFakeDispatcher) Handle(_ context.Context, binding *model.WCFBindi
 // processEvent touches. Every other method panics if called.
 type pollerStubBindings struct {
 	repository.WCFBindingRepository
-	binding  *model.WCFBinding
-	findErr  error
-	peerSet  string // last peer id passed to UpdatePeerID
-	updErr   error
+	binding *model.WCFBinding
+	findErr error
+	peerSet string // last peer id passed to UpdatePeerID
+	updErr  error
 }
 
 func (s *pollerStubBindings) FindByWCFAccountID(_ context.Context, _ string) (*model.WCFBinding, error) {
@@ -142,5 +148,72 @@ func TestWCFPoller_PeerCaptureFailureSkipsDispatch(t *testing.T) {
 	}
 	if bindings.peerSet != "peerA" {
 		t.Fatalf("UpdatePeerID should still be attempted; peerSet=%q want %q", bindings.peerSet, "peerA")
+	}
+}
+
+// newPrimeClient stands up an httptest wcfLink whose /api/events endpoint is
+// driven by page(afterID) → (events, err), so prime's paging, error-mid-drain,
+// and empty-history branches can be pinned without a real sidecar.
+func newPrimeClient(t *testing.T, page func(afterID int64) ([]wcf.Event, error)) *wcf.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		afterID, _ := strconv.ParseInt(r.URL.Query().Get("after_id"), 10, 64)
+		items, err := page(afterID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+	}))
+	t.Cleanup(srv.Close)
+	return wcf.NewClient(srv.URL, 5*time.Second)
+}
+
+func TestWCFPoller_PrimeDrainsAllHistory(t *testing.T) {
+	// Regression for the single-page cap: 120 historical events with batchLimit
+	// 50 must page (50, 50, 20) and return 120, not 50. A stale 50 here would mean
+	// events 51-120 later arrive via normal poll() and dispatch as NEW commands.
+	client := newPrimeClient(t, func(afterID int64) ([]wcf.Event, error) {
+		var items []wcf.Event
+		for id := afterID + 1; id <= 120 && len(items) < 50; id++ {
+			items = append(items, wcf.Event{ID: id})
+		}
+		return items, nil
+	})
+	p := &WCFPoller{client: client, batchLimit: 50}
+	if got := p.prime(context.Background()); got != 120 {
+		t.Fatalf("prime must drain to 120 across pages, got %d", got)
+	}
+}
+
+func TestWCFPoller_PrimeErrorReturnsLastMaxNotZero(t *testing.T) {
+	// Regression: prime used to `return 0` on error, which forced the next poll()
+	// to fetch from after_id=0 and dispatch the ENTIRE remaining history. It must
+	// return the highest id seen so far so the cursor stays ahead of history.
+	var calls int32
+	client := newPrimeClient(t, func(afterID int64) ([]wcf.Event, error) {
+		if atomic.AddInt32(&calls, 1) >= 2 {
+			return nil, errors.New("sidecar 500")
+		}
+		var items []wcf.Event
+		for id := afterID + 1; id <= 50; id++ { // first page: ids 1..50
+			items = append(items, wcf.Event{ID: id})
+		}
+		return items, nil
+	})
+	p := &WCFPoller{client: client, batchLimit: 50}
+	if got := p.prime(context.Background()); got != 50 {
+		t.Fatalf("prime on mid-drain error must return last max (50), got %d", got)
+	}
+}
+
+func TestWCFPoller_PrimeEmptyHistoryReturnsZero(t *testing.T) {
+	client := newPrimeClient(t, func(afterID int64) ([]wcf.Event, error) {
+		return nil, nil // empty sidecar DB
+	})
+	p := &WCFPoller{client: client, batchLimit: 50}
+	if got := p.prime(context.Background()); got != 0 {
+		t.Fatalf("prime of empty history must return 0, got %d", got)
 	}
 }

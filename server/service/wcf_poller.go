@@ -17,6 +17,12 @@ import (
 // consumed. Persisting it prevents a restart from replaying old commands (which
 // would create duplicate billable tasks). Absent Redis, the cursor is in-memory
 // only and replays on restart — a documented degraded-mode caveat.
+//
+// No TTL — it must outlive process restarts. Side effect: if the wcfLink
+// sidecar's event DB is ever reset (its autoincrement restarts from 1), this key
+// must be deleted manually — otherwise lastID sits above the sidecar's new max id
+// and ListEvents(after_id=lastID) returns nothing until autoincrement catches up,
+// silently dropping new commands. On a reset: DEL anbanwriter:wcf:last_event_id.
 const WCFCursorKey = "anbanwriter:wcf:last_event_id"
 
 // wcfDispatcher is the subset of the command dispatcher the poller needs,
@@ -101,27 +107,54 @@ func (p *WCFPoller) Run(ctx context.Context) {
 	}
 }
 
-// prime reads one large batch at after_id=0 WITHOUT dispatching and returns the
-// max id seen, establishing a clean starting cursor. Guards against an empty
-// sidecar DB (returns 0).
+// prime fast-forwards the starting cursor past ALL historical events WITHOUT
+// dispatching, so stale commands sitting in the sidecar DB at first run (or after
+// a lost cursor) can never fire as new billable tasks. It drains the history in
+// pages — ListEvents is exclusive-after, ascending, so paging on the running max
+// walks the whole DB. A short page (< batchLimit) means it's drained.
+//
+// On error mid-drain it returns the highest id seen SO FAR, never 0. Returning 0
+// would make the next poll() fetch from after_id=0 and dispatch everything still
+// in history — the exact double-bill prime exists to prevent. An empty sidecar DB
+// (no history at all) legitimately returns 0.
 func (p *WCFPoller) prime(ctx context.Context) int64 {
-	events, err := p.client.ListEvents(ctx, 0, 500)
-	if err != nil {
-		if p.logger != nil {
-			p.logger.Warn().Err(err).Msg("wcf prime failed; starting from id 0")
-		}
-		return 0
-	}
 	var max int64
-	for _, ev := range events {
-		if ev.ID > max {
-			max = ev.ID
+	afterID := int64(0)
+	for {
+		events, err := p.client.ListEvents(ctx, afterID, p.batchLimit)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.Warn().Err(err).Int64("after_id", afterID).Msg("wcf prime page failed; resuming from last seen id")
+			}
+			return max
+		}
+		for _, ev := range events {
+			if ev.ID > max {
+				max = ev.ID
+			}
+		}
+		if len(events) < p.batchLimit {
+			break // drained — no more history to skip
+		}
+		afterID = max
+		if ctx.Err() != nil {
+			return max
 		}
 	}
 	return max
 }
 
-func (p *WCFPoller) poll(ctx context.Context) error {
+func (p *WCFPoller) poll(ctx context.Context) (err error) {
+	// Recover the whole poll, not just processEvent: advanceCursor and the
+	// third-party ListEvents HTTP call run OUTSIDE processEvent's recover, and a
+	// panic in either would kill the inbound-command goroutine (Run has no
+	// wrapper of its own). One bad page or HTTP surprise must never take down the
+	// command path. Swallow the panic (log it) so the next tick retries.
+	defer func() {
+		if r := recover(); r != nil && p.logger != nil {
+			p.logger.Error().Interface("panic", r).Msg("wcf poll panicked; recovered")
+		}
+	}()
 	events, err := p.client.ListEvents(ctx, p.lastID, p.batchLimit)
 	if err != nil {
 		return err
@@ -219,7 +252,14 @@ func (p *WCFPoller) loadCursor(ctx context.Context) (bool, int64) {
 	}
 	val, err := p.redis.Get(ctx, WCFCursorKey).Int64()
 	if err != nil {
-		// redis.Nil or any error → treat as absent (prime from history).
+		// Any read error — redis.Nil (genuine first run) OR a transient network
+		// blip — is treated as "absent" so Run() primes from history. This is
+		// deliberate and billing-safe: prime fast-forwards PAST all history (it
+		// never dispatches), so the worst case is dropping commands that arrived
+		// since the last persisted cursor (recoverable — the user resends), never
+		// a duplicate charge. The tempting alternative — skip prime on a
+		// transient error and start from id 0 — would instead make the next poll
+		// dispatch the ENTIRE history, the exact double-bill this guard prevents.
 		return false, 0
 	}
 	return true, val

@@ -20,7 +20,7 @@ import (
 type bindFakeRepo struct {
 	repository.WCFBindingRepository
 	binding     *model.WCFBinding
-	updateCalls int            // number of Update invocations
+	updateCalls int // number of Update invocations
 	lastUpdate  *model.WCFBinding
 }
 
