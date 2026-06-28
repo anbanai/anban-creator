@@ -4,15 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Anban 智能创作助手** (anbanwriter) is a content creation platform with three main components:
+**Anban 智能创作助手** (anbanwriter) is a content creation platform. Core components:
 - **Agent** (`agent/`): Standalone Go binary for containerized Claude Code task execution
 - **Server** (`server/`): Fiber v3 HTTP API with MySQL, Redis, Asynq task queue, WebSocket, and MCP endpoint
 - **Studio** (`studio/`): React 19 + TypeScript + Vite 8 frontend for content management
 
+Client surfaces wrapping the same server API:
+- **Desktop** (`desktop/`): Tauri v2 (Rust) shell that bundles the agent as a native sidecar to run tasks locally (local-execution client) on the user's machine; claims work by polling `POST /api/v1/agent/claim`
+- **Miniapp** (`miniapp/`): WeChat Mini Program client kept at feature parity with Studio (real-time updates via SSE, not WebSocket)
+
 The `app/` directory is a **library** (no `main.go`) providing content creation functionality used by both the server and agent. It handles Markdown-to-WeChat-HTML conversion, AI writing, image generation, humanization, and WeChat publishing.
 
-- **Language**: Go 1.26.0 (Agent + Server + app library), TypeScript (Studio)
-- **Logging**: Zerolog (all components — app library, server, agent)
+Four git submodules: `claudecode/`, `openclaw/`, `codex/` (plugin distributions) and `wcflink/` (the `lich0821/wcfLink` sidecar used for WeChat bot integration). Run `git submodule update --init --recursive` before building Docker images.
+
+- **Language**: Go 1.26.0 (Agent + Server + app library), TypeScript (Studio + miniapp), Rust (desktop Tauri core)
+- **Logging**: Zerolog (all Go components — app library, server, agent); never mix with zap
 - **WeChat SDK**: silenceper/wechat/v2
 
 ## Build & Test Commands
@@ -30,6 +36,8 @@ make docker-server-image      # Build server Docker image (Go binary)
 make docker-images            # Build both images
 ```
 
+> ⚠️ Never run `go build ./server` or `go build ./agent` from the repo root — Go tries to write the `server`/`agent` binary where same-named directories already exist and fails. Use `make server-build` or `go build -o /tmp/abwriter-server ./server`.
+
 ### Go Tests
 
 ```bash
@@ -42,6 +50,8 @@ make fmt                      # Format code (go fmt)
 make vet                      # Static analysis (go vet)
 make lint                     # Lint (requires golangci-lint)
 ```
+
+> ⚠️ `make lint` panics on Go 1.26 with golangci-lint versions that bundle go-critic v0.6.2 (its `init` runs regardless of which linters are enabled). If it panics, `brew upgrade golangci-lint` to a release built against a newer go-critic. See `.golangci.yml`.
 
 ### Studio Frontend
 
@@ -91,8 +101,9 @@ Standalone Go binary that executes Claude Code tasks in Docker containers. The s
 Fiber v3 HTTP API. Layered architecture: handler → service → repository → MySQL/GORM.
 
 Key packages:
-- `handler/` — HTTP handlers (auth, channel, plan, task, timeline, websocket, credit, agent)
-- `service/` — Business logic including `task_execution.go` (agent SDK integration), `task_files.go`, `credit.go`, `publishing.go`, `task_agent.go`, `redis_notifier.go` (Redis pub/sub progress events), `task_events.go` (notifier interface)
+- `handler/` — HTTP handlers (auth, project, plan, task, timeline, websocket, credit, agent, designer, wcf)
+- `router/` — `router.go` registers all `/api/v1` route groups, middleware, and the WS hub (the single source of truth for routes)
+- `service/` — Business logic including `task_execution.go` (agent SDK integration), `task_files.go`, `credit.go`, `publishing.go`, `task_agent.go`, `redis_notifier.go` (Redis pub/sub progress events), `task_events.go` (notifier interface), `wcf_*.go` (WeChat bot integration)
 - `agent/` — Agent execution layer using claude-agent-sdk-go, includes MCP server and tool definitions
 - `scheduler/` — Asynq-based background task processing with `plan_checker.go`
 - `model/` — GORM models with auto-migration
@@ -140,23 +151,30 @@ Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhos
 
 ### Server API Routes
 
+All routes are registered in `server/router/router.go`. Everything under `/api/v1` except `auth/*` (public) and `agent/*` (API-key auth) requires JWT auth.
+
 - `GET /health` — Health check (MySQL + Redis status)
-- `GET /ws` — WebSocket for real-time updates
-- `POST /api/v1/auth/*` — Register, login, refresh, logout, wx-login (public)
-- `GET /api/v1/auth/me` — Current user (authenticated)
-- `/api/v1/channels` — Channel CRUD + fetch-profile, archive/restore
+- `GET /ws`, `GET /ws/login` — WebSocket for real-time updates / QR login
+- `POST /api/v1/auth/*` — Public: register, login, code-login (SMS), send-code, refresh, logout, wx-login, qrcode/scanned/qr-callback (QR login)
+- `GET /api/v1/auth/me`, `PUT /api/v1/auth/password` — Authenticated user
+- `POST /api/v1/agent/*` — Agent↔server protocol (API-key auth): upload, progress, claim, complete
+- `/api/v1/projects` — Project CRUD + fetch-profile, analyze-image, archive/restore, stats (formerly `/channels`)
+- `/api/v1/projects/:project_id/topics` — Topic pool (create/list/delete/reset)
+- `/api/v1/designer/*` — Image generation studio (providers, generate, upload-reference, history)
 - `/api/v1/plans` — Plan CRUD + pause/resume
-- `/api/v1/tasks` — Task CRUD + cancel, stream (SSE), preview, files/zip/download
-- `/api/v1/timeline` — Unified timeline view
-- `/api/v1/credits` — Balance, sign-in, transactions
-- `/api/v1/files/*` — Local file serving (local storage mode only)
-- `/mcp` — MCP endpoint (API key or JWT auth, configured in `claudecode/.mcp.json` and `openclaw/.mcp.json`)
+- `/api/v1/tasks` — Task CRUD + cancel/retry, bulk-cancel/retry/delete, stream (SSE), preview, files/zip/download, publish-approve/publish-reject (approval gate), seednote-analytics
+- `/api/v1/wechat/*` — WeChat bot (wcfLink) binding + commands
+- `/api/v1/timeline`, `/api/v1/usage/stats` — Timeline view, usage stats
+- `/api/v1/credits` — Balance, sign-in, transactions, pricing
+- `/api/v1/api-keys`, `/api/v1/feedback` — API key management, feedback
+- `/api/v1/files/*` — Local file serving (local storage mode) / OSS redirect
+- `/mcp` — MCP endpoint (API key or JWT auth, configured in plugin `.mcp.json` files)
 
 ## Configuration
 
 ### Server
 
-YAML config at `server/config.yaml`. All fields overridable via `ANBAN_*` env vars.
+YAML config at `server/config.yaml` — the single source of truth. Environment variables affect config **only** where the YAML explicitly writes a `${VAR}` or `${VAR:-default}` placeholder (expanded before parsing); there is no hidden `ANBAN_*` override layer. Per-environment differences (Docker hostnames/addresses) are expressed as visible `${...}` placeholders in the file (e.g. `redis.addr: "${ANBAN_REDIS_ADDR:-localhost:6379}"`); `docker-compose.yml` supplies those envs. To env-control any other field, add a `${...}` placeholder in the YAML. Expansion is `${VAR}` only (braced) — literal `$` is never touched, so passwords are safe. Env values must be valid YAML scalars for their field (e.g. a bool field needs `true`/`false`, not `1`/`yes` — there is no truthy coercion).
 
 Graceful degradation: MySQL unreachable → degraded mode (no persistence). Redis unreachable → in-process goroutine task execution, rate limiting skipped.
 
@@ -183,6 +201,8 @@ Two loading modes: `Load()`/`LoadWithDefaults()` (full validation) vs `LoadMinim
 4. Agent reports results back to server
 5. Server streams progress to Studio via WebSocket/SSE
 
+Local-execution variant (desktop): instead of Docker, the bundled agent sidecar claims the task over `/api/v1/agent/claim` and runs Claude Code locally on the user's machine; the same progress/report protocol is reused.
+
 ## Image Generation Providers
 
 All implement `Provider` interface (`app/image/provider.go`).
@@ -191,7 +211,7 @@ All implement `Provider` interface (`app/image/provider.go`).
 |----------|-------|-------|
 | OpenAI | `openai` (default) | Synchronous, dall-e-2/dall-e-3 |
 | Google Gemini | `gemini` or `google` | Inline image data |
-| Volcengine/Seedream | `volcengine`, `volc`, `seedream` | Async polling |
+| Volcengine/Seedream | `volcengine`, `vol`, `seedream` | Async polling |
 
 ## Important Constraints
 
@@ -221,6 +241,7 @@ All implement `Provider` interface (`app/image/provider.go`).
 - `setup.go` — `resolveConfig()`, `initLogger()`, `connectMySQL()`, `connectRedis()`, `setupStorage()`
 - `services.go` — `setupCoreServices()` returns `coreServices` struct with all service instances
 - `handlers.go` — `setupHandlers()` + `setupMCPHandler()` return handler instances
+- `router/router.go` — `RegisterRoutes()` wires all `/api/v1` groups, middleware, and the WS hub
 - `workers.go` — `startWorkers()` for Asynq server, scheduler, periodic cleanup
 
 ### Task Progress (Redis Pub/Sub)
@@ -230,17 +251,15 @@ Task progress events use `TaskProgressNotifier` interface (`server/service/task_
 - SSE handler in `server/handler/task.go` subscribes via notifier
 - Publish points in `task_execution.go`, `task_agent.go`, `task.go`
 
-### Error Handling
-
-- **App library**: `Hinter` interface (`app/errors.go`) for user-friendly hints, `printJSON()` for JSON output
-- **Server**: Zerolog structured logging, GORM error handling, JWT error responses
-- **WechatAPIError** (`app/wechat/errors.go`): parses WeChat error codes, `IsRetryable()` for transient errors
-
 ### WeChat API Integration
 
 - Access token automatically cached/refreshed by wechat SDK
 - Material upload: images < 10MB, returns media_id and CDN URL, retry on transient failures
 - Draft creation: content < 20,000 chars or 1MB, HTML safe tags only
+
+### WeChat Bot (wcfLink)
+
+`wcflink/` (git submodule → `lich0821/wcfLink`) is a sidecar that bridges a real WeChat client to the server for **task notifications and chat commands** — a separate concern from the publishing SDK above. Server-side integration lives in `server/model/wcf_binding.go`, `server/repository/wcf_binding.go`, and `server/service/wcf_*.go` (binding, command, notifier, poller). The poller consumes wcfLink events (login/start/qr/status, paged by `after_id`) and `send-text` auto-resolves a `context_token` from a prior inbound message. Studio binds a WeChat account via `/api/v1/wechat/*`.
 
 ## Plugin & Agent Ecosystem
 
@@ -294,7 +313,7 @@ codex/                             # git submodule → anbanai/anbanwriter-codex
 
 Install flow: `codex plugin marketplace add ./codex && codex plugin install anbanwriter`, then `bash codex/install/install-subagents.sh` to register the subagents in `~/.codex/config.toml`.
 
-All three plugins (`claudecode/`, `openclaw/`, `codex/`) connect to the same `anbanwriter` MCP server and share themes/writers/skill content.
+All three plugins (`claudecode/`, `openclaw/`, `codex/`) connect to the same `anbanwriter` MCP server and share themes/writers/skill content. When a skill or agent exists in multiple distros, update all of them unless an intended divergence is asserted by a test (e.g. `server/mcp` `TestLiveSliceSkillFiles`). Agents must call MCP tools directly — no ad-hoc HTTP clients.
 
 ## Notes
 
@@ -303,3 +322,4 @@ All three plugins (`claudecode/`, `openclaw/`, `codex/`) connect to the same `an
 - Docker Compose provides MySQL 8.0 + Redis 7 + agent + server containers
 - Server binary is `bin/abwriter-server` (not anbanwriter-server)
 - **Never modify base UI components in `studio/src/components/ui/`**. These are managed shadcn/ui primitives. If a base component update breaks business logic, fix the business component only — never patch the primitive.
+- `AGENTS.md` mirrors this guidance for non-Claude assistants; keep it roughly in sync when adding cross-cutting rules.

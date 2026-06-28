@@ -1,13 +1,14 @@
 # Anban 智能创作助手 Online Service Configuration
 # Copy this file to config.yaml and adjust values as needed.
-# All fields can also be set via ANBAN_ prefixed environment variables
-# (e.g. ANBAN_DATABASE_DSN, ANBAN_JWT_SECRET_KEY).
+# 环境变量控制：本文件是唯一真相源。仅当某字段写成 ${VAR} 或 ${VAR:-default}
+# 时才会从环境变量取值（其余字段一律以文件为准，没有任何隐藏的覆盖层）。
+# 例：dsn: "${ANBAN_DATABASE_DSN:-...默认DSN...}"、addr: "${ANBAN_REDIS_ADDR:-localhost:6379}"
 
 # ---------------------------------------------------------------------------
 # Server: HTTP listen configuration
 # ---------------------------------------------------------------------------
 server:
-  port: 8080 # Listen port. Override with ANBAN_PORT or -port flag.
+  port: 8080 # Listen port. Override via -port flag, or write ${ANBAN_PORT:-8080} here.
   host: "0.0.0.0" # Listen host. Use "127.0.0.1" to restrict to localhost.
 
 # ---------------------------------------------------------------------------
@@ -15,7 +16,7 @@ server:
 logging:
   level:
     info # "debug", "info" (default), "warn", "error", "trace"
-    # Override with ANBAN_LOGGING_LEVEL or LOG_LEVEL env.
+    # 如需 env 控制写 level: ${LOG_LEVEL:-info}。
 
 # ---------------------------------------------------------------------------
 # Database: MySQL connection
@@ -24,7 +25,7 @@ logging:
 # error and continues running in degraded mode (no data persistence).
 # ---------------------------------------------------------------------------
 database:
-  dsn: "root:anbanwriter_dev@tcp(localhost:3306)/anbanwriter?charset=utf8mb4&parseTime=True&loc=Local"
+  dsn: "${ANBAN_DATABASE_DSN:-root:anbanwriter_dev@tcp(localhost:3306)/anbanwriter?charset=utf8mb4&parseTime=True&loc=Local}"
   max_open_conns: 10 # Maximum open connections to the database.
   max_idle_conns: 5 # Maximum idle connections kept in the pool.
   conn_max_lifetime: 3600 # Connection maximum lifetime in seconds.
@@ -36,13 +37,13 @@ database:
 # is unavailable.
 # ---------------------------------------------------------------------------
 redis:
-  addr: "localhost:6379" # Redis server address (host:port).
-  password: "" # Redis password. Set via ANBAN_REDIS_PASSWORD.
+  addr: "${ANBAN_REDIS_ADDR:-localhost:6379}" # Redis server address (host:port).
+  password: "" # Redis password. 如需 env 控制写 ${ANBAN_REDIS_PASSWORD}。
   db: 0 # Redis database number.
 
 # ---------------------------------------------------------------------------
 # JWT: JSON Web Token authentication
-# Required. secret_key must be set (via config or ANBAN_JWT_SECRET_KEY).
+# Required. secret_key must be set here（如需 env 控制写 ${ANBAN_JWT_SECRET_KEY}）。
 # ---------------------------------------------------------------------------
 jwt:
   secret_key: "" # HMAC signing key. MUST be set in production.
@@ -174,7 +175,7 @@ image_presets:
 # ---------------------------------------------------------------------------
 # Writing: LLM API configuration for writing services
 # Used by article writing, humanization, topic research, SEO, outlines.
-# Falls back to ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL env vars.
+# 如需 env 控制（例如复用 ANTHROPIC_*），写 base_url: "${ANTHROPIC_BASE_URL}" 等。
 # ---------------------------------------------------------------------------
 writing:
   base_url: "" # LLM API endpoint (e.g. "https://open.bigmodel.cn/api/anthropic")
@@ -186,7 +187,7 @@ writing:
 # Uses OpenAI-compatible /chat/completions with image content blocks.
 # Model must support vision/image input (e.g. gpt-4o, gpt-4o-mini, gemini-2.0-flash).
 # Falls back to writing config when not configured.
-# Override via ANBAN_VISION_* env vars.
+# 如需 env 控制，写 base_url: "${ANBAN_VISION_BASE_URL}" 等。
 # ---------------------------------------------------------------------------
 vision:
   base_url: "" # Vision API endpoint (e.g. "https://api.openai.com/v1")
@@ -197,8 +198,7 @@ vision:
 # ---------------------------------------------------------------------------
 # TingWu: Alibaba Cloud speech transcription/analysis for live-slice workflows
 # Optional. Configure this plus OSS storage to let MCP create/query live
-# analysis tasks directly. All fields can be overridden with:
-# ANBAN_TINGWU_ENDPOINT / REGION / APP_KEY / ACCESS_KEY / ACCESS_SECRET.
+# analysis tasks directly. 如需 env 控制，各字段写 ${ANBAN_TINGWU_ENDPOINT} 等。
 # ---------------------------------------------------------------------------
 tingwu:
   endpoint: "" # e.g. "tingwu.cn-beijing.aliyuncs.com"
@@ -237,7 +237,7 @@ credits:
     outline:
       "glm-5-turbo": 60
       "glm-5.1": 80
-  admin_api_key: "" # API key for admin credit grant endpoint (also via ANBAN_CREDITS_ADMIN_API_KEY)
+  admin_api_key: "" # API key for admin credit grant endpoint (如需 env 控制写 ${ANBAN_CREDITS_ADMIN_API_KEY}）
 
 # ---------------------------------------------------------------------------
 # CORS: Cross-Origin Resource Sharing configuration
@@ -260,10 +260,10 @@ claude:
   executor: local # "local" (subprocess) or "docker" (container).
   plugin_dir: "" # Path to the abwriter plugin directory (local executor only).
   # Auto-detected by searching for agents/ in parent directories.
-  # Override with ANBAN_CLAUDE_PLUGIN_DIR.
+  # 如需 env 控制写 plugin_dir: ${ANBAN_CLAUDE_PLUGIN_DIR}。
   # In k8s/Docker: typically "/app" or "/anbanai".
   sandbox: false # Enable SDK sandbox for agent tasks (local executor only).
-  # Override with ANBAN_CLAUDE_SANDBOX=true.
+  # 如需 env 控制写 sandbox: ${ANBAN_CLAUDE_SANDBOX:-false}。
 
   # Per-task-type max turns for agent execution.
   # article=300 (10-step pipeline + 7 images + HTML + draft), seednote=150.
@@ -276,13 +276,13 @@ claude:
   docker:
     image: "abwriter-agent:latest" # Docker image with Claude CLI + abwriter plugin.
     container_name: "abwriter" # Persistent container to reuse via docker exec (empty = create+destroy per task).
-    workspace_dir: "./data/workspace" # Host-side workspace base dir (must match docker-compose volume mount source).
+    workspace_dir: "${ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR:-./data/workspace}" # Host-side workspace base dir (must match docker-compose volume mount source).
     cpu_cores: 2 # CPU limit per task container.
     memory_mb: 4096 # Memory limit per task container (MB).
     timeout_sec: 1800 # Container execution timeout (seconds, default 30 min).
 
   # Per-task agent execution log directory. Each task gets a {task_id}.log file.
-  # Empty = disabled (no log files). Override with ANBAN_CLAUDE_TASK_LOG_DIR.
+  # Empty = disabled (no log files). 如需 env 控制写 ${ANBAN_CLAUDE_TASK_LOG_DIR}。
   task_log_dir: "./data/logs/tasks"
 
   env:
@@ -330,13 +330,15 @@ invitation:
 # channel, runs in Docker on Linux — NOT the Windows-only WeChatFerry) to push
 # task success/failure notifications and accept chat commands. Users bind their
 # own WeChat via a QR in Studio. Disabled or unreachable → graceful no-op.
-# Env overrides: ANBAN_WCF_ENABLED / ANBAN_WCF_BASE_URL / ANBAN_WCF_TIMEOUT / ANBAN_WCF_POLL_INTERVAL
-# Docker note: docker-compose.yml sets ANBAN_WCF_ENABLED=true for the server
-# container, so this `enabled: false` is overridden in the compose path; it only
-# governs local `make server-dev` runs.
+# 环境变量控制（显式 ${...}，无隐藏覆盖层）：
+#   docker-compose.yml 传 ANBAN_WCF_ENABLED=true / ANBAN_WCF_BASE_URL=http://wcflink:18070，
+#   本文件通过下面的 ${VAR:-default} 取用——Docker 走内网服务名，本地 `make server-dev` 走默认值。
 # ---------------------------------------------------------------------------
 wcf:
-  enabled: false # Master switch. ANBAN_WCF_ENABLED=true to enable.
-  base_url: "http://localhost:18070" # wcfLink sidecar HTTP base URL (compose service name in Docker: http://wcflink:18070).
-  timeout: 30 # HTTP client timeout (seconds).
-  poll_interval: 2 # Inbound event poll cadence (seconds).
+  # NOTE: env bool values must be YAML literals `true`/`false` (e.g. ANBAN_WCF_ENABLED=true).
+  # Unlike the old override layer, `1`/`0`/`yes`/`on` are NOT coerced and will fail config load —
+  # this is intentional: YAML is the single source of truth with strict typing.
+  enabled: ${ANBAN_WCF_ENABLED:-false} # Master switch. 本地默认关；Docker 经 compose env 打开。
+  base_url: "${ANBAN_WCF_BASE_URL:-http://localhost:18070}" # wcfLink sidecar HTTP base URL (compose service name in Docker: http://wcflink:18070).
+  timeout: 30 # HTTP client timeout (seconds). 如需 env 控制写 ${ANBAN_WCF_TIMEOUT:-30}。
+  poll_interval: 2 # Inbound event poll cadence (seconds). 如需 env 控制写 ${ANBAN_WCF_POLL_INTERVAL:-2}。

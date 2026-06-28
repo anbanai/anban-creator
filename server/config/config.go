@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
+	"regexp"
 	"strings"
 	"time"
 
@@ -277,7 +277,7 @@ type ClaudeConfig struct {
 	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
 	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 300, "seednote": 150}
 	TaskLogDir     string            `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
-	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). Override with ANBAN_CLAUDE_AGENT_SERVER_URL.
+	AgentServerURL string            `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
 
 // DockerConfig holds Docker executor settings for container-based task execution.
@@ -376,13 +376,19 @@ type InvitationConfig struct {
 	MaxPerUser int  `yaml:"max_per_user"` // max invites per user (default 3)
 }
 
-// NewConfig loads configuration from a YAML file, applies defaults, then
-// overlays any ANBAN_ prefixed environment variables.
+// NewConfig loads configuration from a YAML file. Before parsing, ${VAR} and
+// ${VAR:-default} placeholders in the file are expanded from the process
+// environment — this is the ONLY way environment variables affect config.
+// There is no hidden ANBAN_* override layer; every env dependency must be
+// written explicitly in the YAML as ${...}, so the file stays the single
+// visible source of truth.
 func NewConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
+
+	data = expandEnvVars(data)
 
 	cfg := &Config{}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
@@ -390,7 +396,6 @@ func NewConfig(path string) (*Config, error) {
 	}
 
 	cfg.applyDefaults()
-	cfg.applyEnvOverrides()
 	cfg.resolvePaths()
 
 	if err := cfg.Validate(); err != nil {
@@ -398,6 +403,29 @@ func NewConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// envVarRe matches ${VAR} and ${VAR:-default}. Only braced references are
+// expanded, so a literal '$' in a value (e.g. a password) is never touched.
+// Submatch 1 = variable name; submatch 2 = default text (nil when no :-group).
+var envVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}`)
+
+// expandEnvVars replaces ${VAR} / ${VAR:-default} occurrences in the raw config
+// text using the process environment. A referenced variable that is unset (or
+// empty) expands to its default when one is given, otherwise to an empty
+// string. Unlike os.ExpandEnv, bare $VAR without braces is left untouched, so
+// only placeholders the author wrote deliberately are expanded.
+func expandEnvVars(data []byte) []byte {
+	return envVarRe.ReplaceAllFunc(data, func(m []byte) []byte {
+		sub := envVarRe.FindSubmatch(m)
+		if v := os.Getenv(string(sub[1])); v != "" {
+			return []byte(v)
+		}
+		if len(sub) > 2 && sub[2] != nil {
+			return sub[2] // :-default provided
+		}
+		return nil // unset and no default → empty string
+	})
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.
@@ -506,6 +534,11 @@ func (c *Config) applyDefaults() {
 		c.Email.SMTPPort = 587
 	}
 
+	// Writing LLM defaults.
+	if c.Writing.Timeout == 0 {
+		c.Writing.Timeout = 10 * time.Minute
+	}
+
 	// Seednote sidecar defaults.
 	if c.Seednote.BaseURL == "" {
 		c.Seednote.BaseURL = "http://localhost:18060"
@@ -574,8 +607,9 @@ func (c *Config) AgentServerURL() string {
 	}
 }
 
-// resolvePaths resolves relative paths to absolute. Must be called after both
-// applyDefaults and applyEnvOverrides so that env-var overrides are also resolved.
+// resolvePaths resolves relative paths to absolute. Must be called after
+// applyDefaults (and after ${VAR} expansion in NewConfig) so that values
+// supplied via the environment are also resolved.
 func (c *Config) resolvePaths() {
 	// Resolve plugin_dir to absolute path if relative.
 	// The Claude Code CLI subprocess runs with CWD set to a temp directory,
@@ -595,269 +629,6 @@ func (c *Config) resolvePaths() {
 	if c.Claude.TaskLogDir != "" && !filepath.IsAbs(c.Claude.TaskLogDir) {
 		if abs, err := filepath.Abs(c.Claude.TaskLogDir); err == nil {
 			c.Claude.TaskLogDir = abs
-		}
-	}
-}
-
-// applyEnvOverrides reads ANBAN_ prefixed environment variables and
-// overwrites the corresponding config fields. The mapping follows the struct
-// hierarchy using underscores as separators, e.g.:
-//
-//	ANBAN_DATABASE_DSN
-//	ANBAN_JWT_SECRET_KEY
-//	ANBAN_REDIS_ADDR
-//	ANBAN_PORT
-func (c *Config) applyEnvOverrides() {
-	prefix := "ANBAN_"
-
-	if v := os.Getenv(prefix + "PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			c.Server.Port = port
-		}
-	}
-	if v := os.Getenv(prefix + "HOST"); v != "" {
-		c.Server.Host = v
-	}
-
-	if v := os.Getenv(prefix + "LOGGING_LEVEL"); v != "" {
-		c.Logging.Level = v
-	}
-
-	if v := os.Getenv(prefix + "DATABASE_DSN"); v != "" {
-		c.Database.DSN = v
-	}
-	if v := os.Getenv(prefix + "DATABASE_MAX_OPEN_CONNS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Database.MaxOpenConns = n
-		}
-	}
-	if v := os.Getenv(prefix + "DATABASE_MAX_IDLE_CONNS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Database.MaxIdleConns = n
-		}
-	}
-	if v := os.Getenv(prefix + "DATABASE_CONN_MAX_LIFETIME"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Database.ConnMaxLifetime = n
-		}
-	}
-
-	if v := os.Getenv(prefix + "REDIS_ADDR"); v != "" {
-		c.Redis.Addr = v
-	}
-	if v := os.Getenv(prefix + "REDIS_PASSWORD"); v != "" {
-		c.Redis.Password = v
-	}
-	if v := os.Getenv(prefix + "REDIS_DB"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Redis.DB = n
-		}
-	}
-
-	if v := os.Getenv(prefix + "JWT_SECRET_KEY"); v != "" {
-		c.JWT.SecretKey = v
-	}
-	if v := os.Getenv(prefix + "JWT_ACCESS_EXPIRY"); v != "" {
-		c.JWT.AccessExpiry = v
-	}
-	if v := os.Getenv(prefix + "JWT_REFRESH_EXPIRY"); v != "" {
-		c.JWT.RefreshExpiry = v
-	}
-
-	if v := os.Getenv(prefix + "WECHAT_APP_ID"); v != "" {
-		c.WeChat.AppID = v
-	}
-	if v := os.Getenv(prefix + "WECHAT_APP_SECRET"); v != "" {
-		c.WeChat.AppSecret = v
-	}
-	if v := os.Getenv(prefix + "WECHAT_QRCODE_PAGE"); v != "" {
-		c.WeChat.QRCodePage = v
-	}
-	if v := os.Getenv(prefix + "WECHAT_ENV_VERSION"); v != "" {
-		c.WeChat.EnvVersion = v
-	}
-
-	if v := os.Getenv(prefix + "MCP_API_KEY"); v != "" {
-		c.MCP.APIKey = v
-	}
-
-	if v := os.Getenv(prefix + "STORAGE_PROVIDER"); v != "" {
-		c.Storage.Provider = v
-	}
-	if v := os.Getenv(prefix + "STORAGE_ENDPOINT"); v != "" {
-		c.Storage.Endpoint = v
-	}
-	if v := os.Getenv(prefix + "STORAGE_ACCESS_KEY_ID"); v != "" {
-		c.Storage.AccessKeyID = v
-	}
-	if v := os.Getenv(prefix + "STORAGE_ACCESS_KEY_SECRET"); v != "" {
-		c.Storage.AccessKeySecret = v
-	}
-	if v := os.Getenv(prefix + "STORAGE_BUCKET_NAME"); v != "" {
-		c.Storage.BucketName = v
-	}
-	if v := os.Getenv(prefix + "STORAGE_REGION"); v != "" {
-		c.Storage.Region = v
-	}
-	if v := os.Getenv(prefix + "STORAGE_CUSTOM_DOMAIN"); v != "" {
-		c.Storage.CustomDomain = v
-	}
-	if v := os.Getenv(prefix + "STORAGE_LOCAL_DATA_DIR"); v != "" {
-		c.Storage.LocalDataDir = v
-	}
-
-	if v := os.Getenv(prefix + "CLAUDE_MODEL"); v != "" {
-		c.Claude.Model = v
-	}
-	if v := os.Getenv(prefix + "CLAUDE_EXECUTOR"); v != "" {
-		c.Claude.Executor = v
-	}
-	if v := os.Getenv(prefix + "CLAUDE_PLUGIN_DIR"); v != "" {
-		c.Claude.PluginDir = v
-	}
-	if v := os.Getenv(prefix + "CLAUDE_SANDBOX"); v != "" {
-		c.Claude.Sandbox = v == "true" || v == "1"
-	}
-	if v := os.Getenv(prefix + "CLAUDE_AGENT_SERVER_URL"); v != "" {
-		c.Claude.AgentServerURL = v
-	}
-	if v := os.Getenv(prefix + "CLAUDE_DOCKER_IMAGE"); v != "" {
-		c.Claude.Docker.Image = v
-	}
-	if v := os.Getenv(prefix + "CLAUDE_DOCKER_CPU_CORES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			c.Claude.Docker.CPUCores = n
-		}
-	}
-	if v := os.Getenv(prefix + "CLAUDE_DOCKER_MEMORY_MB"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			c.Claude.Docker.MemoryMB = n
-		}
-	}
-	if v := os.Getenv(prefix + "CLAUDE_DOCKER_TIMEOUT_SEC"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Claude.Docker.TimeoutSec = n
-		}
-	}
-	if v := os.Getenv(prefix + "CLAUDE_DOCKER_CONTAINER_NAME"); v != "" {
-		c.Claude.Docker.ContainerName = v
-	}
-	if v := os.Getenv(prefix + "CLAUDE_DOCKER_WORKSPACE_DIR"); v != "" {
-		c.Claude.Docker.WorkspaceDir = v
-	}
-	if v := os.Getenv(prefix + "CLAUDE_TASK_LOG_DIR"); v != "" {
-		c.Claude.TaskLogDir = v
-	}
-
-	if v := os.Getenv(prefix + "CREDITS_ADMIN_API_KEY"); v != "" {
-		c.Credits.AdminAPIKey = v
-	}
-
-	if v := os.Getenv(prefix + "ASYNQ_CONCURRENCY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Asynq.Concurrency = n
-		}
-	}
-
-	if v := os.Getenv(prefix + "EMAIL_SMTP_HOST"); v != "" {
-		c.Email.SMTPHost = v
-	}
-	if v := os.Getenv(prefix + "EMAIL_SMTP_PORT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Email.SMTPPort = n
-		}
-	}
-	if v := os.Getenv(prefix + "EMAIL_SMTP_USERNAME"); v != "" {
-		c.Email.SMTPUsername = v
-	}
-	if v := os.Getenv(prefix + "EMAIL_SMTP_PASSWORD"); v != "" {
-		c.Email.SMTPPassword = v
-	}
-	if v := os.Getenv(prefix + "EMAIL_FROM_ADDRESS"); v != "" {
-		c.Email.FromAddress = v
-	}
-	if v := os.Getenv(prefix + "EMAIL_FROM_NAME"); v != "" {
-		c.Email.FromName = v
-	}
-	if v := os.Getenv(prefix + "EMAIL_CODE_TTL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			c.Email.CodeTTL = d
-		}
-	}
-	if v := os.Getenv(prefix + "EMAIL_CODE_LENGTH"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Email.CodeLength = n
-		}
-	}
-
-	if v := os.Getenv(prefix + "INVITATION_ENABLED"); v != "" {
-		c.Invitation.Enabled = v == "true" || v == "1"
-	}
-	if v := os.Getenv(prefix + "INVITATION_MAX_PER_USER"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Invitation.MaxPerUser = n
-		}
-	}
-
-	if v := os.Getenv(prefix + "WRITING_BASE_URL"); v != "" {
-		c.Writing.BaseURL = v
-	}
-	if v := os.Getenv(prefix + "WRITING_KEY"); v != "" {
-		c.Writing.Key = v
-	}
-	if v := os.Getenv(prefix + "WRITING_MODEL"); v != "" {
-		c.Writing.Model = v
-	}
-	if c.Writing.Timeout == 0 {
-		c.Writing.Timeout = 10 * time.Minute
-	}
-	if v := os.Getenv(prefix + "WRITING_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			c.Writing.Timeout = d
-		} else {
-			fmt.Fprintf(os.Stderr, "invalid %sWRITING_TIMEOUT=%q: %v, using default %v\n", prefix, v, err, c.Writing.Timeout)
-		}
-	}
-
-	if v := os.Getenv(prefix + "TINGWU_ENDPOINT"); v != "" {
-		c.TingWu.Endpoint = v
-	}
-	if v := os.Getenv(prefix + "TINGWU_REGION"); v != "" {
-		c.TingWu.Region = v
-	}
-	if v := os.Getenv(prefix + "TINGWU_APP_KEY"); v != "" {
-		c.TingWu.AppKey = v
-	}
-	if v := os.Getenv(prefix + "TINGWU_ACCESS_KEY"); v != "" {
-		c.TingWu.AccessKey = v
-	}
-	if v := os.Getenv(prefix + "TINGWU_ACCESS_SECRET"); v != "" {
-		c.TingWu.AccessSecret = v
-	}
-
-	if v := os.Getenv(prefix + "SEEDNOTE_BASE_URL"); v != "" {
-		c.Seednote.BaseURL = v
-	}
-	if v := os.Getenv(prefix + "SEEDNOTE_TIMEOUT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Seednote.Timeout = n
-		}
-	}
-
-	if v := os.Getenv(prefix + "WCF_ENABLED"); v == "true" || v == "1" {
-		c.WCF.Enabled = true
-	}
-	if v := os.Getenv(prefix + "WCF_BASE_URL"); v != "" {
-		c.WCF.BaseURL = v
-	}
-	if v := os.Getenv(prefix + "WCF_TIMEOUT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.WCF.Timeout = n
-		}
-	}
-	if v := os.Getenv(prefix + "WCF_POLL_INTERVAL"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.WCF.PollInterval = n
 		}
 	}
 }
@@ -982,7 +753,7 @@ func (c *Config) Validate() error {
 	}
 	if c.Claude.Executor == "local" {
 		if strings.TrimSpace(c.Claude.PluginDir) == "" {
-			errs = append(errs, "claude.plugin_dir is required for agent execution (set via config, ANBAN_CLAUDE_PLUGIN_DIR env, or ensure agents/ exists in a parent directory)")
+			errs = append(errs, "claude.plugin_dir is required for agent execution (set it in config.yaml, or ensure agents/ exists in a parent directory)")
 		} else {
 			agentsDir := filepath.Join(c.Claude.PluginDir, "agents")
 			if info, err := os.Stat(agentsDir); err != nil || !info.IsDir() {

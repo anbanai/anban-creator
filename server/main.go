@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -40,7 +39,7 @@ var defaultConfigPaths = []string{"./config.yaml", "./server/config.yaml"}
 func main() {
 	// 1. Parse flags.
 	configPath := flag.String("config", "", "path to server config file (default: ./config.yaml or ./server/config.yaml)")
-	port := flag.Int("port", 0, "server listen port (overrides config and ANBAN_PORT)")
+	port := flag.Int("port", 0, "server listen port (overrides config.yaml server.port)")
 	flag.Parse()
 
 	// Resolve config path: explicit flag > env > default search.
@@ -53,19 +52,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Override port via ANBAN_PORT env or -port flag.
+	// -port flag overrides config.yaml server.port. (Per-environment port
+	// control, if ever needed, is via ${ANBAN_PORT:-8080} written explicitly in
+	// config.yaml — there is no hidden ANBAN_PORT override.)
 	if *port > 0 {
 		cfg.Server.Port = *port
-	} else if v := os.Getenv("ANBAN_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil && p > 0 {
-			cfg.Server.Port = p
-		}
 	}
 
-	// 3. Init logger (JSON to stderr, level from config, LOG_LEVEL env, or "info").
+	// 3. Init logger (JSON to stderr, level from config.yaml logging.level).
 	logLevelStr := cfg.Logging.Level
 	if logLevelStr == "" {
-		logLevelStr = os.Getenv("LOG_LEVEL")
+		logLevelStr = "info"
 	}
 	logLevel := parseLogLevel(logLevelStr)
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
@@ -292,21 +289,13 @@ func main() {
 
 	var writingLLMClient service.LLMClient
 	if repo != nil {
-		// Prefer config.yaml writing section; fall back to env vars.
+		// Writing LLM comes solely from config.yaml (writing.*). If env control
+		// is needed, write e.g. base_url: "${ANTHROPIC_BASE_URL}" in config.yaml.
 		llmBaseURL := cfg.Writing.BaseURL
 		llmAPIKey := cfg.Writing.Key
 		llmModel := cfg.Writing.Model
-		if llmBaseURL == "" {
-			llmBaseURL = os.Getenv("ANTHROPIC_BASE_URL")
-		}
-		if llmAPIKey == "" {
-			llmAPIKey = os.Getenv("ANTHROPIC_AUTH_TOKEN")
-		}
 		if llmModel == "" {
 			llmModel = cfg.Claude.Model
-			if llmModel == "" {
-				llmModel = os.Getenv("ANTHROPIC_MODEL")
-			}
 		}
 		if llmBaseURL != "" && llmAPIKey != "" && llmModel != "" {
 			writingLLMClient = service.NewOpenAILLMClient(llmBaseURL, llmAPIKey, llmModel, cfg.Writing.Timeout)
@@ -518,7 +507,7 @@ func main() {
 					writingSvc.SetModelConfigService(modelConfigSvc)
 				}
 			} else {
-				log.Warn().Msg("LLM client not configured (missing writing config or ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL), writing tools unavailable")
+				log.Warn().Msg("LLM client not configured (set writing.base_url/key/model in config.yaml), writing tools unavailable")
 			}
 		}
 		if writingLLMClient != nil || cfg.TingWu.Complete() || store != nil {
