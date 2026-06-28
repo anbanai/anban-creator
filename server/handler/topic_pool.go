@@ -42,6 +42,9 @@ func (h *TopicPoolHandler) List(c fiber.Ctx) error {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+	if offset < 0 {
+		offset = 0
+	}
 
 	topics, total, err := h.service.List(c.Context(), userID, projectID, status, offset, limit)
 	if err != nil {

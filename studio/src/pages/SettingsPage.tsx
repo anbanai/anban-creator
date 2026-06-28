@@ -75,7 +75,7 @@ export default function SettingsPage() {
   })
 
   const handleCreate = () => {
-    submit(async () => createMutation.mutateAsync(keyName))
+    void submit(async () => createMutation.mutateAsync(keyName)).catch(() => {})
   }
 
   const handleCopy = (text: string) => {
@@ -85,7 +85,7 @@ export default function SettingsPage() {
   }
 
   const handleChangePassword = (values: ChangePasswordFormValues) => {
-    submit(async () => {
+    void submit(async () => {
       await api.auth.changePassword(values.old_password, values.new_password)
       toast.success('密码修改成功')
       passwordForm.reset()
@@ -325,7 +325,7 @@ export default function SettingsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={revokeMutation.isPending} onClick={() => { if (revokeTarget) submit(async () => revokeMutation.mutateAsync(revokeTarget)) }}>
+            <AlertDialogAction variant="destructive" disabled={revokeMutation.isPending} onClick={() => { if (revokeTarget) void submit(async () => revokeMutation.mutateAsync(revokeTarget)).catch(() => {}) }}>
               {revokeMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
               吊销
             </AlertDialogAction>
