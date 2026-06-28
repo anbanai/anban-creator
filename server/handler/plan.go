@@ -151,6 +151,12 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
 
+	// Byline must not be a writer-persona name (same defense-in-depth guard as
+	// task/project/template create). A plan byline flows to spawned tasks.
+	if err := service.RejectWriterNameAsByline(req.Byline); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+
 	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
 		UserID:             userID,
 		ProjectID:          req.ProjectID,
@@ -164,6 +170,12 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		GoalMode:           req.GoalMode,
 		HasContentImage:    req.HasContentImage,
 		HasTailImage:       req.HasTailImage,
+		VisualStyle:        req.VisualStyle,
+		WriterKey:          req.WriterKey,
+		WritingVoice:       req.WritingVoice,
+		Byline:             req.Byline,
+		PersonaAvatar:      req.PersonaAvatar,
+		Theme:              req.Theme,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
@@ -272,6 +284,14 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
 
+	// Byline must not be a writer-persona name. req.Byline is nil for "leave
+	// unchanged"; only validate when the caller is setting/clearing it.
+	if req.Byline != nil {
+		if err := service.RejectWriterNameAsByline(*req.Byline); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+	}
+
 	plan, err := h.service.Update(c.Context(), service.UpdatePlanParams{
 		ID:                 id,
 		CronExpr:           req.CronExpr,
@@ -284,6 +304,12 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		GoalMode:           req.GoalMode,
 		HasContentImage:    req.HasContentImage,
 		HasTailImage:       req.HasTailImage,
+		VisualStyle:        req.VisualStyle,
+		WriterKey:          req.WriterKey,
+		WritingVoice:       req.WritingVoice,
+		Byline:             req.Byline,
+		PersonaAvatar:      req.PersonaAvatar,
+		Theme:              req.Theme,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")

@@ -59,7 +59,7 @@
     <view class="task-create__section" v-if="!isEcommerce">
       <text class="field-label">视觉风格</text>
       <AbTextarea
-        v-model="form.style"
+        v-model="form.visual_style"
         placeholder="描述画面风格，如：清新自然、暖色调、生活化场景..."
         :rows="3"
         :maxlength="1024"
@@ -71,7 +71,7 @@
     <view class="task-create__section" v-if="isArticle">
       <text class="field-label">写作风格</text>
       <AbTextarea
-        v-model="form.writing_style"
+        v-model="form.writer_key"
         placeholder="描述文章的写作风格、语气、结构..."
         :rows="3"
         :maxlength="1024"
@@ -94,12 +94,12 @@
       <text class="field-label">作者人设</text>
       <view class="field-spacer">
         <text class="field-sublabel">作者署名</text>
-        <AbInput v-model="form.author" placeholder="显示在文章/笔记的作者名" />
+        <AbInput v-model="form.byline" placeholder="显示在文章/笔记的作者名" />
       </view>
       <view class="field-spacer">
         <text class="field-sublabel">写作风格模仿</text>
         <AbTextarea
-          v-model="form.author_style_intro"
+          v-model="form.writing_voice"
           placeholder="模仿某位作者/博主的文风，描述其语言习惯、句式特点..."
           :rows="2"
           :maxlength="1024"
@@ -107,7 +107,7 @@
       </view>
       <view class="field-spacer">
         <text class="field-sublabel">人设头像 URL</text>
-        <AbInput v-model="form.author_avatar_url" placeholder="可选，作者头像图片地址" />
+        <AbInput v-model="form.persona_avatar" placeholder="可选，作者头像图片地址" />
       </view>
     </view>
 
@@ -383,12 +383,12 @@ const form = reactive({
   quantity: 1,
   image_ratio: '3:4',
   image_model_key: '',
-  style: '',
-  writing_style: '',
+  visual_style: '',
+  writer_key: '',
   theme: '',
-  author: '',
-  author_style_intro: '',
-  author_avatar_url: '',
+  byline: '',
+  writing_voice: '',
+  persona_avatar: '',
   goal_mode: false,
   goal: '',
   template_id: '',
@@ -666,13 +666,13 @@ async function onSubmit() {
       quantity: isEcommerce.value ? undefined : form.quantity,
       image_ratio: form.image_ratio,
       image_model_key: form.image_model_key || undefined,
-      style: form.style.trim() || undefined,
-      writing_style: isArticle.value && form.writing_style.trim() ? form.writing_style.trim() : undefined,
+      visual_style: form.visual_style.trim() || undefined,
+      writer_key: isArticle.value && form.writer_key.trim() ? form.writer_key.trim() : undefined,
       theme: isArticle.value && form.theme ? form.theme : undefined,
       template_id: form.template_id || undefined,
-      author: form.author.trim() || undefined,
-      author_style_intro: form.author_style_intro.trim() || undefined,
-      author_avatar_url: form.author_avatar_url.trim() || undefined,
+      byline: form.byline.trim() || undefined,
+      writing_voice: form.writing_voice.trim() || undefined,
+      persona_avatar: form.persona_avatar.trim() || undefined,
       has_content_image: isSeednote.value && form.has_content_image ? true : undefined,
       has_tail_image: isSeednote.value && form.has_tail_image ? true : undefined,
       // ecommerce basic fields

@@ -482,6 +482,17 @@ func (s *WritingService) WriteArticleStream(
 		return nil, fmt.Errorf("llm generate article: %w", err)
 	}
 
+	// Truncation guard: a stream can end "successfully" (nil error, clean EOF)
+	// yet emit only a partial article — e.g. a reasoning model emits thinking
+	// tokens then stops, or the provider cuts a long generation mid-paragraph.
+	// Without this check a half-finished article flows into humanizer →
+	// converter → publish as if complete. Reject anything below half the
+	// requested length's lower bound; an unrecognized length skips the guard.
+	wordCount := utf8.RuneCountInString(article)
+	if min := minExpectedArticleWords(length); min > 0 && wordCount < min/2 {
+		return nil, fmt.Errorf("article appears truncated: %d runes generated, expected at least %d for length %q (stream ended early)", wordCount, min/2, length)
+	}
+
 	s.logger.Info().
 		Str("user_id", userID).
 		Str("project_id", projectID).
@@ -495,6 +506,24 @@ func (s *WritingService) WriteArticleStream(
 		Prompt:    result.Prompt,
 		WordCount: utf8.RuneCountInString(article),
 	}, nil
+}
+
+// minExpectedArticleWords returns the lower-bound word count for a requested
+// article length (short/medium/long), used by WriteArticleStream's truncation
+// guard. Bounds mirror app/writer.Length doc comments (short 800-1200,
+// medium 1500-2500, long 3000-5000). Returns 0 for an unrecognized length so the
+// guard is skipped (no reliable target).
+func minExpectedArticleWords(length string) int {
+	switch writer.Length(length) {
+	case writer.LengthShort:
+		return 800
+	case writer.LengthMedium:
+		return 1500
+	case writer.LengthLong:
+		return 3000
+	default:
+		return 0
+	}
 }
 
 // ConvertMarkdown converts Markdown to WeChat-compatible HTML using the

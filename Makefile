@@ -11,6 +11,7 @@ SERVER_CONFIG := server/config.yaml
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
         server-build server-run server-dev server-test \
+        agent-build-native \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
         docker-agent-image docker-server-image docker-images
@@ -136,6 +137,27 @@ docker-images: docker-agent-image docker-server-image
 docker-image: docker-agent-image
 
 # ---------------------------------------------------------------------------
+# Desktop (Tauri) targets
+# ---------------------------------------------------------------------------
+
+# Build the abwriter-agent binary natively (no Docker) for the host platform.
+# The desktop app bundles this as a sidecar to claim & run tasks on the user's
+# machine via claude-agent-sdk-go (which spawns the local `claude` CLI).
+# Cross-compile the host-native variant; use ARCHES= to override, e.g.
+#   make agent-build-native ARCHES="darwin/arm64 darwin/amd64"
+ARCHES ?= $(shell go env GOOS)/$(shell go env GOARCH)
+
+agent-build-native:
+	@mkdir -p $(BINDIR)
+	@set -e; for arch in $(ARCHES); do \
+		os=$${arch%/*}; goarch=$${arch#*/}; \
+		out="$(BINDIR)/abwriter-agent-$${os}-$${goarch}"; \
+		echo "Building abwriter-agent for $${os}/$${goarch}..."; \
+		GOOS=$${os} GOARCH=$${goarch} CGO_ENABLED=0 go build -trimpath -o $${out} ./agent; \
+	done
+	@echo "Agent native build complete: $(ARCHES)"
+
+# ---------------------------------------------------------------------------
 # Help
 # ---------------------------------------------------------------------------
 
@@ -172,3 +194,6 @@ help:
 	@echo "  make docker-server-image - Build server image (Go binary)"
 	@echo "  make docker-images      - Build both images"
 	@echo "  make docker-image       - Build agent image (alias)"
+	@echo ""
+	@echo "Desktop (Tauri) targets:"
+	@echo "  make agent-build-native - Build abwriter-agent natively (desktop sidecar)"

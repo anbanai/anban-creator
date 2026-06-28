@@ -262,6 +262,9 @@ func main() {
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
+		// Wire executor defaults so local-executor claim responses carry the same
+		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
+		taskSvc.SetExecutorDefaults(cfg.Claude.Model, cfg.Claude.MaxTurns)
 		if count, err := taskSvc.ClearArtifactTitles(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clear artifact task titles")
 		} else if count > 0 {
@@ -542,6 +545,13 @@ func main() {
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		defer cleanupCancel()
 		go startPeriodicCleanup(cleanupCtx, taskSvc, viralAnalysisSvc, posterSvc, log)
+
+		// 15.3 Start the local-claim fallback worker (every 10s). Flips
+		// pending local-target tasks past their claim deadline back to cloud
+		// execution so they're never stuck when no desktop is online.
+		reclaimCtx, reclaimCancel := context.WithCancel(context.Background())
+		defer reclaimCancel()
+		go startLocalClaimFallback(reclaimCtx, taskSvc, log)
 	}
 
 	// 16. Build Services struct.
@@ -836,6 +846,33 @@ func startPeriodicCleanup(ctx context.Context, taskSvc *service.TaskService, vir
 			return
 		case <-ticker.C:
 			cleanup()
+		}
+	}
+}
+
+// startLocalClaimFallback periodically (every ~10s) flips pending local-target
+// tasks past their claim deadline back to cloud execution, so tasks aren't
+// stuck when no desktop executor is online. Paired with LocalClaimWindow (30s):
+// the desktop polls /api/v1/agent/claim every couple of seconds, so under normal
+// operation a task is claimed long before this fallback fires.
+func startLocalClaimFallback(ctx context.Context, taskSvc *service.TaskService, log *zerolog.Logger) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("local claim fallback stopped")
+			return
+		case <-ticker.C:
+			n, err := taskSvc.ReclaimExpiredLocalTasks(ctx)
+			if err != nil {
+				log.Warn().Err(err).Msg("local claim fallback failed")
+				continue
+			}
+			if n > 0 {
+				log.Info().Int("reclaimed", n).Msg("reclaimed expired local tasks to cloud execution")
+			}
 		}
 	}
 }

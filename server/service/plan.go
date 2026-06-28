@@ -45,6 +45,14 @@ type CreatePlanParams struct {
 	// non-nil honors explicit user choice.
 	HasContentImage *bool
 	HasTailImage    *bool
+	// Style/persona/theme dimensions copied into spawned tasks' Task.Overrides.
+	// Each is optional; empty = inherit from the project at resolve time.
+	VisualStyle   string
+	WriterKey     string
+	WritingVoice  string
+	Byline        string
+	PersonaAvatar string
+	Theme         string
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -102,11 +110,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		hasTail = *p.HasTailImage
 	}
 
-	// A plan is a pure scheduler under a project: it carries NO style/persona/theme
-	// fields. Spawned tasks fully inherit every dimension from the project at
-	// execution (resolver.ResolveStyle, task.Overrides ?? project). The plan only
-	// owns scheduling + the scheduling-adjacent "what to produce" image params +
-	// goal mode that flow to spawned tasks.
+	// A plan carries its own style/persona/theme dimensions (copied into spawned
+	// tasks' Task.Overrides at CreateFromPlan) plus scheduling-adjacent "what to
+	// produce" image params + goal mode. See model.Plan for the dimension set.
 	plan := &model.Plan{
 		ID:                 uuid.New().String(),
 		UserID:             p.UserID,
@@ -124,6 +130,12 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		GoalMode:           p.GoalMode,
 		HasContentImage:    hasContent,
 		HasTailImage:       hasTail,
+		VisualStyle:        p.VisualStyle,
+		WriterKey:          p.WriterKey,
+		WritingVoice:       p.WritingVoice,
+		Byline:             p.Byline,
+		PersonaAvatar:      p.PersonaAvatar,
+		Theme:              p.Theme,
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -167,13 +179,11 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
+//   - VisualStyle / WriterKey / WritingVoice / Byline / PersonaAvatar / Theme:
+//     nil = leave unchanged; &"" = clear (inherit from project); &"value" = set
 //
 // ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
 // unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
-//
-// Style/persona/theme dimensions are intentionally ABSENT: a plan is a pure
-// scheduler and carries no style fields (tasks inherit from the project). Removed
-// fields: Style/WritingStyle/Theme/Author/AuthorStyleIntro/AuthorAvatarURL/TemplateID.
 type UpdatePlanParams struct {
 	ID                 string
 	CronExpr           string
@@ -186,6 +196,12 @@ type UpdatePlanParams struct {
 	GoalMode           *bool
 	HasContentImage    *bool
 	HasTailImage       *bool
+	VisualStyle        *string
+	WriterKey          *string
+	WritingVoice       *string
+	Byline             *string
+	PersonaAvatar      *string
+	Theme              *string
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -218,6 +234,24 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 	}
 	if p.HasTailImage != nil {
 		plan.HasTailImage = *p.HasTailImage
+	}
+	if p.VisualStyle != nil {
+		plan.VisualStyle = *p.VisualStyle
+	}
+	if p.WriterKey != nil {
+		plan.WriterKey = *p.WriterKey
+	}
+	if p.WritingVoice != nil {
+		plan.WritingVoice = *p.WritingVoice
+	}
+	if p.Byline != nil {
+		plan.Byline = *p.Byline
+	}
+	if p.PersonaAvatar != nil {
+		plan.PersonaAvatar = *p.PersonaAvatar
+	}
+	if p.Theme != nil {
+		plan.Theme = *p.Theme
 	}
 
 	// If cron expression changed, validate and recompute next run.

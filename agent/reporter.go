@@ -47,6 +47,23 @@ func (r *Reporter) ReportResult(ctx context.Context, result *serveragent.Executi
 	})
 }
 
+// ReportComplete signals terminal completion to the server. The server finalizes
+// the task ONLY when it is a local_claimed task still in the running state
+// (guarded CAS) — so calling this from the cloud Docker path is a safe no-op
+// (cloud's authoritative finalization is server-side HandleExecution). For
+// local-execution tasks this is the terminal half of the path: without it the
+// task could never reach completed/failed and would be force-failed by the
+// stuck-task reaper. Idempotent on the server, so a retry is harmless.
+func (r *Reporter) ReportComplete(ctx context.Context, result *serveragent.ExecutionResult) error {
+	if result == nil {
+		return nil
+	}
+	return r.postJSON(ctx, "/api/v1/agent/complete", map[string]any{
+		"task_id": r.cfg.TaskID,
+		"result":  result,
+	})
+}
+
 func (r *Reporter) postJSON(ctx context.Context, path string, payload any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {

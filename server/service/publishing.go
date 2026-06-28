@@ -73,9 +73,13 @@ type PublishDraftResult struct {
 	DraftURL string `json:"draft_url,omitempty"`
 }
 
-// buildAppConfig creates an app config from a project (nil image config since publishing doesn't need image API).
-// Style dimensions resolve project-only (no task context) — the byline comes from
-// the project, matching the pre-refactor project-author behavior.
+// buildAppConfig creates an app config from a project (nil image config since
+// publishing doesn't need image API). Style dimensions resolve project-only HERE:
+// the per-article Author actually published to WeChat comes from draft.json
+// (written by the agent using the task-aware get_project_profile, so task-level
+// byline overrides ARE honored on publish). The project byline resolved here is
+// only the fallback the draft service uses for an article with no Author (e.g.
+// the HTML-file fallback path in extractArticleDraftFromWorkspace).
 func (s *PublishingService) buildAppConfig(ch *model.Project) (*appconfig.Config, error) {
 	return agent.BuildAppConfig(ch, ResolveStyle(ch, nil), nil, "", false, "")
 }

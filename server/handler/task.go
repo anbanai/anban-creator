@@ -104,6 +104,11 @@ type createTaskRequest struct {
 	SellingPoints            string         `json:"selling_points,omitempty"`
 	Language                 string         `json:"language,omitempty"`
 	ProviderStrategyOverride string         `json:"provider_strategy_override,omitempty"`
+	// ExecutionTarget, when "local", routes the task to the caller's desktop
+	// local executor instead of cloud execution. Set by the desktop studio build
+	// when a local executor is available. Empty = cloud (default). See
+	// model.ExecutionTarget*.
+	ExecutionTarget string `json:"execution_target,omitempty"`
 }
 
 type bulkDownloadTaskFilesRequest struct {
@@ -245,6 +250,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		HasContentImage:   req.HasContentImage,
 		HasTailImage:      req.HasTailImage,
 		Ecommerce:         ecommerceCfg,
+		ExecutionTarget:   req.ExecutionTarget,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")

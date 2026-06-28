@@ -40,6 +40,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to report result: %v\n", reportErr)
 	}
 
+	// Signal terminal completion so the server can finalize the task. Safe in
+	// both modes: the server no-ops unless this is a local_claimed task still
+	// running. Uses a fresh context because the run ctx may be cancelled at
+	// shutdown, and this report must land for the task to reach a terminal state.
+	if completeErr := reporter.ReportComplete(context.Background(), result); completeErr != nil {
+		fmt.Fprintf(os.Stderr, "failed to report completion: %v\n", completeErr)
+	}
+
 	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to print result: %v\n", err)
 		if runErr == nil {

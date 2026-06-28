@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -270,11 +271,101 @@ func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID str
 	var tasks []*model.Task
 	err := r.db.WithContext(ctx).
 		Where("project_id = ? AND status = ?", projectID, model.TaskStatusPending).
+		// Exclude tasks awaiting a desktop local-executor claim — those must not
+		// be scooped up by cloud DispatchPendingTasks. execution_target defaults
+		// to '' (cloud); only "local" tasks are skipped here. "local_claimed"
+		// tasks are already status=running so they never match this query.
+		Where("execution_target <> ?", model.ExecutionTargetLocal).
 		Where("NOT (retry_count > 0 AND updated_at > DATE_SUB(NOW(), INTERVAL 2 MINUTE))").
 		Order("created_at ASC").
 		Limit(limit).
 		Find(&tasks).Error
 	return tasks, err
+}
+
+// ClaimNextLocalTask atomically claims the oldest pending local-target task for
+// the user. The find + conditional CAS run inside a single transaction: the
+// UPDATE ... WHERE id=? AND status='pending' guarantees exactly one concurrent
+// claimer wins (RowsAffected=1); losers get 0 and surface as (nil, nil). The
+// executorInfo blob is recorded for diagnostics. Returns (nil, nil) when no
+// task is claimable.
+func (r *taskRepository) ClaimNextLocalTask(ctx context.Context, userID string, executorInfo []byte) (*model.Task, error) {
+	var claimedID string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task model.Task
+		findErr := tx.
+			Where("user_id = ? AND status = ? AND execution_target = ?", userID, model.TaskStatusPending, model.ExecutionTargetLocal).
+			Where("local_claim_deadline IS NULL OR local_claim_deadline >= ?", time.Now()).
+			Order("created_at ASC").
+			First(&task).Error
+		if findErr != nil {
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return nil // nothing claimable
+			}
+			return findErr
+		}
+
+		updates := map[string]interface{}{
+			"status":           model.TaskStatusRunning,
+			"started_at":       time.Now(),
+			"execution_target": model.ExecutionTargetLocalClaimed,
+		}
+		if len(executorInfo) > 0 {
+			updates["executor_info"] = string(executorInfo)
+		}
+		res := tx.Model(&model.Task{}).
+			Where("id = ? AND status = ?", task.ID, model.TaskStatusPending).
+			Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			// Lost the race to another claimer (or status changed). Treat as
+			// nothing-claimable so the caller polls again.
+			return nil
+		}
+		claimedID = task.ID
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if claimedID == "" {
+		return nil, nil
+	}
+	// Reload so the returned task reflects the CAS (status=running, target set).
+	return r.FindByID(ctx, claimedID)
+}
+
+// FindExpiredLocalTasks returns IDs of pending local-target tasks past their
+// claim deadline — candidates for cloud fallback.
+func (r *taskRepository) FindExpiredLocalTasks(ctx context.Context, now time.Time) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("status = ? AND execution_target = ?", model.TaskStatusPending, model.ExecutionTargetLocal).
+		Where("local_claim_deadline IS NOT NULL AND local_claim_deadline < ?", now).
+		Limit(100).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
+// ResetLocalTarget atomically clears the local-execution markers so a task is
+// eligible for normal cloud dispatch — but ONLY while it is still pending +
+// local-target (a guarded CAS, mirroring ClaimNextLocalTask). Returns reset=true
+// when the CAS matched; reset=false when the task was claimed or changed since
+// the fallback selected it, in which case the caller must NOT re-enqueue (doing
+// so would double-run the task on cloud + the desktop that just claimed it).
+func (r *taskRepository) ResetLocalTarget(ctx context.Context, taskID string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND status = ? AND execution_target = ?", taskID, model.TaskStatusPending, model.ExecutionTargetLocal).
+		Updates(map[string]interface{}{
+			"execution_target":     model.ExecutionTargetCloud,
+			"local_claim_deadline": nil,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 // FindTitlesByProjectID returns all recorded titles for a project, ordered by creation time descending.
