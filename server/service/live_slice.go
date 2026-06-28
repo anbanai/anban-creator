@@ -299,28 +299,42 @@ type LiveSubjectCompletion struct {
 
 // LiveSubjectClipPlanRequest asks the service to turn completed subject scripts into executable clips.
 type LiveSubjectClipPlanRequest struct {
-	Sentences          []LiveSentence          `json:"sentences"`
-	Completions        []LiveSubjectCompletion `json:"completions"`
-	VideoPath          string                  `json:"video_path"`
-	OutputDir          string                  `json:"output_dir"`
-	Invalid            []LiveInvalid           `json:"invalid,omitempty"`
-	MinDurationSeconds float64                 `json:"min_duration_seconds,omitempty"`
-	MaxDurationSeconds float64                 `json:"max_duration_seconds,omitempty"`
-	HeadPaddingSeconds float64                 `json:"head_padding_seconds,omitempty"`
-	TailPaddingSeconds float64                 `json:"tail_padding_seconds,omitempty"`
+	Sentences              []LiveSentence          `json:"sentences"`
+	Completions            []LiveSubjectCompletion `json:"completions"`
+	VideoPath              string                  `json:"video_path"`
+	OutputDir              string                  `json:"output_dir"`
+	Invalid                []LiveInvalid           `json:"invalid,omitempty"`
+	MinDurationSeconds     float64                 `json:"min_duration_seconds,omitempty"`
+	MaxDurationSeconds     float64                 `json:"max_duration_seconds,omitempty"`
+	HeadPaddingSeconds     float64                 `json:"head_padding_seconds,omitempty"`
+	TailPaddingSeconds     float64                 `json:"tail_padding_seconds,omitempty"`
+	TargetMode             string                  `json:"target_mode,omitempty"`
+	VerticalFill           string                  `json:"vertical_fill,omitempty"`
+	SourceWidth            int                     `json:"source_width,omitempty"`
+	SourceHeight           int                     `json:"source_height,omitempty"`
+	TargetWidth            int                     `json:"target_width,omitempty"`
+	TargetHeight           int                     `json:"target_height,omitempty"`
+	NormalizeAudioLoudness *bool                   `json:"normalize_audio_loudness,omitempty"`
 }
 
 // LiveClipPlanRequest asks the service to turn LLM segment indexes into concrete cut commands.
 type LiveClipPlanRequest struct {
-	Sentences          []LiveSentence `json:"sentences"`
-	Segments           []LiveSegment  `json:"segments"`
-	VideoPath          string         `json:"video_path"`
-	OutputDir          string         `json:"output_dir"`
-	Invalid            []LiveInvalid  `json:"invalid,omitempty"`
-	MinDurationSeconds float64        `json:"min_duration_seconds,omitempty"`
-	MaxDurationSeconds float64        `json:"max_duration_seconds,omitempty"`
-	HeadPaddingSeconds float64        `json:"head_padding_seconds,omitempty"`
-	TailPaddingSeconds float64        `json:"tail_padding_seconds,omitempty"`
+	Sentences              []LiveSentence `json:"sentences"`
+	Segments               []LiveSegment  `json:"segments"`
+	VideoPath              string         `json:"video_path"`
+	OutputDir              string         `json:"output_dir"`
+	Invalid                []LiveInvalid  `json:"invalid,omitempty"`
+	MinDurationSeconds     float64        `json:"min_duration_seconds,omitempty"`
+	MaxDurationSeconds     float64        `json:"max_duration_seconds,omitempty"`
+	HeadPaddingSeconds     float64        `json:"head_padding_seconds,omitempty"`
+	TailPaddingSeconds     float64        `json:"tail_padding_seconds,omitempty"`
+	TargetMode             string         `json:"target_mode,omitempty"`
+	VerticalFill           string         `json:"vertical_fill,omitempty"`
+	SourceWidth            int            `json:"source_width,omitempty"`
+	SourceHeight           int            `json:"source_height,omitempty"`
+	TargetWidth            int            `json:"target_width,omitempty"`
+	TargetHeight           int            `json:"target_height,omitempty"`
+	NormalizeAudioLoudness *bool          `json:"normalize_audio_loudness,omitempty"`
 }
 
 // LiveClipPlanResult is a deterministic clip plan ready for local ffmpeg execution.
@@ -353,6 +367,8 @@ type LiveClip struct {
 	ConcatArgs        []string       `json:"concat_args,omitempty"`
 	Transcript        []LiveSentence `json:"transcript"`
 	ScriptNotes       []LiveSentence `json:"script_notes,omitempty"`
+	Orientation       string         `json:"orientation,omitempty"`
+	VerticalFilter    string         `json:"vertical_filter,omitempty"`
 	Method            string         `json:"method,omitempty"`
 	Status            string         `json:"status,omitempty"`
 }
@@ -673,6 +689,159 @@ func computeLiveStats(sentences []LiveSentence) ([]LiveWordStat, []LiveSilentSta
 	return words, silents
 }
 
+// encodeOptions captures deterministic ffmpeg re-encode parameters shared by every clip.
+// Quality flags (yuv420p, CRF, faststart) and optional loudnorm apply on every re-encode path;
+// a non-empty videoFilter adds a -vf chain and forces re-encoding (suppressing fast stream-copy).
+type encodeOptions struct {
+	videoFilter  string // -vf chain (empty = no video filter)
+	audioFilter  string // -af chain (empty = no audio filter)
+	preset       string
+	crf          string
+	pixFmt       string
+	audioCodec   string
+	audioBitrate string
+	faststart    bool
+}
+
+// encodePlanInput holds the orientation and loudness knobs common to both clip-plan request types.
+type encodePlanInput struct {
+	targetMode    string
+	verticalFill  string
+	sourceWidth   int
+	sourceHeight  int
+	targetWidth   int
+	targetHeight  int
+	normalizeLoud bool
+}
+
+// encodeDecision is the resolved re-encode configuration for a clip plan.
+type encodeDecision struct {
+	opts          encodeOptions
+	needsReencode bool   // true when a video filter forces re-encoding (suppresses fast copy)
+	orientation   string // human-readable transform label for transparency / decision logs
+}
+
+const (
+	defaultTargetWidth  = 1080
+	defaultTargetHeight = 1920
+	// loudnormFilter is an EBU R128-ish loudness filter used on re-encode paths (Douyin-safe).
+	loudnormFilter = "loudnorm=I=-16:TP=-1.5:LRA=11"
+)
+
+// computeEncodeOptions resolves the deterministic re-encode configuration from request knobs.
+// Quality flags and loudnorm apply on every re-encode path; an orientation transform adds a
+// -vf chain and forces re-encoding (which suppresses the fast stream-copy attempt).
+// Source dimensions are required to convert orientation — without them the clip passes through.
+func computeEncodeOptions(in encodePlanInput) encodeDecision {
+	targetW := in.targetWidth
+	if targetW <= 0 {
+		targetW = defaultTargetWidth
+	}
+	targetH := in.targetHeight
+	if targetH <= 0 {
+		targetH = defaultTargetHeight
+	}
+	opts := encodeOptions{
+		preset:       "veryfast",
+		crf:          "20",
+		pixFmt:       "yuv420p",
+		audioCodec:   "aac",
+		audioBitrate: "128k",
+		faststart:    true,
+	}
+	if in.normalizeLoud {
+		opts.audioFilter = loudnormFilter
+	}
+	dec := encodeDecision{opts: opts}
+	mode := strings.ToLower(strings.TrimSpace(in.targetMode))
+	fill := strings.ToLower(strings.TrimSpace(in.verticalFill))
+	sourceKnown := in.sourceWidth > 0 && in.sourceHeight > 0
+	if !sourceKnown || mode == "original" {
+		dec.orientation = "passthrough"
+		return dec
+	}
+	switch mode {
+	case "horizontal":
+		if in.sourceHeight > in.sourceWidth {
+			// landscape canvas = the vertical target dims swapped (defaults 1080x1920 → 1920x1080)
+			dec.opts.videoFilter = fmt.Sprintf("scale=%d:%d,setsar=1", targetH, targetW)
+			dec.orientation = "vertical-to-horizontal"
+		} else {
+			dec.orientation = "horizontal"
+		}
+	default: // "", "auto", "vertical" → target vertical (short-video default)
+		if in.sourceWidth >= in.sourceHeight {
+			// landscape or square source → convert to vertical
+			vf := verticalFillFilter(fill, targetW, targetH)
+			dec.opts.videoFilter = vf
+			dec.orientation = "landscape-to-vertical:" + fillLabel(fill)
+		} else if in.sourceWidth != targetW || in.sourceHeight != targetH {
+			// already vertical but not the target canvas → normalize size
+			dec.opts.videoFilter = fmt.Sprintf("scale=%d:%d,setsar=1", targetW, targetH)
+			dec.orientation = "vertical:scale"
+		} else {
+			dec.orientation = "vertical:passthrough"
+		}
+	}
+	dec.needsReencode = dec.opts.videoFilter != ""
+	return dec
+}
+
+// verticalFillFilter returns the -vf chain that converts a landscape source to a vertical canvas.
+func verticalFillFilter(fill string, targetW, targetH int) string {
+	switch fill {
+	case "crop":
+		return fmt.Sprintf("crop=ih*%d/%d:ih,scale=%d:%d,setsar=1", targetW, targetH, targetW, targetH)
+	case "none":
+		return ""
+	default: // blur: blurred full-frame background + centered foreground (mainstream 直播切片 look)
+		return fmt.Sprintf("split[bg][fg];[bg]scale=%d:%d,boxblur=20:5[bg];[fg]scale=%d:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2", targetW, targetH, targetW)
+	}
+}
+
+func fillLabel(fill string) string {
+	switch fill {
+	case "crop":
+		return "crop"
+	case "none":
+		return "none"
+	default:
+		return "blur"
+	}
+}
+
+// buildEncodeArgs assembles the accurate (re-encode) ffmpeg command. Output is always the last arg
+// so callers can safely reference args[len-1] without index surgery.
+func buildEncodeArgs(start, duration float64, videoPath, output string, opts encodeOptions) []string {
+	args := []string{"ffmpeg", "-y", "-ss", formatSeconds(start), "-i", videoPath, "-t", formatSeconds(duration)}
+	if opts.videoFilter != "" {
+		args = append(args, "-vf", opts.videoFilter)
+	}
+	if opts.audioFilter != "" {
+		args = append(args, "-af", opts.audioFilter)
+	}
+	args = append(args, "-c:v", "libx264")
+	if opts.preset != "" {
+		args = append(args, "-preset", opts.preset)
+	}
+	if opts.crf != "" {
+		args = append(args, "-crf", opts.crf)
+	}
+	if opts.pixFmt != "" {
+		args = append(args, "-pix_fmt", opts.pixFmt)
+	}
+	if opts.audioCodec != "" {
+		args = append(args, "-c:a", opts.audioCodec)
+	}
+	if opts.audioBitrate != "" {
+		args = append(args, "-b:a", opts.audioBitrate)
+	}
+	if opts.faststart {
+		args = append(args, "-movflags", "+faststart")
+	}
+	return append(args, output)
+}
+
 // BuildLiveClipPlan converts LLM segment indexes into concrete clip timings and ffmpeg commands.
 func (s *LiveSliceService) BuildLiveClipPlan(req LiveClipPlanRequest) (*LiveClipPlanResult, error) {
 	if strings.TrimSpace(req.VideoPath) == "" {
@@ -695,6 +864,15 @@ func (s *LiveSliceService) BuildLiveClipPlan(req LiveClipPlanRequest) (*LiveClip
 	if err := validateSegmentIndexesForPlan(req.Segments, byIndex); err != nil {
 		return nil, err
 	}
+	dec := computeEncodeOptions(encodePlanInput{
+		targetMode:    req.TargetMode,
+		verticalFill:  req.VerticalFill,
+		sourceWidth:   req.SourceWidth,
+		sourceHeight:  req.SourceHeight,
+		targetWidth:   req.TargetWidth,
+		targetHeight:  req.TargetHeight,
+		normalizeLoud: req.NormalizeAudioLoudness == nil || *req.NormalizeAudioLoudness,
+	})
 
 	plan := &LiveClipPlanResult{
 		Clips:    []LiveClip{},
@@ -745,7 +923,16 @@ func (s *LiveSliceService) BuildLiveClipPlan(req LiveClipPlanRequest) (*LiveClip
 		}
 		output := uniqueClipOutput(req.OutputDir, segmentIndex, title, usedOutputs)
 		fastArgs := []string{"ffmpeg", "-y", "-ss", formatSeconds(start), "-i", req.VideoPath, "-t", formatSeconds(duration), "-c", "copy", output}
-		accurateArgs := []string{"ffmpeg", "-y", "-ss", formatSeconds(start), "-i", req.VideoPath, "-t", formatSeconds(duration), "-c:v", "libx264", "-c:a", "aac", output}
+		accurateArgs := buildEncodeArgs(start, duration, req.VideoPath, output, dec.opts)
+		method := "copy"
+		fastShellField := shellJoin(fastArgs)
+		fastArgsField := fastArgs
+		if dec.needsReencode {
+			// A video filter (orientation transform) forces re-encoding; fast stream-copy is invalid.
+			method = "encode"
+			fastShellField = ""
+			fastArgsField = nil
+		}
 		part := LiveClipPart{
 			PartIndex:        1,
 			SentenceStart:    segment.Start,
@@ -769,13 +956,15 @@ func (s *LiveSliceService) BuildLiveClipPlan(req LiveClipPlanRequest) (*LiveClip
 			End:              end,
 			Duration:         duration,
 			Output:           output,
-			FastCutShell:     shellJoin(fastArgs),
+			FastCutShell:     fastShellField,
 			AccurateCutShell: shellJoin(accurateArgs),
-			FastCutArgs:      fastArgs,
+			FastCutArgs:      fastArgsField,
 			AccurateCutArgs:  accurateArgs,
 			Parts:            []LiveClipPart{part},
 			Transcript:       clipSentences,
-			Method:           "copy",
+			Orientation:      dec.orientation,
+			VerticalFilter:   dec.opts.videoFilter,
+			Method:           method,
 			Status:           "planned",
 		})
 	}
@@ -801,6 +990,15 @@ func (s *LiveSliceService) BuildLiveSubjectClipPlan(req LiveSubjectClipPlanReque
 		return nil, err
 	}
 	invalid := liveInvalidSet(req.Invalid, byIndex)
+	dec := computeEncodeOptions(encodePlanInput{
+		targetMode:    req.TargetMode,
+		verticalFill:  req.VerticalFill,
+		sourceWidth:   req.SourceWidth,
+		sourceHeight:  req.SourceHeight,
+		targetWidth:   req.TargetWidth,
+		targetHeight:  req.TargetHeight,
+		normalizeLoud: req.NormalizeAudioLoudness == nil || *req.NormalizeAudioLoudness,
+	})
 	plan := &LiveClipPlanResult{
 		Clips:    []LiveClip{},
 		Rejected: []LiveRejected{},
@@ -813,7 +1011,7 @@ func (s *LiveSliceService) BuildLiveSubjectClipPlan(req LiveSubjectClipPlanReque
 		if title == "" {
 			title = fmt.Sprintf("subject-%02d", clipIndex)
 		}
-		clip, notices, err := buildSubjectClip(sentences, byIndex, invalid, req, completion, clipIndex, title, usedOutputs)
+		clip, notices, err := buildSubjectClip(sentences, byIndex, invalid, req, completion, clipIndex, title, usedOutputs, dec)
 		if err != nil {
 			plan.Rejected = append(plan.Rejected, LiveRejected{Index: clipIndex, Title: title, Reason: err.Error()})
 			continue
@@ -1150,7 +1348,7 @@ func validateSegmentIndexesForPlan(segments []LiveSegment, byIndex map[int64]Liv
 	return nil
 }
 
-func buildSubjectClip(sentences []LiveSentence, byIndex map[int64]LiveSentence, invalid map[int64]bool, req LiveSubjectClipPlanRequest, completion LiveSubjectCompletion, clipIndex int, title string, usedOutputs map[string]int) (LiveClip, []LiveClipNotice, error) {
+func buildSubjectClip(sentences []LiveSentence, byIndex map[int64]LiveSentence, invalid map[int64]bool, req LiveSubjectClipPlanRequest, completion LiveSubjectCompletion, clipIndex int, title string, usedOutputs map[string]int, dec encodeDecision) (LiveClip, []LiveClipNotice, error) {
 	scriptNotes := []LiveSentence{}
 	sourceIndexes := []int64{}
 	seen := map[int64]bool{}
@@ -1217,7 +1415,7 @@ func buildSubjectClip(sentences []LiveSentence, byIndex map[int64]LiveSentence, 
 		end = roundMillis(end)
 		partDuration = roundMillis(partDuration)
 		partOutput := uniquePartOutput(partsDir, clipIndex, i+1, title, partOutputCounts)
-		accurateArgs := []string{"ffmpeg", "-y", "-ss", formatSeconds(start), "-i", req.VideoPath, "-t", formatSeconds(partDuration), "-c:v", "libx264", "-c:a", "aac", partOutput}
+		accurateArgs := buildEncodeArgs(start, partDuration, req.VideoPath, partOutput, dec.opts)
 		parts = append(parts, LiveClipPart{
 			PartIndex:        i + 1,
 			SentenceStart:    group[0],
@@ -1249,25 +1447,38 @@ func buildSubjectClip(sentences []LiveSentence, byIndex map[int64]LiveSentence, 
 		Status:        "planned",
 	}
 	if len(parts) == 1 {
-		clip.AccurateCutShell = parts[0].AccurateCutShell
-		clip.AccurateCutArgs = parts[0].AccurateCutArgs
-		clip.FastCutShell = parts[0].AccurateCutShell
-		clip.FastCutArgs = parts[0].AccurateCutArgs
-		clip.Method = "encode"
+		// Rebuild the encode command targeting the final output path (parts[0] originally wrote to a .parts path).
+		accurateArgs := buildEncodeArgs(parts[0].Start, parts[0].Duration, req.VideoPath, output, dec.opts)
+		accurateShell := shellJoin(accurateArgs)
 		clip.Output = output
+		clip.AccurateCutArgs = accurateArgs
+		clip.AccurateCutShell = accurateShell
 		clip.Parts[0].Output = output
-		clip.Parts[0].AccurateCutArgs[len(clip.Parts[0].AccurateCutArgs)-1] = output
-		clip.Parts[0].AccurateCutShell = shellJoin(clip.Parts[0].AccurateCutArgs)
-		clip.AccurateCutArgs = clip.Parts[0].AccurateCutArgs
-		clip.AccurateCutShell = clip.Parts[0].AccurateCutShell
-		clip.FastCutArgs = clip.Parts[0].AccurateCutArgs
-		clip.FastCutShell = clip.Parts[0].AccurateCutShell
+		clip.Parts[0].AccurateCutArgs = accurateArgs
+		clip.Parts[0].AccurateCutShell = accurateShell
+		if dec.needsReencode {
+			// Orientation transform forces re-encoding; expose no fast (stream-copy) command.
+			clip.FastCutArgs = nil
+			clip.FastCutShell = ""
+		} else {
+			// No transform: alias fast to the encode command so the agent's fast-then-accurate loop
+			// runs the single re-encode once and succeeds.
+			clip.FastCutArgs = accurateArgs
+			clip.FastCutShell = accurateShell
+		}
+		clip.Method = "encode"
+		clip.Orientation = dec.orientation
+		clip.VerticalFilter = dec.opts.videoFilter
 		return clip, notices, nil
 	}
 	concatListPath := strings.TrimSuffix(output, filepath.Ext(output)) + ".concat.txt"
 	concatListContent := buildConcatListContent(parts)
+	// Concat final stays stream-copy: each part was already re-encoded above to a consistent
+	// yuv420p profile (with the same orientation filter), so -c copy remuxes the join losslessly.
 	concatArgs := []string{"ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concatListPath, "-c", "copy", output}
 	clip.Method = "concat"
+	clip.Orientation = dec.orientation
+	clip.VerticalFilter = dec.opts.videoFilter
 	clip.ConcatListPath = concatListPath
 	clip.ConcatListContent = concatListContent
 	clip.ConcatArgs = concatArgs
