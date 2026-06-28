@@ -81,6 +81,15 @@ impl AppConfig {
         }
         let text = serde_json::to_string_pretty(self)?;
         fs::write(path, text)?;
+        // Tighten permissions: this file holds the user's AnbanWriter API key
+        // and ANTHROPIC_API_KEY in plaintext. The default umask is typically
+        // 0o644 (world-readable); restrict to owner-only on unix. (OS
+        // keychain-backed storage for the secrets is a follow-up.)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        }
         Ok(())
     }
 }

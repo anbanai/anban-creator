@@ -8,12 +8,16 @@ use tokio_util::sync::CancellationToken;
 /// Shared state managed by Tauri and accessed by IPC commands + the executor
 /// loop. `config` is behind an RwLock so the loop reads live values while
 /// commands mutate; `cancel` holds the active loop's cancellation token.
+///
+/// The lock-bearing fields are `Arc` so async IPC commands can `clone()` an
+/// owned handle and `.await` on it without borrowing `State` across the await
+/// (Tauri's macro requires async-command futures to be `'static`).
 pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
     pub config_dir: PathBuf,
     pub resources: Resources,
     pub running: Arc<AtomicBool>,
-    pub cancel: Mutex<Option<CancellationToken>>,
+    pub cancel: Arc<Mutex<Option<CancellationToken>>>,
 }
 
 impl AppState {
@@ -23,7 +27,7 @@ impl AppState {
             config_dir,
             resources,
             running: Arc::new(AtomicBool::new(false)),
-            cancel: Mutex::new(None),
+            cancel: Arc::new(Mutex::new(None)),
         }
     }
 }

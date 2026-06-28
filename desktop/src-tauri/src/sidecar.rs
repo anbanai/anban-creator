@@ -5,8 +5,11 @@ use std::process::Stdio;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
-/// Environment the spawned agent subprocess inherits beyond its flags.
+/// Per-run sidecar configuration: the process environment the spawned agent
+/// inherits plus the cancellation token shared with the executor loop.
 pub struct SidecarEnv {
     /// Path to the bundled Node executable (its parent dir is prepended to PATH
     /// so claude-agent-sdk-go can spawn the `claude` CLI).
@@ -17,6 +20,10 @@ pub struct SidecarEnv {
     pub anthropic_api_key: String,
     /// Original PATH to preserve system tools (ffmpeg may be system-installed).
     pub system_path: String,
+    /// Executor-loop cancellation token; fired when the user stops the executor
+    /// so run_agent can kill the spawned agent promptly instead of letting it
+    /// run (and burn quota) in the background.
+    pub cancel: CancellationToken,
 }
 
 /// One line of stdout/stderr forwarded to the frontend as a local-run event.
@@ -28,12 +35,31 @@ struct LogLine {
     message: String,
 }
 
+/// Emit one local-run log line. Best-effort: a failed emit (e.g. no listener)
+/// is silently dropped — the agent owns the authoritative progress stream.
+fn emit(app: &AppHandle, task_id: &str, level: &'static str, message: impl Into<String>) {
+    let _ = app.emit(
+        "local-run://event",
+        LogLine {
+            task_id: task_id.to_string(),
+            stage: "agent",
+            level,
+            message: message.into(),
+        },
+    );
+}
+
 /// Spawn the bundled `abwriter-agent` for a claimed task and stream its output
 /// to the frontend via `local-run://event` until it exits. The agent reports
 /// progress + results back to the cloud itself (using --api-key/--server-url,
 /// which the SDK surfaces as ANBAN_API_KEY/ANBAN_API_URL); we only observe.
 ///
-/// Argv mirrors `server/agent/docker_executor.go::buildAgentCommand`.
+/// If `env.cancel` fires while the agent is running we kill the subprocess so a
+/// stopped executor doesn't leave Claude Code running (and burning quota) in the
+/// background. Without this, the loop would block on `child.wait()` until the
+/// task finished on its own.
+///
+/// Argv + env mirror `server/agent/docker_executor.go::buildAgentCommand`.
 pub async fn run_agent(
     app: &AppHandle,
     agent_bin: &Path,
@@ -80,48 +106,59 @@ pub async fn run_agent(
     if !env.anthropic_api_key.is_empty() {
         cmd.env("ANTHROPIC_API_KEY", &env.anthropic_api_key);
     }
+    // Project context: the agent reads ANBAN_DEFAULT_PROJECT (not a flag) and
+    // forwards it to BuildUserPrompt. Mirror the cloud DockerExecutor
+    // (docker_executor.go sets ANBAN_DEFAULT_PROJECT=%s) so local tasks get the
+    // same project scoping — e.g. the topic-pool anti-double-consume `about:`
+    // invariant depends on BuildUserPrompt seeing the right project.
+    if !cfg.project_id.is_empty() {
+        cmd.env("ANBAN_DEFAULT_PROJECT", &cfg.project_id);
+    }
 
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
 
-    let log_stage = "agent";
     let mut child = cmd.spawn()?;
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
 
     let app_out = app.clone();
     let task_id_out = cfg.task_id.clone();
-    tokio::spawn(async move {
+    let out_handle: JoinHandle<()> = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            let _ = app_out.emit(
-                "local-run://event",
-                LogLine { task_id: task_id_out.clone(), stage: log_stage, level: "info", message: line },
-            );
+            emit(&app_out, &task_id_out, "info", line);
         }
     });
 
     let app_err = app.clone();
     let task_id_err = cfg.task_id.clone();
-    tokio::spawn(async move {
+    let err_handle: JoinHandle<()> = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            let _ = app_err.emit(
-                "local-run://event",
-                LogLine { task_id: task_id_err.clone(), stage: log_stage, level: "warn", message: line },
-            );
+            emit(&app_err, &task_id_err, "warn", line);
         }
     });
 
-    let status = child.wait().await?;
-    let level = if status.success() { "info" } else { "error" };
-    let _ = app.emit(
-        "local-run://event",
-        LogLine {
-            task_id: cfg.task_id.clone(),
-            stage: log_stage,
-            level,
-            message: format!("agent exited ({})", status),
-        },
-    );
+    // Wait for exit OR cancellation. On cancel we kill + reap the child so a
+    // stopped executor halts the running task promptly (the loop can't reach
+    // its next cancel-check while it's blocked in this await).
+    tokio::select! {
+        status = child.wait() => {
+            let status = status?;
+            let level: &'static str = if status.success() { "info" } else { "error" };
+            emit(app, &cfg.task_id, level, format!("agent exited ({})", status));
+        }
+        _ = env.cancel.cancelled() => {
+            emit(app, &cfg.task_id, "warn", "本地执行器已停止，终止当前 agent".to_string());
+            // Best-effort kill + reap so we don't orphan the process tree.
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+    }
+
+    // The forwarders exit on their own once the child's pipes close (they do on
+    // both normal exit and kill); abort anyway so cleanup is deterministic.
+    out_handle.abort();
+    err_handle.abort();
     Ok(())
 }

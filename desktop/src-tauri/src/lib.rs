@@ -54,7 +54,7 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     // Give the window a tick to come up before the first claim.
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    let _ = commands_start(&handle);
+                    let _ = commands_start(&handle).await;
                 });
             }
 
@@ -79,10 +79,12 @@ pub fn run() {
 }
 
 /// Spawn the local executor if provisioned. Mirrors the start_local_executor
-/// command but callable from setup without a State extractor.
-fn commands_start(app: &tauri::AppHandle) -> Result<bool, String> {
+/// command but callable from setup without a State extractor. Async because it's
+/// invoked from inside `tauri::async_runtime::spawn` (an async context) — using
+/// the blocking lock variants there would panic/deadlock the runtime.
+async fn commands_start(app: &tauri::AppHandle) -> Result<bool, String> {
     let state = app.state::<state::AppState>();
-    let cfg = state.config.blocking_read().clone();
+    let cfg = state.config.read().await.clone();
     if !provision::status(&state.resources, &cfg, false).available {
         return Ok(false);
     }
@@ -91,7 +93,7 @@ fn commands_start(app: &tauri::AppHandle) -> Result<bool, String> {
     }
     let cancel = tokio_util::sync::CancellationToken::new();
     {
-        let mut slot = state.cancel.blocking_lock();
+        let mut slot = state.cancel.lock().await;
         *slot = Some(cancel.clone());
     }
     let config = state.config.clone();

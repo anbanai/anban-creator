@@ -30,10 +30,11 @@ pub struct LocalExecutionConfig {
     pub has_content_image: bool,
     #[serde(default)]
     pub has_tail_image: bool,
-    /// Returned by the server claim contract; reserved for project-scoped
-    /// workspace namespacing. Not yet consumed by the agent argv builder.
+    /// Returned by the server claim contract; injected into the spawned agent's
+    /// env as ANBAN_DEFAULT_PROJECT (mirrors the cloud DockerExecutor) so the
+    /// agent's BuildUserPrompt sees the project context (e.g. the topic-pool
+    /// anti-double-consume `about:` invariant depends on it).
     #[serde(default)]
-    #[allow(dead_code)]
     pub project_id: String,
 }
 
@@ -112,7 +113,15 @@ pub async fn run_loop(
     res: Resources,
     cancel: CancellationToken,
 ) {
-    let client = match reqwest::Client::builder().build() {
+    let client = match reqwest::Client::builder()
+        // Bound every request so a hung/slow server (or a transparent proxy
+        // that accepts the TCP connection but never responds) can't freeze the
+        // claim loop — which would also make the executor un-stoppable, since
+        // stop only takes effect on the next loop iteration.
+        .timeout(std::time::Duration::from_secs(15))
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .build()
+    {
         Ok(c) => c,
         Err(e) => {
             let _ = app.emit(
@@ -143,7 +152,14 @@ pub async fn run_loop(
             continue;
         }
 
-        match claim_once(&client, &snapshot.api_base, &snapshot.api_key).await {
+        // Claim is cancelable: a hung request (bounded by the client timeout)
+        // or a user-initiated stop can still interrupt this await so the loop
+        // can exit promptly instead of blocking on the in-flight claim.
+        let claimed = tokio::select! {
+            r = claim_once(&client, &snapshot.api_base, &snapshot.api_key) => r,
+            _ = cancel.cancelled() => break,
+        };
+        match claimed {
             Ok(Some(task_cfg)) => {
                 let _ = app.emit(
                     "local-run://event",
@@ -158,6 +174,7 @@ pub async fn run_loop(
                     plugin_dir: res.plugin_dir.clone().unwrap_or_default(),
                     anthropic_api_key: snapshot.claude_api_key.clone(),
                     system_path: std::env::var("PATH").unwrap_or_default(),
+                    cancel: cancel.clone(),
                 };
                 let server_url = derive_server_url(&snapshot.api_base);
                 let workspace = std::path::PathBuf::from(&snapshot.workspace_root);
