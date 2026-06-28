@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   mysql:
     image: mysql:8.0
@@ -40,6 +38,11 @@ services:
 
   seednote:
     image: xpzouying/xiaohongshu-mcp
+    # The upstream image publishes an amd64 manifest only. On arm64 hosts
+    # (Apple Silicon) the pull fails with "no matching manifest for
+    # linux/arm64/v8". Force amd64 and run under Docker Desktop's QEMU/Rosetta
+    # emulation. It's an MCP sidecar, so the emulation overhead is acceptable.
+    platform: linux/amd64
     container_name: abwriter-seednote
     restart: unless-stopped
     ports:
@@ -66,6 +69,11 @@ services:
       context: .
       dockerfile: docker/wcflink.Dockerfile
     image: abwriter-wcflink:latest
+    # Force build-only: this image is produced from the wcflink/ submodule and
+    # has no registry artifact. Without this, Compose probes Docker Hub for the
+    # (nonexistent) abwriter-wcflink image and aborts on a transient registry
+    # EOF instead of falling back to the Dockerfile build.
+    pull_policy: build
     container_name: abwriter-wcflink
     restart: unless-stopped
     ports:
