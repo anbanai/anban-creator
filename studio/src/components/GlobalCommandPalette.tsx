@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from 'next-themes'
 import {
@@ -12,6 +12,7 @@ import {
   CommandShortcut,
 } from '@/components/ui/command'
 import { allNavItems, type NavItem } from '@/lib/navigation'
+import { commandPaletteStore } from '@/lib/command-palette'
 
 const shortcutMap: Record<string, string> = {
   '仪表盘': 'g d',
@@ -34,12 +35,17 @@ function ShortcutLabel({ item }: { item: NavItem }) {
 }
 
 export default function GlobalCommandPalette() {
-  const [open, setOpen] = useState(false)
+  const open = useSyncExternalStore(commandPaletteStore.subscribe, commandPaletteStore.getSnapshot)
   const navigate = useNavigate()
   const { setTheme } = useTheme()
 
+  const setOpen = useCallback((v: boolean) => {
+    if (v) commandPaletteStore.open()
+    else commandPaletteStore.close()
+  }, [])
+
   const handleSelect = useCallback((action: () => void) => {
-    setOpen(false)
+    commandPaletteStore.close()
     action()
   }, [])
 
@@ -49,7 +55,7 @@ export default function GlobalCommandPalette() {
         const tag = (e.target as HTMLElement).tagName
         if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return
         e.preventDefault()
-        setOpen((prev) => !prev)
+        commandPaletteStore.toggle()
       }
     }
     window.addEventListener('keydown', onKeyDown)

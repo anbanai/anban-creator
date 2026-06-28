@@ -9,6 +9,7 @@ import {
   BarChart3,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
 import { buttonVariants } from "@/components/ui/button";
@@ -19,6 +20,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { workflowItems, analyticsItems, platformItems } from "@/lib/navigation";
+import {
+  commandPaletteStore,
+  commandPaletteAccelerator,
+} from "@/lib/command-palette";
 
 function useCollapsedState() {
   const [collapsed, setCollapsed] = useState(() => {
@@ -134,6 +139,9 @@ export default function Sidebar() {
           </div>
         )}
 
+        {/* Command palette trigger — the ⌘K palette is otherwise invisible. */}
+        <CommandPaletteTrigger collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pt-2" aria-label="主导航">
           <SidebarSection label="工作区" icon={Workflow} items={workflowItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
@@ -155,6 +163,57 @@ export default function Sidebar() {
       </aside>
     </>
   );
+}
+
+function CommandPaletteTrigger({
+  collapsed,
+  onSelect,
+}: {
+  collapsed: boolean
+  onSelect: () => void
+}) {
+  const openPalette = () => {
+    commandPaletteStore.open()
+    onSelect()
+  }
+
+  if (collapsed) {
+    return (
+      <div className="px-3 pt-2 pb-1">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={openPalette}
+                aria-label={`搜索 (${commandPaletteAccelerator})`}
+                className="flex w-full items-center justify-center rounded-md py-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              />
+            }
+          >
+            <Search className="h-4 w-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">搜索 ({commandPaletteAccelerator})</TooltipContent>
+        </Tooltip>
+      </div>
+    )
+  }
+
+  return (
+    <div className="px-3 pt-2 pb-1">
+      <button
+        type="button"
+        onClick={openPalette}
+        className="group flex w-full items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-3 py-2 text-sm text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground/80"
+      >
+        <Search className="h-4 w-4 shrink-0" />
+        <span className="flex-1 text-left">搜索…</span>
+        <kbd className="pointer-events-none rounded border border-sidebar-border bg-sidebar px-1.5 py-0.5 text-[10px] font-medium text-sidebar-foreground/60">
+          {commandPaletteAccelerator}
+        </kbd>
+      </button>
+    </div>
+  )
 }
 
 function SidebarSection({
