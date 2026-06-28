@@ -22,6 +22,8 @@ import { changePasswordSchema, type ChangePasswordFormValues } from '@/lib/schem
 import type { CreateAPIKeyResponse } from '@/types'
 import { tierLabels, tierDescriptions } from '@/lib/labels'
 import ModelConfigSection from '@/components/settings/ModelConfigSection'
+import LocalExecutorSection from '@/components/settings/LocalExecutorSection'
+import { isDesktop } from '@/lib/tauri'
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -95,6 +97,9 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="设置" description="管理你的账号和偏好设置。" />
+
+      {/* Local executor (desktop only — renders nothing in the web build) */}
+      {isDesktop() && <LocalExecutorSection />}
 
       {/* Profile Card */}
       <Card>

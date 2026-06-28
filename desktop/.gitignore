@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Tauri / Rust build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Bundled runtime resources (populated by populate-resources.sh; not committed —
+# too large and platform-specific)
+src-tauri/resources/bin/
+src-tauri/resources/claude/
+src-tauri/resources/claudecode/
+
+# Generated app icons (keep the source if you author them; ignore scratch)
+*.log
+.DS_Store

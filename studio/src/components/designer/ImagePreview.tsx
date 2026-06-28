@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { downloadBlob, openInExternalWindow } from '@/lib/tauri'
 
 export interface PreviewImage {
   url: string
@@ -97,16 +98,10 @@ export default function ImagePreview({
     try {
       const res = await fetch(current.url)
       const blob = await res.blob()
-      const blobUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = `designer-image-${currentIndex + 1}.${metadata.outputFormat || 'png'}`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(blobUrl)
+      // Native save dialog on desktop; anchor click in the browser.
+      await downloadBlob(`designer-image-${currentIndex + 1}.${metadata.outputFormat || 'png'}`, blob)
     } catch {
-      window.open(current.url, '_blank')
+      void openInExternalWindow(current.url)
     }
   }
 

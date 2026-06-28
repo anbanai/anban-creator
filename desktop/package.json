@@ -1,0 +1,19 @@
+{
+  "name": "anbanwriter-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AnbanWriter desktop shell (Tauri v2) — cloud data + local execution.",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:debug": "tauri build --debug"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

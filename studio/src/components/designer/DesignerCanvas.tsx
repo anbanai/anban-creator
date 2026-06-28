@@ -1,6 +1,7 @@
 import { Download, Maximize2, ImageIcon, Paintbrush } from 'lucide-react'
 import GeneratingAnimation from '@/components/designer/GeneratingAnimation'
 import type { GenerateImage } from '@/types/designer'
+import { downloadBlob, openInExternalWindow } from '@/lib/tauri'
 
 interface DesignerCanvasProps {
   images: GenerateImage[]
@@ -15,16 +16,10 @@ export default function DesignerCanvas({ images, isGenerating, canInpaint, onIma
     try {
       const res = await fetch(url)
       const blob = await res.blob()
-      const blobUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = `designer-${index + 1}.png`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(blobUrl)
+      // Native save dialog on desktop; anchor click in the browser.
+      await downloadBlob(`designer-${index + 1}.png`, blob)
     } catch {
-      window.open(url, '_blank')
+      void openInExternalWindow(url)
     }
   }
 

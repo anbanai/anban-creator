@@ -5,6 +5,7 @@ import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronR
 import { toast } from 'sonner'
 import type { TaskFile } from '@/types'
 import { api } from '../lib/api'
+import { downloadBlob } from '@/lib/tauri'
 import {
   Dialog,
   DialogContent,
@@ -113,12 +114,9 @@ function FilePreviewModalContent({
   const handleDownload = async () => {
     try {
       const blob = await api.tasks.downloadFileBlob(taskId, file.id)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = file.file_name
-      a.click()
-      URL.revokeObjectURL(url)
+      // Native save dialog on desktop (WKWebView ignores <a download>); anchor
+      // click in the browser. See lib/tauri.ts downloadBlob.
+      await downloadBlob(file.file_name, blob)
     } catch (err) {
       console.error('Failed to download file:', err)
       toast.error('文件下载失败')
@@ -392,12 +390,9 @@ function FilePreviewInline({
   const handleDownload = async () => {
     try {
       const blob = await api.tasks.downloadFileBlob(taskId, file.id)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = file.file_name
-      a.click()
-      URL.revokeObjectURL(url)
+      // Native save dialog on desktop (WKWebView ignores <a download>); anchor
+      // click in the browser. See lib/tauri.ts downloadBlob.
+      await downloadBlob(file.file_name, blob)
     } catch (err) {
       console.error('Failed to download file:', err)
       toast.error('文件下载失败')

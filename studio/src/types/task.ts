@@ -72,6 +72,11 @@ export interface Task {
   // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）。运行/失败/完成
   // 态可能填充；刚创建的 pending 任务为空。用于取消对话框展示「已消耗不退还」。
   total_cost_usd?: number | null
+  // Where the task runs (mirrors server model.ExecutionTarget*):
+  // ''/'cloud' = cloud Asynq/Docker; 'local' = awaiting a desktop local-executor
+  // claim; 'local_claimed' = a desktop claimed it and is running it on the user's
+  // machine. Drives the "本地运行中" badge on task cards. Absent on older rows.
+  execution_target?: ExecutionTarget
   created_at: string
   started_at: string
   completed_at: string
@@ -150,7 +155,14 @@ export interface CreateTaskRequest {
   target_platform?: string
   selling_points?: string
   language?: string
+  // ''/'cloud' (default) → cloud execution; 'local' → claim by the desktop
+  // local executor and run on the user's machine (enables ffmpeg/local-shell).
+  // The desktop sets this when a local executor is available; web always omits.
+  execution_target?: ExecutionTarget
 }
+
+// Where a task executes (mirrors server model.ExecutionTarget* constants).
+export type ExecutionTarget = '' | 'cloud' | 'local' | 'local_claimed'
 
 export interface WorkflowStatus {
   version: string
