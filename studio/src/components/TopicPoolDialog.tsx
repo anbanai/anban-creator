@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { toast } from 'sonner'
+import { getApiErrorMessage } from '@/lib/http-client'
 import type { Project, TopicPool } from '@/types'
 
 interface TopicPoolDialogProps {
@@ -28,9 +30,13 @@ export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialog
 
   const addMutation = useMutation({
     mutationFn: (topics: string[]) => api.topicPool.create(project.id, { topics }),
-    onSuccess: () => {
+    onSuccess: (_data, topics) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(project.id) })
       setNewTopics('')
+      toast.success(`已添加 ${topics.length} 条选题`)
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '添加选题失败，请重试'))
     },
   })
 
@@ -39,12 +45,18 @@ export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialog
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(project.id) })
     },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '删除选题失败，请重试'))
+    },
   })
 
   const resetMutation = useMutation({
     mutationFn: (id: number) => api.topicPool.reset(project.id, id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(project.id) })
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '重置选题失败，请重试'))
     },
   })
 

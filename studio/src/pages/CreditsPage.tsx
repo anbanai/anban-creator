@@ -105,7 +105,7 @@ export default function CreditsPage() {
               </p>
             </div>
             <Button
-              onClick={() => submit(async () => signInMutation.mutateAsync())}
+              onClick={() => { void submit(async () => signInMutation.mutateAsync()).catch(() => {}) }}
               disabled={signedInToday || signInMutation.isPending}
               loading={signInMutation.isPending}
             >

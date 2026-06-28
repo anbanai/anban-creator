@@ -204,7 +204,7 @@ export default function DashboardPage() {
             </div>
             <Button
               size="sm"
-              onClick={() => submit(async () => signInMutation.mutateAsync())}
+              onClick={() => { void submit(async () => signInMutation.mutateAsync()).catch(() => {}) }}
               disabled={(signInStatus?.signed_in_today ?? false) || signInMutation.isPending}
               loading={signInMutation.isPending}
             >

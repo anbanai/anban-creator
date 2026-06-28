@@ -141,6 +141,9 @@ export default function TaskDetailPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
       setShowCancelDialog(false)
     },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '取消任务失败，请稍后重试'))
+    },
   })
 
   const togglePublished = useMutation({
@@ -153,6 +156,9 @@ export default function TaskDetailPage() {
         queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(id) })
       }
     },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '切换发布状态失败，请稍后重试'))
+    },
   })
 
   // Publish-approval gate (Batch 4A): resume a held publish or close the gate.
@@ -163,6 +169,9 @@ export default function TaskDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['task', id] })
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
     },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '放行失败，请稍后重试'))
+    },
   })
 
   const rejectPublish = useMutation({
@@ -171,6 +180,9 @@ export default function TaskDetailPage() {
       toast.success('已驳回发布审核')
       queryClient.invalidateQueries({ queryKey: ['task', id] })
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '驳回失败，请稍后重试'))
     },
   })
 
@@ -184,8 +196,8 @@ export default function TaskDetailPage() {
       setShowDeleteDialog(false)
       navigate('/tasks')
     },
-    onError: () => {
-      toast.error('删除失败，请稍后重试')
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '删除失败，请稍后重试'))
     },
   })
 
@@ -464,7 +476,7 @@ export default function TaskDetailPage() {
               variant={task.published ? 'outline' : 'default'}
               size="sm"
               loading={togglePublished.isPending}
-              onClick={() => submit(async () => togglePublished.mutateAsync({ published: !task.published }))}
+              onClick={() => { void submit(async () => togglePublished.mutateAsync({ published: !task.published })).catch(() => {}) }}
             >
               <Eye className="h-4 w-4" />
               {task.published ? '已发布' : '标记已发布'}
@@ -520,7 +532,7 @@ export default function TaskDetailPage() {
               <Button
                 size="sm"
                 loading={approvePublish.isPending}
-                onClick={() => submit(async () => approvePublish.mutateAsync())}
+                onClick={() => { void submit(async () => approvePublish.mutateAsync()).catch(() => {}) }}
               >
                 <Send className="h-4 w-4" />
                 放行发布
@@ -529,7 +541,7 @@ export default function TaskDetailPage() {
                 variant="outline"
                 size="sm"
                 loading={rejectPublish.isPending}
-                onClick={() => submit(async () => rejectPublish.mutateAsync())}
+                onClick={() => { void submit(async () => rejectPublish.mutateAsync()).catch(() => {}) }}
               >
                 <Ban className="h-4 w-4" />
                 驳回
@@ -879,7 +891,7 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={cancelMutation.isPending} onClick={() => submit(async () => cancelMutation.mutateAsync())}>
+            <AlertDialogAction variant="destructive" disabled={cancelMutation.isPending} onClick={() => { void submit(async () => cancelMutation.mutateAsync()).catch(() => {}) }}>
               {cancelMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
               确定取消
             </AlertDialogAction>
@@ -898,7 +910,7 @@ export default function TaskDetailPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => submit(async () => deleteMutation.mutateAsync())}>
+            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { void submit(async () => deleteMutation.mutateAsync()).catch(() => {}) }}>
               {deleteMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
               确定删除
             </AlertDialogAction>

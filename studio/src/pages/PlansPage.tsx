@@ -7,6 +7,7 @@ import { Plus, FileText, Stamp, Target, Loader2, Images } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import type { Project, Plan, PlanType, CreatePlanRequest, Template } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
@@ -165,8 +166,8 @@ export default function PlansPage() {
       queryClient.invalidateQueries({ queryKey: ['plans'] })
       resetModal()
     },
-    onError: () => {
-      toast.error('创建计划失败')
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '创建计划失败'))
     },
   })
 
@@ -177,8 +178,8 @@ export default function PlansPage() {
       queryClient.invalidateQueries({ queryKey: ['plans'] })
       resetModal()
     },
-    onError: () => {
-      toast.error('更新计划失败')
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '更新计划失败'))
     },
   })
 
@@ -189,6 +190,9 @@ export default function PlansPage() {
       queryClient.invalidateQueries({ queryKey: ['plans'] })
       setDeleteTarget(null)
     },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '删除计划失败'))
+    },
   })
 
   const pauseMutation = useMutation({
@@ -197,6 +201,9 @@ export default function PlansPage() {
       toast.success('计划已暂停')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
     },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '暂停计划失败'))
+    },
   })
 
   const resumeMutation = useMutation({
@@ -204,6 +211,9 @@ export default function PlansPage() {
     onSuccess: () => {
       toast.success('计划已恢复')
       queryClient.invalidateQueries({ queryKey: ['plans'] })
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '恢复计划失败'))
     },
   })
 
@@ -421,12 +431,12 @@ export default function PlansPage() {
                 </div>
                 <div className="mt-2 flex justify-end gap-1.5 border-t border-border pt-2">
                   {plan.status === 'active' && (
-                    <Button variant="ghost" size="xs" loading={pauseMutation.isPending} onClick={() => submit(async () => pauseMutation.mutateAsync(plan.id))}>
+                    <Button variant="ghost" size="xs" loading={pauseMutation.isPending} onClick={() => { void submit(async () => pauseMutation.mutateAsync(plan.id)).catch(() => {}) }}>
                       暂停
                     </Button>
                   )}
                   {plan.status === 'paused' && (
-                    <Button variant="ghost" size="xs" loading={resumeMutation.isPending} onClick={() => submit(async () => resumeMutation.mutateAsync(plan.id))}>
+                    <Button variant="ghost" size="xs" loading={resumeMutation.isPending} onClick={() => { void submit(async () => resumeMutation.mutateAsync(plan.id)).catch(() => {}) }}>
                       恢复
                     </Button>
                   )}
@@ -745,7 +755,7 @@ export default function PlansPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
+            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) void submit(async () => deleteMutation.mutateAsync(deleteTarget)).catch(() => {}) }}>
               {deleteMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
               删除
             </AlertDialogAction>
