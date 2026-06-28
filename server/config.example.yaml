@@ -331,6 +331,9 @@ invitation:
 # task success/failure notifications and accept chat commands. Users bind their
 # own WeChat via a QR in Studio. Disabled or unreachable → graceful no-op.
 # Env overrides: ANBAN_WCF_ENABLED / ANBAN_WCF_BASE_URL / ANBAN_WCF_TIMEOUT / ANBAN_WCF_POLL_INTERVAL
+# Docker note: docker-compose.yml sets ANBAN_WCF_ENABLED=true for the server
+# container, so this `enabled: false` is overridden in the compose path; it only
+# governs local `make server-dev` runs.
 # ---------------------------------------------------------------------------
 wcf:
   enabled: false # Master switch. ANBAN_WCF_ENABLED=true to enable.

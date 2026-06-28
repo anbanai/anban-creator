@@ -94,17 +94,29 @@ func (s *WCFBindingService) StartBind(ctx context.Context, userID string) (Start
 	}
 
 	// Upsert a pending binding row so GetStatus can show "binding in progress".
+	// The login session id is stored server-side and re-checked at PollBindStatus
+	// so an authenticated user can't poll ANOTHER user's in-flight login — wcfLink
+	// mints session ids as "login_<unixnano>" (sequential, not random).
 	if existing, err := s.repo.WCFBindings().FindByUserID(ctx, userID); err == nil && existing != nil {
-		_ = s.repo.WCFBindings().UpdateStatus(ctx, userID, model.WCFBindingStatusPending)
+		// One atomic write (Save): flip to pending AND stamp the login session id
+		// in a single UPDATE. Two separate writes would leave the row pending
+		// under the PREVIOUS session id if the second failed — then PollBindStatus's
+		// ownership check would reject the user's own (new) id and lock them out.
+		existing.Status = model.WCFBindingStatusPending
+		existing.LoginSessionID = session.SessionID
+		if err := s.repo.WCFBindings().Update(ctx, existing); err != nil {
+			return StartBindResult{}, fmt.Errorf("persist wcf binding: %w", err)
+		}
 	} else {
 		now := time.Now()
 		binding := &model.WCFBinding{
-			ID:         uuid.NewString(),
-			UserID:     userID,
-			Status:     model.WCFBindingStatusPending,
-			LastSeenAt: now,
-			CreatedAt:  now,
-			UpdatedAt:  now,
+			ID:             uuid.NewString(),
+			UserID:         userID,
+			LoginSessionID: session.SessionID,
+			Status:         model.WCFBindingStatusPending,
+			LastSeenAt:     now,
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		}
 		if err := s.repo.WCFBindings().Create(ctx, binding); err != nil {
 			return StartBindResult{}, fmt.Errorf("create wcf binding: %w", err)
@@ -133,6 +145,19 @@ func (s *WCFBindingService) PollBindStatus(ctx context.Context, userID, sessionI
 	binding, err := s.repo.WCFBindings().FindByUserID(ctx, userID)
 	if err != nil || binding == nil {
 		return BindStatusResult{Available: true, Status: "unbound"}, ErrLoginNotPending
+	}
+	// Ownership: the supplied session id must be exactly the one THIS user's
+	// bind started. wcfLink session ids are sequential ("login_<unixnano>"), so
+	// without this check an authenticated user could poll another user's in-flight
+	// login and bind that WeChat to their own account. Strict equality — no legacy
+	// leniency: every pending row is created via StartBind, which stamps the
+	// session id in the same atomic write as the pending status flip, so a pending
+	// row always carries its id. A pre-fix pending row (empty id, only reachable
+	// at first deploy) is rejected once and self-heals when the user restarts
+	// StartBind. A lenient "" branch would instead let ANY guessed id through on a
+	// legacy row, reopening the very window this check exists to close.
+	if binding.LoginSessionID != sessionID {
+		return BindStatusResult{Available: true}, ErrLoginNotPending
 	}
 
 	session, err := s.client.GetLoginStatus(ctx, sessionID)

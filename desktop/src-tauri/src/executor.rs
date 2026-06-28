@@ -143,7 +143,15 @@ pub async fn run_loop(
         }
 
         let snapshot = cfg.read().await.clone();
-        let proceed = snapshot.agent_ready() && !snapshot.api_key.is_empty() && !snapshot.workspace_root.is_empty();
+        // Gate on the bundled agent binary too: without it every claimed task
+        // fails to spawn. The loop keeps claiming (there's no spawn-side backoff),
+        // so a missing binary would burn through the pending queue — each task
+        // lingering ~5 min until the stuck-task reaper force-fails + refunds it.
+        // Don't claim work we can't execute.
+        let proceed = snapshot.agent_ready()
+            && res.agent_bin.is_some()
+            && !snapshot.api_key.is_empty()
+            && !snapshot.workspace_root.is_empty();
         if !proceed {
             // Not fully provisioned — back off and re-check.
             if tokio::time::timeout(ERROR_BACKOFF, cancel.cancelled()).await.is_ok() {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/royalrick/anbanwriter/server/model"
@@ -119,5 +120,27 @@ func TestWCFPoller_AtMostOnceCursorOrder(t *testing.T) {
 	p.processEvent(context.Background(), ev)
 	if disp.calls != 1 {
 		t.Fatalf("dispatch should still occur; got %d", disp.calls)
+	}
+}
+
+func TestWCFPoller_PeerCaptureFailureSkipsDispatch(t *testing.T) {
+	// If persisting the captured peer fails (DB write error), the poller must
+	// NOT dispatch — otherwise a billable task is created with no persisted
+	// PeerID, so the reply (SendToBinding) silently no-ops: the user is charged
+	// for a task they never see confirmed, and the reply channel is never
+	// locked. UpdatePeerID is still attempted; only dispatch is skipped.
+	disp := &pollerFakeDispatcher{}
+	bindings := &pollerStubBindings{
+		binding: &model.WCFBinding{UserID: "u1", WCFAccountID: "acc", PeerID: "", Status: model.WCFBindingStatusActive},
+		updErr:  errors.New("db write failed"),
+	}
+	p := &WCFPoller{repo: &pollerStubRepo{bindings: bindings}, dispatcher: disp}
+	p.processEvent(context.Background(), inboundText("peerA", "写文章 测试"))
+
+	if disp.calls != 0 {
+		t.Fatalf("expected NO dispatch on peer-capture failure, got %d", disp.calls)
+	}
+	if bindings.peerSet != "peerA" {
+		t.Fatalf("UpdatePeerID should still be attempted; peerSet=%q want %q", bindings.peerSet, "peerA")
 	}
 }

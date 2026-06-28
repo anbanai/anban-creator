@@ -180,8 +180,17 @@ func (p *WCFPoller) processEvent(ctx context.Context, ev wcf.Event) {
 		}
 		if err := p.repo.WCFBindings().UpdatePeerID(ctx, binding.UserID, ev.FromUserID); err == nil {
 			binding.PeerID = ev.FromUserID
-		} else if p.logger != nil {
-			p.logger.Warn().Err(err).Str("user_id", binding.UserID).Msg("wcf peer capture failed")
+		} else {
+			// Persisting the peer lock failed — do NOT dispatch. Otherwise a
+			// billable task is created with no persisted PeerID, so the reply
+			// (SendToBinding) silently no-ops: the user is charged for a task
+			// they never see confirmed, and the reply channel is never locked.
+			// The poll cursor already advanced (at-most-once), so this command
+			// is dropped rather than retried.
+			if p.logger != nil {
+				p.logger.Warn().Err(err).Str("user_id", binding.UserID).Msg("wcf peer capture failed; skipping dispatch")
+			}
+			return
 		}
 	}
 
