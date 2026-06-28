@@ -90,15 +90,22 @@ func registerLiveSliceTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"sentences":            liveSentenceSchema(nil)["properties"].(map[string]any)["sentences"],
-				"segments":             liveSegmentArraySchema(),
-				"video_path":           map[string]any{"type": "string", "description": "Source video path used in generated ffmpeg commands"},
-				"output_dir":           map[string]any{"type": "string", "description": "Working directory; clips are planned under output_dir/exports"},
-				"invalid":              liveInvalidArraySchema(),
-				"min_duration_seconds": map[string]any{"type": "number", "default": 5},
-				"max_duration_seconds": map[string]any{"type": "number", "default": 180},
-				"head_padding_seconds": map[string]any{"type": "number", "default": 0},
-				"tail_padding_seconds": map[string]any{"type": "number", "default": 0},
+				"sentences":                liveSentenceSchema(nil)["properties"].(map[string]any)["sentences"],
+				"segments":                 liveSegmentArraySchema(),
+				"video_path":               map[string]any{"type": "string", "description": "Source video path used in generated ffmpeg commands"},
+				"output_dir":               map[string]any{"type": "string", "description": "Working directory; clips are planned under output_dir/exports"},
+				"invalid":                  liveInvalidArraySchema(),
+				"min_duration_seconds":     map[string]any{"type": "number", "default": 5},
+				"max_duration_seconds":     map[string]any{"type": "number", "default": 180},
+				"head_padding_seconds":     map[string]any{"type": "number", "default": 0},
+				"tail_padding_seconds":     map[string]any{"type": "number", "default": 0},
+				"target_mode":              map[string]any{"type": "string", "description": "Output orientation target: auto/vertical (short-video 9:16, default), horizontal, original (keep source)", "default": "auto"},
+				"vertical_fill":            map[string]any{"type": "string", "description": "How to fit a landscape source into a vertical canvas: blur (default, blurred bg + centered foreground, loses nothing), crop (center 9:16 column, loses sides), none", "default": "blur"},
+				"source_width":             map[string]any{"type": "integer", "description": "Source video width in px from ffprobe; supplying width+height enables orientation conversion"},
+				"source_height":            map[string]any{"type": "integer", "description": "Source video height in px from ffprobe; supplying width+height enables orientation conversion"},
+				"target_width":             map[string]any{"type": "integer", "description": "Target vertical canvas width", "default": 1080},
+				"target_height":            map[string]any{"type": "integer", "description": "Target vertical canvas height", "default": 1920},
+				"normalize_audio_loudness": map[string]any{"type": "boolean", "description": "Apply EBU R128 loudnorm on re-encode paths so clip audio is broadcast/Douyin-safe (default true)", "default": true},
 			},
 			"required": []any{"sentences", "segments", "video_path", "output_dir"},
 		},
@@ -110,15 +117,22 @@ func registerLiveSliceTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"sentences":            liveSentenceSchema(nil)["properties"].(map[string]any)["sentences"],
-				"completions":          liveSubjectCompletionArraySchema(),
-				"video_path":           map[string]any{"type": "string", "description": "Source video path used in generated ffmpeg commands"},
-				"output_dir":           map[string]any{"type": "string", "description": "Working directory; clips are planned under output_dir/exports"},
-				"invalid":              liveInvalidArraySchema(),
-				"min_duration_seconds": map[string]any{"type": "number", "default": 5},
-				"max_duration_seconds": map[string]any{"type": "number", "default": 180},
-				"head_padding_seconds": map[string]any{"type": "number", "default": 0},
-				"tail_padding_seconds": map[string]any{"type": "number", "default": 0},
+				"sentences":                liveSentenceSchema(nil)["properties"].(map[string]any)["sentences"],
+				"completions":              liveSubjectCompletionArraySchema(),
+				"video_path":               map[string]any{"type": "string", "description": "Source video path used in generated ffmpeg commands"},
+				"output_dir":               map[string]any{"type": "string", "description": "Working directory; clips are planned under output_dir/exports"},
+				"invalid":                  liveInvalidArraySchema(),
+				"min_duration_seconds":     map[string]any{"type": "number", "default": 5},
+				"max_duration_seconds":     map[string]any{"type": "number", "default": 180},
+				"head_padding_seconds":     map[string]any{"type": "number", "default": 0},
+				"tail_padding_seconds":     map[string]any{"type": "number", "default": 0},
+				"target_mode":              map[string]any{"type": "string", "description": "Output orientation target: auto/vertical (short-video 9:16, default), horizontal, original (keep source)", "default": "auto"},
+				"vertical_fill":            map[string]any{"type": "string", "description": "How to fit a landscape source into a vertical canvas: blur (default, blurred bg + centered foreground, loses nothing), crop (center 9:16 column, loses sides), none", "default": "blur"},
+				"source_width":             map[string]any{"type": "integer", "description": "Source video width in px from ffprobe; supplying width+height enables orientation conversion"},
+				"source_height":            map[string]any{"type": "integer", "description": "Source video height in px from ffprobe; supplying width+height enables orientation conversion"},
+				"target_width":             map[string]any{"type": "integer", "description": "Target vertical canvas width", "default": 1080},
+				"target_height":            map[string]any{"type": "integer", "description": "Target vertical canvas height", "default": 1920},
+				"normalize_audio_loudness": map[string]any{"type": "boolean", "description": "Apply EBU R128 loudnorm on re-encode paths so clip audio is broadcast/Douyin-safe (default true)", "default": true},
 			},
 			"required": []any{"sentences", "completions", "video_path", "output_dir"},
 		},
@@ -504,15 +518,22 @@ func buildLiveClipPlanHandler(ctx context.Context, req *mcp.CallToolRequest) (*m
 		return errorResult(err.Error()), nil
 	}
 	plan, err := svcs.LiveSliceSvc.BuildLiveClipPlan(service.LiveClipPlanRequest{
-		VideoPath:          videoPath,
-		OutputDir:          outputDir,
-		Sentences:          sentences,
-		Segments:           segments,
-		Invalid:            invalid,
-		MinDurationSeconds: floatFromArg(args["min_duration_seconds"], 0),
-		MaxDurationSeconds: floatFromArg(args["max_duration_seconds"], 0),
-		HeadPaddingSeconds: floatFromArg(args["head_padding_seconds"], 0),
-		TailPaddingSeconds: floatFromArg(args["tail_padding_seconds"], 0),
+		VideoPath:              videoPath,
+		OutputDir:              outputDir,
+		Sentences:              sentences,
+		Segments:               segments,
+		Invalid:                invalid,
+		MinDurationSeconds:     floatFromArg(args["min_duration_seconds"], 0),
+		MaxDurationSeconds:     floatFromArg(args["max_duration_seconds"], 0),
+		HeadPaddingSeconds:     floatFromArg(args["head_padding_seconds"], 0),
+		TailPaddingSeconds:     floatFromArg(args["tail_padding_seconds"], 0),
+		TargetMode:             stringFromArg(args["target_mode"]),
+		VerticalFill:           stringFromArg(args["vertical_fill"]),
+		SourceWidth:            intFromArg(args["source_width"], 0),
+		SourceHeight:           intFromArg(args["source_height"], 0),
+		TargetWidth:            intFromArg(args["target_width"], 0),
+		TargetHeight:           intFromArg(args["target_height"], 0),
+		NormalizeAudioLoudness: boolPtrFromArg(args["normalize_audio_loudness"]),
 	})
 	if err != nil {
 		return errorResult("build live clip plan: " + err.Error()), nil
@@ -546,15 +567,22 @@ func buildLiveSubjectClipPlanHandler(ctx context.Context, req *mcp.CallToolReque
 		return errorResult(err.Error()), nil
 	}
 	plan, err := svcs.LiveSliceSvc.BuildLiveSubjectClipPlan(service.LiveSubjectClipPlanRequest{
-		VideoPath:          videoPath,
-		OutputDir:          outputDir,
-		Sentences:          sentences,
-		Completions:        completions,
-		Invalid:            invalid,
-		MinDurationSeconds: floatFromArg(args["min_duration_seconds"], 0),
-		MaxDurationSeconds: floatFromArg(args["max_duration_seconds"], 0),
-		HeadPaddingSeconds: floatFromArg(args["head_padding_seconds"], 0),
-		TailPaddingSeconds: floatFromArg(args["tail_padding_seconds"], 0),
+		VideoPath:              videoPath,
+		OutputDir:              outputDir,
+		Sentences:              sentences,
+		Completions:            completions,
+		Invalid:                invalid,
+		MinDurationSeconds:     floatFromArg(args["min_duration_seconds"], 0),
+		MaxDurationSeconds:     floatFromArg(args["max_duration_seconds"], 0),
+		HeadPaddingSeconds:     floatFromArg(args["head_padding_seconds"], 0),
+		TailPaddingSeconds:     floatFromArg(args["tail_padding_seconds"], 0),
+		TargetMode:             stringFromArg(args["target_mode"]),
+		VerticalFill:           stringFromArg(args["vertical_fill"]),
+		SourceWidth:            intFromArg(args["source_width"], 0),
+		SourceHeight:           intFromArg(args["source_height"], 0),
+		TargetWidth:            intFromArg(args["target_width"], 0),
+		TargetHeight:           intFromArg(args["target_height"], 0),
+		NormalizeAudioLoudness: boolPtrFromArg(args["normalize_audio_loudness"]),
 	})
 	if err != nil {
 		return errorResult("build live subject clip plan: " + err.Error()), nil
@@ -958,6 +986,15 @@ func boolFromArg(v any, fallback bool) bool {
 		return b
 	}
 	return fallback
+}
+
+// boolPtrFromArg returns nil when the argument is absent so request structs can default
+// (a nil *bool is interpreted as the documented default, e.g. loudnorm enabled).
+func boolPtrFromArg(v any) *bool {
+	if b, ok := v.(bool); ok {
+		return &b
+	}
+	return nil
 }
 
 func intFromArg(v any, fallback int) int {

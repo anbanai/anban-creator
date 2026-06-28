@@ -1142,3 +1142,155 @@ func TestUploadLiveAudioRejectsLocalStorage(t *testing.T) {
 		t.Fatalf("error should guide OSS configuration, got: %v", err)
 	}
 }
+
+// argsHave reports whether the space-joined ffmpeg args contain substr. Filter chains (-vf / -af)
+// are passed as a single argv element, so whole-token equality would miss them; substring is robust.
+func argsHave(args []string, substr string) bool {
+	return strings.Contains(strings.Join(args, " "), substr)
+}
+
+func TestBuildLiveClipPlanAccurateArgsIncludeQualityFlags(t *testing.T) {
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+
+	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
+		VideoPath: "/tmp/live.mp4",
+		OutputDir: "output/live-slice/task",
+		Sentences: []LiveSentence{{Index: 1, Start: 10, End: 40, Text: "核心卖点"}},
+		Segments:  []LiveSegment{{Title: "卖点", Start: 1, End: 1}},
+	})
+	if err != nil {
+		t.Fatalf("build clip plan: %v", err)
+	}
+	clip := plan.Clips[0]
+	args := clip.AccurateCutArgs
+	if len(args) == 0 || args[len(args)-1] != clip.Output {
+		t.Fatalf("output must be the last accurate arg: %#v", args)
+	}
+	for _, want := range []string{"-pix_fmt", "yuv420p", "-crf", "20", "-preset", "veryfast", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-af", loudnormFilter} {
+		if !argsHave(args, want) {
+			t.Fatalf("accurate args missing %q: %#v", want, args)
+		}
+	}
+	// No source dimensions → passthrough: fast stream-copy must still be offered.
+	if clip.Method != "copy" || len(clip.FastCutArgs) == 0 {
+		t.Fatalf("expected copy/fast available for passthrough, method=%q fast=%#v", clip.Method, clip.FastCutArgs)
+	}
+	if clip.VerticalFilter != "" {
+		t.Fatalf("passthrough should have no vertical filter, got %q", clip.VerticalFilter)
+	}
+}
+
+func TestBuildLiveClipPlanLoudnormDisabled(t *testing.T) {
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	off := false
+	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
+		VideoPath:              "/tmp/live.mp4",
+		OutputDir:              "output/live-slice/task",
+		Sentences:              []LiveSentence{{Index: 1, Start: 10, End: 40, Text: "核心卖点"}},
+		Segments:               []LiveSegment{{Title: "卖点", Start: 1, End: 1}},
+		NormalizeAudioLoudness: &off,
+	})
+	if err != nil {
+		t.Fatalf("build clip plan: %v", err)
+	}
+	args := plan.Clips[0].AccurateCutArgs
+	if argsHave(args, "-af") || argsHave(args, loudnormFilter) {
+		t.Fatalf("loudnorm should be absent when disabled: %#v", args)
+	}
+}
+
+func TestBuildLiveClipPlanVerticalizesLandscapeSource(t *testing.T) {
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+
+	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
+		VideoPath:    "/tmp/live.mp4",
+		OutputDir:    "output/live-slice/task",
+		Sentences:    []LiveSentence{{Index: 1, Start: 10, End: 40, Text: "核心卖点"}},
+		Segments:     []LiveSegment{{Title: "卖点", Start: 1, End: 1}},
+		TargetMode:   "vertical",
+		VerticalFill: "blur",
+		SourceWidth:  1920,
+		SourceHeight: 1080,
+	})
+	if err != nil {
+		t.Fatalf("build clip plan: %v", err)
+	}
+	clip := plan.Clips[0]
+	if clip.Method != "encode" {
+		t.Fatalf("method = %q, want encode (filter forces re-encode)", clip.Method)
+	}
+	if len(clip.FastCutArgs) != 0 || clip.FastCutShell != "" {
+		t.Fatalf("fast cut must be suppressed when a video filter is active: %#v / %q", clip.FastCutArgs, clip.FastCutShell)
+	}
+	for _, want := range []string{"split[bg][fg]", "boxblur=20:5", "overlay=(W-w)/2:(H-h)/2", "-pix_fmt", "yuv420p", "-movflags", "+faststart"} {
+		if !argsHave(clip.AccurateCutArgs, want) {
+			t.Fatalf("accurate args missing %q: %#v", want, clip.AccurateCutArgs)
+		}
+	}
+	if !strings.Contains(clip.Orientation, "landscape-to-vertical:blur") {
+		t.Fatalf("orientation = %q", clip.Orientation)
+	}
+	if clip.VerticalFilter == "" {
+		t.Fatalf("vertical filter should be echoed for transparency")
+	}
+}
+
+func TestBuildLiveClipPlanVerticalCropFill(t *testing.T) {
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+
+	plan, err := svc.BuildLiveClipPlan(LiveClipPlanRequest{
+		VideoPath:    "/tmp/live.mp4",
+		OutputDir:    "output/live-slice/task",
+		Sentences:    []LiveSentence{{Index: 1, Start: 10, End: 40, Text: "核心卖点"}},
+		Segments:     []LiveSegment{{Title: "卖点", Start: 1, End: 1}},
+		TargetMode:   "vertical",
+		VerticalFill: "crop",
+		SourceWidth:  1920,
+		SourceHeight: 1080,
+	})
+	if err != nil {
+		t.Fatalf("build clip plan: %v", err)
+	}
+	clip := plan.Clips[0]
+	if clip.Method != "encode" {
+		t.Fatalf("method = %q, want encode", clip.Method)
+	}
+	if !argsHave(clip.AccurateCutArgs, "crop=ih*1080/1920:ih") || !argsHave(clip.AccurateCutArgs, "scale=1080:1920") {
+		t.Fatalf("crop fill vf missing: %#v", clip.AccurateCutArgs)
+	}
+	if argsHave(clip.AccurateCutArgs, "boxblur") {
+		t.Fatalf("crop fill must not use boxblur: %#v", clip.AccurateCutArgs)
+	}
+}
+
+func TestBuildLiveClipPlanSkipsConversionForAlreadyVerticalAndUnknown(t *testing.T) {
+	svc := NewLiveSliceServiceWithClients(nil, nil, nil, nil)
+	base := LiveClipPlanRequest{
+		VideoPath:  "/tmp/live.mp4",
+		OutputDir:  "output/live-slice/task",
+		Sentences:  []LiveSentence{{Index: 1, Start: 10, End: 40, Text: "核心卖点"}},
+		Segments:   []LiveSegment{{Title: "卖点", Start: 1, End: 1}},
+		TargetMode: "vertical",
+	}
+
+	// Already-vertical at target size → no transform, fast copy available.
+	vertical := base
+	vertical.SourceWidth = 1080
+	vertical.SourceHeight = 1920
+	vp, err := svc.BuildLiveClipPlan(vertical)
+	if err != nil {
+		t.Fatalf("build clip plan: %v", err)
+	}
+	if c := vp.Clips[0]; c.Method != "copy" || c.VerticalFilter != "" {
+		t.Fatalf("already-vertical target should pass through: method=%q vf=%q", c.Method, c.VerticalFilter)
+	}
+
+	// No source dims supplied → cannot safely transform, pass through.
+	unknown, err := svc.BuildLiveClipPlan(base)
+	if err != nil {
+		t.Fatalf("build clip plan: %v", err)
+	}
+	if u := unknown.Clips[0]; u.Method != "copy" || u.VerticalFilter != "" {
+		t.Fatalf("unknown source should pass through: method=%q vf=%q", u.Method, u.VerticalFilter)
+	}
+}
