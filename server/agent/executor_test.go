@@ -886,8 +886,13 @@ func TestLoadAgentDefinition(t *testing.T) {
 					if len(def.Tools) != 0 {
 						t.Error("designer must omit tools to inherit MCP tools")
 					}
-				} else if len(def.Tools) == 0 {
-					t.Error("no tools specified")
+				} else if len(def.Tools) != 0 {
+					// All MCP-needing agents omit `tools:` to inherit the full mcp__anban__*
+					// toolset (Claude Code treats `tools` as an allowlist — see
+					// claudecode/CLAUDE.md). designer is asserted above; the others must
+					// also omit. The legacy "must specify tools" policy was dropped when
+					// agents migrated to MCP-tool inheritance.
+					t.Errorf("%s agent should omit tools frontmatter to inherit MCP tools; got %v", agentName, def.Tools)
 				}
 			})
 		}

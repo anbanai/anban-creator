@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -236,25 +236,11 @@ func errorResult(msg string) *mcp.CallToolResult {
 	}
 }
 
-// noopLogger returns a discard slog.Logger if zlog is nil.
-func noopLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(ioDiscard{}, nil))
-}
-
-type ioDiscard struct{}
-
-func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
-
 // isManagedCall returns true if the MCP call is from a managed key (agent task execution).
 func isManagedCall(ctx context.Context) bool {
 	info := auth.TokenInfoFromContext(ctx)
 	if info == nil {
 		return false
 	}
-	for _, s := range info.Scopes {
-		if s == "managed" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(info.Scopes, "managed")
 }
