@@ -200,6 +200,9 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	if offset < 0 {
+		offset = 0
+	}
 
 	plans, total, err := h.service.List(c.Context(), userID, offset, limit, projectID)
 	if err != nil {

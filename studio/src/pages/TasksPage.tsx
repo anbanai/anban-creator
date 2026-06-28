@@ -709,7 +709,7 @@ export default function TasksPage() {
                               onClick={(e) => {
                                 e.preventDefault()
                                 e.stopPropagation()
-                                submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published }))
+                                void submit(async () => togglePublished.mutateAsync({ id: task.id, published: !task.published })).catch(() => {})
                               }}
                               className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
                                 task.published

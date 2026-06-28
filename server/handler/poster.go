@@ -112,6 +112,9 @@ func (h *PosterHandler) List(c fiber.Ctx) error {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	if offset < 0 {
+		offset = 0
+	}
 
 	tasks, total, err := h.service.ListByUserID(c.Context(), userID, offset, limit)
 	if err != nil {

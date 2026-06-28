@@ -64,6 +64,9 @@ func (h *TemplateHandler) List(c fiber.Ctx) error {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	if offset < 0 {
+		offset = 0
+	}
 
 	// Validate scope; reject unknown values rather than silently falling back.
 	switch scope {
