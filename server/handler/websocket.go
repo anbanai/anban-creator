@@ -236,7 +236,7 @@ func (h *WebSocketHub) HandleLoginWebSocket(authHandler *AuthHandler) fiber.Hand
 			})
 		}
 
-		if authHandler == nil || !authHandler.HasValidQRScene(scene) {
+		if authHandler == nil || !authHandler.HasValidQRScene(c.Context(), scene) {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "invalid or expired QR code scene",
 			})

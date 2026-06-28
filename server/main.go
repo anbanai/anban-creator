@@ -346,7 +346,7 @@ func main() {
 			Msg("goal mode configured (uses Claude Code native /goal)")
 	}
 	// 13.1 Create auth handler (after creditSvc so we can grant registration bonus).
-	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits)
+	authHandler := handler.NewAuthHandler(jwtSvc, wechatSvc, &cfg.WeChat, repo, emailSvc, log, wsHub, cfg.Invitation.Enabled, cfg.Invitation.MaxPerUser, creditSvc, &cfg.Credits, rdb)
 
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
