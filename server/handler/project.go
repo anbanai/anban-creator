@@ -255,6 +255,31 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
 
+	// E-commerce projects snapshot the chosen template's reusable defaults
+	// (default deliverable modules, target platform, brand brief, default image
+	// model) onto the project at creation. The task resolver reads
+	// project.EcommerceDefaults as the single source of truth — without this
+	// copy the column is empty and every ecommerce task is billed without its
+	// package modules / brand brief / target platform. Product photos and
+	// selling points stay per-task (not defaulted). Non-ecommerce platforms and
+	// template-less projects are unaffected.
+	if ch.Platform == model.PlatformEcommerce && ch.CreatedFromTemplateID != "" && h.templateSvc != nil {
+		if tmpl, terr := h.templateSvc.GetByID(c.Context(), ch.CreatedFromTemplateID); terr == nil && tmpl != nil {
+			te := tmpl.Ecommerce.Data()
+			ch.SetEcommerceDefaults(model.EcommerceProjectDefaults{
+				DefaultSelectedModules: te.DefaultSelectedModules,
+				TargetPlatform:         te.TargetPlatform,
+				BrandBrief:             te.BrandBrief,
+				ImageModelKey:          te.ImageModelKey,
+			})
+		} else if terr != nil {
+			// Fetch failed (template deleted / DB blip): defaults stay empty and the
+			// project is billed without its package modules. Log so this stays
+			// traceable rather than the silent regression this snapshot exists to fix.
+			h.logger.Warn().Err(terr).Str("template_id", ch.CreatedFromTemplateID).Msg("ecommerce project created but template defaults fetch failed; project ecommerce_defaults left empty")
+		}
+	}
+
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")

@@ -64,3 +64,9 @@ studio/dist/
 
 # Playwright MCP debug artifacts
 .playwright-mcp/
+
+# Local eval/scratch harnesses (not product code; contain compiled Python)
+eval-article-viral-strategy/
+seednote-workspace/
+__pycache__/
+*.pyc

@@ -33,6 +33,13 @@ type EcommerceProjectDefaults struct {
 	ImageModelKey          string         `json:"image_model_key,omitempty"`
 }
 
+// SetEcommerceDefaults stores reusable e-commerce defaults into the
+// EcommerceDefaults JSON column. Thin wrapper over datatypes.NewJSONType so
+// handler/service call sites don't each need to import gorm.io/datatypes.
+func (p *Project) SetEcommerceDefaults(ec EcommerceProjectDefaults) {
+	p.EcommerceDefaults = datatypes.NewJSONType(ec)
+}
+
 // Project is the SINGLE SOURCE OF TRUTH for every style/persona/theme/ecommerce
 // setting. Tasks and plans inherit from it with precedence task > project; a task
 // may override individual dimensions via Task.Overrides.
