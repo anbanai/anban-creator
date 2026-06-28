@@ -36,3 +36,24 @@ jobs:
 
       - name: Test
         run: go test -race ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: studio
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type-check
+        run: bunx tsc -b
+
+      - name: Test
+        run: bun run test

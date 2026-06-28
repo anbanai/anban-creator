@@ -300,6 +300,9 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
+    onError: () => {
+      toast.error('归档项目失败，请重试')
+    },
   })
 
   const restoreMutation = useMutation({
@@ -308,6 +311,9 @@ export default function ProjectsPage() {
       toast.success('项目已恢复')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
+    },
+    onError: () => {
+      toast.error('恢复项目失败，请重试')
     },
   })
 
@@ -520,8 +526,8 @@ export default function ProjectsPage() {
               onEdit={openEdit}
               archiving={archiveMutation.isPending}
               restoring={restoreMutation.isPending}
-              onArchive={(id) => submit(async () => archiveMutation.mutateAsync(id))}
-              onRestore={(id) => submit(async () => restoreMutation.mutateAsync(id))}
+              onArchive={(id) => { void submit(async () => archiveMutation.mutateAsync(id)).catch(() => {}) }}
+              onRestore={(id) => { void submit(async () => restoreMutation.mutateAsync(id)).catch(() => {}) }}
               onDelete={handleDelete}
             />
           ))}
@@ -870,7 +876,7 @@ export default function ProjectsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) submit(async () => deleteMutation.mutateAsync(deleteTarget)) }}>
+            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) void submit(async () => deleteMutation.mutateAsync(deleteTarget)).catch(() => {}) }}>
               {deleteMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
               删除
             </AlertDialogAction>

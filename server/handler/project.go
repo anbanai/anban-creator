@@ -1046,20 +1046,9 @@ func cleanOwnedUploadKey(imageURL, userID string) (string, fiberErrorFunc) {
 		return "", func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
 	}
 	// Align with FileHandler.ServeFile (file.go) ownership rules:
-	// projects/references are user uploads (purpose="project" / "reference"),
-	// {userID}/designer/ are designer-generated images.
-	// "uploads/channels/" is the legacy prefix from before the channel→project
-	// rename; keep accepting it so existing user uploads remain analyzable.
-	allowed := []string{
-		"uploads/projects/" + userID + "/",
-		"uploads/references/" + userID + "/",
-		"uploads/channels/" + userID + "/",
-		userID + "/designer/",
-	}
-	for _, prefix := range allowed {
-		if strings.HasPrefix(cleanKey, prefix) {
-			return cleanKey, nil
-		}
+	// projects/references are user uploads, {userID}/designer/ are designer images.
+	if isUserOwnedStorageKey(userID, cleanKey, userID+"/designer/") {
+		return cleanKey, nil
 	}
 	return "", func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }
 }

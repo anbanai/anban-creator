@@ -378,22 +378,11 @@ func (h *PlanHandler) Pause(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"message": "plan paused"})
 }
 
-// validateImageModelKeyForUser resolves the user's tier and validates image_model_key.
-// Returns nil if the key is acceptable for this user, an error otherwise.
-// Fail-closed: if the user's tier cannot be determined (repo unavailable or
-// lookup error), default to Free so a DB hiccup cannot accidentally widen
-// access to Pro/Enterprise-only models.
+// validateImageModelKeyForUser delegates to the package-level helper, binding
+// this handler's repository and image presets. See validateImageModelKeyForUser
+// in image_model.go for the fail-closed tier-resolution rules.
 func (h *PlanHandler) validateImageModelKeyForUser(c fiber.Ctx, userID, key string) error {
-	if key == "" {
-		return nil
-	}
-	tier := model.TierFree
-	if h.repo != nil {
-		if user, err := h.repo.Users().FindByID(c.Context(), userID); err == nil && user != nil {
-			tier = model.ResolveTier(user.Tier)
-		}
-	}
-	return ValidateImageModelKey(key, tier, h.imagePresets)
+	return validateImageModelKeyForUser(c.Context(), h.repo, userID, key, h.imagePresets)
 }
 
 // Resume handles POST /api/v1/plans/:id/resume.
