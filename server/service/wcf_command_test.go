@@ -9,8 +9,8 @@ import (
 
 func TestParseCommand(t *testing.T) {
 	cases := []struct {
-		name    string
-		input   string
+		name     string
+		input    string
 		wantKind wcfCommandKind
 		wantArgs string
 	}{
@@ -40,13 +40,20 @@ func TestParseCommand(t *testing.T) {
 		{"cancel nospaced", "取消abc-123", cmdCancel, "abc-123"},
 
 		// Create — task TYPE comes from the project; these are pure aliases.
+		// Only explicit genre verbs trigger; bare high-frequency words (写/文章/任务)
+		// are excluded so casual phrases don't create billable tasks.
 		{"create article spaced", "写文章 夏日防晒指南", cmdCreate, "夏日防晒指南"},
 		{"create article nospaced", "写文章夏日防晒", cmdCreate, "夏日防晒"},
 		{"create seednote", "种草 测评好物", cmdCreate, "测评好物"},
 		{"create seednote verb", "写种草新品", cmdCreate, "新品"},
 		{"create poster", "海报 双十一促销", cmdCreate, "双十一促销"},
-		{"create generic write", "写 测试主题", cmdCreate, "测试主题"},
-		{"create bare", "写", cmdCreate, ""},
+		{"create generic verb", "创建 新主题", cmdCreate, "新主题"},
+		{"create generic verb bare", "创建", cmdCreate, ""},
+		// Bare/ambiguous prefixes are NOT create triggers (anti-false-positive).
+		{"casual write not create", "写 测试主题", cmdUnknown, ""},
+		{"bare write not create", "写", cmdUnknown, ""},
+		{"casual article not create", "文章写得不错", cmdUnknown, ""},
+		{"casual task not create", "任务太多了", cmdUnknown, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

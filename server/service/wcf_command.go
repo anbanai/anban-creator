@@ -46,9 +46,12 @@ type parsedCommand struct {
 
 // createPrefixes are the trigger words for "create a task". The task TYPE comes
 // from the default project's platform — these words are pure aliases, ordered
-// longest-first so "写文章" wins over the bare "写" prefix.
+// longest-first. Bare high-frequency single/ambiguous words ("写", "文章",
+// "任务") are deliberately excluded: a create command is BILLABLE (credits are
+// charged), so a casual phrase like "写得好" or "任务太多了" must NOT spin up a
+// task. Only explicit genre verbs survive — keep it that way when adding aliases.
 var createPrefixes = []string{
-	"写文章", "写种草", "种草", "海报", "文章", "创建", "任务", "写",
+	"写文章", "写种草", "种草", "海报", "创建",
 }
 
 // statusPrefixes / cancelPrefixes trigger id-taking commands.

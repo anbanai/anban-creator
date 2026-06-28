@@ -154,17 +154,11 @@ func main() {
 
 	// 9.1 Create Seednote (种草笔记) sidecar client.
 	var seednoteClient *seednote.Client
-	{
-		seednoteClient = seednote.NewClient(cfg.Seednote.BaseURL, time.Duration(cfg.Seednote.Timeout)*time.Second)
-		hcCtx, hcCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := seednoteClient.HealthCheck(hcCtx); err != nil {
-			hcCancel()
-			log.Error().Err(err).Msg("Seednote sidecar 不可用，种草笔记功能将不可用")
-			seednoteClient = nil
-		} else {
-			hcCancel()
-			log.Info().Str("base_url", cfg.Seednote.BaseURL).Msg("Seednote sidecar client initialized")
-		}
+	seednoteClient = seednote.NewClient(cfg.Seednote.BaseURL, time.Duration(cfg.Seednote.Timeout)*time.Second)
+	if awaitSidecar(log, "seednote", seednoteClient.HealthCheck, 30*time.Second) {
+		log.Info().Str("base_url", cfg.Seednote.BaseURL).Msg("Seednote sidecar client initialized")
+	} else {
+		seednoteClient = nil
 	}
 
 	// 9.2 Create wcfLink (WeChat bot) sidecar client. Disabled entirely when
@@ -173,14 +167,10 @@ func main() {
 	var wcfClient *wcf.Client
 	if cfg.WCF.Enabled {
 		wcfClient = wcf.NewClient(cfg.WCF.BaseURL, time.Duration(cfg.WCF.Timeout)*time.Second)
-		hcCtx, hcCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := wcfClient.HealthCheck(hcCtx); err != nil {
-			hcCancel()
-			log.Error().Err(err).Msg("wcfLink sidecar 不可用，微信通知/命令功能将不可用")
-			wcfClient = nil
-		} else {
-			hcCancel()
+		if awaitSidecar(log, "wcfLink", wcfClient.HealthCheck, 30*time.Second) {
 			log.Info().Str("base_url", cfg.WCF.BaseURL).Msg("wcfLink sidecar client initialized")
+		} else {
+			wcfClient = nil
 		}
 	}
 
@@ -681,6 +671,14 @@ func main() {
 			}
 		}
 
+		// 1b. Signal the WebSocket hub to stop and close every live client
+		// connection. Best-effort with no completion barrier: run() drains its
+		// quit signal asynchronously and closeAllClients unblocks each serve()/ping
+		// loop as its conn closes. Run before HTTP shutdown so the hub and ping
+		// loops tear down rather than leak to process exit — Fiber force-closes
+		// the sockets regardless, but without the quit signal run() never exits.
+		wsHub.Shutdown()
+
 		// 2. Shutdown HTTP server.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -744,6 +742,36 @@ func main() {
 }
 
 // createTaskLogDir ensures the task log directory exists if configured.
+// awaitSidecar retries a sidecar health check until it succeeds or the wait
+// deadline elapses. Sidecars (wcfLink, seednote) bind their port asynchronously
+// after their container starts; in Docker Compose the server only waits for
+// service_started (not service_healthy), so a single probe at startup races the
+// sidecar's readiness and would nil the client — silently disabling that
+// feature for the entire process lifetime — even though the sidecar becomes
+// healthy a few seconds later. Retry with backoff instead; on final failure the
+// caller still nils the client so the rest of the stack degrades gracefully.
+func awaitSidecar(log *zerolog.Logger, name string, check func(context.Context) error, wait time.Duration) bool {
+	const interval = 2 * time.Second
+	end := time.Now().Add(wait)
+	for attempt := 1; ; attempt++ {
+		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := check(c)
+		cancel()
+		if err == nil {
+			if attempt > 1 {
+				log.Info().Str("sidecar", name).Int("attempts", attempt).Msg("sidecar ready after retry")
+			}
+			return true
+		}
+		if time.Now().After(end) {
+			log.Error().Err(err).Str("sidecar", name).Msg("sidecar 不可用，对应功能将不可用")
+			return false
+		}
+		log.Warn().Err(err).Str("sidecar", name).Msg("sidecar 尚未就绪，重试中")
+		time.Sleep(interval)
+	}
+}
+
 func createTaskLogDir(dir string, log *zerolog.Logger) {
 	if dir == "" {
 		return

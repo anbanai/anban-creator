@@ -53,12 +53,19 @@ func (r *wcfBindingRepository) FindByUserID(ctx context.Context, userID string) 
 
 func (r *wcfBindingRepository) FindByWCFAccountID(ctx context.Context, accountID string) (*model.WCFBinding, error) {
 	var b model.WCFBinding
-	// Resolve only ACTIVE bindings: a stale unbound/pending row must not block a
+	// Resolve only ACTIVE bindings: a stale pending/unbound row must not block a
 	// fresh bind or false-positive a conflict, and only active accounts should
-	// receive commands. ORDER BY created_at keeps resolution deterministic in the
-	// rare race where two rows briefly share an account id (it's transient — the
-	// binding flow is low-frequency, and binding uniqueness is enforced upstream
-	// by the StartBind active-check).
+	// receive commands.
+	//
+	// ORDER BY created_at + First makes resolution deterministic. This matters
+	// because cross-user account uniqueness is NOT DB-enforced: StartBind only
+	// refuses a re-bind for the SAME user, and the cross-user conflict check in
+	// PollBindStatus (this lookup then Update) is check-then-write, not atomic;
+	// wcf_account_id is intentionally non-unique so pending rows can coexist.
+	// In the "bind your own WeChat" model, two users sharing one account (the
+	// only way to hit the TOCTOU) is a narrow, recoverable edge, not a
+	// stranger-billing path — peer capture guards that. Deterministic
+	// earliest-wins keeps poller/notifier resolution stable either way.
 	if err := r.db.WithContext(ctx).
 		Where("wcf_account_id = ? AND status = ?", accountID, model.WCFBindingStatusActive).
 		Order("created_at").
@@ -68,6 +75,10 @@ func (r *wcfBindingRepository) FindByWCFAccountID(ctx context.Context, accountID
 	return &b, nil
 }
 
+// Update overwrites the ENTIRE row via Save (not a partial column update):
+// callers must load the row first and mutate only the fields they intend to
+// change, so unrelated columns (e.g. LoginSessionID) aren't clobbered with zero
+// values.
 func (r *wcfBindingRepository) Update(ctx context.Context, binding *model.WCFBinding) error {
 	return r.db.WithContext(ctx).Save(binding).Error
 }

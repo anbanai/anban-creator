@@ -618,6 +618,22 @@ func TestBuildUserPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildUserPrompt_TopicPreClaimWording(t *testing.T) {
+	// The topic-pool anti-double-consume invariant depends on this EXACT
+	// wording. When the server pre-claims a topic it injects it here, and the
+	// research skills pattern-match on "create content about:" to detect a
+	// pre-claimed topic and skip their own claim_topic call. If this phrase
+	// drifts, the skills would re-claim on every run. (Server-side
+	// ClaimForTask idempotency on task_id still prevents true double-consume,
+	// but the skill behavior would be wrong — pin the substring here too.)
+	for _, agent := range []string{"seednote", "wechatarticle"} {
+		got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "X", AgentName: agent})
+		if !strings.Contains(got, "create content about: X") {
+			t.Errorf("agent %q: prompt %q must contain the pre-claim marker \"create content about: X\"", agent, got)
+		}
+	}
+}
+
 func TestBuildUserPrompt_Goal(t *testing.T) {
 	// Empty goal — no /goal prefix.
 	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote"})

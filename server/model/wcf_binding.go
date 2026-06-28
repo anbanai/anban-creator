@@ -22,6 +22,12 @@ const (
 type WCFBinding struct {
 	ID               string     `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID           string     `gorm:"type:char(36);uniqueIndex;not null" json:"user_id"`
+	// LoginSessionID is the wcfLink login session this user's pending bind is
+	// tied to. Stored server-side at StartBind and re-checked at PollBindStatus
+	// so an authenticated user can't poll ANOTHER user's in-flight login by
+	// guessing its session id (wcfLink mints session ids as "login_<unixnano>",
+	// which is sequential, not random). Never serialized to clients.
+	LoginSessionID   string     `gorm:"type:varchar(128)" json:"-"`
 	WCFAccountID     string     `gorm:"type:varchar(128);index" json:"wcf_account_id"`
 	PeerID           string     `gorm:"type:varchar(128)" json:"peer_id"`              // captured from first inbound message
 	DefaultProjectID string     `gorm:"type:char(36);index" json:"default_project_id"` // resolved project for create commands
