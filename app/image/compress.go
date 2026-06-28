@@ -5,6 +5,8 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,6 +201,39 @@ func IsValidImageFormat(filePath string) bool {
 
 	ext := strings.ToLower(filepath.Ext(filePath))
 	return validExts[ext]
+}
+
+// IsValidImageFile reports whether filePath is a supported image by BOTH its
+// extension and its actual content. It first applies the cheap IsValidImageFormat
+// extension gate, then sniffs the first 512 bytes with http.DetectContentType and
+// requires an image/* MIME.
+//
+// Why the content check: a file renamed with an image extension (a PDF saved as
+// cover.jpg, an HTML error page downloaded as a .png) passes IsValidImageFormat,
+// then survives the compress path — CompressImage logs "compress failed, using
+// original" and falls back to the raw bytes — and only fails downstream at WeChat
+// material upload with a cryptic provider error. Validating content up front turns
+// that into a clear, early, hint-bearing rejection instead of a confusing failure
+// after seconds of upload work.
+//
+// IsValidImageFormat (extension-only) is retained as a pure, allocation-free
+// prefilter; IsValidImageFile is the strict variant used wherever a file is about
+// to be processed or uploaded.
+func IsValidImageFile(filePath string) bool {
+	if !IsValidImageFormat(filePath) {
+		return false
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	// http.DetectContentType only inspects the leading bytes; 512 is the conventional
+	// sniff size (matches the HTTP Content-Type sniffing spec).
+	sniff := make([]byte, 512)
+	n, _ := io.ReadFull(f, sniff)
+	mime := http.DetectContentType(sniff[:n])
+	return strings.HasPrefix(mime, "image/")
 }
 
 // ImageInfo 图片信息

@@ -137,7 +137,7 @@ func (p *Processor) UploadLocalImage(filePath string) (*UploadResult, error) {
 	}
 
 	// 检查图片格式
-	if !IsValidImageFormat(filePath) {
+	if !IsValidImageFile(filePath) {
 		return nil, &ProcessorError{Message: fmt.Sprintf("unsupported image format: %s", filePath), HintText: "支持格式: JPG, PNG"}
 	}
 
@@ -178,7 +178,7 @@ func (p *Processor) DownloadAndUpload(url string) (*UploadResult, error) {
 	defer os.Remove(tmpPath)
 
 	// 检查格式
-	if !IsValidImageFormat(tmpPath) {
+	if !IsValidImageFile(tmpPath) {
 		return nil, fmt.Errorf("downloaded file is not a valid image")
 	}
 
@@ -561,7 +561,7 @@ func (p *Processor) DownloadOnly(url, outputPath string) (*DownloadResult, error
 	}
 	defer os.Remove(tmpPath)
 
-	if !IsValidImageFormat(tmpPath) {
+	if !IsValidImageFile(tmpPath) {
 		return nil, fmt.Errorf("downloaded file is not a valid image")
 	}
 
@@ -608,7 +608,7 @@ func (p *Processor) ValidateCoverImage(filePath string) error {
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return &ProcessorError{Message: fmt.Sprintf("cover image not found: %s", filePath), HintText: "请检查封面图片路径是否正确"}
 	}
-	if !IsValidImageFormat(filePath) {
+	if !IsValidImageFile(filePath) {
 		return &ProcessorError{Message: "unsupported cover image format", HintText: "封面图支持格式: JPG, PNG"}
 	}
 	info, err := GetImageInfo(filePath)
