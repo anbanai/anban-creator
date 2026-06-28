@@ -12,8 +12,10 @@ import {
   Search,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
+import LocalExecutorStatusPill from "@/components/desktop/LocalExecutorStatusPill";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { isDesktop } from "@/lib/tauri";
 import {
   Tooltip,
   TooltipContent,
@@ -153,6 +155,7 @@ export default function Sidebar() {
 
         {/* Bottom: Platform + Settings */}
         <div className="px-3 py-2 space-y-0.5">
+          {isDesktop() && <LocalExecutorStatusPill collapsed={collapsed} />}
           <SidebarBottomSection collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
         </div>
 

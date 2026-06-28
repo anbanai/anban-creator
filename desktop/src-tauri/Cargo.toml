@@ -17,6 +17,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-dialog = "2"
+# Prevent a second desktop instance from launching (and registering a second
+# local executor) — focuses the existing window instead. Must be the first plugin.
+tauri-plugin-single-instance = "2"
 
 # Async runtime + HTTP + serialization for the local executor loop.
 tokio = { version = "1", features = ["full"] }

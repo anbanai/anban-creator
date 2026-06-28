@@ -11,6 +11,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { NavigationProgress } from '@/components/NavigationProgress'
 import ShortcutHelp from '@/components/ShortcutHelp'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette'
+import LocalExecutorLayer from '@/components/desktop/LocalExecutorLayer'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 
 // Lazy-loaded pages
@@ -121,6 +122,7 @@ function AppRoutes() {
               <NavigationProgress />
               <KeyboardShortcuts />
               <GlobalCommandPalette />
+              <LocalExecutorLayer />
               <AppLayout />
             </ProtectedRoute>
           }

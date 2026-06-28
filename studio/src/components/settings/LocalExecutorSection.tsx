@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Loader2, RefreshCw, FolderOpen, Play, Square, CheckCircle2, XCircle } from 'lucide-react'
+import { Loader2, RefreshCw, FolderOpen, Play, Square } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/common/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { ReadinessChecklist } from '@/components/settings/ReadinessChecklist'
 import {
   getLocalExecutorStatus,
   setLocalExecutorConfig,
@@ -14,8 +15,11 @@ import {
   startLocalExecutor,
   stopLocalExecutor,
   pickDirectory,
+  getApiBase,
+  setApiBase,
   type LocalExecutorStatus,
 } from '@/lib/tauri'
+import { applyApiBase } from '@/lib/http-client'
 
 /**
  * Desktop-only local-executor configuration. Renders only inside the Tauri
@@ -30,6 +34,8 @@ export default function LocalExecutorSection() {
   const [claudeKey, setClaudeKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [toggling, setToggling] = useState(false)
+  const [apiBaseInput, setApiBaseInput] = useState('')
+  const [savingBase, setSavingBase] = useState(false)
 
   const { data: status, isLoading, refetch, isFetching } = useQuery<LocalExecutorStatus | null>({
     queryKey: ['local-executor-status'],
@@ -42,9 +48,31 @@ export default function LocalExecutorSection() {
     if (status) setWorkspace(status.workspace || '')
   }, [status?.workspace])
 
+  // Load the current cloud API base once so self-hosters can view/change it.
+  useEffect(() => {
+    void getApiBase().then((b) => {
+      if (b) setApiBaseInput(b)
+    })
+  }, [])
+
   const handlePick = async () => {
     const dir = await pickDirectory()
     if (dir) setWorkspace(dir)
+  }
+
+  const handleSaveBase = async () => {
+    setSavingBase(true)
+    try {
+      const ok = await setApiBase(apiBaseInput)
+      if (ok) {
+        applyApiBase(apiBaseInput)
+        toast.success('云端地址已更新')
+      } else {
+        toast.error('保存失败')
+      }
+    } finally {
+      setSavingBase(false)
+    }
   }
 
   const handleSave = async () => {
@@ -117,16 +145,7 @@ export default function LocalExecutorSection() {
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> 正在检查依赖…
           </div>
         ) : (
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <Readiness ok={status?.api_key_set} label="AnbanWriter API Key" />
-            <Readiness ok={status?.claude_authenticated} label="Claude 鉴权" />
-            <Readiness ok={status?.workspace_set} label="本地工作区" />
-            <Readiness ok={status?.agent_present} label="abwriter-agent" />
-            <Readiness ok={status?.node_present} label="Node 运行时" />
-            <Readiness ok={status?.claude_present} label="claude-code" />
-            <Readiness ok={status?.plugin_present} label="claudecode 插件" />
-            <Readiness ok={status?.ffmpeg_present} label="ffmpeg（可选）" optional />
-          </ul>
+          <ReadinessChecklist status={status} />
         )}
         {status && !ready && status.reason && (
           <p className="text-xs text-amber-600">{status.reason}</p>
@@ -185,22 +204,25 @@ export default function LocalExecutorSection() {
             {status?.running ? '停止' : '启动'}
           </Button>
         </div>
+
+        {/* Cloud API base — self-hosters point this at their own server. */}
+        <div className="space-y-1.5 border-t border-border pt-3">
+          <Label htmlFor="le-api-base" className="text-xs">
+            云端 API 地址（自部署可改）
+          </Label>
+          <div className="flex gap-2">
+            <Input
+              id="le-api-base"
+              value={apiBaseInput}
+              onChange={(e) => setApiBaseInput(e.target.value)}
+              placeholder="https://api.anbanai.com/api/v1"
+            />
+            <Button variant="secondary" onClick={handleSaveBase} disabled={savingBase || !apiBaseInput.trim()}>
+              {savingBase ? <Loader2 className="h-4 w-4 animate-spin" /> : '应用'}
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
-  )
-}
-
-function Readiness({ ok, label, optional }: { ok?: boolean; label: string; optional?: boolean }) {
-  if (ok) {
-    return (
-      <li className="flex items-center gap-1.5 text-muted-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> {label}
-      </li>
-    )
-  }
-  return (
-    <li className={`flex items-center gap-1.5 ${optional ? 'text-muted-foreground/60' : 'text-amber-600'}`}>
-      <XCircle className="h-3.5 w-3.5" /> {label}
-    </li>
   )
 }

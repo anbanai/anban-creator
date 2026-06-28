@@ -5,7 +5,9 @@ mod paths;
 mod provision;
 mod sidecar;
 mod state;
+mod window_state;
 
+use std::sync::Arc;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Build the webview initialization script that seeds localStorage with the
@@ -20,9 +22,49 @@ fn init_script(api_base: &str) -> String {
     )
 }
 
+/// Native app menu (About / Services / Hide / Quit, Edit, Window). All items are
+/// OS-predefined so the standard shortcuts (⌘Q, ⌘C, ⌘V, ⌘A, ⌘Z, ⌘M …) route
+/// correctly — without this the macOS menu bar shows an empty/generic app menu.
+/// No custom items → no accelerator parsing → no runtime-panic risk.
+fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, SubmenuBuilder};
+    let app_menu = SubmenuBuilder::new(app, "AnbanWriter")
+        .about(None)
+        .separator()
+        .services()
+        .hide()
+        .hide_others()
+        .separator()
+        .quit()
+        .build()?;
+    let edit_menu = SubmenuBuilder::new(app, "编辑")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let window_menu = SubmenuBuilder::new(app, "窗口")
+        .minimize()
+        .maximize()
+        .build()?;
+    Menu::with_items(app, &[&app_menu, &edit_menu, &window_menu])
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single-instance guard: a second launch focuses the existing window
+        // instead of starting a second executor (which would compete for claims).
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Resolve platform config dir + load persisted config.
@@ -36,17 +78,57 @@ pub fn run() {
             let should_run = config.local_executor_enabled;
             let api_base_for_script = config.api_base.clone();
 
-            app.manage(state::AppState::new(config, config_dir, resources));
+            app.manage(state::AppState::new(config, config_dir.clone(), resources));
 
-            // Create the main window in code so we can attach an init script
-            // (config-defined windows can't take one). Label "main" matches the
-            // capability in capabilities/default.json.
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("AnbanWriter")
-                .inner_size(1280.0, 820.0)
-                .min_inner_size(960.0, 640.0)
-                .initialization_script(init_script(&api_base_for_script))
-                .build()?;
+            // Native menu (standard items + working copy/paste/quit shortcuts).
+            let menu_handle = app.handle().clone();
+            menu_handle.set_menu(build_menu(&menu_handle)?)?;
+
+            // Restore last window geometry (size/pos/maximized) if we have it.
+            let saved = window_state::load(&config_dir);
+            let mut builder =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("AnbanWriter")
+                    .min_inner_size(960.0, 640.0)
+                    .initialization_script(init_script(&api_base_for_script));
+            if let Some(s) = &saved {
+                builder = builder.inner_size(s.width as f64, s.height as f64);
+            } else {
+                builder = builder.inner_size(1280.0, 820.0);
+            }
+            // Label "main" matches the capability in capabilities/default.json.
+            let main_window = builder.build()?;
+            if let Some(s) = &saved {
+                let _ = main_window.set_position(tauri::PhysicalPosition::new(s.x, s.y));
+                if s.maximized {
+                    let _ = main_window.maximize();
+                }
+            }
+
+            // Persist geometry on resize/move, throttled to once/second (those
+            // events fire continuously during a drag/resize).
+            let throttle = Arc::new(window_state::SaveThrottle::new(std::time::Duration::from_secs(1)));
+            let win = main_window.clone();
+            let cd = config_dir.clone();
+            main_window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_))
+                    && throttle.allow()
+                {
+                    let size = win.inner_size().unwrap_or_default();
+                    let pos = win.outer_position().unwrap_or_default();
+                    let maximized = win.is_maximized().unwrap_or(false);
+                    window_state::save(
+                        &cd,
+                        &window_state::WindowState {
+                            width: size.width,
+                            height: size.height,
+                            x: pos.x,
+                            y: pos.y,
+                            maximized,
+                        },
+                    );
+                }
+            });
 
             // Optionally auto-start the executor on launch.
             if should_run {
