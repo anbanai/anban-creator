@@ -1222,7 +1222,10 @@ func TestBuildLiveClipPlanVerticalizesLandscapeSource(t *testing.T) {
 	if len(clip.FastCutArgs) != 0 || clip.FastCutShell != "" {
 		t.Fatalf("fast cut must be suppressed when a video filter is active: %#v / %q", clip.FastCutArgs, clip.FastCutShell)
 	}
-	for _, want := range []string{"split[bg][fg]", "boxblur=20:5", "overlay=(W-w)/2:(H-h)/2", "-pix_fmt", "yuv420p", "-movflags", "+faststart"} {
+	// setsar=1 is mandatory on the blur path: scale changes pixel dims and without
+	// resetting SAR ffmpeg derives one to preserve the input DAR, tagging the
+	// 1080x1920 frame SAR=256:81 / DAR=16:9 → renders horizontal on Douyin/WeChat.
+	for _, want := range []string{"split[bg][fg]", "boxblur=20:5", "overlay=(W-w)/2:(H-h)/2,setsar=1", "setsar=1", "-pix_fmt", "yuv420p", "-movflags", "+faststart"} {
 		if !argsHave(clip.AccurateCutArgs, want) {
 			t.Fatalf("accurate args missing %q: %#v", want, clip.AccurateCutArgs)
 		}

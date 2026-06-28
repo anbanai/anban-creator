@@ -111,7 +111,13 @@ func verticalFillFilter(fill string, targetW, targetH int) string {
 	case "none":
 		return ""
 	default: // blur: blurred full-frame background + centered foreground (mainstream 直播切片 look)
-		return fmt.Sprintf("split[bg][fg];[bg]scale=%d:%d,boxblur=20:5[bg];[fg]scale=%d:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2", targetW, targetH, targetW)
+		// setsar=1 on the overlay output is mandatory: scale changes the pixel
+		// dimensions, and without resetting SAR ffmpeg derives one to preserve the
+		// input DAR — so a 1920x1080 source scaled to 1080x1920 gets tagged
+		// SAR=256:81 / DAR=16:9 and renders HORIZONTAL on SAR-aware players
+		// (Douyin/WeChat), defeating the whole 9:16 upgrade. crop and scale
+		// branches both set it; the blur branch must too.
+		return fmt.Sprintf("split[bg][fg];[bg]scale=%d:%d,boxblur=20:5[bg];[fg]scale=%d:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1", targetW, targetH, targetW)
 	}
 }
 
