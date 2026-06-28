@@ -28,6 +28,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel, ecommerceModuleCatalog, ecommerceTargetPlatformOptions, ecommerceLanguageOptions } from '@/lib/labels'
+import { isLocalExecutorAvailable } from '@/lib/tauri'
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
@@ -84,6 +85,22 @@ export default function TasksPage() {
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
+  // Desktop local-executor integration: when the Tauri shell reports a
+  // provisioned local executor, default new tasks to run on the user's machine
+  // (enables ffmpeg / local-shell). The user can flip this off to force cloud.
+  // In the browser isLocalExecutorAvailable() is always false → no-op.
+  const [localExecutorAvailable, setLocalExecutorAvailable] = useState(false)
+  const [runLocally, setRunLocally] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    isLocalExecutorAvailable().then((ok) => {
+      if (!cancelled) {
+        setLocalExecutorAvailable(ok)
+        setRunLocally(ok)
+      }
+    })
+    return () => { cancelled = true }
+  }, [])
   // 递增令牌：openCreate 的模板异步回填在 .then 中比对，若对话框已重开/切走则丢弃，
   // 避免陈旧回填串改表单（与 ProjectsPage 同一防护思路）。
   const taskCreateTokenRef = useRef(0)
@@ -399,6 +416,8 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
+      // Route to the desktop local executor when available and opted in.
+      execution_target: localExecutorAvailable && runLocally ? 'local' : undefined,
     }))
   }
 
@@ -678,6 +697,11 @@ export default function TasksPage() {
                           <Badge variant={statusBadgeVariant(task.status)}>
                             {taskStatusLabel[task.status] || task.status}
                           </Badge>
+                          {(task.execution_target === 'local' || task.execution_target === 'local_claimed') && (
+                            <Badge variant="outline" className="text-[10px]">
+                              本地{task.execution_target === 'local' ? '待认领' : '运行中'}
+                            </Badge>
+                          )}
                           {task.status === 'completed' && (
                             <button
                               type="button"
@@ -1203,6 +1227,12 @@ export default function TasksPage() {
             </form>
           </Form>
           <DialogFooter>
+            {localExecutorAvailable && (
+              <label className="mr-auto flex cursor-pointer items-center gap-2 text-xs text-muted-foreground" title="在本机运行：使用桌面端内置的 Claude Code + ffmpeg，可剪辑本地视频、执行本地命令。关闭则改为云端执行。">
+                <Switch checked={runLocally} onCheckedChange={setRunLocally} />
+                在本机运行
+              </label>
+            )}
             <Button variant="secondary" onClick={closeModal}>取消</Button>
             <Button
               type="submit"
