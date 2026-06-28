@@ -174,6 +174,10 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 			} else {
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to reload task for refund")
 			}
+			// Notify the task owner's WeChat of the cancellation (best-effort).
+			if s.wcfNotifier != nil {
+				s.wcfNotifier.NotifyTerminal(persistCtx, task, model.TaskStatusCancelled, errMsg)
+			}
 			if task.ProjectID != "" && s.pubsub != nil {
 				s.pubsub.ReleaseSlot(persistCtx, task.ProjectID)
 			}
@@ -342,6 +346,11 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
 	}
 
+	// Notify the task owner's WeChat of the terminal success (best-effort).
+	if s.wcfNotifier != nil {
+		s.wcfNotifier.NotifyTerminal(persistCtx, task, model.TaskStatusCompleted, "")
+	}
+
 	// Release concurrency slot.
 	if task.ProjectID != "" {
 		if s.pubsub != nil {
@@ -478,6 +487,9 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			}
 
 			s.refundTaskByMode(ctx, task, "rate_limit_exhausted")
+			if s.wcfNotifier != nil {
+				s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
+			}
 
 			// A slot opened on this project — dispatch pending tasks.
 			if task.ProjectID != "" {
@@ -524,6 +536,21 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 				if updateErr := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "retry enqueue failed: "+err.Error()); updateErr != nil {
 					s.logger.Error().Err(updateErr).Str("task_id", taskID).Msg("failed to mark task as failed after enqueue failure")
 				}
+				// Terminal failure: refund the charge and notify the owner, mirroring
+				// the other terminal-failure branches. The concurrency slot was
+				// already released above; dispatch pending so the freed slot is used.
+				if cerr := s.repo.Tasks().SetCompletedAt(ctx, taskID); cerr != nil {
+					s.logger.Error().Err(cerr).Str("task_id", taskID).Msg("failed to set completed_at on failure")
+				}
+				s.refundTaskByMode(ctx, task, "retry_enqueue_failed")
+				if s.wcfNotifier != nil {
+					s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, "retry enqueue failed: "+err.Error())
+				}
+				if task.ProjectID != "" {
+					if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
+						s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after enqueue failure")
+					}
+				}
 				return err
 			}
 		} else {
@@ -548,6 +575,9 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 		}
 		s.refundTaskByMode(ctx, task, "auth_error")
+		if s.wcfNotifier != nil {
+			s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
+		}
 		if task.ProjectID != "" {
 			if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
 				s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
@@ -579,6 +609,9 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 
 		// Refund credits for failed task (skipped for goal-mode tasks).
 		s.refundTaskByMode(ctx, task, "execution_failed")
+		if s.wcfNotifier != nil {
+			s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
+		}
 
 		// A slot opened on this project — dispatch pending tasks.
 		if task.ProjectID != "" {
@@ -625,6 +658,21 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue retry, marking task as failed")
 			if updateErr := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "retry enqueue failed: "+err.Error()); updateErr != nil {
 				s.logger.Error().Err(updateErr).Str("task_id", taskID).Msg("failed to mark task as failed after enqueue failure")
+			}
+			// Terminal failure: refund the charge and notify the owner, mirroring
+			// the other terminal-failure branches. The concurrency slot was
+			// already released above; dispatch pending so the freed slot is used.
+			if cerr := s.repo.Tasks().SetCompletedAt(ctx, taskID); cerr != nil {
+				s.logger.Error().Err(cerr).Str("task_id", taskID).Msg("failed to set completed_at on failure")
+			}
+			s.refundTaskByMode(ctx, task, "retry_enqueue_failed")
+			if s.wcfNotifier != nil {
+				s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, "retry enqueue failed: "+err.Error())
+			}
+			if task.ProjectID != "" {
+				if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
+					s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after enqueue failure")
+				}
 			}
 			return err
 		}

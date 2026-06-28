@@ -46,6 +46,10 @@ type TaskService struct {
 	pubsubCancel        context.CancelFunc // stops the listenCancelEvents goroutine
 	cancelFuncs         sync.Map           // taskID → context.CancelFunc
 	seednoteTrackingSvc PublishedTrackingService
+	// wcfNotifier pushes task success/failure/cancel messages to the task
+	// owner's WeChat via the wcfLink sidecar. Nil when wcf is disabled — all
+	// terminal hooks no-op. Best-effort; never fails the task pipeline.
+	wcfNotifier *WCFNotifier
 	topicPoolSvc        *TopicPoolService
 	goalMultiplier      int
 	// executionTimeout bounds the fallback (Redis-down) in-process execution.
@@ -114,6 +118,12 @@ func (s *TaskService) Close() {
 
 func (s *TaskService) SetSeednoteTrackingService(trackingSvc PublishedTrackingService) {
 	s.seednoteTrackingSvc = trackingSvc
+}
+
+// SetWCFNotifier wires the WeChat notification sidecar. Notifier is nil-safe;
+// pass nil to disable all terminal-state WeChat notifications.
+func (s *TaskService) SetWCFNotifier(n *WCFNotifier) {
+	s.wcfNotifier = n
 }
 
 // SetTopicPoolService sets the topic pool service for plan-task integration.
