@@ -139,12 +139,12 @@
             />
           </view>
 
-          <!-- Writing style (visual) -->
+          <!-- Visual style -->
           <view class="field-group">
             <text class="field-label">视觉风格</text>
             <view class="style-block">
               <AbTextarea
-                v-model="form.style"
+                v-model="form.visual_style"
                 :placeholder="stylePlaceholder"
                 :rows="3"
               />
@@ -273,19 +273,19 @@
             <text class="field-hint">选择模板后，视觉风格/作者/写作风格/排版将一次性填入，可继续编辑。</text>
           </view>
 
-          <!-- Persona block (article / seednote) — author ≠ writing_style persona -->
+          <!-- Persona block (article / seednote) — byline ≠ writer_key persona -->
           <view v-if="isArticle || isSeednote" class="persona-block">
             <text class="field-label persona-block__title">作者人设</text>
 
             <view class="field-spacer">
               <text class="field-sublabel">作者署名</text>
-              <AbInput v-model="form.author" placeholder="显示在文章/笔记的作者名（≠ 写作风格）" />
+              <AbInput v-model="form.byline" placeholder="显示在文章/笔记的作者名（≠ 写作风格）" />
             </view>
 
             <view class="field-spacer">
               <text class="field-sublabel">写作风格模仿</text>
               <AbTextarea
-                v-model="form.author_style_intro"
+                v-model="form.writing_voice"
                 placeholder="模仿某位作者/博主的文风，描述其语言习惯、句式特点…"
                 :rows="2"
               />
@@ -295,8 +295,8 @@
               <text class="field-sublabel">人设头像</text>
               <view class="ref-uploader ref-uploader--sm" @tap="onChooseAuthorAvatar">
                 <image
-                  v-if="form.author_avatar_url"
-                  :src="form.author_avatar_url"
+                  v-if="form.persona_avatar"
+                  :src="form.persona_avatar"
                   class="ref-uploader__img"
                   mode="aspectFill"
                 />
@@ -308,7 +308,7 @@
                 </view>
               </view>
               <AbInput
-                v-model="form.author_avatar_url"
+                v-model="form.persona_avatar"
                 placeholder="或输入图片 URL"
                 style="margin-top: 8rpx;"
               />
@@ -349,7 +349,7 @@
           <!-- Author name for seednote (article uses the persona block above) -->
           <view v-if="isSeednote" class="field-group">
             <text class="field-label">作者名</text>
-            <AbInput v-model="form.author" placeholder="署名" />
+            <AbInput v-model="form.byline" placeholder="署名" />
           </view>
         </view>
       </view>
@@ -575,12 +575,12 @@ const form = reactive({
   avatar_url: '',
   positioning: '',
   keywords: '',
-  style: '',
+  visual_style: '',
   // Article persona — orthogonal to byline (project memory invariant).
-  writing_style: '',
-  author: '',
-  author_style_intro: '',
-  author_avatar_url: '',
+  writer_key: '',
+  byline: '',
+  writing_voice: '',
+  persona_avatar: '',
   template_id: '',
   theme: '',
   layout: '',
@@ -745,11 +745,11 @@ async function loadProject(id: string) {
     form.avatar_url = ch.avatar_url || ''
     form.positioning = ch.positioning || ''
     form.keywords = ch.keywords || ''
-    form.style = ch.style || ''
-    form.writing_style = ch.writing_style || ''
-    form.author = ch.author || ''
-    form.author_style_intro = ch.author_style_intro || ''
-    form.author_avatar_url = ch.author_avatar_url || ''
+    form.visual_style = ch.visual_style || ''
+    form.writer_key = ch.writer_key || ''
+    form.byline = ch.byline || ''
+    form.writing_voice = ch.writing_voice || ''
+    form.persona_avatar = ch.persona_avatar || ''
     form.template_id = ch.template_id || ''
     form.theme = ch.theme || ''
     form.layout = ch.layout || ''
@@ -774,13 +774,13 @@ async function loadProject(id: string) {
     if (form.template_id) {
       try {
         const tpl = await templatesApi.get(form.template_id)
-        if (!form.style && tpl.style_prompt) form.style = tpl.style_prompt
-        if (!form.author && tpl.author_name) form.author = tpl.author_name
-        if (!form.author_style_intro && tpl.author_style_intro) {
-          form.author_style_intro = tpl.author_style_intro
+        if (!form.visual_style && tpl.style_prompt) form.visual_style = tpl.style_prompt
+        if (!form.byline && tpl.author_name) form.byline = tpl.author_name
+        if (!form.writing_voice && tpl.writing_voice) {
+          form.writing_voice = tpl.writing_voice
         }
-        if (!form.author_avatar_url && tpl.author_avatar_url) {
-          form.author_avatar_url = tpl.author_avatar_url
+        if (!form.persona_avatar && tpl.persona_avatar) {
+          form.persona_avatar = tpl.persona_avatar
         }
         if (!form.theme && tpl.theme) form.theme = tpl.theme
       } catch {
@@ -885,7 +885,7 @@ async function onFetchProfile() {
         : profile.keywords
       keywordList.value = kw
     }
-    if (profile.style) form.style = profile.style
+    if (profile.visual_style) form.visual_style = profile.visual_style
     uni.showToast({ title: '已自动识别账号信息', icon: 'success' })
   } catch (err: any) {
     const msg = err?.message || '拉取失败，请手动填写'
@@ -914,7 +914,7 @@ function chooseAndUpload(
         const result = await projectsApi.uploadImage(filePath, purpose)
         if (target === 'avatar') form.avatar_url = result.url
         else if (target === 'reference') form.reference_image_url = result.url
-        else form.author_avatar_url = result.url
+        else form.persona_avatar = result.url
         uni.showToast({ title: '上传成功', icon: 'success' })
       } catch (err: any) {
         uni.showToast({ title: err?.message || '上传失败', icon: 'none' })
@@ -949,8 +949,8 @@ async function onAnalyzeReference() {
   analyzingStyle.value = true
   try {
     const result = await projectsApi.analyzeImage(form.reference_image_url)
-    if (result.style) {
-      form.style = result.style
+    if (result.visual_style) {
+      form.visual_style = result.visual_style
       uni.showToast({ title: '已识别视觉风格', icon: 'success' })
     } else {
       uni.showToast({ title: '未能识别风格', icon: 'none' })
@@ -978,14 +978,14 @@ function pickTemplate() {
 }
 
 // One-shot import of persona/style from a template (mirrors studio).
-// Per project memory: do NOT auto-fill author from a writer-persona source
+// Per project memory: do NOT auto-fill byline from a writer-persona source
 // unless the template explicitly carries author_name.
 function importTemplate(tpl: Template) {
   form.template_id = tpl.id
-  if (tpl.style_prompt) form.style = tpl.style_prompt
-  if (tpl.author_name) form.author = tpl.author_name
-  if (tpl.author_style_intro) form.author_style_intro = tpl.author_style_intro
-  if (tpl.author_avatar_url) form.author_avatar_url = tpl.author_avatar_url
+  if (tpl.style_prompt) form.visual_style = tpl.style_prompt
+  if (tpl.author_name) form.byline = tpl.author_name
+  if (tpl.writing_voice) form.writing_voice = tpl.writing_voice
+  if (tpl.persona_avatar) form.persona_avatar = tpl.persona_avatar
   if (tpl.theme) form.theme = tpl.theme
   uni.showToast({ title: `已导入「${tpl.name}」`, icon: 'success' })
 }
@@ -1016,19 +1016,19 @@ function buildPayload(): CreateProjectRequest {
     avatar_url: form.avatar_url || undefined,
     positioning: form.positioning || undefined,
     keywords: form.keywords || undefined,
-    style: form.style || undefined,
-    writing_style: isArticle.value && form.writing_style ? form.writing_style : undefined,
-    author_style_intro: (isArticle.value || isSeednote.value) && form.author_style_intro
-      ? form.author_style_intro
+    visual_style: form.visual_style || undefined,
+    writer_key: isArticle.value && form.writer_key ? form.writer_key : undefined,
+    writing_voice: (isArticle.value || isSeednote.value) && form.writing_voice
+      ? form.writing_voice
       : undefined,
-    author_avatar_url: (isArticle.value || isSeednote.value) && form.author_avatar_url
-      ? form.author_avatar_url
+    persona_avatar: (isArticle.value || isSeednote.value) && form.persona_avatar
+      ? form.persona_avatar
       : undefined,
     template_id: form.template_id || undefined,
     theme: form.theme || undefined,
     layout: form.layout || undefined,
     image_preset: form.image_preset || undefined,
-    author: form.author || undefined,
+    byline: form.byline || undefined,
     reference_image_url: form.reference_image_url || undefined,
     image_ratio: form.image_ratio || undefined,
     enable_publishing: form.enable_publishing || undefined,

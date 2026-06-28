@@ -85,11 +85,11 @@
             <text class="template-card__name">{{ tpl.name }}</text>
             <text v-if="tpl.style_prompt" class="template-card__prompt">{{ tpl.style_prompt }}</text>
             <!-- Article persona preview -->
-            <view v-if="tpl.type === 'article' && (tpl.author_name || tpl.author_style_intro)" class="template-card__persona">
+            <view v-if="tpl.type === 'article' && (tpl.author_name || tpl.writing_voice)" class="template-card__persona">
               <image
-                v-if="tpl.author_avatar_url"
+                v-if="tpl.persona_avatar"
                 class="template-card__avatar"
-                :src="tpl.author_avatar_url"
+                :src="tpl.persona_avatar"
                 mode="aspectFill"
               />
               <view v-else class="template-card__avatar template-card__avatar--placeholder">
@@ -172,9 +172,9 @@
 
             <!-- Poster scaffold -->
             <template v-if="previewTemplate.type === 'poster'">
-              <view v-if="previewTemplate.writing_style" class="preview-popup__block">
+              <view v-if="previewTemplate.writer_key" class="preview-popup__block">
                 <text class="preview-popup__block-label">写作风格</text>
-                <text class="preview-popup__block-text">{{ previewTemplate.writing_style }}</text>
+                <text class="preview-popup__block-text">{{ previewTemplate.writer_key }}</text>
               </view>
               <view v-if="scaffoldText(previewTemplate.structure)" class="preview-popup__block">
                 <text class="preview-popup__block-label">内容结构</text>
@@ -189,15 +189,15 @@
             <!-- Article persona + theme -->
             <template v-if="previewTemplate.type === 'article'">
               <view
-                v-if="previewTemplate.author_name || previewTemplate.author_style_intro || previewTemplate.author_avatar_url"
+                v-if="previewTemplate.author_name || previewTemplate.writing_voice || previewTemplate.persona_avatar"
                 class="preview-popup__block"
               >
                 <text class="preview-popup__block-label">写作风格</text>
                 <view class="preview-popup__persona">
                   <image
-                    v-if="previewTemplate.author_avatar_url"
+                    v-if="previewTemplate.persona_avatar"
                     class="preview-popup__persona-avatar"
-                    :src="previewTemplate.author_avatar_url"
+                    :src="previewTemplate.persona_avatar"
                     mode="aspectFill"
                   />
                   <view v-else class="preview-popup__persona-avatar preview-popup__persona-avatar--placeholder">
@@ -209,8 +209,8 @@
                     <text v-if="previewTemplate.author_name" class="preview-popup__persona-name">
                       {{ previewTemplate.author_name }}
                     </text>
-                    <text v-if="previewTemplate.author_style_intro" class="preview-popup__persona-intro">
-                      {{ previewTemplate.author_style_intro }}
+                    <text v-if="previewTemplate.writing_voice" class="preview-popup__persona-intro">
+                      {{ previewTemplate.writing_voice }}
                     </text>
                   </view>
                 </view>
@@ -373,7 +373,7 @@
             <view class="form-section">
               <text class="field-sublabel">写作风格 / 调性</text>
               <AbTextarea
-                v-model="form.writing_style"
+                v-model="form.writer_key"
                 placeholder="例如：犀利、接地气、像朋友聊天；多用短句和反问"
                 :rows="2"
                 :maxlength="1024"
@@ -423,9 +423,9 @@
               <view class="thumb-row">
                 <view class="thumb-box thumb-box--avatar" @tap="chooseAuthorAvatar">
                   <image
-                    v-if="form.author_avatar_url"
+                    v-if="form.persona_avatar"
                     class="thumb-box__image"
-                    :src="form.author_avatar_url"
+                    :src="form.persona_avatar"
                     mode="aspectFill"
                   />
                   <view v-else class="thumb-box__placeholder">
@@ -443,7 +443,7 @@
                   <view class="form-section form-section--tight">
                     <text class="field-sublabel">写作风格 · 供 AI 模仿的口吻</text>
                     <AbTextarea
-                      v-model="form.author_style_intro"
+                      v-model="form.writing_voice"
                       placeholder="例如：犀利、接地气；多用短句和反问；爱用具体数字和案例"
                       :rows="3"
                       :maxlength="1024"
@@ -660,8 +660,8 @@ function hasFullDetail(tpl: Template): boolean {
   return (
     (!!tpl.structure && Object.keys(tpl.structure).length > 0) ||
     !!tpl.author_name ||
-    !!tpl.author_style_intro ||
-    !!tpl.writing_style ||
+    !!tpl.writing_voice ||
+    !!tpl.writer_key ||
     !!tpl.theme
   )
 }
@@ -768,7 +768,7 @@ interface TemplateFormState {
   style_prompt: string
   visibility: TemplateVisibility
   // poster scaffold
-  writing_style: string
+  writer_key: string
   structure: string
   example: string
   category: string
@@ -776,8 +776,8 @@ interface TemplateFormState {
   // article
   theme: string
   author_name: string
-  author_style_intro: string
-  author_avatar_url: string
+  writing_voice: string
+  persona_avatar: string
   // ecommerce defaults
   ecommerce_modules: Record<string, number>
   ecommerce_target_platform: string
@@ -805,15 +805,15 @@ const form = reactive<TemplateFormState>({
   thumbnail_url: '',
   style_prompt: '',
   visibility: 'public',
-  writing_style: '',
+  writer_key: '',
   structure: '',
   example: '',
   category: '',
   tags_text: '',
   theme: '',
   author_name: '',
-  author_style_intro: '',
-  author_avatar_url: '',
+  writing_voice: '',
+  persona_avatar: '',
   ecommerce_modules: {},
   ecommerce_target_platform: '',
   ecommerce_brand_brief: '',
@@ -840,15 +840,15 @@ function resetForm() {
   form.thumbnail_url = ''
   form.style_prompt = ''
   form.visibility = 'public'
-  form.writing_style = ''
+  form.writer_key = ''
   form.structure = ''
   form.example = ''
   form.category = ''
   form.tags_text = ''
   form.theme = ''
   form.author_name = ''
-  form.author_style_intro = ''
-  form.author_avatar_url = ''
+  form.writing_voice = ''
+  form.persona_avatar = ''
   form.ecommerce_modules = {}
   form.ecommerce_target_platform = ''
   form.ecommerce_brand_brief = ''
@@ -873,11 +873,11 @@ function openEdit(tpl: Template) {
   form.thumbnail_url = tpl.thumbnail_url
   form.style_prompt = tpl.style_prompt
   form.visibility = tpl.visibility === 'private' ? 'private' : 'public'
-  form.writing_style = tpl.writing_style ?? ''
+  form.writer_key = tpl.writer_key ?? ''
   form.theme = tpl.theme ?? ''
   form.author_name = tpl.author_name ?? ''
-  form.author_style_intro = tpl.author_style_intro ?? ''
-  form.author_avatar_url = tpl.author_avatar_url ?? ''
+  form.writing_voice = tpl.writing_voice ?? ''
+  form.persona_avatar = tpl.persona_avatar ?? ''
   form.structure = scaffoldText(tpl.structure)
   form.example = scaffoldText(tpl.example_content)
   form.category = tpl.category ?? ''
@@ -937,7 +937,7 @@ function pickWriter() {
       if (!w) return
       selectedWriterName.value = w.name
       // Only fill writing-style intro, never overwrite author name (byline).
-      if (w.description) form.author_style_intro = w.description
+      if (w.description) form.writing_voice = w.description
     },
   })
 }
@@ -996,7 +996,7 @@ function chooseAuthorAvatar() {
       authorAvatarUploading.value = true
       try {
         const result = await projectsApi.uploadImage(filePath, 'project')
-        form.author_avatar_url = result.url
+        form.persona_avatar = result.url
         uni.showToast({ title: '上传成功', icon: 'success' })
       } catch (err: any) {
         uni.showToast({ title: err?.message || '上传失败', icon: 'none' })
@@ -1022,12 +1022,12 @@ async function analyzeStyle(force: boolean) {
   try {
     const res = await projectsApi.analyzeImage(url)
     if (reqId !== analyzeReqId) return
-    if (!res.style) return
+    if (!res.visual_style) return
     if (force || !form.style_prompt.trim()) {
-      form.style_prompt = res.style
+      form.style_prompt = res.visual_style
     }
     if (!form.name.trim()) {
-      form.name = deriveTemplateName(res.style)
+      form.name = deriveTemplateName(res.visual_style)
     }
   } catch (err: any) {
     if (reqId !== analyzeReqId) return
@@ -1040,8 +1040,8 @@ async function analyzeStyle(force: boolean) {
 }
 
 // Derive a default name from the first clause of the style description (≤20 chars).
-function deriveTemplateName(style: string): string {
-  const firstClause = style.trim().split(/[\n。，,.]/)[0]
+function deriveTemplateName(visual_style: string): string {
+  const firstClause = visual_style.trim().split(/[\n。，,.]/)[0]
   return firstClause.slice(0, 20).trim()
 }
 
@@ -1066,8 +1066,8 @@ async function submitForm() {
       .filter(Boolean)
 
     // Type-aware payload: only include fields the current type renders. This
-    // guards the writer-key trap (article/seednote must NOT carry writing_style
-    // — backend style_resolve would copy it into Task.WritingStyle).
+    // guards the writer-key trap (article/seednote must NOT carry writer_key
+    // — backend style_resolve would copy it into Task.WriterKey).
     const payload: Record<string, any> = {
       name: finalName,
       type: form.type,
@@ -1077,8 +1077,8 @@ async function submitForm() {
     }
 
     if (form.type === 'poster') {
-      const writingStyleTrimmed = form.writing_style.trim()
-      if (writingStyleTrimmed) payload.writing_style = writingStyleTrimmed
+      const writingStyleTrimmed = form.writer_key.trim()
+      if (writingStyleTrimmed) payload.writer_key = writingStyleTrimmed
       const structureTrimmed = form.structure.trim()
       if (structureTrimmed) payload.structure = structureTrimmed
       const exampleTrimmed = form.example.trim()
@@ -1093,10 +1093,10 @@ async function submitForm() {
       if (themeTrimmed) payload.theme = themeTrimmed
       const authorNameTrimmed = form.author_name.trim()
       if (authorNameTrimmed) payload.author_name = authorNameTrimmed
-      const authorAvatarTrimmed = form.author_avatar_url.trim()
-      if (authorAvatarTrimmed) payload.author_avatar_url = authorAvatarTrimmed
-      const authorIntroTrimmed = form.author_style_intro.trim()
-      if (authorIntroTrimmed) payload.author_style_intro = authorIntroTrimmed
+      const authorAvatarTrimmed = form.persona_avatar.trim()
+      if (authorAvatarTrimmed) payload.persona_avatar = authorAvatarTrimmed
+      const authorIntroTrimmed = form.writing_voice.trim()
+      if (authorIntroTrimmed) payload.writing_voice = authorIntroTrimmed
     }
 
     if (form.type === 'ecommerce') {

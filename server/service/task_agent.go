@@ -24,6 +24,18 @@ func (s *TaskService) ValidateAgentTaskAccess(ctx context.Context, taskID, authe
 	return task, nil
 }
 
+// UpdateHeartbeat refreshes a task's last_heartbeat_at, marking it as actively
+// working. Called by the agent /progress endpoint on every report so long-running
+// local-execution tasks are not force-failed by the stuck-task reaper
+// (plan_checker.go:reapStuckTasks, 5-min threshold) before they complete. The
+// cloud path also refreshes heartbeats via HandleExecution's HeartbeatFunc.
+func (s *TaskService) UpdateHeartbeat(ctx context.Context, taskID string) error {
+	if err := s.repo.Tasks().UpdateHeartbeat(ctx, taskID); err != nil {
+		return fmt.Errorf("update heartbeat: %w", err)
+	}
+	return nil
+}
+
 // AppendProgressLog appends one progress line to the task log atomically.
 // If Redis pub/sub is available, it also publishes a progress event so
 // SSE handlers on any replica can push updates to their clients immediately.

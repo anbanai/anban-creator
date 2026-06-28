@@ -56,6 +56,11 @@ type TaskService struct {
 	// decoupled from the execution ctx so completed work is saved even on overrun.
 	// Default 10m; override via SetExecutionTimeouts.
 	persistTimeout time.Duration
+	// defaultModel / maxTurnsOverrides feed the local-executor claim response
+	// (LocalExecutionConfig) so a desktop-built agent argv mirrors what the cloud
+	// DockerExecutor would pass. Set via SetExecutorDefaults during wiring.
+	defaultModel      string
+	maxTurnsOverrides map[string]int
 }
 
 // NewTaskService creates a new TaskService.
@@ -127,6 +132,14 @@ func (s *TaskService) SetExecutionTimeouts(execution, persist time.Duration) {
 	if persist > 0 {
 		s.persistTimeout = persist
 	}
+}
+
+// SetExecutorDefaults wires the Claude model + per-type max-turns overrides used
+// to build local-executor claim responses. Mirrors the values the cloud
+// DockerExecutor receives, so a desktop-spawned agent argv matches the cloud path.
+func (s *TaskService) SetExecutorDefaults(defaultModel string, maxTurnsOverrides map[string]int) {
+	s.defaultModel = defaultModel
+	s.maxTurnsOverrides = maxTurnsOverrides
 }
 
 // GoalMultiplier returns the configured goal-mode credit multiplier (default 3).
@@ -208,6 +221,12 @@ type CreateManualParams struct {
 	// otherwise. When set, the task is billed once as a single package at the sum
 	// of selected module prices and quantity is forced to 1.
 	Ecommerce *model.EcommerceConfig
+	// ExecutionTarget, when model.ExecutionTargetLocal, routes the task to a
+	// desktop local executor instead of cloud Asynq/Docker. The task is created
+	// pending with a LocalClaimDeadline and is NOT enqueued; a desktop claims it
+	// via ClaimLocalTask. Unclaimed tasks fall back to cloud after the deadline
+	// (ReclaimExpiredLocalTasks). Empty = cloud (default).
+	ExecutionTarget string
 }
 
 // CreateManual creates tasks without a plan and enqueues them for execution.
@@ -395,6 +414,11 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			GoalMode:           p.GoalMode,
 			HasContentImage:    hasContent,
 			HasTailImage:       hasTail,
+			ExecutionTarget:    p.ExecutionTarget,
+		}
+		if p.ExecutionTarget == model.ExecutionTargetLocal {
+			deadline := time.Now().Add(LocalClaimWindow)
+			task.LocalClaimDeadline = &deadline
 		}
 		if p.Overrides != nil {
 			task.SetOverrides(*p.Overrides)
@@ -423,8 +447,13 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			return nil, fmt.Errorf("create task: %w", err)
 		}
 
-		// Enqueue for async execution.
-		if err := s.EnqueueExecution(ctx, task, nil); err != nil {
+		// Enqueue for async execution. Local-target tasks wait for a desktop
+		// local executor to claim them (ClaimLocalTask); do NOT enqueue to cloud
+		// Asynq. The fallback worker re-routes them to cloud if unclaimed past
+		// the deadline, so they can never get stuck.
+		if task.ExecutionTarget == model.ExecutionTargetLocal {
+			s.logger.Info().Str("task_id", taskID).Msg("task routed to local executor, awaiting desktop claim")
+		} else if err := s.EnqueueExecution(ctx, task, nil); err != nil {
 			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue task, marking as failed")
 			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to enqueue: "+err.Error())
 		}
@@ -437,11 +466,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
 //
-// A plan is a pure scheduler under a project: it carries no style/persona/theme
-// fields, so the spawned task carries NO overrides and fully inherits every
-// style/persona/theme dimension from the project at execution (ResolveStyle).
-// Only the plan's scheduling-adjacent "what to produce" params (image model,
-// reference image, watermark, goal, seednote image composition) flow to the task.
+// The plan's style/persona/theme dimensions are copied into the spawned task's
+// Task.Overrides (all six, via SetOverrides — empty dimensions serialize to {}
+// and the resolver falls through to the project for them). This lets two plans
+// under one project theme their tasks differently. The plan's
+// scheduling-adjacent "what to produce" params (image model, reference image,
+// watermark, goal, seednote image composition) also flow to the task.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
 	taskID := generateTaskID()
 
@@ -508,6 +538,18 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		HasContentImage:    plan.HasContentImage,
 		HasTailImage:       plan.HasTailImage,
 	}
+
+	// Copy the plan's style/persona/theme dimensions into the spawned task's
+	// overrides. Empty dimensions serialize to {} and the resolver falls through
+	// to the project for them, so this is safe even when the plan set nothing.
+	task.SetOverrides(model.StyleOverrides{
+		VisualStyle:   plan.VisualStyle,
+		WriterKey:     plan.WriterKey,
+		WritingVoice:  plan.WritingVoice,
+		Byline:        plan.Byline,
+		PersonaAvatar: plan.PersonaAvatar,
+		Theme:         plan.Theme,
+	})
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {
 		// Refund the deducted credits if task creation fails.

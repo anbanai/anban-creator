@@ -24,16 +24,16 @@ export interface Template {
   thumbnail_url: string
   structure: Record<string, unknown>
   style_prompt: string
-  // writing_style is the legacy writer-key scaffold (poster). Surfaced to the
+  // writer_key is the legacy writer-key scaffold (poster). Surfaced to the
   // agent via get_project_profile(task_id). Old rows omit it.
-  writing_style?: string
+  writer_key?: string
   // theme is the 排版样式 dimension (Markdown→HTML layout theme). Old rows omit.
   theme?: string
   // Author persona — 公众号 写作风格 dimension, defined inline on the template
   // (not a writer key). Old rows (and non-article types) omit these.
   author_name?: string
-  author_avatar_url?: string
-  author_style_intro?: string
+  persona_avatar?: string
+  writing_voice?: string
   example_content: Record<string, unknown>
   tags: string[]
   // E-commerce template defaults (type="ecommerce" only). Surfaced to the task
@@ -55,7 +55,7 @@ export interface CreateTemplateRequest {
   style_prompt: string
   visibility: TemplateVisibility
   // Content scaffold (optional, poster).
-  writing_style?: string
+  writer_key?: string
   theme?: string
   structure?: string
   example_content?: string
@@ -63,8 +63,8 @@ export interface CreateTemplateRequest {
   tags?: string[]
   // Author persona (公众号). Sent only for article templates.
   author_name?: string
-  author_avatar_url?: string
-  author_style_intro?: string
+  persona_avatar?: string
+  writing_voice?: string
   // E-commerce template defaults. Sent only for ecommerce templates.
   ecommerce?: EcommerceTemplateDefaults
 }

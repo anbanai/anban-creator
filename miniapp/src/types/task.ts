@@ -46,10 +46,10 @@ export interface Task {
   goal?: string
   goal_mode?: boolean
   template_id?: string
-  // 公众号人设（task > template > project 解析链）：作者署名 + 写作风格模仿 + 可选头像
-  author?: string
-  author_style_intro?: string
-  author_avatar_url?: string
+  // 公众号人设（task > template > project 解析链）：署名 + 写作风格模仿 + 可选头像
+  byline?: string
+  writing_voice?: string
+  persona_avatar?: string
   // E-commerce package config (only present for platform=ecommerce tasks)
   ecommerce?: EcommerceTaskConfig
   // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）
@@ -87,17 +87,17 @@ export interface CreateTaskRequest {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
-  style?: string
-  writing_style?: string
+  visual_style?: string
+  writer_key?: string
   theme?: string
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
   template_id?: string
-  // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。空则兜底到模板/项目。
-  author?: string
-  author_style_intro?: string
-  author_avatar_url?: string
+  // 公众号人设 override（署名 + 写作风格模仿 + 可选头像）。空则兜底到模板/项目。
+  byline?: string
+  writing_voice?: string
+  persona_avatar?: string
   // Seednote image composition: cover always generated. Server ignores for non-seednote.
   has_content_image?: boolean
   has_tail_image?: boolean

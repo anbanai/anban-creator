@@ -186,6 +186,8 @@ func NewRouter(svc *Services) *fiber.App {
 		agentAPI := app.Group("/api/v1/agent", agentLimiter, svc.AgentHandler.AuthMiddleware)
 		agentAPI.Post("/upload", svc.AgentHandler.Upload)
 		agentAPI.Post("/progress", svc.AgentHandler.Progress)
+		agentAPI.Post("/claim", svc.AgentHandler.Claim)
+		agentAPI.Post("/complete", svc.AgentHandler.Complete)
 	}
 
 	// ---------------------------------------------------------------------------

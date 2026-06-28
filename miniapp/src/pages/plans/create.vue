@@ -101,7 +101,7 @@
       <view class="form-section" v-if="!isEcommerce">
         <text class="form-section__label">视觉风格</text>
         <AbTextarea
-          v-model="form.style"
+          v-model="form.visual_style"
           placeholder="描述画面风格，如：清新自然、暖色调、生活化场景..."
           :rows="3"
           :maxlength="1024"
@@ -113,7 +113,7 @@
       <view class="form-section" v-if="isArticle">
         <text class="form-section__label">写作风格</text>
         <AbTextarea
-          v-model="form.writingStyle"
+          v-model="form.writer_key"
           placeholder="描述文章的写作风格、语气、结构..."
           :rows="3"
           :maxlength="100"
@@ -136,12 +136,12 @@
         <text class="form-section__label">作者人设</text>
         <view class="field-spacer">
           <text class="form-section__sublabel">作者署名</text>
-          <AbInput v-model="form.author" placeholder="显示在文章/笔记的作者名" />
+          <AbInput v-model="form.byline" placeholder="显示在文章/笔记的作者名" />
         </view>
         <view class="field-spacer">
           <text class="form-section__sublabel">写作风格模仿</text>
           <AbTextarea
-            v-model="form.authorStyleIntro"
+            v-model="form.writing_voice"
             placeholder="模仿某位作者/博主的文风，描述其语言习惯、句式特点..."
             :rows="2"
             :maxlength="1024"
@@ -149,7 +149,7 @@
         </view>
         <view class="field-spacer">
           <text class="form-section__sublabel">人设头像 URL</text>
-          <AbInput v-model="form.authorAvatarUrl" placeholder="可选，作者头像图片地址" />
+          <AbInput v-model="form.persona_avatar" placeholder="可选，作者头像图片地址" />
         </view>
       </view>
 
@@ -263,12 +263,12 @@ const form = reactive({
   prompt: '',
   weekdays: [] as number[],
   imageModelKey: '',
-  style: '',
-  writingStyle: '',
+  visual_style: '',
+  writer_key: '',
   theme: '',
-  author: '',
-  authorStyleIntro: '',
-  authorAvatarUrl: '',
+  byline: '',
+  writing_voice: '',
+  persona_avatar: '',
   hasContentImage: true,
   hasTailImage: false,
   skipReferenceImage: false,
@@ -412,12 +412,12 @@ function pickTemplate() {
       if (form.templateId === tpl.id) return
       form.templateId = tpl.id
       // Template → 3 dimensions + persona. Mirrors studio handleTemplateSelect.
-      if (tpl.style_prompt) form.style = tpl.style_prompt
-      if (tpl.writing_style) form.writingStyle = tpl.writing_style
+      if (tpl.style_prompt) form.visual_style = tpl.style_prompt
+      if (tpl.writer_key) form.writer_key = tpl.writer_key
       if (tpl.theme) form.theme = tpl.theme
-      if (tpl.author_name) form.author = tpl.author_name
-      if (tpl.author_style_intro) form.authorStyleIntro = tpl.author_style_intro
-      if (tpl.author_avatar_url) form.authorAvatarUrl = tpl.author_avatar_url
+      if (tpl.author_name) form.byline = tpl.author_name
+      if (tpl.writing_voice) form.writing_voice = tpl.writing_voice
+      if (tpl.persona_avatar) form.persona_avatar = tpl.persona_avatar
     },
   })
 }
@@ -493,12 +493,12 @@ async function handleSubmit() {
       prompt: form.prompt.trim() || undefined,
       project_id: form.projectId,
       image_model_key: form.imageModelKey || undefined,
-      style: form.style.trim() || undefined,
-      writing_style: isArticle.value && form.writingStyle.trim() ? form.writingStyle.trim() : undefined,
+      visual_style: form.visual_style.trim() || undefined,
+      writer_key: isArticle.value && form.writer_key.trim() ? form.writer_key.trim() : undefined,
       theme: isArticle.value && form.theme ? form.theme : undefined,
-      author: form.author.trim() || undefined,
-      author_style_intro: form.authorStyleIntro.trim() || undefined,
-      author_avatar_url: form.authorAvatarUrl.trim() || undefined,
+      byline: form.byline.trim() || undefined,
+      writing_voice: form.writing_voice.trim() || undefined,
+      persona_avatar: form.persona_avatar.trim() || undefined,
       watermark: form.watermark || undefined,
       goal_mode: form.goalMode || undefined,
       goal: form.goalMode && form.goal.trim() ? form.goal.trim() : undefined,
@@ -537,12 +537,12 @@ async function loadPlan(planId: string) {
     form.cronExpr = plan.cron_expr || '0 9 * * 1,3,5'
     form.prompt = plan.prompt || ''
     form.imageModelKey = plan.image_model_key || ''
-    form.style = plan.style || ''
-    form.writingStyle = plan.writing_style || ''
+    form.visual_style = plan.visual_style || ''
+    form.writer_key = plan.writer_key || ''
     form.theme = plan.theme || ''
-    form.author = plan.author || ''
-    form.authorStyleIntro = plan.author_style_intro || ''
-    form.authorAvatarUrl = plan.author_avatar_url || ''
+    form.byline = plan.byline || ''
+    form.writing_voice = plan.writing_voice || ''
+    form.persona_avatar = plan.persona_avatar || ''
     form.hasContentImage = plan.has_content_image ?? true
     form.hasTailImage = plan.has_tail_image ?? false
     form.skipReferenceImage = plan.skip_reference_image || false

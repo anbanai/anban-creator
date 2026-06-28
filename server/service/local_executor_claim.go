@@ -1,0 +1,274 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/royalrick/anbanwriter/server/agent"
+	"github.com/royalrick/anbanwriter/server/model"
+)
+
+// maxExecutorInfoBytes caps the desktop-supplied diagnostics blob written to the
+// Task.executor_info JSON column. Prevents a buggy/malicious client from stuffing
+// multi-MB blobs or pathologically nested JSON into the column.
+const maxExecutorInfoBytes = 4 * 1024
+
+// parseExecutorMeta validates the desktop-supplied executor_info and reduces it
+// to a canonical ExecutorMeta, so the JSON column never holds arbitrary bytes.
+// Empty / null / whitespace input yields a zero-value ExecutorMeta (a valid JSON
+// object on store). Non-object JSON or oversized blobs are rejected.
+func parseExecutorMeta(raw []byte) (model.ExecutorMeta, error) {
+	var info model.ExecutorMeta
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return info, nil
+	}
+	if len(raw) > maxExecutorInfoBytes {
+		return info, fmt.Errorf("executor_info too large: %d bytes (max %d)", len(raw), maxExecutorInfoBytes)
+	}
+	if err := json.Unmarshal(raw, &info); err != nil {
+		return info, fmt.Errorf("invalid executor_info: %w", err)
+	}
+	return info, nil
+}
+
+// LocalClaimWindow is how long a local-target task waits for a desktop
+// executor to claim it before the server falls back to cloud execution. The
+// desktop polls /api/v1/agent/claim every couple of seconds, so this only
+// elapses when no desktop is online.
+const LocalClaimWindow = 30 * time.Second
+
+// LocalExecutionConfig is the full task config returned to a desktop local
+// executor on a successful claim. The desktop builds the abwriter-agent argv
+// from this (mirroring agent.DockerExecutor.buildAgentCommand) and supplies
+// server_url + the user's own API key from its local settings — those are NOT
+// echoed here (the desktop already holds them and echoing keys is unsafe).
+type LocalExecutionConfig struct {
+	TaskID          string `json:"task_id"`
+	TaskType        string `json:"task_type"`
+	Topic           string `json:"topic"`
+	AgentFlag       string `json:"agent_flag"` // "anbanwriter:<agent>"
+	MaxTurns        int    `json:"max_turns"`
+	Model           string `json:"model,omitempty"`
+	Goal            string `json:"goal,omitempty"`
+	HasContentImage bool   `json:"has_content_image"`
+	HasTailImage    bool   `json:"has_tail_image"`
+	ProjectID       string `json:"project_id"`
+}
+
+// ClaimLocalTask atomically claims the oldest pending local-target task owned
+// by userID and returns its execution config. Returns (nil, nil) when no task
+// is claimable (none pending, none local-target, deadline expired, or lost the
+// CAS race). executorInfoRaw is the desktop's diagnostics blob (hostname/
+// version); it is validated + size-capped + canonicalized into an ExecutorMeta
+// before being stored, so the JSON column never holds untrusted bytes.
+//
+// On a successful claim the task is already status=running +
+// execution_target=local_claimed, so cloud Asynq will never pick it up. The
+// claiming desktop then spawns abwriter-agent, which reports progress/results
+// back through the existing /api/v1/agent/progress + /agent/upload endpoints.
+func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo string) (*LocalExecutionConfig, error) {
+	info, err := parseExecutorMeta([]byte(executorInfo))
+	if err != nil {
+		return nil, err
+	}
+	// Canonical re-marshal: the column is typed datatypes.JSONType[ExecutorMeta],
+	// so store a validated ExecutorMeta object, never the raw client bytes.
+	canonical, err := json.Marshal(info)
+	if err != nil {
+		return nil, fmt.Errorf("marshal executor info: %w", err)
+	}
+	task, err := s.repo.Tasks().ClaimNextLocalTask(ctx, userID, canonical)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, nil
+	}
+	return s.buildLocalExecutionConfig(task), nil
+}
+
+// buildLocalExecutionConfig resolves the agent argv inputs for a task the same
+// way the cloud DockerExecutor does (default model from config, per-type
+// max-turns via agent.DefaultMaxTurns). See agent.buildAgentCommand.
+func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutionConfig {
+	return &LocalExecutionConfig{
+		TaskID:          task.ID,
+		TaskType:        task.Type,
+		Topic:           task.Prompt,
+		AgentFlag:       "anbanwriter:" + agent.TaskTypeToAgent(task.Type),
+		MaxTurns:        agent.DefaultMaxTurns(task.Type, s.maxTurnsOverrides),
+		Model:           s.defaultModel,
+		Goal:            task.Goal,
+		HasContentImage: task.HasContentImage,
+		HasTailImage:    task.HasTailImage,
+		ProjectID:       task.ProjectID,
+	}
+}
+
+// ReclaimExpiredLocalTasks flips pending local-target tasks past their claim
+// deadline back to cloud execution and re-enqueues them. Called periodically
+// (every ~10s) by the fallback worker so tasks aren't stuck when no desktop is
+// online. Returns the number of tasks reclaimed.
+//
+// ResetLocalTarget is an atomic CAS (pending+local → cloud); if it returns
+// reset=false the task was claimed or changed between FindExpiredLocalTasks and
+// the reset, so we MUST skip re-enqueue — otherwise the task would run on both
+// the desktop that just claimed it and cloud (double execution, double billing).
+func (s *TaskService) ReclaimExpiredLocalTasks(ctx context.Context) (int, error) {
+	ids, err := s.repo.Tasks().FindExpiredLocalTasks(ctx, time.Now())
+	if err != nil {
+		return 0, err
+	}
+	reclaimed := 0
+	for _, id := range ids {
+		reset, err := s.repo.Tasks().ResetLocalTarget(ctx, id)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("task_id", id).Msg("fallback: reset local target")
+			continue
+		}
+		if !reset {
+			// Lost the race to a claimer (or another replica). Do NOT enqueue.
+			continue
+		}
+		task, err := s.repo.Tasks().FindByID(ctx, id)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("task_id", id).Msg("fallback: reload after reset")
+			continue
+		}
+		task.ExecutionTarget = model.ExecutionTargetCloud
+		task.LocalClaimDeadline = nil
+		if err := s.EnqueueExecution(ctx, task, nil); err != nil {
+			s.logger.Error().Err(err).Str("task_id", id).Msg("fallback: re-enqueue failed")
+			continue
+		}
+		reclaimed++
+		s.logger.Info().Str("task_id", id).Msg("local task unclaimed past deadline, fell back to cloud execution")
+	}
+	return reclaimed, nil
+}
+
+// CompleteLocalTask finalizes a desktop-executed (local_claimed) task: persists
+// the result, transitions it to a terminal status, releases the concurrency
+// slot, and dispatches the next pending task. It is the local-execution analog
+// of the cloud HandleExecution finalization tail (task_execution.go:288-357).
+//
+// Key difference from cloud: a local task's WorkDir lives on the desktop, so
+// the server cannot host-side upload files or extract the article draft. The
+// desktop agent uploads its output files via /agent/upload and publishes via the
+// MCP publish tool itself. Therefore this path does NOT perform server-side
+// auto-publish / hold-for-approval (a cloud-WorkDir-only fallback); if the agent
+// did not publish and the project requires publishing, it logs a warning for the
+// operator instead of silently skipping.
+//
+// Guarded + idempotent: finalizes ONLY when the task is still
+// execution_target=local_claimed AND status=running (CAS). A repeat /complete
+// call, a task already reaped/terminal, or a cloud task that happens to call
+// /complete is a no-op — so the shared abwriter-agent binary (used by both cloud
+// Docker and the desktop) can call this endpoint in both modes without
+// double-finalizing cloud tasks, whose authoritative finalization remains the
+// server-side HandleExecution.
+func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, result *agent.ExecutionResult) error {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("find task: %w", err)
+	}
+	if task == nil {
+		return nil
+	}
+	// Only finalize live local tasks. Anything else (cloud task, already
+	// terminal, cancelled) is a no-op — keeps the endpoint idempotent and safe
+	// for the shared agent binary.
+	if task.ExecutionTarget != model.ExecutionTargetLocalClaimed || task.Status != model.TaskStatusRunning {
+		return nil
+	}
+
+	// Persist the final result + token usage (same helper as the cloud path).
+	if result != nil {
+		if err := s.UpdateExecutionResult(ctx, taskID, result); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: persist result")
+		}
+	}
+
+	// Failure → terminal-fail (no cloud retry). Local execution is an explicit
+	// user choice; silently re-running a failed local task on cloud would
+	// surprise the user and could double-bill. Mirrors the terminal branch of
+	// HandleExecutionFailure minus the retry-enqueue logic.
+	if result == nil || !result.Success {
+		errMsg := "local execution failed"
+		if result != nil && result.Error != "" {
+			errMsg = result.Error
+		}
+		swapped, err := s.repo.Tasks().CompareAndSwapStatusAndError(ctx, taskID, model.TaskStatusRunning, model.TaskStatusFailed, errMsg)
+		if err != nil {
+			return fmt.Errorf("cas local task to failed: %w", err)
+		}
+		if !swapped {
+			return nil // already terminal (e.g. reaped meanwhile)
+		}
+		if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: set completed_at on failure")
+		}
+		// Re-read so refundTaskByMode sees the final (failed) status.
+		if t, err := s.repo.Tasks().FindByID(ctx, taskID); err == nil {
+			s.refundTaskByMode(ctx, t, "local_executor_failed")
+		}
+		s.releaseSlotAndDispatch(ctx, task)
+		s.logger.Warn().Str("task_id", taskID).Str("error", errMsg).Msg("local task failed")
+		return nil
+	}
+
+	// Success. Publishing model for local: the desktop agent publishes via the
+	// server MCP (publish_draft) itself, so check whether it already did. The
+	// server-side auto-publish / hold-for-approval fallback is cloud-only (needs
+	// the host WorkDir to extract the draft), so it cannot run here — surface the
+	// case loudly instead of silently skipping so the operator can act.
+	published := result.LogText != "" && wasPublishedByAgent(result.LogText)
+	if !published && task.ProjectID != "" {
+		if proj, perr := s.repo.Projects().FindByID(ctx, task.ProjectID); perr == nil && proj != nil && proj.GetEnablePublishing() {
+			if proj.GetRequirePublishApproval() {
+				s.logger.Warn().
+					Str("task_id", taskID).Str("project_id", task.ProjectID).
+					Msg("local task completed on approval-required project without agent publish; server cannot extract draft (no host WorkDir) — operator must review uploaded files")
+			} else {
+				s.logger.Warn().
+					Str("task_id", taskID).Str("project_id", task.ProjectID).
+					Msg("local task completed without agent publish; server-side auto-publish unavailable for local execution (no host WorkDir) — agent should publish via MCP")
+			}
+		}
+	}
+
+	swapped, err := s.repo.Tasks().CompareAndSwapStatus(ctx, taskID, model.TaskStatusRunning, model.TaskStatusCompleted)
+	if err != nil {
+		return fmt.Errorf("cas local task to completed: %w", err)
+	}
+	if !swapped {
+		return nil // already terminal (e.g. reaped as failed meanwhile)
+	}
+	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: set completed_at")
+	}
+	// NOTE: no refund on success — successful tasks consumed the credits, same as
+	// the cloud success path (refundTaskByMode is failure/cancel only).
+	s.releaseSlotAndDispatch(ctx, task)
+	s.logger.Info().Str("task_id", taskID).Bool("published", published).Msg("local task completed")
+	return nil
+}
+
+// releaseSlotAndDispatch releases the project concurrency slot and dispatches
+// the next pending task. Shared tail of the local success/failure paths;
+// mirrors HandleExecution (task_execution.go:345-357).
+func (s *TaskService) releaseSlotAndDispatch(ctx context.Context, task *model.Task) {
+	if task.ProjectID == "" {
+		return
+	}
+	if s.pubsub != nil {
+		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
+	}
+	if err := s.DispatchPendingTasks(ctx, task.ProjectID); err != nil {
+		s.logger.Warn().Err(err).Str("project_id", task.ProjectID).Msg("local complete: dispatch pending tasks")
+	}
+}

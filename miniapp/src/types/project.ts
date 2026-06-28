@@ -17,18 +17,18 @@ export interface Project {
   description?: string
   positioning: string
   keywords: string
-  // Visual style dimension — independent from writing_style/theme.
-  style: string
+  // Visual style dimension — independent from writer_key/theme.
+  visual_style: string
   // Optional template binding (article/ecommerce). When set, persona fields may
   // be sourced from the bound template at runtime (task>template>project chain).
   template_id?: string
-  // Article-only persona fields — author (署名) is DISTINCT from writing_style.
+  // Article-only persona fields — byline (署名) is DISTINCT from writer_key.
   // Per project memory: byline NEVER auto-fills from persona.
-  writing_style?: string
-  author_style_intro?: string
-  author_avatar_url?: string
+  writer_key?: string
+  writing_voice?: string
+  persona_avatar?: string
   theme: string
-  author: string
+  byline: string
   reference_image_url: string
   image_ratio: string
   layout: string
@@ -63,14 +63,14 @@ export interface CreateProjectRequest {
   avatar_url?: string
   positioning?: string
   keywords?: string
-  style?: string
-  // Article-only persona (orthogonal: author ≠ writing_style persona).
-  writing_style?: string
-  author_style_intro?: string
-  author_avatar_url?: string
+  visual_style?: string
+  // Article-only persona (orthogonal: byline ≠ writer_key persona).
+  writer_key?: string
+  writing_voice?: string
+  persona_avatar?: string
   template_id?: string
   theme?: string
-  author?: string
+  byline?: string
   reference_image_url?: string
   image_ratio?: string
   layout?: string
@@ -82,7 +82,7 @@ export interface CreateProjectRequest {
 }
 
 export interface AnalyzeImageResponse {
-  style: string
+  visual_style: string
 }
 
 export interface FileUploadResponse {
@@ -123,6 +123,6 @@ export interface PlatformProfile {
   avatar_url: string
   positioning: string
   keywords?: string
-  style?: string
+  visual_style?: string
   raw_data: Record<string, unknown>
 }

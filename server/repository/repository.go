@@ -104,6 +104,28 @@ type TaskRepository interface {
 	CountByUserIDAndStatus(ctx context.Context, userID, status string, projectID string) (int64, error)
 	CountRunningByProject(ctx context.Context, projectID string) (int64, error)
 	FindPendingByProject(ctx context.Context, projectID string, limit int) ([]*model.Task, error)
+	// ClaimNextLocalTask atomically claims the oldest pending local-target task
+	// owned by userID: CAS status pending→running, set execution_target=
+	// local_claimed + executor_info + started_at, all inside one transaction so
+	// concurrent claimers cannot double-claim. Returns the claimed task, or
+	// (nil, nil) when no task is claimable (none pending, none local-target, or
+	// deadline already expired). executorInfo is an opaque JSON blob.
+	ClaimNextLocalTask(ctx context.Context, userID string, executorInfo []byte) (*model.Task, error)
+	// FindExpiredLocalTasks returns IDs of pending local-target tasks whose
+	// claim deadline has passed — candidates for cloud fallback. A nil/zero
+	// deadline never expires (treated as unclaimed indefinitely, which should
+	// not happen since creation always sets a deadline).
+	FindExpiredLocalTasks(ctx context.Context, now time.Time) ([]string, error)
+	// ResetLocalTarget atomically clears the local-execution markers
+	// (execution_target back to cloud, deadline cleared) ONLY while the task is
+	// still pending + local-target — a guarded CAS. Returns reset=true when the
+	// CAS matched and the task is now eligible for cloud dispatch; reset=false
+	// when the task was claimed (running+local_claimed) or otherwise changed
+	// since the fallback selected it. In the false case the caller MUST NOT
+	// re-enqueue, or the task would run twice (cloud + the desktop that just
+	// claimed it). Used by the fallback worker before re-enqueueing an
+	// unclaimed local task.
+	ResetLocalTarget(ctx context.Context, taskID string) (bool, error)
 	CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)

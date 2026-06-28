@@ -144,9 +144,38 @@ type Task struct {
 	// not import service (cycle). The service boundary (un)marshals it.
 	PendingDraftArticles datatypes.JSON `gorm:"type:json" json:"pending_draft_articles,omitempty"`
 	WorkflowStatus       *string        `gorm:"type:json" json:"workflow_status,omitempty"`
-	CreatedAt            time.Time      `gorm:"index:idx_user_created,priority:2" json:"created_at"`
-	UpdatedAt            time.Time      `gorm:"index" json:"updated_at"`
-	Plan                 *Plan          `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
+
+	// Local-execution (desktop) claim protocol. ExecutionTarget selects where the
+	// task runs: ExecutionTargetCloud (empty, default) → cloud Asynq/Docker;
+	// ExecutionTargetLocal → awaiting claim by a desktop local executor (not
+	// enqueued to Asynq); ExecutionTargetLocalClaimed → a desktop claimed it and
+	// is running it locally. LocalClaimDeadline is set at creation for "local"
+	// tasks; the fallback worker (service.ReclaimExpiredLocalTasks) flips expired
+	// unclaimed ones back to cloud so tasks never get stuck when no desktop is
+	// online. ExecutorInfo records which desktop claimed the task (diagnostics).
+	ExecutionTarget    string                           `gorm:"type:varchar(20);default:''" json:"execution_target,omitempty"`
+	LocalClaimDeadline *time.Time                       `gorm:"index" json:"local_claim_deadline,omitempty"`
+	ExecutorInfo       datatypes.JSONType[ExecutorMeta] `gorm:"type:json" json:"executor_info"`
+
+	CreatedAt time.Time `gorm:"index:idx_user_created,priority:2" json:"created_at"`
+	UpdatedAt time.Time `gorm:"index" json:"updated_at"`
+	Plan      *Plan     `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
+}
+
+// ExecutionTarget values selecting where a task runs.
+const (
+	ExecutionTargetCloud        = ""              // default: cloud Asynq/Docker
+	ExecutionTargetLocal        = "local"         // awaiting desktop local-executor claim
+	ExecutionTargetLocalClaimed = "local_claimed" // claimed by a desktop, running locally
+)
+
+// ExecutorMeta records which local executor claimed a task, for diagnostics.
+// Stored on Task.ExecutorInfo as a typed JSON column (datatypes.JSONType) so
+// the zero value serializes to a valid JSON null.
+type ExecutorMeta struct {
+	Hostname  string `json:"hostname,omitempty"`
+	Version   string `json:"version,omitempty"`
+	ClaimedAt string `json:"claimed_at,omitempty"`
 }
 
 // TableName returns the database table name for Task.

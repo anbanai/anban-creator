@@ -2,6 +2,7 @@ package handler
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"mime"
 	"path/filepath"
 	"strings"
@@ -145,6 +146,45 @@ type agentProgressRequest struct {
 	Result  *serveragent.ExecutionResult `json:"result"`
 }
 
+// agentClaimRequest is the optional body for POST /api/v1/agent/claim.
+// executor_info is an opaque JSON blob (desktop hostname/version) recorded for
+// diagnostics. The body may be empty.
+type agentClaimRequest struct {
+	ExecutorInfo json.RawMessage `json:"executor_info"`
+}
+
+// Claim handles POST /api/v1/agent/claim.
+//
+// A desktop local executor polls this endpoint to atomically claim its oldest
+// pending local-target task. On success it returns the full task config
+// (service.LocalExecutionConfig) which the desktop turns into an abwriter-agent
+// argv (mirroring the cloud DockerExecutor), supplying its own server_url +
+// API key. The claimed task is already status=running, so cloud Asynq never
+// picks it up. Returns 204 No Content when nothing is claimable.
+func (h *AgentHandler) Claim(c fiber.Ctx) error {
+	if h.taskSvc == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
+	}
+
+	userID := h.authenticatedUserID(c)
+
+	var req agentClaimRequest
+	// Body is optional; ignore bind errors (empty body is the common case).
+	if len(c.Body()) > 0 {
+		_ = c.Bind().Body(&req)
+	}
+
+	cfg, err := h.taskSvc.ClaimLocalTask(c.Context(), userID, string(req.ExecutorInfo))
+	if err != nil {
+		h.logger.Error().Err(err).Msg("claim local task failed")
+		return Error(c, fiber.StatusInternalServerError, "claim failed")
+	}
+	if cfg == nil {
+		return c.Status(fiber.StatusNoContent).SendString("")
+	}
+	return Success(c, cfg)
+}
+
 // Progress handles POST /api/v1/agent/progress.
 func (h *AgentHandler) Progress(c fiber.Ctx) error {
 	if h.taskSvc == nil {
@@ -161,6 +201,16 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 
 	if _, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c)); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
+	}
+
+	// Refresh the heartbeat on every progress report. This is the local-
+	// execution keep-alive: a desktop agent reports progress per turn/line, and
+	// each report resets the 5-min stuck-task reaper. Cloud tasks are also kept
+	// alive by HandleExecution's HeartbeatFunc, so this is a harmless redundant
+	// refresh there. Without it, a long-running local task would be force-failed
+	// by reapStuckTasks (plan_checker.go) before it completes.
+	if err := h.taskSvc.UpdateHeartbeat(c.Context(), req.TaskID); err != nil {
+		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("failed to update task heartbeat")
 	}
 
 	if req.Message != "" {
@@ -180,5 +230,38 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		}
 	}
 
+	return Success(c, fiber.Map{"ok": true})
+}
+
+// Complete handles POST /api/v1/agent/complete.
+//
+// A desktop local executor calls this once when abwriter-agent finishes, with
+// the final ExecutionResult. The service finalizes the task (status → completed
+// or failed, slot release, dispatch, refund-on-failure) — guarded to
+// local_claimed tasks and idempotent, so a cloud task or a repeat call is a
+// no-op. This is the terminal half of the local-execution path; without it a
+// local task could never reach a terminal state (the agent binary is shared with
+// cloud, whose authoritative finalization is server-side HandleExecution).
+func (h *AgentHandler) Complete(c fiber.Ctx) error {
+	if h.taskSvc == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
+	}
+
+	var req agentProgressRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if strings.TrimSpace(req.TaskID) == "" {
+		return Error(c, fiber.StatusBadRequest, "task_id is required")
+	}
+
+	if _, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c)); err != nil {
+		return Error(c, fiber.StatusForbidden, "task access denied")
+	}
+
+	if err := h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, req.Result); err != nil {
+		h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("complete local task failed")
+		return Error(c, fiber.StatusInternalServerError, "complete failed")
+	}
 	return Success(c, fiber.Map{"ok": true})
 }
