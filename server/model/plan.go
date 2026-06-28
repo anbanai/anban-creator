@@ -38,7 +38,7 @@ type Plan struct {
 	// Style/persona/theme dimensions, copied into spawned tasks' Task.Overrides
 	// at CreateFromPlan (non-empty only). Orthogonal to each other and to the
 	// scheduling fields above; empty = inherit from the project at resolve time.
-	VisualStyle   string `gorm:"type:varchar(1024);default:''" json:"visual_style,omitempty"`   // 图片视觉 (free text)
+	VisualStyle   string `gorm:"type:varchar(1024);default:''" json:"visual_style,omitempty"`  // 图片视觉 (free text)
 	WriterKey     string `gorm:"type:varchar(100);default:''" json:"writer_key,omitempty"`     // 写作者 YAML resource key
 	WritingVoice  string `gorm:"type:varchar(1024);default:''" json:"writing_voice,omitempty"` // 写作笔迹 (free-text imitation)
 	Byline        string `gorm:"type:varchar(200);default:''" json:"byline,omitempty"`         // 作者署名 (publish byline — never a writer persona name)

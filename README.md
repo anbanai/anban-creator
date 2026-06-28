@@ -100,8 +100,11 @@ server/       Go API server, MCP tools, scheduling, task execution, storage, pub
 agent/        Standalone agent runner used by Docker/local execution
 app/          Shared Go packages for config, converter, writer, humanizer, image, WeChat draft helpers
 studio/       React Web Studio
+desktop/      Tauri v2 desktop shell (local-execution client wrapping Studio)
+miniapp/      WeChat Mini Program parity client
 claudecode/   Claude Code plugin assets: agents, skills, themes, writer styles
 openclaw/     OpenClaw plugin distribution assets
+codex/        Codex plugin distribution assets (skills + subagents)
 docs/         Design specs and implementation plans
 ```
 

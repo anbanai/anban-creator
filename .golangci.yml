@@ -1,0 +1,38 @@
+# golangci-lint configuration.
+#
+# `make lint` runs `golangci-lint run ./...`. This config curates a low-noise,
+# high-value linter set (the golangci-lint defaults + a few extras) and is NOT
+# wired into CI as a blocking gate yet — run it locally and triage findings in a
+# follow-up wave.
+#
+# TOOLCHAIN NOTE: golangci-lint versions that bundle go-critic v0.6.2 panic on
+# startup under Go 1.26+ (`load embedded ruleguard rules: can't load fmt`, from
+# go-critic's package init — it runs regardless of which linters are enabled).
+# If `make lint` panics, upgrade golangci-lint to a release built against a
+# newer go-critic (e.g. `brew upgrade golangci-lint`); this config is ready to
+# use once the toolchain is compatible.
+run:
+  timeout: 5m
+  go: "1.26"
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - typecheck
+    - unconvert
+    - gofmt
+
+issues:
+  # Test files routinely ignore errors and use simpler constructs; don't flag them.
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+  max-issues-per-linter: 0
+  max-same-issues: 0

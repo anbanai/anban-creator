@@ -146,12 +146,7 @@ func (h *FileHandler) ServeFile(c fiber.Ctx) error {
 
 	// Verify ownership: allow user's uploads AND user's designer-generated images
 	// (OSS object keys for designer results are shaped "{userID}/designer/{genID}/{index}{ext}").
-	// "uploads/channels/" is the legacy prefix from before the channel→project rename;
-	// keep accepting it so existing user uploads remain accessible.
-	if !strings.HasPrefix(cleanKey, "uploads/projects/"+userID+"/") &&
-		!strings.HasPrefix(cleanKey, "uploads/references/"+userID+"/") &&
-		!strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") &&
-		!strings.HasPrefix(cleanKey, userID+"/designer/") {
+	if !isUserOwnedStorageKey(userID, cleanKey, userID+"/designer/") {
 		return Forbidden(c, "you do not have access to this file")
 	}
 

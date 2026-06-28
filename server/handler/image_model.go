@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/gofiber/fiber/v3"
@@ -133,4 +134,24 @@ func ValidateImageModelKey(key string, userTier model.Tier, presets []config.Ima
 		return nil
 	}
 	return fmt.Errorf("未知的图像模型 key: %q", key)
+}
+
+// validateImageModelKeyForUser resolves the caller's tier from the repository
+// and validates image_model_key against it.
+//
+// Returns nil if the key is acceptable, an error otherwise. Fail-closed: if the
+// user's tier cannot be determined (repo unavailable or lookup error), default
+// to Free so a DB hiccup cannot accidentally widen access to Pro/Enterprise-only
+// models.
+func validateImageModelKeyForUser(ctx context.Context, repo repository.Repository, userID, key string, presets []config.ImageModelPreset) error {
+	if key == "" {
+		return nil
+	}
+	tier := model.TierFree
+	if repo != nil {
+		if user, err := repo.Users().FindByID(ctx, userID); err == nil && user != nil {
+			tier = model.ResolveTier(user.Tier)
+		}
+	}
+	return ValidateImageModelKey(key, tier, presets)
 }

@@ -53,6 +53,18 @@ cd studio && bun run test     # Run vitest tests
 cd studio && bun run test:watch  # Watch mode tests
 ```
 
+### Desktop (Tauri v2)
+
+The `desktop/` shell wraps Studio with a Tauri v2 app and runs the agent locally (local-execution client). Resources must be populated before the first Rust build (see `reference_tauri_v2_build_gotchas`).
+
+```bash
+make agent-build-native        # Build native agent binary used by desktop local-executor
+cd desktop && bash populate-resources.sh  # Populate Tauri resources before first cargo build
+cd desktop && bun install      # Install desktop JS deps
+cd desktop && bun run dev      # Run desktop app in development (tauri dev)
+cd desktop && bun run build    # Build desktop installers (tauri build)
+```
+
 ### Docker Infrastructure
 
 ```bash

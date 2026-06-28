@@ -285,6 +285,9 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	if offset < 0 {
+		offset = 0
+	}
 
 	tasks, total, err := h.service.List(c.Context(), userID, offset, limit, status, projectID)
 	if err != nil {
@@ -1147,9 +1150,10 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid file path")
 	}
 
-	// Verify ownership: key format is {userID}/{taskID}/... or uploads/{projects|references}/{userID}/...
-	// "uploads/channels/" is the legacy prefix from before the channel→project rename.
-	if !strings.HasPrefix(cleanKey, userID+"/") && !strings.HasPrefix(cleanKey, "uploads/projects/"+userID+"/") && !strings.HasPrefix(cleanKey, "uploads/references/"+userID+"/") && !strings.HasPrefix(cleanKey, "uploads/channels/"+userID+"/") {
+	// Verify ownership: task workspace files live under {userID}/{taskID}/...,
+	// user uploads under uploads/{projects|references|channels}/{userID}/
+	// (channels is the legacy prefix from the channel→project rename).
+	if !isUserOwnedStorageKey(userID, cleanKey, userID+"/") {
 		return Forbidden(c, "you do not have access to this file")
 	}
 
@@ -1198,22 +1202,11 @@ func (h *TaskHandler) ServeLocalFile(c fiber.Ctx) error {
 	return c.SendFile(absPath)
 }
 
-// validateImageModelKeyForUser resolves the user's tier and validates image_model_key.
-// Returns nil if the key is acceptable for this user, an error otherwise.
-// Fail-closed: if the user's tier cannot be determined (repo unavailable or
-// lookup error), default to Free so a DB hiccup cannot accidentally widen
-// access to Pro/Enterprise-only models.
+// validateImageModelKeyForUser delegates to the package-level helper, binding
+// this handler's repository and image presets. See validateImageModelKeyForUser
+// in image_model.go for the fail-closed tier-resolution rules.
 func (h *TaskHandler) validateImageModelKeyForUser(c fiber.Ctx, userID, key string) error {
-	if key == "" {
-		return nil
-	}
-	tier := model.TierFree
-	if h.repo != nil {
-		if user, err := h.repo.Users().FindByID(c.Context(), userID); err == nil && user != nil {
-			tier = model.ResolveTier(user.Tier)
-		}
-	}
-	return ValidateImageModelKey(key, tier, h.imagePresets)
+	return validateImageModelKeyForUser(c.Context(), h.repo, userID, key, h.imagePresets)
 }
 
 // validateUUIDParam extracts and validates that a path parameter is a valid UUID.
