@@ -46,11 +46,9 @@ function planToFormValues(plan: Plan): PlanFormValues {
     image_model_key: plan.image_model_key || '',
     skip_reference_image: plan.skip_reference_image || false,
     visual_style: plan.visual_style || '',
-    writer_key: plan.writer_key || '',
+    writer: plan.writer || '',
     theme: plan.theme || '',
-    byline: plan.byline || '',
-    writing_voice: plan.writing_voice || '',
-    persona_avatar: plan.persona_avatar || '',
+    author: plan.author || '',
     watermark: plan.watermark || false,
     goal: plan.goal || '',
     goal_mode: plan.goal_mode || false,
@@ -83,11 +81,9 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       visual_style: '',
-      writer_key: '',
+      writer: '',
       theme: '',
-      byline: '',
-      writing_voice: '',
-      persona_avatar: '',
+      author: '',
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
@@ -103,9 +99,8 @@ export default function PlansPage() {
   }, [modalOpen, form])
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
-  const watchedAuthor = useWatch({ control: form.control, name: 'byline' })
-  const watchedAuthorIntro = useWatch({ control: form.control, name: 'writing_voice' })
-  const watchedAuthorAvatar = useWatch({ control: form.control, name: 'persona_avatar' })
+  const watchedAuthor = useWatch({ control: form.control, name: 'author' })
+  const watchedWriter = useWatch({ control: form.control, name: 'writer' })
   const watchedTheme = useWatch({ control: form.control, name: 'theme' })
   const watchedGoalMode = useWatch({ control: form.control, name: 'goal_mode' })
 
@@ -230,11 +225,9 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       visual_style: '',
-      writer_key: '',
+      writer: '',
       theme: '',
-      byline: '',
-      writing_voice: '',
-      persona_avatar: '',
+      author: '',
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
@@ -281,11 +274,9 @@ export default function PlansPage() {
       prompt: '',
       image_model_key: '',
       visual_style: '',
-      writer_key: '',
+      writer: '',
       theme: '',
-      byline: '',
-      writing_voice: '',
-      persona_avatar: '',
+      author: '',
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
@@ -303,12 +294,10 @@ export default function PlansPage() {
     // The three orthogonal style dimensions flow into the plan; spawned tasks inherit
     // them and the agent surfaces them via get_project_profile(task_id).
     form.setValue('visual_style', template.style_prompt || '', { shouldDirty: true })
-    form.setValue('writer_key', template.writer_key || '', { shouldDirty: true })
+    form.setValue('writer', template.writer || '', { shouldDirty: true })
     form.setValue('theme', template.theme || '', { shouldDirty: true })
-    // 公众号人设（作者署名 + 写作风格模仿 + 可选头像）随模板导入，仍可编辑。
-    form.setValue('byline', template.author_name || '', { shouldDirty: true })
-    form.setValue('writing_voice', template.writing_voice || '', { shouldDirty: true })
-    form.setValue('persona_avatar', template.persona_avatar || '', { shouldDirty: true })
+    // 公众号字段（作者署名 + 写作风格 key）随模板导入，仍可编辑。
+    form.setValue('author', template.author || '', { shouldDirty: true })
   }
 
   async function onSubmit(values: PlanFormValues) {
@@ -323,11 +312,9 @@ export default function PlansPage() {
       project_id: values.project_id || undefined,
       image_model_key: values.image_model_key,
       visual_style: values.visual_style || undefined,
-      writer_key: values.writer_key || undefined,
+      writer: values.writer || undefined,
       theme: values.theme || undefined,
-      byline: values.byline || undefined,
-      writing_voice: values.writing_voice || undefined,
-      persona_avatar: values.persona_avatar || undefined,
+      author: values.author || undefined,
       watermark: values.watermark || undefined,
       goal_mode: values.goal_mode || undefined,
       goal: values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
@@ -584,17 +571,15 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑（覆盖模板/项目）。
-                  计划级 author_* 字段经后端解析链 plan > template > project 下发到 spawned task。 */}
+              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑。
+                  计划级 author/writer/theme 会写入 spawned task overrides，运行时按 task > project 解析。 */}
               {watchedType === 'article' && (
                 <>
                   <PersonaBlock
-                    authorName={watchedAuthor ?? ''}
-                    onAuthorName={(v) => form.setValue('byline', v, { shouldDirty: true })}
-                    authorStyleIntro={watchedAuthorIntro ?? ''}
-                    onAuthorStyleIntro={(v) => form.setValue('writing_voice', v, { shouldDirty: true })}
-                    authorAvatarUrl={watchedAuthorAvatar ?? ''}
-                    onAuthorAvatarUrl={(v) => form.setValue('persona_avatar', v, { shouldDirty: true })}
+                    author={watchedAuthor ?? ''}
+                    onAuthor={(v) => form.setValue('author', v, { shouldDirty: true })}
+                    writer={watchedWriter ?? ''}
+                    onWriter={(v) => form.setValue('writer', v, { shouldDirty: true })}
                   />
                   <ThemePicker theme={watchedTheme ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
                   {!selectedTemplate && (

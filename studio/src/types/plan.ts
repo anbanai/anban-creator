@@ -16,7 +16,7 @@ export interface Plan {
   skip_reference_image?: boolean
   reference_image_url?: string
   visual_style?: string
-  writer_key?: string
+  writer?: string
   theme?: string
   watermark?: boolean
   goal?: string
@@ -27,10 +27,8 @@ export interface Plan {
   // toggleable. Both default true; spawned article tasks inherit them.
   article_with_cover?: boolean
   article_with_content_images?: boolean
-  // 公众号人设（与项目/模板同链解析：plan > template > project），spawned task 继承。
-  byline?: string
-  writing_voice?: string
-  persona_avatar?: string
+  // 公众号发布署名 + 写作风格 key，spawned task 继承。
+  author?: string
   // template_id records the template selected when creating the plan; spawned
   // tasks inherit it so the agent can surface the template's content scaffold
   // via get_project_profile(task_id).
@@ -48,7 +46,7 @@ export interface CreatePlanRequest {
   skip_reference_image?: boolean
   reference_image_url?: string
   visual_style?: string
-  writer_key?: string
+  writer?: string
   theme?: string
   watermark?: boolean
   goal?: string
@@ -60,10 +58,8 @@ export interface CreatePlanRequest {
   // toggleable; both default true. Server ignores for non-article plans.
   article_with_cover?: boolean
   article_with_content_images?: boolean
-  // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。
-  byline?: string
-  writing_voice?: string
-  persona_avatar?: string
+  // 公众号发布署名 + 写作风格 key override。
+  author?: string
   template_id?: string
 }
 
@@ -74,7 +70,7 @@ export interface UpdatePlanRequest {
   skip_reference_image?: boolean
   reference_image_url?: string
   visual_style?: string
-  writer_key?: string
+  writer?: string
   theme?: string
   watermark?: boolean
   goal?: string
@@ -84,9 +80,7 @@ export interface UpdatePlanRequest {
   // Article image toggles (公众号文章): leave-unchanged when omitted.
   article_with_cover?: boolean
   article_with_content_images?: boolean
-  // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。
-  byline?: string
-  writing_voice?: string
-  persona_avatar?: string
+  // 公众号发布署名 + 写作风格 key override。
+  author?: string
   template_id?: string
 }

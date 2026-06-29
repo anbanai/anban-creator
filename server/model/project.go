@@ -40,13 +40,12 @@ func (p *Project) SetEcommerceDefaults(ec EcommerceProjectDefaults) {
 	p.EcommerceDefaults = datatypes.NewJSONType(ec)
 }
 
-// Project is the SINGLE SOURCE OF TRUTH for every style/persona/theme/ecommerce
+// Project is the SINGLE SOURCE OF TRUTH for every style/author/theme/ecommerce
 // setting. Tasks and plans inherit from it with precedence task > project; a task
 // may override individual dimensions via Task.Overrides.
 //
-// DB column names are retained from the pre-refactor schema (gorm:"column:...")
-// so this rename needs no data migration — only the Go field names and JSON keys
-// change, which removes the `Style` overload from every code/API surface.
+// DB column names use the current public contract directly. Legacy columns are
+// removed by the author/writer SQL migration for this new project.
 type Project struct {
 	ID          string `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID      string `gorm:"type:char(36);index;not null" json:"user_id"`
@@ -62,18 +61,13 @@ type Project struct {
 	Instructions string `gorm:"type:text" json:"instructions,omitempty"` // 项目指令
 	// VisualStyle is the 图片视觉 (image visual style, free text) dimension.
 	VisualStyle string `gorm:"column:style;type:text" json:"visual_style"`
-	// WriterKey is the 写作者 YAML resource key (e.g. "dan-koe") for the app/writer
+	// Writer is the 写作者 YAML resource key (e.g. "dan-koe") for the app/writer
 	// styled-writing pipeline. Orthogonal to VisualStyle/Theme.
-	WriterKey string `gorm:"column:writing_style;type:varchar(100);default:''" json:"writer_key"`
+	Writer string `gorm:"type:varchar(100);default:''" json:"writer"`
 	// Theme is the 排版 (layout/typesetting) resource key (e.g. "autumn-warm").
 	Theme string `gorm:"type:varchar(50)" json:"theme"`
-	// Byline is the 作者（署名）— the published author name, passed to publish_draft.
-	// STRICTLY independent of WritingVoice (the writing-imitation dimension).
-	Byline string `gorm:"column:author;type:varchar(50)" json:"byline"`
-	// WritingVoice is the 写作笔迹 (free-text writing imitation: 框架/方式/笔迹).
-	WritingVoice string `gorm:"column:author_style_intro;type:text" json:"writing_voice"`
-	// PersonaAvatar is the optional 人设头像 (persona avatar, never part of the byline).
-	PersonaAvatar string `gorm:"column:author_avatar_url;type:varchar(500)" json:"persona_avatar"`
+	// Author is the 作者（署名）— the published author name, passed to publish_draft.
+	Author string `gorm:"column:author;type:varchar(50)" json:"author"`
 	// CreatedFromTemplateID records the starter template used to create this project
 	// (audit only). Templates are project-creation starters, imported once then
 	// detached — this id does NOT enter the resolution chain.

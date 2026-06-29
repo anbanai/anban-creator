@@ -69,25 +69,21 @@ func (h *TaskHandler) SetRepository(repo repository.Repository) {
 // Request types.
 
 type createTaskRequest struct {
-	ProjectID          string `json:"project_id"`
-	Prompt             string `json:"prompt"`
-	Quantity           int    `json:"quantity"`
-	ImageRatio         string `json:"image_ratio"`
-	ImageModelKey      string `json:"image_model_key"`
-	SkipReferenceImage *bool  `json:"skip_reference_image"`
-	ReferenceImageURL  string `json:"reference_image_url"`
-	VisualStyle        string `json:"visual_style"`
-	WriterKey          string `json:"writer_key"`
-	Theme              string `json:"theme"`
-	// Byline / WritingVoice / PersonaAvatar: 公众号 作者（署名）+ 写作风格（模仿）
-	// + 可选人设头像 overrides, orthogonal to VisualStyle/WriterKey/Theme.
-	Byline        string  `json:"byline"`
-	WritingVoice  string  `json:"writing_voice"`
-	PersonaAvatar string  `json:"persona_avatar"`
-	Watermark     *bool   `json:"watermark"`
-	Goal          string  `json:"goal"`
-	GoalMode      bool    `json:"goal_mode"`
-	TemplateID    *string `json:"template_id,omitempty"`
+	ProjectID          string  `json:"project_id"`
+	Prompt             string  `json:"prompt"`
+	Quantity           int     `json:"quantity"`
+	ImageRatio         string  `json:"image_ratio"`
+	ImageModelKey      string  `json:"image_model_key"`
+	SkipReferenceImage *bool   `json:"skip_reference_image"`
+	ReferenceImageURL  string  `json:"reference_image_url"`
+	VisualStyle        string  `json:"visual_style"`
+	Writer             string  `json:"writer"`
+	Theme              string  `json:"theme"`
+	Author             string  `json:"author"`
+	Watermark          *bool   `json:"watermark"`
+	Goal               string  `json:"goal"`
+	GoalMode           bool    `json:"goal_mode"`
+	TemplateID         *string `json:"template_id,omitempty"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to CreateManualParams defaults (content on,
 	// tail off). Non-seednote task types ignore them.
@@ -201,11 +197,11 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
-	if err := service.RejectWriterNameAsByline(req.Byline); err != nil {
+	if err := service.RejectWriterNameAsAuthor(req.Author); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
-	// A task carries only per-dimension style/persona/theme OVERRIDES; every other
+	// A task carries only per-dimension style/author/theme OVERRIDES; every other
 	// dimension is inherited from the project and resolved two-layer at execution
 	// (task.Overrides.X ?? project.X via ResolveStyle). Build the overrides only
 	// when the caller set at least one dimension — an all-empty (nil) override means
@@ -213,15 +209,13 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	// are project-creation starters only) and no longer snapshots resolved values,
 	// so editing the project immediately affects pending tasks.
 	var overrides *model.StyleOverrides
-	if req.VisualStyle != "" || req.WriterKey != "" || req.Theme != "" ||
-		req.Byline != "" || req.WritingVoice != "" || req.PersonaAvatar != "" {
+	if req.VisualStyle != "" || req.Writer != "" || req.Theme != "" ||
+		req.Author != "" {
 		overrides = &model.StyleOverrides{
-			VisualStyle:   req.VisualStyle,
-			WriterKey:     req.WriterKey,
-			WritingVoice:  req.WritingVoice,
-			Byline:        req.Byline,
-			PersonaAvatar: req.PersonaAvatar,
-			Theme:         req.Theme,
+			VisualStyle: req.VisualStyle,
+			Writer:      req.Writer,
+			Author:      req.Author,
+			Theme:       req.Theme,
 		}
 	}
 

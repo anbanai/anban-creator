@@ -23,6 +23,25 @@ type TemplateService struct {
 	logger *zerolog.Logger
 }
 
+// TemplatePatch carries explicit field-presence for template updates. A nil
+// pointer means "leave unchanged"; a non-nil pointer, including "", means "set
+// to this value".
+type TemplatePatch struct {
+	Name           *string
+	Type           *string
+	ThumbnailURL   *string
+	VisualStyle    *string
+	Visibility     *string
+	Writer         *string
+	Theme          *string
+	Author         *string
+	Category       *string
+	Tags           *[]string
+	Structure      *map[string]any
+	ExampleContent *map[string]any
+	Ecommerce      *model.EcommerceTemplateDefaults
+}
+
 // NewTemplateService creates a new TemplateService.
 func NewTemplateService(repo repository.Repository, logger *zerolog.Logger) *TemplateService {
 	return &TemplateService{repo: repo, logger: logger}
@@ -100,6 +119,51 @@ func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, user
 // ErrTemplateNotFound if the id does not match a row, or ErrTemplateForbidden
 // if userID is not the owner.
 func (s *TemplateService) Update(ctx context.Context, id string, userID string, patch *model.Template) (*model.Template, error) {
+	p := TemplatePatch{}
+	if patch.Name != "" {
+		p.Name = &patch.Name
+	}
+	if patch.Type != "" {
+		p.Type = &patch.Type
+	}
+	if patch.ThumbnailURL != "" {
+		p.ThumbnailURL = &patch.ThumbnailURL
+	}
+	if patch.VisualStyle != "" {
+		p.VisualStyle = &patch.VisualStyle
+	}
+	if patch.Visibility != "" {
+		p.Visibility = &patch.Visibility
+	}
+	if patch.Writer != "" {
+		p.Writer = &patch.Writer
+	}
+	if patch.Theme != "" {
+		p.Theme = &patch.Theme
+	}
+	if patch.Author != "" {
+		p.Author = &patch.Author
+	}
+	if patch.Category != "" {
+		p.Category = &patch.Category
+	}
+	if len(patch.Tags) > 0 {
+		p.Tags = &patch.Tags
+	}
+	if len(patch.Structure) > 0 {
+		p.Structure = &patch.Structure
+	}
+	if len(patch.ExampleContent) > 0 {
+		p.ExampleContent = &patch.ExampleContent
+	}
+	if ec := patch.Ecommerce.Data(); len(ec.DefaultSelectedModules) > 0 || ec.TargetPlatform != "" || ec.BrandBrief != "" || ec.ImageModelKey != "" {
+		p.Ecommerce = &ec
+	}
+	return s.UpdatePatch(ctx, id, userID, p)
+}
+
+// UpdatePatch modifies an existing template with explicit PATCH semantics.
+func (s *TemplateService) UpdatePatch(ctx context.Context, id string, userID string, patch TemplatePatch) (*model.Template, error) {
 	existing, err := s.repo.Templates().FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -111,62 +175,44 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 		return nil, ErrTemplateForbidden
 	}
 
-	// Apply patch fields.
-	if patch.Name != "" {
-		existing.Name = patch.Name
+	if patch.Name != nil {
+		existing.Name = *patch.Name
 	}
-	if patch.Type != "" {
-		existing.Type = patch.Type
+	if patch.Type != nil {
+		existing.Type = *patch.Type
 	}
-	if patch.ThumbnailURL != "" {
-		existing.ThumbnailURL = patch.ThumbnailURL
+	if patch.ThumbnailURL != nil {
+		existing.ThumbnailURL = *patch.ThumbnailURL
 	}
-	existing.VisualStyle = patch.VisualStyle
-	if patch.Visibility == "public" || patch.Visibility == "private" {
-		existing.Visibility = patch.Visibility
+	if patch.VisualStyle != nil {
+		existing.VisualStyle = *patch.VisualStyle
 	}
-	// Content scaffold fields use "non-empty = set, empty = leave unchanged"
-	// (matching Name/Type/ThumbnailURL). This means PATCH cannot CLEAR them — the
-	// Studio edit form always round-trips the current values, so clearing in the
-	// UI sends "" which is treated as "unchanged". Acceptable for v1.
-	if patch.WriterKey != "" {
-		existing.WriterKey = patch.WriterKey
+	if patch.Visibility != nil && (*patch.Visibility == "public" || *patch.Visibility == "private") {
+		existing.Visibility = *patch.Visibility
 	}
-	// 排版样式 (Theme). Same "non-empty = set" PATCH rule as the scaffold/author
-	// fields — the repo writes ALL columns, so omitting this silently keeps the
-	// OLD theme (the "编辑后保存无效" bug). The Studio edit form round-trips the
-	// current value, so empty = leave unchanged is safe.
-	if patch.Theme != "" {
-		existing.Theme = patch.Theme
+	if patch.Writer != nil {
+		existing.Writer = *patch.Writer
 	}
-	// Author persona (公众号 写作风格). Same "non-empty = set" PATCH rule as the
-	// scaffold fields above; the Studio edit form round-trips current values.
-	if patch.Byline != "" {
-		existing.Byline = patch.Byline
+	if patch.Theme != nil {
+		existing.Theme = *patch.Theme
 	}
-	if patch.PersonaAvatar != "" {
-		existing.PersonaAvatar = patch.PersonaAvatar
+	if patch.Author != nil {
+		existing.Author = *patch.Author
 	}
-	if patch.WritingVoice != "" {
-		existing.WritingVoice = patch.WritingVoice
+	if patch.Category != nil {
+		existing.Category = *patch.Category
 	}
-	if patch.Category != "" {
-		existing.Category = patch.Category
+	if patch.Tags != nil {
+		existing.Tags = *patch.Tags
 	}
-	if len(patch.Tags) > 0 {
-		existing.Tags = patch.Tags
+	if patch.Structure != nil {
+		existing.Structure = *patch.Structure
 	}
-	if len(patch.Structure) > 0 {
-		existing.Structure = patch.Structure
+	if patch.ExampleContent != nil {
+		existing.ExampleContent = *patch.ExampleContent
 	}
-	if len(patch.ExampleContent) > 0 {
-		existing.ExampleContent = patch.ExampleContent
-	}
-	// Ecommerce defaults (type="ecommerce" templates). Copied when the patch
-	// carries a non-empty config — the handler only sets it when the client sent
-	// one, so an all-zero JSONType correctly means "leave unchanged" (PATCH).
-	if ec := patch.Ecommerce.Data(); len(ec.DefaultSelectedModules) > 0 || ec.TargetPlatform != "" || ec.BrandBrief != "" || ec.ImageModelKey != "" {
-		existing.Ecommerce = patch.Ecommerce
+	if patch.Ecommerce != nil {
+		existing.SetEcommerce(*patch.Ecommerce)
 	}
 
 	ensureTagsNotNil(existing)

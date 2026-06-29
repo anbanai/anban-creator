@@ -16,8 +16,8 @@ const (
 	// ConfigFileName 配置文件名
 	ConfigFileName = "settings.json"
 
-	// DefaultArticleWriterKey 默认写作者 key（writer 资源 key，如 dan-koe）
-	DefaultArticleWriterKey = "dan-koe"
+	// DefaultArticleWriter 默认写作者 key（writer 资源 key，如 dan-koe）
+	DefaultArticleWriter = "dan-koe"
 	// DefaultArticleTheme 默认图文文章主题
 	DefaultArticleTheme = "default"
 	// DefaultImageProvider 默认图片生成服务商
@@ -112,11 +112,11 @@ type CountedImageSection struct {
 
 // ArticleConfig 图文文章配置
 type ArticleConfig struct {
-	WriterKey string       `json:"writer_key,omitempty" yaml:"writer_key,omitempty"`
-	Theme     string       `json:"theme,omitempty" yaml:"theme,omitempty"`
-	Byline    string       `json:"byline,omitempty" yaml:"byline,omitempty"`
-	Cover     ImageSection `json:"cover,omitempty" yaml:"cover,omitempty"`
-	Content   ImageSection `json:"content,omitempty" yaml:"content,omitempty"`
+	Writer  string       `json:"writer,omitempty" yaml:"writer,omitempty"`
+	Theme   string       `json:"theme,omitempty" yaml:"theme,omitempty"`
+	Author  string       `json:"author,omitempty" yaml:"author,omitempty"`
+	Cover   ImageSection `json:"cover,omitempty" yaml:"cover,omitempty"`
+	Content ImageSection `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
 // WechatConfig 微信公众号配置

@@ -1,9 +1,9 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import {
   Select,
@@ -12,89 +12,60 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/Select'
-import { ReferenceImageUpload } from '@/components/projects/ReferenceImageUpload'
-import { SignedImage } from '@/components/ui/SignedImage'
 import type { ResourceEntry } from '@/types/resource'
 
-// PersonaBlock — 公众号「人设」统一区块，被模板编辑器、公众号项目编辑器、
-// 任务/计划编辑器（只读）共用，保证几处 UI 完全一致。聚合三件事，三者语义严格不同、互不派生：
-//   - 名称（署名）：真实发布者姓名，保存后落到 author_name/byline（项目为 byline），
-//     经 get_project_profile 作为发布作者名下发到微信。纯手填，绝不来自写作风格人设名。
-//   - 写作风格：供 AI 模仿的口吻/笔迹，落到 writing_voice（扁平下发，≠ writer_key）。
-//     「从写作风格库导入」只回填此项（取所选 writer 的 description），不触碰署名。
-//   - 头像（可选）：人设头像，仅参考。
-// readOnly=true 时渲染为只读摘要（项目绑定模板、任务/计划选了模板时，随模板同步展示）。
 interface PersonaBlockProps {
-  authorName: string
-  onAuthorName: (v: string) => void
-  authorStyleIntro: string
-  onAuthorStyleIntro: (v: string) => void
-  authorAvatarUrl: string
-  onAuthorAvatarUrl: (v: string) => void
+  author: string
+  onAuthor: (v: string) => void
+  writer: string
+  onWriter: (v: string) => void
   readOnly?: boolean
 }
 
+function writerValue(w: ResourceEntry): string {
+  return w.english_name || w.name || ''
+}
+
+function writerLabel(w: ResourceEntry): string {
+  if (w.display_name) return w.display_name
+  if (w.name && w.category_cn) return `${w.name}（${w.category_cn}）`
+  return w.name || w.english_name || ''
+}
+
 export function PersonaBlock({
-  authorName,
-  onAuthorName,
-  authorStyleIntro,
-  onAuthorStyleIntro,
-  authorAvatarUrl,
-  onAuthorAvatarUrl,
+  author,
+  onAuthor,
+  writer,
+  onWriter,
   readOnly = false,
 }: PersonaBlockProps) {
-  // 写作风格库（writers）用于一键导入：entry.name = 中文名（如 "Dan Koe"），
-  // entry.description = 风格简介，entry.category_cn = 分类。
   const { data: writerResources } = useQuery({
     queryKey: queryKeys.resources.writers,
     queryFn: () => api.resources.list('writers'),
     staleTime: Infinity,
   })
-  const writers = (writerResources?.items || []) as ResourceEntry[]
-  // writer entry 的 name 即中文名；按名字排序稳定展示。
-  const sortedWriters = [...writers].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-  const writerLabel = (w: ResourceEntry) =>
-    w.category_cn ? `${w.name}（${w.category_cn}）` : w.name
 
-  // 只读摘要：项目绑定模板、任务/计划选了模板时，写作风格随模板同步展示。
+  const writers = useMemo(() => {
+    const items = (writerResources?.items || []) as ResourceEntry[]
+    return [...items]
+      .filter((w) => writerValue(w))
+      .sort((a, b) => writerLabel(a).localeCompare(writerLabel(b), 'zh-Hans-CN'))
+  }, [writerResources])
+
+  const selectedWriter = writers.find((w) => writerValue(w) === writer)
+
   if (readOnly) {
-    const hasAny = authorName || authorStyleIntro || authorAvatarUrl
-    if (!hasAny) {
-      return (
-        <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
-          <div className="flex items-center justify-between">
-            <Label className="text-sm font-medium">作者署名 · 写作风格</Label>
-            <Badge variant="secondary" className="text-[10px]">随模板同步</Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">所选模板未设置写作风格。</p>
-        </div>
-      )
-    }
     return (
       <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
         <div className="flex items-center justify-between">
-          <Label className="text-sm font-medium">作者署名 · 写作风格</Label>
-          <Badge variant="secondary" className="text-[10px]">随模板同步·改模板自动更新</Badge>
+          <Label className="text-sm font-medium">发布署名 · 写作风格</Label>
+          <Badge variant="secondary" className="text-[10px]">随模板同步</Badge>
         </div>
-        <div className="flex items-start gap-3">
-          {authorAvatarUrl && (
-            <SignedImage
-              src={authorAvatarUrl}
-              alt="头像"
-              className="h-12 w-12 shrink-0 rounded-full object-cover"
-              showLoading={false}
-            />
-          )}
-          <div className="min-w-0 flex-1 space-y-1">
-            {authorName && (
-              <p className="text-sm font-medium text-foreground">{authorName}</p>
-            )}
-            {authorStyleIntro && (
-              <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-                {authorStyleIntro}
-              </p>
-            )}
-          </div>
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-foreground">{author || '未设置发布署名'}</p>
+          <p className="text-sm text-muted-foreground">
+            {selectedWriter ? writerLabel(selectedWriter) : writer || '未设置写作风格'}
+          </p>
         </div>
       </div>
     )
@@ -103,75 +74,45 @@ export function PersonaBlock({
   return (
     <div className="space-y-3 rounded-lg border border-dashed border-input p-3">
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-sm font-medium">作者署名 · 写作风格</Label>
-        <span className="shrink-0 text-xs text-muted-foreground">署名=发布作者名 · 写作风格=供 AI 模仿的口吻</span>
+        <Label className="text-sm font-medium">发布署名 · 写作风格</Label>
+        <span className="shrink-0 text-xs text-muted-foreground">头像/昵称仅用于 Studio 选择展示</span>
       </div>
-      {sortedWriters.length > 0 && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">从写作风格库导入</span>
-          <Select
-            value=""
-            onValueChange={(v) => {
-              const w = sortedWriters.find((x) => x.name === v || x.english_name === v)
-              if (!w) return
-              // 仅导入「写作风格简介」供 AI 模仿。作者署名是真实发布者姓名，与写作风格人设名无关，
-              // 导入绝不覆盖署名——否则会把人设名（如 Dan Koe）当成发布作者发到公众号。
-              if (w.description) onAuthorStyleIntro(w.description)
-            }}
-          >
-            <SelectTrigger className="h-7 w-full max-w-xs text-xs">
-              <SelectValue placeholder="选择写作风格，自动填入写作风格简介" />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor="persona-author-name" className="text-xs font-medium text-muted-foreground">
+            公众号发布署名
+          </Label>
+          <Input
+            id="persona-author-name"
+            value={author}
+            onChange={(e) => onAuthor(e.target.value)}
+            placeholder="例如：李雷、某某实验室"
+            maxLength={100}
+          />
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs font-medium text-muted-foreground">
+            写作风格
+          </Label>
+          <Select value={writer || ''} onValueChange={(value) => onWriter(value || '')}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="选择写作风格，例如 Dan Koe" />
             </SelectTrigger>
             <SelectContent>
-              {sortedWriters.map((w) => (
-                <SelectItem
-                  key={w.english_name || w.name}
-                  value={w.name || w.english_name || ''}
-                  label={writerLabel(w)}
-                >
-                  {writerLabel(w)}
+              {writers.map((w) => (
+                <SelectItem key={writerValue(w)} value={writerValue(w)} label={writerLabel(w)}>
+                  <div className="flex items-center gap-2">
+                    <span>{writerLabel(w)}</span>
+                    {w.category_cn && (
+                      <span className="text-xs text-muted-foreground">{w.category_cn}</span>
+                    )}
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
-      )}
-      <div className="flex items-stretch gap-3">
-        <div className="shrink-0">
-          <ReferenceImageUpload
-            value={authorAvatarUrl}
-            onChange={onAuthorAvatarUrl}
-            purpose="reference"
-          />
-          <p className="mt-1 text-center text-[11px] text-muted-foreground">头像（可选）</p>
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <div className="space-y-1">
-            <Label htmlFor="persona-author-name" className="text-xs font-medium text-muted-foreground">
-              发布署名 · 文章作者位显示的真实姓名/品牌
-            </Label>
-            <Input
-              id="persona-author-name"
-              value={authorName}
-              onChange={(e) => onAuthorName(e.target.value)}
-              placeholder="例如：李雷、某某实验室"
-              maxLength={100}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="persona-style-intro" className="text-xs font-medium text-muted-foreground">
-              写作风格 · 供 AI 模仿的口吻（自由文本，可从上方风格库导入）
-            </Label>
-            <Textarea
-              id="persona-style-intro"
-              value={authorStyleIntro}
-              onChange={(e) => onAuthorStyleIntro(e.target.value)}
-              placeholder="例如：犀利、接地气、像朋友聊天；多用短句和反问；爱用具体数字和案例"
-              maxLength={1024}
-              className="resize-none"
-              rows={3}
-            />
-          </div>
         </div>
       </div>
     </div>

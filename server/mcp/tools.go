@@ -116,7 +116,7 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get a project's resolved creation profile for AI content generation. Returns the project's positioning/keywords/name plus the EFFECTIVE (already-resolved) style/persona/theme dimensions, each with its own *_source tag (\"task\" when the task overrode it, else \"project\"): `visual_style` (图片视觉, free text), `writer_key` (写作者 YAML resource key e.g. dan-koe), `writing_voice` (写作笔迹, free-text writing imitation), `byline` (作者署名 — the published author name; pass verbatim to publish_draft's author, omit if empty), `persona_avatar` (人设头像, optional), `theme` (排版 resource key e.g. autumn-warm). These dimensions are independent and never derive from each other. Resolution is two-layer (task override > project); pass task_id when one exists so per-task overrides surface. Does NOT expose credentials.",
+		Description: "Get a project's resolved creation profile for AI content generation. Returns the project's positioning/keywords/name plus the EFFECTIVE (already-resolved) style/theme/author dimensions, each with its own *_source tag (\"task\" when the task overrode it, else \"project\"): `visual_style` (图片视觉, free text), `writer` (写作者 YAML resource key e.g. dan-koe), `author` (作者署名 — the published author name; pass verbatim to publish_draft's author, omit if empty), `theme` (排版 resource key e.g. autumn-warm). Studio-only writer display metadata such as avatars/nicknames is intentionally not exposed. These dimensions are independent and never derive from each other. Resolution is two-layer (task override > project); pass task_id when one exists so per-task overrides surface. Does NOT expose credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -301,7 +301,7 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 }
 
 // buildAccountInfo is the testable core of get_project_profile. It returns a
-// FLAT, fully-resolved creation profile: every style/persona/theme dimension is
+// FLAT, fully-resolved creation profile: every style/author/theme dimension is
 // resolved two-layer (task override > project) through service.ResolveStyle — the
 // SAME primitive the prompt (BuildUserPrompt) and settings.json (config_builder)
 // channels use — so the three delivery channels to the agent can never disagree.
@@ -346,35 +346,31 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	}
 
 	// ONE resolution, two layers (task override > project). The dimensions are
-	// independent — the writer key never drives the visual style, the byline never
-	// equals the writing voice — and each carries its provenance.
+	// independent — the writer key never drives the visual style, the author never
+	// equals the writer persona — and each carries its provenance.
 	r := service.ResolveStyle(ch, task)
 
-	// Flat profile. Every style/persona/theme dimension is exposed directly (no
+	// Flat profile. Every runtime style/theme/author dimension is exposed directly (no
 	// template_* namespace) with its own *_source provenance tag:
 	//   - visual_style   (图片视觉): free-text image visual style; empty = none
-	//   - writer_key     (写作者):   writer YAML resource key, e.g. "dan-koe"
-	//   - writing_voice  (写作笔迹): free-text writing imitation
-	//   - byline         (作者署名): published author name; pass to publish_draft's author
-	//   - persona_avatar (人设头像): optional persona avatar reference
+	//   - writer     (写作者):   writer YAML resource key, e.g. "dan-koe"
+	//   - author         (作者署名): published author name; pass to publish_draft's author
 	//   - theme          (排版样式): theme resource key, e.g. "autumn-warm"
+	// Writer avatars/nicknames are Studio-only display metadata and must never
+	// enter Agent/MCP runtime profiles.
 	info := map[string]any{
-		"name":                  ch.Name,
-		"positioning":           ch.Positioning,
-		"keywords":              ch.Keywords,
-		"platform":              ch.Platform,
-		"visual_style":          r.VisualStyle,
-		"writer_key":            r.WriterKey,
-		"writing_voice":         r.WritingVoice,
-		"byline":                r.Byline,
-		"persona_avatar":        r.PersonaAvatar,
-		"theme":                 r.Theme,
-		"visual_style_source":   r.VisualStyleSource,
-		"writer_key_source":     r.WriterKeySource,
-		"writing_voice_source":  r.WritingVoiceSource,
-		"byline_source":         r.BylineSource,
-		"persona_avatar_source": r.PersonaAvatarSource,
-		"theme_source":          r.ThemeSource,
+		"name":                ch.Name,
+		"positioning":         ch.Positioning,
+		"keywords":            ch.Keywords,
+		"platform":            ch.Platform,
+		"visual_style":        r.VisualStyle,
+		"writer":              r.Writer,
+		"author":              r.Author,
+		"theme":               r.Theme,
+		"visual_style_source": r.VisualStyleSource,
+		"writer_source":       r.WriterSource,
+		"author_source":       r.AuthorSource,
+		"theme_source":        r.ThemeSource,
 	}
 
 	switch scope {
@@ -438,12 +434,12 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 				info["theme_description"] = e.Description
 			}
 		}
-		if r.WriterKey != "" {
-			if e := mgr.Get(resources.CategoryWriter, r.WriterKey); e != nil {
-				// writer_key_description describes the writing VOICE (tone/人设/调性) of
+		if r.Writer != "" {
+			if e := mgr.Get(resources.CategoryWriter, r.Writer); e != nil {
+				// writer_description describes the writing VOICE (tone/人设/调性) of
 				// the resolved writer resource key. It is independent of visual_style;
 				// the two describe different dimensions and must not be conflated.
-				info["writer_key_description"] = e.Description
+				info["writer_description"] = e.Description
 			}
 		}
 	}

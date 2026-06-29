@@ -15,9 +15,9 @@ import (
 // WRITER key (e.g. "dan-koe") there, and the server injected it verbatim as a
 // "视觉风格要求", which made image generation read the writer's cover style
 // (dan-koe → 维多利亚木刻). After splitting the field into three orthogonal
-// dimensions — Style (图片视觉) / WritingStyle (写作风格) / Theme (排版样式) —
+// dimensions — Style (图片视觉) / Writer (写作风格) / Theme (排版样式) —
 // any article project whose Style still holds a known writer key must be
-// moved to WritingStyle and Style cleared. Otherwise the writer key would be
+// moved to Writer and Style cleared. Otherwise the writer key would be
 // read as a visual-style anchor and re-trigger the bug on existing projects.
 //
 // Seednote projects are untouched: their Style is a genuine visual description.
@@ -43,14 +43,13 @@ func MigrateArticleStyleOverload(ctx context.Context, db *gorm.DB, log *zerolog.
 		if mgr.Get(resources.CategoryWriter, ch.VisualStyle) == nil {
 			continue // VisualStyle is not a writer key — it is a real visual style; keep it.
 		}
-		// Move the writer key into WriterKey (only when empty, to avoid
+		// Move the writer key into Writer (only when empty, to avoid
 		// clobbering an explicitly configured writer) and clear VisualStyle. Use a
 		// map so the empty-string style is actually written (gorm skips zero
-		// values in struct Updates but writes them in map Updates). The DB column
-		// names (style / writing_style) are retained from the pre-rename schema.
+		// values in struct Updates but writes them in map Updates).
 		updates := map[string]any{"style": ""}
-		if ch.WriterKey == "" {
-			updates["writing_style"] = ch.VisualStyle
+		if ch.Writer == "" {
+			updates["writer"] = ch.VisualStyle
 		}
 		if err := db.Model(&model.Project{}).Where("id = ?", ch.ID).Updates(updates).Error; err != nil {
 			log.Error().Err(err).Str("project_id", ch.ID).Str("style", ch.VisualStyle).
@@ -62,7 +61,7 @@ func MigrateArticleStyleOverload(ctx context.Context, db *gorm.DB, log *zerolog.
 
 	if migrated > 0 {
 		log.Info().Int("migrated", migrated).
-			Msg("style backfill: moved stale writer keys from style to writing_style (visual dimension cleared)")
+			Msg("style backfill: moved stale writer keys from style to writer (visual dimension cleared)")
 	}
 	return nil
 }

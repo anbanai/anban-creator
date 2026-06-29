@@ -77,7 +77,7 @@ type PublishDraftResult struct {
 // publishing doesn't need image API). Style dimensions resolve project-only HERE:
 // the per-article Author actually published to WeChat comes from draft.json
 // (written by the agent using the task-aware get_project_profile, so task-level
-// byline overrides ARE honored on publish). The project byline resolved here is
+// author overrides ARE honored on publish). The project author resolved here is
 // only the fallback the draft service uses for an article with no Author (e.g.
 // the HTML-file fallback path in extractArticleDraftFromWorkspace).
 func (s *PublishingService) buildAppConfig(ch *model.Project) (*appconfig.Config, error) {

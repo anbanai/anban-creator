@@ -31,7 +31,7 @@ func registerTemplateTools(server *mcp.Server) {
 				"category":        map[string]any{"type": "string", "description": "Industry/category tag (optional)"},
 				"structure":       map[string]any{"type": "string", "description": "JSON string of template structure (required)"},
 				"style_prompt":    map[string]any{"type": "string", "description": "AI visual style prompt (optional)"},
-				"writing_style":   map[string]any{"type": "string", "description": "Content writing voice/tonality scaffold (optional), distinct from visual style_prompt; stored as the template's writer_key. Templates are project-launchers (imported once, then detached) and do not enter task resolution."},
+				"writer":          map[string]any{"type": "string", "description": "Writer style resource key (optional), distinct from visual style_prompt. Templates are project-launchers (imported once, then detached) and do not enter task resolution."},
 				"example_content": map[string]any{"type": "string", "description": "JSON string of example content (optional)"},
 				"tags":            map[string]any{"type": "string", "description": "JSON array string of tags (optional)"},
 			},
@@ -77,7 +77,7 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	structure, _ := args["structure"].(string)
 	category, _ := args["category"].(string)
 	stylePrompt, _ := args["style_prompt"].(string)
-	writingStyle, _ := args["writing_style"].(string)
+	writer, _ := args["writer"].(string)
 	exampleContent, _ := args["example_content"].(string)
 	tags, _ := args["tags"].(string)
 
@@ -119,7 +119,7 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		Category:       category,
 		Structure:      structureMap,
 		VisualStyle:    stylePrompt,
-		WriterKey:      writingStyle,
+		Writer:         writer,
 		ExampleContent: exampleMap,
 		Tags:           tagsSlice,
 		IsActive:       true,

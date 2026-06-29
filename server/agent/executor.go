@@ -36,7 +36,7 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // readable as fields are added and prevents argument-order bugs.
 //
 // The prompt is BEHAVIORAL ONLY (agent + topic, task/project ids, seednote
-// image-composition flags, goal condition). The visual / persona / theme
+// image-composition flags, goal condition). The visual / writer / author / theme
 // dimensions never enter the prompt — they are single-sourced via
 // resolver.ResolveStyle and delivered to the agent through two purposeful
 // projections: get_project_profile (MCP, for agent reasoning) and settings.json
@@ -64,7 +64,7 @@ type UserPromptParams struct {
 // The agent definition is loaded via WithAgent() (system prompt), so the user
 // message only needs to provide the topic or an autonomous execution instruction.
 //
-// The prompt is behavioral only — it never carries the visual / persona / theme
+// The prompt is behavioral only — it never carries the visual / writer / author / theme
 // style dimensions. Those are resolved once (resolver.ResolveStyle, two-layer
 // task ?? project) and read by the agent from get_project_profile(task_id); the
 // app-library projection lands in settings.json. Injecting them here too would
@@ -443,7 +443,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	// Resolve the effective style dimensions two-layer (task.Overrides ?? project)
 	// ONCE; settings.json here and the user prompt below both read this same
 	// resolution so the two channels can never disagree. (P2 moves the
-	// visual/persona/theme dimensions fully to MCP, but they stay single-sourced
+	// visual/writer/author/theme dimensions fully to MCP, but they stay single-sourced
 	// here regardless.) resolved is zero-valued when there is no project.
 	var resolved resolver.Resolved
 	if opts.Project != nil {

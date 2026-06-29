@@ -63,12 +63,10 @@ type EcommerceConfig struct {
 // zero value serializes to a valid JSON null and the "only overridden keys"
 // semantics are expressed by presence rather than by nullable columns.
 type StyleOverrides struct {
-	VisualStyle   string `json:"visual_style,omitempty"`   // 图片视觉 (free text)
-	WriterKey     string `json:"writer_key,omitempty"`     // 写作者 YAML resource key
-	WritingVoice  string `json:"writing_voice,omitempty"`  // 写作笔迹 (free-text imitation)
-	Byline        string `json:"byline,omitempty"`         // 作者署名 (publish byline)
-	PersonaAvatar string `json:"persona_avatar,omitempty"` // 人设头像 (never part of byline)
-	Theme         string `json:"theme,omitempty"`          // 排版主题 key
+	VisualStyle string `json:"visual_style,omitempty"` // 图片视觉 (free text)
+	Writer      string `json:"writer,omitempty"`       // 写作者 YAML resource key
+	Author      string `json:"author,omitempty"`       // 作者署名 (publish author)
+	Theme       string `json:"theme,omitempty"`        // 排版主题 key
 }
 
 // Task represents a content generation task.
@@ -84,7 +82,7 @@ type Task struct {
 	ImageRatio        string `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageModelKey     string `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL string `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
-	// Overrides carries per-task overrides for the style/persona/theme dimensions
+	// Overrides carries per-task overrides for the style/author/theme dimensions
 	// the task otherwise inherits from its project. Only keys the user explicitly
 	// overrode are set; empty/absent = inherit the project value. Effective value
 	// at execution = task.Overrides.X ?? project.X (two-layer, no template/plan
@@ -197,7 +195,7 @@ func (t *Task) SetEcommerce(ec EcommerceConfig) {
 	t.Ecommerce = datatypes.NewJSONType(ec)
 }
 
-// SetOverrides stores per-task style/persona/theme overrides into the Overrides
+// SetOverrides stores per-task style/author/theme overrides into the Overrides
 // JSON column. Thin wrapper over datatypes.NewJSONType so call sites (task
 // creation, retry) don't each need to import gorm.io/datatypes.
 func (t *Task) SetOverrides(o StyleOverrides) {

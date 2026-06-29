@@ -81,7 +81,6 @@ func (h *ProjectHandler) signProjectURLs(ctx context.Context, ch *model.Project)
 	}
 	ch.AvatarURL = service.SignURL(ctx, h.store, h.logger, ch.AvatarURL, service.DefaultSignedURLTTL)
 	ch.ReferenceImageURL = service.SignURL(ctx, h.store, h.logger, ch.ReferenceImageURL, service.DefaultSignedURLTTL)
-	ch.PersonaAvatar = service.SignURL(ctx, h.store, h.logger, ch.PersonaAvatar, service.DefaultSignedURLTTL)
 }
 
 // SetSeednoteClient injects the Seednote SDK client.
@@ -98,11 +97,9 @@ type projectRequest struct {
 	Positioning        string `json:"positioning"`
 	Keywords           string `json:"keywords"`
 	VisualStyle        string `json:"visual_style"`
-	WriterKey          string `json:"writer_key"`
+	Writer             string `json:"writer"`
 	Theme              string `json:"theme"`
-	Byline             string `json:"byline"`
-	WritingVoice       string `json:"writing_voice"`
-	PersonaAvatar      string `json:"persona_avatar"`
+	Author             string `json:"author"`
 	TemplateID         string `json:"template_id"`
 	ReferenceImageURL  string `json:"reference_image_url"`
 	ImageRatio         string `json:"image_ratio"`
@@ -124,11 +121,9 @@ func (req *projectRequest) toProject() *model.Project {
 		Positioning:           req.Positioning,
 		Keywords:              req.Keywords,
 		VisualStyle:           req.VisualStyle,
-		WriterKey:             req.WriterKey,
+		Writer:                req.Writer,
 		Theme:                 req.Theme,
-		Byline:                req.Byline,
-		WritingVoice:          req.WritingVoice,
-		PersonaAvatar:         req.PersonaAvatar,
+		Author:                req.Author,
 		CreatedFromTemplateID: req.TemplateID,
 		ReferenceImageURL:     req.ReferenceImageURL,
 		ImageRatio:            req.ImageRatio,
@@ -248,7 +243,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
-	if err := service.RejectWriterNameAsByline(req.Byline); err != nil {
+	if err := service.RejectWriterNameAsAuthor(req.Author); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -365,7 +360,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
-	if err := service.RejectWriterNameAsByline(req.Byline); err != nil {
+	if err := service.RejectWriterNameAsAuthor(req.Author); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -790,12 +785,12 @@ func (req *projectRequest) getFieldValue(key string) string {
 		return req.Keywords
 	case "visual_style":
 		return req.VisualStyle
-	case "writer_key":
-		return req.WriterKey
+	case "writer":
+		return req.Writer
 	case "theme":
 		return req.Theme
-	case "byline":
-		return req.Byline
+	case "author":
+		return req.Author
 	case "reference_image_url":
 		return req.ReferenceImageURL
 	case "image_ratio":

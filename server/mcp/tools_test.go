@@ -237,11 +237,11 @@ func TestBuildAccountInfo_ArticleScope_TaskStyleOverride(t *testing.T) {
 	}
 }
 
-// TestBuildAccountInfo_ArticleWriterKeyDefault: an article project with no writer key
+// TestBuildAccountInfo_ArticleWriterDefault: an article project with no writer key
 // resolves to the platform default (writer.DefaultStyleName) at resolution time, with
 // source "project". The default is NOT stored on the project — it surfaces only via
 // ResolveStyle, the single place every consumer reads it.
-func TestBuildAccountInfo_ArticleWriterKeyDefault(t *testing.T) {
+func TestBuildAccountInfo_ArticleWriterDefault(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -263,11 +263,11 @@ func TestBuildAccountInfo_ArticleWriterKeyDefault(t *testing.T) {
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	if got := info["writer_key"]; got != writer.DefaultStyleName {
-		t.Errorf("writer_key = %v, want %q (article platform default)", got, writer.DefaultStyleName)
+	if got := info["writer"]; got != writer.DefaultStyleName {
+		t.Errorf("writer = %v, want %q (article platform default)", got, writer.DefaultStyleName)
 	}
-	if got := info["writer_key_source"]; got != "project" {
-		t.Errorf("writer_key_source = %v, want project", got)
+	if got := info["writer_source"]; got != "project" {
+		t.Errorf("writer_source = %v, want project", got)
 	}
 }
 
@@ -301,25 +301,23 @@ func TestBuildAccountInfo_CrossUser_RejectedAtProjectLookup(t *testing.T) {
 	}
 }
 
-// TestBuildAccountInfo_BylineAndWritingVoice: a project carries THREE independent
-// persona dimensions — byline (作者署名, the published name), writing_voice (写作笔迹,
-// free-text imitation), and persona_avatar (人设头像). All surface directly from the
-// project with source "project". They never derive from one another, and the byline
-// is independent of the writing voice (byline ≠ writer persona name).
-func TestBuildAccountInfo_BylineAndWritingVoice(t *testing.T) {
+// TestBuildAccountInfo_AuthorAndWriter: runtime profile exposes only the
+// dimensions the agent actually consumes. author (公众号发布署名) and writer
+// (写作风格 key) surface independently; persona avatar is Studio-only display
+// metadata and must not leak to Agent/MCP.
+func TestBuildAccountInfo_AuthorAndWriter(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
 	userID := uuid.New().String()
 	ch := &model.Project{
-		ID:            uuid.New().String(),
-		UserID:        userID,
-		Platform:      model.PlatformArticle,
-		Name:          "article-project",
-		Byline:        "老李",
-		WritingVoice:  "犀利、接地气、像朋友聊天",
-		PersonaAvatar: "https://example.com/avatar.png",
-		Theme:         "autumn-warm",
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "article-project",
+		Author:   "老李",
+		Writer:   "dan-koe",
+		Theme:    "autumn-warm",
 	}
 	if err := repo.Projects().Create(ctx, ch); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -332,20 +330,23 @@ func TestBuildAccountInfo_BylineAndWritingVoice(t *testing.T) {
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	if got := info["byline"]; got != "老李" {
-		t.Errorf("byline = %v, want 老李", got)
+	if got := info["author"]; got != "老李" {
+		t.Errorf("author = %v, want 老李", got)
 	}
-	if got := info["byline_source"]; got != "project" {
-		t.Errorf("byline_source = %v, want project", got)
+	if got := info["author_source"]; got != "project" {
+		t.Errorf("author_source = %v, want project", got)
 	}
-	if got := info["writing_voice"]; got != "犀利、接地气、像朋友聊天" {
-		t.Errorf("writing_voice = %v, want the writing-voice intro", got)
+	if got := info["writer"]; got != "dan-koe" {
+		t.Errorf("writer = %v, want dan-koe", got)
 	}
-	if got := info["writing_voice_source"]; got != "project" {
-		t.Errorf("writing_voice_source = %v, want project", got)
+	if got := info["writer_source"]; got != "project" {
+		t.Errorf("writer_source = %v, want project", got)
 	}
-	if got := info["persona_avatar"]; got != "https://example.com/avatar.png" {
-		t.Errorf("persona_avatar = %v, want avatar url", got)
+	if _, present := info["persona_avatar"]; present {
+		t.Errorf("persona_avatar must not be exposed to agent profile: %v", info["persona_avatar"])
+	}
+	if _, present := info["persona_avatar_source"]; present {
+		t.Errorf("persona_avatar_source must not be exposed to agent profile: %v", info["persona_avatar_source"])
 	}
 	if got := info["theme"]; got != "autumn-warm" {
 		t.Errorf("theme = %v, want autumn-warm", got)
@@ -355,9 +356,9 @@ func TestBuildAccountInfo_BylineAndWritingVoice(t *testing.T) {
 	}
 }
 
-// TestBuildAccountInfo_TaskBylineOverridesProject: a task carrying its OWN byline
-// override wins over the project byline (the top rung of the two-layer resolution).
-func TestBuildAccountInfo_TaskBylineOverridesProject(t *testing.T) {
+// TestBuildAccountInfo_TaskAuthorOverridesProject: a task carrying its OWN author
+// override wins over the project author (the top rung of the two-layer resolution).
+func TestBuildAccountInfo_TaskAuthorOverridesProject(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -367,7 +368,7 @@ func TestBuildAccountInfo_TaskBylineOverridesProject(t *testing.T) {
 		UserID:   userID,
 		Platform: model.PlatformArticle,
 		Name:     "article-project",
-		Byline:   "项目作者",
+		Author:   "项目作者",
 	}
 	if err := repo.Projects().Create(ctx, ch); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -379,7 +380,7 @@ func TestBuildAccountInfo_TaskBylineOverridesProject(t *testing.T) {
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusPending,
 	}
-	task.SetOverrides(model.StyleOverrides{Byline: "任务作者"})
+	task.SetOverrides(model.StyleOverrides{Author: "任务作者"})
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -392,18 +393,18 @@ func TestBuildAccountInfo_TaskBylineOverridesProject(t *testing.T) {
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	if got := info["byline"]; got != "任务作者" {
-		t.Errorf("byline = %v, want 任务作者 (task override wins over project)", got)
+	if got := info["author"]; got != "任务作者" {
+		t.Errorf("author = %v, want 任务作者 (task override wins over project)", got)
 	}
-	if got := info["byline_source"]; got != "task" {
-		t.Errorf("byline_source = %v, want task", got)
+	if got := info["author_source"]; got != "task" {
+		t.Errorf("author_source = %v, want task", got)
 	}
 }
 
-// TestBuildAccountInfo_BylineFallbackToProject: when a task carries no byline
-// override, the project's own byline is preserved with source "project" — an empty
+// TestBuildAccountInfo_AuthorFallbackToProject: when a task carries no author
+// override, the project's own author is preserved with source "project" — an empty
 // override never clobbers the project value.
-func TestBuildAccountInfo_BylineFallbackToProject(t *testing.T) {
+func TestBuildAccountInfo_AuthorFallbackToProject(t *testing.T) {
 	_, _, repo, cleanup := setupAccountInfoTest(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -413,7 +414,7 @@ func TestBuildAccountInfo_BylineFallbackToProject(t *testing.T) {
 		UserID:   userID,
 		Platform: model.PlatformArticle,
 		Name:     "article-project",
-		Byline:   "项目作者",
+		Author:   "项目作者",
 	}
 	if err := repo.Projects().Create(ctx, ch); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -438,11 +439,11 @@ func TestBuildAccountInfo_BylineFallbackToProject(t *testing.T) {
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	if got := info["byline"]; got != "项目作者" {
-		t.Errorf("byline = %v, want 项目作者 (no override keeps project byline)", got)
+	if got := info["author"]; got != "项目作者" {
+		t.Errorf("author = %v, want 项目作者 (no override keeps project author)", got)
 	}
-	if got := info["byline_source"]; got != "project" {
-		t.Errorf("byline_source = %v, want project", got)
+	if got := info["author_source"]; got != "project" {
+		t.Errorf("author_source = %v, want project", got)
 	}
 }
 
@@ -467,7 +468,8 @@ func TestBuildAccountInfo_NoTemplateNamespace(t *testing.T) {
 	for _, key := range []string{
 		"template_id", "template_name", "template_writing_style",
 		"template_structure", "template_example", "template_author_avatar",
-		"template_author_name", "template_theme", "author", "style", "writing_style",
+		"template_author", "template_theme", "style", "writing_style",
+		"author_name", "writer_key", "byline", "writing_voice",
 	} {
 		if _, present := info[key]; present {
 			t.Errorf("profile should not surface legacy key %q, got %v", key, info[key])

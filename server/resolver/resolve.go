@@ -1,5 +1,5 @@
 // Package resolver is the SINGLE source of truth for resolving a task's effective
-// style/persona/theme dimensions. It is a leaf package (imports only server/model
+// style/author/theme dimensions. It is a leaf package (imports only server/model
 // + app/writer) so that service (which imports agent), agent (which service
 // imports), and mcp can ALL call it without an import cycle.
 //
@@ -23,18 +23,14 @@ import (
 // The template/plan layers are GONE — a project is the single source of truth and
 // a task only stores per-dimension overrides.
 type Resolved struct {
-	VisualStyle         string
-	WriterKey           string
-	WritingVoice        string
-	Byline              string
-	PersonaAvatar       string
-	Theme               string
-	VisualStyleSource   string // "task" | "project"
-	WriterKeySource     string
-	WritingVoiceSource  string
-	BylineSource        string
-	PersonaAvatarSource string
-	ThemeSource         string
+	VisualStyle       string
+	Writer            string
+	Author            string
+	Theme             string
+	VisualStyleSource string // "task" | "project"
+	WriterSource      string
+	AuthorSource      string
+	ThemeSource       string
 }
 
 // ResolveStyle resolves every dimension two-layer (task override > project) and
@@ -48,35 +44,25 @@ type Resolved struct {
 // "project" source bucket (it is the platform's built-in writer).
 func ResolveStyle(project *model.Project, task *model.Task) Resolved {
 	r := Resolved{
-		VisualStyle:         project.VisualStyle,
-		WriterKey:           project.WriterKey,
-		WritingVoice:        project.WritingVoice,
-		Byline:              project.Byline,
-		PersonaAvatar:       project.PersonaAvatar,
-		Theme:               project.Theme,
-		VisualStyleSource:   "project",
-		WriterKeySource:     "project",
-		WritingVoiceSource:  "project",
-		BylineSource:        "project",
-		PersonaAvatarSource: "project",
-		ThemeSource:         "project",
+		VisualStyle:       project.VisualStyle,
+		Writer:            project.Writer,
+		Author:            project.Author,
+		Theme:             project.Theme,
+		VisualStyleSource: "project",
+		WriterSource:      "project",
+		AuthorSource:      "project",
+		ThemeSource:       "project",
 	}
 	if task != nil {
 		o := task.Overrides.Data()
 		if o.VisualStyle != "" {
 			r.VisualStyle, r.VisualStyleSource = o.VisualStyle, "task"
 		}
-		if o.WriterKey != "" {
-			r.WriterKey, r.WriterKeySource = o.WriterKey, "task"
+		if o.Writer != "" {
+			r.Writer, r.WriterSource = o.Writer, "task"
 		}
-		if o.WritingVoice != "" {
-			r.WritingVoice, r.WritingVoiceSource = o.WritingVoice, "task"
-		}
-		if o.Byline != "" {
-			r.Byline, r.BylineSource = o.Byline, "task"
-		}
-		if o.PersonaAvatar != "" {
-			r.PersonaAvatar, r.PersonaAvatarSource = o.PersonaAvatar, "task"
+		if o.Author != "" {
+			r.Author, r.AuthorSource = o.Author, "task"
 		}
 		if o.Theme != "" {
 			r.Theme, r.ThemeSource = o.Theme, "task"
@@ -84,8 +70,8 @@ func ResolveStyle(project *model.Project, task *model.Task) Resolved {
 	}
 	// Article always carries a writer voice; apply the platform default when the
 	// project left it empty. One place, every consumer agrees.
-	if project.Platform == model.PlatformArticle && r.WriterKey == "" {
-		r.WriterKey = writer.DefaultStyleName
+	if project.Platform == model.PlatformArticle && r.Writer == "" {
+		r.Writer = writer.DefaultStyleName
 	}
 	return r
 }

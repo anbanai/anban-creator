@@ -204,7 +204,7 @@ func TestTemplateService_Update_OwnerOnly(t *testing.T) {
 }
 
 // TestTemplateService_Update_PersistsScaffold: the content scaffold fields
-// (WriterKey / Structure / ExampleContent / Category / Tags) set via Update
+// (Writer / Structure / ExampleContent / Category / Tags) set via Update
 // must round-trip through the repository. The repository uses db.Save (writes
 // ALL columns), so the service MUST copy every patch field onto `existing` —
 // forgetting one silently persists the OLD value. This test guards that footgun.
@@ -219,7 +219,7 @@ func TestTemplateService_Update_PersistsScaffold(t *testing.T) {
 	}
 
 	patch := &model.Template{
-		WriterKey:      "犀利、接地气",
+		Writer:         "犀利、接地气",
 		Structure:      map[string]any{"text": "钩子 → 论点 → 行动"},
 		ExampleContent: map[string]any{"text": "示例正文"},
 		Category:       "个人成长",
@@ -229,8 +229,8 @@ func TestTemplateService_Update_PersistsScaffold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.WriterKey != "犀利、接地气" {
-		t.Errorf("WriterKey = %q, want 犀利、接地气", updated.WriterKey)
+	if updated.Writer != "犀利、接地气" {
+		t.Errorf("Writer = %q, want 犀利、接地气", updated.Writer)
 	}
 	if got, ok := updated.Structure["text"].(string); !ok || got != "钩子 → 论点 → 行动" {
 		t.Errorf("Structure = %v, want {text: 钩子 → 论点 → 行动}", updated.Structure)
@@ -250,19 +250,17 @@ func TestTemplateService_Update_PersistsScaffold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if refetched.WriterKey != "犀利、接地气" {
-		t.Errorf("persisted WriterKey = %q, want 犀利、接地气", refetched.WriterKey)
+	if refetched.Writer != "犀利、接地气" {
+		t.Errorf("persisted Writer = %q, want 犀利、接地气", refetched.Writer)
 	}
 	if got, ok := refetched.Structure["text"].(string); !ok || got != "钩子 → 论点 → 行动" {
 		t.Errorf("persisted Structure = %v", refetched.Structure)
 	}
 }
 
-// TestTemplateService_Update_PersistsAuthorPersona: the 公众号 author-persona
-// fields (Byline / PersonaAvatar / WritingVoice) set via Update must
-// round-trip through the repository. Same footgun guard as PersistsScaffold: the
-// repo writes ALL columns, so the service must copy each patch field.
-func TestTemplateService_Update_PersistsAuthorPersona(t *testing.T) {
+// TestTemplateService_Update_PersistsAuthorFields: the runtime author/writer
+// fields set via Update must round-trip through the repository.
+func TestTemplateService_Update_PersistsAuthorFields(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	ctx := context.Background()
 	ownerID := uuid.New().String()
@@ -273,22 +271,18 @@ func TestTemplateService_Update_PersistsAuthorPersona(t *testing.T) {
 	}
 
 	patch := &model.Template{
-		Byline:        "老李",
-		PersonaAvatar: "https://example.com/avatar.png",
-		WritingVoice:  "犀利、接地气、像朋友聊天",
+		Author: "老李",
+		Writer: "dan-koe",
 	}
 	updated, err := svc.Update(ctx, created.ID, ownerID, patch)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.Byline != "老李" {
-		t.Errorf("Byline = %q, want 老李", updated.Byline)
+	if updated.Author != "老李" {
+		t.Errorf("Author = %q, want 老李", updated.Author)
 	}
-	if updated.PersonaAvatar != "https://example.com/avatar.png" {
-		t.Errorf("PersonaAvatar = %q, want avatar url", updated.PersonaAvatar)
-	}
-	if updated.WritingVoice != "犀利、接地气、像朋友聊天" {
-		t.Errorf("WritingVoice = %q, want intro", updated.WritingVoice)
+	if updated.Writer != "dan-koe" {
+		t.Errorf("Writer = %q, want dan-koe", updated.Writer)
 	}
 
 	// Re-fetch to confirm persistence (not just in-memory).
@@ -296,17 +290,74 @@ func TestTemplateService_Update_PersistsAuthorPersona(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if refetched.Byline != "老李" {
-		t.Errorf("persisted Byline = %q, want 老李", refetched.Byline)
+	if refetched.Author != "老李" {
+		t.Errorf("persisted Author = %q, want 老李", refetched.Author)
 	}
-	if refetched.WritingVoice != "犀利、接地气、像朋友聊天" {
-		t.Errorf("persisted WritingVoice = %q", refetched.WritingVoice)
+	if refetched.Writer != "dan-koe" {
+		t.Errorf("persisted Writer = %q", refetched.Writer)
+	}
+}
+
+func TestTemplateService_Update_EmptyVisualStylePatchDoesNotClearExisting(t *testing.T) {
+	svc, _, _ := setupTemplateService(t)
+	ctx := context.Background()
+	ownerID := uuid.New().String()
+
+	created, err := svc.Create(ctx, &model.Template{
+		Name:        "视觉模板",
+		Type:        "article",
+		VisualStyle: "暖色生活摄影",
+	}, ownerID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	updated, err := svc.Update(ctx, created.ID, ownerID, &model.Template{Theme: "autumn-warm"})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.VisualStyle != "暖色生活摄影" {
+		t.Fatalf("VisualStyle = %q, want existing style preserved", updated.VisualStyle)
+	}
+}
+
+func TestTemplateService_UpdatePatch_AllowsClearingRuntimeFields(t *testing.T) {
+	svc, _, _ := setupTemplateService(t)
+	ctx := context.Background()
+	ownerID := uuid.New().String()
+
+	created, err := svc.Create(ctx, &model.Template{
+		Name:        "可清空模板",
+		Type:        "article",
+		VisualStyle: "暖色生活摄影",
+		Writer:      "dan-koe",
+		Author:      "老李",
+		Theme:       "autumn-warm",
+	}, ownerID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	empty := ""
+	updated, err := svc.UpdatePatch(ctx, created.ID, ownerID, TemplatePatch{
+		Writer: &empty,
+		Author: &empty,
+		Theme:  &empty,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePatch: %v", err)
+	}
+	if updated.Writer != "" || updated.Author != "" || updated.Theme != "" {
+		t.Fatalf("Writer/Author/Theme = %q/%q/%q, want all cleared", updated.Writer, updated.Author, updated.Theme)
+	}
+	if updated.VisualStyle != "暖色生活摄影" {
+		t.Fatalf("VisualStyle = %q, want omitted style preserved", updated.VisualStyle)
 	}
 }
 
 // TestTemplateService_Update_PersistsTheme: the 公众号 排版样式 (Theme) set via
 // Update must round-trip through the repository. Same footgun guard as the
-// scaffold/author-persona tests: the repo writes ALL columns, so the service
+// scaffold/author tests: the repo writes ALL columns, so the service
 // must copy patch.Theme onto existing — forgetting it silently keeps the OLD
 // theme, which is exactly the "编辑后保存无效" bug.
 func TestTemplateService_Update_PersistsTheme(t *testing.T) {

@@ -23,11 +23,9 @@ export interface Project {
   keywords: string
   instructions?: string
   visual_style: string
-  writer_key: string
+  writer: string
   theme: string
-  byline: string
-  writing_voice: string
-  persona_avatar: string
+  author: string
   template_id: string
   reference_image_url: string
   image_ratio: string
@@ -63,11 +61,9 @@ export interface CreateProjectRequest {
   keywords?: string
   instructions?: string
   visual_style?: string
-  writer_key?: string
+  writer?: string
   theme?: string
-  byline?: string
-  writing_voice?: string
-  persona_avatar?: string
+  author?: string
   template_id?: string
   reference_image_url?: string
   image_ratio?: string

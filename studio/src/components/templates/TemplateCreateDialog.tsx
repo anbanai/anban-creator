@@ -83,7 +83,7 @@ export function TemplateCreateDialog({
   // Templates are project-launchers — no template_* agent namespace.
   const [writingStyle, setWritingStyle] = useState('')
   // 排版样式 (theme) — the Markdown→HTML layout theme. Orthogonal to visual
-  // style_prompt and writer_key. Pre-fills project.theme; the project surfaces flat.
+  // style_prompt and writer. Pre-fills project.theme; the project surfaces flat.
   const [theme, setTheme] = useState('')
   const [structure, setStructure] = useState('')
   const [example, setExample] = useState('')
@@ -91,15 +91,9 @@ export function TemplateCreateDialog({
   // Tags entered as comma-separated text; split on submit. Editing backfills
   // the existing tags joined by ", ".
   const [tagsText, setTagsText] = useState('')
-  // 公众号 (article) 写作风格 — 统一区块（名称即署名 + 写作风格 + 可选头像）：
-  //   - authorName：名称 = 发布作者名（→ author_name，建项目时预填 project.byline；
-  //     运行时两层解析 task > project，byline ≠ 写作风格人设名）。
-  //   - authorStyleIntro：写作风格（自由文本 框架/写作方式/笔迹）→ writing_voice（≠ writer_key）。
-  //   - authorAvatarUrl：可选头像（不入署名）。三者聚合在 PersonaBlock，
-  //     可从写作风格库一键导入；与公众号项目编辑器 UI 完全一致。
-  const [authorName, setAuthorName] = useState('')
-  const [authorAvatarUrl, setAuthorAvatarUrl] = useState('')
-  const [authorStyleIntro, setAuthorStyleIntro] = useState('')
+  // 公众号 (article) 字段：author 是发布署名，writer 是写作风格资源 key。
+  const [author, setAuthor] = useState('')
+  const [writer, setWriter] = useState('')
   // E-commerce template defaults (type="ecommerce"). Pre-fill the task form when
   // this template is picked. Visual style reuses the shared style_prompt field
   // above; product photos are NEVER part of the template (per-task upload).
@@ -136,11 +130,10 @@ export function TemplateCreateDialog({
       setThumbnailUrl(template.thumbnail_url)
       setStylePrompt(template.style_prompt)
       setVisibility(template.visibility === 'private' ? 'private' : 'public')
-      setWritingStyle(template.writer_key ?? '')
+      setWritingStyle(template.writer ?? '')
       setTheme(template.theme ?? '')
-      setAuthorName(template.author_name ?? '')
-      setAuthorAvatarUrl(template.persona_avatar ?? '')
-      setAuthorStyleIntro(template.writing_voice ?? '')
+      setAuthor(template.author ?? '')
+      setWriter(template.writer ?? '')
       // structure / example are stored as { text: ... }; fall back to raw for
       // legacy rows that may have stored plain strings.
       setStructure(extractScaffoldText(template.structure))
@@ -159,9 +152,8 @@ export function TemplateCreateDialog({
       setVisibility('public')
       setWritingStyle('')
       setTheme('')
-      setAuthorName('')
-      setAuthorAvatarUrl('')
-      setAuthorStyleIntro('')
+      setAuthor('')
+      setWriter('')
       setStructure('')
       setExample('')
       setCategory('')
@@ -258,16 +250,11 @@ export function TemplateCreateDialog({
         style_prompt: stylePrompt.trim(),
         visibility,
       }
-      // Type-aware payload: each type sends ONLY the fields its form renders.
-      // This is the definitive guard for the writer-key bug trap — an article or
-      // seednote template must NEVER carry writer_key: style_resolve copies it
-      // into Task.WritingStyle, which config_builder treats as a writer resource
-      // key, so a free-text value there silently fails to resolve any writer.
-      // (Editing a legacy article row that backfilled a stale writer_key into
-      // state must NOT re-send it on save, since the field isn't rendered.)
+      // Type-aware payload: each type sends only the fields its form renders.
+      // Article templates may carry writer, but only as a selected writer
+      // resource key; free-text writing voice is no longer a business field.
       if (type === 'poster') {
-        const writingStyleTrimmed = writingStyle.trim()
-        if (writingStyleTrimmed) payload.writer_key = writingStyleTrimmed
+        payload.writer = writingStyle.trim()
         const structureTrimmed = structure.trim()
         if (structureTrimmed) payload.structure = structureTrimmed
         const exampleTrimmed = example.trim()
@@ -277,15 +264,9 @@ export function TemplateCreateDialog({
         if (trimmedTags.length > 0) payload.tags = trimmedTags
       }
       if (type === 'article') {
-        const themeTrimmed = theme.trim()
-        if (themeTrimmed) payload.theme = themeTrimmed
-        // 作者 (署名, byline) + 写作风格 (imitation): two independent dimensions.
-        const authorNameTrimmed = authorName.trim()
-        if (authorNameTrimmed) payload.author_name = authorNameTrimmed
-        const authorAvatarTrimmed = authorAvatarUrl.trim()
-        if (authorAvatarTrimmed) payload.persona_avatar = authorAvatarTrimmed
-        const authorIntroTrimmed = authorStyleIntro.trim()
-        if (authorIntroTrimmed) payload.writing_voice = authorIntroTrimmed
+        payload.theme = theme.trim()
+        payload.author = author.trim()
+        payload.writer = writer.trim()
       }
       if (type === 'ecommerce') {
         // E-commerce defaults — only the non-empty ones are attached, matching
@@ -529,19 +510,15 @@ export function TemplateCreateDialog({
             </div>
           )}
 
-          {/* 公众号 (article) — 写作风格（名称即署名 + 写作风格 + 可选头像，统一区块）
-              + 排版风格（实时预览）。名称落到 author_name（=发布作者名），写作风格落到
-              writing_voice（≠ writer_key）。二者共用 PersonaBlock /
-              ThemePicker，与公众号项目编辑器 UI 完全一致。 */}
+          {/* 公众号 (article) — 发布署名 + 写作风格 key + 排版风格。头像/昵称仅用于
+              Studio 资源展示，不写入模板业务字段。 */}
           {type === 'article' && (
             <>
               <PersonaBlock
-                authorName={authorName}
-                onAuthorName={setAuthorName}
-                authorStyleIntro={authorStyleIntro}
-                onAuthorStyleIntro={setAuthorStyleIntro}
-                authorAvatarUrl={authorAvatarUrl}
-                onAuthorAvatarUrl={setAuthorAvatarUrl}
+                author={author}
+                onAuthor={setAuthor}
+                writer={writer}
+                onWriter={setWriter}
               />
               <ThemePicker theme={theme} onTheme={setTheme} />
             </>

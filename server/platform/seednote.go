@@ -374,7 +374,7 @@ type SeednoteNoteContent struct {
 	CollectCount  int    `json:"collect_count"`
 	CommentCount  int    `json:"comment_count"`
 	ShareCount    int    `json:"share_count"`
-	AuthorName    string `json:"author_name,omitempty"`
+	AuthorName    string `json:"author,omitempty"`
 	AuthorID      string `json:"author_id,omitempty"`
 	InteractCount int    `json:"interact_count"`
 }

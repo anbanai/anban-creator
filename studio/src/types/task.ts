@@ -12,15 +12,13 @@ export interface EcommerceTaskConfig {
 }
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
-// Per-task overrides for the style/persona/theme dimensions (mirrors server
+// Per-task overrides for the style/author/theme dimensions (mirrors server
 // model.StyleOverrides). Empty/absent field = inherit from the owning project
 // (two-layer task.Overrides.X ?? project.X; no template/plan layer).
 export interface StyleOverrides {
   visual_style?: string
-  writer_key?: string
-  writing_voice?: string
-  byline?: string
-  persona_avatar?: string
+  writer?: string
+  author?: string
   theme?: string
 }
 
@@ -60,12 +58,12 @@ export interface Task {
   goal?: string
   goal_mode?: boolean
   template_id?: string
-  // Per-task style/persona/theme overrides (mirrors server model.StyleOverrides,
+  // Per-task style/author/theme overrides (mirrors server model.StyleOverrides,
   // serialized as `overrides`). A field absent/empty here means "inherit from the
   // owning project" via the two-layer task.Overrides.X ?? project.X resolution
   // (no template/plan layer). Drives the "继承自项目 / 已覆盖" inheritance badges.
-  // NOTE: the persona dimensions live ONLY inside `overrides` on the wire — the
-  // server Task response carries no top-level byline/writing_voice/persona_avatar.
+  // NOTE: author/style dimensions live ONLY inside `overrides` on the wire — the
+  // server Task response carries no top-level author/writer.
   overrides?: StyleOverrides
   // E-commerce package config (only present for platform=ecommerce tasks).
   ecommerce?: EcommerceTaskConfig
@@ -133,17 +131,15 @@ export interface CreateTaskRequest {
   skip_reference_image?: boolean
   reference_image_url?: string
   visual_style?: string
-  writer_key?: string
+  writer?: string
   theme?: string
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
   template_id?: string
-  // 公众号人设 override（作者署名 + 写作风格模仿 + 可选头像）。空则按解析链兜底到
-  // 模板/项目；非空即覆盖。
-  byline?: string
-  writing_voice?: string
-  persona_avatar?: string
+  // 公众号 override（作者署名 + 写作风格 key）。空则按解析链兜底到项目；
+  // 非空即覆盖。
+  author?: string
   // Seednote image composition: cover always generated. Server ignores for non-seednote.
   has_content_image?: boolean
   has_tail_image?: boolean

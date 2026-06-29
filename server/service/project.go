@@ -144,19 +144,16 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	if ch.VisualStyle != "" {
 		existing.VisualStyle = ch.VisualStyle
 	}
-	if ch.WriterKey != "" {
-		existing.WriterKey = ch.WriterKey
+	if ch.Writer != "" {
+		existing.Writer = ch.Writer
 	}
 	if ch.Theme != "" {
 		existing.Theme = ch.Theme
 	}
-	// 作者署名（byline）：unconditional assign 以支持清空，与 WritingVoice/
-	// PersonaAvatar 一致。导入模型下"导入模板→清空署名"是合法操作，guarded assign
-	// 会让清空后的保存静默回填旧署名。
-	existing.Byline = ch.Byline
-	// 公众号人设字段 + 建项来源模板：unconditional assign 以支持清空（清头像/写作笔迹、解除来源记录）。
-	existing.WritingVoice = ch.WritingVoice
-	existing.PersonaAvatar = ch.PersonaAvatar
+	// 作者署名（author）：unconditional assign 以支持清空。
+	// 导入模型下"导入模板→清空署名"是合法操作，guarded assign 会让清空后的保存静默回填旧署名。
+	existing.Author = ch.Author
+	// 建项来源模板：unconditional assign 以支持清空。
 	existing.CreatedFromTemplateID = ch.CreatedFromTemplateID
 	// ReferenceImageURL: unconditional assign to support clearing.
 	existing.ReferenceImageURL = ch.ReferenceImageURL

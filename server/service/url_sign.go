@@ -69,16 +69,12 @@ func SignURL(ctx context.Context, store storage.Provider, log *zerolog.Logger, r
 	return signed
 }
 
-// SignTemplateURLs resolves a *model.Template's image fields (thumbnail, author
-// avatar) to directly-fetchable signed URLs in place. No-op when t is nil or no
-// store is wired. Centralising the field list keeps every response path that
-// returns a template consistent — the template handlers AND the
-// recommended-templates slice returned by project create — so adding a new image
-// field here updates all of them at once.
+// SignTemplateURLs resolves a *model.Template's runtime image fields to
+// directly-fetchable signed URLs in place. No-op when t is nil or no store is
+// wired.
 func SignTemplateURLs(ctx context.Context, store storage.Provider, log *zerolog.Logger, t *model.Template) {
 	if t == nil {
 		return
 	}
 	t.ThumbnailURL = SignURL(ctx, store, log, t.ThumbnailURL, DefaultSignedURLTTL)
-	t.PersonaAvatar = SignURL(ctx, store, log, t.PersonaAvatar, DefaultSignedURLTTL)
 }

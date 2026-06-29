@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestRejectWriterNameAsByline(t *testing.T) {
+func TestRejectWriterNameAsAuthor(t *testing.T) {
 	tests := []struct {
 		name   string
 		author string
@@ -28,16 +28,16 @@ func TestRejectWriterNameAsByline(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := RejectWriterNameAsByline(tt.author)
+			err := RejectWriterNameAsAuthor(tt.author)
 			if tt.reject {
 				if err == nil {
 					t.Fatalf("expected rejection for %q, got nil", tt.author)
 				}
-				if !errors.Is(err, ErrBylineIsWriterName) {
-					t.Fatalf("expected error to wrap ErrBylineIsWriterName, got %v", err)
+				if !errors.Is(err, ErrAuthorIsWriterName) {
+					t.Fatalf("expected error to wrap ErrAuthorIsWriterName, got %v", err)
 				}
 				if !strings.Contains(err.Error(), "写作风格") {
-					t.Fatalf("error should explain the byline vs 写作风格 semantics: %v", err)
+					t.Fatalf("error should explain the author vs 写作风格 semantics: %v", err)
 				}
 			} else {
 				if err != nil {

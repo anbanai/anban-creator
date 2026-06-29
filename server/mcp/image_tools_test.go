@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	appconfig "github.com/royalrick/anbanwriter/app/config"
+	srvconfig "github.com/royalrick/anbanwriter/server/config"
 	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/service"
 )
@@ -248,6 +250,33 @@ func TestImageResult_UploadFields_JSONTags(t *testing.T) {
 	}
 	if strings.Contains(sf, `"wechat_url"`) || strings.Contains(sf, `"media_id"`) {
 		t.Errorf("[FAIL] failed JSON should not carry URL fields when upload errored: %s", sf)
+	}
+}
+
+func TestResolveImageBillingModelUsesTaskSelectedPreset(t *testing.T) {
+	old := billSvc
+	t.Cleanup(func() { billSvc = old })
+
+	billSvc = &billingServices{
+		config: &srvconfig.Config{
+			ImageAPI: srvconfig.ImageAPIConfig{
+				Cover: &appconfig.ImageAPI{Provider: "volcengine", Model: "doubao-seedream", Credits: 9},
+			},
+			ImagePresets: []srvconfig.ImageModelPreset{
+				{
+					Key:      "openai-gpt-image",
+					Provider: "openai",
+					Model:    "gpt-image-2",
+					MinTier:  "free",
+				},
+			},
+		},
+	}
+
+	provider, mdl := resolveImageBillingModel(context.Background(), "user-1", "openai-gpt-image")
+
+	if provider != "openai" || mdl != "gpt-image-2" {
+		t.Fatalf("billing model = %s/%s, want openai/gpt-image-2", provider, mdl)
 	}
 }
 

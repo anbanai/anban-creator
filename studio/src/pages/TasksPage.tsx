@@ -140,13 +140,12 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', visual_style: '', writer_key: '', theme: '', byline: '', writing_voice: '', persona_avatar: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
+    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', visual_style: '', writer: '', theme: '', author: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
-  const watchedAuthor = useWatch({ control: form.control, name: 'byline' })
-  const watchedAuthorIntro = useWatch({ control: form.control, name: 'writing_voice' })
-  const watchedAuthorAvatar = useWatch({ control: form.control, name: 'persona_avatar' })
+  const watchedAuthor = useWatch({ control: form.control, name: 'author' })
+  const watchedWriter = useWatch({ control: form.control, name: 'writer' })
   const watchedTheme = useWatch({ control: form.control, name: 'theme' })
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
@@ -337,7 +336,7 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', project_id: '', image_ratio: '', image_model_key: '', visual_style: '', writer_key: '', theme: '', byline: '', writing_voice: '', persona_avatar: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
+    form.reset({ type: defaultType, prompt: '', project_id: '', image_ratio: '', image_model_key: '', visual_style: '', writer: '', theme: '', author: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
     setQuantity(1)
     setWatermark(false)
     setProjectImageRatio('')
@@ -361,11 +360,9 @@ export default function TasksPage() {
           if (taskCreateTokenRef.current !== token) return
           setSelectedTemplate(tmpl)
           form.setValue('visual_style', tmpl.style_prompt || '', { shouldDirty: false })
-          form.setValue('writer_key', tmpl.writer_key || '', { shouldDirty: false })
+          form.setValue('writer', tmpl.writer || '', { shouldDirty: false })
           form.setValue('theme', tmpl.theme || '', { shouldDirty: false })
-          form.setValue('byline', tmpl.author_name || '', { shouldDirty: false })
-          form.setValue('writing_voice', tmpl.writing_voice || '', { shouldDirty: false })
-          form.setValue('persona_avatar', tmpl.persona_avatar || '', { shouldDirty: false })
+          form.setValue('author', tmpl.author || '', { shouldDirty: false })
         })
         .catch(() => {
           /* 模板不存在/已删：保持空选，用户可手动选其他模板 */
@@ -384,7 +381,7 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', visual_style: '', writer_key: '', theme: '', byline: '', writing_voice: '', persona_avatar: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', visual_style: '', writer: '', theme: '', author: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
     setQuantity(1)
     setWatermark(false)
     setGoalMode(false)
@@ -406,11 +403,9 @@ export default function TasksPage() {
       image_ratio: values.image_ratio || undefined,
       image_model_key: values.image_model_key || undefined,
       visual_style: values.visual_style || undefined,
-      writer_key: values.writer_key || undefined,
+      writer: values.writer || undefined,
       theme: values.theme || undefined,
-      byline: values.byline || undefined,
-      writing_voice: values.writing_voice || undefined,
-      persona_avatar: values.persona_avatar || undefined,
+      author: values.author || undefined,
       watermark: watermark || undefined,
       goal_mode: goalMode || undefined,
       goal: goalMode ? (goalText.trim() || undefined) : undefined,
@@ -439,14 +434,12 @@ export default function TasksPage() {
     setSelectedTemplate(template)
     // Template thumbnail is a UI preview only — it is not a generation reference image.
     // The three orthogonal style dimensions flow into the task; the agent picks them up
-    // flat via get_project_profile(task_id) (visual_style / writer_key / theme).
+    // flat via get_project_profile(task_id) (visual_style / writer / theme).
     form.setValue('visual_style', template.style_prompt || '', { shouldDirty: true })
-    form.setValue('writer_key', template.writer_key || '', { shouldDirty: true })
+    form.setValue('writer', template.writer || '', { shouldDirty: true })
     form.setValue('theme', template.theme || '', { shouldDirty: true })
-    // 公众号人设（作者署名 + 写作风格模仿 + 可选头像）随模板导入，仍可编辑。
-    form.setValue('byline', template.author_name || '', { shouldDirty: true })
-    form.setValue('writing_voice', template.writing_voice || '', { shouldDirty: true })
-    form.setValue('persona_avatar', template.persona_avatar || '', { shouldDirty: true })
+    // 公众号字段（作者署名 + 写作风格 key）随模板导入，仍可编辑。
+    form.setValue('author', template.author || '', { shouldDirty: true })
     // E-commerce template defaults: pre-fill modules / target platform / image
     // model so picking a template configures the whole package. Product photos
     // stay per-task (the user uploads them). The server (CreateManual) re-merges
@@ -836,7 +829,7 @@ export default function TasksPage() {
                   <p className="text-xs text-muted-foreground">
                     留空即沿用：视觉风格 {selectedProject.visual_style || '—'}
                     {watchedType === 'article' && (
-                      <> · 署名 {selectedProject.byline || '—'} · 写作口吻 {selectedProject.writing_voice || '—'} · 排版 {selectedProject.theme || '默认'}</>
+                      <> · 署名 {selectedProject.author || '—'} · 写作风格 {selectedProject.writer || '—'} · 排版 {selectedProject.theme || '默认'}</>
                     )}
                   </p>
                   <p className="text-[11px] text-muted-foreground/80">在此填写任意字段，即仅对本任务覆盖项目设置。</p>
@@ -952,17 +945,15 @@ export default function TasksPage() {
                 )} />
               )}
 
-              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑（覆盖模板/项目）。
-                  任务级 author_* 字段经后端解析链 task > template > project 下发。 */}
+              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑。
+                  任务级 author/writer/theme override 经后端按 task > project 解析。 */}
               {watchedType === 'article' && (
                 <>
                   <PersonaBlock
-                    authorName={watchedAuthor ?? ''}
-                    onAuthorName={(v) => form.setValue('byline', v, { shouldDirty: true })}
-                    authorStyleIntro={watchedAuthorIntro ?? ''}
-                    onAuthorStyleIntro={(v) => form.setValue('writing_voice', v, { shouldDirty: true })}
-                    authorAvatarUrl={watchedAuthorAvatar ?? ''}
-                    onAuthorAvatarUrl={(v) => form.setValue('persona_avatar', v, { shouldDirty: true })}
+                    author={watchedAuthor ?? ''}
+                    onAuthor={(v) => form.setValue('author', v, { shouldDirty: true })}
+                    writer={watchedWriter ?? ''}
+                    onWriter={(v) => form.setValue('writer', v, { shouldDirty: true })}
                   />
                   <ThemePicker theme={watchedTheme ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
                   {!selectedTemplate && (

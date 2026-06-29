@@ -133,6 +133,33 @@ func resolveImageModel(ctx context.Context, userID string) (provider, mdl string
 	return "", ""
 }
 
+// resolveImageBillingModel mirrors generate_image's provider selection for
+// billing/logging. A task/argument image_model_key must win over the server
+// default; otherwise a user choosing GPT Image can be billed/logged as the
+// default Volcengine model while generation uses OpenAI.
+func resolveImageBillingModel(ctx context.Context, userID, imageModelKey string) (provider, mdl string) {
+	if imageModelKey != "" && billSvc != nil {
+		if billSvc.modelConfigSvc != nil {
+			if cfg, _ := billSvc.modelConfigSvc.ResolveImageConfigForKey(ctx, userID, imageModelKey); cfg != nil {
+				if cfg.Cover != nil && cfg.Cover.Provider != "" {
+					return cfg.Cover.Provider, cfg.Cover.Model
+				}
+				if cfg.Content != nil && cfg.Content.Provider != "" {
+					return cfg.Content.Provider, cfg.Content.Model
+				}
+			}
+		}
+		if billSvc.config != nil {
+			for _, p := range billSvc.config.ImagePresets {
+				if p.Key == imageModelKey {
+					return p.Provider, p.Model
+				}
+			}
+		}
+	}
+	return resolveImageModel(ctx, userID)
+}
+
 // resolveEcommerceImageProvider returns the provider/model the agent's
 // generate_image calls will actually use for this e-commerce task, so the agent
 // can adapt its reference-image strategy to the provider's capability rather

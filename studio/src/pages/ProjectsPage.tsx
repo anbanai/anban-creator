@@ -55,11 +55,9 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   positioning: '',
   instructions: '',
   visual_style: '',
-  writer_key: '',
+  writer: '',
   theme: '',
-  byline: '',
-  writing_voice: '',
-  persona_avatar: '',
+  author: '',
   template_id: '',
   reference_image_url: '',
   image_ratio: '',
@@ -79,11 +77,9 @@ function projectToForm(ch: Project): ProjectFormValues {
     positioning: ch.positioning || '',
     instructions: ch.instructions || '',
     visual_style: ch.visual_style || '',
-    writer_key: ch.writer_key || '',
+    writer: ch.writer || '',
     theme: ch.theme || '',
-    byline: ch.byline || '',
-    writing_voice: ch.writing_voice || '',
-    persona_avatar: ch.persona_avatar || '',
+    author: ch.author || '',
     template_id: ch.template_id || '',
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
@@ -119,9 +115,8 @@ export default function ProjectsPage() {
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
-  const authorName = useWatch({ control: form.control, name: 'byline' })
-  const authorStyleIntro = useWatch({ control: form.control, name: 'writing_voice' })
-  const authorAvatarUrl = useWatch({ control: form.control, name: 'persona_avatar' })
+  const authorValue = useWatch({ control: form.control, name: 'author' })
+  const writerValue = useWatch({ control: form.control, name: 'writer' })
   const themeValue = useWatch({ control: form.control, name: 'theme' })
 
   // Auto-focus profile_url field when dialog opens
@@ -361,9 +356,8 @@ export default function ProjectsPage() {
           if (projectEditTokenRef.current !== token) return
           setSelectedTemplate(t)
           if (!form.getValues('visual_style')) form.setValue('visual_style', t.style_prompt || '', { shouldDirty: false })
-          if (!form.getValues('byline')) form.setValue('byline', t.author_name || '', { shouldDirty: false })
-          if (!form.getValues('writing_voice')) form.setValue('writing_voice', t.writing_voice || '', { shouldDirty: false })
-          if (!form.getValues('persona_avatar')) form.setValue('persona_avatar', t.persona_avatar || '', { shouldDirty: false })
+          if (!form.getValues('author')) form.setValue('author', t.author || '', { shouldDirty: false })
+          if (!form.getValues('writer')) form.setValue('writer', t.writer || '', { shouldDirty: false })
           if (!form.getValues('theme')) form.setValue('theme', t.theme || '', { shouldDirty: false })
         })
         .catch(() => {
@@ -395,9 +389,8 @@ export default function ProjectsPage() {
     if (selectedTemplate?.id === template.id) return
     setSelectedTemplate(template)
     form.setValue('visual_style', template.style_prompt || '', { shouldDirty: true })
-    form.setValue('byline', template.author_name || '', { shouldDirty: true })
-    form.setValue('writing_voice', template.writing_voice || '', { shouldDirty: true })
-    form.setValue('persona_avatar', template.persona_avatar || '', { shouldDirty: true })
+    form.setValue('author', template.author || '', { shouldDirty: true })
+    form.setValue('writer', template.writer || '', { shouldDirty: true })
     form.setValue('theme', template.theme || '', { shouldDirty: true })
   }
 
@@ -411,11 +404,9 @@ export default function ProjectsPage() {
       keywords: values.keywords?.trim() || undefined,
       instructions: values.instructions?.trim() || undefined,
       visual_style: values.visual_style?.trim() || undefined,
-      writer_key: values.writer_key?.trim() || undefined,
+      writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
-      byline: values.byline?.trim() || undefined,
-      writing_voice: values.writing_voice?.trim() || undefined,
-      persona_avatar: values.persona_avatar?.trim() || undefined,
+      author: values.author?.trim() || undefined,
       // 导入模型：项目 Owns 自己的人设。不发送 template_id——后端 Update 无条件清空，
       // 存量"绑定模板"项目保存后即迁移为自有值（运行时 task>template>project 解析）。
       reference_image_url: values.reference_image_url?.trim() || undefined,
@@ -855,19 +846,17 @@ export default function ProjectsPage() {
                   {/* 写作风格（作者署名 + 写作风格模仿 + 可选头像）与排版：始终可编辑，
                       绑定到项目自身字段。选模板后自动填入，用户可覆盖。 */}
                   <PersonaBlock
-                    authorName={authorName ?? ''}
-                    onAuthorName={(v) => form.setValue('byline', v, { shouldDirty: true })}
-                    authorStyleIntro={authorStyleIntro ?? ''}
-                    onAuthorStyleIntro={(v) => form.setValue('writing_voice', v, { shouldDirty: true })}
-                    authorAvatarUrl={authorAvatarUrl ?? ''}
-                    onAuthorAvatarUrl={(v) => form.setValue('persona_avatar', v, { shouldDirty: true })}
+                    author={authorValue ?? ''}
+                    onAuthor={(v) => form.setValue('author', v, { shouldDirty: true })}
+                    writer={writerValue ?? ''}
+                    onWriter={(v) => form.setValue('writer', v, { shouldDirty: true })}
                   />
                   <ThemePicker theme={themeValue ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
                 </>
               )}
 
               {/* 作者名（署名）：seednote 在此编辑；article 改由上方「公众号模板/写作风格」区块统一维护。 */}
-              {isSeednote && <FormField control={form.control} name="byline" render={({ field }) => (
+              {isSeednote && <FormField control={form.control} name="author" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>
                   <FormControl>

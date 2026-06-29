@@ -14,8 +14,8 @@ func NewDefaultConfig() *Config {
 	c.Wechat.Secret = "your_wechat_secret"
 
 	// 图文文章
-	c.Wechat.Article.Byline = "your_author_name"
-	c.Wechat.Article.WriterKey = DefaultArticleWriterKey
+	c.Wechat.Article.Author = "your_author"
+	c.Wechat.Article.Writer = DefaultArticleWriter
 	c.Wechat.Article.Theme = DefaultArticleTheme
 	// 文章封面图
 	c.Wechat.Article.Cover.Image.Provider = DefaultImageProvider

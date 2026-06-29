@@ -306,19 +306,19 @@ func (s *WritingService) AnalyzeImage(ctx context.Context, userID, imageSource, 
 	return strings.TrimSpace(result), nil
 }
 
-// resolveWriterKey returns the 写作者 (writer resource key) for a writing
+// resolveWriter returns the 写作者 (writer resource key) for a writing
 // operation, resolving two-layer via the single ResolveStyle primitive:
-// task.Overrides.WriterKey wins, else project.WriterKey, with the article platform
+// task.Overrides.Writer wins, else project.Writer, with the article platform
 // default applied when still empty. It NEVER reads the visual-style dimension —
 // writer key and visual style are orthogonal and must not leak into each other.
-func (s *WritingService) resolveWriterKey(ctx context.Context, taskID string, ch *model.Project) string {
+func (s *WritingService) resolveWriter(ctx context.Context, taskID string, ch *model.Project) string {
 	var task *model.Task
 	if taskID != "" {
 		if t, terr := s.repo.Tasks().FindByID(ctx, taskID); terr == nil {
 			task = t
 		}
 	}
-	return ResolveStyle(ch, task).WriterKey
+	return ResolveStyle(ch, task).Writer
 }
 
 // resolveEffectiveTheme returns the 排版样式 (theme resource key) for a render
@@ -413,7 +413,7 @@ type OutlineResult struct {
 
 // WriteArticle generates an article using the writer assistant and LLM.
 // taskID optionally resolves the 写作风格 from the task (task > project); empty
-// falls back to the project's writing_style.
+// falls back to the project's writer.
 func (s *WritingService) WriteArticle(
 	ctx context.Context,
 	userID, projectID, topic, inputType, articleType, length, taskID string,
@@ -443,7 +443,7 @@ func (s *WritingService) WriteArticleStream(
 	if s.writersDir != "" {
 		assistant.SetWritersDir(s.writersDir)
 	}
-	styleName := s.resolveWriterKey(ctx, taskID, ch)
+	styleName := s.resolveWriter(ctx, taskID, ch)
 
 	req := &writer.WriteRequest{
 		Input:       topic,
@@ -702,7 +702,7 @@ func (s *WritingService) GenerateOutline(
 	// Resolve 写作风格: explicit caller style wins, else the task's resolved
 	// writer (task > project). Never read ch.Style (that is the visual dimension).
 	if style == "" {
-		style = s.resolveWriterKey(ctx, taskID, ch)
+		style = s.resolveWriter(ctx, taskID, ch)
 	}
 
 	// Extract keywords from the project.

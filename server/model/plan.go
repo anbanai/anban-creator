@@ -4,11 +4,10 @@ import "time"
 
 // Plan represents a scheduled content generation plan.
 //
-// A plan is a scheduler under a project that ALSO carries the six orthogonal
-// style/persona/theme dimensions (VisualStyle / WriterKey / WritingVoice /
-// Byline / PersonaAvatar / Theme). At CreateFromPlan these are copied into the
+// A plan is a scheduler under a project that ALSO carries the orthogonal
+// style/author/theme dimensions (VisualStyle / Writer / Author / Theme). At CreateFromPlan these are copied into the
 // spawned task's Task.Overrides (non-empty only), so two plans under one project
-// can theme their tasks differently — e.g. different bylines or visual styles.
+// can theme their tasks differently — e.g. different authors or visual styles.
 // The resolver stays two-layer (task.Overrides > project); the plan simply seeds
 // the task's overrides. A plan also owns scheduling (cron / topic hint / status),
 // goal-mode, and a few per-plan image defaults that flow to the tasks it spawns.
@@ -24,7 +23,7 @@ type Plan struct {
 	Status      string `gorm:"type:varchar(20);default:active" json:"status"` // active, paused, completed
 	// ImageModelKey / ReferenceImageURL are per-plan image defaults copied to each
 	// spawned task (task-level values, when set, win). They are scheduling-adjacent
-	// "what to produce" params, not style/persona/theme dimensions.
+	// "what to produce" params, not style/author/theme dimensions.
 	ImageModelKey      string `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL  string `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
 	SkipReferenceImage bool   `gorm:"default:false" json:"skip_reference_image,omitempty"`
@@ -40,15 +39,13 @@ type Plan struct {
 	ArticleWithCover         *bool `gorm:"default:true;not null" json:"article_with_cover"`
 	ArticleWithContentImages *bool `gorm:"default:true;not null" json:"article_with_content_images"`
 
-	// Style/persona/theme dimensions, copied into spawned tasks' Task.Overrides
+	// Style/author/theme dimensions, copied into spawned tasks' Task.Overrides
 	// at CreateFromPlan (non-empty only). Orthogonal to each other and to the
 	// scheduling fields above; empty = inherit from the project at resolve time.
-	VisualStyle   string `gorm:"type:varchar(1024);default:''" json:"visual_style,omitempty"`  // 图片视觉 (free text)
-	WriterKey     string `gorm:"type:varchar(100);default:''" json:"writer_key,omitempty"`     // 写作者 YAML resource key
-	WritingVoice  string `gorm:"type:varchar(1024);default:''" json:"writing_voice,omitempty"` // 写作笔迹 (free-text imitation)
-	Byline        string `gorm:"type:varchar(200);default:''" json:"byline,omitempty"`         // 作者署名 (publish byline — never a writer persona name)
-	PersonaAvatar string `gorm:"type:varchar(500);default:''" json:"persona_avatar,omitempty"` // 人设头像 (never part of byline)
-	Theme         string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`           // 排版主题 key
+	VisualStyle string `gorm:"type:varchar(1024);default:''" json:"visual_style,omitempty"` // 图片视觉 (free text)
+	Writer      string `gorm:"type:varchar(100);default:''" json:"writer,omitempty"`        // 写作者 YAML resource key
+	Author      string `gorm:"type:varchar(200);default:''" json:"author,omitempty"`        // 作者署名 (publish author — never a writer persona name)
+	Theme       string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`          // 排版主题 key
 
 	// Goal mode configuration propagated to tasks created from this plan.
 	Goal     string `gorm:"type:text" json:"goal,omitempty"`

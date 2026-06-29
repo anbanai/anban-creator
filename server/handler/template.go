@@ -33,11 +33,11 @@ func (h *TemplateHandler) SetStore(s storage.Provider) {
 	h.store = s
 }
 
-// signTemplateURLs resolves stored image URLs (thumbnail, author avatar) to
-// directly-fetchable signed URLs so any viewer who can see the template can load
-// its images regardless of which user originally uploaded them. No-op when no
-// store is wired (e.g. unit tests) or the URL is external/empty. Delegates the
-// field list to the shared service.SignTemplateURLs so it stays in sync with the
+// signTemplateURLs resolves stored runtime image URLs to directly-fetchable
+// signed URLs so any viewer who can see the template can load its images
+// regardless of which user originally uploaded them. No-op when no store is
+// wired (e.g. unit tests) or the URL is external/empty. Delegates the field list
+// to the shared service.SignTemplateURLs so it stays in sync with the
 // recommended-templates path in project create.
 func (h *TemplateHandler) signTemplateURLs(ctx context.Context, t *model.Template) {
 	service.SignTemplateURLs(ctx, h.store, h.logger, t)
@@ -132,20 +132,33 @@ type createTemplateRequest struct {
 	ThumbnailURL   string   `json:"thumbnail_url"`
 	StylePrompt    string   `json:"style_prompt"`
 	Visibility     string   `json:"visibility"`
-	WriterKey      string   `json:"writer_key"`
+	Writer         string   `json:"writer"`
 	Theme          string   `json:"theme"`
 	Structure      string   `json:"structure"`
 	ExampleContent string   `json:"example_content"`
 	Category       string   `json:"category"`
 	Tags           []string `json:"tags"`
-	// Author persona (公众号 写作风格 dimension, inline on the template).
-	AuthorName    string `json:"author_name"`
-	PersonaAvatar string `json:"persona_avatar"`
-	WritingVoice  string `json:"writing_voice"`
+	Author         string   `json:"author"`
 	// Ecommerce defaults (type="ecommerce" only): default modules/quantities,
 	// target platform, brand brief, default image model key. Pointer so nil =
 	// leave unchanged on PATCH (Update); non-nil = set (Create or Update).
 	Ecommerce *model.EcommerceTemplateDefaults `json:"ecommerce,omitempty"`
+}
+
+type updateTemplateRequest struct {
+	Name           *string                          `json:"name"`
+	Type           *string                          `json:"type"`
+	ThumbnailURL   *string                          `json:"thumbnail_url"`
+	StylePrompt    *string                          `json:"style_prompt"`
+	Visibility     *string                          `json:"visibility"`
+	Writer         *string                          `json:"writer"`
+	Theme          *string                          `json:"theme"`
+	Structure      *string                          `json:"structure"`
+	ExampleContent *string                          `json:"example_content"`
+	Category       *string                          `json:"category"`
+	Tags           *[]string                        `json:"tags"`
+	Author         *string                          `json:"author"`
+	Ecommerce      *model.EcommerceTemplateDefaults `json:"ecommerce,omitempty"`
 }
 
 // scaffoldText wraps a plain-text scaffold value into the model's {"text": ...}
@@ -182,7 +195,7 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
-	if err := service.RejectWriterNameAsByline(req.AuthorName); err != nil {
+	if err := service.RejectWriterNameAsAuthor(req.Author); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -192,15 +205,13 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 		ThumbnailURL:   req.ThumbnailURL,
 		VisualStyle:    req.StylePrompt,
 		Visibility:     req.Visibility,
-		WriterKey:      req.WriterKey,
+		Writer:         req.Writer,
 		Theme:          req.Theme,
 		Structure:      scaffoldText(req.Structure),
 		ExampleContent: scaffoldText(req.ExampleContent),
 		Category:       req.Category,
 		Tags:           req.Tags,
-		Byline:         req.AuthorName,
-		PersonaAvatar:  req.PersonaAvatar,
-		WritingVoice:   req.WritingVoice,
+		Author:         req.Author,
 		IsActive:       true,
 	}
 	if req.Ecommerce != nil {
@@ -235,14 +246,14 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid template id format")
 	}
 
-	var req createTemplateRequest
+	var req updateTemplateRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 	// Empty type = leave unchanged (matches service PATCH semantics). Non-empty
 	// type must still be a known value.
-	if req.Type != "" {
-		switch req.Type {
+	if req.Type != nil && *req.Type != "" {
+		switch *req.Type {
 		case "poster", "seednote", "article", "ecommerce":
 		default:
 			return Error(c, fiber.StatusBadRequest, "type must be one of: poster, seednote, article, ecommerce")
@@ -250,31 +261,46 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 	}
 
 	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
-	if err := service.RejectWriterNameAsByline(req.AuthorName); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+	if req.Author != nil {
+		if err := service.RejectWriterNameAsAuthor(*req.Author); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 	}
 
-	patch := &model.Template{
-		Name:           req.Name,
-		Type:           req.Type,
-		ThumbnailURL:   req.ThumbnailURL,
-		VisualStyle:    req.StylePrompt,
-		Visibility:     req.Visibility,
-		WriterKey:      req.WriterKey,
-		Theme:          req.Theme,
-		Structure:      scaffoldText(req.Structure),
-		ExampleContent: scaffoldText(req.ExampleContent),
-		Category:       req.Category,
-		Tags:           req.Tags,
-		Byline:         req.AuthorName,
-		PersonaAvatar:  req.PersonaAvatar,
-		WritingVoice:   req.WritingVoice,
+	patch := service.TemplatePatch{
+		Name:         req.Name,
+		Type:         req.Type,
+		ThumbnailURL: req.ThumbnailURL,
+		VisualStyle:  req.StylePrompt,
+		Visibility:   req.Visibility,
+		Writer:       req.Writer,
+		Theme:        req.Theme,
+		Category:     req.Category,
+		Tags:         req.Tags,
+		Author:       req.Author,
+		Ecommerce:    req.Ecommerce,
 	}
-	if req.Ecommerce != nil {
-		patch.SetEcommerce(*req.Ecommerce)
+	if req.Structure != nil {
+		structure := scaffoldText(*req.Structure)
+		patch.Structure = &structure
+	}
+	if req.ExampleContent != nil {
+		exampleContent := scaffoldText(*req.ExampleContent)
+		patch.ExampleContent = &exampleContent
+	}
+	if req.Visibility != nil && *req.Visibility != "" && *req.Visibility != "public" && *req.Visibility != "private" {
+		return Error(c, fiber.StatusBadRequest, "visibility must be public or private")
+	}
+	if req.Type != nil && *req.Type == "" {
+		req.Type = nil
+		patch.Type = nil
+	}
+	if req.Visibility != nil && *req.Visibility == "" {
+		req.Visibility = nil
+		patch.Visibility = nil
 	}
 
-	updated, err := h.service.Update(c.Context(), id, userID, patch)
+	updated, err := h.service.UpdatePatch(c.Context(), id, userID, patch)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTemplateNotFound):

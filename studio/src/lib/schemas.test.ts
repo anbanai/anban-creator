@@ -334,7 +334,7 @@ describe('projectSchema', () => {
       positioning: '定位',
       style: 'casual-science',
       theme: 'autumn-warm',
-      byline: '作者',
+      author: '作者',
     })
     expect(result.success).toBe(true)
   })

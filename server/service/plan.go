@@ -50,14 +50,12 @@ type CreatePlanParams struct {
 	// non-nil honors explicit user choice.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	// Style/persona/theme dimensions copied into spawned tasks' Task.Overrides.
+	// Style/author/theme dimensions copied into spawned tasks' Task.Overrides.
 	// Each is optional; empty = inherit from the project at resolve time.
-	VisualStyle   string
-	WriterKey     string
-	WritingVoice  string
-	Byline        string
-	PersonaAvatar string
-	Theme         string
+	VisualStyle string
+	Writer      string
+	Author      string
+	Theme       string
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -125,7 +123,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		articleContent = *p.ArticleWithContentImages
 	}
 
-	// A plan carries its own style/persona/theme dimensions (copied into spawned
+	// A plan carries its own style/author/theme dimensions (copied into spawned
 	// tasks' Task.Overrides at CreateFromPlan) plus scheduling-adjacent "what to
 	// produce" image params + goal mode. See model.Plan for the dimension set.
 	plan := &model.Plan{
@@ -148,10 +146,8 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ArticleWithCover:         &articleCover,
 		ArticleWithContentImages: &articleContent,
 		VisualStyle:              p.VisualStyle,
-		WriterKey:                p.WriterKey,
-		WritingVoice:             p.WritingVoice,
-		Byline:                   p.Byline,
-		PersonaAvatar:            p.PersonaAvatar,
+		Writer:                   p.Writer,
+		Author:                   p.Author,
 		Theme:                    p.Theme,
 	}
 
@@ -196,7 +192,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
-//   - VisualStyle / WriterKey / WritingVoice / Byline / PersonaAvatar / Theme:
+//   - VisualStyle / Writer / Author / Theme:
 //     nil = leave unchanged; &"" = clear (inherit from project); &"value" = set
 //
 // ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
@@ -216,10 +212,8 @@ type UpdatePlanParams struct {
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
 	VisualStyle              *string
-	WriterKey                *string
-	WritingVoice             *string
-	Byline                   *string
-	PersonaAvatar            *string
+	Writer                   *string
+	Author                   *string
 	Theme                    *string
 }
 
@@ -265,17 +259,11 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 	if p.VisualStyle != nil {
 		plan.VisualStyle = *p.VisualStyle
 	}
-	if p.WriterKey != nil {
-		plan.WriterKey = *p.WriterKey
+	if p.Writer != nil {
+		plan.Writer = *p.Writer
 	}
-	if p.WritingVoice != nil {
-		plan.WritingVoice = *p.WritingVoice
-	}
-	if p.Byline != nil {
-		plan.Byline = *p.Byline
-	}
-	if p.PersonaAvatar != nil {
-		plan.PersonaAvatar = *p.PersonaAvatar
+	if p.Author != nil {
+		plan.Author = *p.Author
 	}
 	if p.Theme != nil {
 		plan.Theme = *p.Theme

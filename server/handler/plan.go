@@ -82,16 +82,12 @@ type createPlanRequest struct {
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
 	VisualStyle        string `json:"visual_style"`
-	WriterKey          string `json:"writer_key"`
+	Writer             string `json:"writer"`
 	Theme              string `json:"theme"`
-	// Byline / WritingVoice / PersonaAvatar: 公众号 作者（署名）+ 写作风格（模仿）
-	// + 可选人设头像 overrides, orthogonal to VisualStyle/WriterKey/Theme.
-	Byline        string `json:"byline"`
-	WritingVoice  string `json:"writing_voice"`
-	PersonaAvatar string `json:"persona_avatar"`
-	Watermark     *bool  `json:"watermark"`
-	Goal          string `json:"goal"`
-	GoalMode      bool   `json:"goal_mode"`
+	Author             string `json:"author"`
+	Watermark          *bool  `json:"watermark"`
+	Goal               string `json:"goal"`
+	GoalMode           bool   `json:"goal_mode"`
 	// TemplateID records the template selected during plan creation. nil/empty = no template.
 	TemplateID *string `json:"template_id,omitempty"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
@@ -105,19 +101,15 @@ type createPlanRequest struct {
 }
 
 type updatePlanRequest struct {
-	CronExpr           string  `json:"cron_expr"`
-	Prompt             string  `json:"prompt"`
-	ImageModelKey      *string `json:"image_model_key"`
-	SkipReferenceImage *bool   `json:"skip_reference_image"`
-	ReferenceImageURL  *string `json:"reference_image_url"`
-	VisualStyle        *string `json:"visual_style"`
-	WriterKey          *string `json:"writer_key"`
-	Theme              *string `json:"theme"`
-	// Byline / WritingVoice / PersonaAvatar: leave-unchanged semantics
-	// (omitted = unchanged), same as VisualStyle/WriterKey/Theme.
-	Byline                   *string `json:"byline"`
-	WritingVoice             *string `json:"writing_voice"`
-	PersonaAvatar            *string `json:"persona_avatar"`
+	CronExpr                 string  `json:"cron_expr"`
+	Prompt                   string  `json:"prompt"`
+	ImageModelKey            *string `json:"image_model_key"`
+	SkipReferenceImage       *bool   `json:"skip_reference_image"`
+	ReferenceImageURL        *string `json:"reference_image_url"`
+	VisualStyle              *string `json:"visual_style"`
+	Writer                   *string `json:"writer"`
+	Theme                    *string `json:"theme"`
+	Author                   *string `json:"author"`
 	Watermark                *bool   `json:"watermark"`
 	Goal                     string  `json:"goal"`
 	GoalMode                 *bool   `json:"goal_mode"`
@@ -157,9 +149,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
 
-	// Byline must not be a writer-persona name (same defense-in-depth guard as
-	// task/project/template create). A plan byline flows to spawned tasks.
-	if err := service.RejectWriterNameAsByline(req.Byline); err != nil {
+	// Author must not be a writer-persona name (same defense-in-depth guard as
+	// task/project/template create). A plan author flows to spawned tasks.
+	if err := service.RejectWriterNameAsAuthor(req.Author); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -179,10 +171,8 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		VisualStyle:              req.VisualStyle,
-		WriterKey:                req.WriterKey,
-		WritingVoice:             req.WritingVoice,
-		Byline:                   req.Byline,
-		PersonaAvatar:            req.PersonaAvatar,
+		Writer:                   req.Writer,
+		Author:                   req.Author,
 		Theme:                    req.Theme,
 	})
 	if err != nil {
@@ -295,10 +285,10 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
 
-	// Byline must not be a writer-persona name. req.Byline is nil for "leave
+	// Author must not be a writer-persona name. req.Author is nil for "leave
 	// unchanged"; only validate when the caller is setting/clearing it.
-	if req.Byline != nil {
-		if err := service.RejectWriterNameAsByline(*req.Byline); err != nil {
+	if req.Author != nil {
+		if err := service.RejectWriterNameAsAuthor(*req.Author); err != nil {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 	}
@@ -318,10 +308,8 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		VisualStyle:              req.VisualStyle,
-		WriterKey:                req.WriterKey,
-		WritingVoice:             req.WritingVoice,
-		Byline:                   req.Byline,
-		PersonaAvatar:            req.PersonaAvatar,
+		Writer:                   req.Writer,
+		Author:                   req.Author,
 		Theme:                    req.Theme,
 	})
 	if err != nil {

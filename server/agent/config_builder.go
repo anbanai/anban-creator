@@ -30,7 +30,7 @@ const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 //
 // resolved carries the two-layer effective values (resolver.ResolveStyle); only
 // the dimensions each platform's settings.json slot consumes are read here:
-// Article.WriterKey / Article.Byline / Article.Theme and Seednote.VisualStyle,
+// Article.Writer / Article.Author / Article.Theme and Seednote.VisualStyle,
 // each driven by the resolved value (not the raw project column).
 func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, skipRefImage bool, taskReferenceImageURL string) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
@@ -52,18 +52,18 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 	cfg.Wechat.AppID = ch.GetWechatAppID()
 	cfg.Wechat.Secret = ch.GetWechatSecret()
 
-	// Platform-specific fields. The style/persona/theme values come from the
+	// Platform-specific fields. The style/author/theme values come from the
 	// two-layer resolved set (task.Overrides.X ?? project.X), NOT the raw project
 	// columns — so a per-task override reaches settings.json correctly.
 	switch ch.Platform {
 	case model.ScopeArticle:
-		// Byline is the publish署名 (goes to draft.json's author key at publish).
-		cfg.Wechat.Article.Byline = resolved.Byline
-		// WriterKey is the writer RESOURCE key (e.g. "dan-koe") — NOT the image
+		// Author is the publish署名 (goes to draft.json's author key at publish).
+		cfg.Wechat.Article.Author = resolved.Author
+		// Writer is the writer RESOURCE key (e.g. "dan-koe") — NOT the image
 		// visual style. The article visual style is orthogonal and is read by the
 		// agent solely from get_project_profile (MCP); it never enters the user
 		// prompt nor settings.json.
-		cfg.Wechat.Article.WriterKey = resolved.WriterKey
+		cfg.Wechat.Article.Writer = resolved.Writer
 		cfg.Wechat.Article.Theme = resolved.Theme
 	case model.ScopeSeednote:
 		cfg.Seednote = &appconfig.SeednoteConfig{}

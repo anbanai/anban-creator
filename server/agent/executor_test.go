@@ -62,7 +62,7 @@ func TestBuildAppConfig(t *testing.T) {
 					WechatAppID:  "test_appid",
 					WechatSecret: "test_secret",
 				},
-				Byline:      "TestAuthor",
+				Author:      "TestAuthor",
 				VisualStyle: "dan-koe",
 				Theme:       "default",
 			},

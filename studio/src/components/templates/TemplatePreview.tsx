@@ -72,7 +72,7 @@ function scaffoldText(value: Record<string, unknown> | undefined): string {
 }
 
 // Readable scaffold block: renders the .text as preformatted text. Used for the
-// writer_key / structure / example projects that the agent consumes.
+// writer / structure / example projects that the agent consumes.
 function ScaffoldBlock({ label, text }: { label: string; text: string }) {
   if (!text.trim()) return null
   return (
@@ -204,7 +204,7 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
               {/* 海报 (poster): 内容脚手架（写作风格 / 内容结构 / 示例）—— 保留原展示 */}
               {data.type === 'poster' && (
                 <>
-                  <ScaffoldBlock label="写作风格" text={data.writer_key ?? ''} />
+                  <ScaffoldBlock label="写作风格" text={data.writer ?? ''} />
 
                   {/* 内容结构 —— 优先渲染 .text，无 .text 时回退到 JSON 展开（poster 旧结构） */}
                   {scaffoldText(data.structure) ? (
@@ -233,26 +233,18 @@ export function TemplatePreview({ template, open, onOpenChange, currentUserId, o
           {/* 公众号 (article): 写作风格 + 排版预览，全宽（移出两栏右列，iframe 不再撑爆 flex 行） */}
           {data.type === 'article' && (
             <div className="space-y-3">
-              {/* 写作风格 —— 名称(署名) + 写作风格 + 可选头像，放在一起（与编辑器一致） */}
-              {(data.author_name || data.writing_voice || data.persona_avatar) && (
+              {/* 写作风格 —— 发布署名 + 写作风格；头像/昵称仅用于 Studio 选择展示。 */}
+              {(data.author || data.writer) && (
                 <div className="rounded-lg border border-border px-3 py-2">
                   <p className="text-xs font-medium text-muted-foreground mb-2">写作风格</p>
                   <div className="flex items-start gap-3">
-                    {data.persona_avatar && (
-                      <SignedImage
-                        src={data.persona_avatar}
-                        alt="头像"
-                        className="h-12 w-12 shrink-0 rounded-full object-cover"
-                        showLoading={false}
-                      />
-                    )}
                     <div className="min-w-0 flex-1 space-y-1">
-                      {data.author_name && (
-                        <p className="text-sm font-medium text-foreground">{data.author_name}</p>
+                      {data.author && (
+                        <p className="text-sm font-medium text-foreground">{data.author}</p>
                       )}
-                      {data.writing_voice && (
+                      {data.writer && (
                         <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-                          {data.writing_voice}
+                          {data.writer}
                         </p>
                       )}
                     </div>

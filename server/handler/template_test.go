@@ -228,38 +228,31 @@ func TestTemplateHandler_Create_Success(t *testing.T) {
 	}
 }
 
-// TestTemplateHandler_Create_ArticleAuthorPersona: the 公众号 author-persona
-// fields round-trip through the REST Create path.
-func TestTemplateHandler_Create_ArticleAuthorPersona(t *testing.T) {
+// TestTemplateHandler_Create_ArticleAuthorFields: the 公众号 runtime author fields
+// round-trip through the REST Create path.
+func TestTemplateHandler_Create_ArticleAuthorFields(t *testing.T) {
 	app, _ := setupTemplateHandlerTest(t)
 	userID := uuid.New().String()
 
 	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
-		"name":           "老李的公众号",
-		"type":           "article",
-		"thumbnail_url":  "https://example.com/x.png",
-		"style_prompt":   "暖色",
-		"visibility":     "public",
-		"author_name":    "老李",
-		"persona_avatar": "https://example.com/avatar.png",
-		"writing_voice":  "犀利、接地气、像朋友聊天",
+		"name":          "老李的公众号",
+		"type":          "article",
+		"thumbnail_url": "https://example.com/x.png",
+		"style_prompt":  "暖色",
+		"visibility":    "public",
+		"author":        "老李",
+		"writer":        "dan-koe",
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	// P4 unified the input wire contract with the model's JSON tags: author_name (input)
-	// maps to byline (the byline never equals the writer-persona name — see
-	// RejectWriterNameAsByline), persona_avatar, and writing_voice. The RESPONSE
-	// serializes the model with the same renamed tags, so we assert those here.
+	// author (input) maps to author; writer is the writing-style resource key.
 	data := decodeBody(t, resp)["data"].(map[string]any)
-	if data["byline"] != "老李" {
-		t.Errorf("byline = %v, want 老李", data["byline"])
+	if data["author"] != "老李" {
+		t.Errorf("author = %v, want 老李", data["author"])
 	}
-	if data["persona_avatar"] != "https://example.com/avatar.png" {
-		t.Errorf("persona_avatar = %v", data["persona_avatar"])
-	}
-	if data["writing_voice"] != "犀利、接地气、像朋友聊天" {
-		t.Errorf("writing_voice = %v", data["writing_voice"])
+	if data["writer"] != "dan-koe" {
+		t.Errorf("writer = %v", data["writer"])
 	}
 }
 
@@ -354,6 +347,36 @@ func TestTemplateHandler_Update_EmptyTypeLeavesUnchanged(t *testing.T) {
 	// Type should still be the original seednote from createTemplateRow.
 	if data["type"] != "seednote" {
 		t.Errorf("type = %v, want unchanged seednote", data["type"])
+	}
+}
+
+func TestTemplateHandler_Update_ClearsArticleRuntimeFieldsWithoutClearingVisualStyle(t *testing.T) {
+	app, repo := setupTemplateHandlerTest(t)
+	owner := uuid.New().String()
+	tmpl := createTemplateRow(t, repo, owner, "public", "article template")
+	tmpl.Type = "article"
+	tmpl.VisualStyle = "暖色生活摄影"
+	tmpl.Author = "老李"
+	tmpl.Writer = "dan-koe"
+	tmpl.Theme = "autumn-warm"
+	if err := repo.Templates().Update(t.Context(), tmpl); err != nil {
+		t.Fatalf("seed article template update: %v", err)
+	}
+
+	resp := doRequest(t, app, "PUT", "/api/v1/templates/"+tmpl.ID, owner, map[string]any{
+		"author": "",
+		"writer": "",
+		"theme":  "",
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	data := decodeBody(t, resp)["data"].(map[string]any)
+	if data["author"] != "" || data["writer"] != "" || data["theme"] != "" {
+		t.Fatalf("author/writer/theme = %v/%v/%v, want all cleared", data["author"], data["writer"], data["theme"])
+	}
+	if data["visual_style"] != "暖色生活摄影" {
+		t.Fatalf("visual_style = %v, want existing style preserved", data["visual_style"])
 	}
 }
 

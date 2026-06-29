@@ -248,7 +248,7 @@ type CreateManualParams struct {
 // The Quantity field (1-5) determines how many tasks to create, each independently billed.
 // ImageModelKey optionally selects a per-task image model (validated upstream by the handler).
 //
-// Style/persona/theme dimensions are NOT resolved or snapshotted here: the task
+// Style/author/theme dimensions are NOT resolved or snapshotted here: the task
 // stores only the explicitly-overridden slots (p.Overrides) and inherits the rest
 // from the project at execution via ResolveStyle (task.Overrides.X ?? project.X).
 // This is the live-inheritance model — editing the project immediately affects
@@ -493,10 +493,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
 //
-// The plan's style/persona/theme dimensions are copied into the spawned task's
-// Task.Overrides (all six, via SetOverrides — empty dimensions serialize to {}
-// and the resolver falls through to the project for them). This lets two plans
-// under one project theme their tasks differently. The plan's
+// The plan's style/author/theme dimensions are copied into the spawned task's
+// Task.Overrides (empty dimensions serialize to {} and the resolver falls
+// through to the project for them). This lets two plans under one project theme
+// their tasks differently. The plan's
 // scheduling-adjacent "what to produce" params (image model, reference image,
 // watermark, goal, seednote image composition) also flow to the task.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
@@ -568,16 +568,14 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ArticleWithContentImages: plan.ArticleWithContentImages,
 	}
 
-	// Copy the plan's style/persona/theme dimensions into the spawned task's
+	// Copy the plan's style/author/theme dimensions into the spawned task's
 	// overrides. Empty dimensions serialize to {} and the resolver falls through
 	// to the project for them, so this is safe even when the plan set nothing.
 	task.SetOverrides(model.StyleOverrides{
-		VisualStyle:   plan.VisualStyle,
-		WriterKey:     plan.WriterKey,
-		WritingVoice:  plan.WritingVoice,
-		Byline:        plan.Byline,
-		PersonaAvatar: plan.PersonaAvatar,
-		Theme:         plan.Theme,
+		VisualStyle: plan.VisualStyle,
+		Writer:      plan.Writer,
+		Author:      plan.Author,
+		Theme:       plan.Theme,
 	})
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {

@@ -14,7 +14,7 @@ import (
 // resolver.ResolveStyle for the full contract.
 type Resolved = resolver.Resolved
 
-// ResolveStyle resolves a task's effective style/persona/theme dimensions
+// ResolveStyle resolves a task's effective style/author/theme dimensions
 // (task override > project). Thin pass-through to the single primitive in the
 // resolver package.
 func ResolveStyle(project *model.Project, task *model.Task) resolver.Resolved {
