@@ -93,6 +93,11 @@ type createTaskRequest struct {
 	// tail off). Non-seednote task types ignore them.
 	HasContentImage *bool `json:"has_content_image,omitempty"`
 	HasTailImage    *bool `json:"has_tail_image,omitempty"`
+	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
+	// (cover is NOT mandatory). nil → fall back to model defaults (both on).
+	// Non-article task types ignore them.
+	ArticleWithCover         *bool `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool `json:"article_with_content_images,omitempty"`
 	// E-commerce package fields (project platform = "ecommerce"). SelectedModules
 	// maps a module key (main_images / detail_page / cover_banner / share_image /
 	// sku_images) to its quantity; the task cost = sum(unit price × quantity).
@@ -235,22 +240,24 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	}
 
 	tasks, err := h.service.CreateManual(c.Context(), service.CreateManualParams{
-		UserID:            userID,
-		ProjectID:         req.ProjectID,
-		Prompt:            prompt,
-		Quantity:          quantity,
-		ImageRatio:        req.ImageRatio,
-		ImageModelKey:     req.ImageModelKey,
-		SkipRefImage:      req.SkipReferenceImage,
-		ReferenceImageURL: req.ReferenceImageURL,
-		Overrides:         overrides,
-		Watermark:         req.Watermark,
-		Goal:              req.Goal,
-		GoalMode:          req.GoalMode,
-		HasContentImage:   req.HasContentImage,
-		HasTailImage:      req.HasTailImage,
-		Ecommerce:         ecommerceCfg,
-		ExecutionTarget:   req.ExecutionTarget,
+		UserID:                   userID,
+		ProjectID:                req.ProjectID,
+		Prompt:                   prompt,
+		Quantity:                 quantity,
+		ImageRatio:               req.ImageRatio,
+		ImageModelKey:            req.ImageModelKey,
+		SkipRefImage:             req.SkipReferenceImage,
+		ReferenceImageURL:        req.ReferenceImageURL,
+		Overrides:                overrides,
+		Watermark:                req.Watermark,
+		Goal:                     req.Goal,
+		GoalMode:                 req.GoalMode,
+		HasContentImage:          req.HasContentImage,
+		HasTailImage:             req.HasTailImage,
+		ArticleWithCover:         req.ArticleWithCover,
+		ArticleWithContentImages: req.ArticleWithContentImages,
+		Ecommerce:                ecommerceCfg,
+		ExecutionTarget:          req.ExecutionTarget,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")

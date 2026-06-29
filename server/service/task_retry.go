@@ -37,23 +37,27 @@ func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, er
 	watermark := src.Watermark
 	hasContent := src.HasContentImage
 	hasTail := src.HasTailImage
+	articleCover := src.ArticleWithCover
+	articleContent := src.ArticleWithContentImages
 
 	overrides := src.Overrides.Data()
 	params := CreateManualParams{
-		UserID:            src.UserID,
-		ProjectID:         src.ProjectID,
-		Prompt:            src.Prompt,
-		Quantity:          1,
-		ImageRatio:        src.ImageRatio,
-		ImageModelKey:     src.ImageModelKey,
-		SkipRefImage:      &skipRef,
-		ReferenceImageURL: src.ReferenceImageURL,
-		Overrides:         &overrides,
-		Watermark:         &watermark,
-		Goal:              src.Goal,
-		GoalMode:          src.GoalMode,
-		HasContentImage:   &hasContent,
-		HasTailImage:      &hasTail,
+		UserID:                   src.UserID,
+		ProjectID:                src.ProjectID,
+		Prompt:                   src.Prompt,
+		Quantity:                 1,
+		ImageRatio:               src.ImageRatio,
+		ImageModelKey:            src.ImageModelKey,
+		SkipRefImage:             &skipRef,
+		ReferenceImageURL:        src.ReferenceImageURL,
+		Overrides:                &overrides,
+		Watermark:                &watermark,
+		Goal:                     src.Goal,
+		GoalMode:                 src.GoalMode,
+		HasContentImage:          &hasContent,
+		HasTailImage:             &hasTail,
+		ArticleWithCover:         articleCover,
+		ArticleWithContentImages: articleContent,
 	}
 
 	// Preserve the e-commerce package config (module selection, product photos,

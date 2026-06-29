@@ -34,6 +34,11 @@ type Plan struct {
 	// to on, tail defaults to off — matches the seednote form default.
 	HasContentImage bool `gorm:"default:true;not null" json:"has_content_image"`
 	HasTailImage    bool `gorm:"default:false;not null" json:"has_tail_image"`
+	// ArticleWithCover / ArticleWithContentImages are plan-level 公众号 article image
+	// toggles copied to Task on CreateFromPlan. Nullable *bool, DB default true (nil =
+	// generate). See model.Task.ArticleWithCover for why *bool is required.
+	ArticleWithCover         *bool `gorm:"default:true;not null" json:"article_with_cover"`
+	ArticleWithContentImages *bool `gorm:"default:true;not null" json:"article_with_content_images"`
 
 	// Style/persona/theme dimensions, copied into spawned tasks' Task.Overrides
 	// at CreateFromPlan (non-empty only). Orthogonal to each other and to the

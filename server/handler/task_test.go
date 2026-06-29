@@ -202,3 +202,78 @@ func TestCreateTask_ImageModelKeyTierForbidden(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateTask_ArticleImageTogglesPersist verifies the full
+// handler→service→model→DB round-trip persists an explicit `false` for both
+// article image toggles. This is a regression guard for the *bool /
+// gorm:"default:true" mitigation: a plain bool with default:true silently
+// coerces false→true at Create time (in-memory AND DB). It also guards against
+// a handler wiring omission (forgetting to pass req.ArticleWithCover into
+// CreateManualParams would silently default the user's choice to true). The
+// value is re-read from the repo to assert the persisted state, not just the
+// in-memory response.
+func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      "article-toggles@example.com",
+		Password:   "hashed",
+		InviteCode: "articletoggles",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	body := `{"project_id":"` + projectID + `","prompt":"文章开关持久化测试","article_with_cover":false,"article_with_content_images":false}`
+	req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, 0, 10)
+	if err != nil {
+		t.Fatalf("find tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	got := tasks[0]
+	for label, ptr := range map[string]*bool{
+		"ArticleWithCover":         got.ArticleWithCover,
+		"ArticleWithContentImages": got.ArticleWithContentImages,
+	} {
+		switch {
+		case ptr == nil:
+			t.Errorf("%s = nil, want non-nil false", label)
+		case *ptr:
+			t.Errorf("%s = true, want false", label)
+		}
+	}
+}

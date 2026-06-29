@@ -49,9 +49,9 @@ type TaskService struct {
 	// wcfNotifier pushes task success/failure/cancel messages to the task
 	// owner's WeChat via the wcfLink sidecar. Nil when wcf is disabled — all
 	// terminal hooks no-op. Best-effort; never fails the task pipeline.
-	wcfNotifier *WCFNotifier
-	topicPoolSvc        *TopicPoolService
-	goalMultiplier      int
+	wcfNotifier    *WCFNotifier
+	topicPoolSvc   *TopicPoolService
+	goalMultiplier int
 	// executionTimeout bounds the fallback (Redis-down) in-process execution.
 	// The asynq path is bounded by the asynq task Timeout (see scheduler).
 	// Default 60m; override via SetExecutionTimeouts.
@@ -225,6 +225,11 @@ type CreateManualParams struct {
 	// non-nil honors explicit user choice.
 	HasContentImage *bool
 	HasTailImage    *bool
+	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
+	// (cover NOT mandatory). nil → fall back to task model defaults (both on);
+	// non-nil honors explicit user choice. Non-article task types ignore them.
+	ArticleWithCover         *bool
+	ArticleWithContentImages *bool
 	// Ecommerce carries the e-commerce package config (selected modules, product
 	// photos, target platform, selling points, language, provider-strategy
 	// override). Only consulted when the project platform is "ecommerce"; ignored
@@ -407,24 +412,36 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.HasTailImage != nil {
 			hasTail = *p.HasTailImage
 		}
+		// Article image toggles: honor caller's explicit choice, otherwise rely on
+		// the model's column defaults (both on). Ignored for non-article types.
+		articleCover := true
+		if p.ArticleWithCover != nil {
+			articleCover = *p.ArticleWithCover
+		}
+		articleContent := true
+		if p.ArticleWithContentImages != nil {
+			articleContent = *p.ArticleWithContentImages
+		}
 
 		task := &model.Task{
-			ID:                 taskID,
-			UserID:             p.UserID,
-			ProjectID:          p.ProjectID,
-			Type:               taskType,
-			Status:             model.TaskStatusPending,
-			Prompt:             taskPrompt,
-			ImageRatio:         p.ImageRatio,
-			ImageModelKey:      effectiveImageModelKey,
-			ReferenceImageURL:  p.ReferenceImageURL,
-			SkipReferenceImage: p.SkipRefImage != nil && *p.SkipRefImage,
-			Watermark:          p.Watermark != nil && *p.Watermark,
-			Goal:               p.Goal,
-			GoalMode:           p.GoalMode,
-			HasContentImage:    hasContent,
-			HasTailImage:       hasTail,
-			ExecutionTarget:    p.ExecutionTarget,
+			ID:                       taskID,
+			UserID:                   p.UserID,
+			ProjectID:                p.ProjectID,
+			Type:                     taskType,
+			Status:                   model.TaskStatusPending,
+			Prompt:                   taskPrompt,
+			ImageRatio:               p.ImageRatio,
+			ImageModelKey:            effectiveImageModelKey,
+			ReferenceImageURL:        p.ReferenceImageURL,
+			SkipReferenceImage:       p.SkipRefImage != nil && *p.SkipRefImage,
+			Watermark:                p.Watermark != nil && *p.Watermark,
+			Goal:                     p.Goal,
+			GoalMode:                 p.GoalMode,
+			HasContentImage:          hasContent,
+			HasTailImage:             hasTail,
+			ArticleWithCover:         &articleCover,
+			ArticleWithContentImages: &articleContent,
+			ExecutionTarget:          p.ExecutionTarget,
 		}
 		if p.ExecutionTarget == model.ExecutionTargetLocal {
 			deadline := time.Now().Add(LocalClaimWindow)
@@ -533,20 +550,22 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	task := &model.Task{
-		ID:                 taskID,
-		UserID:             plan.UserID,
-		ProjectID:          plan.ProjectID,
-		Type:               taskType,
-		Status:             model.TaskStatusPending,
-		Prompt:             prompt,
-		ImageModelKey:      plan.ImageModelKey,
-		ReferenceImageURL:  plan.ReferenceImageURL,
-		SkipReferenceImage: plan.SkipReferenceImage,
-		Watermark:          plan.Watermark,
-		Goal:               plan.Goal,
-		GoalMode:           planGoalMode,
-		HasContentImage:    plan.HasContentImage,
-		HasTailImage:       plan.HasTailImage,
+		ID:                       taskID,
+		UserID:                   plan.UserID,
+		ProjectID:                plan.ProjectID,
+		Type:                     taskType,
+		Status:                   model.TaskStatusPending,
+		Prompt:                   prompt,
+		ImageModelKey:            plan.ImageModelKey,
+		ReferenceImageURL:        plan.ReferenceImageURL,
+		SkipReferenceImage:       plan.SkipReferenceImage,
+		Watermark:                plan.Watermark,
+		Goal:                     plan.Goal,
+		GoalMode:                 planGoalMode,
+		HasContentImage:          plan.HasContentImage,
+		HasTailImage:             plan.HasTailImage,
+		ArticleWithCover:         plan.ArticleWithCover,
+		ArticleWithContentImages: plan.ArticleWithContentImages,
 	}
 
 	// Copy the plan's style/persona/theme dimensions into the spawned task's

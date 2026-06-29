@@ -101,6 +101,10 @@ export interface CreateTaskRequest {
   // Seednote image composition: cover always generated. Server ignores for non-seednote.
   has_content_image?: boolean
   has_tail_image?: boolean
+  // Article image toggles (公众号文章): cover + content images each independently
+  // toggleable. Both default true. Server ignores for non-article task types.
+  article_with_cover?: boolean
+  article_with_content_images?: boolean
   // E-commerce package fields (server ignores for non-ecommerce)
   product_photos?: string[]
   selected_modules?: Record<string, number>

@@ -23,6 +23,10 @@ export interface Plan {
   goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
+  // Article image toggles (公众号文章): cover + content images each independently
+  // toggleable. Both default true; spawned article tasks inherit them.
+  article_with_cover?: boolean
+  article_with_content_images?: boolean
   // 公众号人设（与项目/模板同链解析：plan > template > project），spawned task 继承。
   byline?: string
   writing_voice?: string
@@ -52,6 +56,10 @@ export interface CreatePlanRequest {
   // Seednote image composition (see CreateTaskRequest).
   has_content_image?: boolean
   has_tail_image?: boolean
+  // Article image toggles (公众号文章): cover + content images each independently
+  // toggleable; both default true. Server ignores for non-article plans.
+  article_with_cover?: boolean
+  article_with_content_images?: boolean
   // 公众号人设 override（署名 + 写作风格模仿 + 可选头像）。
   byline?: string
   writing_voice?: string
@@ -75,6 +83,10 @@ export interface UpdatePlanRequest {
   goal_mode?: boolean
   has_content_image?: boolean
   has_tail_image?: boolean
+  // Article image toggles (公众号文章): cover + content images each independently
+  // toggleable; both default true. Server ignores for non-article plans.
+  article_with_cover?: boolean
+  article_with_content_images?: boolean
   // 公众号人设 override（署名 + 写作风格模仿 + 可选头像）。
   byline?: string
   writing_voice?: string

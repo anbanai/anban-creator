@@ -98,6 +98,10 @@ type createPlanRequest struct {
 	// generated). nil → fall back to plan model defaults (content on, tail off).
 	HasContentImage *bool `json:"has_content_image,omitempty"`
 	HasTailImage    *bool `json:"has_tail_image,omitempty"`
+	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
+	// (cover NOT mandatory). nil → fall back to plan model defaults (both on).
+	ArticleWithCover         *bool `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool `json:"article_with_content_images,omitempty"`
 }
 
 type updatePlanRequest struct {
@@ -111,15 +115,17 @@ type updatePlanRequest struct {
 	Theme              *string `json:"theme"`
 	// Byline / WritingVoice / PersonaAvatar: leave-unchanged semantics
 	// (omitted = unchanged), same as VisualStyle/WriterKey/Theme.
-	Byline          *string `json:"byline"`
-	WritingVoice    *string `json:"writing_voice"`
-	PersonaAvatar   *string `json:"persona_avatar"`
-	Watermark       *bool   `json:"watermark"`
-	Goal            string  `json:"goal"`
-	GoalMode        *bool   `json:"goal_mode"`
-	TemplateID      *string `json:"template_id,omitempty"`
-	HasContentImage *bool   `json:"has_content_image,omitempty"`
-	HasTailImage    *bool   `json:"has_tail_image,omitempty"`
+	Byline                   *string `json:"byline"`
+	WritingVoice             *string `json:"writing_voice"`
+	PersonaAvatar            *string `json:"persona_avatar"`
+	Watermark                *bool   `json:"watermark"`
+	Goal                     string  `json:"goal"`
+	GoalMode                 *bool   `json:"goal_mode"`
+	TemplateID               *string `json:"template_id,omitempty"`
+	HasContentImage          *bool   `json:"has_content_image,omitempty"`
+	HasTailImage             *bool   `json:"has_tail_image,omitempty"`
+	ArticleWithCover         *bool   `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool   `json:"article_with_content_images,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -158,24 +164,26 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	}
 
 	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
-		UserID:             userID,
-		ProjectID:          req.ProjectID,
-		CronExpr:           req.CronExpr,
-		Prompt:             req.Prompt,
-		ImageModelKey:      req.ImageModelKey,
-		SkipReferenceImage: req.SkipReferenceImage,
-		ReferenceImageURL:  req.ReferenceImageURL,
-		Watermark:          req.Watermark,
-		Goal:               req.Goal,
-		GoalMode:           req.GoalMode,
-		HasContentImage:    req.HasContentImage,
-		HasTailImage:       req.HasTailImage,
-		VisualStyle:        req.VisualStyle,
-		WriterKey:          req.WriterKey,
-		WritingVoice:       req.WritingVoice,
-		Byline:             req.Byline,
-		PersonaAvatar:      req.PersonaAvatar,
-		Theme:              req.Theme,
+		UserID:                   userID,
+		ProjectID:                req.ProjectID,
+		CronExpr:                 req.CronExpr,
+		Prompt:                   req.Prompt,
+		ImageModelKey:            req.ImageModelKey,
+		SkipReferenceImage:       req.SkipReferenceImage,
+		ReferenceImageURL:        req.ReferenceImageURL,
+		Watermark:                req.Watermark,
+		Goal:                     req.Goal,
+		GoalMode:                 req.GoalMode,
+		HasContentImage:          req.HasContentImage,
+		HasTailImage:             req.HasTailImage,
+		ArticleWithCover:         req.ArticleWithCover,
+		ArticleWithContentImages: req.ArticleWithContentImages,
+		VisualStyle:              req.VisualStyle,
+		WriterKey:                req.WriterKey,
+		WritingVoice:             req.WritingVoice,
+		Byline:                   req.Byline,
+		PersonaAvatar:            req.PersonaAvatar,
+		Theme:                    req.Theme,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
@@ -296,23 +304,25 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	}
 
 	plan, err := h.service.Update(c.Context(), service.UpdatePlanParams{
-		ID:                 id,
-		CronExpr:           req.CronExpr,
-		Prompt:             req.Prompt,
-		ImageModelKey:      req.ImageModelKey,
-		SkipReferenceImage: req.SkipReferenceImage,
-		ReferenceImageURL:  req.ReferenceImageURL,
-		Watermark:          req.Watermark,
-		Goal:               req.Goal,
-		GoalMode:           req.GoalMode,
-		HasContentImage:    req.HasContentImage,
-		HasTailImage:       req.HasTailImage,
-		VisualStyle:        req.VisualStyle,
-		WriterKey:          req.WriterKey,
-		WritingVoice:       req.WritingVoice,
-		Byline:             req.Byline,
-		PersonaAvatar:      req.PersonaAvatar,
-		Theme:              req.Theme,
+		ID:                       id,
+		CronExpr:                 req.CronExpr,
+		Prompt:                   req.Prompt,
+		ImageModelKey:            req.ImageModelKey,
+		SkipReferenceImage:       req.SkipReferenceImage,
+		ReferenceImageURL:        req.ReferenceImageURL,
+		Watermark:                req.Watermark,
+		Goal:                     req.Goal,
+		GoalMode:                 req.GoalMode,
+		HasContentImage:          req.HasContentImage,
+		HasTailImage:             req.HasTailImage,
+		ArticleWithCover:         req.ArticleWithCover,
+		ArticleWithContentImages: req.ArticleWithContentImages,
+		VisualStyle:              req.VisualStyle,
+		WriterKey:                req.WriterKey,
+		WritingVoice:             req.WritingVoice,
+		Byline:                   req.Byline,
+		PersonaAvatar:            req.PersonaAvatar,
+		Theme:                    req.Theme,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")

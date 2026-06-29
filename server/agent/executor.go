@@ -53,6 +53,11 @@ type UserPromptParams struct {
 	// always generated. Ignored for non-seednote task types.
 	HasContentImage bool
 	HasTailImage    bool
+	// ArticleWithCover / ArticleWithContentImages toggle 公众号 article image
+	// generation independently (article cover is NOT mandatory, unlike seednote).
+	// Both default true. Ignored for non-article task types.
+	ArticleWithCover         bool
+	ArticleWithContentImages bool
 }
 
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
@@ -74,6 +79,10 @@ type UserPromptParams struct {
 // For seednote tasks, p.HasContentImage / p.HasTailImage control image
 // composition (cover always generated). Non-seednote types ignore the directive.
 //
+// For article tasks, p.ArticleWithCover / p.ArticleWithContentImages toggle cover
+// and in-text image generation independently (both default true → no directive,
+// preserving legacy "always generate both"). Non-article types ignore it.
+//
 // Multi-line goal conditions are flattened to a single line (newlines →
 // spaces) because Claude Code's slash command parser only registers the first
 // line as the condition — anything after a newline would leak into the user
@@ -91,6 +100,12 @@ func BuildUserPrompt(p UserPromptParams) string {
 	}
 	if p.TaskType == model.PlatformSeednote {
 		base += "\n\n" + describeSeednoteImageComposition(p.HasContentImage, p.HasTailImage)
+	}
+	if p.TaskType == model.PlatformArticle {
+		// Both toggles default true → empty directive (byte-identical to legacy prompt).
+		if d := describeArticleImageComposition(p.ArticleWithCover, p.ArticleWithContentImages); d != "" {
+			base += "\n\n" + d
+		}
 	}
 	if p.TaskID != "" || p.ProjectID != "" {
 		parts := make([]string, 0, 2)
@@ -160,6 +175,37 @@ func describeSeednoteImageComposition(hasContent, hasTail bool) string {
 		directive += " 另：禁止生成尾图——image-plan.md 不得包含 `## tail` 节，不得调用 generate_image 生成尾图文件，最终报告图片数量不含尾图。"
 	}
 	return directive
+}
+
+// describeArticleImageComposition renders the image composition directive for
+// 公众号 article tasks. Unlike seednote, the article cover is itself toggleable,
+// so there are four combinations. The default (both on) returns "" so the legacy
+// "always generate cover + 配图" prompt is byte-identical. The other three carry
+// enough weight to override the article-cover-design / article-visual-design
+// skills' hardcoded "always generate" requirements and the template
+// image_count.min gate — mirroring how describeSeednoteImageComposition phrases
+// its prohibitions (see its comment on why a mere omission is too weak).
+func describeArticleImageComposition(withCover, withContent bool) string {
+	switch {
+	case withCover && withContent:
+		return ""
+	case withCover && !withContent:
+		return "图片生成要求（必须严格遵守，覆盖 skill 默认数量规则）：仅生成封面（$DIR/cover.png，900×383，作为发布草稿的 thumb_media_id）。" +
+			"禁止生成任何正文配图——跳过 article-visual-design skill 的配图规划与生成（image-plan.md、images.json、步骤 7 全部跳过）；" +
+			"模板的 image_count.min 不再生效，不得据此强制生成配图；visual-rhythm-plan.md 仍可创建但所有 slot 的 image_url=null；" +
+			"04-article-final.md 不得内联任何正文 <img>。"
+	case !withCover && withContent:
+		return "图片生成要求（必须严格遵守，覆盖 skill 默认数量规则）：禁止生成封面——跳过 article-cover-design skill 与步骤 6d，" +
+			"$DIR/cover.png 不得生成。正常生成正文配图（按模板 image_count.min/max，每张 vision 校验）；" +
+			"但因无封面作 ref_image_path 风格锚点，正文图改为各自独立生成（不传 ref_image_path，或链到首张已生成图），" +
+			"严禁把 ref_image_path 指向不存在的 cover.png。发布草稿不带 thumb_media_id。"
+	default:
+		return "图片生成要求（必须严格遵守，覆盖 skill 默认数量规则）：纯文字文章，禁止生成任何图片——" +
+			"跳过 article-cover-design skill、article-visual-design skill 的全部图片规划与生成（步骤 6d、7 全部跳过）；" +
+			"$DIR/cover.png 不生成；image-plan.md / images.json 不创建；模板 image_count.min 不再生效；" +
+			"visual-rhythm-plan.md 所有 slot 的 image_url=null；04-article-final.md 不得内联 <img>。" +
+			"发布草稿不带 thumb_media_id，并在 final-review.md 显式记录「未生成封面，公众号后台可能不显示封面/需手动设置」。"
+	}
 }
 
 // normalizeGoalCondition trims surrounding whitespace and collapses internal
@@ -503,6 +549,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		ProjectID:       projectID,
 		HasContentImage: opts.Task.HasContentImage,
 		HasTailImage:    opts.Task.HasTailImage,
+		// *bool → bool with a true default (nil = legacy "always generate").
+		ArticleWithCover:         opts.Task.ArticleWithCover == nil || *opts.Task.ArticleWithCover,
+		ArticleWithContentImages: opts.Task.ArticleWithContentImages == nil || *opts.Task.ArticleWithContentImages,
 	})
 
 	// Load agent definition from plugin directory and pass via WithAgent()

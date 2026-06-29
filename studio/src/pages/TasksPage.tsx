@@ -80,6 +80,10 @@ export default function TasksPage() {
   const [goalMode, setGoalMode] = useState(false)
   const [hasContentImage, setHasContentImage] = useState(true)
   const [hasTailImage, setHasTailImage] = useState(false)
+  // Article image toggles (公众号文章): cover + content images each independently
+  // toggleable. Both default true → legacy "always generate both" (zero regression).
+  const [articleWithCover, setArticleWithCover] = useState(true)
+  const [articleWithContentImages, setArticleWithContentImages] = useState(true)
   const [goalText, setGoalText] = useState('')
   const [projectImageRatio, setProjectImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
@@ -340,6 +344,8 @@ export default function TasksPage() {
     setSelectedTemplate(null)
     setHasContentImage(true)
     setHasTailImage(false)
+    setArticleWithCover(true)
+    setArticleWithContentImages(true)
     setModalOpen(true)
 
     // 预选模板：来自模板预览「用于公众号/种草笔记」按钮携带的 template_id。
@@ -387,6 +393,8 @@ export default function TasksPage() {
     setSelectedTemplate(null)
     setHasContentImage(true)
     setHasTailImage(false)
+    setArticleWithCover(true)
+    setArticleWithContentImages(true)
   }
 
   async function onSubmit(values: CreateTaskFormValues) {
@@ -409,6 +417,9 @@ export default function TasksPage() {
       template_id: selectedTemplate?.id || undefined,
       has_content_image: values.type === 'seednote' ? hasContentImage : undefined,
       has_tail_image: values.type === 'seednote' ? hasTailImage : undefined,
+      // Article image toggles (公众号文章): both default true; non-article omits.
+      article_with_cover: values.type === 'article' ? articleWithCover : undefined,
+      article_with_content_images: values.type === 'article' ? articleWithContentImages : undefined,
       // E-commerce package (server forces quantity=1 and bills the package sum).
       // The schema guarantees ≥1 module + ≥1 photo for ecommerce; strip empties.
       product_photos: values.type === 'ecommerce' && values.product_photos?.length ? values.product_photos : undefined,
@@ -1016,6 +1027,48 @@ export default function TasksPage() {
                   </div>
                   <p className="mt-2 text-xs text-muted-foreground">
                     当前将生成 {1 + (hasContentImage ? 1 : 0) + (hasTailImage ? 1 : 0)} 张图片
+                  </p>
+                </div>
+              )}
+
+              {/* Image composition (公众号 article): cover + content images each
+                  independently toggleable — unlike seednote, the article cover is
+                  NOT mandatory (both default on → legacy behavior). */}
+              {watchedType === 'article' && (
+                <div className="rounded-lg border border-border p-3">
+                  <div className="flex items-start gap-3">
+                    <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">图片构成</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        独立选择是否生成封面与正文配图。两者都关 = 纯文字文章。
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 divide-y divide-border">
+                    <div className="flex items-center justify-between py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">封面图</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">公众号头图（900×383，作为发布草稿封面）</p>
+                      </div>
+                      <Switch checked={articleWithCover} onCheckedChange={setArticleWithCover} />
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">正文配图</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">按排版节奏插入的章节插图</p>
+                      </div>
+                      <Switch checked={articleWithContentImages} onCheckedChange={setArticleWithContentImages} />
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {articleWithCover && articleWithContentImages
+                      ? '将生成封面 + 正文配图（默认）'
+                      : articleWithCover
+                        ? '仅生成封面图，不生成正文配图'
+                        : articleWithContentImages
+                          ? '仅生成正文配图；发布草稿不设封面'
+                          : '纯文字文章，不生成任何图片；发布草稿不设封面'}
                   </p>
                 </div>
               )}

@@ -56,6 +56,8 @@ function planToFormValues(plan: Plan): PlanFormValues {
     goal_mode: plan.goal_mode || false,
     has_content_image: plan.has_content_image ?? true,
     has_tail_image: plan.has_tail_image ?? false,
+    article_with_cover: plan.article_with_cover ?? true,
+    article_with_content_images: plan.article_with_content_images ?? true,
   }
 }
 
@@ -88,6 +90,8 @@ export default function PlansPage() {
       persona_avatar: '',
       has_content_image: true,
       has_tail_image: false,
+      article_with_cover: true,
+      article_with_content_images: true,
     },
   })
 
@@ -233,6 +237,8 @@ export default function PlansPage() {
       persona_avatar: '',
       has_content_image: true,
       has_tail_image: false,
+      article_with_cover: true,
+      article_with_content_images: true,
     })
     setSelectedTemplate(null)
     setModalOpen(true)
@@ -282,6 +288,8 @@ export default function PlansPage() {
       persona_avatar: '',
       has_content_image: true,
       has_tail_image: false,
+      article_with_cover: true,
+      article_with_content_images: true,
     })
     setSelectedTemplate(null)
   }
@@ -325,6 +333,9 @@ export default function PlansPage() {
       goal: values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
       has_content_image: values.type === 'seednote' ? values.has_content_image : undefined,
       has_tail_image: values.type === 'seednote' ? values.has_tail_image : undefined,
+      // Article image toggles (公众号文章): both default true; non-article omits.
+      article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
+      article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
       // template_id 透传给后端，由 CreateFromPlan 复制到派生任务，从而让 Agent 通过
       // get_project_profile(task_id) 拿到模板的内容脚手架。
       template_id: selectedTemplate?.id || undefined,
@@ -658,6 +669,55 @@ export default function PlansPage() {
                         <p className="mt-2 text-xs text-muted-foreground">
                           当前将生成 {total} 张图片
                         </p>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )
+                }} />
+              )}
+
+              {/* Image composition (公众号 article): cover + content images each
+                  independently toggleable — unlike seednote, the article cover is
+                  NOT mandatory (both default on → legacy behavior). */}
+              {watchedType === 'article' && (
+                <FormField control={form.control} name="article_with_cover" render={({ field }) => {
+                  const withContent = form.watch('article_with_content_images')
+                  const summary = field.value && withContent
+                    ? '将生成封面 + 正文配图（默认）'
+                    : field.value
+                      ? '仅生成封面图，不生成正文配图'
+                      : withContent
+                        ? '仅生成正文配图；发布草稿不设封面'
+                        : '纯文字文章，不生成任何图片；发布草稿不设封面'
+                  return (
+                    <FormItem>
+                      <div className="rounded-lg border border-border p-3">
+                        <div className="flex items-start gap-3">
+                          <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-foreground">图片构成</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              独立选择是否生成封面与正文配图。两者都关 = 纯文字文章。
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-3 divide-y divide-border">
+                          <div className="flex items-center justify-between py-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">封面图</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">公众号头图（900×383，作为发布草稿封面）</p>
+                            </div>
+                            <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">正文配图</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">按排版节奏插入的章节插图</p>
+                            </div>
+                            <Switch checked={!!withContent} onCheckedChange={(v) => form.setValue('article_with_content_images', v, { shouldDirty: true })} />
+                          </div>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">{summary}</p>
                       </div>
                       <FormMessage />
                     </FormItem>

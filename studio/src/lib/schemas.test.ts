@@ -165,6 +165,28 @@ describe('createTaskSchema', () => {
     expect(result.image_ratio).toBe('')
   })
 
+  it('defaults article image toggles to true (legacy "always generate both")', () => {
+    const result = createTaskSchema.parse({
+      project_id: 'ch-1',
+      type: 'article',
+      prompt: '测试',
+    })
+    expect(result.article_with_cover).toBe(true)
+    expect(result.article_with_content_images).toBe(true)
+  })
+
+  it('honors explicit article_with_cover=false', () => {
+    const result = createTaskSchema.parse({
+      project_id: 'ch-1',
+      type: 'article',
+      prompt: '测试',
+      article_with_cover: false,
+      article_with_content_images: false,
+    })
+    expect(result.article_with_cover).toBe(false)
+    expect(result.article_with_content_images).toBe(false)
+  })
+
   it('accepts goal_mode with a non-empty goal', () => {
     expect(createTaskSchema.safeParse({
       project_id: 'ch-1',
@@ -258,6 +280,16 @@ describe('planSchema', () => {
       project_id: 'ch-1',
     })
     expect(result.success).toBe(true)
+  })
+
+  it('defaults article image toggles to true', () => {
+    const result = planSchema.parse({
+      type: 'article',
+      cron_expr: '0 9 * * 1',
+      prompt: '主题方向',
+    })
+    expect(result.article_with_cover).toBe(true)
+    expect(result.article_with_content_images).toBe(true)
   })
 })
 

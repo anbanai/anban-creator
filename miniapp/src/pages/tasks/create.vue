@@ -130,6 +130,27 @@
       </view>
     </view>
 
+    <!-- Article image composition (公众号 article): cover + content images each
+         independently toggleable — unlike seednote, the article cover is NOT
+         mandatory. Both default on → legacy behavior. -->
+    <view class="task-create__section" v-if="isArticle">
+      <text class="field-label">图片组合</text>
+      <view class="switch-row">
+        <view class="switch-row__text">
+          <text class="field-label switch-row__label">生成封面图</text>
+          <text class="field-hint">公众号头图（900×383），关闭则发布草稿不设封面</text>
+        </view>
+        <AbSwitch v-model="form.article_with_cover" />
+      </view>
+      <view class="switch-row field-spacer">
+        <view class="switch-row__text">
+          <text class="field-label switch-row__label">生成正文配图</text>
+          <text class="field-hint">按排版节奏插入的章节插图</text>
+        </view>
+        <AbSwitch v-model="form.article_with_content_images" />
+      </view>
+    </view>
+
     <!-- E-commerce package (ecommerce only): product photos + delivery modules -->
     <view class="task-create__section" v-if="isEcommerce">
       <text class="field-label">电商素材包</text>
@@ -395,6 +416,10 @@ const form = reactive({
   template_name: '',
   has_content_image: false,
   has_tail_image: false,
+  // Article image toggles (公众号文章): cover + content images each independently
+  // toggleable; both default true → legacy "always generate both" (zero regression).
+  article_with_cover: true,
+  article_with_content_images: true,
   // ecommerce
   target_platform: '',
   selling_points: '',
@@ -675,6 +700,10 @@ async function onSubmit() {
       persona_avatar: form.persona_avatar.trim() || undefined,
       has_content_image: isSeednote.value && form.has_content_image ? true : undefined,
       has_tail_image: isSeednote.value && form.has_tail_image ? true : undefined,
+      // Article image toggles: send actual boolean (incl. false when toggled off);
+      // non-article omits. Both default true → server honors the explicit false.
+      article_with_cover: isArticle.value ? form.article_with_cover : undefined,
+      article_with_content_images: isArticle.value ? form.article_with_content_images : undefined,
       // ecommerce basic fields
       target_platform: isEcommerce.value && form.target_platform ? form.target_platform : undefined,
       selling_points: isEcommerce.value && form.selling_points.trim() ? form.selling_points.trim() : undefined,

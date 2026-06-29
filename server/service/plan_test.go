@@ -224,6 +224,48 @@ func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
 	}
 }
 
+func TestPlanService_Create_ArticleImageToggles(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	chID := createTestProject(t, repo, "user-1", model.PlatformArticle)
+
+	cover, content := false, false
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		UserID:                   "user-1",
+		ProjectID:                chID,
+		CronExpr:                 "0 9 * * *",
+		Prompt:                   "topic hint",
+		ArticleWithCover:         &cover,
+		ArticleWithContentImages: &content,
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	if plan.ArticleWithCover == nil || *plan.ArticleWithCover {
+		t.Error("expected article_with_cover to be false when explicitly set")
+	}
+	if plan.ArticleWithContentImages == nil || *plan.ArticleWithContentImages {
+		t.Error("expected article_with_content_images to be false when explicitly set")
+	}
+
+	// Default (nil flags) → both true (legacy "always generate" behavior).
+	planDefault, err := svc.Create(ctx, CreatePlanParams{
+		UserID:    "user-1",
+		ProjectID: chID,
+		CronExpr:  "0 10 * * *",
+		Prompt:    "topic hint 2",
+	})
+	if err != nil {
+		t.Fatalf("create default plan: %v", err)
+	}
+	if ptr := planDefault.ArticleWithCover; ptr == nil || !*ptr {
+		t.Error("expected article_with_cover to default true when omitted")
+	}
+	if ptr := planDefault.ArticleWithContentImages; ptr == nil || !*ptr {
+		t.Error("expected article_with_content_images to default true when omitted")
+	}
+}
+
 func TestPlanService_GetByID(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()

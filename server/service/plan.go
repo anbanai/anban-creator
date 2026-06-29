@@ -45,6 +45,11 @@ type CreatePlanParams struct {
 	// non-nil honors explicit user choice.
 	HasContentImage *bool
 	HasTailImage    *bool
+	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
+	// (cover NOT mandatory). nil → fall back to plan model defaults (both on);
+	// non-nil honors explicit user choice.
+	ArticleWithCover         *bool
+	ArticleWithContentImages *bool
 	// Style/persona/theme dimensions copied into spawned tasks' Task.Overrides.
 	// Each is optional; empty = inherit from the project at resolve time.
 	VisualStyle   string
@@ -109,33 +114,45 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if p.HasTailImage != nil {
 		hasTail = *p.HasTailImage
 	}
+	// Article image toggles: honor caller's explicit choice, otherwise rely on the
+	// model's column defaults (both on). Ignored for non-article types.
+	articleCover := true
+	if p.ArticleWithCover != nil {
+		articleCover = *p.ArticleWithCover
+	}
+	articleContent := true
+	if p.ArticleWithContentImages != nil {
+		articleContent = *p.ArticleWithContentImages
+	}
 
 	// A plan carries its own style/persona/theme dimensions (copied into spawned
 	// tasks' Task.Overrides at CreateFromPlan) plus scheduling-adjacent "what to
 	// produce" image params + goal mode. See model.Plan for the dimension set.
 	plan := &model.Plan{
-		ID:                 uuid.New().String(),
-		UserID:             p.UserID,
-		ProjectID:          p.ProjectID,
-		Type:               project.Platform,
-		CronExpr:           p.CronExpr,
-		Prompt:             p.Prompt,
-		Status:             model.PlanStatusActive,
-		NextRunAt:          nextRun,
-		ImageModelKey:      p.ImageModelKey,
-		ReferenceImageURL:  p.ReferenceImageURL,
-		SkipReferenceImage: p.SkipReferenceImage != nil && *p.SkipReferenceImage,
-		Watermark:          p.Watermark != nil && *p.Watermark,
-		Goal:               p.Goal,
-		GoalMode:           p.GoalMode,
-		HasContentImage:    hasContent,
-		HasTailImage:       hasTail,
-		VisualStyle:        p.VisualStyle,
-		WriterKey:          p.WriterKey,
-		WritingVoice:       p.WritingVoice,
-		Byline:             p.Byline,
-		PersonaAvatar:      p.PersonaAvatar,
-		Theme:              p.Theme,
+		ID:                       uuid.New().String(),
+		UserID:                   p.UserID,
+		ProjectID:                p.ProjectID,
+		Type:                     project.Platform,
+		CronExpr:                 p.CronExpr,
+		Prompt:                   p.Prompt,
+		Status:                   model.PlanStatusActive,
+		NextRunAt:                nextRun,
+		ImageModelKey:            p.ImageModelKey,
+		ReferenceImageURL:        p.ReferenceImageURL,
+		SkipReferenceImage:       p.SkipReferenceImage != nil && *p.SkipReferenceImage,
+		Watermark:                p.Watermark != nil && *p.Watermark,
+		Goal:                     p.Goal,
+		GoalMode:                 p.GoalMode,
+		HasContentImage:          hasContent,
+		HasTailImage:             hasTail,
+		ArticleWithCover:         &articleCover,
+		ArticleWithContentImages: &articleContent,
+		VisualStyle:              p.VisualStyle,
+		WriterKey:                p.WriterKey,
+		WritingVoice:             p.WritingVoice,
+		Byline:                   p.Byline,
+		PersonaAvatar:            p.PersonaAvatar,
+		Theme:                    p.Theme,
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -185,23 +202,25 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 // ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
 // unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
 type UpdatePlanParams struct {
-	ID                 string
-	CronExpr           string
-	Prompt             string
-	ImageModelKey      *string
-	SkipReferenceImage *bool
-	ReferenceImageURL  *string
-	Watermark          *bool
-	Goal               string
-	GoalMode           *bool
-	HasContentImage    *bool
-	HasTailImage       *bool
-	VisualStyle        *string
-	WriterKey          *string
-	WritingVoice       *string
-	Byline             *string
-	PersonaAvatar      *string
-	Theme              *string
+	ID                       string
+	CronExpr                 string
+	Prompt                   string
+	ImageModelKey            *string
+	SkipReferenceImage       *bool
+	ReferenceImageURL        *string
+	Watermark                *bool
+	Goal                     string
+	GoalMode                 *bool
+	HasContentImage          *bool
+	HasTailImage             *bool
+	ArticleWithCover         *bool
+	ArticleWithContentImages *bool
+	VisualStyle              *string
+	WriterKey                *string
+	WritingVoice             *string
+	Byline                   *string
+	PersonaAvatar            *string
+	Theme                    *string
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -234,6 +253,14 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 	}
 	if p.HasTailImage != nil {
 		plan.HasTailImage = *p.HasTailImage
+	}
+	if p.ArticleWithCover != nil {
+		v := *p.ArticleWithCover
+		plan.ArticleWithCover = &v
+	}
+	if p.ArticleWithContentImages != nil {
+		v := *p.ArticleWithContentImages
+		plan.ArticleWithContentImages = &v
 	}
 	if p.VisualStyle != nil {
 		plan.VisualStyle = *p.VisualStyle

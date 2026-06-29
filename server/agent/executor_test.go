@@ -782,17 +782,81 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 		})
 	}
 
-	// Non-seednote task types must NOT get the image composition directive even
-	// when explicit flags are passed.
+	// A default article task (both image toggles on) must NOT get the seednote
+	// image-composition directive, nor any article directive (both-on = no-op).
 	articleGot := BuildUserPrompt(UserPromptParams{
-		TaskType:        "article",
-		Topic:           "时间管理",
-		AgentName:       "wechatarticle",
-		HasContentImage: true,
-		HasTailImage:    true,
+		TaskType:                 "article",
+		Topic:                    "时间管理",
+		AgentName:                "wechatarticle",
+		HasContentImage:          true,
+		HasTailImage:             true,
+		ArticleWithCover:         true,
+		ArticleWithContentImages: true,
 	})
-	if strings.Contains(articleGot, "图片构成要求") {
-		t.Errorf("article task must not get image composition directive; got %q", articleGot)
+	for _, sub := range []string{"图片构成要求", "图片生成要求", "image_01.png", "tail.png"} {
+		if strings.Contains(articleGot, sub) {
+			t.Errorf("default article task must not get image directive %q; got %q", sub, articleGot)
+		}
+	}
+}
+
+func TestBuildUserPrompt_ArticleImageComposition(t *testing.T) {
+	cases := []struct {
+		name         string
+		withCover    bool
+		withContent  bool
+		wantContains []string
+		wantAbsence  []string
+	}{
+		{
+			name:        "both on (default = no directive)",
+			withCover:   true,
+			withContent: true,
+			// Byte-identical to legacy prompt: no image directive at all.
+			wantAbsence: []string{"图片生成要求", "禁止生成", "纯文字文章", "图片构成要求", "image_01.png", "tail.png"},
+		},
+		{
+			name:         "cover only (content off)",
+			withCover:    true,
+			withContent:  false,
+			wantContains: []string{"图片生成要求", "仅生成封面", "禁止生成任何正文配图", "image_count.min 不再生效"},
+			wantAbsence:  []string{"禁止生成封面", "纯文字文章", "图片构成要求", "image_01.png", "tail.png"},
+		},
+		{
+			name:         "content only (cover off)",
+			withCover:    false,
+			withContent:  true,
+			wantContains: []string{"图片生成要求", "禁止生成封面", "正常生成正文配图", "不带 thumb_media_id"},
+			wantAbsence:  []string{"禁止生成任何正文配图", "纯文字文章", "仅生成封面", "图片构成要求", "image_01.png", "tail.png"},
+		},
+		{
+			name:         "neither (pure text)",
+			withCover:    false,
+			withContent:  false,
+			wantContains: []string{"图片生成要求", "纯文字文章", "禁止生成任何图片", "不带 thumb_media_id"},
+			wantAbsence:  []string{"仅生成封面", "正常生成正文配图", "图片构成要求", "image_01.png", "tail.png"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := BuildUserPrompt(UserPromptParams{
+				TaskType:                 "article",
+				Topic:                    "时间管理",
+				AgentName:                "wechatarticle",
+				ArticleWithCover:         tc.withCover,
+				ArticleWithContentImages: tc.withContent,
+			})
+			for _, sub := range tc.wantContains {
+				if !strings.Contains(got, sub) {
+					t.Errorf("missing %q in prompt: %q", sub, got)
+				}
+			}
+			for _, sub := range tc.wantAbsence {
+				if strings.Contains(got, sub) {
+					t.Errorf("%q should be absent; got %q", sub, got)
+				}
+			}
+		})
 	}
 }
 

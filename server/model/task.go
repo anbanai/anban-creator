@@ -98,6 +98,15 @@ type Task struct {
 	// Propagated to the agent via BuildUserPrompt; non-seednote task types ignore them.
 	HasContentImage bool `gorm:"default:true;not null" json:"has_content_image"`
 	HasTailImage    bool `gorm:"default:false;not null" json:"has_tail_image"`
+	// ArticleWithCover / ArticleWithContentImages toggle 公众号 article image
+	// generation independently (unlike seednote, the article cover is NOT mandatory).
+	// Nullable *bool with a DB default of true: nil (and the DDL default applied to
+	// pre-existing rows) = generate. A non-nil false is honored — plain bool with
+	// default:true cannot represent "off" because GORM auto-fills the zero value
+	// (false) back to the default at Create time. Propagated to the agent via
+	// BuildUserPrompt; non-article task types ignore them.
+	ArticleWithCover         *bool `gorm:"default:true;not null" json:"article_with_cover"`
+	ArticleWithContentImages *bool `gorm:"default:true;not null" json:"article_with_content_images"`
 	// Ecommerce carries the e-commerce package config for platform="ecommerce"
 	// tasks (selected deliverable modules, product photos, target platform, selling
 	// points, language, provider-strategy override). Zero value for non-ecommerce

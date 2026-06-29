@@ -61,6 +61,12 @@ export const createTaskSchema = z.object({
   // Non-seednote task types ignore these fields server-side.
   has_content_image: z.boolean().default(true),
   has_tail_image: z.boolean().default(false),
+  // Article image toggles (公众号文章): cover + content images each independently
+  // toggleable (unlike seednote, the article cover is NOT mandatory). Both default
+  // true → legacy "always generate both" behavior, zero regression. Non-article
+  // task types ignore these fields server-side.
+  article_with_cover: z.boolean().default(true),
+  article_with_content_images: z.boolean().default(true),
   // E-commerce package (server ignores for non-ecommerce). selected_modules maps
   // module key → quantity; product_photos are /files/upload URLs materialized
   // into the agent workspace by the executor.
@@ -149,6 +155,10 @@ export const planSchema = z.object({
   // Seednote image composition (see createTaskSchema). Defaults match the server.
   has_content_image: z.boolean().default(true),
   has_tail_image: z.boolean().default(false),
+  // Article image toggles (see createTaskSchema). Both default true; spawned
+  // article tasks inherit them; non-article plans ignore them server-side.
+  article_with_cover: z.boolean().default(true),
+  article_with_content_images: z.boolean().default(true),
 }).superRefine((data, ctx) => {
   if (data.goal_mode) {
     const goal = data.goal?.trim() || ""

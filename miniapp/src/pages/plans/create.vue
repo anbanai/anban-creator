@@ -172,6 +172,27 @@
         </view>
       </view>
 
+      <!-- Article image composition (公众号 article): cover + content images each
+           independently toggleable — unlike seednote, the article cover is NOT
+           mandatory. Both default on → legacy behavior. -->
+      <view class="form-section" v-if="isArticle">
+        <text class="form-section__label">图片组合</text>
+        <view class="switch-row">
+          <view class="switch-row__text">
+            <text class="form-section__label switch-row__label">生成封面图</text>
+            <text class="form-section__hint">公众号头图（900×383），关闭则发布草稿不设封面</text>
+          </view>
+          <AbSwitch v-model="form.articleWithCover" />
+        </view>
+        <view class="switch-row field-spacer">
+          <view class="switch-row__text">
+            <text class="form-section__label switch-row__label">生成正文配图</text>
+            <text class="form-section__hint">按排版节奏插入的章节插图</text>
+          </view>
+          <AbSwitch v-model="form.articleWithContentImages" />
+        </view>
+      </view>
+
       <!-- Image generation options -->
       <view class="form-section">
         <view class="switch-row">
@@ -271,6 +292,10 @@ const form = reactive({
   persona_avatar: '',
   hasContentImage: true,
   hasTailImage: false,
+  // Article image toggles (公众号文章): cover + content images each independently
+  // toggleable; both default true → legacy "always generate both" (zero regression).
+  articleWithCover: true,
+  articleWithContentImages: true,
   skipReferenceImage: false,
   referenceImageUrl: '',
   watermark: false,
@@ -504,6 +529,10 @@ async function handleSubmit() {
       goal: form.goalMode && form.goal.trim() ? form.goal.trim() : undefined,
       has_content_image: isSeednote.value ? form.hasContentImage : undefined,
       has_tail_image: isSeednote.value ? form.hasTailImage : undefined,
+      // Article image toggles: send actual boolean (incl. false when toggled off);
+      // non-article omits. Both default true → server honors the explicit false.
+      article_with_cover: isArticle.value ? form.articleWithCover : undefined,
+      article_with_content_images: isArticle.value ? form.articleWithContentImages : undefined,
       skip_reference_image: form.skipReferenceImage || undefined,
       reference_image_url: form.referenceImageUrl.trim() || undefined,
       template_id: form.templateId || undefined,
@@ -545,6 +574,8 @@ async function loadPlan(planId: string) {
     form.persona_avatar = plan.persona_avatar || ''
     form.hasContentImage = plan.has_content_image ?? true
     form.hasTailImage = plan.has_tail_image ?? false
+    form.articleWithCover = plan.article_with_cover ?? true
+    form.articleWithContentImages = plan.article_with_content_images ?? true
     form.skipReferenceImage = plan.skip_reference_image || false
     form.referenceImageUrl = plan.reference_image_url || ''
     form.watermark = plan.watermark || false
