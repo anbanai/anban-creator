@@ -171,6 +171,8 @@ services:
     depends_on:
       server:
         condition: service_started
+    environment:
+      BACKEND_HOST: server
     networks:
       - abwriter-network
 

@@ -49,7 +49,7 @@ server {
     # Backend API (REST + SSE). proxy_buffering off + long read timeout keep
     # Server-Sent Events streaming live instead of buffering chunks.
     location /api/ {
-        proxy_pass http://server:8080;
+        proxy_pass http://${BACKEND_HOST}:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -63,7 +63,7 @@ server {
 
     # WebSocket (parity with the vite dev proxy; unused by studio today).
     location /ws {
-        proxy_pass http://server:8080;
+        proxy_pass http://${BACKEND_HOST}:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

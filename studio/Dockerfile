@@ -24,8 +24,12 @@ RUN bun run build
 # Stage 2: serve the static bundle with nginx.
 FROM nginx:1.24-alpine
 
+# Default backend host for docker-compose (service name "server"). Override in
+# k8s via the BACKEND_HOST env var so nginx resolves the correct Service name.
+ENV BACKEND_HOST=server
+
 # nginx config reverse-proxies /api (incl. SSE) and /ws to the backend.
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY default.conf.template /etc/nginx/templates/default.conf.template
 
 COPY --from=build /app/dist /usr/share/nginx/html
 
