@@ -52,7 +52,6 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   wechat_app_id: '',
   wechat_secret: '',
   keywords: '',
-  positioning: '',
   instructions: '',
   visual_style: '',
   writer: '',
@@ -74,8 +73,7 @@ function projectToForm(ch: Project): ProjectFormValues {
     wechat_app_id: ch.config?.wechat_app_id || '',
     wechat_secret: '',
     keywords: ch.keywords || '',
-    positioning: ch.positioning || '',
-    instructions: ch.instructions || '',
+    instructions: ch.instructions || ch.positioning || '',
     visual_style: ch.visual_style || '',
     writer: ch.writer || '',
     theme: ch.theme || '',
@@ -222,7 +220,7 @@ export default function ProjectsPage() {
       const profile = await api.projects.fetchProfile(selectedPlatform, url, appId, secret)
       if (profile.name) form.setValue('name', profile.name)
       if (profile.avatar_url) form.setValue('avatar_url', profile.avatar_url)
-      if (profile.positioning) form.setValue('positioning', profile.positioning)
+      if (profile.positioning) form.setValue('instructions', profile.positioning)
       if (profile.keywords) form.setValue('keywords', profile.keywords)
       if (profile.style) form.setValue('visual_style', profile.style)
       setProfileFetchHint('已更新项目信息')
@@ -400,7 +398,6 @@ export default function ProjectsPage() {
       name: values.name?.trim() || undefined,
       profile_url: values.profile_url?.trim() || undefined,
       avatar_url: values.avatar_url?.trim() || undefined,
-      positioning: values.positioning?.trim() || undefined,
       keywords: values.keywords?.trim() || undefined,
       instructions: values.instructions?.trim() || undefined,
       visual_style: values.visual_style?.trim() || undefined,
@@ -631,7 +628,7 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="positioning" render={({ field }) => (
+              <FormField control={form.control} name="instructions" render={({ field }) => (
                 <FormItem>
                   <FormLabel>项目定位</FormLabel>
                   <FormControl>
@@ -740,23 +737,6 @@ export default function ProjectsPage() {
               <div className="border-t border-border pt-4">
                 <h4 className="mb-3 text-sm font-medium text-muted-foreground">高级设置</h4>
               </div>
-
-              <FormField control={form.control} name="instructions" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>项目指令（Project CLAUDE.md）</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      placeholder="例如：语气亲切自然，避免使用「赋能」「抓手」等黑话；所有封面图必须暖色调；发布前检查标题不超过 25 字。"
-                      className="min-h-[120px] resize-y"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    这段文字会作为 CLAUDE.md 注入到每次任务的工作区，作为 agent 的常驻记忆被所有 skill 遵循。留空则不注入。
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />
 
               <FormField control={form.control} name="keywords" render={({ field }) => (
                 <FormItem>

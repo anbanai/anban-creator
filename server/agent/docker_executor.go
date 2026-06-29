@@ -156,7 +156,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
-		// Write project instructions as CLAUDE.md so Claude Code loads them as
+		// Write project positioning as CLAUDE.md so Claude Code loads it as
 		// persistent project memory. Non-fatal: missing the file should not abort
 		// a task; the agent can still rely on its default agent definition.
 		if err := writeProjectCLAUDEMD(workDir, opts.Project); err != nil {

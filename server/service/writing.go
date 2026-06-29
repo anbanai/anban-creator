@@ -587,7 +587,7 @@ func (s *WritingService) ConvertMarkdown(
 	}, nil
 }
 
-// ResearchTopics generates topic suggestions based on a project's positioning.
+// ResearchTopics generates topic suggestions based on a project's instructions positioning.
 func (s *WritingService) ResearchTopics(
 	ctx context.Context,
 	userID, projectID string,
@@ -620,7 +620,7 @@ func (s *WritingService) ResearchTopics(
 		}
 	}
 
-	positioning := ch.Positioning
+	positioning := ch.Instructions
 	if positioning == "" {
 		positioning = "未设定"
 	}

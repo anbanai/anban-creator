@@ -15,7 +15,8 @@ export interface Project {
   avatar_url: string
   profile_url: string
   description?: string
-  positioning: string
+  /** @deprecated use instructions */
+  positioning?: string
   keywords: string
   instructions?: string
   // Visual style dimension — independent from writer_key/theme.
@@ -62,6 +63,7 @@ export interface CreateProjectRequest {
   name?: string
   profile_url?: string
   avatar_url?: string
+  /** @deprecated use instructions */
   positioning?: string
   keywords?: string
   instructions?: string

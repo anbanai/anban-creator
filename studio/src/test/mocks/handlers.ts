@@ -99,7 +99,7 @@ export const mockProjects: Project[] = [
     name: '测试项目',
     avatar_url: '',
     profile_url: 'https://mp.weixin.qq.com/test',
-    positioning: '测试定位',
+    instructions: '测试定位',
     keywords: '测试',
     visual_style: '',
     writer: '',

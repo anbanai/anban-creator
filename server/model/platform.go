@@ -36,7 +36,7 @@ var PlatformConfigs = map[string]*PlatformConfig{
 		Fields: []PlatformFieldConfig{
 			{Key: "name", Label: "项目名称", Placeholder: "例如 我的科技博客", Required: true, Type: "text", Group: "basic"},
 			{Key: "avatar_url", Label: "头像", Placeholder: "自动获取或手动填写", Type: "url", Group: "basic", AutoFetched: true},
-			{Key: "positioning", Label: "项目定位", Placeholder: "例如 面向开发者的实用 AI 教程", Type: "textarea", Group: "basic", AutoFetched: true},
+			{Key: "instructions", Label: "项目定位", Placeholder: "例如 面向开发者的实用 AI 教程", Type: "textarea", Group: "basic", AutoFetched: true},
 			{Key: "wechat_app_id", Label: "微信 AppID", Placeholder: "wx...", Type: "text", Group: "credentials"},
 			{Key: "wechat_secret", Label: "微信 AppSecret", Placeholder: "创建后不可查看", Type: "password", Group: "credentials"},
 			{Key: "keywords", Label: "关键词", Placeholder: "例如 科技, AI, 软件工程", Type: "textarea", Group: "advanced"},
@@ -60,7 +60,7 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "profile_url", Label: "种草笔记主页", Placeholder: "粘贴种草笔记主页链接或分享文本...", Type: "textarea", Group: "basic"},
 			{Key: "name", Label: "项目名称", Placeholder: "自动获取", Type: "text", Group: "basic", AutoFetched: true},
 			{Key: "avatar_url", Label: "头像", Placeholder: "自动获取", Type: "url", Group: "basic", AutoFetched: true},
-			{Key: "positioning", Label: "项目定位", Placeholder: "自动获取", Type: "textarea", Group: "basic", AutoFetched: true},
+			{Key: "instructions", Label: "项目定位", Placeholder: "自动获取", Type: "textarea", Group: "basic", AutoFetched: true},
 			{Key: "keywords", Label: "关键词", Placeholder: "例如 美妆, 时尚, 生活方式", Type: "textarea", Group: "advanced"},
 			{Key: "visual_style", Label: "视觉风格", Placeholder: "例如 手绘感，暖色调，小清新，治愈系水彩插画风格", Type: "textarea", Group: "advanced"},
 			{Key: "theme", Label: "主题", Placeholder: "例如 autumn-warm, spring-fresh", Type: "text", Group: "advanced"},

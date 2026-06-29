@@ -44,21 +44,27 @@ func (p *Project) SetEcommerceDefaults(ec EcommerceProjectDefaults) {
 // setting. Tasks and plans inherit from it with precedence task > project; a task
 // may override individual dimensions via Task.Overrides.
 //
-// DB column names use the current public contract directly. Legacy columns are
-// removed by the author/writer SQL migration for this new project.
+// DB column names use the current public contract directly. Explicitly marked
+// legacy columns remain only where startup migrations still need them.
 type Project struct {
-	ID          string `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID      string `gorm:"type:char(36);index;not null" json:"user_id"`
-	Platform    string `gorm:"type:varchar(20);not null" json:"platform"` // article, seednote, ecommerce
-	Name        string `gorm:"type:varchar(100);not null" json:"name"`
-	AvatarURL   string `gorm:"type:varchar(500)" json:"avatar_url"`
-	ProfileURL  string `gorm:"type:varchar(500)" json:"profile_url"` // 平台主页链接
-	Positioning string `gorm:"type:text" json:"positioning"`         // 项目定位
-	Keywords    string `gorm:"type:text" json:"keywords"`            // 关键词
-	// Instructions is a per-project CLAUDE.md-style free-text directive that the
-	// agent loads as persistent memory at task run time. Empty means "no extra
-	// instructions" — the agent then relies solely on its default agent definition.
-	Instructions string `gorm:"type:text" json:"instructions,omitempty"` // 项目指令
+	ID         string `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID     string `gorm:"type:char(36);index;not null" json:"user_id"`
+	Platform   string `gorm:"type:varchar(20);not null" json:"platform"` // article, seednote, ecommerce
+	Name       string `gorm:"type:varchar(100);not null" json:"name"`
+	AvatarURL  string `gorm:"type:varchar(500)" json:"avatar_url"`
+	ProfileURL string `gorm:"type:varchar(500)" json:"profile_url"` // 平台主页链接
+	// Positioning is the legacy project-positioning column. New code writes and
+	// reads Instructions; this column remains only for migration/backward reads.
+	Positioning string `gorm:"type:text" json:"positioning,omitempty"`
+	Keywords    string `gorm:"type:text" json:"keywords"` // 关键词
+	// Instructions is the canonical project positioning. It is also rendered into
+	// the task workspace CLAUDE.md under "## 项目定位" so agents receive the same
+	// project context that Studio displays.
+	Instructions string `gorm:"type:text" json:"instructions,omitempty"`
+	// InstructionsSet marks whether an update request explicitly included
+	// instructions, allowing empty string to mean "clear" without treating omitted
+	// fields as clears. It is never persisted or serialized.
+	InstructionsSet bool `gorm:"-" json:"-"`
 	// VisualStyle is the 图片视觉 (image visual style, free text) dimension.
 	VisualStyle string `gorm:"column:style;type:text" json:"visual_style"`
 	// Writer is the 写作者 YAML resource key (e.g. "dan-koe") for the app/writer

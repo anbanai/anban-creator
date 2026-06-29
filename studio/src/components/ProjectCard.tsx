@@ -24,6 +24,7 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
   const platformBadge = platformBadgeVariant[project.platform] || ('secondary' as const)
   const borderColor = platformBorderColor[project.platform] || ''
   const hoverBorderColor = platformHoverBorderColor[project.platform] || ''
+  const positioning = project.instructions || project.positioning || ''
 
   return (
     <div className={`group rounded-lg border border-border bg-card p-5 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md active:scale-[0.98]`}>
@@ -42,8 +43,8 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
           <Badge variant="outline" className="text-[10px]">已归档</Badge>
         )}
       </div>
-      {project.positioning && (
-        <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{project.positioning}</p>
+      {positioning && (
+        <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{positioning}</p>
       )}
       {stats && (
         <div className="mt-4 flex gap-4 border-t border-border pt-3 text-xs text-muted-foreground">

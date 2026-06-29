@@ -52,6 +52,9 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	if !validPlatforms[ch.Platform] {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
 	}
+	if ch.Instructions == "" && ch.Positioning != "" {
+		ch.Instructions = ch.Positioning
+	}
 
 	// Platform-specific validation.
 	pc := model.GetPlatformConfig(ch.Platform)
@@ -135,8 +138,9 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	if ch.ProfileURL != "" {
 		existing.ProfileURL = ch.ProfileURL
 	}
-	if ch.Positioning != "" {
-		existing.Positioning = ch.Positioning
+	if ch.Positioning != "" && !ch.InstructionsSet && ch.Instructions == "" {
+		ch.Instructions = ch.Positioning
+		ch.InstructionsSet = true
 	}
 	if ch.Keywords != "" {
 		existing.Keywords = ch.Keywords
@@ -159,8 +163,9 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	existing.ReferenceImageURL = ch.ReferenceImageURL
 	// ImageRatio: unconditional assign to support clearing.
 	existing.ImageRatio = ch.ImageRatio
-	// Instructions: unconditional assign to support clearing.
-	existing.Instructions = ch.Instructions
+	if ch.InstructionsSet {
+		existing.Instructions = ch.Instructions
+	}
 	if ch.MaxConcurrentTasks > 0 {
 		existing.MaxConcurrentTasks = ch.MaxConcurrentTasks
 	}

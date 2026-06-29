@@ -112,6 +112,10 @@ func main() {
 			log.Error().Err(err).Msg("failed to migrate channels to projects")
 		}
 
+		if err := service.MigrateProjectPositioningToInstructions(context.Background(), mysqlDB, log); err != nil {
+			log.Error().Err(err).Msg("failed to migrate project positioning to instructions")
+		}
+
 	}
 
 	// 7. Create repository.

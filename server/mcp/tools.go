@@ -104,7 +104,7 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project",
-		Description: "Get details of a specific project by ID, including its configuration (WeChat AppID, positioning, style, theme, etc.).",
+		Description: "Get details of a specific project by ID, including its configuration (WeChat AppID, instructions positioning, style, theme, etc.).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -116,7 +116,7 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get a project's resolved creation profile for AI content generation. Returns the project's positioning/keywords/name plus the EFFECTIVE (already-resolved) style/theme/author dimensions, each with its own *_source tag (\"task\" when the task overrode it, else \"project\"): `visual_style` (图片视觉, free text), `writer` (写作者 YAML resource key e.g. dan-koe), `author` (作者署名 — the published author name; pass verbatim to publish_draft's author, omit if empty), `theme` (排版 resource key e.g. autumn-warm). Studio-only writer display metadata such as avatars/nicknames is intentionally not exposed. These dimensions are independent and never derive from each other. Resolution is two-layer (task override > project); pass task_id when one exists so per-task overrides surface. Does NOT expose credentials.",
+		Description: "Get a project's resolved creation profile for AI content generation. Returns the project's instructions positioning/keywords/name plus the EFFECTIVE (already-resolved) style/theme/author dimensions, each with its own *_source tag (\"task\" when the task overrode it, else \"project\"): `visual_style` (图片视觉, free text), `writer` (写作者 YAML resource key e.g. dan-koe), `author` (作者署名 — the published author name; pass verbatim to publish_draft's author, omit if empty), `theme` (排版 resource key e.g. autumn-warm). Studio-only writer display metadata such as avatars/nicknames is intentionally not exposed. These dimensions are independent and never derive from each other. Resolution is two-layer (task override > project); pass task_id when one exists so per-task overrides surface. Does NOT expose credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -360,7 +360,8 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	// enter Agent/MCP runtime profiles.
 	info := map[string]any{
 		"name":                ch.Name,
-		"positioning":         ch.Positioning,
+		"positioning":         ch.Instructions,
+		"instructions":        ch.Instructions,
 		"keywords":            ch.Keywords,
 		"platform":            ch.Platform,
 		"visual_style":        r.VisualStyle,

@@ -235,7 +235,7 @@ func TestDownloadReferenceImage_OversizedStoreReadReturnsError(t *testing.T) {
 }
 
 func TestWriteProjectCLAUDEMD(t *testing.T) {
-	t.Run("writes trimmed instructions", func(t *testing.T) {
+	t.Run("writes fixed positioning template", func(t *testing.T) {
 		dir := t.TempDir()
 		p := &model.Project{Instructions: "  \n# Rules\nAlways use 你好.\n  "}
 
@@ -247,7 +247,7 @@ func TestWriteProjectCLAUDEMD(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to read CLAUDE.md: %v", err)
 		}
-		want := "# Rules\nAlways use 你好."
+		want := "# CLAUDE.md\n\n## 项目定位\n\n# Rules\nAlways use 你好."
 		if string(got) != want {
 			t.Fatalf("unexpected CLAUDE.md content: got %q, want %q", got, want)
 		}

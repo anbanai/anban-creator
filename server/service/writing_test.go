@@ -54,12 +54,12 @@ func setupTestWritingService(t *testing.T, llm *fakeWritingLLM) (*WritingService
 func createWritingProject(t *testing.T, repo repository.Repository, userID, platform, writingStyle string) string {
 	t.Helper()
 	ch := &model.Project{
-		ID:        uuid.NewString(),
-		UserID:    userID,
-		Platform:  platform,
-		Name:      "Writing Project",
-		Writer: writingStyle,
-		Status:    model.ProjectStatusActive,
+		ID:       uuid.NewString(),
+		UserID:   userID,
+		Platform: platform,
+		Name:     "Writing Project",
+		Writer:   writingStyle,
+		Status:   model.ProjectStatusActive,
 	}
 	if err := repo.Projects().Create(context.Background(), ch); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -98,6 +98,34 @@ func TestWritingServiceWriteArticleKeepsMissingStyleError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "STYLE_NOT_FOUND") {
 		t.Fatalf("error = %q, want STYLE_NOT_FOUND", err.Error())
+	}
+}
+
+func TestWritingServiceResearchTopicsUsesProjectInstructionsAsPositioning(t *testing.T) {
+	llm := &fakeWritingLLM{response: `[{"topic":"选题","angle":"角度","keywords":["效率"],"viral_score":80}]`}
+	svc, repo := setupTestWritingService(t, llm)
+	projectID := uuid.NewString()
+	if err := repo.Projects().Create(context.Background(), &model.Project{
+		ID:           projectID,
+		UserID:       "user-1",
+		Platform:     model.PlatformSeednote,
+		Name:         "Research Project",
+		Positioning:  "旧定位不应进入选题 prompt",
+		Instructions: "面向独立开发者的效率工具项目",
+		Status:       model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	if _, err := svc.ResearchTopics(context.Background(), "user-1", projectID, nil, "", 1); err != nil {
+		t.Fatalf("ResearchTopics: %v", err)
+	}
+
+	if !strings.Contains(llm.prompt, "面向独立开发者的效率工具项目") {
+		t.Fatalf("prompt = %q, want project instructions positioning", llm.prompt)
+	}
+	if strings.Contains(llm.prompt, "旧定位不应进入选题 prompt") {
+		t.Fatalf("prompt leaked legacy positioning: %q", llm.prompt)
 	}
 }
 

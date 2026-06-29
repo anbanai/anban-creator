@@ -4,7 +4,7 @@
       <PlatformAvatar :platform="project.platform" />
       <view class="project-card__info">
         <text class="project-card__name">{{ project.name }}</text>
-        <text class="project-card__positioning" v-if="project.positioning">{{ project.positioning }}</text>
+        <text class="project-card__positioning" v-if="positioning">{{ positioning }}</text>
       </view>
     </view>
     <view class="project-card__stats" v-if="stats">
@@ -19,10 +19,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Project, ProjectStats } from '@/types'
 import PlatformAvatar from './PlatformAvatar.vue'
 
-defineProps<{
+const props = defineProps<{
   project: Project
   stats?: ProjectStats | null
 }>()
@@ -30,6 +31,8 @@ defineProps<{
 defineEmits<{
   tap: []
 }>()
+
+const positioning = computed(() => props.project.instructions || props.project.positioning || '')
 </script>
 
 <style lang="scss" scoped>

@@ -105,20 +105,35 @@ type projectRequest struct {
 	ImageRatio         string `json:"image_ratio"`
 	MaxConcurrentTasks int    `json:"max_concurrent_tasks"`
 	Instructions       string `json:"instructions"`
+	InstructionsSet    bool   `json:"-"`
 	// Config fields for platform-specific credentials.
 	WechatAppID      string `json:"wechat_app_id"`
 	WechatSecret     string `json:"wechat_secret"`
 	EnablePublishing bool   `json:"enable_publishing"`
 }
 
+func hasJSONField(body []byte, field string) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return false
+	}
+	_, ok := raw[field]
+	return ok
+}
+
 // toProject converts a request to a Project model.
 func (req *projectRequest) toProject() *model.Project {
+	instructions := req.Instructions
+	instructionsSet := req.InstructionsSet
+	if instructions == "" && req.Positioning != "" {
+		instructions = req.Positioning
+		instructionsSet = true
+	}
 	return &model.Project{
 		Platform:              req.Platform,
 		Name:                  req.Name,
 		ProfileURL:            req.ProfileURL,
 		AvatarURL:             req.AvatarURL,
-		Positioning:           req.Positioning,
 		Keywords:              req.Keywords,
 		VisualStyle:           req.VisualStyle,
 		Writer:                req.Writer,
@@ -128,7 +143,8 @@ func (req *projectRequest) toProject() *model.Project {
 		ReferenceImageURL:     req.ReferenceImageURL,
 		ImageRatio:            req.ImageRatio,
 		MaxConcurrentTasks:    req.MaxConcurrentTasks,
-		Instructions:          req.Instructions,
+		Instructions:          instructions,
+		InstructionsSet:       instructionsSet,
 		Config: model.ProjectConfig{
 			WechatAppID:      req.WechatAppID,
 			WechatSecret:     req.WechatSecret,
@@ -218,6 +234,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if hasJSONField(c.Body(), "instructions") {
+		req.InstructionsSet = true
 	}
 
 	if req.Platform == "" {
@@ -353,6 +372,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if hasJSONField(c.Body(), "instructions") {
+		req.InstructionsSet = true
 	}
 
 	if req.ImageRatio != "" && !model.ValidImageRatios[req.ImageRatio] {
@@ -780,7 +802,12 @@ func (req *projectRequest) getFieldValue(key string) string {
 	case "avatar_url":
 		return req.AvatarURL
 	case "positioning":
+		if req.Instructions != "" {
+			return req.Instructions
+		}
 		return req.Positioning
+	case "instructions":
+		return req.Instructions
 	case "keywords":
 		return req.Keywords
 	case "visual_style":

@@ -107,9 +107,9 @@ func TestProjectServiceUpdateDoesNotBakeArticleWriter(t *testing.T) {
 func TestProjectServiceUpdatePreservesExistingWriterWhenOmitted(t *testing.T) {
 	svc, _ := setupTestProjectService(t)
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform:  model.PlatformArticle,
-		Name:      "Article Project",
-		Writer: "casual-science",
+		Platform: model.PlatformArticle,
+		Name:     "Article Project",
+		Writer:   "casual-science",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -126,5 +126,39 @@ func TestProjectServiceUpdatePreservesExistingWriterWhenOmitted(t *testing.T) {
 	}
 	if updated.Writer != "casual-science" {
 		t.Fatalf("Writer = %q, want casual-science", updated.Writer)
+	}
+}
+
+func TestProjectServiceUpdateInstructionsSetControlsClear(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	created, err := svc.Create(context.Background(), "user-1", &model.Project{
+		Platform:        model.PlatformSeednote,
+		Name:            "Seednote Project",
+		Instructions:    "原定位",
+		InstructionsSet: true,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
+		Name: "Renamed",
+	})
+	if err != nil {
+		t.Fatalf("Update omitted instructions: %v", err)
+	}
+	if updated.Instructions != "原定位" {
+		t.Fatalf("Instructions after omitted update = %q, want 原定位", updated.Instructions)
+	}
+
+	updated, err = svc.Update(context.Background(), "user-1", created.ID, &model.Project{
+		Instructions:    "",
+		InstructionsSet: true,
+	})
+	if err != nil {
+		t.Fatalf("Update clearing instructions: %v", err)
+	}
+	if updated.Instructions != "" {
+		t.Fatalf("Instructions after explicit clear = %q, want empty", updated.Instructions)
 	}
 }

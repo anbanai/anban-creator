@@ -44,7 +44,7 @@
               <text class="project-item__name">{{ project.name }}</text>
               <text class="project-item__platform">
                 {{ platformLabel(project.platform) }}
-                <text v-if="project.positioning"> · {{ project.positioning }}</text>
+                <text v-if="project.instructions || project.positioning"> · {{ project.instructions || project.positioning }}</text>
               </text>
             </view>
           </view>

@@ -123,7 +123,7 @@
           <view class="field-group">
             <text class="field-label">账号定位</text>
             <AbTextarea
-              v-model="form.positioning"
+              v-model="form.instructions"
               placeholder="一句话描述账号定位"
               :rows="2"
             />
@@ -352,16 +352,6 @@
             <AbInput v-model="form.byline" placeholder="署名" />
           </view>
 
-          <!-- Project instructions (CLAUDE.md) -->
-          <view class="field-group">
-            <text class="field-label">项目指令（Project CLAUDE.md）</text>
-            <AbTextarea
-              v-model="form.instructions"
-              placeholder="例如：语气亲切自然，避免使用「赋能」「抓手」等黑话；所有封面图必须暖色调；发布前检查标题不超过 25 字。"
-              :rows="4"
-            />
-            <text class="field-hint">这段文字会作为 CLAUDE.md 注入到每次任务的工作区，作为 agent 的常驻记忆。留空则不注入。</text>
-          </view>
         </view>
       </view>
 
@@ -584,7 +574,6 @@ const form = reactive({
   name: '',
   profile_url: '',
   avatar_url: '',
-  positioning: '',
   keywords: '',
   instructions: '',
   visual_style: '',
@@ -755,9 +744,8 @@ async function loadProject(id: string) {
     form.name = ch.name || ''
     form.profile_url = ch.profile_url || ''
     form.avatar_url = ch.avatar_url || ''
-    form.positioning = ch.positioning || ''
     form.keywords = ch.keywords || ''
-    form.instructions = ch.instructions || ''
+    form.instructions = ch.instructions || ch.positioning || ''
     form.visual_style = ch.visual_style || ''
     form.writer_key = ch.writer_key || ''
     form.byline = ch.byline || ''
@@ -891,7 +879,7 @@ async function onFetchProfile() {
     )
     if (profile.name) form.name = profile.name
     if (profile.avatar_url) form.avatar_url = profile.avatar_url
-    if (profile.positioning) form.positioning = profile.positioning
+    if (profile.positioning) form.instructions = profile.positioning
     if (profile.keywords) {
       const kw = typeof profile.keywords === 'string'
         ? profile.keywords.split(',').filter(Boolean)
@@ -1027,7 +1015,6 @@ function buildPayload(): CreateProjectRequest {
     name: form.name.trim() || undefined,
     profile_url: form.profile_url || undefined,
     avatar_url: form.avatar_url || undefined,
-    positioning: form.positioning || undefined,
     keywords: form.keywords || undefined,
     instructions: form.instructions || undefined,
     visual_style: form.visual_style || undefined,

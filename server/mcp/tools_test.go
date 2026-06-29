@@ -92,6 +92,11 @@ func TestBuildAccountInfo_NoTaskID_FallsBackToProject(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New().String()
 	ch := createAccountInfoProject(t, repo, userID, "极简扁平，蓝白配色")
+	ch.Positioning = "旧定位不应进入 MCP profile"
+	ch.Instructions = "面向独立开发者的效率工具项目"
+	if err := repo.Projects().Update(ctx, ch); err != nil {
+		t.Fatalf("update project instructions: %v", err)
+	}
 
 	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
 		"project_id": ch.ID,
@@ -105,6 +110,12 @@ func TestBuildAccountInfo_NoTaskID_FallsBackToProject(t *testing.T) {
 	}
 	if got := info["visual_style_source"]; got != "project" {
 		t.Errorf("visual_style_source = %v, want project", got)
+	}
+	if got := info["instructions"]; got != "面向独立开发者的效率工具项目" {
+		t.Errorf("instructions = %v, want canonical instructions", got)
+	}
+	if got := info["positioning"]; got != "面向独立开发者的效率工具项目" {
+		t.Errorf("positioning = %v, want canonical instructions compatibility value", got)
 	}
 }
 

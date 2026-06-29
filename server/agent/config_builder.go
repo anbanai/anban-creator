@@ -35,7 +35,7 @@ const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *srvconfig.ImageAPIConfig, taskImageRatio string, skipRefImage bool, taskReferenceImageURL string) (*appconfig.Config, error) {
 	cfg := &appconfig.Config{
 		Name:        ch.Name,
-		Positioning: ch.Positioning,
+		Positioning: ch.Instructions,
 	}
 
 	// Parse keywords (comma or space separated).
@@ -160,16 +160,17 @@ func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	return nil
 }
 
-// writeProjectCLAUDEMD writes a project's free-form instructions as CLAUDE.md in the
-// workspace root. Claude Code loads CLAUDE.md from the cwd as project memory, so all
-// skills/sub-agents in the session receive these instructions without any skill edits.
-// It is a no-op when the project is nil or has no instructions.
+// writeProjectCLAUDEMD writes a project's positioning into a fixed CLAUDE.md
+// template in the workspace root. Claude Code loads CLAUDE.md from the cwd as
+// project memory, so all skills/sub-agents in the session receive the same
+// positioning Studio displays. It is a no-op when the project is nil or blank.
 func writeProjectCLAUDEMD(workDir string, project *model.Project) error {
 	if project == nil || strings.TrimSpace(project.Instructions) == "" {
 		return nil
 	}
 	path := filepath.Join(workDir, "CLAUDE.md")
-	if err := os.WriteFile(path, []byte(strings.TrimSpace(project.Instructions)), 0o644); err != nil {
+	content := "# CLAUDE.md\n\n## 项目定位\n\n" + strings.TrimSpace(project.Instructions)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write CLAUDE.md: %w", err)
 	}
 	return nil

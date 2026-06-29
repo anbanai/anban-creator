@@ -19,7 +19,8 @@ export interface Project {
   avatar_url: string
   profile_url: string
   description?: string
-  positioning: string
+  /** @deprecated use instructions */
+  positioning?: string
   keywords: string
   instructions?: string
   visual_style: string
@@ -57,6 +58,7 @@ export interface CreateProjectRequest {
   name?: string
   profile_url?: string
   avatar_url?: string
+  /** @deprecated use instructions */
   positioning?: string
   keywords?: string
   instructions?: string
@@ -102,7 +104,8 @@ export interface PlatformConfig {
 export interface PlatformProfile {
   name: string
   avatar_url: string
-  positioning: string
+  /** @deprecated use instructions */
+  positioning?: string
   keywords?: string
   style?: string
   raw_data: Record<string, unknown>

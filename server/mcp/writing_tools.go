@@ -142,11 +142,11 @@ func registerWritingTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "research_topics",
-		Description: "Generate topic suggestions based on a project's positioning and keywords. Returns an array of topics with viral scores, angles, and keywords.",
+		Description: "Generate topic suggestions based on a project's instructions positioning and keywords. Returns an array of topics with viral scores, angles, and keywords.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"project_id": map[string]any{"type": "string", "description": "Project ID (uses its positioning and keywords)"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID (uses its instructions positioning and keywords)"},
 				"keywords":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Override keywords (optional, uses project keywords by default)"},
 				"domain":     map[string]any{"type": "string", "description": "Domain or niche focus (optional)"},
 				"count":      map[string]any{"type": "integer", "description": "Number of topics to generate (1-20, default 5)", "minimum": 1, "maximum": 20},

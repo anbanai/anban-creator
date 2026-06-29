@@ -331,7 +331,7 @@ describe('projectSchema', () => {
       wechat_secret: 'secret',
       name: '项目名称',
       keywords: '测试',
-      positioning: '定位',
+      instructions: '定位',
       style: 'casual-science',
       theme: 'autumn-warm',
       author: '作者',
