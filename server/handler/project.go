@@ -107,6 +107,7 @@ type projectRequest struct {
 	ReferenceImageURL  string `json:"reference_image_url"`
 	ImageRatio         string `json:"image_ratio"`
 	MaxConcurrentTasks int    `json:"max_concurrent_tasks"`
+	Instructions       string `json:"instructions"`
 	// Config fields for platform-specific credentials.
 	WechatAppID      string `json:"wechat_app_id"`
 	WechatSecret     string `json:"wechat_secret"`
@@ -132,6 +133,7 @@ func (req *projectRequest) toProject() *model.Project {
 		ReferenceImageURL:     req.ReferenceImageURL,
 		ImageRatio:            req.ImageRatio,
 		MaxConcurrentTasks:    req.MaxConcurrentTasks,
+		Instructions:          req.Instructions,
 		Config: model.ProjectConfig{
 			WechatAppID:      req.WechatAppID,
 			WechatSecret:     req.WechatSecret,

@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 
 	appconfig "github.com/royalrick/anbanwriter/app/config"
+	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/royalrick/anbanwriter/server/storage"
 )
 
@@ -231,4 +232,45 @@ func TestDownloadReferenceImage_OversizedStoreReadReturnsError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("err = %v, want 'too large'", err)
 	}
+}
+
+func TestWriteProjectCLAUDEMD(t *testing.T) {
+	t.Run("writes trimmed instructions", func(t *testing.T) {
+		dir := t.TempDir()
+		p := &model.Project{Instructions: "  \n# Rules\nAlways use 你好.\n  "}
+
+		if err := writeProjectCLAUDEMD(dir, p); err != nil {
+			t.Fatalf("writeProjectCLAUDEMD failed: %v", err)
+		}
+
+		got, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+		if err != nil {
+			t.Fatalf("failed to read CLAUDE.md: %v", err)
+		}
+		want := "# Rules\nAlways use 你好."
+		if string(got) != want {
+			t.Fatalf("unexpected CLAUDE.md content: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("no-op when project is nil", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := writeProjectCLAUDEMD(dir, nil); err != nil {
+			t.Fatalf("writeProjectCLAUDEMD(nil) failed: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
+			t.Fatalf("expected no CLAUDE.md when project is nil")
+		}
+	})
+
+	t.Run("no-op when instructions are blank", func(t *testing.T) {
+		dir := t.TempDir()
+		p := &model.Project{Instructions: "   \n  "}
+		if err := writeProjectCLAUDEMD(dir, p); err != nil {
+			t.Fatalf("writeProjectCLAUDEMD(blank) failed: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
+			t.Fatalf("expected no CLAUDE.md when instructions are blank")
+		}
+	})
 }

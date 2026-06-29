@@ -162,6 +162,8 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	existing.ReferenceImageURL = ch.ReferenceImageURL
 	// ImageRatio: unconditional assign to support clearing.
 	existing.ImageRatio = ch.ImageRatio
+	// Instructions: unconditional assign to support clearing.
+	existing.Instructions = ch.Instructions
 	if ch.MaxConcurrentTasks > 0 {
 		existing.MaxConcurrentTasks = ch.MaxConcurrentTasks
 	}

@@ -160,6 +160,21 @@ func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	return nil
 }
 
+// writeProjectCLAUDEMD writes a project's free-form instructions as CLAUDE.md in the
+// workspace root. Claude Code loads CLAUDE.md from the cwd as project memory, so all
+// skills/sub-agents in the session receive these instructions without any skill edits.
+// It is a no-op when the project is nil or has no instructions.
+func writeProjectCLAUDEMD(workDir string, project *model.Project) error {
+	if project == nil || strings.TrimSpace(project.Instructions) == "" {
+		return nil
+	}
+	path := filepath.Join(workDir, "CLAUDE.md")
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(project.Instructions)), 0o644); err != nil {
+		return fmt.Errorf("write CLAUDE.md: %w", err)
+	}
+	return nil
+}
+
 // TaskTypeToAgent maps server task types to Claude Code agent names.
 func TaskTypeToAgent(taskType string) string {
 	switch taskType {

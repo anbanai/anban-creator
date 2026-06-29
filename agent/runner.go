@@ -35,7 +35,10 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		claudecode.WithMaxTurns(r.cfg.MaxTurns),
 		claudecode.WithCwd(r.cfg.Workspace),
 		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
-		claudecode.WithSettingSources(claudecode.SettingSourceUser),
+		// Load both user and project setting sources so a CLAUDE.md in the
+		// workspace (e.g., written by the desktop shell in the future) is picked up
+		// by Claude Code as project memory.
+		claudecode.WithSettingSources(claudecode.SettingSourceUser, claudecode.SettingSourceProject),
 		claudecode.WithExtraArgs(map[string]*string{
 			"agent": &r.cfg.AgentFlag,
 		}),

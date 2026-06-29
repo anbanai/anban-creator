@@ -17,6 +17,7 @@ export interface Project {
   description?: string
   positioning: string
   keywords: string
+  instructions?: string
   // Visual style dimension — independent from writer_key/theme.
   visual_style: string
   // Optional template binding (article/ecommerce). When set, persona fields may
@@ -63,6 +64,7 @@ export interface CreateProjectRequest {
   avatar_url?: string
   positioning?: string
   keywords?: string
+  instructions?: string
   visual_style?: string
   // Article-only persona (orthogonal: byline ≠ writer_key persona).
   writer_key?: string

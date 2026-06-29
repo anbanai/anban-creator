@@ -21,6 +21,7 @@ export interface Project {
   description?: string
   positioning: string
   keywords: string
+  instructions?: string
   visual_style: string
   writer_key: string
   theme: string
@@ -60,6 +61,7 @@ export interface CreateProjectRequest {
   avatar_url?: string
   positioning?: string
   keywords?: string
+  instructions?: string
   visual_style?: string
   writer_key?: string
   theme?: string

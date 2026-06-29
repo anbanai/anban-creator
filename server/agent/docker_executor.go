@@ -156,6 +156,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
+		// Write project instructions as CLAUDE.md so Claude Code loads them as
+		// persistent project memory. Non-fatal: missing the file should not abort
+		// a task; the agent can still rely on its default agent definition.
+		if err := writeProjectCLAUDEMD(workDir, opts.Project); err != nil {
+			e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to write project CLAUDE.md, continuing")
+		}
 		// Download effective reference image.
 		// Task-level image takes priority over project brand image.
 		if opts.Task.ReferenceImageURL != "" {

@@ -455,6 +455,12 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		if err := writeSettingsJSON(workDir, cfg); err != nil {
 			return nil, fmt.Errorf("write settings: %w", err)
 		}
+		// Write project instructions as CLAUDE.md so Claude Code loads them as
+		// persistent project memory. Non-fatal: missing the file should not abort
+		// a task; the agent can still rely on its default agent definition.
+		if err := writeProjectCLAUDEMD(workDir, opts.Project); err != nil {
+			e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to write project CLAUDE.md, continuing")
+		}
 
 		// Download effective reference image.
 		// Task-level image takes priority over project brand image.
@@ -566,7 +572,9 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		claudecode.WithMaxTurns(maxTurns),
 		claudecode.WithCwd(workDir),
 		claudecode.WithPermissionMode(claudecode.PermissionModeBypassPermissions),
-		claudecode.WithSettingSources(claudecode.SettingSourceUser),
+		// Load both user and project setting sources so the per-task CLAUDE.md
+		// written into workDir is picked up by Claude Code as project memory.
+		claudecode.WithSettingSources(claudecode.SettingSourceUser, claudecode.SettingSourceProject),
 		claudecode.WithAgent(agentName, *agentDef),
 	}
 

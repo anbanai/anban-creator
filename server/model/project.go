@@ -56,6 +56,10 @@ type Project struct {
 	ProfileURL  string `gorm:"type:varchar(500)" json:"profile_url"` // 平台主页链接
 	Positioning string `gorm:"type:text" json:"positioning"`         // 项目定位
 	Keywords    string `gorm:"type:text" json:"keywords"`            // 关键词
+	// Instructions is a per-project CLAUDE.md-style free-text directive that the
+	// agent loads as persistent memory at task run time. Empty means "no extra
+	// instructions" — the agent then relies solely on its default agent definition.
+	Instructions string `gorm:"type:text" json:"instructions,omitempty"` // 项目指令
 	// VisualStyle is the 图片视觉 (image visual style, free text) dimension.
 	VisualStyle string `gorm:"column:style;type:text" json:"visual_style"`
 	// WriterKey is the 写作者 YAML resource key (e.g. "dan-koe") for the app/writer

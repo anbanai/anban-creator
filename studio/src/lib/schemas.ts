@@ -184,6 +184,7 @@ export const projectSchema = z.object({
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
   positioning: z.string().max(1024, "项目定位不能超过 1024 个字符").optional(),
+  instructions: z.string().max(8192, "项目指令不能超过 8192 个字符").optional(),
   visual_style: z.string().max(1024, "视觉风格不能超过 1024 个字符").optional(),
   writer_key: z.string().max(100, "写作风格不能超过 100 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
