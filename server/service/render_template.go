@@ -418,7 +418,7 @@ func imageMaxWidth(imageSize string) string {
 	case "inline":
 		return "68%"
 	case "full-width":
-		return "86%"
+		return "100%"
 	case "full-bleed":
 		return "100%"
 	default:

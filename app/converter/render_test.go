@@ -25,9 +25,9 @@ typography:
   line_height: "1.75"
   letter_spacing: "0.5px"
 layout:
-  container_padding: "20px 10px"
+  container_padding: "20px 0"
   max_width: "700px"
-  card_padding: "18px"
+  card_padding: "18px 16px"
   border_radius: "12px"
   card_background_color: "#ffffff"
   card_border: "1px solid #eee"
@@ -232,6 +232,12 @@ func TestRender_ContainerWrapper(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("card style missing %q", want)
 		}
+	}
+	if !strings.Contains(html, "padding:20px 0;") {
+		t.Errorf("outer wrapper should use compact horizontal padding, got: %s", html)
+	}
+	if !strings.Contains(html, "padding:18px 16px;") {
+		t.Errorf("inner card should keep compact readable padding, got: %s", html)
 	}
 }
 

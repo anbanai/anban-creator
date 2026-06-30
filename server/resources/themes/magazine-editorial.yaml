@@ -23,9 +23,9 @@ typography:
   letter_spacing: "0.3px"
 
 layout:
-  container_padding: "40px 10px"
+  container_padding: "40px 0"
   max_width: "780px"
-  card_padding: "34px 32px"
+  card_padding: "34px 16px"
   section_gap: "40px"
   paragraph_margin: "0 0 18px"
   border_radius: "2px"
