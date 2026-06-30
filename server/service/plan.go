@@ -50,12 +50,6 @@ type CreatePlanParams struct {
 	// non-nil honors explicit user choice.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	// Style/author/theme dimensions copied into spawned tasks' Task.Overrides.
-	// Each is optional; empty = inherit from the project at resolve time.
-	VisualStyle string
-	Writer      string
-	Author      string
-	Theme       string
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -123,9 +117,8 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		articleContent = *p.ArticleWithContentImages
 	}
 
-	// A plan carries its own style/author/theme dimensions (copied into spawned
-	// tasks' Task.Overrides at CreateFromPlan) plus scheduling-adjacent "what to
-	// produce" image params + goal mode. See model.Plan for the dimension set.
+	// A plan carries scheduling-adjacent "what to produce" image params + goal
+	// mode. Project/account style config is snapshotted when a task is spawned.
 	plan := &model.Plan{
 		ID:                       uuid.New().String(),
 		UserID:                   p.UserID,
@@ -145,10 +138,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		HasTailImage:             hasTail,
 		ArticleWithCover:         &articleCover,
 		ArticleWithContentImages: &articleContent,
-		VisualStyle:              p.VisualStyle,
-		Writer:                   p.Writer,
-		Author:                   p.Author,
-		Theme:                    p.Theme,
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -192,8 +181,6 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
-//   - VisualStyle / Writer / Author / Theme:
-//     nil = leave unchanged; &"" = clear (inherit from project); &"value" = set
 //
 // ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
 // unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
@@ -211,10 +198,6 @@ type UpdatePlanParams struct {
 	HasTailImage             *bool
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	VisualStyle              *string
-	Writer                   *string
-	Author                   *string
-	Theme                    *string
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -256,19 +239,6 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		v := *p.ArticleWithContentImages
 		plan.ArticleWithContentImages = &v
 	}
-	if p.VisualStyle != nil {
-		plan.VisualStyle = *p.VisualStyle
-	}
-	if p.Writer != nil {
-		plan.Writer = *p.Writer
-	}
-	if p.Author != nil {
-		plan.Author = *p.Author
-	}
-	if p.Theme != nil {
-		plan.Theme = *p.Theme
-	}
-
 	// If cron expression changed, validate and recompute next run.
 	if p.CronExpr != "" && p.CronExpr != plan.CronExpr {
 		if _, err := cron.ParseStandard(p.CronExpr); err != nil {

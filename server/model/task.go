@@ -24,9 +24,7 @@ type ProgressPayload struct {
 // Task.Ecommerce as a typed JSON column (datatypes.JSONType) so the agent reads it
 // via get_project_profile(task_id, scope="ecommerce") and Studio renders it.
 //
-// Visual style is NOT duplicated here — it flows through the orthogonal
-// Task.Overrides.VisualStyle dimension (resolved task > project), exactly like
-// seednote/article.
+// Visual style is not duplicated here; new tasks read it from ProjectSnapshot.
 //
 // SelectedModules maps a module key to its quantity:
 //   - main_images / detail_page / cover_banner / share_image / sku_images
@@ -39,11 +37,9 @@ type EcommerceConfig struct {
 	ProductPhotos   []string       `json:"product_photos,omitempty"`
 	TargetPlatform  string         `json:"target_platform,omitempty"`
 	SellingPoints   string         `json:"selling_points,omitempty"`
-	// BrandBrief is the brand positioning/voice, resolved from the selected
-	// e-commerce template's BrandBrief at task creation (task-level override
-	// rare; this is template/project-level brand context, distinct from the
-	// product-specific SellingPoints). Surfaced to the agent via
-	// get_project_profile(scope="ecommerce") so product imagery respects brand.
+	// BrandBrief is the brand positioning/voice, merged from project defaults at
+	// task creation unless the task supplies an explicit value. Product-specific
+	// SellingPoints stay separate.
 	BrandBrief string `json:"brand_brief,omitempty"`
 	Language   string `json:"language,omitempty"`
 	// ProviderStrategyOverride is deprecated/superseded: provider selection now
@@ -54,19 +50,30 @@ type EcommerceConfig struct {
 	ProviderStrategyOverride string `json:"provider_strategy_override,omitempty"`
 }
 
-// StyleOverrides holds per-task overrides for the dimensions a task otherwise
-// inherits from its project. Only fields the user explicitly overrode are set;
-// empty/absent = inherit the project value. Resolution at execution is the
-// two-layer task.Overrides.X ?? project.X (no template/plan layer).
-//
-// Stored on Task.Overrides as a typed JSON column (datatypes.JSONType) so the
-// zero value serializes to a valid JSON null and the "only overridden keys"
-// semantics are expressed by presence rather than by nullable columns.
+// StyleOverrides is legacy storage for old tasks created before project_snapshot.
+// New task/plan flows do not write it.
 type StyleOverrides struct {
 	VisualStyle string `json:"visual_style,omitempty"` // 图片视觉 (free text)
 	Writer      string `json:"writer,omitempty"`       // 写作者 YAML resource key
 	Author      string `json:"author,omitempty"`       // 作者署名 (publish author)
 	Theme       string `json:"theme,omitempty"`        // 排版主题 key
+}
+
+// ProjectSnapshot freezes the project/account configuration a task should use at
+// creation time. Runtime surfaces (MCP/settings/UI) read this when present so
+// later project edits do not change an already-created task.
+type ProjectSnapshot struct {
+	ProjectName       string                   `json:"project_name,omitempty"`
+	Platform          string                   `json:"platform,omitempty"`
+	Instructions      string                   `json:"instructions,omitempty"`
+	Keywords          string                   `json:"keywords,omitempty"`
+	VisualStyle       string                   `json:"visual_style,omitempty"`
+	ReferenceImageURL string                   `json:"reference_image_url,omitempty"`
+	ImageRatio        string                   `json:"image_ratio,omitempty"`
+	Writer            string                   `json:"writer,omitempty"`
+	Theme             string                   `json:"theme,omitempty"`
+	Author            string                   `json:"author,omitempty"`
+	EcommerceDefaults EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
 }
 
 // Task represents a content generation task.
@@ -82,14 +89,12 @@ type Task struct {
 	ImageRatio        string `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageModelKey     string `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
 	ReferenceImageURL string `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
-	// Overrides carries per-task overrides for the style/author/theme dimensions
-	// the task otherwise inherits from its project. Only keys the user explicitly
-	// overrode are set; empty/absent = inherit the project value. Effective value
-	// at execution = task.Overrides.X ?? project.X (two-layer, no template/plan
-	// layer). See StyleOverrides.
-	Overrides          datatypes.JSONType[StyleOverrides] `gorm:"type:json" json:"overrides"`
-	SkipReferenceImage bool                               `gorm:"default:false" json:"skip_reference_image,omitempty"`
-	Watermark          bool                               `gorm:"default:false" json:"watermark,omitempty"`
+	// Overrides is legacy storage for old task-level style/author/theme overrides.
+	// New tasks use ProjectSnapshot as the runtime fact source.
+	Overrides          datatypes.JSONType[StyleOverrides]  `gorm:"type:json" json:"overrides"`
+	ProjectSnapshot    datatypes.JSONType[ProjectSnapshot] `gorm:"type:json" json:"project_snapshot"`
+	SkipReferenceImage bool                                `gorm:"default:false" json:"skip_reference_image,omitempty"`
+	Watermark          bool                                `gorm:"default:false" json:"watermark,omitempty"`
 	// HasContentImage / HasTailImage control seednote image composition. Cover is
 	// always generated; these two flags decide whether image_01.png and tail.png
 	// follow. Default matches the seednote form default (content on, tail off).
@@ -195,9 +200,57 @@ func (t *Task) SetEcommerce(ec EcommerceConfig) {
 	t.Ecommerce = datatypes.NewJSONType(ec)
 }
 
-// SetOverrides stores per-task style/author/theme overrides into the Overrides
-// JSON column. Thin wrapper over datatypes.NewJSONType so call sites (task
-// creation, retry) don't each need to import gorm.io/datatypes.
+// SetOverrides stores legacy per-task style/author/theme overrides.
 func (t *Task) SetOverrides(o StyleOverrides) {
 	t.Overrides = datatypes.NewJSONType(o)
+}
+
+// SetProjectSnapshot stores a frozen project/account snapshot.
+func (t *Task) SetProjectSnapshot(s ProjectSnapshot) {
+	t.ProjectSnapshot = datatypes.NewJSONType(s)
+}
+
+// SnapshotProject builds the runtime snapshot for a task from the current
+// project. The article writer default is applied here so snapshots are complete.
+func SnapshotProject(p *Project) ProjectSnapshot {
+	if p == nil {
+		return ProjectSnapshot{}
+	}
+	return ProjectSnapshot{
+		ProjectName:       p.Name,
+		Platform:          p.Platform,
+		Instructions:      p.Instructions,
+		Keywords:          p.Keywords,
+		VisualStyle:       p.VisualStyle,
+		ReferenceImageURL: p.ReferenceImageURL,
+		ImageRatio:        p.ImageRatio,
+		Writer:            p.Writer,
+		Theme:             p.Theme,
+		Author:            p.Author,
+		EcommerceDefaults: p.EcommerceDefaults.Data(),
+	}
+}
+
+// ProjectFromSnapshot returns a project-shaped view backed by a task snapshot.
+// Credentials and persistence metadata intentionally remain from base.
+func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
+	if base == nil {
+		return nil
+	}
+	if snap.Platform == "" {
+		return base
+	}
+	p := *base
+	p.Name = snap.ProjectName
+	p.Platform = snap.Platform
+	p.Instructions = snap.Instructions
+	p.Keywords = snap.Keywords
+	p.VisualStyle = snap.VisualStyle
+	p.ReferenceImageURL = snap.ReferenceImageURL
+	p.ImageRatio = snap.ImageRatio
+	p.Writer = snap.Writer
+	p.Theme = snap.Theme
+	p.Author = snap.Author
+	p.SetEcommerceDefaults(snap.EcommerceDefaults)
+	return &p
 }

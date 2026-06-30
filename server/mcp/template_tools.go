@@ -22,20 +22,17 @@ var validTemplateTypes = map[string]bool{
 func registerTemplateTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "save_template",
-		Description: "Save a content template extracted from a viral note or poster design. Templates are global (not user-scoped).",
+		Description: "Save a visual template. Templates are global (not user-scoped) and only carry an AI visual style prompt.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"type":            map[string]any{"type": "string", "description": "Template type: poster, seednote, or article"},
-				"name":            map[string]any{"type": "string", "description": "Template name (optional, auto-derived from style_prompt if empty)"},
-				"category":        map[string]any{"type": "string", "description": "Industry/category tag (optional)"},
-				"structure":       map[string]any{"type": "string", "description": "JSON string of template structure (required)"},
-				"style_prompt":    map[string]any{"type": "string", "description": "AI visual style prompt (optional)"},
-				"writer":          map[string]any{"type": "string", "description": "Writer style resource key (optional), distinct from visual style_prompt. Templates are project-launchers (imported once, then detached) and do not enter task resolution."},
-				"example_content": map[string]any{"type": "string", "description": "JSON string of example content (optional)"},
-				"tags":            map[string]any{"type": "string", "description": "JSON array string of tags (optional)"},
+				"type":         map[string]any{"type": "string", "description": "Template type: poster, seednote, or article"},
+				"name":         map[string]any{"type": "string", "description": "Template name (optional, auto-derived from style_prompt if empty)"},
+				"category":     map[string]any{"type": "string", "description": "Industry/category tag (optional)"},
+				"style_prompt": map[string]any{"type": "string", "description": "AI visual style prompt"},
+				"tags":         map[string]any{"type": "string", "description": "JSON array string of tags (optional)"},
 			},
-			"required": []any{"type", "structure"},
+			"required": []any{"type", "style_prompt"},
 		},
 	}, saveTemplateHandler)
 
@@ -74,11 +71,8 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 
 	tmplType, _ := args["type"].(string)
 	name, _ := args["name"].(string)
-	structure, _ := args["structure"].(string)
 	category, _ := args["category"].(string)
 	stylePrompt, _ := args["style_prompt"].(string)
-	writer, _ := args["writer"].(string)
-	exampleContent, _ := args["example_content"].(string)
 	tags, _ := args["tags"].(string)
 
 	if tmplType == "" {
@@ -87,24 +81,12 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	if !validTemplateTypes[tmplType] {
 		return errorResult(fmt.Sprintf("invalid type: %s (must be one of: poster, seednote, article)", tmplType)), nil
 	}
-	if structure == "" {
-		return errorResult("structure is required"), nil
+	if stylePrompt == "" {
+		return errorResult("style_prompt is required"), nil
 	}
 
 	if tags == "" {
 		tags = "[]"
-	}
-
-	var structureMap map[string]any
-	if err := json.Unmarshal([]byte(structure), &structureMap); err != nil {
-		return errorResult(fmt.Sprintf("invalid structure JSON: %v", err)), nil
-	}
-
-	var exampleMap map[string]any
-	if exampleContent != "" {
-		if err := json.Unmarshal([]byte(exampleContent), &exampleMap); err != nil {
-			return errorResult(fmt.Sprintf("invalid example_content JSON: %v", err)), nil
-		}
 	}
 
 	var tagsSlice []string
@@ -113,16 +95,13 @@ func saveTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	}
 
 	template := model.Template{
-		ID:             uuid.New().String(),
-		Type:           tmplType,
-		Name:           name,
-		Category:       category,
-		Structure:      structureMap,
-		VisualStyle:    stylePrompt,
-		Writer:         writer,
-		ExampleContent: exampleMap,
-		Tags:           tagsSlice,
-		IsActive:       true,
+		ID:          uuid.New().String(),
+		Type:        tmplType,
+		Name:        name,
+		Category:    category,
+		VisualStyle: stylePrompt,
+		Tags:        tagsSlice,
+		IsActive:    true,
 	}
 
 	created, err := svcs.TemplateSvc.Create(ctx, &template, "")

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -8,12 +8,9 @@ import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Sta
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { TaskType, TaskStatus, CreateTaskRequest, Project, WorkflowStatus, Template } from '@/types'
+import type { TaskType, TaskStatus, CreateTaskRequest, Project, WorkflowStatus } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
-import { TemplatePicker } from '@/components/templates/TemplatePicker'
-import { PersonaBlock } from '@/components/templates/PersonaBlock'
-import { ThemePicker } from '@/components/templates/ThemePicker'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
@@ -87,7 +84,6 @@ export default function TasksPage() {
   const [goalText, setGoalText] = useState('')
   const [projectImageRatio, setProjectImageRatio] = useState('')
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
-  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   // Desktop local-executor integration: when the Tauri shell reports a
   // provisioned local executor, default new tasks to run on the user's machine
@@ -105,9 +101,6 @@ export default function TasksPage() {
     })
     return () => { cancelled = true }
   }, [])
-  // 递增令牌：openCreate 的模板异步回填在 .then 中比对，若对话框已重开/切走则丢弃，
-  // 避免陈旧回填串改表单（与 ProjectsPage 同一防护思路）。
-  const taskCreateTokenRef = useRef(0)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
 
@@ -140,18 +133,14 @@ export default function TasksPage() {
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
-    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', visual_style: '', writer: '', theme: '', author: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
+    defaultValues: { type: 'seednote', prompt: '', project_id: '', quantity: 1, image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' },
   })
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
-  const watchedAuthor = useWatch({ control: form.control, name: 'author' })
-  const watchedWriter = useWatch({ control: form.control, name: 'writer' })
-  const watchedTheme = useWatch({ control: form.control, name: 'theme' })
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
-  // 选定项目的继承设置预览（两层 task.Overrides.X ?? project.X 解析可视化，#3）。
-  // 创建表单中留空的字段将继承这些项目值。
+  // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
 
   // E-commerce package cost = Σ(module price × quantity), mirroring the server's
@@ -336,38 +325,15 @@ export default function TasksPage() {
       return
     }
     const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', project_id: '', image_ratio: '', image_model_key: '', visual_style: '', writer: '', theme: '', author: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
+    form.reset({ type: defaultType, prompt: '', project_id: '', image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
     setQuantity(1)
     setWatermark(false)
     setProjectImageRatio('')
-    setSelectedTemplate(null)
     setHasContentImage(true)
     setHasTailImage(false)
     setArticleWithCover(true)
     setArticleWithContentImages(true)
     setModalOpen(true)
-
-    // 预选模板：来自模板预览「用于公众号/种草笔记」按钮携带的 template_id。
-    // 异步取回模板后回填 selectedTemplate + style（shouldDirty:false 防止脏检查
-    // 弹窗在用户未改动时就困住关闭）。取回失败（模板已删等）静默留空，不阻断创建。
-    const templateID = searchParams.get('template_id')
-    if (templateID) {
-      const token = ++taskCreateTokenRef.current
-      api.templates
-        .get(templateID)
-        .then((tmpl) => {
-          // 对话框已重开/切走则丢弃这条陈旧回填，避免串改。
-          if (taskCreateTokenRef.current !== token) return
-          setSelectedTemplate(tmpl)
-          form.setValue('visual_style', tmpl.style_prompt || '', { shouldDirty: false })
-          form.setValue('writer', tmpl.writer || '', { shouldDirty: false })
-          form.setValue('theme', tmpl.theme || '', { shouldDirty: false })
-          form.setValue('author', tmpl.author || '', { shouldDirty: false })
-        })
-        .catch(() => {
-          /* 模板不存在/已删：保持空选，用户可手动选其他模板 */
-        })
-    }
   }
 
   function closeModal() {
@@ -381,13 +347,12 @@ export default function TasksPage() {
   function resetModal() {
     setModalOpen(false)
     setShowDirtyDialog(false)
-    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', visual_style: '', writer: '', theme: '', author: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
+    form.reset({ type: 'seednote', prompt: '', project_id: '', image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
     setQuantity(1)
     setWatermark(false)
     setGoalMode(false)
     setGoalText('')
     setProjectImageRatio('')
-    setSelectedTemplate(null)
     setHasContentImage(true)
     setHasTailImage(false)
     setArticleWithCover(true)
@@ -402,14 +367,9 @@ export default function TasksPage() {
       quantity: quantity > 1 ? quantity : undefined,
       image_ratio: values.image_ratio || undefined,
       image_model_key: values.image_model_key || undefined,
-      visual_style: values.visual_style || undefined,
-      writer: values.writer || undefined,
-      theme: values.theme || undefined,
-      author: values.author || undefined,
       watermark: watermark || undefined,
       goal_mode: goalMode || undefined,
       goal: goalMode ? (goalText.trim() || undefined) : undefined,
-      template_id: selectedTemplate?.id || undefined,
       has_content_image: values.type === 'seednote' ? hasContentImage : undefined,
       has_tail_image: values.type === 'seednote' ? hasTailImage : undefined,
       // Article image toggles (公众号文章): both default true; non-article omits.
@@ -425,34 +385,6 @@ export default function TasksPage() {
       // Route to the desktop local executor when available and opted in.
       execution_target: localExecutorAvailable && runLocally ? 'local' : undefined,
     }))
-  }
-
-  function handleTemplateSelect(template: Template) {
-    // Clicking the already-active card is a no-op — preserves any edits the user
-    // has made to the style textarea. Switching to a different template refills.
-    if (selectedTemplate?.id === template.id) return
-    setSelectedTemplate(template)
-    // Template thumbnail is a UI preview only — it is not a generation reference image.
-    // The three orthogonal style dimensions flow into the task; the agent picks them up
-    // flat via get_project_profile(task_id) (visual_style / writer / theme).
-    form.setValue('visual_style', template.style_prompt || '', { shouldDirty: true })
-    form.setValue('writer', template.writer || '', { shouldDirty: true })
-    form.setValue('theme', template.theme || '', { shouldDirty: true })
-    // 公众号字段（作者署名 + 写作风格 key）随模板导入，仍可编辑。
-    form.setValue('author', template.author || '', { shouldDirty: true })
-    // E-commerce template defaults: pre-fill modules / target platform / image
-    // model so picking a template configures the whole package. Product photos
-    // stay per-task (the user uploads them). The server (CreateManual) re-merges
-    // these as fallbacks; surfacing them here lets the user review/tweak before
-    // billing. Non-ecommerce templates carry no `ecommerce` block (no-op).
-    if (template.type === 'ecommerce' && template.ecommerce) {
-      const ec = template.ecommerce
-      if (ec.default_selected_modules && Object.keys(ec.default_selected_modules).length > 0) {
-        form.setValue('selected_modules', ec.default_selected_modules, { shouldDirty: true })
-      }
-      if (ec.target_platform) form.setValue('target_platform', ec.target_platform, { shouldDirty: true })
-      if (ec.image_model_key) form.setValue('image_model_key', ec.image_model_key, { shouldDirty: true })
-    }
   }
 
   function toggleTaskSelection(taskId: string) {
@@ -812,6 +744,11 @@ export default function TasksPage() {
                           form.setValue('image_ratio', '')
                           const ch = projects.find((c) => c.id === id)
                           setProjectImageRatio(ch?.image_ratio || platformDefaultRatio[platform] || '3:4')
+                          if (platform === 'ecommerce' && ch?.ecommerce_defaults) {
+                            form.setValue('selected_modules', ch.ecommerce_defaults.default_selected_modules || {}, { shouldDirty: false })
+                            form.setValue('target_platform', ch.ecommerce_defaults.target_platform || '', { shouldDirty: false })
+                            form.setValue('image_model_key', ch.ecommerce_defaults.image_model_key || '', { shouldDirty: false })
+                          }
                         } else {
                           setProjectImageRatio('')
                         }
@@ -822,17 +759,16 @@ export default function TasksPage() {
                 </FormItem>
               )} />
 
-              {/* 继承预览：留空字段即继承以下项目设置（两层 task.Overrides.X ?? project.X 解析可视化，#3） */}
               {selectedProject && watchedType !== 'viral_analysis' && (
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 space-y-1">
-                  <p className="text-xs font-medium text-foreground/80">继承自项目「{selectedProject.name}」</p>
+                  <p className="text-xs font-medium text-foreground/80">将使用项目「{selectedProject.name}」的快照</p>
                   <p className="text-xs text-muted-foreground">
-                    留空即沿用：视觉风格 {selectedProject.visual_style || '—'}
+                    视觉风格 {selectedProject.visual_style || '—'}
                     {watchedType === 'article' && (
                       <> · 署名 {selectedProject.author || '—'} · 写作风格 {selectedProject.writer || '—'} · 排版 {selectedProject.theme || '默认'}</>
                     )}
                   </p>
-                  <p className="text-[11px] text-muted-foreground/80">在此填写任意字段，即仅对本任务覆盖项目设置。</p>
+                  <p className="text-[11px] text-muted-foreground/80">创建后项目再修改，不会影响这个任务。</p>
                 </div>
               )}
 
@@ -919,48 +855,6 @@ export default function TasksPage() {
                   <FormMessage />
                 </FormItem>
               )} />
-
-              {(watchedType === 'article' || watchedType === 'seednote' || watchedType === 'ecommerce') && (
-                <TemplatePicker
-                  type={watchedType as import('@/types').TemplateType}
-                  selected={selectedTemplate}
-                  onSelect={handleTemplateSelect}
-                />
-              )}
-
-              {watchedType !== 'viral_analysis' && (
-                <FormField control={form.control} name="visual_style" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>视觉风格</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        {...field}
-                        placeholder="选择模板自动填充，或直接输入自定义风格"
-                        maxLength={1024}
-                        className="min-h-[72px] resize-y"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              )}
-
-              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑。
-                  任务级 author/writer/theme override 经后端按 task > project 解析。 */}
-              {watchedType === 'article' && (
-                <>
-                  <PersonaBlock
-                    author={watchedAuthor ?? ''}
-                    onAuthor={(v) => form.setValue('author', v, { shouldDirty: true })}
-                    writer={watchedWriter ?? ''}
-                    onWriter={(v) => form.setValue('writer', v, { shouldDirty: true })}
-                  />
-                  <ThemePicker theme={watchedTheme ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
-                  {!selectedTemplate && (
-                    <p className="text-xs text-muted-foreground">未选模板时默认随项目设置，也可在此覆盖。</p>
-                  )}
-                </>
-              )}
 
               {/* Watermark toggle */}
               <button

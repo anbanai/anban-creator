@@ -145,11 +145,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	}
 
 	if opts.Project != nil {
-		// Two-layer resolution (task.Overrides ?? project) feeds settings.json so a
-		// per-task override reaches the agent CLI's app/library path. The prompt path
-		// (buildAgentCommand --style) resolves the same way below.
-		resolved := resolver.ResolveStyle(opts.Project, opts.Task)
-		cfg, err := BuildAppConfig(opts.Project, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
+		// Snapshot resolution feeds settings.json so retries and historical tasks
+		// keep the original project configuration. Old rows without a snapshot may
+		// still resolve through legacy task overrides.
+		effectiveProject := EffectiveProject(opts.Project, opts.Task)
+		resolved := resolver.ResolveStyle(effectiveProject, opts.Task)
+		cfg, err := BuildAppConfig(effectiveProject, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -159,7 +160,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		// Write project positioning as CLAUDE.md so Claude Code loads it as
 		// persistent project memory. Non-fatal: missing the file should not abort
 		// a task; the agent can still rely on its default agent definition.
-		if err := writeProjectCLAUDEMD(workDir, opts.Project); err != nil {
+		if err := writeProjectCLAUDEMD(workDir, effectiveProject); err != nil {
 			e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to write project CLAUDE.md, continuing")
 		}
 		// Download effective reference image.
@@ -292,8 +293,8 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 		"--agent-flag", "anbanwriter:" + TaskTypeToAgent(opts.Task.Type),
 	}
 	// Note: visual style is NOT passed as a CLI flag — it reaches the agent
-	// solely via get_project_profile(task_id) (MCP), resolved two-layer
-	// (task.Overrides ?? project) by the server. It never enters the prompt.
+	// solely via get_project_profile(task_id) (MCP), resolved from the task
+	// snapshot by the server. It never enters the prompt.
 	if strings.TrimSpace(opts.Task.Goal) != "" {
 		cmd = append(cmd, "--goal", opts.Task.Goal)
 	}

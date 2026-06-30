@@ -3,7 +3,7 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Inbox, Loader2 } from 'lucide-react'
+import { Plus, Inbox, Loader2, Minus } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -23,6 +23,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
 import { ThemePicker } from '@/components/templates/ThemePicker'
+import { ImageModelSelector } from '@/components/ImageModelSelector'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { projectSchema, type ProjectFormValues } from '@/lib/schemas'
@@ -31,6 +32,8 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
+import { useImageModels } from '@/hooks/useImageModels'
 
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
@@ -58,6 +61,10 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   theme: '',
   author: '',
   template_id: '',
+  ecommerce_default_selected_modules: {},
+  ecommerce_target_platform: '',
+  ecommerce_brand_brief: '',
+  ecommerce_image_model_key: '',
   reference_image_url: '',
   image_ratio: '',
   enable_publishing: false,
@@ -79,6 +86,10 @@ function projectToForm(ch: Project): ProjectFormValues {
     theme: ch.theme || '',
     author: ch.author || '',
     template_id: ch.template_id || '',
+    ecommerce_default_selected_modules: ch.ecommerce_defaults?.default_selected_modules || {},
+    ecommerce_target_platform: ch.ecommerce_defaults?.target_platform || '',
+    ecommerce_brand_brief: ch.ecommerce_defaults?.brand_brief || '',
+    ecommerce_image_model_key: ch.ecommerce_defaults?.image_model_key || '',
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
     enable_publishing: ch.config?.enable_publishing ?? false,
@@ -116,6 +127,16 @@ export default function ProjectsPage() {
   const authorValue = useWatch({ control: form.control, name: 'author' })
   const writerValue = useWatch({ control: form.control, name: 'writer' })
   const themeValue = useWatch({ control: form.control, name: 'theme' })
+  const ecommerceModules = useWatch({ control: form.control, name: 'ecommerce_default_selected_modules' })
+  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
+
+  const setEcommerceModuleQty = (key: string, qty: number) => {
+    const cur = form.getValues('ecommerce_default_selected_modules') ?? {}
+    const next = { ...cur }
+    if (qty >= 1) next[key] = qty
+    else delete next[key]
+    form.setValue('ecommerce_default_selected_modules', next, { shouldDirty: true })
+  }
 
   // Auto-focus profile_url field when dialog opens
   useEffect(() => {
@@ -341,10 +362,8 @@ export default function ProjectsPage() {
     setSelectedTemplate(null)
     setModalOpen(true)
 
-    // 导入模型存量兼容：旧"绑定模板"项目的人设字段历史上为空（运行时由模板下发）。
-    // 打开编辑时把模板人设作为默认值回填到当前为空的字段，让用户看到生效中的人设并可
-    // 编辑。保存后 template_id 由后端清空（迁移为项目自有值）。shouldDirty:false 避免
-    // 未改动时触发脏检查弹窗。模板已删则静默留空，用户可手动选其他模板。
+    // 存量兼容：旧项目可能仍带 template_id。打开编辑时只把模板视觉提示回填到空的
+    // visual_style；author/writer/theme 已由项目自身维护，不再从模板导入。
     if (project.template_id) {
       const token = ++projectEditTokenRef.current
       api.templates
@@ -354,9 +373,6 @@ export default function ProjectsPage() {
           if (projectEditTokenRef.current !== token) return
           setSelectedTemplate(t)
           if (!form.getValues('visual_style')) form.setValue('visual_style', t.style_prompt || '', { shouldDirty: false })
-          if (!form.getValues('author')) form.setValue('author', t.author || '', { shouldDirty: false })
-          if (!form.getValues('writer')) form.setValue('writer', t.writer || '', { shouldDirty: false })
-          if (!form.getValues('theme')) form.setValue('theme', t.theme || '', { shouldDirty: false })
         })
         .catch(() => {
           /* 模板不存在/已删：保持空选，用户可手动选其他模板 */
@@ -381,15 +397,12 @@ export default function ProjectsPage() {
     form.reset(CHANNEL_FORM_DEFAULTS)
   }
 
-  // 选模板=一次性把模板风格导入表单（视觉/作者/写作风格/排版，可编辑）。再次点击同一
+  // 选模板=一次性把模板视觉提示导入表单（可编辑）。再次点击同一
   // 卡片为 no-op（保留用户对风格文本框的改动），切换到别的模板则覆盖。
   function handleProjectTemplateImport(template: Template) {
     if (selectedTemplate?.id === template.id) return
     setSelectedTemplate(template)
     form.setValue('visual_style', template.style_prompt || '', { shouldDirty: true })
-    form.setValue('author', template.author || '', { shouldDirty: true })
-    form.setValue('writer', template.writer || '', { shouldDirty: true })
-    form.setValue('theme', template.theme || '', { shouldDirty: true })
   }
 
   async function onSubmit(values: ProjectFormValues) {
@@ -404,14 +417,21 @@ export default function ProjectsPage() {
       writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       author: values.author?.trim() || undefined,
-      // 导入模型：项目 Owns 自己的人设。不发送 template_id——后端 Update 无条件清空，
-      // 存量"绑定模板"项目保存后即迁移为自有值（运行时 task>template>project 解析）。
+      // 导入模型：模板只用于填充视觉提示，不发送 template_id，不参与运行时解析。
       reference_image_url: values.reference_image_url?.trim() || undefined,
       image_ratio: values.image_ratio || undefined,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
       enable_publishing: values.enable_publishing || undefined,
       require_publish_approval: values.require_publish_approval || undefined,
+    }
+    if (values.platform === 'ecommerce') {
+      payload.ecommerce_defaults = {
+        default_selected_modules: values.ecommerce_default_selected_modules || {},
+        target_platform: values.ecommerce_target_platform || undefined,
+        brand_brief: values.ecommerce_brand_brief?.trim() || undefined,
+        image_model_key: values.ecommerce_image_model_key || undefined,
+      }
     }
 
     // Auto-set image_ratio based on platform if not specified
@@ -810,21 +830,92 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
-              {/* 电商模板：选模板一次性导入视觉风格基线（三维风格架构——电商只用 Style 维度；
-                  模块的默认模块/品牌/模型属任务级配置，项目只承载视觉风格）。 */}
+              {/* 电商视觉模板：选模板一次性导入视觉风格基线。 */}
               {isEcommerce && (
-                <TemplatePicker type="ecommerce" selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
+                <>
+                  <TemplatePicker type="ecommerce" selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
+
+                  <div className="space-y-3 rounded-lg border border-border p-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">电商默认配置</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">新建电商任务时会预填这些项目默认值，产品图和卖点仍在任务里填写。</p>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {ecommerceModuleCatalog.map((mod) => {
+                        const qty = ecommerceModules?.[mod.key] ?? 0
+                        const enabled = qty >= 1
+                        return (
+                          <div key={mod.key} className="flex items-center justify-between gap-3 py-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-foreground">{mod.label}</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">{mod.hint}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {enabled && (
+                                <div className="flex items-center gap-1">
+                                  <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setEcommerceModuleQty(mod.key, Math.max(mod.minQty, qty - mod.qtyStep))} aria-label="减少">
+                                    <Minus className="h-3 w-3" />
+                                  </Button>
+                                  <span className="w-8 text-center text-sm tabular-nums">{qty}{mod.qtyLabel}</span>
+                                  <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setEcommerceModuleQty(mod.key, Math.min(mod.maxQty, qty + mod.qtyStep))} aria-label="增加">
+                                    <Plus className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              )}
+                              <Switch checked={enabled} onCheckedChange={(on) => setEcommerceModuleQty(mod.key, on ? mod.defaultQty : 0)} aria-label={`启用 ${mod.label}`} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <FormField control={form.control} name="ecommerce_target_platform" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>默认目标平台</FormLabel>
+                        <Select value={field.value || undefined} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger className="w-full"><SelectValue placeholder="选择投放平台" /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {ecommerceTargetPlatformOptions.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="ecommerce_image_model_key" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>默认图像模型</FormLabel>
+                        <FormControl>
+                          {imageModelsLoading ? (
+                            <Skeleton className="h-10 w-full rounded-xl" />
+                          ) : (
+                            <ImageModelSelector options={imageModelOptions} value={field.value || ''} onChange={field.onChange} />
+                          )}
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="ecommerce_brand_brief" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>品牌 brief</FormLabel>
+                        <FormControl>
+                          <Textarea {...field} placeholder="品牌定位、受众、调性、禁忌和固定视觉要求" className="min-h-[72px] resize-y" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                </>
               )}
 
               {isWechat && (
                 <>
-                  {/* 公众号模板：像小红书一样左右滑动选模板；选中后一次性把视觉/作者/写作
-                      风格/排版导入表单，可继续自行调整（导入模型，项目 Owns 自己的人设）。
-                      运行时解析优先级：task > task-template > plan > project 自身。 */}
+                  {/* 公众号视觉模板：像小红书一样左右滑动选模板；选中后只导入图片视觉提示。 */}
                   <TemplatePicker type="article" selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
 
-                  {/* 写作风格（作者署名 + 写作风格模仿 + 可选头像）与排版：始终可编辑，
-                      绑定到项目自身字段。选模板后自动填入，用户可覆盖。 */}
+                  {/* 写作风格（作者署名 + 写作风格模仿 + 可选头像）与排版：始终绑定到项目自身字段。 */}
                   <PersonaBlock
                     author={authorValue ?? ''}
                     onAuthor={(v) => form.setValue('author', v, { shouldDirty: true })}
@@ -835,7 +926,7 @@ export default function ProjectsPage() {
                 </>
               )}
 
-              {/* 作者名（署名）：seednote 在此编辑；article 改由上方「公众号模板/写作风格」区块统一维护。 */}
+              {/* 作者名（署名）：seednote 在此编辑；article 由上方公众号写作配置统一维护。 */}
               {isSeednote && <FormField control={form.control} name="author" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="shrink-0 w-20 text-right">作者名</FormLabel>

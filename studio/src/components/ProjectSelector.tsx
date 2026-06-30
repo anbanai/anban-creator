@@ -7,15 +7,18 @@ interface ProjectSelectorProps {
   value: string
   onChange: (projectId: string, platform: string) => void
   platform?: string
+  excludePlatforms?: string[]
 }
 
-export function ProjectSelector({ value, onChange, platform }: ProjectSelectorProps) {
+export function ProjectSelector({ value, onChange, platform, excludePlatforms = [] }: ProjectSelectorProps) {
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects', 'active', platform],
     queryFn: () => api.projects.list({ status: 'active', platform }),
   })
 
-  const options: ComboboxOption[] = projects.map((ch) => ({
+  const visibleProjects = projects.filter((ch) => !excludePlatforms.includes(ch.platform))
+
+  const options: ComboboxOption[] = visibleProjects.map((ch) => ({
     value: ch.id,
     label: ch.name,
     group: platformLabels[ch.platform] || ch.platform,
@@ -34,7 +37,7 @@ export function ProjectSelector({ value, onChange, platform }: ProjectSelectorPr
           onChange('', '')
           return
         }
-        const ch = projects.find((c) => c.id === id)
+        const ch = visibleProjects.find((c) => c.id === id)
         if (ch) onChange(ch.id, ch.platform)
       }}
       placeholder="选择项目..."

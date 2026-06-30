@@ -153,6 +153,56 @@ func TestBuildAccountInfo_TaskStyleOverride(t *testing.T) {
 	}
 }
 
+func TestBuildAccountInfo_TaskProjectSnapshotWinsOverCurrentProject(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := createAccountInfoProject(t, repo, userID, "当前视觉")
+	ch.Name = "当前项目名"
+	ch.Instructions = "当前定位"
+	ch.ReferenceImageURL = "/api/v1/files/current-ref"
+	if err := repo.Projects().Update(ctx, ch); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	task := createAccountInfoTask(t, repo, userID, ch.ID, "")
+	task.SetProjectSnapshot(model.ProjectSnapshot{
+		ProjectName:       "快照项目名",
+		Platform:          model.PlatformSeednote,
+		Instructions:      "快照定位",
+		VisualStyle:       "快照视觉",
+		ReferenceImageURL: "/api/v1/files/snapshot-ref",
+	})
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task snapshot: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"project_id": ch.ID,
+		"scope":      "seednote",
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	if got := info["name"]; got != "快照项目名" {
+		t.Fatalf("name = %v, want snapshot name", got)
+	}
+	if got := info["instructions"]; got != "快照定位" {
+		t.Fatalf("instructions = %v, want snapshot instructions", got)
+	}
+	if got := info["visual_style"]; got != "快照视觉" {
+		t.Fatalf("visual_style = %v, want snapshot visual style", got)
+	}
+	if got := info["visual_style_source"]; got != "snapshot" {
+		t.Fatalf("visual_style_source = %v, want snapshot", got)
+	}
+	imgCfg := info["image_config"].(map[string]any)
+	if got := imgCfg["reference_image_url"]; got != "/api/v1/files/snapshot-ref" {
+		t.Fatalf("reference_image_url = %v, want snapshot ref", got)
+	}
+}
+
 // TestBuildAccountInfo_TaskStyleEmpty_FallsBackToProject: task_id supplied but the
 // task carries no VisualStyle override → project visual_style wins, source "project".
 func TestBuildAccountInfo_TaskStyleEmpty_FallsBackToProject(t *testing.T) {

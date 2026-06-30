@@ -12,14 +12,31 @@ export interface EcommerceTaskConfig {
 }
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
-// Per-task overrides for the style/author/theme dimensions (mirrors server
-// model.StyleOverrides). Empty/absent field = inherit from the owning project
-// (two-layer task.Overrides.X ?? project.X; no template/plan layer).
+// Legacy per-task overrides kept for older rows. New tasks use project_snapshot.
 export interface StyleOverrides {
   visual_style?: string
   writer?: string
   author?: string
   theme?: string
+}
+
+export interface ProjectSnapshot {
+  project_name?: string
+  platform?: TaskType
+  instructions?: string
+  keywords?: string
+  visual_style?: string
+  reference_image_url?: string
+  image_ratio?: string
+  writer?: string
+  theme?: string
+  author?: string
+  ecommerce_defaults?: {
+    default_selected_modules?: Record<string, number>
+    target_platform?: string
+    brand_brief?: string
+    image_model_key?: string
+  }
 }
 
 export interface Task {
@@ -57,14 +74,8 @@ export interface Task {
   // the loop runs entirely inside Claude Code, server observes only the result.
   goal?: string
   goal_mode?: boolean
-  template_id?: string
-  // Per-task style/author/theme overrides (mirrors server model.StyleOverrides,
-  // serialized as `overrides`). A field absent/empty here means "inherit from the
-  // owning project" via the two-layer task.Overrides.X ?? project.X resolution
-  // (no template/plan layer). Drives the "继承自项目 / 已覆盖" inheritance badges.
-  // NOTE: author/style dimensions live ONLY inside `overrides` on the wire — the
-  // server Task response carries no top-level author/writer.
   overrides?: StyleOverrides
+  project_snapshot?: ProjectSnapshot
   // E-commerce package config (only present for platform=ecommerce tasks).
   ecommerce?: EcommerceTaskConfig
   // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）。运行/失败/完成
@@ -130,16 +141,9 @@ export interface CreateTaskRequest {
   image_model_key?: string
   skip_reference_image?: boolean
   reference_image_url?: string
-  visual_style?: string
-  writer?: string
-  theme?: string
   watermark?: boolean
   goal?: string
   goal_mode?: boolean
-  template_id?: string
-  // 公众号 override（作者署名 + 写作风格 key）。空则按解析链兜底到项目；
-  // 非空即覆盖。
-  author?: string
   // Seednote image composition: cover always generated. Server ignores for non-seednote.
   has_content_image?: boolean
   has_tail_image?: boolean

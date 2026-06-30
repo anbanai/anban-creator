@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { Project, Plan, PlanType, CreatePlanRequest, Template } from '@/types'
+import type { Project, Plan, PlanType, CreatePlanRequest } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { ImageModelSelector } from '@/components/ImageModelSelector'
@@ -21,12 +21,9 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import SchedulePicker from '@/components/SchedulePicker'
-import { TemplatePicker } from '@/components/templates/TemplatePicker'
-import { PersonaBlock } from '@/components/templates/PersonaBlock'
-import { ThemePicker } from '@/components/templates/ThemePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { planStatusLabel, contentTypeLabel, contentTypeOptions, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
+import { planStatusLabel, contentTypeLabel, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
 import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
@@ -37,6 +34,11 @@ import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 
+const planTypeOptions: { value: PlanType; label: string }[] = [
+  { value: 'seednote', label: '种草笔记' },
+  { value: 'article', label: '公众号文章' },
+]
+
 function planToFormValues(plan: Plan): PlanFormValues {
   return {
     project_id: plan.project_id || '',
@@ -45,10 +47,6 @@ function planToFormValues(plan: Plan): PlanFormValues {
     prompt: plan.prompt || '',
     image_model_key: plan.image_model_key || '',
     skip_reference_image: plan.skip_reference_image || false,
-    visual_style: plan.visual_style || '',
-    writer: plan.writer || '',
-    theme: plan.theme || '',
-    author: plan.author || '',
     watermark: plan.watermark || false,
     goal: plan.goal || '',
     goal_mode: plan.goal_mode || false,
@@ -68,7 +66,6 @@ export default function PlansPage() {
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
-  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
 
@@ -80,10 +77,6 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
-      visual_style: '',
-      writer: '',
-      theme: '',
-      author: '',
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
@@ -99,9 +92,6 @@ export default function PlansPage() {
   }, [modalOpen, form])
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
-  const watchedAuthor = useWatch({ control: form.control, name: 'author' })
-  const watchedWriter = useWatch({ control: form.control, name: 'writer' })
-  const watchedTheme = useWatch({ control: form.control, name: 'theme' })
   const watchedGoalMode = useWatch({ control: form.control, name: 'goal_mode' })
 
   // Warn before closing with unsaved changes
@@ -224,35 +214,18 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
-      visual_style: '',
-      writer: '',
-      theme: '',
-      author: '',
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
     })
-    setSelectedTemplate(null)
     setModalOpen(true)
   }
 
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
     form.reset(planToFormValues(plan))
-    setSelectedTemplate(null)
     setModalOpen(true)
-
-    // 回填计划已绑定的模板：fetch 后回填 selectedTemplate，style 已由
-    // planToFormValues 从 plan.visual_style 填入，无需再覆盖（shouldDirty:false 不触脏）。
-    if (plan.template_id) {
-      api.templates
-        .get(plan.template_id)
-        .then(setSelectedTemplate)
-        .catch(() => {
-          /* 模板已删/不存在：保持空选，不阻断编辑 */
-        })
-    }
   }
 
   function closeModal() {
@@ -273,31 +246,11 @@ export default function PlansPage() {
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
-      visual_style: '',
-      writer: '',
-      theme: '',
-      author: '',
       has_content_image: true,
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
     })
-    setSelectedTemplate(null)
-  }
-
-  function handleTemplateSelect(template: Template) {
-    // Clicking the already-active card is a no-op — preserves any edits the user
-    // has made to the style textarea. Switching to a different template refills.
-    if (selectedTemplate?.id === template.id) return
-    setSelectedTemplate(template)
-    // Template thumbnail is a UI preview only — it is not a generation reference image.
-    // The three orthogonal style dimensions flow into the plan; spawned tasks inherit
-    // them and the agent surfaces them via get_project_profile(task_id).
-    form.setValue('visual_style', template.style_prompt || '', { shouldDirty: true })
-    form.setValue('writer', template.writer || '', { shouldDirty: true })
-    form.setValue('theme', template.theme || '', { shouldDirty: true })
-    // 公众号字段（作者署名 + 写作风格 key）随模板导入，仍可编辑。
-    form.setValue('author', template.author || '', { shouldDirty: true })
   }
 
   async function onSubmit(values: PlanFormValues) {
@@ -311,10 +264,6 @@ export default function PlansPage() {
       prompt: values.prompt?.trim() || undefined,
       project_id: values.project_id || undefined,
       image_model_key: values.image_model_key,
-      visual_style: values.visual_style || undefined,
-      writer: values.writer || undefined,
-      theme: values.theme || undefined,
-      author: values.author || undefined,
       watermark: values.watermark || undefined,
       goal_mode: values.goal_mode || undefined,
       goal: values.goal_mode ? (values.goal?.trim() || undefined) : undefined,
@@ -323,9 +272,6 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      // template_id 透传给后端，由 CreateFromPlan 复制到派生任务，从而让 Agent 通过
-      // get_project_profile(task_id) 拿到模板的内容脚手架。
-      template_id: selectedTemplate?.id || undefined,
     }
 
     if (editingPlan) {
@@ -352,6 +298,7 @@ export default function PlansPage() {
           <ProjectSelector
             value={projectFilter}
             onChange={(id) => setProjectFilter(id)}
+            excludePlatforms={['ecommerce']}
           />
         </div>
         <div className="w-full sm:w-48 sm:ml-auto">
@@ -484,6 +431,7 @@ export default function PlansPage() {
                         field.onChange(id)
                         if (id) form.setValue('type', platform as PlanType)
                       }}
+                      excludePlatforms={['ecommerce']}
                     />
                   </FormControl>
                   <FormMessage />
@@ -499,7 +447,7 @@ export default function PlansPage() {
                         <SelectValue placeholder="选择类型" />
                       </SelectTrigger>
                       <SelectContent>
-                        {contentTypeOptions.map((opt) => (
+                        {planTypeOptions.map((opt) => (
                           <SelectItem key={opt.value} value={opt.value} label={opt.label}>{opt.label}</SelectItem>
                         ))}
                       </SelectContent>
@@ -549,44 +497,6 @@ export default function PlansPage() {
                   <FormMessage />
                 </FormItem>
               )} />
-
-              <TemplatePicker
-                type={watchedType as import('@/types').TemplateType}
-                selected={selectedTemplate}
-                onSelect={handleTemplateSelect}
-              />
-
-              <FormField control={form.control} name="visual_style" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>视觉风格</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      {...field}
-                      placeholder="选择模板自动填充，或直接输入自定义风格"
-                      maxLength={1024}
-                      className="min-h-[72px] resize-y"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              {/* 公众号 (article) 写作风格 + 排版：选模板后自动填入，可继续编辑。
-                  计划级 author/writer/theme 会写入 spawned task overrides，运行时按 task > project 解析。 */}
-              {watchedType === 'article' && (
-                <>
-                  <PersonaBlock
-                    author={watchedAuthor ?? ''}
-                    onAuthor={(v) => form.setValue('author', v, { shouldDirty: true })}
-                    writer={watchedWriter ?? ''}
-                    onWriter={(v) => form.setValue('writer', v, { shouldDirty: true })}
-                  />
-                  <ThemePicker theme={watchedTheme ?? ''} onTheme={(v) => form.setValue('theme', v, { shouldDirty: true })} />
-                  {!selectedTemplate && (
-                    <p className="text-xs text-muted-foreground">未选模板时默认随项目设置，也可在此覆盖。</p>
-                  )}
-                </>
-              )}
 
               <FormField control={form.control} name="watermark" render={({ field }) => (
                 <FormItem>

@@ -33,9 +33,9 @@ type Resolved struct {
 	ThemeSource       string
 }
 
-// ResolveStyle resolves every dimension two-layer (task override > project) and
-// records each dimension's source. project MUST be non-nil; task may be nil (in
-// which case every dimension is inherited from the project).
+// ResolveStyle resolves every dimension from the task's project snapshot when
+// present, falling back to legacy two-layer task override > project behavior for
+// old rows. project MUST be non-nil; task may be nil.
 //
 // Article platform always carries a writer voice (seednote/ecommerce have none):
 // when the resolved writer key is empty on an article project, the platform
@@ -43,6 +43,24 @@ type Resolved struct {
 // consumer (MCP, prompt, settings.json) sees it consistently. It folds into the
 // "project" source bucket (it is the platform's built-in writer).
 func ResolveStyle(project *model.Project, task *model.Task) Resolved {
+	if task != nil {
+		if snap := task.ProjectSnapshot.Data(); snap.Platform != "" {
+			r := Resolved{
+				VisualStyle:       snap.VisualStyle,
+				Writer:            snap.Writer,
+				Author:            snap.Author,
+				Theme:             snap.Theme,
+				VisualStyleSource: "snapshot",
+				WriterSource:      "snapshot",
+				AuthorSource:      "snapshot",
+				ThemeSource:       "snapshot",
+			}
+			if snap.Platform == model.PlatformArticle && r.Writer == "" {
+				r.Writer = writer.DefaultStyleName
+			}
+			return r
+		}
+	}
 	r := Resolved{
 		VisualStyle:       project.VisualStyle,
 		Writer:            project.Writer,

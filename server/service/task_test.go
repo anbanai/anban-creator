@@ -282,6 +282,114 @@ func TestTaskService_FinalizeTitleRejectsDuplicateEvenWhenCurrentTaskAlreadyHasT
 	}
 }
 
+func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	project := &model.Project{
+		ID:                uuid.New().String(),
+		UserID:            userID,
+		Platform:          model.PlatformArticle,
+		Name:              "旧项目名",
+		Status:            model.ProjectStatusActive,
+		Instructions:      "旧定位",
+		Keywords:          "旧关键词",
+		VisualStyle:       "旧视觉",
+		ReferenceImageURL: "/api/v1/files/ref-old",
+		ImageRatio:        "3:4",
+		Writer:            "dan-koe",
+		Theme:             "autumn-warm",
+		Author:            "旧署名",
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: project.ID,
+		Prompt:    "topic",
+		Quantity:  1,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("created tasks = %d, want 1", len(tasks))
+	}
+
+	project.Name = "新项目名"
+	project.Instructions = "新定位"
+	project.VisualStyle = "新视觉"
+	project.Author = "新署名"
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	snap := found.ProjectSnapshot.Data()
+	if snap.ProjectName != "旧项目名" || snap.Instructions != "旧定位" ||
+		snap.VisualStyle != "旧视觉" || snap.Author != "旧署名" {
+		t.Fatalf("snapshot = %+v, want original project values", snap)
+	}
+	if snap.ReferenceImageURL != "/api/v1/files/ref-old" || snap.ImageRatio != "3:4" {
+		t.Fatalf("snapshot image fields = %q/%q", snap.ReferenceImageURL, snap.ImageRatio)
+	}
+}
+
+func TestTaskService_CreateFromPlanSnapshotsProjectWithoutPlanStyleOverrides(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	project := &model.Project{
+		ID:           uuid.New().String(),
+		UserID:       userID,
+		Platform:     model.PlatformSeednote,
+		Name:         "项目",
+		Status:       model.ProjectStatusActive,
+		Instructions: "项目定位",
+		VisualStyle:  "项目视觉",
+		Writer:       "project-writer",
+		Theme:        "project-theme",
+		Author:       "项目署名",
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	plan := &model.Plan{
+		ID:          uuid.New().String(),
+		UserID:      userID,
+		ProjectID:   project.ID,
+		Type:        model.PlatformSeednote,
+		Status:      model.PlanStatusActive,
+		Prompt:      "topic",
+		VisualStyle: "计划视觉不应进入任务",
+		Writer:      "plan-writer",
+		Theme:       "plan-theme",
+		Author:      "计划署名",
+	}
+
+	task, err := svc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("CreateFromPlan: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	snap := found.ProjectSnapshot.Data()
+	if snap.VisualStyle != "项目视觉" || snap.Writer != "project-writer" ||
+		snap.Theme != "project-theme" || snap.Author != "项目署名" {
+		t.Fatalf("snapshot = %+v, want project values", snap)
+	}
+	if overrides := found.Overrides.Data(); overrides != (model.StyleOverrides{}) {
+		t.Fatalf("overrides = %+v, want empty", overrides)
+	}
+}
+
 func TestTaskService_ClearArtifactTitles(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()

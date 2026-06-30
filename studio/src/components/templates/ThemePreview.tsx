@@ -13,7 +13,7 @@ const PREVIEW_HEIGHT = 440
 /**
  * Renders a sandboxed iframe preview of a 排版样式 (theme) by fetching the
  * server-rendered WeChat HTML (built-in sample markdown + theme, deterministic).
- * Used in the article template form and read-only preview. Empty theme → null.
+ * Used in project account settings and read-only preview. Empty theme → null.
  */
 export function ThemePreview({ theme, className }: ThemePreviewProps) {
   const { data: html, isLoading, isError } = useQuery({

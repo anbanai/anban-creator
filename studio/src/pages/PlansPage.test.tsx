@@ -59,4 +59,16 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       expect(errorMock).toHaveBeenCalledWith('排期冲突，请检查现有计划')
     })
   })
+
+  it('does not offer e-commerce as a plan content type', async () => {
+    render(<PlansPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
+    const [, typeSelect] = screen.getAllByRole('combobox')
+    fireEvent.click(typeSelect)
+
+    expect(await screen.findByRole('option', { name: '公众号文章' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '种草笔记' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
+  })
 })

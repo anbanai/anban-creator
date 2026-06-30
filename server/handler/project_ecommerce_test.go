@@ -15,9 +15,7 @@ import (
 	"github.com/royalrick/anbanwriter/server/service"
 )
 
-// setupProjectEcommerceTest wires a ProjectHandler backed by an in-memory repo,
-// a TemplateService, and a seeded e-commerce template carrying reusable
-// defaults. Returns the app, repo and the seed template.
+// setupProjectEcommerceTest wires a ProjectHandler backed by an in-memory repo.
 func setupProjectEcommerceTest(t *testing.T) (*fiber.App, repository.Repository, *model.Template) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:proj_ecom_test?mode=memory&cache=shared"), &gorm.Config{})
@@ -39,24 +37,6 @@ func setupProjectEcommerceTest(t *testing.T) (*fiber.App, repository.Repository,
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 
-	tmpl := &model.Template{
-		ID:         uuid.New().String(),
-		UserID:     uuid.New().String(),
-		Name:       "电商模板A",
-		Type:       "ecommerce",
-		Visibility: "public",
-		IsActive:   true,
-	}
-	tmpl.SetEcommerce(model.EcommerceTemplateDefaults{
-		DefaultSelectedModules: map[string]int{"main": 6, "detail": 4},
-		TargetPlatform:         "wechat-store",
-		BrandBrief:             "高端护肤品牌",
-		ImageModelKey:          "openai-gpt-image",
-	})
-	if err := repo.Templates().Create(t.Context(), tmpl); err != nil {
-		t.Fatalf("seed template: %v", err)
-	}
-
 	projectSvc := service.NewProjectService(repo, &logger)
 	templateSvc := service.NewTemplateService(repo, &logger)
 	h := NewProjectHandler(projectSvc, &logger)
@@ -72,23 +52,22 @@ func setupProjectEcommerceTest(t *testing.T) (*fiber.App, repository.Repository,
 		return c.Next()
 	}
 	app.Post("/api/v1/projects", injectUser, h.Create)
-	return app, repo, tmpl
+	return app, repo, nil
 }
 
-// TestProjectHandler_CreateEcommerceSnapshotsTemplateDefaults is the regression
-// test for the Task.Overrides refactor (103e330): that commit moved the
-// e-commerce defaults read from Template.Ecommerce to Project.EcommerceDefaults
-// but never populated the project column — so every e-commerce task was billed
-// without its package modules / brand brief / target platform / image model.
-// Project creation MUST snapshot the chosen template's defaults onto the project.
-func TestProjectHandler_CreateEcommerceSnapshotsTemplateDefaults(t *testing.T) {
-	app, _, tmpl := setupProjectEcommerceTest(t)
+func TestProjectHandler_CreateEcommerceStoresProjectDefaults(t *testing.T) {
+	app, _, _ := setupProjectEcommerceTest(t)
 	owner := uuid.New().String()
 
 	resp := doRequest(t, app, "POST", "/api/v1/projects", owner, map[string]any{
-		"platform":    "ecommerce",
-		"name":        "测试店铺",
-		"template_id": tmpl.ID,
+		"platform": "ecommerce",
+		"name":     "测试店铺",
+		"ecommerce_defaults": map[string]any{
+			"default_selected_modules": map[string]any{"main": 6, "detail": 4},
+			"target_platform":          "wechat-store",
+			"brand_brief":              "高端护肤品牌",
+			"image_model_key":          "openai-gpt-image",
+		},
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -97,7 +76,7 @@ func TestProjectHandler_CreateEcommerceSnapshotsTemplateDefaults(t *testing.T) {
 	project := data["project"].(map[string]any)
 	ec, ok := project["ecommerce_defaults"].(map[string]any)
 	if !ok {
-		t.Fatalf("ecommerce_defaults NOT populated on created project — regression: project column must snapshot the template's defaults. data=%#v", data)
+		t.Fatalf("ecommerce_defaults NOT populated on created project. data=%#v", data)
 	}
 	if ec["target_platform"] != "wechat-store" {
 		t.Errorf("target_platform = %v, want wechat-store", ec["target_platform"])

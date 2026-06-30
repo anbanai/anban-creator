@@ -228,9 +228,7 @@ func TestTemplateHandler_Create_Success(t *testing.T) {
 	}
 }
 
-// TestTemplateHandler_Create_ArticleAuthorFields: the 公众号 runtime author fields
-// round-trip through the REST Create path.
-func TestTemplateHandler_Create_ArticleAuthorFields(t *testing.T) {
+func TestTemplateHandler_Create_IgnoresNonVisualRuntimeFields(t *testing.T) {
 	app, _ := setupTemplateHandlerTest(t)
 	userID := uuid.New().String()
 
@@ -246,13 +244,12 @@ func TestTemplateHandler_Create_ArticleAuthorFields(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	// author (input) maps to author; writer is the writing-style resource key.
 	data := decodeBody(t, resp)["data"].(map[string]any)
-	if data["author"] != "老李" {
-		t.Errorf("author = %v, want 老李", data["author"])
+	if data["visual_style"] != "暖色" {
+		t.Errorf("visual_style = %v, want 暖色", data["visual_style"])
 	}
-	if data["writer"] != "dan-koe" {
-		t.Errorf("writer = %v", data["writer"])
+	if data["author"] != "" || data["writer"] != "" {
+		t.Errorf("author/writer = %v/%v, want ignored", data["author"], data["writer"])
 	}
 }
 
@@ -350,7 +347,7 @@ func TestTemplateHandler_Update_EmptyTypeLeavesUnchanged(t *testing.T) {
 	}
 }
 
-func TestTemplateHandler_Update_ClearsArticleRuntimeFieldsWithoutClearingVisualStyle(t *testing.T) {
+func TestTemplateHandler_Update_IgnoresRuntimeFieldsWithoutClearingVisualStyle(t *testing.T) {
 	app, repo := setupTemplateHandlerTest(t)
 	owner := uuid.New().String()
 	tmpl := createTemplateRow(t, repo, owner, "public", "article template")
@@ -364,19 +361,20 @@ func TestTemplateHandler_Update_ClearsArticleRuntimeFieldsWithoutClearingVisualS
 	}
 
 	resp := doRequest(t, app, "PUT", "/api/v1/templates/"+tmpl.ID, owner, map[string]any{
-		"author": "",
-		"writer": "",
-		"theme":  "",
+		"author":       "",
+		"writer":       "",
+		"theme":        "",
+		"style_prompt": "新视觉",
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	data := decodeBody(t, resp)["data"].(map[string]any)
-	if data["author"] != "" || data["writer"] != "" || data["theme"] != "" {
-		t.Fatalf("author/writer/theme = %v/%v/%v, want all cleared", data["author"], data["writer"], data["theme"])
+	if data["author"] != "老李" || data["writer"] != "dan-koe" || data["theme"] != "autumn-warm" {
+		t.Fatalf("author/writer/theme = %v/%v/%v, want legacy values unchanged", data["author"], data["writer"], data["theme"])
 	}
-	if data["visual_style"] != "暖色生活摄影" {
-		t.Fatalf("visual_style = %v, want existing style preserved", data["visual_style"])
+	if data["visual_style"] != "新视觉" {
+		t.Fatalf("visual_style = %v, want updated visual style", data["visual_style"])
 	}
 }
 

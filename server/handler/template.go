@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -122,53 +121,26 @@ func (h *TemplateHandler) GetByID(c fiber.Ctx) error {
 	return Success(c, tmpl)
 }
 
-// createTemplateRequest is the body for POST /api/v1/templates (Create) and
-// PUT /api/v1/templates/:id (Update). Structure/ExampleContent are sent as plain
-// markdown text from the Studio form; the handler wraps them into {"text": ...}
-// for the model's JSON columns (the MCP save_template path keeps passing raw JSON).
+// createTemplateRequest is the body for POST /api/v1/templates (Create).
+// Templates are visual-only: request fields import image prompt metadata only.
 type createTemplateRequest struct {
-	Name           string   `json:"name"`
-	Type           string   `json:"type"`
-	ThumbnailURL   string   `json:"thumbnail_url"`
-	StylePrompt    string   `json:"style_prompt"`
-	Visibility     string   `json:"visibility"`
-	Writer         string   `json:"writer"`
-	Theme          string   `json:"theme"`
-	Structure      string   `json:"structure"`
-	ExampleContent string   `json:"example_content"`
-	Category       string   `json:"category"`
-	Tags           []string `json:"tags"`
-	Author         string   `json:"author"`
-	// Ecommerce defaults (type="ecommerce" only): default modules/quantities,
-	// target platform, brand brief, default image model key. Pointer so nil =
-	// leave unchanged on PATCH (Update); non-nil = set (Create or Update).
-	Ecommerce *model.EcommerceTemplateDefaults `json:"ecommerce,omitempty"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	ThumbnailURL string   `json:"thumbnail_url"`
+	StylePrompt  string   `json:"style_prompt"`
+	Visibility   string   `json:"visibility"`
+	Category     string   `json:"category"`
+	Tags         []string `json:"tags"`
 }
 
 type updateTemplateRequest struct {
-	Name           *string                          `json:"name"`
-	Type           *string                          `json:"type"`
-	ThumbnailURL   *string                          `json:"thumbnail_url"`
-	StylePrompt    *string                          `json:"style_prompt"`
-	Visibility     *string                          `json:"visibility"`
-	Writer         *string                          `json:"writer"`
-	Theme          *string                          `json:"theme"`
-	Structure      *string                          `json:"structure"`
-	ExampleContent *string                          `json:"example_content"`
-	Category       *string                          `json:"category"`
-	Tags           *[]string                        `json:"tags"`
-	Author         *string                          `json:"author"`
-	Ecommerce      *model.EcommerceTemplateDefaults `json:"ecommerce,omitempty"`
-}
-
-// scaffoldText wraps a plain-text scaffold value into the model's {"text": ...}
-// JSON shape. Empty input returns nil so the column stays NULL/empty (lets the
-// PATCH "non-empty = set" rule in the service work correctly on Update).
-func scaffoldText(s string) map[string]any {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	return map[string]any{"text": s}
+	Name         *string   `json:"name"`
+	Type         *string   `json:"type"`
+	ThumbnailURL *string   `json:"thumbnail_url"`
+	StylePrompt  *string   `json:"style_prompt"`
+	Visibility   *string   `json:"visibility"`
+	Category     *string   `json:"category"`
+	Tags         *[]string `json:"tags"`
 }
 
 // Create handles POST /api/v1/templates.
@@ -194,28 +166,15 @@ func (h *TemplateHandler) Create(c fiber.Ctx) error {
 		req.Visibility = "public"
 	}
 
-	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
-	if err := service.RejectWriterNameAsAuthor(req.Author); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-
 	tmpl := &model.Template{
-		Name:           req.Name,
-		Type:           req.Type,
-		ThumbnailURL:   req.ThumbnailURL,
-		VisualStyle:    req.StylePrompt,
-		Visibility:     req.Visibility,
-		Writer:         req.Writer,
-		Theme:          req.Theme,
-		Structure:      scaffoldText(req.Structure),
-		ExampleContent: scaffoldText(req.ExampleContent),
-		Category:       req.Category,
-		Tags:           req.Tags,
-		Author:         req.Author,
-		IsActive:       true,
-	}
-	if req.Ecommerce != nil {
-		tmpl.SetEcommerce(*req.Ecommerce)
+		Name:         req.Name,
+		Type:         req.Type,
+		ThumbnailURL: req.ThumbnailURL,
+		VisualStyle:  req.StylePrompt,
+		Visibility:   req.Visibility,
+		Category:     req.Category,
+		Tags:         req.Tags,
+		IsActive:     true,
 	}
 
 	created, err := h.service.Create(c.Context(), tmpl, userID)
@@ -260,33 +219,14 @@ func (h *TemplateHandler) Update(c fiber.Ctx) error {
 		}
 	}
 
-	// 作者署名不得是写作风格的人设名/key（二者语义不同，混用会把模仿对象当成发布作者）。
-	if req.Author != nil {
-		if err := service.RejectWriterNameAsAuthor(*req.Author); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-	}
-
 	patch := service.TemplatePatch{
 		Name:         req.Name,
 		Type:         req.Type,
 		ThumbnailURL: req.ThumbnailURL,
 		VisualStyle:  req.StylePrompt,
 		Visibility:   req.Visibility,
-		Writer:       req.Writer,
-		Theme:        req.Theme,
 		Category:     req.Category,
 		Tags:         req.Tags,
-		Author:       req.Author,
-		Ecommerce:    req.Ecommerce,
-	}
-	if req.Structure != nil {
-		structure := scaffoldText(*req.Structure)
-		patch.Structure = &structure
-	}
-	if req.ExampleContent != nil {
-		exampleContent := scaffoldText(*req.ExampleContent)
-		patch.ExampleContent = &exampleContent
 	}
 	if req.Visibility != nil && *req.Visibility != "" && *req.Visibility != "public" && *req.Visibility != "private" {
 		return Error(c, fiber.StatusBadRequest, "visibility must be public or private")

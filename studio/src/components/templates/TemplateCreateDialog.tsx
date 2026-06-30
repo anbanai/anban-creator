@@ -1,11 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Sparkles, RefreshCw, Minus, Plus } from 'lucide-react'
+import { Loader2, Sparkles, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
-import { ImageModelSelector } from '@/components/ImageModelSelector'
-import { useImageModels } from '@/hooks/useImageModels'
 import { queryKeys } from '@/lib/query-keys'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -22,8 +19,6 @@ import {
 } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
 import { ReferenceImageUpload } from '@/components/projects/ReferenceImageUpload'
-import { PersonaBlock } from '@/components/templates/PersonaBlock'
-import { ThemePicker } from '@/components/templates/ThemePicker'
 import type { Template, TemplateType, TemplateVisibility, CreateTemplateRequest, UpdateTemplateRequest } from '@/types'
 import { toast } from 'sonner'
 
@@ -38,18 +33,6 @@ const TYPE_OPTIONS: { value: TemplateType; label: string }[] = [
 function deriveTemplateName(style: string): string {
   const firstClause = style.trim().split(/[\n。，,.]/)[0]
   return firstClause.slice(0, 20).trim()
-}
-
-// structure / example_content are stored server-side as { text: <markdown> }.
-// Backfill the textarea from that shape, tolerating legacy plain-string rows.
-function extractScaffoldText(value: unknown): string {
-  if (!value) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'object' && value !== null) {
-    const text = (value as Record<string, unknown>).text
-    if (typeof text === 'string') return text
-  }
-  return ''
 }
 
 interface TemplateCreateDialogProps {
@@ -77,31 +60,10 @@ export function TemplateCreateDialog({
   const [visibility, setVisibility] = useState<TemplateVisibility>('public')
   const [analyzing, setAnalyzing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  // Content scaffold (optional, separate from visual style_prompt). Stored on the
-  // template (poster legacy scaffold); structure/example wrap as
-  // { text: <markdown> } on submit (matches the backend JSON column shape).
-  // Templates are project-launchers — no template_* agent namespace.
-  const [writingStyle, setWritingStyle] = useState('')
-  // 排版样式 (theme) — the Markdown→HTML layout theme. Orthogonal to visual
-  // style_prompt and writer. Pre-fills project.theme; the project surfaces flat.
-  const [theme, setTheme] = useState('')
-  const [structure, setStructure] = useState('')
-  const [example, setExample] = useState('')
   const [category, setCategory] = useState('')
   // Tags entered as comma-separated text; split on submit. Editing backfills
   // the existing tags joined by ", ".
   const [tagsText, setTagsText] = useState('')
-  // 公众号 (article) 字段：author 是发布署名，writer 是写作风格资源 key。
-  const [author, setAuthor] = useState('')
-  const [writer, setWriter] = useState('')
-  // E-commerce template defaults (type="ecommerce"). Pre-fill the task form when
-  // this template is picked. Visual style reuses the shared style_prompt field
-  // above; product photos are NEVER part of the template (per-task upload).
-  const [ecommerceModules, setEcommerceModules] = useState<Record<string, number>>({})
-  const [ecommerceTargetPlatform, setEcommerceTargetPlatform] = useState('')
-  const [ecommerceBrandBrief, setEcommerceBrandBrief] = useState('')
-  const [ecommerceImageModelKey, setEcommerceImageModelKey] = useState('')
-  const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
 
   // Session epoch: incremented every time the dialog opens. Captured at the
   // start of handleSubmit and compared after the await — if the user closed
@@ -130,38 +92,16 @@ export function TemplateCreateDialog({
       setThumbnailUrl(template.thumbnail_url)
       setStylePrompt(template.style_prompt)
       setVisibility(template.visibility === 'private' ? 'private' : 'public')
-      setWritingStyle(template.writer ?? '')
-      setTheme(template.theme ?? '')
-      setAuthor(template.author ?? '')
-      setWriter(template.writer ?? '')
-      // structure / example are stored as { text: ... }; fall back to raw for
-      // legacy rows that may have stored plain strings.
-      setStructure(extractScaffoldText(template.structure))
-      setExample(extractScaffoldText(template.example_content))
       setCategory(template.category ?? '')
       setTagsText(Array.isArray(template.tags) ? template.tags.join(', ') : '')
-      setEcommerceModules(template.ecommerce?.default_selected_modules ?? {})
-      setEcommerceTargetPlatform(template.ecommerce?.target_platform ?? '')
-      setEcommerceBrandBrief(template.ecommerce?.brand_brief ?? '')
-      setEcommerceImageModelKey(template.ecommerce?.image_model_key ?? '')
     } else {
       setName('')
       setType(defaultType)
       setThumbnailUrl('')
       setStylePrompt('')
       setVisibility('public')
-      setWritingStyle('')
-      setTheme('')
-      setAuthor('')
-      setWriter('')
-      setStructure('')
-      setExample('')
       setCategory('')
       setTagsText('')
-      setEcommerceModules({})
-      setEcommerceTargetPlatform('')
-      setEcommerceBrandBrief('')
-      setEcommerceImageModelKey('')
     }
   }, [open, template, defaultType])
 
@@ -239,10 +179,6 @@ export function TemplateCreateDialog({
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean)
-      // Build payload with the scaffold fields. Each scaffold field is only
-      // included when non-empty: the backend Update treats "absent = no change"
-      // and "non-empty = set", so omitting empties preserves prior values on
-      // edit and avoids clobbering with blanks on create.
       const payload: CreateTemplateRequest = {
         name: finalName,
         type,
@@ -250,40 +186,9 @@ export function TemplateCreateDialog({
         style_prompt: stylePrompt.trim(),
         visibility,
       }
-      // Type-aware payload: each type sends only the fields its form renders.
-      // Article templates may carry writer, but only as a selected writer
-      // resource key; free-text writing voice is no longer a business field.
-      if (type === 'poster') {
-        payload.writer = writingStyle.trim()
-        const structureTrimmed = structure.trim()
-        if (structureTrimmed) payload.structure = structureTrimmed
-        const exampleTrimmed = example.trim()
-        if (exampleTrimmed) payload.example_content = exampleTrimmed
-        const categoryTrimmed = category.trim()
-        if (categoryTrimmed) payload.category = categoryTrimmed
-        if (trimmedTags.length > 0) payload.tags = trimmedTags
-      }
-      if (type === 'article') {
-        payload.theme = theme.trim()
-        payload.author = author.trim()
-        payload.writer = writer.trim()
-      }
-      if (type === 'ecommerce') {
-        // E-commerce defaults — only the non-empty ones are attached, matching
-        // the backend Update "absent = no change" semantics. Modules are pruned
-        // of zero/absent quantities so the template carries only active modules.
-        const modules: Record<string, number> = {}
-        for (const [k, q] of Object.entries(ecommerceModules)) {
-          if (q >= 1) modules[k] = q
-        }
-        const ecommerce: NonNullable<CreateTemplateRequest['ecommerce']> = {}
-        if (Object.keys(modules).length > 0) ecommerce.default_selected_modules = modules
-        if (ecommerceTargetPlatform) ecommerce.target_platform = ecommerceTargetPlatform
-        const brandBriefTrimmed = ecommerceBrandBrief.trim()
-        if (brandBriefTrimmed) ecommerce.brand_brief = brandBriefTrimmed
-        if (ecommerceImageModelKey) ecommerce.image_model_key = ecommerceImageModelKey
-        if (Object.keys(ecommerce).length > 0) payload.ecommerce = ecommerce
-      }
+      const categoryTrimmed = category.trim()
+      if (categoryTrimmed) payload.category = categoryTrimmed
+      if (trimmedTags.length > 0) payload.tags = trimmedTags
       if (isEditing && template) {
         await updateMutation.mutateAsync({ id: template.id, data: payload as UpdateTemplateRequest })
       } else {
@@ -432,187 +337,32 @@ export function TemplateCreateDialog({
             </p>
           </div>
 
-          {/* 海报 (poster) — legacy 内容脚手架 (writing style / structure /
-              example / category / tags). Poster keeps the original form
-              unchanged (see no-silent-feature-removal). */}
-          {type === 'poster' && (
-            <div className="space-y-3 rounded-lg border border-dashed border-input p-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm font-medium">内容脚手架</Label>
-                <span className="text-xs text-muted-foreground">可选，创建任务/计划选此模板时送达 AI</span>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="tpl-writing-style" className="text-xs text-muted-foreground">
-                  写作风格 / 调性
-                </Label>
-                <Textarea
-                  id="tpl-writing-style"
-                  value={writingStyle}
-                  onChange={(e) => setWritingStyle(e.target.value)}
-                  placeholder="例如：犀利、接地气、像朋友聊天；多用短句和反问"
-                  maxLength={1024}
-                  className="resize-none"
-                  rows={2}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="tpl-structure" className="text-xs text-muted-foreground">
-                  内容结构
-                </Label>
-                <Textarea
-                  id="tpl-structure"
-                  value={structure}
-                  onChange={(e) => setStructure(e.target.value)}
-                  placeholder={'例如：\n1. 开头钩子（一句话点出痛点）\n2. 3 个论点（每个配案例）\n3. 行动号召'}
-                  className="resize-none font-mono text-xs"
-                  rows={4}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="tpl-example" className="text-xs text-muted-foreground">
-                  示例内容
-                </Label>
-                <Textarea
-                  id="tpl-example"
-                  value={example}
-                  onChange={(e) => setExample(e.target.value)}
-                  placeholder="贴一段你认可的成稿片段，AI 会模仿它的语气与节奏"
-                  className="resize-none"
-                  rows={4}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="tpl-category" className="text-xs text-muted-foreground">
-                    分类
-                  </Label>
-                  <Input
-                    id="tpl-category"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    placeholder="例如：个人成长"
-                    maxLength={50}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="tpl-tags" className="text-xs text-muted-foreground">
-                    标签<span className="ml-1 font-normal">（逗号分隔）</span>
-                  </Label>
-                  <Input
-                    id="tpl-tags"
-                    value={tagsText}
-                    onChange={(e) => setTagsText(e.target.value)}
-                    placeholder="例如：干货, 方法论"
-                    maxLength={200}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 公众号 (article) — 发布署名 + 写作风格 key + 排版风格。头像/昵称仅用于
-              Studio 资源展示，不写入模板业务字段。 */}
-          {type === 'article' && (
-            <>
-              <PersonaBlock
-                author={author}
-                onAuthor={setAuthor}
-                writer={writer}
-                onWriter={setWriter}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="tpl-category" className="text-xs text-muted-foreground">
+                分类
+              </Label>
+              <Input
+                id="tpl-category"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="例如：生活方式"
+                maxLength={50}
               />
-              <ThemePicker theme={theme} onTheme={setTheme} />
-            </>
-          )}
-
-          {/* 电商 (ecommerce) — 视觉风格沿用上方公共 style_prompt 字段（三维风格架构：
-              电商只用 Style 维度）。此处配置建任务选此模板时自动带入的默认模块/目标平台/
-              品牌定位/默认模型；产品图始终在任务级上传，不进模板。 */}
-          {type === 'ecommerce' && (
-            <div className="space-y-3 rounded-lg border border-dashed border-input p-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm font-medium">电商默认配置</Label>
-                <span className="text-xs text-muted-foreground">可选，建任务选此模板时自动带入</span>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">默认交付模块</Label>
-                <div className="divide-y divide-border">
-                  {ecommerceModuleCatalog.map((mod) => {
-                    const qty = ecommerceModules[mod.key] ?? 0
-                    const enabled = qty >= 1
-                    return (
-                      <div key={mod.key} className="flex items-center justify-between gap-3 py-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-medium text-foreground">{mod.label}</p>
-                            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{mod.ratio}</span>
-                          </div>
-                          <p className="mt-0.5 text-xs text-muted-foreground">{mod.hint}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {enabled && (
-                            <div className="flex items-center gap-1">
-                              <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setEcommerceModules((cur) => ({ ...cur, [mod.key]: Math.max(mod.minQty, (cur[mod.key] ?? mod.defaultQty) - mod.qtyStep) }))} aria-label="减少">
-                                <Minus className="h-3 w-3" />
-                              </Button>
-                              <span className="w-8 text-center text-sm tabular-nums">{qty}{mod.qtyLabel}</span>
-                              <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" onClick={() => setEcommerceModules((cur) => ({ ...cur, [mod.key]: Math.min(mod.maxQty, (cur[mod.key] ?? mod.defaultQty) + mod.qtyStep) }))} aria-label="增加">
-                                <Plus className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          )}
-                          <Switch
-                            checked={enabled}
-                            onCheckedChange={(on) => setEcommerceModules((cur) => {
-                              const next = { ...cur }
-                              if (on) next[mod.key] = mod.defaultQty
-                              else delete next[mod.key]
-                              return next
-                            })}
-                            aria-label={`默认启用 ${mod.label}`}
-                          />
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">默认目标平台</Label>
-                <Select value={ecommerceTargetPlatform || undefined} onValueChange={(v) => setEcommerceTargetPlatform(v ?? '')}>
-                  <SelectTrigger className="w-full"><SelectValue placeholder="不指定（建任务时再选）" /></SelectTrigger>
-                  <SelectContent>
-                    {ecommerceTargetPlatformOptions.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="tpl-brand-brief" className="text-xs text-muted-foreground">品牌定位 / 调性</Label>
-                <Textarea
-                  id="tpl-brand-brief"
-                  value={ecommerceBrandBrief}
-                  onChange={(e) => setEcommerceBrandBrief(e.target.value)}
-                  placeholder="例如：新锐国货美妆、主打成分党、高级简约视觉；用于约束跨图一致的品牌语境"
-                  maxLength={1024}
-                  className="resize-none"
-                  rows={2}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">默认图像模型</Label>
-                {imageModelsLoading ? (
-                  <Skeleton className="h-10 w-full rounded-xl" />
-                ) : (
-                  <ImageModelSelector options={imageModelOptions} value={ecommerceImageModelKey} onChange={setEcommerceImageModelKey} />
-                )}
-              </div>
             </div>
-          )}
+            <div className="space-y-1.5">
+              <Label htmlFor="tpl-tags" className="text-xs text-muted-foreground">
+                标签<span className="ml-1 font-normal">（逗号分隔）</span>
+              </Label>
+              <Input
+                id="tpl-tags"
+                value={tagsText}
+                onChange={(e) => setTagsText(e.target.value)}
+                placeholder="例如：暖色, 写实"
+                maxLength={200}
+              />
+            </div>
+          </div>
         </div>
 
         <DialogFooter>

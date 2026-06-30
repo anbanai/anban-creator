@@ -14,9 +14,8 @@ import (
 // double-charge risk.
 //
 // Only failed (or cancelled) tasks may be retried. The cloned task carries the
-// original's per-dimension overrides (src.Overrides) verbatim, so it inherits
-// the same project dimensions and applies the same task-level overrides as the
-// failed run (live inheritance: task.Overrides.X ?? project.X).
+// original's project snapshot verbatim so it uses the same frozen config as the
+// failed run.
 func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, error) {
 	src, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -41,6 +40,7 @@ func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, er
 	articleContent := src.ArticleWithContentImages
 
 	overrides := src.Overrides.Data()
+	snapshot := src.ProjectSnapshot.Data()
 	params := CreateManualParams{
 		UserID:                   src.UserID,
 		ProjectID:                src.ProjectID,
@@ -51,6 +51,7 @@ func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, er
 		SkipRefImage:             &skipRef,
 		ReferenceImageURL:        src.ReferenceImageURL,
 		Overrides:                &overrides,
+		ProjectSnapshot:          &snapshot,
 		Watermark:                &watermark,
 		Goal:                     src.Goal,
 		GoalMode:                 src.GoalMode,

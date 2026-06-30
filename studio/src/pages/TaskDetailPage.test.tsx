@@ -97,6 +97,33 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
   })
 
+  it('shows the frozen project snapshot', async () => {
+    mockTask(taskWith({
+      type: 'article',
+      status: 'completed',
+      result: { files: null, output: '' },
+      project_snapshot: {
+        project_name: '快照项目',
+        platform: 'article',
+        visual_style: '柔光生活摄影',
+        image_ratio: '16:9',
+        reference_image_url: '/api/v1/files/ref.png',
+        author: '安般',
+        writer: 'dan-koe',
+        theme: 'autumn-warm',
+      },
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('项目快照')).toBeInTheDocument()
+    expect(screen.getByText('快照项目')).toBeInTheDocument()
+    expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
+    expect(screen.getByText('安般')).toBeInTheDocument()
+    expect(screen.getByText('dan-koe')).toBeInTheDocument()
+    expect(screen.getByText('autumn-warm')).toBeInTheDocument()
+  })
+
   it('renders dynamic logs as markdown and keeps copyable raw text', async () => {
     const writeText = vi.fn()
     Object.assign(navigator, {

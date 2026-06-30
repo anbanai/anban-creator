@@ -24,8 +24,6 @@ import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { SignedImage } from '@/components/ui/SignedImage'
-import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 
@@ -41,7 +39,7 @@ export default function TaskDetailPage() {
   }, [id, navigate])
 
   const queryClient = useQueryClient()
-  const { token, user } = useAuth()
+  const { token } = useAuth()
 
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
@@ -53,7 +51,6 @@ export default function TaskDetailPage() {
   } | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [showTemplatePreview, setShowTemplatePreview] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
   const logContainerRef = useRef<HTMLDivElement | null>(null)
@@ -92,16 +89,6 @@ export default function TaskDetailPage() {
   })
   const project = projectDetail?.project
 
-  // Resolve the template used to create this task, if any.
-  // template_id is a UI-attribution field only — the template may have been
-  // deleted since task creation; the card renders a fallback in that case.
-  const templateId = task?.template_id
-  const { data: usedTemplate, isError: templateNotFound } = useQuery({
-    queryKey: queryKeys.templates.detail(templateId!),
-    queryFn: () => api.templates.get(templateId!),
-    enabled: !!templateId,
-    retry: false,
-  })
   const MAX_PERSISTED_LOGS = 500
   const persistedLogs = (task?.progress_log
     ?.split('\n')
@@ -609,56 +596,66 @@ export default function TaskDetailPage() {
         <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
-      {/* Used template attribution card */}
-      {task.template_id && (
+      {task.project_snapshot && task.project_snapshot.platform && (
         <Card>
-          <CardContent>
-            <p className="text-xs text-muted-foreground mb-2">使用模板</p>
-            {templateNotFound ? (
-              <p className="text-sm text-muted-foreground italic">
-                模板不可访问（id: <span className="font-mono">{task.template_id.slice(0, 8)}</span>）
+          <CardContent className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground">项目快照</p>
+              <p className="mt-1 text-sm font-medium text-foreground">
+                {task.project_snapshot.project_name || project?.name || '—'}
               </p>
-            ) : usedTemplate ? (
-              <button
-                type="button"
-                onClick={() => setShowTemplatePreview(true)}
-                aria-label={`查看模板详情：${usedTemplate.name}`}
-                className="group flex w-full items-start gap-3 rounded-md -mx-1 px-1 py-1 text-left transition-colors hover:bg-accent/50"
-              >
-                <div className="relative h-20 w-[60px] shrink-0 overflow-hidden rounded-md bg-secondary">
-                  {usedTemplate.thumbnail_url ? (
-                    <SignedImage
-                      src={usedTemplate.thumbnail_url}
-                      alt={usedTemplate.name}
-                      className="h-full w-full object-cover"
-                      showLoading={false}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-base font-medium text-muted-foreground">
-                      {usedTemplate.name.charAt(0)}
-                    </div>
-                  )}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <p className="text-xs text-muted-foreground">视觉风格</p>
+                <p className="mt-1 line-clamp-3 text-sm text-foreground">{task.project_snapshot.visual_style || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">图片比例</p>
+                <p className="mt-1 text-sm text-foreground">{task.project_snapshot.image_ratio || task.image_ratio || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">参考图</p>
+                <p className="mt-1 truncate text-sm text-foreground">{task.project_snapshot.reference_image_url || '—'}</p>
+              </div>
+            </div>
+            {task.type === 'article' && (
+              <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">署名</p>
+                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.author || '—'}</p>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{usedTemplate.name}</p>
-                  {usedTemplate.category && (
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">{usedTemplate.category}</p>
-                  )}
-                  {usedTemplate.style_prompt && (
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/80">
-                      {usedTemplate.style_prompt}
-                    </p>
-                  )}
-                  <p className="mt-1 text-[11px] text-primary/70 group-hover:text-primary">点击查看详情</p>
+                <div>
+                  <p className="text-xs text-muted-foreground">写作风格</p>
+                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.writer || '默认'}</p>
                 </div>
-              </button>
-            ) : (
-              <div className="flex items-start gap-3">
-                <Skeleton className="h-12 w-12 rounded-md" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-3 w-20" />
-                  <Skeleton className="h-3 w-full" />
+                <div>
+                  <p className="text-xs text-muted-foreground">排版</p>
+                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.theme || '默认'}</p>
+                </div>
+              </div>
+            )}
+            {task.type === 'ecommerce' && task.project_snapshot.ecommerce_defaults && (
+              <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">目标平台</p>
+                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.ecommerce_defaults.target_platform || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">图片模型</p>
+                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.ecommerce_defaults.image_model_key || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">默认模块</p>
+                  <p className="mt-1 text-sm text-foreground">
+                    {task.project_snapshot.ecommerce_defaults.default_selected_modules
+                      ? Object.entries(task.project_snapshot.ecommerce_defaults.default_selected_modules).map(([k, v]) => `${k} x${v}`).join('、')
+                      : '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">品牌 brief</p>
+                  <p className="mt-1 line-clamp-3 text-sm text-foreground">{task.project_snapshot.ecommerce_defaults.brand_brief || '—'}</p>
                 </div>
               </div>
             )}
@@ -917,13 +914,6 @@ export default function TaskDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <TemplatePreview
-        template={usedTemplate ?? null}
-        open={showTemplatePreview}
-        onOpenChange={setShowTemplatePreview}
-        currentUserId={user?.id}
-      />
     </div>
   )
 }

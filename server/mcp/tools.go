@@ -116,13 +116,13 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get a project's resolved creation profile for AI content generation. Returns the project's instructions positioning/keywords/name plus the EFFECTIVE (already-resolved) style/theme/author dimensions, each with its own *_source tag (\"task\" when the task overrode it, else \"project\"): `visual_style` (图片视觉, free text), `writer` (写作者 YAML resource key e.g. dan-koe), `author` (作者署名 — the published author name; pass verbatim to publish_draft's author, omit if empty), `theme` (排版 resource key e.g. autumn-warm). Studio-only writer display metadata such as avatars/nicknames is intentionally not exposed. These dimensions are independent and never derive from each other. Resolution is two-layer (task override > project); pass task_id when one exists so per-task overrides surface. Does NOT expose credentials.",
+		Description: "Get a project's resolved creation profile for AI content generation. Returns the project's instructions positioning/keywords/name plus the EFFECTIVE (already-resolved) style/theme/author dimensions: `visual_style` (图片视觉, free text), `writer` (写作者 YAML resource key e.g. dan-koe), `author` (作者署名 — the published author name; pass verbatim to publish_draft's author, omit if empty), `theme` (排版 resource key e.g. autumn-warm). Studio-only writer display metadata such as avatars/nicknames is intentionally not exposed. These dimensions are independent and never derive from each other. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "ecommerce"}, "description": "Filter output by content type"},
-				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, per-task overrides resolve on top of the project (task > project) and each dimension's *_source reflects where it came from. The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists."},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, reads the task's frozen project_snapshot so historical tasks stay reproducible. The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists."},
 			},
 			"required": []any{"project_id"},
 		},
@@ -301,15 +301,10 @@ func accountInfoHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 }
 
 // buildAccountInfo is the testable core of get_project_profile. It returns a
-// FLAT, fully-resolved creation profile: every style/author/theme dimension is
-// resolved two-layer (task override > project) through service.ResolveStyle — the
-// SAME primitive the prompt (BuildUserPrompt) and settings.json (config_builder)
-// channels use — so the three delivery channels to the agent can never disagree.
-// Each dimension carries its own *_source tag ("task" when the task overrode it,
-// else "project"). The old template_* namespace, the task>template>project
-// three-layer resolution, and the project-template theme fold are all GONE: a
-// project is the single source of truth and a task only stores per-dimension
-// overrides.
+// flat, fully resolved creation profile. For new rows, a supplied task_id applies
+// the task's frozen project_snapshot; old rows without snapshots fall back to
+// legacy task overrides over the current project. The same ResolveStyle primitive
+// feeds prompt/settings/MCP channels so they cannot disagree.
 func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (map[string]any, string) {
 	projectID, _ := args["project_id"].(string)
 	if projectID == "" {
@@ -327,8 +322,8 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	}
 	service.SanitizeProject(ch)
 
-	// Load the requested task (if any) so per-task overrides surface. The task must
-	// belong to the same user+project, otherwise the call is rejected.
+	// Load the requested task (if any) so its frozen project snapshot surfaces.
+	// The task must belong to the same user+project, otherwise the call is rejected.
 	var task *model.Task
 	if taskID != "" {
 		if svcs.TaskSvc == nil {
@@ -343,11 +338,14 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		if task.UserID != userID || task.ProjectID != projectID {
 			return nil, "task does not belong to the requested project"
 		}
+		if snap := task.ProjectSnapshot.Data(); snap.Platform != "" {
+			ch = model.ProjectFromSnapshot(ch, snap)
+		}
 	}
 
-	// ONE resolution, two layers (task override > project). The dimensions are
-	// independent — the writer key never drives the visual style, the author never
-	// equals the writer persona — and each carries its provenance.
+	// The dimensions are independent — the writer key never drives the visual
+	// style, the author never equals the writer persona — and each carries its
+	// provenance.
 	r := service.ResolveStyle(ch, task)
 
 	// Flat profile. Every runtime style/theme/author dimension is exposed directly (no

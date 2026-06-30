@@ -65,10 +65,11 @@ type UserPromptParams struct {
 // message only needs to provide the topic or an autonomous execution instruction.
 //
 // The prompt is behavioral only — it never carries the visual / writer / author / theme
-// style dimensions. Those are resolved once (resolver.ResolveStyle, two-layer
-// task ?? project) and read by the agent from get_project_profile(task_id); the
-// app-library projection lands in settings.json. Injecting them here too would
-// create a second, divergent copy of the same values.
+// style dimensions. Those are resolved once from the task's frozen project
+// snapshot, with a legacy override fallback for old rows, and read by the agent
+// from get_project_profile(task_id); the app-library projection lands in
+// settings.json. Injecting them here too would create a second, divergent copy
+// of the same values.
 //
 // p.Goal, when non-empty, is prepended as a /goal slash command so Claude Code's
 // built-in goal loop drives turn-by-turn evaluation inside the same session.
@@ -440,15 +441,15 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 3. Write project config to workspace settings.json.
-	// Resolve the effective style dimensions two-layer (task.Overrides ?? project)
-	// ONCE; settings.json here and the user prompt below both read this same
-	// resolution so the two channels can never disagree. (P2 moves the
-	// visual/writer/author/theme dimensions fully to MCP, but they stay single-sourced
-	// here regardless.) resolved is zero-valued when there is no project.
+	// Resolve the effective style dimensions ONCE from the task snapshot (legacy
+	// rows without a snapshot may still use old task overrides). settings.json
+	// here and the MCP profile read the same source so the two channels cannot
+	// diverge. resolved is zero-valued when there is no project.
 	var resolved resolver.Resolved
 	if opts.Project != nil {
-		resolved = resolver.ResolveStyle(opts.Project, opts.Task)
-		cfg, err := BuildAppConfig(opts.Project, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
+		effectiveProject := EffectiveProject(opts.Project, opts.Task)
+		resolved = resolver.ResolveStyle(effectiveProject, opts.Task)
+		cfg, err := BuildAppConfig(effectiveProject, resolved, e.imageAPICfg, opts.Task.ImageRatio, opts.Task.SkipReferenceImage, opts.Task.ReferenceImageURL)
 		if err != nil {
 			return nil, fmt.Errorf("build app config: %w", err)
 		}
@@ -458,7 +459,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		// Write project positioning as CLAUDE.md so Claude Code loads it as
 		// persistent project memory. Non-fatal: missing the file should not abort
 		// a task; the agent can still rely on its default agent definition.
-		if err := writeProjectCLAUDEMD(workDir, opts.Project); err != nil {
+		if err := writeProjectCLAUDEMD(workDir, effectiveProject); err != nil {
 			e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to write project CLAUDE.md, continuing")
 		}
 

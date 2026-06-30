@@ -203,102 +203,119 @@ func TestTemplateService_Update_OwnerOnly(t *testing.T) {
 	}
 }
 
-// TestTemplateService_Update_PersistsScaffold: the content scaffold fields
-// (Writer / Structure / ExampleContent / Category / Tags) set via Update
-// must round-trip through the repository. The repository uses db.Save (writes
-// ALL columns), so the service MUST copy every patch field onto `existing` —
-// forgetting one silently persists the OLD value. This test guards that footgun.
-func TestTemplateService_Update_PersistsScaffold(t *testing.T) {
+func TestTemplateService_Create_WritesVisualOnly(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	ctx := context.Background()
 	ownerID := uuid.New().String()
 
-	created, err := svc.Create(ctx, &model.Template{Name: "脚手架模板", Type: "article"}, ownerID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	patch := &model.Template{
+	tmpl := &model.Template{
+		Name:           "视觉模板",
+		Type:           "article",
+		VisualStyle:    "暖色生活摄影",
 		Writer:         "犀利、接地气",
+		Theme:          "autumn-warm",
+		Author:         "老李",
 		Structure:      map[string]any{"text": "钩子 → 论点 → 行动"},
 		ExampleContent: map[string]any{"text": "示例正文"},
 		Category:       "个人成长",
 		Tags:           []string{"干货", "方法论"},
 	}
-	updated, err := svc.Update(ctx, created.ID, ownerID, patch)
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if updated.Writer != "犀利、接地气" {
-		t.Errorf("Writer = %q, want 犀利、接地气", updated.Writer)
-	}
-	if got, ok := updated.Structure["text"].(string); !ok || got != "钩子 → 论点 → 行动" {
-		t.Errorf("Structure = %v, want {text: 钩子 → 论点 → 行动}", updated.Structure)
-	}
-	if got, ok := updated.ExampleContent["text"].(string); !ok || got != "示例正文" {
-		t.Errorf("ExampleContent = %v, want {text: 示例正文}", updated.ExampleContent)
-	}
-	if updated.Category != "个人成长" {
-		t.Errorf("Category = %q, want 个人成长", updated.Category)
-	}
-	if len(updated.Tags) != 2 || updated.Tags[0] != "干货" || updated.Tags[1] != "方法论" {
-		t.Errorf("Tags = %v, want [干货 方法论]", updated.Tags)
-	}
+	tmpl.SetEcommerce(model.EcommerceTemplateDefaults{
+		DefaultSelectedModules: map[string]int{"product_poster": 1},
+		TargetPlatform:         "tmall",
+		BrandBrief:             "品牌说明",
+		ImageModelKey:          "openai-gpt-image",
+	})
 
-	// Re-fetch from the repository to confirm persistence (not just in-memory).
-	refetched, err := svc.GetByID(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	if refetched.Writer != "犀利、接地气" {
-		t.Errorf("persisted Writer = %q, want 犀利、接地气", refetched.Writer)
-	}
-	if got, ok := refetched.Structure["text"].(string); !ok || got != "钩子 → 论点 → 行动" {
-		t.Errorf("persisted Structure = %v", refetched.Structure)
-	}
-}
-
-// TestTemplateService_Update_PersistsAuthorFields: the runtime author/writer
-// fields set via Update must round-trip through the repository.
-func TestTemplateService_Update_PersistsAuthorFields(t *testing.T) {
-	svc, _, _ := setupTemplateService(t)
-	ctx := context.Background()
-	ownerID := uuid.New().String()
-
-	created, err := svc.Create(ctx, &model.Template{Name: "作者模板", Type: "article"}, ownerID)
+	created, err := svc.Create(ctx, tmpl, ownerID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	if created.VisualStyle != "暖色生活摄影" {
+		t.Errorf("VisualStyle = %q, want 暖色生活摄影", created.VisualStyle)
+	}
+	if created.Category != "个人成长" {
+		t.Errorf("Category = %q, want 个人成长", created.Category)
+	}
+	if len(created.Tags) != 2 || created.Tags[0] != "干货" || created.Tags[1] != "方法论" {
+		t.Errorf("Tags = %v, want [干货 方法论]", created.Tags)
+	}
+	if created.Writer != "" || created.Theme != "" || created.Author != "" {
+		t.Fatalf("Writer/Theme/Author = %q/%q/%q, want empty visual-only fields", created.Writer, created.Theme, created.Author)
+	}
+	if created.Structure != nil || created.ExampleContent != nil {
+		t.Fatalf("Structure/ExampleContent = %v/%v, want nil visual-only fields", created.Structure, created.ExampleContent)
+	}
+	if ec := created.Ecommerce.Data(); len(ec.DefaultSelectedModules) > 0 || ec.TargetPlatform != "" || ec.BrandBrief != "" || ec.ImageModelKey != "" {
+		t.Fatalf("Ecommerce = %+v, want empty visual-only payload", ec)
+	}
 
-	patch := &model.Template{
-		Author: "老李",
-		Writer: "dan-koe",
-	}
-	updated, err := svc.Update(ctx, created.ID, ownerID, patch)
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if updated.Author != "老李" {
-		t.Errorf("Author = %q, want 老李", updated.Author)
-	}
-	if updated.Writer != "dan-koe" {
-		t.Errorf("Writer = %q, want dan-koe", updated.Writer)
-	}
-
-	// Re-fetch to confirm persistence (not just in-memory).
 	refetched, err := svc.GetByID(ctx, created.ID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if refetched.Author != "老李" {
-		t.Errorf("persisted Author = %q, want 老李", refetched.Author)
-	}
-	if refetched.Writer != "dan-koe" {
-		t.Errorf("persisted Writer = %q", refetched.Writer)
+	if refetched.Writer != "" || refetched.Theme != "" || refetched.Author != "" || refetched.Structure != nil || refetched.ExampleContent != nil {
+		t.Fatalf("persisted legacy fields = writer:%q theme:%q author:%q structure:%v example:%v, want empty",
+			refetched.Writer, refetched.Theme, refetched.Author, refetched.Structure, refetched.ExampleContent)
 	}
 }
 
-func TestTemplateService_Update_EmptyVisualStylePatchDoesNotClearExisting(t *testing.T) {
+func TestTemplateService_Update_IgnoresLegacyBusinessFields(t *testing.T) {
+	svc, repo, _ := setupTemplateService(t)
+	ctx := context.Background()
+	ownerID := uuid.New().String()
+
+	legacy := &model.Template{
+		ID:             uuid.NewString(),
+		UserID:         ownerID,
+		Name:           "旧模板",
+		Type:           "article",
+		VisualStyle:    "旧视觉",
+		Writer:         "legacy-writer",
+		Theme:          "legacy-theme",
+		Author:         "legacy-author",
+		Structure:      map[string]any{"text": "legacy-structure"},
+		ExampleContent: map[string]any{"text": "legacy-example"},
+		Category:       "旧分类",
+		Tags:           []string{"旧标签"},
+	}
+	legacy.SetEcommerce(model.EcommerceTemplateDefaults{TargetPlatform: "legacy-platform"})
+	if err := repo.Templates().Create(ctx, legacy); err != nil {
+		t.Fatalf("create legacy template: %v", err)
+	}
+
+	updated, err := svc.Update(ctx, legacy.ID, ownerID, &model.Template{
+		Name:           "新模板",
+		VisualStyle:    "新视觉",
+		Writer:         "new-writer",
+		Theme:          "new-theme",
+		Author:         "new-author",
+		Structure:      map[string]any{"text": "new-structure"},
+		ExampleContent: map[string]any{"text": "new-example"},
+		Category:       "新分类",
+		Tags:           []string{"新标签"},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Name != "新模板" || updated.VisualStyle != "新视觉" || updated.Category != "新分类" {
+		t.Fatalf("updated visual metadata = name:%q visual:%q category:%q", updated.Name, updated.VisualStyle, updated.Category)
+	}
+	if len(updated.Tags) != 1 || updated.Tags[0] != "新标签" {
+		t.Fatalf("Tags = %v, want [新标签]", updated.Tags)
+	}
+	if updated.Writer != "legacy-writer" || updated.Theme != "legacy-theme" || updated.Author != "legacy-author" {
+		t.Fatalf("legacy writer/theme/author = %q/%q/%q, want preserved legacy values", updated.Writer, updated.Theme, updated.Author)
+	}
+	if got := updated.Structure["text"]; got != "legacy-structure" {
+		t.Fatalf("Structure = %v, want preserved legacy-structure", updated.Structure)
+	}
+	if got := updated.ExampleContent["text"]; got != "legacy-example" {
+		t.Fatalf("ExampleContent = %v, want preserved legacy-example", updated.ExampleContent)
+	}
+}
+
+func TestTemplateService_Update_LegacyRuntimePatchDoesNotClearVisualStyle(t *testing.T) {
 	svc, _, _ := setupTemplateService(t)
 	ctx := context.Background()
 	ownerID := uuid.New().String()
@@ -319,75 +336,8 @@ func TestTemplateService_Update_EmptyVisualStylePatchDoesNotClearExisting(t *tes
 	if updated.VisualStyle != "暖色生活摄影" {
 		t.Fatalf("VisualStyle = %q, want existing style preserved", updated.VisualStyle)
 	}
-}
-
-func TestTemplateService_UpdatePatch_AllowsClearingRuntimeFields(t *testing.T) {
-	svc, _, _ := setupTemplateService(t)
-	ctx := context.Background()
-	ownerID := uuid.New().String()
-
-	created, err := svc.Create(ctx, &model.Template{
-		Name:        "可清空模板",
-		Type:        "article",
-		VisualStyle: "暖色生活摄影",
-		Writer:      "dan-koe",
-		Author:      "老李",
-		Theme:       "autumn-warm",
-	}, ownerID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	empty := ""
-	updated, err := svc.UpdatePatch(ctx, created.ID, ownerID, TemplatePatch{
-		Writer: &empty,
-		Author: &empty,
-		Theme:  &empty,
-	})
-	if err != nil {
-		t.Fatalf("UpdatePatch: %v", err)
-	}
-	if updated.Writer != "" || updated.Author != "" || updated.Theme != "" {
-		t.Fatalf("Writer/Author/Theme = %q/%q/%q, want all cleared", updated.Writer, updated.Author, updated.Theme)
-	}
-	if updated.VisualStyle != "暖色生活摄影" {
-		t.Fatalf("VisualStyle = %q, want omitted style preserved", updated.VisualStyle)
-	}
-}
-
-// TestTemplateService_Update_PersistsTheme: the 公众号 排版样式 (Theme) set via
-// Update must round-trip through the repository. Same footgun guard as the
-// scaffold/author tests: the repo writes ALL columns, so the service
-// must copy patch.Theme onto existing — forgetting it silently keeps the OLD
-// theme, which is exactly the "编辑后保存无效" bug.
-func TestTemplateService_Update_PersistsTheme(t *testing.T) {
-	svc, _, _ := setupTemplateService(t)
-	ctx := context.Background()
-	ownerID := uuid.New().String()
-
-	created, err := svc.Create(ctx, &model.Template{Name: "排版模板", Type: "article"}, ownerID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	patch := &model.Template{
-		Theme: "autumn-warm",
-	}
-	updated, err := svc.Update(ctx, created.ID, ownerID, patch)
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if updated.Theme != "autumn-warm" {
-		t.Errorf("Theme = %q, want autumn-warm", updated.Theme)
-	}
-
-	// Re-fetch to confirm persistence (not just in-memory).
-	refetched, err := svc.GetByID(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	if refetched.Theme != "autumn-warm" {
-		t.Errorf("persisted Theme = %q, want autumn-warm", refetched.Theme)
+	if updated.Theme != "" {
+		t.Fatalf("Theme = %q, want ignored legacy runtime field", updated.Theme)
 	}
 }
 

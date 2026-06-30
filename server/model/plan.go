@@ -4,13 +4,10 @@ import "time"
 
 // Plan represents a scheduled content generation plan.
 //
-// A plan is a scheduler under a project that ALSO carries the orthogonal
-// style/author/theme dimensions (VisualStyle / Writer / Author / Theme). At CreateFromPlan these are copied into the
-// spawned task's Task.Overrides (non-empty only), so two plans under one project
-// can theme their tasks differently — e.g. different authors or visual styles.
-// The resolver stays two-layer (task.Overrides > project); the plan simply seeds
-// the task's overrides. A plan also owns scheduling (cron / topic hint / status),
-// goal-mode, and a few per-plan image defaults that flow to the tasks it spawns.
+// A plan is a scheduler under a project. It owns scheduling (cron / topic hint /
+// status), goal-mode, and a few per-plan image defaults that flow to spawned
+// tasks. Project/account style config is snapshotted from the project when the
+// task is created; plans no longer override visual/writer/author/theme.
 type Plan struct {
 	ID          string `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID      string `gorm:"type:char(36);index;not null" json:"user_id"`
@@ -39,9 +36,8 @@ type Plan struct {
 	ArticleWithCover         *bool `gorm:"default:true;not null" json:"article_with_cover"`
 	ArticleWithContentImages *bool `gorm:"default:true;not null" json:"article_with_content_images"`
 
-	// Style/author/theme dimensions, copied into spawned tasks' Task.Overrides
-	// at CreateFromPlan (non-empty only). Orthogonal to each other and to the
-	// scheduling fields above; empty = inherit from the project at resolve time.
+	// Legacy style/author/theme columns. New code no longer writes or reads these;
+	// task runtime config is frozen from the owning project into Task.ProjectSnapshot.
 	VisualStyle string `gorm:"type:varchar(1024);default:''" json:"visual_style,omitempty"` // 图片视觉 (free text)
 	Writer      string `gorm:"type:varchar(100);default:''" json:"writer,omitempty"`        // 写作者 YAML resource key
 	Author      string `gorm:"type:varchar(200);default:''" json:"author,omitempty"`        // 作者署名 (publish author — never a writer persona name)

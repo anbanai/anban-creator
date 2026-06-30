@@ -42,7 +42,7 @@ export function TemplatePicker({ type, selected, onSelect, disabled }: TemplateP
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <LayoutTemplate className="h-3.5 w-3.5 text-muted-foreground" />
-          <p className="text-xs font-medium text-foreground">选择模板覆盖项目风格</p>
+          <p className="text-xs font-medium text-foreground">导入视觉模板</p>
         </div>
         {templates.length > 0 && (
           <span className="text-[11px] text-muted-foreground">{templates.length} 个</span>

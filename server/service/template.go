@@ -27,19 +27,13 @@ type TemplateService struct {
 // pointer means "leave unchanged"; a non-nil pointer, including "", means "set
 // to this value".
 type TemplatePatch struct {
-	Name           *string
-	Type           *string
-	ThumbnailURL   *string
-	VisualStyle    *string
-	Visibility     *string
-	Writer         *string
-	Theme          *string
-	Author         *string
-	Category       *string
-	Tags           *[]string
-	Structure      *map[string]any
-	ExampleContent *map[string]any
-	Ecommerce      *model.EcommerceTemplateDefaults
+	Name         *string
+	Type         *string
+	ThumbnailURL *string
+	VisualStyle  *string
+	Visibility   *string
+	Category     *string
+	Tags         *[]string
 }
 
 // NewTemplateService creates a new TemplateService.
@@ -107,6 +101,14 @@ func (s *TemplateService) Create(ctx context.Context, tmpl *model.Template, user
 	}
 	tmpl.UserID = userID
 	tmpl.IsActive = true
+	// New template writes are visual-only. Legacy DB columns remain on the model
+	// for old rows, but service writes intentionally clear them.
+	tmpl.Writer = ""
+	tmpl.Theme = ""
+	tmpl.Author = ""
+	tmpl.Structure = nil
+	tmpl.ExampleContent = nil
+	tmpl.SetEcommerce(model.EcommerceTemplateDefaults{})
 	ensureTagsNotNil(tmpl)
 
 	if err := s.repo.Templates().Create(ctx, tmpl); err != nil {
@@ -135,29 +137,11 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	if patch.Visibility != "" {
 		p.Visibility = &patch.Visibility
 	}
-	if patch.Writer != "" {
-		p.Writer = &patch.Writer
-	}
-	if patch.Theme != "" {
-		p.Theme = &patch.Theme
-	}
-	if patch.Author != "" {
-		p.Author = &patch.Author
-	}
 	if patch.Category != "" {
 		p.Category = &patch.Category
 	}
 	if len(patch.Tags) > 0 {
 		p.Tags = &patch.Tags
-	}
-	if len(patch.Structure) > 0 {
-		p.Structure = &patch.Structure
-	}
-	if len(patch.ExampleContent) > 0 {
-		p.ExampleContent = &patch.ExampleContent
-	}
-	if ec := patch.Ecommerce.Data(); len(ec.DefaultSelectedModules) > 0 || ec.TargetPlatform != "" || ec.BrandBrief != "" || ec.ImageModelKey != "" {
-		p.Ecommerce = &ec
 	}
 	return s.UpdatePatch(ctx, id, userID, p)
 }
@@ -190,29 +174,11 @@ func (s *TemplateService) UpdatePatch(ctx context.Context, id string, userID str
 	if patch.Visibility != nil && (*patch.Visibility == "public" || *patch.Visibility == "private") {
 		existing.Visibility = *patch.Visibility
 	}
-	if patch.Writer != nil {
-		existing.Writer = *patch.Writer
-	}
-	if patch.Theme != nil {
-		existing.Theme = *patch.Theme
-	}
-	if patch.Author != nil {
-		existing.Author = *patch.Author
-	}
 	if patch.Category != nil {
 		existing.Category = *patch.Category
 	}
 	if patch.Tags != nil {
 		existing.Tags = *patch.Tags
-	}
-	if patch.Structure != nil {
-		existing.Structure = *patch.Structure
-	}
-	if patch.ExampleContent != nil {
-		existing.ExampleContent = *patch.ExampleContent
-	}
-	if patch.Ecommerce != nil {
-		existing.SetEcommerce(*patch.Ecommerce)
 	}
 
 	ensureTagsNotNil(existing)

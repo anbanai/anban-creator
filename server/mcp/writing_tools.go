@@ -60,7 +60,7 @@ func newStreamingProgressRelayer(ctx context.Context, sess progressNotifier, tok
 func registerWritingTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "write_article",
-		Description: "Generate an article using the resolved writing style and an LLM. The writing style is resolved from the task (task > project) when task_id is given, falling back to the project's writer. The server assembles the writing prompt from the resolved writer resource, calls the LLM, and returns the article text in Markdown format.",
+		Description: "Generate an article using the resolved writing style and an LLM. When task_id is given, the writing style comes from the task's frozen project snapshot; old rows without a snapshot fall back to legacy task/project resolution. The server assembles the writing prompt from the resolved writer resource, calls the LLM, and returns the article text in Markdown format.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -69,7 +69,7 @@ func registerWritingTools(server *mcp.Server) {
 				"input_type":   map[string]any{"type": "string", "enum": []any{"idea", "fragment", "outline", "title"}, "description": "Type of input content (default: idea)"},
 				"article_type": map[string]any{"type": "string", "enum": []any{"essay", "commentary", "story", "tutorial", "review"}, "description": "Article type (default: essay)"},
 				"length":       map[string]any{"type": "string", "enum": []any{"short", "medium", "long"}, "description": "Desired article length (default: medium)"},
-				"task_id":      map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project's writer."},
+				"task_id":      map[string]any{"type": "string", "description": "Task ID. When provided, uses the task's frozen project snapshot as the single source of truth. Omit only for direct CLI calls, which fall back to the project's writer."},
 			},
 			"required": []any{"project_id", "topic"},
 		},
@@ -77,14 +77,14 @@ func registerWritingTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "convert_markdown",
-		Description: "Convert Markdown content to WeChat-compatible HTML. The theme (排版样式) is resolved from the task (task > project) when task_id is given, falling back to the project theme. The server renders the HTML with image placeholders.",
+		Description: "Convert Markdown content to WeChat-compatible HTML. When task_id is given, the theme (排版样式) comes from the task's frozen project snapshot; old rows without a snapshot fall back to legacy task/project resolution. The server renders the HTML with image placeholders.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
 				"markdown":   map[string]any{"type": "string", "description": "Markdown content to convert"},
-				"theme":      map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > project), then the project theme."},
-				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
+				"theme":      map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id snapshot, then the project theme."},
+				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, uses the task's frozen project snapshot as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
 			},
 			"required": []any{"project_id", "markdown"},
 		},
@@ -92,7 +92,7 @@ func registerWritingTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "render_template",
-		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the renderer freely decide image placement and layout), render_template annotates the markdown with explicit [SLOT: ...] markers so each image is placed at the planned position and each section is wrapped in the specified layout module. The theme (排版样式) is resolved from the task (task > project) when task_id is given, falling back to the project theme. Use this when you have a visual-rhythm-plan that dictates where each image goes (hero / section_opener / inline_detail / footer).",
+		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the renderer freely decide image placement and layout), render_template annotates the markdown with explicit [SLOT: ...] markers so each image is placed at the planned position and each section is wrapped in the specified layout module. When task_id is given, the theme (排版样式) comes from the task's frozen project snapshot; old rows without a snapshot fall back to legacy task/project resolution. Use this when you have a visual-rhythm-plan that dictates where each image goes (hero / section_opener / inline_detail / footer).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -133,8 +133,8 @@ func registerWritingTools(server *mcp.Server) {
 					},
 					"required": []any{"article_type", "slots"},
 				},
-				"theme":   map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id (task > project), then the project theme."},
-				"task_id": map[string]any{"type": "string", "description": "Task ID. When provided, the theme is resolved from the task (task > project) as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
+				"theme":   map[string]any{"type": "string", "description": "Theme name override (optional). When omitted, resolves from task_id snapshot, then the project theme."},
+				"task_id": map[string]any{"type": "string", "description": "Task ID. When provided, uses the task's frozen project snapshot as the single source of truth. Omit only for direct CLI calls, which fall back to the project theme."},
 			},
 			"required": []any{"project_id", "markdown", "layout_plan"},
 		},
@@ -172,15 +172,15 @@ func registerWritingTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_outline",
-		Description: "Generate a structured article outline/framework based on a topic and template. The writing style is resolved from the task (task > project) when task_id is given, falling back to the project's writer. Returns title, hook, sections, key points, CTA, and viral elements.",
+		Description: "Generate a structured article outline/framework based on a topic and template. When task_id is given, the writing style comes from the task's frozen project snapshot; old rows without a snapshot fall back to legacy task/project resolution. Returns title, hook, sections, key points, CTA, and viral elements.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID (uses its keywords)"},
 				"topic":      map[string]any{"type": "string", "description": "Article topic or idea"},
 				"template":   map[string]any{"type": "string", "enum": []any{"authoritative", "comparison", "cultural", "practical"}, "description": "Outline template type (default: authoritative)"},
-				"style":      map[string]any{"type": "string", "description": "Writing style override (optional). When omitted, resolves from task_id (task > project), then the project's writer."},
-				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, the writing style is resolved from the task (task > project) as the single source of truth. Omit only for direct CLI calls."},
+				"style":      map[string]any{"type": "string", "description": "Writing style override (optional). When omitted, resolves from task_id snapshot, then the project's writer."},
+				"task_id":    map[string]any{"type": "string", "description": "Task ID. When provided, uses the task's frozen project snapshot as the single source of truth. Omit only for direct CLI calls."},
 			},
 			"required": []any{"project_id", "topic"},
 		},

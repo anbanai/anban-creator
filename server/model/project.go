@@ -23,9 +23,7 @@ type ProjectConfig struct {
 // EcommerceProjectDefaults holds the reusable e-commerce defaults for a project
 // (platform="ecommerce"): deliverable modules + quantities, target platform,
 // brand brief, and default image model key. Product photos stay per-task
-// (Task.Ecommerce) since each task ships a distinct product set. Stored on
-// Project.EcommerceDefaults as a typed JSON column; tasks inherit these unless
-// the task overrides them.
+// (Task.Ecommerce) since each task ships a distinct product set.
 type EcommerceProjectDefaults struct {
 	DefaultSelectedModules map[string]int `json:"default_selected_modules,omitempty"`
 	TargetPlatform         string         `json:"target_platform,omitempty"`
@@ -40,9 +38,9 @@ func (p *Project) SetEcommerceDefaults(ec EcommerceProjectDefaults) {
 	p.EcommerceDefaults = datatypes.NewJSONType(ec)
 }
 
-// Project is the SINGLE SOURCE OF TRUTH for every style/author/theme/ecommerce
-// setting. Tasks and plans inherit from it with precedence task > project; a task
-// may override individual dimensions via Task.Overrides.
+// Project is the single source of truth for style/author/theme/e-commerce
+// defaults. New tasks freeze these values into Task.ProjectSnapshot at creation;
+// legacy Task.Overrides only exist so old rows can still resolve.
 //
 // DB column names use the current public contract directly. Explicitly marked
 // legacy columns remain only where startup migrations still need them.
@@ -84,10 +82,11 @@ type Project struct {
 	Config                ProjectConfig `gorm:"type:json;serializer:json" json:"config"`         // 平台特有配置
 	// EcommerceDefaults carries the reusable e-commerce defaults for platform=
 	// "ecommerce" projects. Zero value for non-ecommerce projects.
-	EcommerceDefaults datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`
-	Status            string                                       `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
-	CreatedAt         time.Time                                    `json:"created_at"`
-	UpdatedAt         time.Time                                    `json:"updated_at"`
+	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`
+	EcommerceDefaultsSet bool                                         `gorm:"-" json:"-"`
+	Status               string                                       `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
+	CreatedAt            time.Time                                    `json:"created_at"`
+	UpdatedAt            time.Time                                    `json:"updated_at"`
 }
 
 func (Project) TableName() string { return "projects" }

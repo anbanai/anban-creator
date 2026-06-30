@@ -24,11 +24,23 @@ import (
 // unbounded memory/disk usage. Mirrors the upload limit in handler/file.go.
 const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 
+// EffectiveProject returns the task snapshot view when a task carries one,
+// otherwise the live project. Runtime config generation should use this so old
+// tasks remain reproducible after project edits.
+func EffectiveProject(ch *model.Project, task *model.Task) *model.Project {
+	if ch == nil || task == nil {
+		return ch
+	}
+	return model.ProjectFromSnapshot(ch, task.ProjectSnapshot.Data())
+}
+
 // BuildAppConfig constructs an app/config.Config from a Project DB record plus the
-// resolved (task ?? project) style dimensions. This bridges the multi-user server
-// config to the single-account app config used by the abwriter CLI binary.
+// resolved style dimensions. For new tasks this project is the frozen task
+// snapshot; old rows without a snapshot fall back through legacy task overrides.
+// This bridges the multi-user server config to the single-account app config used
+// by the abwriter CLI binary.
 //
-// resolved carries the two-layer effective values (resolver.ResolveStyle); only
+// resolved carries the effective values (resolver.ResolveStyle); only
 // the dimensions each platform's settings.json slot consumes are read here:
 // Article.Writer / Article.Author / Article.Theme and Seednote.VisualStyle,
 // each driven by the resolved value (not the raw project column).
@@ -53,8 +65,8 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 	cfg.Wechat.Secret = ch.GetWechatSecret()
 
 	// Platform-specific fields. The style/author/theme values come from the
-	// two-layer resolved set (task.Overrides.X ?? project.X), NOT the raw project
-	// columns — so a per-task override reaches settings.json correctly.
+	// resolved set. For current tasks, the raw project already represents the
+	// frozen snapshot; legacy task overrides are applied only for old rows.
 	switch ch.Platform {
 	case model.ScopeArticle:
 		// Author is the publish署名 (goes to draft.json's author key at publish).

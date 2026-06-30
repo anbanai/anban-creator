@@ -59,7 +59,7 @@ export function PersonaBlock({
       <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
         <div className="flex items-center justify-between">
           <Label className="text-sm font-medium">发布署名 · 写作风格</Label>
-          <Badge variant="secondary" className="text-[10px]">随模板同步</Badge>
+          <Badge variant="secondary" className="text-[10px]">只读</Badge>
         </div>
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">{author || '未设置发布署名'}</p>

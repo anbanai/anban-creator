@@ -211,15 +211,16 @@ type CreateManualParams struct {
 	ImageModelKey     string
 	SkipRefImage      *bool
 	ReferenceImageURL string
-	// Overrides carries the task-level per-dimension overrides. Only the fields the
-	// user explicitly overrode are populated; empty fields = inherit the project
-	// value (resolved two-layer task.Overrides.X ?? project.X at execution via
-	// ResolveStyle). nil = fully inherit the project. The task no longer snapshots
-	// resolved values — editing the project immediately affects pending tasks.
+	// Overrides is deprecated. New Studio/API flows do not set task-level style
+	// overrides; runtime style/account config comes from ProjectSnapshot.
 	Overrides *model.StyleOverrides
-	Watermark *bool
-	Goal      string
-	GoalMode  bool
+	// ProjectSnapshot, when set, is copied verbatim. Retry uses this to preserve
+	// the original task's frozen config. New manual tasks leave it nil and snapshot
+	// the current project at creation time.
+	ProjectSnapshot *model.ProjectSnapshot
+	Watermark       *bool
+	Goal            string
+	GoalMode        bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to task model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -248,11 +249,8 @@ type CreateManualParams struct {
 // The Quantity field (1-5) determines how many tasks to create, each independently billed.
 // ImageModelKey optionally selects a per-task image model (validated upstream by the handler).
 //
-// Style/author/theme dimensions are NOT resolved or snapshotted here: the task
-// stores only the explicitly-overridden slots (p.Overrides) and inherits the rest
-// from the project at execution via ResolveStyle (task.Overrides.X ?? project.X).
-// This is the live-inheritance model — editing the project immediately affects
-// pending tasks.
+// Style/author/theme dimensions are snapshotted from the project at creation.
+// Editing the project later does not change existing pending/running tasks.
 //
 // When GoalMode is true, each task charges GoalMultiplier() × base cost upfront
 // and never refunds. The goal condition is propagated to the agent process and
@@ -443,6 +441,11 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ArticleWithContentImages: &articleContent,
 			ExecutionTarget:          p.ExecutionTarget,
 		}
+		if p.ProjectSnapshot != nil {
+			task.SetProjectSnapshot(*p.ProjectSnapshot)
+		} else {
+			task.SetProjectSnapshot(model.SnapshotProject(project))
+		}
 		if p.ExecutionTarget == model.ExecutionTargetLocal {
 			deadline := time.Now().Add(LocalClaimWindow)
 			task.LocalClaimDeadline = &deadline
@@ -493,12 +496,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
 //
-// The plan's style/author/theme dimensions are copied into the spawned task's
-// Task.Overrides (empty dimensions serialize to {} and the resolver falls
-// through to the project for them). This lets two plans under one project theme
-// their tasks differently. The plan's
-// scheduling-adjacent "what to produce" params (image model, reference image,
-// watermark, goal, seednote image composition) also flow to the task.
+// The plan's scheduling-adjacent "what to produce" params (image model,
+// reference image, watermark, goal, seednote image composition) flow to the task.
+// Project/account style config is frozen from the project into ProjectSnapshot.
 func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*model.Task, error) {
 	taskID := generateTaskID()
 
@@ -519,8 +519,10 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 
 	// Derive task type from the project if ProjectID is set.
 	taskType := plan.Type
+	var project *model.Project
 	if plan.ProjectID != "" {
 		if found, err := s.repo.Projects().FindByID(ctx, plan.ProjectID); err == nil {
+			project = found
 			taskType = found.Platform
 		}
 	}
@@ -567,16 +569,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ArticleWithCover:         plan.ArticleWithCover,
 		ArticleWithContentImages: plan.ArticleWithContentImages,
 	}
-
-	// Copy the plan's style/author/theme dimensions into the spawned task's
-	// overrides. Empty dimensions serialize to {} and the resolver falls through
-	// to the project for them, so this is safe even when the plan set nothing.
-	task.SetOverrides(model.StyleOverrides{
-		VisualStyle: plan.VisualStyle,
-		Writer:      plan.Writer,
-		Author:      plan.Author,
-		Theme:       plan.Theme,
-	})
+	if project != nil {
+		task.SetProjectSnapshot(model.SnapshotProject(project))
+	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {
 		// Refund the deducted credits if task creation fails.

@@ -81,15 +81,9 @@ type createPlanRequest struct {
 	ImageModelKey      string `json:"image_model_key"`
 	SkipReferenceImage *bool  `json:"skip_reference_image"`
 	ReferenceImageURL  string `json:"reference_image_url"`
-	VisualStyle        string `json:"visual_style"`
-	Writer             string `json:"writer"`
-	Theme              string `json:"theme"`
-	Author             string `json:"author"`
 	Watermark          *bool  `json:"watermark"`
 	Goal               string `json:"goal"`
 	GoalMode           bool   `json:"goal_mode"`
-	// TemplateID records the template selected during plan creation. nil/empty = no template.
-	TemplateID *string `json:"template_id,omitempty"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off).
 	HasContentImage *bool `json:"has_content_image,omitempty"`
@@ -106,14 +100,9 @@ type updatePlanRequest struct {
 	ImageModelKey            *string `json:"image_model_key"`
 	SkipReferenceImage       *bool   `json:"skip_reference_image"`
 	ReferenceImageURL        *string `json:"reference_image_url"`
-	VisualStyle              *string `json:"visual_style"`
-	Writer                   *string `json:"writer"`
-	Theme                    *string `json:"theme"`
-	Author                   *string `json:"author"`
 	Watermark                *bool   `json:"watermark"`
 	Goal                     string  `json:"goal"`
 	GoalMode                 *bool   `json:"goal_mode"`
-	TemplateID               *string `json:"template_id,omitempty"`
 	HasContentImage          *bool   `json:"has_content_image,omitempty"`
 	HasTailImage             *bool   `json:"has_tail_image,omitempty"`
 	ArticleWithCover         *bool   `json:"article_with_cover,omitempty"`
@@ -149,12 +138,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
 
-	// Author must not be a writer-persona name (same defense-in-depth guard as
-	// task/project/template create). A plan author flows to spawned tasks.
-	if err := service.RejectWriterNameAsAuthor(req.Author); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-
 	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
 		UserID:                   userID,
 		ProjectID:                req.ProjectID,
@@ -170,10 +153,6 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
-		VisualStyle:              req.VisualStyle,
-		Writer:                   req.Writer,
-		Author:                   req.Author,
-		Theme:                    req.Theme,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
@@ -285,14 +264,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
 
-	// Author must not be a writer-persona name. req.Author is nil for "leave
-	// unchanged"; only validate when the caller is setting/clearing it.
-	if req.Author != nil {
-		if err := service.RejectWriterNameAsAuthor(*req.Author); err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-	}
-
 	plan, err := h.service.Update(c.Context(), service.UpdatePlanParams{
 		ID:                       id,
 		CronExpr:                 req.CronExpr,
@@ -307,10 +278,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
-		VisualStyle:              req.VisualStyle,
-		Writer:                   req.Writer,
-		Author:                   req.Author,
-		Theme:                    req.Theme,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")

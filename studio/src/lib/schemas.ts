@@ -43,11 +43,6 @@ export const createTaskSchema = z.object({
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
-  visual_style: z.string().max(1024).optional(),
-  writer: z.string().max(100).optional(),
-  theme: z.string().max(100).optional(),
-  // 公众号发布署名 + 写作风格 key。写作风格头像/昵称仅用于 Studio 展示，不进 payload。
-  author: z.string().max(50).optional(),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),
@@ -134,11 +129,6 @@ export const planSchema = z.object({
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },
   ).optional(),
-  visual_style: z.string().max(1024).optional(),
-  writer: z.string().max(100).optional(),
-  theme: z.string().max(100).optional(),
-  // 公众号发布署名 + 写作风格 key，spawned task 继承。
-  author: z.string().max(50).optional(),
   watermark: z.boolean().optional(),
   goal: goalSchema.optional(),
   goal_mode: z.boolean().default(false),
@@ -178,8 +168,12 @@ export const projectSchema = z.object({
   writer: z.string().max(100, "写作风格不能超过 100 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),
   author: z.string().max(50, "作者名不能超过 50 个字符").optional(),
-  // 绑定的公众号模板：写作风格/排版随模板同步，运行时解析纳入优先级链。
+  // 一次性导入视觉模板；项目保存自己的视觉字段，不运行时绑定模板。
   template_id: z.string().optional(),
+  ecommerce_default_selected_modules: z.record(z.string(), z.number().int().min(0)).default({}),
+  ecommerce_target_platform: z.string().optional(),
+  ecommerce_brand_brief: z.string().max(2000, "品牌 brief 不能超过 2000 个字符").optional(),
+  ecommerce_image_model_key: z.string().max(50).optional(),
   reference_image_url: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },

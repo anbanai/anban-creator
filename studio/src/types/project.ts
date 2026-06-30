@@ -30,12 +30,20 @@ export interface Project {
   template_id: string
   reference_image_url: string
   image_ratio: string
+  ecommerce_defaults?: EcommerceProjectDefaults
   max_concurrent_tasks: number
   config: ProjectConfig
   status: ProjectStatus
   stats?: ProjectStats
   created_at: string
   updated_at: string
+}
+
+export interface EcommerceProjectDefaults {
+  default_selected_modules?: Record<string, number>
+  target_platform?: string
+  brand_brief?: string
+  image_model_key?: string
 }
 
 export interface ProjectStats {
@@ -69,6 +77,7 @@ export interface CreateProjectRequest {
   template_id?: string
   reference_image_url?: string
   image_ratio?: string
+  ecommerce_defaults?: EcommerceProjectDefaults
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string
