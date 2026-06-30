@@ -406,9 +406,7 @@ func main() {
 		}
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
-		if seednoteTrackingSvc != nil {
-			seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
-		}
+		seednoteAnalyticsHandler = buildSeednoteAnalyticsHandler(repo, log)
 		if wcfBindingSvc != nil {
 			wcfHandler = handler.NewWCFHandler(wcfBindingSvc, log)
 		}
@@ -826,6 +824,14 @@ func connectRedis(ctx context.Context, cfg *config.Config, log *zerolog.Logger) 
 
 	log.Info().Str("addr", cfg.Redis.Addr).Msg("Redis connection established")
 	return rdb
+}
+
+func buildSeednoteAnalyticsHandler(repo repository.Repository, log *zerolog.Logger) *handler.SeednoteAnalyticsHandler {
+	if repo == nil {
+		return nil
+	}
+	trackingSvc := service.NewSeednoteTrackingService(repo, nil, nil, nil, log)
+	return handler.NewSeednoteAnalyticsHandler(trackingSvc, log)
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.

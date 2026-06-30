@@ -63,7 +63,7 @@ const chartColors = {
 }
 
 export default function SeednoteAnalyticsPanel({ taskId }: SeednoteAnalyticsPanelProps) {
-  const { data, isLoading, isError } = useQuery({
+  const { data, error, isLoading, isError } = useQuery({
     queryKey: queryKeys.tasks.seednoteAnalytics(taskId),
     queryFn: () => api.seednoteAnalytics.getByTask(taskId),
     enabled: Boolean(taskId),
@@ -75,6 +75,20 @@ export default function SeednoteAnalyticsPanel({ taskId }: SeednoteAnalyticsPane
         <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           种草笔记公开数据加载中
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const status = (error as { response?: { status?: number } } | null)?.response?.status
+  if (isError && status === 404) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>种草笔记数据</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          暂无公开数据，追踪尚未准备
         </CardContent>
       </Card>
     )
@@ -98,7 +112,7 @@ export default function SeednoteAnalyticsPanel({ taskId }: SeednoteAnalyticsPane
           <CardTitle>种草笔记数据</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          追踪任务正在准备中
+          暂无公开数据，追踪尚未准备
         </CardContent>
       </Card>
     )

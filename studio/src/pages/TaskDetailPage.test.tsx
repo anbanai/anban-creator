@@ -1,8 +1,8 @@
-import { screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TaskDetailPage from './TaskDetailPage'
 import { render } from '@/test/test-utils'
-import { mockTasks } from '@/test/mocks/handlers'
+import { mockProjectDetail, mockTasks } from '@/test/mocks/handlers'
 import type { Task } from '@/types'
 import { api } from '@/lib/api'
 
@@ -37,6 +37,10 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.projects,
         get: vi.fn().mockResolvedValue(mockProjectDetail),
       },
+      seednoteAnalytics: {
+        ...actual.api.seednoteAnalytics,
+        getByTask: vi.fn(),
+      },
     },
   }
 })
@@ -62,6 +66,13 @@ function taskWith(overrides: Partial<Task>): Task {
 }
 
 describe('TaskDetailPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.tasks.files).mockResolvedValue([])
+    vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
+    vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
+  })
+
   it('shows compact running progress and hides workflow stage grid', async () => {
     mockTask(taskWith({
       status: 'running',
@@ -97,10 +108,12 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
   })
 
-  it('shows the frozen project snapshot with the reference image before the visual style', async () => {
+  it('shows project parameters with the reference image before the visual style', async () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
+      credits_charged: 128,
+      total_cost_usd: 1.23,
       result: { files: null, output: '' },
       project_snapshot: {
         project_name: '快照项目',
@@ -116,7 +129,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('项目快照')).toBeInTheDocument()
+    expect(await screen.findByText('项目参数')).toBeInTheDocument()
+    expect(screen.queryByText('项目快照')).not.toBeInTheDocument()
     expect(screen.getByText('快照项目')).toBeInTheDocument()
     const referenceImage = await screen.findByRole('img', { name: '参考图' })
     expect(referenceImage.compareDocumentPosition(screen.getByText('视觉风格')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -124,6 +138,29 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('安般')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()
+    expect(screen.getByText('扣除积分')).toBeInTheDocument()
+    expect(screen.getByText('128')).toBeInTheDocument()
+    expect(screen.queryByText('执行成本')).not.toBeInTheDocument()
+    expect(screen.queryByText('$1.23')).not.toBeInTheDocument()
+  })
+
+  it('opens project details in a dialog instead of navigating to the projects list', async () => {
+    mockTask(taskWith({
+      type: 'article',
+      status: 'completed',
+      result: { files: null, output: '' },
+    }))
+
+    render(<TaskDetailPage />)
+
+    const projectButton = await screen.findByRole('button', { name: /测试项目/ })
+    fireEvent.click(projectButton)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: '项目信息' })).toBeInTheDocument()
+    expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
+    expect(within(dialog).getByText('https://mp.weixin.qq.com/test')).toBeInTheDocument()
+    expect(mockNavigate).not.toHaveBeenCalledWith('/projects')
   })
 
   it('renders dynamic logs as markdown and keeps copyable raw text', async () => {

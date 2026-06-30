@@ -130,9 +130,7 @@ function FilePreviewModalContent({
       ? 'sm:max-w-3xl'
       : isHTML
         ? 'sm:max-w-4xl'
-        : isMD
-          ? 'sm:max-w-3xl'
-          : 'sm:max-w-2xl'
+        : 'sm:max-w-4xl'
 
   return (
     <DialogContent className={modalClass}>
@@ -144,7 +142,7 @@ function FilePreviewModalContent({
       </DialogHeader>
 
       {loading && (
-        <div className="flex items-center justify-center py-16">
+        <div className={isImage || isVideo ? 'flex items-center justify-center py-16' : 'flex min-h-[70vh] items-center justify-center rounded-lg border border-border bg-background'}>
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           <span className="ml-2 text-sm text-muted-foreground">加载中...</span>
         </div>
@@ -172,14 +170,14 @@ function FilePreviewModalContent({
         <iframe
           srcDoc={htmlContent}
           sandbox="allow-scripts"
-          className="w-full rounded-lg border border-border bg-background"
+          className="h-[70vh] w-full rounded-lg border border-border bg-background"
           style={{ height: '70vh' }}
           title="文章预览"
         />
       )}
 
       {!loading && isMD && textContent && (
-        <div className="max-h-[70vh] overflow-y-auto rounded-lg border border-border bg-background p-6">
+        <div className="h-[70vh] overflow-y-auto rounded-lg border border-border bg-background p-6">
           <article className="prose prose-sm dark:prose-invert max-w-none prose-headings:font-semibold prose-a:text-primary prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-pre:bg-muted prose-pre:p-4 prose-table:border prose-th:border prose-th:p-2 prose-td:border prose-td:p-2">
             <Markdown remarkPlugins={[remarkGfm]}>{textContent}</Markdown>
           </article>
@@ -187,7 +185,7 @@ function FilePreviewModalContent({
       )}
 
       {!loading && isText && !isMD && textContent && (
-        <pre className="max-h-[70vh] overflow-auto rounded-lg border border-border bg-muted/50 p-4 text-sm text-foreground whitespace-pre-wrap break-words">
+        <pre className="h-[70vh] overflow-auto rounded-lg border border-border bg-muted/50 p-4 text-sm text-foreground whitespace-pre-wrap break-words">
           {textContent}
         </pre>
       )}

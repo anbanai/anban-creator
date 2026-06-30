@@ -24,6 +24,7 @@ import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
@@ -52,6 +53,7 @@ export default function TaskDetailPage() {
   } | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [showProjectDialog, setShowProjectDialog] = useState(false)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
   const logContainerRef = useRef<HTMLDivElement | null>(null)
@@ -366,6 +368,17 @@ export default function TaskDetailPage() {
   const canCancel = task.status === 'pending' || task.status === 'running'
   const canRetry = task.status === 'failed' || task.status === 'cancelled'
   const currentTask = task
+  const snapshot = task.project_snapshot
+  const showProjectParameters = Boolean(snapshot?.platform || project)
+  const projectParameterName = snapshot?.project_name || project?.name || '—'
+  const projectParameterReferenceImage = snapshot?.reference_image_url || project?.reference_image_url || ''
+  const projectParameterVisualStyle = snapshot?.visual_style || project?.visual_style || '—'
+  const projectParameterImageRatio = snapshot?.image_ratio || project?.image_ratio || task.image_ratio || '—'
+  const projectParameterImageModel = task.image_model_key || snapshot?.ecommerce_defaults?.image_model_key || project?.ecommerce_defaults?.image_model_key || '—'
+  const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
+  const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
+  const projectDialogReferenceImage = project?.reference_image_url || snapshot?.reference_image_url || ''
+  const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
 
   // Retry re-runs this task as a fresh billed task. The server clones the full
   // configuration (three-dimensional style, author/writer, ecommerce package,
@@ -442,19 +455,28 @@ export default function TaskDetailPage() {
               </Badge>
             <Badge variant={statusBadgeVariant(task.status)}>{taskStatusLabel[task.status] || task.status}</Badge>
             {project && (
-              <Link
-                to={`/projects`}
-                className="flex items-center gap-1.5 rounded-md bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              <button
+                type="button"
+                onClick={() => setShowProjectDialog(true)}
+                className="flex items-center gap-1.5 rounded-md bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 {project.avatar_url ? (
-                  <img src={project.avatar_url} alt="" className="h-4 w-4 rounded-full object-cover" />
+                  <span className="h-4 w-4 overflow-hidden rounded-full bg-secondary">
+                    <SignedImage
+                      src={project.avatar_url}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      fallbackClassName="h-full w-full"
+                      fallbackIcon={<span className="text-[8px] font-medium text-secondary-foreground">{project.name.charAt(0)}</span>}
+                    />
+                  </span>
                 ) : (
                   <span className="flex h-4 w-4 items-center justify-center rounded-full bg-secondary text-[8px] font-medium">
                     {project.name.charAt(0)}
                   </span>
                 )}
                 {project.name}
-              </Link>
+              </button>
             )}
           </div>
         </div>
@@ -591,33 +613,41 @@ export default function TaskDetailPage() {
             <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
           </CardContent>
         </Card>
+        {typeof task.credits_charged === 'number' && (
+          <Card>
+            <CardContent>
+              <p className="text-xs text-muted-foreground">扣除积分</p>
+              <p className="mt-1 text-sm text-foreground">{task.credits_charged.toLocaleString()}</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {task.type === 'seednote' && task.published && (
         <SeednoteAnalyticsPanel taskId={task.id} />
       )}
 
-      {task.project_snapshot && task.project_snapshot.platform && (
+      {showProjectParameters && (
         <Card>
           <CardContent className="space-y-3">
             <div>
-              <p className="text-xs text-muted-foreground">项目快照</p>
+              <p className="text-xs text-muted-foreground">项目参数</p>
               <p className="mt-1 text-sm font-medium text-foreground">
-                {task.project_snapshot.project_name || project?.name || '—'}
+                {projectParameterName}
               </p>
             </div>
             <div className="grid gap-3 lg:grid-cols-[140px_minmax(0,1fr)]">
               <div>
                 <p className="text-xs text-muted-foreground">参考图</p>
-                {task.project_snapshot.reference_image_url ? (
+                {projectParameterReferenceImage ? (
                   <a
-                    href={task.project_snapshot.reference_image_url}
+                    href={projectParameterReferenceImage}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-1 block h-24 w-32 overflow-hidden rounded-md border border-border bg-muted"
                   >
                     <SignedImage
-                      src={task.project_snapshot.reference_image_url}
+                      src={projectParameterReferenceImage}
                       alt="参考图"
                       className="h-full w-full object-cover"
                       fallbackClassName="h-full w-full"
@@ -631,60 +661,52 @@ export default function TaskDetailPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">视觉风格</p>
-                <p className="mt-1 line-clamp-4 text-sm text-foreground">{task.project_snapshot.visual_style || '—'}</p>
+                <p className="mt-1 line-clamp-4 text-sm text-foreground">{projectParameterVisualStyle}</p>
               </div>
             </div>
-            <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
               <div>
                 <p className="text-xs text-muted-foreground">图片比例</p>
-                <p className="mt-1 text-sm text-foreground">{task.project_snapshot.image_ratio || task.image_ratio || '—'}</p>
+                <p className="mt-1 text-sm text-foreground">{projectParameterImageRatio}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">图片模型</p>
-                <p className="mt-1 text-sm text-foreground">{task.image_model_key || task.project_snapshot.ecommerce_defaults?.image_model_key || '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">扣除积分</p>
-                <p className="mt-1 text-sm text-foreground">{typeof task.credits_charged === 'number' ? task.credits_charged.toLocaleString() : '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">执行成本</p>
-                <p className="mt-1 text-sm text-foreground">{task.total_cost_usd && task.total_cost_usd > 0 ? formatUSD(task.total_cost_usd) : '—'}</p>
+                <p className="mt-1 text-sm text-foreground">{projectParameterImageModel}</p>
               </div>
             </div>
-            {task.type === 'article' && (
+            {task.type === 'article' && snapshot && (
               <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-3">
                 <div>
                   <p className="text-xs text-muted-foreground">署名</p>
-                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.author || '—'}</p>
+                  <p className="mt-1 text-sm text-foreground">{snapshot.author || project?.author || '—'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">写作风格</p>
-                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.writer || '默认'}</p>
+                  <p className="mt-1 text-sm text-foreground">{snapshot.writer || project?.writer || '默认'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">排版</p>
-                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.theme || '默认'}</p>
+                  <p className="mt-1 text-sm text-foreground">{snapshot.theme || project?.theme || '默认'}</p>
                 </div>
               </div>
             )}
-            {task.type === 'ecommerce' && task.project_snapshot.ecommerce_defaults && (
+            {task.type === 'ecommerce' && (snapshot?.ecommerce_defaults || project?.ecommerce_defaults) && (
               <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
                   <p className="text-xs text-muted-foreground">目标平台</p>
-                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.ecommerce_defaults.target_platform || '—'}</p>
+                  <p className="mt-1 text-sm text-foreground">{snapshot?.ecommerce_defaults?.target_platform || project?.ecommerce_defaults?.target_platform || '—'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">默认模块</p>
                   <p className="mt-1 text-sm text-foreground">
-                    {task.project_snapshot.ecommerce_defaults.default_selected_modules
-                      ? Object.entries(task.project_snapshot.ecommerce_defaults.default_selected_modules).map(([k, v]) => `${k} x${v}`).join('、')
+                    {(snapshot?.ecommerce_defaults?.default_selected_modules || project?.ecommerce_defaults?.default_selected_modules)
+                      ? Object.entries(snapshot?.ecommerce_defaults?.default_selected_modules || project?.ecommerce_defaults?.default_selected_modules || {}).map(([k, v]) => `${k} x${v}`).join('、')
                       : '—'}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">品牌 brief</p>
-                  <p className="mt-1 line-clamp-3 text-sm text-foreground">{task.project_snapshot.ecommerce_defaults.brand_brief || '—'}</p>
+                  <p className="mt-1 line-clamp-3 text-sm text-foreground">{snapshot?.ecommerce_defaults?.brand_brief || project?.ecommerce_defaults?.brand_brief || '—'}</p>
                 </div>
               </div>
             )}
@@ -892,6 +914,119 @@ export default function TaskDetailPage() {
             </Streamdown>
           </div>
         </Card>
+      )}
+
+      {project && (
+        <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>项目信息</DialogTitle>
+              <DialogDescription>
+                当前任务关联项目的实时配置，用于对照本次任务继承的项目参数。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[70vh] overflow-y-auto pr-1">
+              <div className="grid gap-4 sm:grid-cols-[120px_minmax(0,1fr)]">
+                <div>
+                  <p className="text-xs text-muted-foreground">参考图</p>
+                  {projectDialogReferenceImage ? (
+                    <a
+                      href={projectDialogReferenceImage}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 block h-24 w-28 overflow-hidden rounded-md border border-border bg-muted"
+                    >
+                      <SignedImage
+                        src={projectDialogReferenceImage}
+                        alt="项目参考图"
+                        className="h-full w-full object-cover"
+                        fallbackClassName="h-full w-full"
+                      />
+                    </a>
+                  ) : (
+                    <div className="mt-1 flex h-24 w-28 items-center justify-center rounded-md border border-dashed border-border bg-muted/40 text-xs text-muted-foreground">
+                      未设置
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 space-y-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">项目名称</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">{project.name}</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs text-muted-foreground">平台</p>
+                      <p className="mt-1 text-sm text-foreground">{contentTypeLabel[projectDialogPlatform] || projectDialogPlatform}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">图片比例</p>
+                      <p className="mt-1 text-sm text-foreground">{project.image_ratio || snapshot?.image_ratio || '—'}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs text-muted-foreground">主页</p>
+                  <p className="mt-1 break-all text-sm text-foreground">{project.profile_url || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">关键词</p>
+                  <p className="mt-1 text-sm text-foreground">{project.keywords || snapshot?.keywords || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">定位 / 说明</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{projectDialogInstructions}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">视觉风格</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{project.visual_style || snapshot?.visual_style || '—'}</p>
+                </div>
+              </div>
+              {projectDialogPlatform === 'article' && (
+                <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">署名</p>
+                    <p className="mt-1 text-sm text-foreground">{project.author || snapshot?.author || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">写作风格</p>
+                    <p className="mt-1 text-sm text-foreground">{project.writer || snapshot?.writer || '默认'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">排版</p>
+                    <p className="mt-1 text-sm text-foreground">{project.theme || snapshot?.theme || '默认'}</p>
+                  </div>
+                </div>
+              )}
+              {projectDialogPlatform === 'ecommerce' && projectDialogEcommerceDefaults && (
+                <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">默认目标平台</p>
+                    <p className="mt-1 text-sm text-foreground">{projectDialogEcommerceDefaults.target_platform || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">默认模块</p>
+                    <p className="mt-1 text-sm text-foreground">
+                      {projectDialogEcommerceDefaults.default_selected_modules
+                        ? Object.entries(projectDialogEcommerceDefaults.default_selected_modules).map(([k, v]) => `${k} x${v}`).join('、')
+                        : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">图片模型</p>
+                    <p className="mt-1 text-sm text-foreground">{projectDialogEcommerceDefaults.image_model_key || '—'}</p>
+                  </div>
+                  <div className="sm:col-span-3">
+                    <p className="text-xs text-muted-foreground">品牌 brief</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{projectDialogEcommerceDefaults.brand_brief || '—'}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Cancel confirmation */}
