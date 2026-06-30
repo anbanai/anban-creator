@@ -35,8 +35,8 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // UserPromptParams holds the inputs for BuildUserPrompt. Struct keeps call sites
 // readable as fields are added and prevents argument-order bugs.
 //
-// The prompt is BEHAVIORAL ONLY (agent + topic, task/project ids, seednote
-// image-composition flags, goal condition). The visual / writer / author / theme
+// The prompt is BEHAVIORAL ONLY (agent + topic, task/project ids, compact
+// runtime controls, goal condition). The visual / writer / author / theme
 // dimensions never enter the prompt — they are single-sourced via
 // resolver.ResolveStyle and delivered to the agent through two purposeful
 // projections: get_project_profile (MCP, for agent reasoning) and settings.json
@@ -55,9 +55,9 @@ type UserPromptParams struct {
 	HasTailImage    bool
 	// ArticleWithCover / ArticleWithContentImages toggle 公众号 article image
 	// generation independently (article cover is NOT mandatory, unlike seednote).
-	// Both default true. Ignored for non-article task types.
-	ArticleWithCover         bool
-	ArticleWithContentImages bool
+	// nil defaults true for legacy tasks/callers. Ignored for non-article task types.
+	ArticleWithCover         *bool
+	ArticleWithContentImages *bool
 }
 
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
@@ -77,12 +77,13 @@ type UserPromptParams struct {
 // across turns until a small fast model confirms the condition holds (or
 // max_turns is exhausted). Empty string is a no-op.
 //
-// For seednote tasks, p.HasContentImage / p.HasTailImage control image
-// composition (cover always generated). Non-seednote types ignore the directive.
+// For seednote tasks, p.HasContentImage / p.HasTailImage are emitted as a
+// structured seednote_image_mode runtime control (cover always generated).
+// Non-seednote types ignore it.
 //
-// For article tasks, p.ArticleWithCover / p.ArticleWithContentImages toggle cover
-// and in-text image generation independently (both default true → no directive,
-// preserving legacy "always generate both"). Non-article types ignore it.
+// For article tasks, p.ArticleWithCover / p.ArticleWithContentImages are emitted
+// as a structured article_image_mode runtime control. The agent and skills own
+// detailed workflow semantics for each mode; Go only passes state.
 //
 // Multi-line goal conditions are flattened to a single line (newlines →
 // spaces) because Claude Code's slash command parser only registers the first
@@ -99,14 +100,8 @@ func BuildUserPrompt(p UserPromptParams) string {
 	} else {
 		base = fmt.Sprintf("Use the %s agent to create content about: %s", p.AgentName, p.Topic)
 	}
-	if p.TaskType == model.PlatformSeednote {
-		base += "\n\n" + describeSeednoteImageComposition(p.HasContentImage, p.HasTailImage)
-	}
-	if p.TaskType == model.PlatformArticle {
-		// Both toggles default true → empty directive (byte-identical to legacy prompt).
-		if d := describeArticleImageComposition(p.ArticleWithCover, p.ArticleWithContentImages); d != "" {
-			base += "\n\n" + d
-		}
+	if controls := describeRuntimeControls(p); controls != "" {
+		base += "\n\n" + controls
 	}
 	if p.TaskID != "" || p.ProjectID != "" {
 		parts := make([]string, 0, 2)
@@ -124,88 +119,50 @@ func BuildUserPrompt(p UserPromptParams) string {
 	return base
 }
 
-// describeSeednoteImageComposition renders the image composition directive that
-// overrides the seednote-visual-design skill's default count rules. Cover is
-// always generated; content and tail are toggled by the two flags.
-//
-// Content image count is adaptive: when enabled, the agent splits information
-// points into 1~3 pages (2-4 points each), so the exact total is decided at
-// run time and recorded in image-plan.md. The skill and its SubagentStop hook
-// validate that image-plan.md's declared count matches the generated files.
-func describeSeednoteImageComposition(hasContent, hasTail bool) string {
-	parts := []string{"封面图（cover.png）"}
-	if hasContent {
-		parts = append(parts, "1~3 张内容图（image_01.png…image_0N.png，N 由信息点数量自适应，每张承载 2-4 个信息点，最多 3 张）")
+// describeRuntimeControls emits compact, machine-readable controls for agents.
+// Detailed semantics live in claudecode agents/skills/CLAUDE.md so server code
+// does not duplicate workflow prose.
+func describeRuntimeControls(p UserPromptParams) string {
+	var controls []string
+	switch p.TaskType {
+	case model.PlatformSeednote:
+		controls = append(controls, "seednote_image_mode="+seednoteImageMode(p.HasContentImage, p.HasTailImage))
+	case model.PlatformArticle:
+		controls = append(controls, "article_image_mode="+articleImageMode(defaultTrue(p.ArticleWithCover), defaultTrue(p.ArticleWithContentImages)))
 	}
-	if hasTail {
-		parts = append(parts, "尾图（tail.png）")
+	if len(controls) == 0 {
+		return ""
 	}
-
-	var directive string
-	if hasContent {
-		// Content images are adaptive → the total is not fixed, so we hand the
-		// decision to the agent and let the mechanical gate validate consistency.
-		directive = fmt.Sprintf(
-			"图片构成要求（必须严格遵守，覆盖 skill 默认数量规则）：生成 %s。"+
-				"内容图张数由信息点分组决定（1~3 张，每张 2-4 个信息点）；"+
-				"image-plan.md 必须在「计划图片数量」字段写入实际生成的总张数，机械闸门按此校验。",
-			strings.Join(parts, "、"),
-		)
-	} else {
-		// No content images → composition is fully deterministic.
-		total := 1 // cover
-		if hasTail {
-			total++
-		}
-		directive = fmt.Sprintf(
-			"图片构成要求（必须严格遵守，覆盖 skill 默认数量规则）：生成 %s，共 %d 张。"+
-				"image-plan.md 必须在「计划图片数量」字段写入此数字。",
-			strings.Join(parts, "、"), total,
-		)
-	}
-
-	// The seednote agent and seednote-visual-design skill hardcode 尾图 as a
-	// mandatory deliverable (success criteria, image-plan `## tail` template
-	// section, generation step). Simply omitting it from the composition list
-	// above is too weak an override — the model still generates it to satisfy the
-	// hardcoded requirement. State the prohibition explicitly so it carries the
-	// same weight as the requirement it must override. Phrased around 「尾图」 /
-	// the `## tail` section (no literal "tail.png") to stay unambiguous without
-	// filename noise.
-	if !hasTail {
-		directive += " 另：禁止生成尾图——image-plan.md 不得包含 `## tail` 节，不得调用 generate_image 生成尾图文件，最终报告图片数量不含尾图。"
-	}
-	return directive
+	return "运行控制：\n- " + strings.Join(controls, "\n- ")
 }
 
-// describeArticleImageComposition renders the image composition directive for
-// 公众号 article tasks. Unlike seednote, the article cover is itself toggleable,
-// so there are four combinations. The default (both on) returns "" so the legacy
-// "always generate cover + 配图" prompt is byte-identical. The other three carry
-// enough weight to override the article-cover-design / article-visual-design
-// skills' hardcoded "always generate" requirements and the template
-// image_count.min gate — mirroring how describeSeednoteImageComposition phrases
-// its prohibitions (see its comment on why a mere omission is too weak).
-func describeArticleImageComposition(withCover, withContent bool) string {
+func defaultTrue(v *bool) bool {
+	return v == nil || *v
+}
+
+func seednoteImageMode(hasContent, hasTail bool) string {
+	switch {
+	case hasContent && hasTail:
+		return "full"
+	case hasContent:
+		return "cover_content"
+	case hasTail:
+		return "cover_tail"
+	default:
+		return "cover_only"
+	}
+}
+
+func articleImageMode(withCover, withContent bool) string {
 	switch {
 	case withCover && withContent:
-		return ""
+		return "cover_and_content"
 	case withCover && !withContent:
-		return "图片生成要求（必须严格遵守，覆盖 skill 默认数量规则）：仅生成封面（$DIR/cover.png，900×383，作为发布草稿的 thumb_media_id）。" +
-			"禁止生成任何正文配图——跳过 article-visual-design skill 的配图规划与生成（image-plan.md、images.json、步骤 7 全部跳过）；" +
-			"模板的 image_count.min 不再生效，不得据此强制生成配图；visual-rhythm-plan.md 仍可创建但所有 slot 的 image_url=null；" +
-			"04-article-final.md 不得内联任何正文 <img>。"
+		return "cover_only"
 	case !withCover && withContent:
-		return "图片生成要求（必须严格遵守，覆盖 skill 默认数量规则）：禁止生成封面——跳过 article-cover-design skill 与步骤 6d，" +
-			"$DIR/cover.png 不得生成。正常生成正文配图（按模板 image_count.min/max，每张 vision 校验）；" +
-			"但因无封面作 ref_image_path 风格锚点，正文图改为各自独立生成（不传 ref_image_path，或链到首张已生成图），" +
-			"严禁把 ref_image_path 指向不存在的 cover.png。发布草稿不带 thumb_media_id。"
+		return "content_only"
 	default:
-		return "图片生成要求（必须严格遵守，覆盖 skill 默认数量规则）：纯文字文章，禁止生成任何图片——" +
-			"跳过 article-cover-design skill、article-visual-design skill 的全部图片规划与生成（步骤 6d、7 全部跳过）；" +
-			"$DIR/cover.png 不生成；image-plan.md / images.json 不创建；模板 image_count.min 不再生效；" +
-			"visual-rhythm-plan.md 所有 slot 的 image_url=null；04-article-final.md 不得内联 <img>。" +
-			"发布草稿不带 thumb_media_id，并在 final-review.md 显式记录「未生成封面，公众号后台可能不显示封面/需手动设置」。"
+		return "text_only"
 	}
 }
 
@@ -548,17 +505,16 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		projectID = opts.Project.ID
 	}
 	userPrompt := BuildUserPrompt(UserPromptParams{
-		TaskType:        opts.Task.Type,
-		Topic:           opts.Task.Prompt,
-		AgentName:       agentName,
-		Goal:            opts.Task.Goal,
-		TaskID:          opts.Task.ID,
-		ProjectID:       projectID,
-		HasContentImage: opts.Task.HasContentImage,
-		HasTailImage:    opts.Task.HasTailImage,
-		// *bool → bool with a true default (nil = legacy "always generate").
-		ArticleWithCover:         opts.Task.ArticleWithCover == nil || *opts.Task.ArticleWithCover,
-		ArticleWithContentImages: opts.Task.ArticleWithContentImages == nil || *opts.Task.ArticleWithContentImages,
+		TaskType:                 opts.Task.Type,
+		Topic:                    opts.Task.Prompt,
+		AgentName:                agentName,
+		Goal:                     opts.Task.Goal,
+		TaskID:                   opts.Task.ID,
+		ProjectID:                projectID,
+		HasContentImage:          opts.Task.HasContentImage,
+		HasTailImage:             opts.Task.HasTailImage,
+		ArticleWithCover:         opts.Task.ArticleWithCover,
+		ArticleWithContentImages: opts.Task.ArticleWithContentImages,
 	})
 
 	// Load agent definition from plugin directory and pass via WithAgent()

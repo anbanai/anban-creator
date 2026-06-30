@@ -10,18 +10,20 @@ import (
 )
 
 type Config struct {
-	ServerURL       string
-	APIKey          string
-	TaskID          string
-	TaskType        string
-	Topic           string
-	Goal            string
-	Workspace       string
-	Model           string
-	AgentFlag       string
-	MaxTurns        int
-	HasContentImage bool
-	HasTailImage    bool
+	ServerURL                string
+	APIKey                   string
+	TaskID                   string
+	TaskType                 string
+	Topic                    string
+	Goal                     string
+	Workspace                string
+	Model                    string
+	AgentFlag                string
+	MaxTurns                 int
+	HasContentImage          bool
+	HasTailImage             bool
+	ArticleWithCover         bool
+	ArticleWithContentImages bool
 }
 
 func ParseConfig() (*Config, error) {
@@ -41,6 +43,8 @@ func ParseConfig() (*Config, error) {
 	// so the in-prompt directive reflects the user's task/plan choice.
 	flag.BoolVar(&cfg.HasContentImage, "has-content-image", true, "seednote: generate image_01.png (content page)")
 	flag.BoolVar(&cfg.HasTailImage, "has-tail-image", false, "seednote: generate tail.png")
+	flag.BoolVar(&cfg.ArticleWithCover, "article-with-cover", true, "article: generate cover image")
+	flag.BoolVar(&cfg.ArticleWithContentImages, "article-with-content-images", true, "article: generate in-text images")
 	flag.Parse()
 
 	cfg.ServerURL = strings.TrimRight(strings.TrimSpace(cfg.ServerURL), "/")
@@ -81,13 +85,15 @@ func ParseConfig() (*Config, error) {
 func (c *Config) UserPrompt() string {
 	agentName := serveragent.TaskTypeToAgent(c.TaskType)
 	return serveragent.BuildUserPrompt(serveragent.UserPromptParams{
-		TaskType:        c.TaskType,
-		Topic:           c.Topic,
-		AgentName:       agentName,
-		Goal:            c.Goal,
-		TaskID:          c.TaskID,
-		ProjectID:       os.Getenv("ANBAN_DEFAULT_PROJECT"),
-		HasContentImage: c.HasContentImage,
-		HasTailImage:    c.HasTailImage,
+		TaskType:                 c.TaskType,
+		Topic:                    c.Topic,
+		AgentName:                agentName,
+		Goal:                     c.Goal,
+		TaskID:                   c.TaskID,
+		ProjectID:                os.Getenv("ANBAN_DEFAULT_PROJECT"),
+		HasContentImage:          c.HasContentImage,
+		HasTailImage:             c.HasTailImage,
+		ArticleWithCover:         &c.ArticleWithCover,
+		ArticleWithContentImages: &c.ArticleWithContentImages,
 	})
 }

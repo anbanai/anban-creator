@@ -307,6 +307,12 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 			"--has-tail-image", strconv.FormatBool(opts.Task.HasTailImage),
 		)
 	}
+	if opts.Task.Type == model.PlatformArticle {
+		cmd = append(cmd,
+			"--article-with-cover", strconv.FormatBool(opts.Task.ArticleWithCover == nil || *opts.Task.ArticleWithCover),
+			"--article-with-content-images", strconv.FormatBool(opts.Task.ArticleWithContentImages == nil || *opts.Task.ArticleWithContentImages),
+		)
+	}
 	if agentModel != "" {
 		cmd = append(cmd, "--model", agentModel)
 	}

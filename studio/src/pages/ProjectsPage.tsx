@@ -773,6 +773,10 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
+              {isWechat && (
+                <TemplatePicker type="article" selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
+              )}
+
               <FormField control={form.control} name="visual_style" render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between gap-2">
@@ -912,9 +916,6 @@ export default function ProjectsPage() {
 
               {isWechat && (
                 <>
-                  {/* 公众号视觉模板：像小红书一样左右滑动选模板；选中后只导入图片视觉提示。 */}
-                  <TemplatePicker type="article" selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
-
                   {/* 写作风格（作者署名 + 写作风格模仿 + 可选头像）与排版：始终绑定到项目自身字段。 */}
                   <PersonaBlock
                     author={authorValue ?? ''}

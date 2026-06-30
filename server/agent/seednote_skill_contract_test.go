@@ -75,21 +75,44 @@ func TestSeednoteWritingSkillKeepsUserInputLocking(t *testing.T) {
 	}
 }
 
-func repoRoot(t *testing.T) string {
-	t.Helper()
-
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
+func TestSeednoteSkillContracts_RuntimeImageMode(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "claudecode", "agents", "seednote.md"),
+		filepath.Join(root, "claudecode", "skills", "seednote", "SKILL.md"),
+		filepath.Join(root, "claudecode", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "claudecode", "skills", "seednote-visual-design", "references", "content.md"),
+		filepath.Join(root, "openclaw", "skills", "seednote", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "seednote-visual-design", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "seednote-visual-design", "references", "content.md"),
 	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("repo root with go.mod not found")
-		}
-		dir = parent
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			text := string(data)
+			for _, term := range []string{
+				"seednote_image_mode",
+				"cover_only",
+				"cover_content",
+				"cover_tail",
+				"full",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing seednote runtime image mode term %q", path, term)
+				}
+			}
+			for _, stale := range []string{
+				"图片构成要求",
+				"user prompt 指令",
+				"禁止生成尾图",
+			} {
+				if strings.Contains(text, stale) {
+					t.Fatalf("%s still contains stale seednote image-control phrase %q", path, stale)
+				}
+			}
+		})
 	}
 }

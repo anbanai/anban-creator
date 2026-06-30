@@ -73,27 +73,9 @@ pub async fn run_agent(
     std::fs::create_dir_all(&task_workspace)?;
 
     let mut cmd = Command::new(agent_bin);
-    cmd.arg("--server-url").arg(server_url)
-        .arg("--api-key").arg(api_key)
-        .arg("--task-id").arg(&cfg.task_id)
-        .arg("--task-type").arg(&cfg.task_type)
-        .arg("--topic").arg(&cfg.topic)
-        .arg("--max-turns").arg(cfg.max_turns.to_string())
-        .arg("--workspace").arg(&task_workspace)
-        .arg("--agent-flag").arg(&cfg.agent_flag);
-    if let Some(model) = &cfg.model {
-        if !model.is_empty() {
-            cmd.arg("--model").arg(model);
-        }
+    for arg in agent_args(server_url, api_key, &task_workspace, cfg) {
+        cmd.arg(arg);
     }
-    if let Some(goal) = &cfg.goal {
-        if !goal.is_empty() {
-            cmd.arg("--goal").arg(goal);
-        }
-    }
-    // Bool flags mirror the Go flag defaults (has-content-image defaults true).
-    cmd.arg("--has-content-image").arg(cfg.has_content_image.to_string());
-    cmd.arg("--has-tail-image").arg(cfg.has_tail_image.to_string());
 
     // Environment: extend PATH with the bundled Node dir, point Claude Code at
     // the bundled plugin, forward the Anthropic key when configured.
@@ -115,7 +97,9 @@ pub async fn run_agent(
         cmd.env("ANBAN_DEFAULT_PROJECT", &cfg.project_id);
     }
 
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
 
     let mut child = cmd.spawn()?;
     let stdout = child.stdout.take().expect("piped stdout");
@@ -161,4 +145,95 @@ pub async fn run_agent(
     out_handle.abort();
     err_handle.abort();
     Ok(())
+}
+
+fn agent_args(
+    server_url: &str,
+    api_key: &str,
+    task_workspace: &Path,
+    cfg: &LocalExecutionConfig,
+) -> Vec<String> {
+    let mut args = vec![
+        "--server-url".to_string(),
+        server_url.to_string(),
+        "--api-key".to_string(),
+        api_key.to_string(),
+        "--task-id".to_string(),
+        cfg.task_id.clone(),
+        "--task-type".to_string(),
+        cfg.task_type.clone(),
+        "--topic".to_string(),
+        cfg.topic.clone(),
+        "--max-turns".to_string(),
+        cfg.max_turns.to_string(),
+        "--workspace".to_string(),
+        task_workspace.display().to_string(),
+        "--agent-flag".to_string(),
+        cfg.agent_flag.clone(),
+    ];
+    if let Some(model) = &cfg.model {
+        if !model.is_empty() {
+            args.push("--model".to_string());
+            args.push(model.clone());
+        }
+    }
+    if let Some(goal) = &cfg.goal {
+        if !goal.is_empty() {
+            args.push("--goal".to_string());
+            args.push(goal.clone());
+        }
+    }
+    // Bool flags mirror the Go flag defaults and server/agent/docker_executor.go.
+    args.extend([
+        "--has-content-image".to_string(),
+        cfg.has_content_image.to_string(),
+        "--has-tail-image".to_string(),
+        cfg.has_tail_image.to_string(),
+        "--article-with-cover".to_string(),
+        cfg.article_with_cover.to_string(),
+        "--article-with-content-images".to_string(),
+        cfg.article_with_content_images.to_string(),
+    ]);
+    args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_args_include_article_image_switches() {
+        let cfg = LocalExecutionConfig {
+            task_id: "task-1".to_string(),
+            task_type: "article".to_string(),
+            topic: "topic".to_string(),
+            agent_flag: "anbanwriter:wechatarticle".to_string(),
+            max_turns: 12,
+            model: None,
+            goal: None,
+            has_content_image: true,
+            has_tail_image: false,
+            article_with_cover: false,
+            article_with_content_images: true,
+            project_id: "project-1".to_string(),
+        };
+
+        let args = agent_args(
+            "https://api.example.com",
+            "key",
+            Path::new("/tmp/task-1"),
+            &cfg,
+        );
+
+        assert_flag_value(&args, "--article-with-cover", "false");
+        assert_flag_value(&args, "--article-with-content-images", "true");
+    }
+
+    fn assert_flag_value(args: &[String], flag: &str, want: &str) {
+        let pos = args
+            .iter()
+            .position(|arg| arg == flag)
+            .expect("flag missing");
+        assert_eq!(args.get(pos + 1).map(String::as_str), Some(want));
+    }
 }

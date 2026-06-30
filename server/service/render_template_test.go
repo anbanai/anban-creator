@@ -420,6 +420,31 @@ func TestRenderTemplate_DedupInlineAndSlotSameURL(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_UsesSlotImageSizeForInlineStyles(t *testing.T) {
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	userID := "user-image-size-style-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+
+	markdown := "# 标题\n\n## 第一节\n\n第一段。\n\n第二段。\n"
+	plan := &LayoutPlan{
+		ArticleType: "long-form-essay",
+		Slots: []LayoutPlanSlot{
+			{SlotID: "hero", SectionIndex: 0, ImageURL: "https://cdn/hero.png", ImageSize: "full-bleed"},
+			{SlotID: "section_opener", SectionIndex: 0, ImageURL: "https://cdn/section.png", ImageSize: "full-width"},
+			{SlotID: "inline_detail", SectionIndex: 0, AfterParagraphIndex: 0, ImageURL: "https://cdn/inline.png", ImageSize: "inline"},
+		},
+	}
+
+	result, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "", "")
+	if err != nil {
+		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
+	}
+
+	assertImageStyleContains(t, result.HTML, "https://cdn/hero.png", "max-width:100%")
+	assertImageStyleContains(t, result.HTML, "https://cdn/section.png", "max-width:86%")
+	assertImageStyleContains(t, result.HTML, "https://cdn/inline.png", "max-width:68%")
+}
+
 func TestRenderTemplate_ThemeFallbackToProjectTheme(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-theme-fallback-001"
@@ -440,6 +465,22 @@ func TestRenderTemplate_ThemeFallbackToProjectTheme(t *testing.T) {
 	}
 	if result.Theme != "autumn-warm" {
 		t.Errorf("[FAIL] Theme = %q, want autumn-warm (default)", result.Theme)
+	}
+}
+
+func assertImageStyleContains(t *testing.T, html, url, wantStyle string) {
+	t.Helper()
+	idx := strings.Index(html, `src="`+url+`"`)
+	if idx < 0 {
+		t.Fatalf("[FAIL] HTML missing image URL %s:\n%s", url, html)
+	}
+	end := strings.Index(html[idx:], ">")
+	if end < 0 {
+		t.Fatalf("[FAIL] image tag for %s is not closed:\n%s", url, html[idx:])
+	}
+	tag := html[idx : idx+end]
+	if !strings.Contains(tag, wantStyle) {
+		t.Fatalf("[FAIL] image tag for %s missing style %q:\n%s", url, wantStyle, tag)
 	}
 }
 

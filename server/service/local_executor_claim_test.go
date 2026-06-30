@@ -97,6 +97,41 @@ func TestClaimLocalTask_HappyPath(t *testing.T) {
 	}
 }
 
+func TestBuildLocalExecutionConfigCarriesArticleImageSwitches(t *testing.T) {
+	svc, _ := setupTaskServiceWithEnqueuer(t)
+	cover := false
+	content := true
+	task := &model.Task{
+		ID:                       "task-article-local",
+		Type:                     model.PlatformArticle,
+		Prompt:                   "时间管理",
+		ArticleWithCover:         &cover,
+		ArticleWithContentImages: &content,
+	}
+
+	cfg := svc.buildLocalExecutionConfig(task)
+	if cfg.ArticleWithCover {
+		t.Fatal("expected article_with_cover=false to be carried to local executor config")
+	}
+	if !cfg.ArticleWithContentImages {
+		t.Fatal("expected article_with_content_images=true to be carried to local executor config")
+	}
+}
+
+func TestBuildLocalExecutionConfigDefaultsArticleImageSwitchesOn(t *testing.T) {
+	svc, _ := setupTaskServiceWithEnqueuer(t)
+	task := &model.Task{
+		ID:     "task-article-local-default",
+		Type:   model.PlatformArticle,
+		Prompt: "时间管理",
+	}
+
+	cfg := svc.buildLocalExecutionConfig(task)
+	if !cfg.ArticleWithCover || !cfg.ArticleWithContentImages {
+		t.Fatalf("article image switches should default true for local executor config, got cover=%v content=%v", cfg.ArticleWithCover, cfg.ArticleWithContentImages)
+	}
+}
+
 // TestClaimLocalTask_SecondClaimReturnsNil confirms only one claimer wins.
 func TestClaimLocalTask_SecondClaimReturnsNil(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)

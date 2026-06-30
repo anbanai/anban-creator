@@ -47,16 +47,18 @@ const LocalClaimWindow = 30 * time.Second
 // server_url + the user's own API key from its local settings — those are NOT
 // echoed here (the desktop already holds them and echoing keys is unsafe).
 type LocalExecutionConfig struct {
-	TaskID          string `json:"task_id"`
-	TaskType        string `json:"task_type"`
-	Topic           string `json:"topic"`
-	AgentFlag       string `json:"agent_flag"` // "anbanwriter:<agent>"
-	MaxTurns        int    `json:"max_turns"`
-	Model           string `json:"model,omitempty"`
-	Goal            string `json:"goal,omitempty"`
-	HasContentImage bool   `json:"has_content_image"`
-	HasTailImage    bool   `json:"has_tail_image"`
-	ProjectID       string `json:"project_id"`
+	TaskID                   string `json:"task_id"`
+	TaskType                 string `json:"task_type"`
+	Topic                    string `json:"topic"`
+	AgentFlag                string `json:"agent_flag"` // "anbanwriter:<agent>"
+	MaxTurns                 int    `json:"max_turns"`
+	Model                    string `json:"model,omitempty"`
+	Goal                     string `json:"goal,omitempty"`
+	HasContentImage          bool   `json:"has_content_image"`
+	HasTailImage             bool   `json:"has_tail_image"`
+	ArticleWithCover         bool   `json:"article_with_cover"`
+	ArticleWithContentImages bool   `json:"article_with_content_images"`
+	ProjectID                string `json:"project_id"`
 }
 
 // ClaimLocalTask atomically claims the oldest pending local-target task owned
@@ -96,16 +98,18 @@ func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo s
 // max-turns via agent.DefaultMaxTurns). See agent.buildAgentCommand.
 func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutionConfig {
 	return &LocalExecutionConfig{
-		TaskID:          task.ID,
-		TaskType:        task.Type,
-		Topic:           task.Prompt,
-		AgentFlag:       "anbanwriter:" + agent.TaskTypeToAgent(task.Type),
-		MaxTurns:        agent.DefaultMaxTurns(task.Type, s.maxTurnsOverrides),
-		Model:           s.defaultModel,
-		Goal:            task.Goal,
-		HasContentImage: task.HasContentImage,
-		HasTailImage:    task.HasTailImage,
-		ProjectID:       task.ProjectID,
+		TaskID:                   task.ID,
+		TaskType:                 task.Type,
+		Topic:                    task.Prompt,
+		AgentFlag:                "anbanwriter:" + agent.TaskTypeToAgent(task.Type),
+		MaxTurns:                 agent.DefaultMaxTurns(task.Type, s.maxTurnsOverrides),
+		Model:                    s.defaultModel,
+		Goal:                     task.Goal,
+		HasContentImage:          task.HasContentImage,
+		HasTailImage:             task.HasTailImage,
+		ArticleWithCover:         task.ArticleWithCover == nil || *task.ArticleWithCover,
+		ArticleWithContentImages: task.ArticleWithContentImages == nil || *task.ArticleWithContentImages,
+		ProjectID:                task.ProjectID,
 	}
 }
 
