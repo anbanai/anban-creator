@@ -130,6 +130,26 @@ func TestTemplateHandler_List_ScopeAllReturnsPublicPlusOwn(t *testing.T) {
 	}
 }
 
+func TestTemplateHandler_List_ReturnsStylePromptForStudio(t *testing.T) {
+	app, repo := setupTemplateHandlerTest(t)
+	owner := uuid.New().String()
+	createTemplateRow(t, repo, owner, "public", "视觉模板")
+
+	resp := doRequest(t, app, "GET", "/api/v1/templates/?scope=all", owner, nil)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body := decodeBody(t, resp)
+	items := body["data"].(map[string]any)["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items count = %d, want 1", len(items))
+	}
+	item := items[0].(map[string]any)
+	if item["style_prompt"] != "暖色" {
+		t.Fatalf("style_prompt = %v, want 暖色", item["style_prompt"])
+	}
+}
+
 func TestTemplateHandler_List_ScopeMineReturnsOwnOnly(t *testing.T) {
 	app, repo := setupTemplateHandlerTest(t)
 	owner := uuid.New().String()
@@ -250,6 +270,25 @@ func TestTemplateHandler_Create_IgnoresNonVisualRuntimeFields(t *testing.T) {
 	}
 	if data["author"] != "" || data["writer"] != "" {
 		t.Errorf("author/writer = %v/%v, want ignored", data["author"], data["writer"])
+	}
+}
+
+func TestTemplateHandler_Create_ReturnsStylePromptForStudio(t *testing.T) {
+	app, _ := setupTemplateHandlerTest(t)
+	userID := uuid.New().String()
+
+	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
+		"name":         "视觉模板",
+		"type":         "seednote",
+		"style_prompt": "暖色生活摄影",
+		"visibility":   "public",
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	data := decodeBody(t, resp)["data"].(map[string]any)
+	if data["style_prompt"] != "暖色生活摄影" {
+		t.Fatalf("style_prompt = %v, want 暖色生活摄影", data["style_prompt"])
 	}
 }
 
@@ -427,5 +466,20 @@ func TestTemplateHandler_GetByID_PrivateTemplateVisibleToOwner(t *testing.T) {
 	resp := doRequest(t, app, "GET", "/api/v1/templates/"+tmpl.ID, owner, nil)
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestTemplateHandler_GetByID_ReturnsStylePromptForStudio(t *testing.T) {
+	app, repo := setupTemplateHandlerTest(t)
+	owner := uuid.New().String()
+	tmpl := createTemplateRow(t, repo, owner, "public", "视觉模板")
+
+	resp := doRequest(t, app, "GET", "/api/v1/templates/"+tmpl.ID, owner, nil)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	data := decodeBody(t, resp)["data"].(map[string]any)
+	if data["style_prompt"] != "暖色" {
+		t.Fatalf("style_prompt = %v, want 暖色", data["style_prompt"])
 	}
 }

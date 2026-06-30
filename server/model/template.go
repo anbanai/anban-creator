@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 
 	"gorm.io/datatypes"
@@ -36,6 +37,17 @@ type Template struct {
 }
 
 func (Template) TableName() string { return "templates" }
+
+func (t Template) MarshalJSON() ([]byte, error) {
+	type Alias Template
+	return json.Marshal(struct {
+		Alias
+		StylePrompt string `json:"style_prompt"`
+	}{
+		Alias:       Alias(t),
+		StylePrompt: t.VisualStyle,
+	})
+}
 
 // EcommerceTemplateDefaults is a legacy payload kept so old template rows can be
 // decoded. E-commerce defaults now live on projects.
