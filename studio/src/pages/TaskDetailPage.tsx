@@ -21,6 +21,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
+import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -605,18 +606,50 @@ export default function TaskDetailPage() {
                 {task.project_snapshot.project_name || project?.name || '—'}
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 lg:grid-cols-[140px_minmax(0,1fr)]">
               <div>
-                <p className="text-xs text-muted-foreground">视觉风格</p>
-                <p className="mt-1 line-clamp-3 text-sm text-foreground">{task.project_snapshot.visual_style || '—'}</p>
+                <p className="text-xs text-muted-foreground">参考图</p>
+                {task.project_snapshot.reference_image_url ? (
+                  <a
+                    href={task.project_snapshot.reference_image_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 block h-24 w-32 overflow-hidden rounded-md border border-border bg-muted"
+                  >
+                    <SignedImage
+                      src={task.project_snapshot.reference_image_url}
+                      alt="参考图"
+                      className="h-full w-full object-cover"
+                      fallbackClassName="h-full w-full"
+                    />
+                  </a>
+                ) : (
+                  <div className="mt-1 flex h-24 w-32 items-center justify-center rounded-md border border-dashed border-border bg-muted/40 text-xs text-muted-foreground">
+                    未设置
+                  </div>
+                )}
               </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">视觉风格</p>
+                <p className="mt-1 line-clamp-4 text-sm text-foreground">{task.project_snapshot.visual_style || '—'}</p>
+              </div>
+            </div>
+            <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <p className="text-xs text-muted-foreground">图片比例</p>
                 <p className="mt-1 text-sm text-foreground">{task.project_snapshot.image_ratio || task.image_ratio || '—'}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">参考图</p>
-                <p className="mt-1 truncate text-sm text-foreground">{task.project_snapshot.reference_image_url || '—'}</p>
+                <p className="text-xs text-muted-foreground">图片模型</p>
+                <p className="mt-1 text-sm text-foreground">{task.image_model_key || task.project_snapshot.ecommerce_defaults?.image_model_key || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">扣除积分</p>
+                <p className="mt-1 text-sm text-foreground">{typeof task.credits_charged === 'number' ? task.credits_charged.toLocaleString() : '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">执行成本</p>
+                <p className="mt-1 text-sm text-foreground">{task.total_cost_usd && task.total_cost_usd > 0 ? formatUSD(task.total_cost_usd) : '—'}</p>
               </div>
             </div>
             {task.type === 'article' && (
@@ -636,14 +669,10 @@ export default function TaskDetailPage() {
               </div>
             )}
             {task.type === 'ecommerce' && task.project_snapshot.ecommerce_defaults && (
-              <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
                   <p className="text-xs text-muted-foreground">目标平台</p>
                   <p className="mt-1 text-sm text-foreground">{task.project_snapshot.ecommerce_defaults.target_platform || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">图片模型</p>
-                  <p className="mt-1 text-sm text-foreground">{task.project_snapshot.ecommerce_defaults.image_model_key || '—'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">默认模块</p>

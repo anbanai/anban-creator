@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http/httptest"
 	"path/filepath"
@@ -275,5 +276,86 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 		case *ptr:
 			t.Errorf("%s = true, want false", label)
 		}
+	}
+}
+
+func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	taskID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      "task-credits@example.com",
+		Password:   "hashed",
+		InviteCode: "taskcredits",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusCompleted,
+		Prompt:    "详情扣分展示",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.Credits().CreateTransaction(ctx, &model.CreditTransaction{
+		UserID:       userID,
+		Type:         model.CreditTypeTaskDeduct,
+		Amount:       -120,
+		BalanceAfter: 880,
+		TaskID:       &taskID,
+		Description:  "任务扣除 -120",
+	}); err != nil {
+		t.Fatalf("create credit transaction: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+
+	app := fiber.New()
+	app.Get("/tasks/:id", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.GetByID(c)
+	})
+
+	req := httptest.NewRequest("GET", "/tasks/"+taskID, nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Data struct {
+			ID             string `json:"id"`
+			CreditsCharged int    `json:"credits_charged"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.ID != taskID {
+		t.Fatalf("id = %q, want %q", body.Data.ID, taskID)
+	}
+	if body.Data.CreditsCharged != 120 {
+		t.Fatalf("credits_charged = %d, want 120", body.Data.CreditsCharged)
 	}
 }

@@ -133,6 +133,11 @@ type bulkTasksResponse struct {
 	Results   []bulkTaskResult `json:"results"`
 }
 
+type taskDetailResponse struct {
+	*model.Task
+	CreditsCharged *int `json:"credits_charged,omitempty"`
+}
+
 // Create handles POST /api/v1/tasks.
 func (h *TaskHandler) Create(c fiber.Ctx) error {
 	var req createTaskRequest
@@ -294,7 +299,15 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	return Success(c, task)
+	resp := taskDetailResponse{Task: task}
+	if h.repo != nil {
+		if tx, err := h.repo.Credits().FindDeductionByTaskID(c.Context(), task.ID); err == nil && tx != nil && tx.Amount < 0 {
+			charged := -tx.Amount
+			resp.CreditsCharged = &charged
+		}
+	}
+
+	return Success(c, resp)
 }
 
 // Cancel handles POST /api/v1/tasks/:id/cancel.

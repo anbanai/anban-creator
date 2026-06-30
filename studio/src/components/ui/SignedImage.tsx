@@ -107,6 +107,14 @@ export function SignedImage({
     )
   }
 
+  if (!resolvedUrl) {
+    return (
+      <div className={cn('flex h-full w-full items-center justify-center', fallbackClassName)}>
+        {fallbackIcon ?? <ImageIcon className="h-10 w-10 text-muted-foreground/40" />}
+      </div>
+    )
+  }
+
   return (
     <img
       src={resolvedUrl}

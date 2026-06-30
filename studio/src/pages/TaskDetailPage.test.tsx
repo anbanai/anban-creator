@@ -97,7 +97,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
   })
 
-  it('shows the frozen project snapshot', async () => {
+  it('shows the frozen project snapshot with the reference image before the visual style', async () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
@@ -107,7 +107,7 @@ describe('TaskDetailPage', () => {
         platform: 'article',
         visual_style: '柔光生活摄影',
         image_ratio: '16:9',
-        reference_image_url: '/api/v1/files/ref.png',
+        reference_image_url: 'https://cdn.example.com/ref.png',
         author: '安般',
         writer: 'dan-koe',
         theme: 'autumn-warm',
@@ -118,6 +118,8 @@ describe('TaskDetailPage', () => {
 
     expect(await screen.findByText('项目快照')).toBeInTheDocument()
     expect(screen.getByText('快照项目')).toBeInTheDocument()
+    const referenceImage = await screen.findByRole('img', { name: '参考图' })
+    expect(referenceImage.compareDocumentPosition(screen.getByText('视觉风格')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
     expect(screen.getByText('安般')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
