@@ -482,6 +482,7 @@ func main() {
 	if projectSvc != nil && taskSvc != nil && creditSvc != nil && planSvc != nil {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
+		var videoSvc *service.VideoService
 		var writingSvc *service.WritingService
 		var liveSliceSvc *service.LiveSliceService
 
@@ -490,6 +491,11 @@ func main() {
 			if modelConfigSvc != nil {
 				imageSvc.SetModelConfigService(modelConfigSvc)
 			}
+		}
+		if cfg.VideoAPI.Key != "" && cfg.VideoAPI.Model != "" {
+			videoSvc = service.NewVideoService(&cfg.VideoAPI)
+		} else {
+			log.Warn().Msg("video generation service not configured (set video_api.key/model), video tools unavailable")
 		}
 		if mysqlDB != nil && imageSvc != nil {
 			designerSvc = service.NewDesignerService(mysqlDB, imageSvc, creditSvc, &cfg.ImageAPI, store, log)
@@ -528,10 +534,12 @@ func main() {
 
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:       projectSvc,
+			Store:            store,
 			TaskSvc:          taskSvc,
 			CreditSvc:        creditSvc,
 			PlanSvc:          planSvc,
 			ImageSvc:         imageSvc,
+			VideoSvc:         videoSvc,
 			WritingSvc:       writingSvc,
 			PublishingSvc:    publishingSvc,
 			WorkspaceSvc:     workspaceSvc,
@@ -547,6 +555,7 @@ func main() {
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
+			Bool("video_tools", videoSvc != nil).
 			Bool("writing_tools", writingSvc != nil).
 			Bool("live_slice_tools", liveSliceSvc != nil).
 			Bool("publishing_tools", publishingSvc != nil).

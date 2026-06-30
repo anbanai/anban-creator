@@ -13,15 +13,18 @@ import (
 	"github.com/royalrick/anbanwriter/server/resources"
 	"github.com/royalrick/anbanwriter/server/seednote"
 	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/royalrick/anbanwriter/server/storage"
 )
 
 // Services holds the service instances needed by MCP tools.
 type Services struct {
 	ProjectSvc       *service.ProjectService
+	Store            storage.Provider
 	TaskSvc          *service.TaskService
 	CreditSvc        *service.CreditService
 	PlanSvc          *service.PlanService
 	ImageSvc         *service.ImageService
+	VideoSvc         *service.VideoService
 	WritingSvc       *service.WritingService
 	PublishingSvc    *service.PublishingService
 	WorkspaceSvc     *service.WorkspaceService
@@ -39,6 +42,7 @@ func RegisterTools(server *mcp.Server) {
 	registerCreditTools(server)
 	registerPlanTools(server)
 	registerImageTools(server)
+	registerVideoTools(server)
 	registerWritingTools(server)
 	registerPublishingTools(server)
 	registerWorkspaceTools(server)

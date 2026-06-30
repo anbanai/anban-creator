@@ -24,6 +24,7 @@ type Config struct {
 	Storage      StorageConfig      `yaml:"storage"`
 	MCP          MCPConfig          `yaml:"mcp"`
 	ImageAPI     ImageAPIConfig     `yaml:"image_api"`
+	VideoAPI     VideoAPIConfig     `yaml:"video_api"`
 	ImagePresets []ImageModelPreset `yaml:"image_presets"`
 	Writing      WritingConfig      `yaml:"writing"`
 	Vision       VisionConfig       `yaml:"vision"`
@@ -148,6 +149,28 @@ type WeChatConfig struct {
 // MCPConfig holds Model Context Protocol endpoint configuration.
 type MCPConfig struct {
 	APIKey string `yaml:"api_key"` // API key for MCP endpoint authentication
+}
+
+const DefaultVideoAPIBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
+
+// VideoAPIConfig holds Volcengine Ark content-generation settings for
+// Seedance/Dreamina-style short-video generation.
+type VideoAPIConfig struct {
+	Key      string              `yaml:"key"`
+	BaseURL  string              `yaml:"base_url"`
+	Model    string              `yaml:"model"`
+	Timeout  time.Duration       `yaml:"timeout"`
+	Credits  int                 `yaml:"credits"`
+	Defaults VideoDefaultsConfig `yaml:"defaults"`
+}
+
+// VideoDefaultsConfig holds safe defaults for short commercial videos.
+type VideoDefaultsConfig struct {
+	Resolution  string `yaml:"resolution"`
+	Ratio       string `yaml:"ratio"`
+	Duration    int64  `yaml:"duration"`
+	ServiceTier string `yaml:"service_tier"`
+	Watermark   *bool  `yaml:"watermark"`
 }
 
 // StorageConfig holds file storage configuration.
@@ -459,6 +482,21 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Storage.LocalDataDir == "" {
 		c.Storage.LocalDataDir = "./data/files"
+	}
+	if c.VideoAPI.BaseURL == "" {
+		c.VideoAPI.BaseURL = DefaultVideoAPIBaseURL
+	}
+	if c.VideoAPI.Timeout == 0 {
+		c.VideoAPI.Timeout = 10 * time.Minute
+	}
+	if c.VideoAPI.Defaults.Resolution == "" {
+		c.VideoAPI.Defaults.Resolution = "1080p"
+	}
+	if c.VideoAPI.Defaults.Ratio == "" {
+		c.VideoAPI.Defaults.Ratio = "9:16"
+	}
+	if c.VideoAPI.Defaults.Duration == 0 {
+		c.VideoAPI.Defaults.Duration = 15
 	}
 
 	// Per-platform image size defaults (ratio:tier format).

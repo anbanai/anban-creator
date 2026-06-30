@@ -173,6 +173,23 @@ image_presets:
     min_tier: "pro"
 
 # ---------------------------------------------------------------------------
+# Video API: Volcengine Ark Seedance/Dreamina video generation
+# Used by MCP video tools. API keys stay server-side; agents call MCP only.
+# Reference image/audio/video URLs must be public HTTPS URLs (OSS/CDN).
+# ---------------------------------------------------------------------------
+video_api:
+  key: "${VOLCENGINE_ARK_API_KEY}" # Volcengine Ark API key
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  model: "doubao-seedance-2-0"
+  timeout: 10m
+  credits: 3000 # Per-video task credit cost for MCP create_video_generation_task
+  defaults:
+    resolution: "1080p"
+    ratio: "9:16"
+    duration: 15
+    watermark: false
+
+# ---------------------------------------------------------------------------
 # Writing: LLM API configuration for writing services
 # Used by article writing, humanization, topic research, SEO, outlines.
 # 如需 env 控制（例如复用 ANTHROPIC_*），写 base_url: "${ANTHROPIC_BASE_URL}" 等。

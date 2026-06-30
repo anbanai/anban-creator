@@ -201,6 +201,7 @@ const (
 	CreditTypeTopicResearch    = "topic_research"
 	CreditTypeSEO              = "seo"
 	CreditTypeOutline          = "outline"
+	CreditTypeVideoGen         = "video_gen"
 	CreditTypePosterGeneration = "poster_generation"
 	CreditTypeViralAnalysis    = "viral_analysis"
 )

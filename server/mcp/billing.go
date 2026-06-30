@@ -56,6 +56,8 @@ func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, coun
 	var cost int
 	if opType == model.CreditTypeImageGen {
 		cost = imageGenCredits(provider, mdl)
+	} else if opType == model.CreditTypeVideoGen {
+		cost = videoGenCredits()
 	} else {
 		var ok bool
 		cost, ok = billSvc.config.Credits.ModelCost(opType, provider, mdl)
@@ -69,6 +71,13 @@ func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, coun
 
 	_, err := billSvc.creditSvc.DeductForOperation(ctx, userID, opType, cost*count)
 	return err
+}
+
+func videoGenCredits() int {
+	if billSvc == nil || billSvc.config == nil {
+		return 0
+	}
+	return billSvc.config.VideoAPI.Credits
 }
 
 // imageGenCredits looks up per-image credit cost from ImageAPI configs.
@@ -99,6 +108,8 @@ func isByok(ctx context.Context, userID, opType string) bool {
 	switch opType {
 	case model.CreditTypeImageGen:
 		return billSvc.modelConfigSvc.HasCompleteImageOverride(ctx, userID)
+	case model.CreditTypeVideoGen:
+		return false
 	case model.CreditTypeArticleWrite, model.CreditTypeConvert,
 		model.CreditTypeTopicResearch,
 		model.CreditTypeSEO, model.CreditTypeOutline:
