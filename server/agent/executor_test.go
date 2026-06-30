@@ -722,39 +722,34 @@ func TestBuildUserPrompt_TaskContext(t *testing.T) {
 
 func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 	cases := []struct {
-		name         string
-		hasContent   bool
-		hasTail      bool
-		wantContains []string
-		wantAbsence  []string
+		name       string
+		hasContent bool
+		hasTail    bool
+		wantMode   string
 	}{
 		{
-			name:         "cover only",
-			hasContent:   false,
-			hasTail:      false,
-			wantContains: []string{"图片构成要求", "封面图（cover.png）", "共 1 张", "写入此数字", "禁止生成尾图"},
-			wantAbsence:  []string{"image_01.png", "tail.png", "1~3 张内容图"},
+			name:       "cover only",
+			hasContent: false,
+			hasTail:    false,
+			wantMode:   "seednote_image_mode=cover_only",
 		},
 		{
-			name:         "cover and content (default)",
-			hasContent:   true,
-			hasTail:      false,
-			wantContains: []string{"图片构成要求", "封面图（cover.png）", "1~3 张内容图", "写入实际生成的总张数", "内容图张数由信息点分组决定", "最多 3 张", "禁止生成尾图"},
-			wantAbsence:  []string{"tail.png", "共 2 张"},
+			name:       "cover and content (default)",
+			hasContent: true,
+			hasTail:    false,
+			wantMode:   "seednote_image_mode=cover_content",
 		},
 		{
-			name:         "cover and tail",
-			hasContent:   false,
-			hasTail:      true,
-			wantContains: []string{"图片构成要求", "封面图（cover.png）", "尾图（tail.png）", "共 2 张", "写入此数字"},
-			wantAbsence:  []string{"image_01.png", "1~3 张内容图", "禁止生成尾图"},
+			name:       "cover and tail",
+			hasContent: false,
+			hasTail:    true,
+			wantMode:   "seednote_image_mode=cover_tail",
 		},
 		{
-			name:         "cover content and tail",
-			hasContent:   true,
-			hasTail:      true,
-			wantContains: []string{"图片构成要求", "封面图（cover.png）", "1~3 张内容图", "尾图（tail.png）", "写入实际生成的总张数", "内容图张数由信息点分组决定", "最多 3 张"},
-			wantAbsence:  []string{"共 3 张", "禁止生成尾图"},
+			name:       "cover content and tail",
+			hasContent: true,
+			hasTail:    true,
+			wantMode:   "seednote_image_mode=full",
 		},
 	}
 	for _, tc := range cases {
@@ -766,34 +761,34 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 				HasContentImage: tc.hasContent,
 				HasTailImage:    tc.hasTail,
 			})
-			for _, sub := range tc.wantContains {
+			for _, sub := range []string{"运行控制：", tc.wantMode} {
 				if !strings.Contains(got, sub) {
 					t.Errorf("missing %q in prompt: %q", sub, got)
 				}
 			}
-			for _, sub := range tc.wantAbsence {
+			for _, sub := range []string{"图片构成要求", "写入实际生成的总张数", "写入此数字", "禁止生成尾图", "image_01.png", "tail.png", "1~3 张内容图"} {
 				if strings.Contains(got, sub) {
 					t.Errorf("%q should be absent; got %q", sub, got)
 				}
-			}
-			if !strings.Contains(got, "image-plan.md 必须在「计划图片数量」字段写入") {
-				t.Errorf("missing image-plan.md hint; got %q", got)
 			}
 		})
 	}
 
 	// A default article task (both image toggles on) must NOT get the seednote
-	// image-composition directive, nor any article directive (both-on = no-op).
+	// image-composition directive, nor any long-form image instruction.
 	articleGot := BuildUserPrompt(UserPromptParams{
 		TaskType:                 "article",
 		Topic:                    "时间管理",
 		AgentName:                "wechatarticle",
 		HasContentImage:          true,
 		HasTailImage:             true,
-		ArticleWithCover:         true,
-		ArticleWithContentImages: true,
+		ArticleWithCover:         ptrBool(true),
+		ArticleWithContentImages: ptrBool(true),
 	})
-	for _, sub := range []string{"图片构成要求", "图片生成要求", "image_01.png", "tail.png"} {
+	if !strings.Contains(articleGot, "article_image_mode=cover_and_content") {
+		t.Errorf("default article task should get structured article image mode; got %q", articleGot)
+	}
+	for _, sub := range []string{"图片构成要求", "图片生成要求", "image_01.png", "tail.png", "seednote_image_mode="} {
 		if strings.Contains(articleGot, sub) {
 			t.Errorf("default article task must not get image directive %q; got %q", sub, articleGot)
 		}
@@ -802,39 +797,38 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 
 func TestBuildUserPrompt_ArticleImageComposition(t *testing.T) {
 	cases := []struct {
-		name         string
-		withCover    bool
-		withContent  bool
-		wantContains []string
-		wantAbsence  []string
+		name        string
+		withCover   *bool
+		withContent *bool
+		wantMode    string
 	}{
 		{
-			name:        "both on (default = no directive)",
-			withCover:   true,
-			withContent: true,
-			// Byte-identical to legacy prompt: no image directive at all.
-			wantAbsence: []string{"图片生成要求", "禁止生成", "纯文字文章", "图片构成要求", "image_01.png", "tail.png"},
+			name:     "nil defaults to both on",
+			wantMode: "article_image_mode=cover_and_content",
 		},
 		{
-			name:         "cover only (content off)",
-			withCover:    true,
-			withContent:  false,
-			wantContains: []string{"图片生成要求", "仅生成封面", "禁止生成任何正文配图", "image_count.min 不再生效"},
-			wantAbsence:  []string{"禁止生成封面", "纯文字文章", "图片构成要求", "image_01.png", "tail.png"},
+			name:        "both on",
+			withCover:   ptrBool(true),
+			withContent: ptrBool(true),
+			wantMode:    "article_image_mode=cover_and_content",
 		},
 		{
-			name:         "content only (cover off)",
-			withCover:    false,
-			withContent:  true,
-			wantContains: []string{"图片生成要求", "禁止生成封面", "正常生成正文配图", "不带 thumb_media_id"},
-			wantAbsence:  []string{"禁止生成任何正文配图", "纯文字文章", "仅生成封面", "图片构成要求", "image_01.png", "tail.png"},
+			name:        "cover only (content off)",
+			withCover:   ptrBool(true),
+			withContent: ptrBool(false),
+			wantMode:    "article_image_mode=cover_only",
 		},
 		{
-			name:         "neither (pure text)",
-			withCover:    false,
-			withContent:  false,
-			wantContains: []string{"图片生成要求", "纯文字文章", "禁止生成任何图片", "不带 thumb_media_id"},
-			wantAbsence:  []string{"仅生成封面", "正常生成正文配图", "图片构成要求", "image_01.png", "tail.png"},
+			name:        "content only (cover off)",
+			withCover:   ptrBool(false),
+			withContent: ptrBool(true),
+			wantMode:    "article_image_mode=content_only",
+		},
+		{
+			name:        "neither (pure text)",
+			withCover:   ptrBool(false),
+			withContent: ptrBool(false),
+			wantMode:    "article_image_mode=text_only",
 		},
 	}
 	for _, tc := range cases {
@@ -846,17 +840,40 @@ func TestBuildUserPrompt_ArticleImageComposition(t *testing.T) {
 				ArticleWithCover:         tc.withCover,
 				ArticleWithContentImages: tc.withContent,
 			})
-			for _, sub := range tc.wantContains {
+			for _, sub := range []string{"运行控制：", tc.wantMode} {
 				if !strings.Contains(got, sub) {
 					t.Errorf("missing %q in prompt: %q", sub, got)
 				}
 			}
-			for _, sub := range tc.wantAbsence {
+			for _, sub := range []string{"图片生成要求", "禁止生成任何正文配图", "禁止生成封面", "纯文字文章", "图片构成要求", "image_01.png", "tail.png", "image_count.min 不再生效"} {
 				if strings.Contains(got, sub) {
 					t.Errorf("%q should be absent; got %q", sub, got)
 				}
 			}
 		})
+	}
+}
+
+func ptrBool(v bool) *bool {
+	return &v
+}
+
+func TestExecutorPromptSource_DoesNotEmbedLongImageDirectives(t *testing.T) {
+	data, err := os.ReadFile("executor.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	for _, stale := range []string{
+		"图片生成要求",
+		"图片构成要求",
+		"禁止生成任何正文配图",
+		"禁止生成尾图",
+		"不得把缺 image-plan.md",
+	} {
+		if strings.Contains(source, stale) {
+			t.Fatalf("executor.go should emit structured runtime controls, not long workflow directive %q", stale)
+		}
 	}
 }
 

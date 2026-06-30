@@ -154,7 +154,7 @@ func (s *WritingService) RenderTemplate(
 	}
 
 	// Slot images are final — render their placeholders as real <img> tags.
-	html := renderImagesAsRealTags(convResult.HTML, convResult.Images)
+	html := renderImagesAsRealTags(convResult.HTML, convResult.Images, layoutPlan)
 
 	slotsRendered := auditRenderedSlots(html, imageBearingSlots(layoutPlan))
 
@@ -386,16 +386,44 @@ func imageBearingSlots(plan *LayoutPlan) []LayoutPlanSlot {
 // renderImagesAsRealTags replaces <!-- IMG:N --> placeholders with real <img>
 // tags using each image's Original URL. RenderTemplate slots carry final URLs,
 // so — unlike ConvertMarkdown — no upload pipeline intervenes.
-func renderImagesAsRealTags(htmlContent string, images []converter.ImageRef) string {
+func renderImagesAsRealTags(htmlContent string, images []converter.ImageRef, plan *LayoutPlan) string {
 	out := htmlContent
+	imageSizes := plannedImageSizes(plan)
 	for _, img := range images {
 		if img.Placeholder == "" {
 			continue
 		}
-		tag := fmt.Sprintf(`<img src="%s" style="max-width:100%%;height:auto;display:block;margin:20px auto;" alt="" />`, img.Original)
+		maxWidth := imageMaxWidth(imageSizes[img.Original])
+		tag := fmt.Sprintf(`<img src="%s" style="max-width:%s;height:auto;display:block;margin:20px auto;" alt="" />`, img.Original, maxWidth)
 		out = strings.ReplaceAll(out, img.Placeholder, tag)
 	}
 	return out
+}
+
+func plannedImageSizes(plan *LayoutPlan) map[string]string {
+	sizes := map[string]string{}
+	if plan == nil {
+		return sizes
+	}
+	for _, slot := range imageBearingSlots(plan) {
+		if slot.ImageURL != "" && slot.ImageSize != "" {
+			sizes[slot.ImageURL] = slot.ImageSize
+		}
+	}
+	return sizes
+}
+
+func imageMaxWidth(imageSize string) string {
+	switch imageSize {
+	case "inline":
+		return "68%"
+	case "full-width":
+		return "86%"
+	case "full-bleed":
+		return "100%"
+	default:
+		return "100%"
+	}
 }
 
 // sortSlotsForRendering orders slots so section_opener precedes inline_detail.

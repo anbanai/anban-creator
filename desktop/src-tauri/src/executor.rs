@@ -1,4 +1,8 @@
-use crate::{config::AppConfig, paths::Resources, sidecar::{self, SidecarEnv}};
+use crate::{
+    config::AppConfig,
+    paths::Resources,
+    sidecar::{self, SidecarEnv},
+};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -30,12 +34,20 @@ pub struct LocalExecutionConfig {
     pub has_content_image: bool,
     #[serde(default)]
     pub has_tail_image: bool,
+    #[serde(default = "default_true")]
+    pub article_with_cover: bool,
+    #[serde(default = "default_true")]
+    pub article_with_content_images: bool,
     /// Returned by the server claim contract; injected into the spawned agent's
     /// env as ANBAN_DEFAULT_PROJECT (mirrors the cloud DockerExecutor) so the
     /// agent's BuildUserPrompt sees the project context (e.g. the topic-pool
     /// anti-double-consume `about:` invariant depends on it).
     #[serde(default)]
     pub project_id: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Standard server response envelope (`{code,msg,data}`).
@@ -86,7 +98,10 @@ async fn claim_once(
         .post(&url)
         .bearer_auth(api_key)
         .json(&ClaimBody {
-            executor_info: ExecutorInfo { hostname: "desktop", version: "0.1" },
+            executor_info: ExecutorInfo {
+                hostname: "desktop",
+                version: "0.1",
+            },
         })
         .send()
         .await
@@ -98,8 +113,10 @@ async fn claim_once(
     if !resp.status().is_success() {
         return Err(format!("claim returned HTTP {}", resp.status()));
     }
-    let envelope: Envelope<LocalExecutionConfig> =
-        resp.json().await.map_err(|e| format!("claim decode failed: {e}"))?;
+    let envelope: Envelope<LocalExecutionConfig> = resp
+        .json()
+        .await
+        .map_err(|e| format!("claim decode failed: {e}"))?;
     Ok(envelope.data)
 }
 
@@ -126,7 +143,11 @@ pub async fn run_loop(
         Err(e) => {
             let _ = app.emit(
                 "local-run://event",
-                StatusEvent { stage: "executor", level: "error", message: format!("http client init failed: {e}") },
+                StatusEvent {
+                    stage: "executor",
+                    level: "error",
+                    message: format!("http client init failed: {e}"),
+                },
             );
             return;
         }
@@ -134,7 +155,11 @@ pub async fn run_loop(
 
     let _ = app.emit(
         "local-run://event",
-        StatusEvent { stage: "executor", level: "info", message: "本地执行器已启动".to_string() },
+        StatusEvent {
+            stage: "executor",
+            level: "info",
+            message: "本地执行器已启动".to_string(),
+        },
     );
 
     loop {
@@ -154,7 +179,10 @@ pub async fn run_loop(
             && !snapshot.workspace_root.is_empty();
         if !proceed {
             // Not fully provisioned — back off and re-check.
-            if tokio::time::timeout(ERROR_BACKOFF, cancel.cancelled()).await.is_ok() {
+            if tokio::time::timeout(ERROR_BACKOFF, cancel.cancelled())
+                .await
+                .is_ok()
+            {
                 break;
             }
             continue;
@@ -174,7 +202,10 @@ pub async fn run_loop(
                     StatusEvent {
                         stage: "executor",
                         level: "info",
-                        message: format!("已认领任务 {}（{}），开始本地执行", task_cfg.task_id, task_cfg.task_type),
+                        message: format!(
+                            "已认领任务 {}（{}），开始本地执行",
+                            task_cfg.task_id, task_cfg.task_type
+                        ),
                     },
                 );
                 let env = SidecarEnv {
@@ -187,25 +218,49 @@ pub async fn run_loop(
                 let server_url = derive_server_url(&snapshot.api_base);
                 let workspace = std::path::PathBuf::from(&snapshot.workspace_root);
                 let agent_bin = res.agent_bin.clone().unwrap_or_default();
-                if let Err(e) = sidecar::run_agent(&app, &agent_bin, &env, &workspace, &server_url, &snapshot.api_key, &task_cfg).await {
+                if let Err(e) = sidecar::run_agent(
+                    &app,
+                    &agent_bin,
+                    &env,
+                    &workspace,
+                    &server_url,
+                    &snapshot.api_key,
+                    &task_cfg,
+                )
+                .await
+                {
                     let _ = app.emit(
                         "local-run://event",
-                        StatusEvent { stage: "executor", level: "error", message: format!("任务 {} 执行失败: {e}", task_cfg.task_id) },
+                        StatusEvent {
+                            stage: "executor",
+                            level: "error",
+                            message: format!("任务 {} 执行失败: {e}", task_cfg.task_id),
+                        },
                     );
                 }
             }
             Ok(None) => {
                 // Nothing claimable — sleep until the next poll.
-                if tokio::time::timeout(POLL_INTERVAL, cancel.cancelled()).await.is_ok() {
+                if tokio::time::timeout(POLL_INTERVAL, cancel.cancelled())
+                    .await
+                    .is_ok()
+                {
                     break;
                 }
             }
             Err(e) => {
                 let _ = app.emit(
                     "local-run://event",
-                    StatusEvent { stage: "executor", level: "error", message: format!("认领失败: {e}") },
+                    StatusEvent {
+                        stage: "executor",
+                        level: "error",
+                        message: format!("认领失败: {e}"),
+                    },
                 );
-                if tokio::time::timeout(ERROR_BACKOFF, cancel.cancelled()).await.is_ok() {
+                if tokio::time::timeout(ERROR_BACKOFF, cancel.cancelled())
+                    .await
+                    .is_ok()
+                {
                     break;
                 }
             }
@@ -215,7 +270,11 @@ pub async fn run_loop(
     running.store(false, Ordering::SeqCst);
     let _ = app.emit(
         "local-run://event",
-        StatusEvent { stage: "executor", level: "info", message: "本地执行器已停止".to_string() },
+        StatusEvent {
+            stage: "executor",
+            level: "info",
+            message: "本地执行器已停止".to_string(),
+        },
     );
 }
 
