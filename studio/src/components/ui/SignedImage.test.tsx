@@ -27,4 +27,18 @@ describe('SignedImage', () => {
     createObjectURL.mockRestore()
     revokeObjectURL.mockRestore()
   })
+
+  it('fetches absolute API file URLs with the authenticated client', async () => {
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:absolute-ref')
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    vi.mocked(http.get).mockResolvedValue({ data: new Blob(['x'], { type: 'image/png' }) })
+
+    render(<SignedImage src="https://app.example.com/api/v1/files/ref.png" alt="参考图" />)
+
+    const image = await screen.findByRole('img', { name: '参考图' })
+    expect(image).toHaveAttribute('src', 'blob:absolute-ref')
+    expect(http.get).toHaveBeenCalledWith('/files/ref.png', { responseType: 'blob' })
+    createObjectURL.mockRestore()
+    revokeObjectURL.mockRestore()
+  })
 })

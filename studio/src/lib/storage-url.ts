@@ -41,6 +41,9 @@ export function normalizeStorageUrl(url: string): string {
   if (url.startsWith('/files/')) return url
   try {
     const u = new URL(url)
+    if (u.pathname.startsWith('/api/v1/files/')) {
+      return u.pathname.replace('/api/v1/files/', '/files/')
+    }
     // Self-contained signed URL — render directly, do NOT route through proxy.
     if (isSignedOSSUrl(u)) return url
     if (u.hostname.endsWith('.aliyuncs.com')) {
