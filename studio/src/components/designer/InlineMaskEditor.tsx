@@ -110,6 +110,21 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
 
     featherRef.current = feather
 
+    const syncCanvasSize = useCallback(() => {
+      const canvas = canvasRef.current
+      const img = imgRef.current
+      if (!canvas || !img) return false
+
+      if (canvas.width !== img.naturalWidth) {
+        canvas.width = img.naturalWidth
+      }
+      if (canvas.height !== img.naturalHeight) {
+        canvas.height = img.naturalHeight
+      }
+
+      return canvas.width > 0 && canvas.height > 0
+    }, [])
+
     // Load image via authenticated backend proxy when it's a remote OSS URL,
     // to avoid CORS on <img crossOrigin="anonymous"> + canvas export. For
     // same-origin / blob URLs, use them directly.
@@ -174,17 +189,19 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
       const canvas = canvasRef.current
       const img = imgRef.current
       if (!canvas || !img || !imageLoaded) return
+      if (!syncCanvasSize()) return
 
       const ctx = canvas.getContext('2d')
       if (!ctx) return
 
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
       const allStrokes: AnyStroke[] = [...strokesRef.current]
       if (currentStrokeRef.current.length > 0) {
-        allStrokes.push({ type: 'brush', points: currentStrokeRef.current })
+        allStrokes.push({
+          type: tool === 'eraser' ? 'eraser' : 'brush',
+          points: currentStrokeRef.current,
+        })
       }
       if (currentShapeRef.current && (tool === 'rect' || tool === 'circle')) {
         allStrokes.push({ type: tool, bounds: currentShapeRef.current })
@@ -235,11 +252,12 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
       }
 
       ctx.globalCompositeOperation = 'source-over'
-    }, [imageLoaded, tool])
+    }, [imageLoaded, syncCanvasSize, tool])
 
     function getCanvasPoint(e: React.MouseEvent | React.TouchEvent) {
       const canvas = canvasRef.current
       if (!canvas) return null
+      if (!syncCanvasSize()) return null
 
       const rect = canvas.getBoundingClientRect()
       let clientX: number, clientY: number
@@ -600,7 +618,10 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
                   src={imgSrc}
                   alt="编辑图片"
                   className="block max-h-[60vh] max-w-full rounded-xl shadow-lg object-contain"
-                  onLoad={() => setImageLoaded(true)}
+                  onLoad={() => {
+                    setImageLoaded(true)
+                    requestAnimationFrame(syncCanvasSize)
+                  }}
                   onError={() => setImgError(true)}
                   draggable={false}
                 />
