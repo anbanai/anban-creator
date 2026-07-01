@@ -5,7 +5,34 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+type skillFrontmatter struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+}
+
+func requireValidSkillFrontmatter(t *testing.T, plugin, skillName, body string) {
+	t.Helper()
+	const marker = "---\n"
+	if !strings.HasPrefix(body, marker) {
+		t.Fatalf("%s %s SKILL.md missing YAML frontmatter", plugin, skillName)
+	}
+	rest := strings.TrimPrefix(body, marker)
+	end := strings.Index(rest, marker)
+	if end < 0 {
+		t.Fatalf("%s %s SKILL.md frontmatter is not closed", plugin, skillName)
+	}
+	var fm skillFrontmatter
+	if err := yaml.Unmarshal([]byte(rest[:end]), &fm); err != nil {
+		t.Fatalf("%s %s SKILL.md has invalid YAML frontmatter: %v", plugin, skillName, err)
+	}
+	if strings.TrimSpace(fm.Name) == "" || strings.TrimSpace(fm.Description) == "" {
+		t.Fatalf("%s %s SKILL.md frontmatter requires non-empty name and description", plugin, skillName)
+	}
+}
 
 func TestVideoUseSkillFiles(t *testing.T) {
 	wd, err := os.Getwd()
@@ -22,6 +49,7 @@ func TestVideoUseSkillFiles(t *testing.T) {
 			t.Fatalf("%s video-use SKILL.md missing: %v", plugin, err)
 		}
 		body := string(raw)
+		requireValidSkillFrontmatter(t, plugin, "video-use", body)
 		for _, want := range []string{
 			"name: video-use",
 			"upload_video_audio",
@@ -89,6 +117,7 @@ func TestVideoOverlaySkillFiles(t *testing.T) {
 				t.Fatalf("%s %s SKILL.md missing: %v", plugin, skill, err)
 			}
 			body := string(raw)
+			requireValidSkillFrontmatter(t, plugin, skill, body)
 			for _, want := range []string{
 				"name: " + skill,
 				"edit/animations/slot_<id>/",
@@ -129,10 +158,10 @@ func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 	for _, want := range []string{
 		"ca-certificates jq git",
 		"git config --global http.version HTTP/1.1",
-		"npx -y skills@latest add heygen-com/hyperframes",
+		"npx -y skills@1.5.14 add heygen-com/hyperframes",
 		"--skill music-to-video",
 		"--skill slideshow",
-		"npx -y skills@latest add remotion-dev/skills",
+		"npx -y skills@1.5.14 add remotion-dev/skills",
 		"--skill remotion-best-practices",
 		"--agent claude-code",
 		"--copy",
@@ -143,7 +172,7 @@ func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
 			t.Fatalf("server Dockerfile should install official video overlay skills, missing %q", want)
 		}
 	}
-	if strings.Index(body, "USER node") > strings.Index(body, "npx -y skills@latest add heygen-com/hyperframes") {
+	if strings.Index(body, "USER node") > strings.Index(body, "npx -y skills@1.5.14 add heygen-com/hyperframes") {
 		t.Fatalf("server Dockerfile should install official skills as the node user")
 	}
 }

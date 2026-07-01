@@ -22,6 +22,7 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			t.Fatalf("%s dreamina-video SKILL.md missing: %v", plugin, err)
 		}
 		body := string(raw)
+		requireValidSkillFrontmatter(t, plugin, "dreamina-video", body)
 		for _, want := range []string{
 			"name: dreamina-video",
 			"即梦",
