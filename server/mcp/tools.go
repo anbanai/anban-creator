@@ -25,6 +25,7 @@ type Services struct {
 	PlanSvc          *service.PlanService
 	ImageSvc         *service.ImageService
 	VideoSvc         *service.VideoService
+	VideoASRSvc      *service.VideoASRService
 	WritingSvc       *service.WritingService
 	PublishingSvc    *service.PublishingService
 	WorkspaceSvc     *service.WorkspaceService
@@ -43,6 +44,7 @@ func RegisterTools(server *mcp.Server) {
 	registerPlanTools(server)
 	registerImageTools(server)
 	registerVideoTools(server)
+	registerVideoASRTools(server)
 	registerWritingTools(server)
 	registerPublishingTools(server)
 	registerWorkspaceTools(server)

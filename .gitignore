@@ -68,5 +68,6 @@ studio/dist/
 # Local eval/scratch harnesses (not product code; contain compiled Python)
 eval-article-viral-strategy/
 seednote-workspace/
+video-use-main/
 __pycache__/
 *.pyc

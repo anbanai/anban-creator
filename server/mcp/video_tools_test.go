@@ -21,11 +21,17 @@ import (
 )
 
 type fakeVideoReferenceStorage struct {
-	url string
-	key string
+	name string
+	url  string
+	key  string
 }
 
-func (f *fakeVideoReferenceStorage) Name() string { return "fake" }
+func (f *fakeVideoReferenceStorage) Name() string {
+	if f.name != "" {
+		return f.name
+	}
+	return "fake"
+}
 
 func (f *fakeVideoReferenceStorage) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
 	data, err := io.ReadAll(reader)

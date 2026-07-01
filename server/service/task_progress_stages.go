@@ -9,7 +9,7 @@ import "github.com/royalrick/anbanwriter/server/model"
 //
 // Stage names are extracted from claudecode/agents/{wechatarticle,seednote}.md.
 // Only article and seednote go through TaskService.UpdateProgress; other
-// pipelines (designer, live-slicer, short-video-studio) have their own
+// pipelines (designer, live-slicer, video) have their own
 // services and are out of scope here.
 var stagePercentByType = map[string]map[string]int{
 	model.ScopeArticle: {

@@ -29,6 +29,7 @@ type Config struct {
 	Writing      WritingConfig      `yaml:"writing"`
 	Vision       VisionConfig       `yaml:"vision"`
 	TingWu       TingWuConfig       `yaml:"tingwu"`
+	FunASR       FunASRConfig       `yaml:"funasr"`
 	Claude       ClaudeConfig       `yaml:"claude"`
 	Credits      CreditsConfig      `yaml:"credits"`
 	CORS         CORSConfig         `yaml:"cors"`
@@ -286,6 +287,28 @@ func (c TingWuConfig) Complete() bool {
 		strings.TrimSpace(c.AppKey) != "" &&
 		strings.TrimSpace(c.AccessKey) != "" &&
 		strings.TrimSpace(c.AccessSecret) != ""
+}
+
+// FunASRConfig holds OpenAI-compatible FunASR file ASR configuration.
+type FunASRConfig struct {
+	BaseURL string        `yaml:"base_url"`
+	APIKey  string        `yaml:"api_key"`
+	Model   string        `yaml:"model"`
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+// Empty reports whether no FunASR settings are configured.
+func (c FunASRConfig) Empty() bool {
+	return strings.TrimSpace(c.BaseURL) == "" &&
+		strings.TrimSpace(c.APIKey) == "" &&
+		strings.TrimSpace(c.Model) == ""
+}
+
+// Complete reports whether all settings required for OpenAI-compatible FunASR calls exist.
+func (c FunASRConfig) Complete() bool {
+	return strings.TrimSpace(c.BaseURL) != "" &&
+		strings.TrimSpace(c.APIKey) != "" &&
+		strings.TrimSpace(c.Model) != ""
 }
 
 // ClaudeConfig holds configuration for the Claude CLI subprocess.
@@ -576,6 +599,9 @@ func (c *Config) applyDefaults() {
 	if c.Writing.Timeout == 0 {
 		c.Writing.Timeout = 10 * time.Minute
 	}
+	if c.FunASR.Timeout == 0 {
+		c.FunASR.Timeout = 10 * time.Minute
+	}
 
 	// Seednote sidecar defaults.
 	if c.Seednote.BaseURL == "" {
@@ -755,6 +781,18 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.TingWu.AccessSecret) == "" {
 			errs = append(errs, "tingwu.access_secret is required when any TingWu setting is configured")
+		}
+	}
+
+	if !c.FunASR.Empty() {
+		if strings.TrimSpace(c.FunASR.BaseURL) == "" {
+			errs = append(errs, "funasr.base_url is required when any FunASR setting is configured")
+		}
+		if strings.TrimSpace(c.FunASR.APIKey) == "" {
+			errs = append(errs, "funasr.api_key is required when any FunASR setting is configured")
+		}
+		if strings.TrimSpace(c.FunASR.Model) == "" {
+			errs = append(errs, "funasr.model is required when any FunASR setting is configured")
 		}
 	}
 

@@ -304,7 +304,7 @@ codex/                             # git submodule → anbanai/anbanwriter-codex
 ├── .codex-plugin/                 # Codex plugin manifest (camelCase fields)
 ├── .mcp.json                      # MCP server config (identical to claudecode)
 ├── skills/                        # 18 SKILL.md skills (aligned with claudecode, setup adjusted for ~/.codex/config.toml)
-├── agents/                        # 5 subagent TOMLs (wechatarticle, seednote, designer, live-slicer, short-video-studio)
+├── agents/                        # 6 subagent TOMLs (wechatarticle, seednote, designer, live-slicer, video, ecommerce)
 ├── install/                       # install-subagents.sh + agents-registration.toml
 ├── hooks/                         # SubagentStop + Stop (Stop replaces Claude Code's TaskCompleted)
 ├── CODEX.md                       # Codex-specific developer guide
