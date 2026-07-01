@@ -114,24 +114,28 @@ type Task struct {
 	// tasks (selected deliverable modules, product photos, target platform, selling
 	// points, language, provider-strategy override). Zero value for non-ecommerce
 	// tasks. Read by the agent via get_project_profile(task_id, scope="ecommerce").
-	Ecommerce           datatypes.JSONType[EcommerceConfig] `gorm:"type:json" json:"ecommerce"`
-	ProgressLog         string                              `gorm:"type:longtext" json:"progress_log,omitempty"`
-	Progress            int                                 `gorm:"default:0" json:"progress,omitempty"`
-	LatestProgress      datatypes.JSONType[ProgressPayload] `gorm:"type:json" json:"latest_progress"`
-	Result              *string                             `gorm:"type:json" json:"result,omitempty"`
-	InputTokens         *int64                              `json:"input_tokens,omitempty"`
-	OutputTokens        *int64                              `json:"output_tokens,omitempty"`
-	CacheReadTokens     *int64                              `json:"cache_read_tokens,omitempty"`
-	CacheCreationTokens *int64                              `json:"cache_creation_tokens,omitempty"`
-	TotalCostUSD        *float64                            `json:"total_cost_usd,omitempty"`
-	ErrorMessage        string                              `gorm:"type:text" json:"error_message,omitempty"`
-	StartedAt           *time.Time                          `gorm:"index" json:"started_at"`
-	CompletedAt         *time.Time                          `gorm:"index" json:"completed_at"`
-	CleanedUpAt         *time.Time                          `gorm:"index" json:"cleaned_up_at"`
-	LastHeartbeatAt     *time.Time                          `gorm:"index" json:"last_heartbeat_at,omitempty"`
-	RetryCount          int                                 `gorm:"default:0" json:"retry_count"`
-	MaxRetries          int                                 `gorm:"default:3" json:"max_retries"`
-	RateLimitRetryCount int                                 `gorm:"default:0" json:"rate_limit_retry_count"`
+	Ecommerce             datatypes.JSONType[EcommerceConfig] `gorm:"type:json" json:"ecommerce"`
+	VideoConfig           datatypes.JSONType[VideoTaskConfig] `gorm:"type:json" json:"video_config"`
+	VideoGenerationID     string                              `gorm:"type:varchar(100);default:''" json:"video_generation_id,omitempty"`
+	VideoEstimatedCredits int                                 `gorm:"default:0" json:"video_estimated_credits,omitempty"`
+	VideoCreditsCharged   int                                 `gorm:"default:0" json:"video_credits_charged,omitempty"`
+	ProgressLog           string                              `gorm:"type:longtext" json:"progress_log,omitempty"`
+	Progress              int                                 `gorm:"default:0" json:"progress,omitempty"`
+	LatestProgress        datatypes.JSONType[ProgressPayload] `gorm:"type:json" json:"latest_progress"`
+	Result                *string                             `gorm:"type:json" json:"result,omitempty"`
+	InputTokens           *int64                              `json:"input_tokens,omitempty"`
+	OutputTokens          *int64                              `json:"output_tokens,omitempty"`
+	CacheReadTokens       *int64                              `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens   *int64                              `json:"cache_creation_tokens,omitempty"`
+	TotalCostUSD          *float64                            `json:"total_cost_usd,omitempty"`
+	ErrorMessage          string                              `gorm:"type:text" json:"error_message,omitempty"`
+	StartedAt             *time.Time                          `gorm:"index" json:"started_at"`
+	CompletedAt           *time.Time                          `gorm:"index" json:"completed_at"`
+	CleanedUpAt           *time.Time                          `gorm:"index" json:"cleaned_up_at"`
+	LastHeartbeatAt       *time.Time                          `gorm:"index" json:"last_heartbeat_at,omitempty"`
+	RetryCount            int                                 `gorm:"default:0" json:"retry_count"`
+	MaxRetries            int                                 `gorm:"default:3" json:"max_retries"`
+	RateLimitRetryCount   int                                 `gorm:"default:0" json:"rate_limit_retry_count"`
 
 	// Goal mode: when GoalMode is true, Goal is prepended to the user prompt as
 	// a /goal slash command so Claude Code's built-in goal loop drives
@@ -198,6 +202,10 @@ func (Task) TableName() string { return "tasks" }
 // plan-spawned tasks) don't each need to import gorm.io/datatypes.
 func (t *Task) SetEcommerce(ec EcommerceConfig) {
 	t.Ecommerce = datatypes.NewJSONType(ec)
+}
+
+func (t *Task) SetVideoConfig(vc VideoTaskConfig) {
+	t.VideoConfig = datatypes.NewJSONType(vc)
 }
 
 // SetOverrides stores legacy per-task style/author/theme overrides.

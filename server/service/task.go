@@ -32,20 +32,22 @@ const TypeContentGenerate = "content:generate"
 
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
-	repo                repository.Repository
-	executor            agent.TaskExecutor
-	logger              *zerolog.Logger
-	enqueuer            TaskEnqueuer
-	store               storage.Provider
-	creditSvc           *CreditService
-	publishingSvc       *PublishingService
-	taskLogDir          string
-	workspaceSvc        *WorkspaceService
-	workspaceDir        string
-	pubsub              *RedisPubSub
-	pubsubCancel        context.CancelFunc // stops the listenCancelEvents goroutine
-	cancelFuncs         sync.Map           // taskID → context.CancelFunc
-	seednoteTrackingSvc PublishedTrackingService
+	repo                  repository.Repository
+	executor              agent.TaskExecutor
+	logger                *zerolog.Logger
+	enqueuer              TaskEnqueuer
+	store                 storage.Provider
+	creditSvc             *CreditService
+	publishingSvc         *PublishingService
+	taskLogDir            string
+	workspaceSvc          *WorkspaceService
+	workspaceDir          string
+	pubsub                *RedisPubSub
+	pubsubCancel          context.CancelFunc // stops the listenCancelEvents goroutine
+	cancelFuncs           sync.Map           // taskID → context.CancelFunc
+	seednoteTrackingSvc   PublishedTrackingService
+	videoCatalog          VideoModelCatalog
+	videoCreditMultiplier int
 	// wcfNotifier pushes task success/failure/cancel messages to the task
 	// owner's WeChat via the wcfLink sidecar. Nil when wcf is disabled — all
 	// terminal hooks no-op. Best-effort; never fails the task pipeline.
@@ -106,6 +108,37 @@ func NewTaskService(
 	}
 
 	return svc
+}
+
+// Repository returns the backing repository for cross-service MCP bookkeeping
+// that must update task-adjacent records in the same persistence layer.
+func (s *TaskService) Repository() repository.Repository {
+	if s == nil {
+		return nil
+	}
+	return s.repo
+}
+
+func (s *TaskService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
+	if s == nil {
+		return
+	}
+	s.videoCatalog = catalog
+	s.videoCreditMultiplier = creditMultiplier
+}
+
+func (s *TaskService) resolvedVideoCatalog() VideoModelCatalog {
+	if s != nil && s.videoCatalog != nil {
+		return s.videoCatalog
+	}
+	return DefaultVideoModelCatalog()
+}
+
+func (s *TaskService) resolvedVideoCreditMultiplier() int {
+	if s != nil && s.videoCreditMultiplier > 0 {
+		return s.videoCreditMultiplier
+	}
+	return 1000
 }
 
 // Close stops the Redis pub/sub subscriber goroutine.
@@ -237,6 +270,9 @@ type CreateManualParams struct {
 	// otherwise. When set, the task is billed once as a single package at the sum
 	// of selected module prices and quantity is forced to 1.
 	Ecommerce *model.EcommerceConfig
+	// Video carries plan/task-level overrides for platform="video"; omitted
+	// fields are filled from the project's video profile.
+	Video *model.VideoTaskConfig
 	// ExecutionTarget, when model.ExecutionTargetLocal, routes the task to a
 	// desktop local executor instead of cloud Asynq/Docker. The task is created
 	// pending with a LocalClaimDeadline and is NOT enqueued; a desktop claims it
@@ -309,6 +345,22 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			effectiveImageModelKey = projEc.ImageModelKey
 		}
 	}
+	var videoPlan *VideoGenerationPlan
+	if taskType == model.PlatformVideo {
+		quantity = 1
+		videoReq := videoRequestFromTaskConfig(p.Prompt, p.Video)
+		resolved, err := ResolveVideoGenerationPlan(
+			videoReq,
+			project.VideoDefaults.Data(),
+			project.VideoModelPolicy.Data(),
+			s.resolvedVideoCatalog(),
+			s.resolvedVideoCreditMultiplier(),
+		)
+		if err != nil {
+			return nil, err
+		}
+		videoPlan = &resolved
+	}
 
 	// Pre-calculate total credit cost and deduct upfront to avoid race conditions.
 	var deductedTaskIDs []string
@@ -338,6 +390,18 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			}
 			taskID := generateTaskID()
 			if _, err := s.creditSvc.DeductForTaskWithAmount(ctx, p.UserID, taskType, taskID, packageCost); err != nil {
+				if errors.Is(err, ErrInsufficientCredits) {
+					return nil, fmt.Errorf("积分不足: %w", err)
+				}
+				return nil, fmt.Errorf("deduct credits: %w", err)
+			}
+			deductedTaskIDs = []string{taskID}
+		} else if taskType == model.PlatformVideo {
+			if videoPlan == nil || videoPlan.EstimatedCredits <= 0 {
+				return nil, fmt.Errorf("video estimated credits must be positive")
+			}
+			taskID := generateTaskID()
+			if _, err := s.creditSvc.DeductForTaskWithAmount(ctx, p.UserID, taskType, taskID, videoPlan.EstimatedCredits); err != nil {
 				if errors.Is(err, ErrInsufficientCredits) {
 					return nil, fmt.Errorf("积分不足: %w", err)
 				}
@@ -456,6 +520,14 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.Ecommerce != nil {
 			task.SetEcommerce(*p.Ecommerce)
 		}
+		if videoPlan != nil {
+			vc := videoTaskConfigFromPlan(*videoPlan)
+			task.SetVideoConfig(vc)
+			task.VideoEstimatedCredits = videoPlan.EstimatedCredits
+			if s.creditSvc != nil {
+				task.VideoCreditsCharged = videoPlan.EstimatedCredits
+			}
+		}
 
 		if err := s.repo.Tasks().Create(ctx, task); err != nil {
 			// Refund only the tasks that were NOT successfully created.
@@ -494,6 +566,36 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	return tasks, nil
 }
 
+func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) VideoGenerationRequest {
+	req := VideoGenerationRequest{Prompt: prompt}
+	if cfg == nil {
+		return req
+	}
+	req.Purpose = cfg.Purpose
+	req.Model = cfg.ModelKey
+	req.Resolution = cfg.Resolution
+	req.Ratio = cfg.Ratio
+	req.Duration = cfg.Duration
+	req.Watermark = cfg.Watermark
+	req.Preflight = &cfg.Preflight
+	return req
+}
+
+func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
+	return model.VideoTaskConfig{
+		Purpose:          plan.Purpose,
+		ModelKey:         plan.ModelKey,
+		Model:            plan.Model,
+		Resolution:       plan.Resolution,
+		Ratio:            plan.Ratio,
+		Duration:         plan.Duration,
+		Watermark:        plan.Watermark,
+		Preflight:        plan.Preflight,
+		EstimatedCredits: plan.EstimatedCredits,
+		PricingBreakdown: plan.PricingBreakdown,
+	}
+}
+
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
 //
 // The plan's scheduling-adjacent "what to produce" params (image model,
@@ -526,6 +628,26 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 			taskType = found.Platform
 		}
 	}
+	var planVideoConfig *model.VideoTaskConfig
+	if taskType == model.PlatformVideo {
+		vc := plan.VideoConfig.Data()
+		planVideoConfig = &vc
+		if vc.EstimatedCredits <= 0 && project != nil {
+			resolved, err := ResolveVideoGenerationPlan(
+				videoRequestFromTaskConfig(prompt, planVideoConfig),
+				project.VideoDefaults.Data(),
+				project.VideoModelPolicy.Data(),
+				s.resolvedVideoCatalog(),
+				s.resolvedVideoCreditMultiplier(),
+			)
+			if err != nil {
+				s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("skipping video plan task with invalid video config")
+				return nil, nil
+			}
+			vc = videoTaskConfigFromPlan(resolved)
+			planVideoConfig = &vc
+		}
+	}
 
 	// Deduct credits for the plan task.
 	// Plan-level goal mode (plan.GoalMode) propagates to the task and scales
@@ -537,11 +659,23 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	if s.creditSvc != nil {
-		if _, costOK := s.creditSvc.TaskCost(taskType); !costOK {
+		if taskType == model.PlatformVideo {
+			if planVideoConfig == nil || planVideoConfig.EstimatedCredits <= 0 {
+				s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping video plan task without estimated credits")
+				return nil, nil
+			}
+			if _, err := s.creditSvc.DeductForTaskWithAmount(ctx, plan.UserID, taskType, taskID, planVideoConfig.EstimatedCredits); err != nil {
+				if errors.Is(err, ErrInsufficientCredits) {
+					s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task due to insufficient credits")
+					return nil, nil
+				}
+				s.logger.Error().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("failed to deduct credits for video plan task")
+				return nil, nil
+			}
+		} else if _, costOK := s.creditSvc.TaskCost(taskType); !costOK {
 			s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task with unknown task type")
 			return nil, nil
-		}
-		if _, err := s.creditSvc.DeductForTask(ctx, plan.UserID, taskType, taskID, planMultiplier); err != nil {
+		} else if _, err := s.creditSvc.DeductForTask(ctx, plan.UserID, taskType, taskID, planMultiplier); err != nil {
 			if errors.Is(err, ErrInsufficientCredits) {
 				s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task due to insufficient credits")
 				return nil, nil
@@ -571,6 +705,13 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 	if project != nil {
 		task.SetProjectSnapshot(model.SnapshotProject(project))
+	}
+	if planVideoConfig != nil {
+		task.SetVideoConfig(*planVideoConfig)
+		task.VideoEstimatedCredits = planVideoConfig.EstimatedCredits
+		if s.creditSvc != nil {
+			task.VideoCreditsCharged = planVideoConfig.EstimatedCredits
+		}
 	}
 
 	if err := s.repo.Tasks().Create(ctx, task); err != nil {

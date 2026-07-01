@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/datatypes"
+)
 
 // Plan represents a scheduled content generation plan.
 //
@@ -33,8 +37,10 @@ type Plan struct {
 	// ArticleWithCover / ArticleWithContentImages are plan-level 公众号 article image
 	// toggles copied to Task on CreateFromPlan. Nullable *bool, DB default true (nil =
 	// generate). See model.Task.ArticleWithCover for why *bool is required.
-	ArticleWithCover         *bool `gorm:"default:true;not null" json:"article_with_cover"`
-	ArticleWithContentImages *bool `gorm:"default:true;not null" json:"article_with_content_images"`
+	ArticleWithCover         *bool                               `gorm:"default:true;not null" json:"article_with_cover"`
+	ArticleWithContentImages *bool                               `gorm:"default:true;not null" json:"article_with_content_images"`
+	VideoConfig              datatypes.JSONType[VideoTaskConfig] `gorm:"type:json" json:"video_config"`
+	VideoEstimatedCredits    int                                 `gorm:"default:0" json:"video_estimated_credits,omitempty"`
 
 	// Legacy style/author/theme columns. New code no longer writes or reads these;
 	// task runtime config is frozen from the owning project into Task.ProjectSnapshot.
@@ -54,3 +60,7 @@ type Plan struct {
 
 // TableName returns the database table name for Plan.
 func (Plan) TableName() string { return "plans" }
+
+func (p *Plan) SetVideoConfig(vc VideoTaskConfig) {
+	p.VideoConfig = datatypes.NewJSONType(vc)
+}

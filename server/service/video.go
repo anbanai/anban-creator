@@ -13,6 +13,7 @@ import (
 	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 
 	"github.com/royalrick/anbanwriter/server/config"
+	"github.com/royalrick/anbanwriter/server/model"
 )
 
 const (
@@ -53,6 +54,7 @@ type VideoGenerationRequest struct {
 	Seed         *int64                `json:"seed,omitempty"`
 	CameraFixed  *bool                 `json:"camera_fixed,omitempty"`
 	Watermark    *bool                 `json:"watermark,omitempty"`
+	Preflight    *bool                 `json:"preflight,omitempty"`
 	ServiceTier  string                `json:"service_tier,omitempty"`
 	SafetyID     string                `json:"safety_identifier,omitempty"`
 	TaskID       string                `json:"task_id,omitempty"`
@@ -61,9 +63,12 @@ type VideoGenerationRequest struct {
 
 // VideoReferenceInput describes one text/image/audio/video reference.
 type VideoReferenceInput struct {
-	Type string `json:"type"`
-	URL  string `json:"url,omitempty"`
-	Text string `json:"text,omitempty"`
+	Type                 string  `json:"type"`
+	URL                  string  `json:"url,omitempty"`
+	Text                 string  `json:"text,omitempty"`
+	TaskFileID           string  `json:"task_file_id,omitempty"`
+	ReferenceRole        string  `json:"reference_role,omitempty"`
+	InputDurationSeconds float64 `json:"input_duration_seconds,omitempty"`
 }
 
 // VideoGenerationCreateResult is returned immediately after task submission.
@@ -99,20 +104,24 @@ type VideoGenerationError struct {
 
 // VideoGenerationPlan is a deterministic MCP planning artifact.
 type VideoGenerationPlan struct {
-	ProjectID         string                `json:"project_id"`
-	Purpose           string                `json:"purpose"`
-	Prompt            string                `json:"prompt"`
-	Model             string                `json:"model,omitempty"`
-	Resolution        string                `json:"resolution"`
-	Ratio             string                `json:"ratio"`
-	Duration          int64                 `json:"duration"`
-	Seed              *int64                `json:"seed,omitempty"`
-	CameraFixed       *bool                 `json:"camera_fixed,omitempty"`
-	Watermark         *bool                 `json:"watermark,omitempty"`
-	ServiceTier       string                `json:"service_tier,omitempty"`
-	References        []VideoReferenceInput `json:"references,omitempty"`
-	RequiredArtifacts []string              `json:"required_artifacts"`
-	SDKPayloadPreview map[string]any        `json:"sdk_payload_preview"`
+	ProjectID         string                       `json:"project_id"`
+	Purpose           string                       `json:"purpose"`
+	Prompt            string                       `json:"prompt"`
+	ModelKey          string                       `json:"model_key,omitempty"`
+	Model             string                       `json:"model,omitempty"`
+	Resolution        string                       `json:"resolution"`
+	Ratio             string                       `json:"ratio"`
+	Duration          int64                        `json:"duration"`
+	Seed              *int64                       `json:"seed,omitempty"`
+	CameraFixed       *bool                        `json:"camera_fixed,omitempty"`
+	Watermark         *bool                        `json:"watermark,omitempty"`
+	Preflight         bool                         `json:"preflight,omitempty"`
+	ServiceTier       string                       `json:"service_tier,omitempty"`
+	References        []VideoReferenceInput        `json:"references,omitempty"`
+	EstimatedCredits  int                          `json:"estimated_credits,omitempty"`
+	PricingBreakdown  *model.VideoPricingBreakdown `json:"pricing_breakdown,omitempty"`
+	RequiredArtifacts []string                     `json:"required_artifacts"`
+	SDKPayloadPreview map[string]any               `json:"sdk_payload_preview"`
 }
 
 // VideoService wraps Ark runtime content generation for short videos.
@@ -201,6 +210,7 @@ func (s *VideoService) BuildPlan(req VideoGenerationRequest, projectID string) (
 		Seed:        resolved.Seed,
 		CameraFixed: resolved.CameraFixed,
 		Watermark:   resolved.Watermark,
+		Preflight:   resolved.Preflight != nil && *resolved.Preflight,
 		ServiceTier: resolved.ServiceTier,
 		References:  resolved.ReferenceSet,
 		RequiredArtifacts: []string{
@@ -273,24 +283,6 @@ func (s *VideoService) buildArkCreateRequest(req VideoGenerationRequest) (arkmod
 }
 
 func (s *VideoService) applyDefaults(req VideoGenerationRequest) VideoGenerationRequest {
-	if req.Model == "" && s.cfg != nil {
-		req.Model = s.cfg.Model
-	}
-	if req.Resolution == "" && s.cfg != nil {
-		req.Resolution = s.cfg.Defaults.Resolution
-	}
-	if req.Ratio == "" && s.cfg != nil {
-		req.Ratio = s.cfg.Defaults.Ratio
-	}
-	if req.Duration == 0 && s.cfg != nil {
-		req.Duration = s.cfg.Defaults.Duration
-	}
-	if req.ServiceTier == "" && s.cfg != nil {
-		req.ServiceTier = s.cfg.Defaults.ServiceTier
-	}
-	if req.Watermark == nil && s.cfg != nil {
-		req.Watermark = s.cfg.Defaults.Watermark
-	}
 	if req.Purpose == "" {
 		req.Purpose = VideoPurposePlanting
 	}

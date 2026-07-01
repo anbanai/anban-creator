@@ -180,14 +180,8 @@ image_presets:
 video_api:
   key: "${VOLCENGINE_ARK_API_KEY}" # Volcengine Ark API key
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
-  model: "doubao-seedance-2-0"
   timeout: 10m
-  credits: 3000 # Per-video task credit cost for MCP create_video_generation_task
-  defaults:
-    resolution: "1080p"
-    ratio: "9:16"
-    duration: 15
-    watermark: false
+  credit_multiplier: 1000 # 1 RMB = 1000 credits; project video profile controls business defaults.
 
 # ---------------------------------------------------------------------------
 # Writing: LLM API configuration for writing services

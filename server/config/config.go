@@ -154,24 +154,76 @@ type MCPConfig struct {
 
 const DefaultVideoAPIBaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 
-// VideoAPIConfig holds Volcengine Ark content-generation settings for
-// Seedance/Dreamina-style short-video generation.
+// VideoAPIConfig holds global Volcengine Ark content-generation settings.
+// Business defaults live on Project.VideoDefaults/VideoModelPolicy so plans and
+// tasks can snapshot them.
 type VideoAPIConfig struct {
-	Key      string              `yaml:"key"`
-	BaseURL  string              `yaml:"base_url"`
-	Model    string              `yaml:"model"`
-	Timeout  time.Duration       `yaml:"timeout"`
-	Credits  int                 `yaml:"credits"`
-	Defaults VideoDefaultsConfig `yaml:"defaults"`
+	Key              string                   `yaml:"key"`
+	BaseURL          string                   `yaml:"base_url"`
+	Timeout          time.Duration            `yaml:"timeout"`
+	CreditMultiplier int                      `yaml:"credit_multiplier"`
+	ModelCatalog     []VideoModelCatalogEntry `yaml:"model_catalog"`
 }
 
-// VideoDefaultsConfig holds safe defaults for short commercial videos.
-type VideoDefaultsConfig struct {
-	Resolution  string `yaml:"resolution"`
-	Ratio       string `yaml:"ratio"`
-	Duration    int64  `yaml:"duration"`
-	ServiceTier string `yaml:"service_tier"`
-	Watermark   *bool  `yaml:"watermark"`
+type VideoModelCatalogEntry struct {
+	Key                   string             `yaml:"key"`
+	DisplayName           string             `yaml:"display_name"`
+	ModelID               string             `yaml:"model_id"`
+	SupportedResolutions  []string           `yaml:"supported_resolutions"`
+	SupportedRatios       []string           `yaml:"supported_ratios"`
+	MinDuration           int64              `yaml:"min_duration"`
+	MaxDuration           int64              `yaml:"max_duration"`
+	SupportsVideoInput    bool               `yaml:"supports_video_input"`
+	Supports4K            bool               `yaml:"supports_4k"`
+	NoInputPricePerSecond map[string]float64 `yaml:"no_input_price_per_second"`
+	VideoInput5sMinPrice  map[string]float64 `yaml:"video_input_5s_min_price"`
+	VideoInput5sMaxPrice  map[string]float64 `yaml:"video_input_5s_max_price"`
+}
+
+func (c VideoAPIConfig) CreditMultiplierOrDefault() int {
+	if c.CreditMultiplier > 0 {
+		return c.CreditMultiplier
+	}
+	return 1000
+}
+
+func (c VideoAPIConfig) ModelCatalogOrDefault() []VideoModelCatalogEntry {
+	if len(c.ModelCatalog) > 0 {
+		return c.ModelCatalog
+	}
+	return []VideoModelCatalogEntry{
+		{
+			Key:                  "seedance-2.0",
+			DisplayName:          "Doubao Seedance 2.0",
+			ModelID:              "doubao-seedance-2-0-260128",
+			SupportedResolutions: []string{"480p", "720p", "1080p", "4k"},
+			SupportedRatios:      []string{"16:9", "9:16", "1:1", "4:3", "3:4"},
+			MinDuration:          1,
+			MaxDuration:          15,
+			SupportsVideoInput:   true,
+			Supports4K:           true,
+		},
+		{
+			Key:                  "seedance-2.0-fast",
+			DisplayName:          "Doubao Seedance 2.0 Fast",
+			ModelID:              "doubao-seedance-2-0-fast-260128",
+			SupportedResolutions: []string{"480p", "720p"},
+			SupportedRatios:      []string{"16:9", "9:16", "1:1", "4:3", "3:4"},
+			MinDuration:          1,
+			MaxDuration:          15,
+			SupportsVideoInput:   true,
+		},
+		{
+			Key:                  "seedance-2.0-mini",
+			DisplayName:          "Doubao Seedance 2.0 Mini",
+			ModelID:              "doubao-seedance-2-0-mini-260615",
+			SupportedResolutions: []string{"480p", "720p"},
+			SupportedRatios:      []string{"16:9", "9:16", "1:1", "4:3", "3:4"},
+			MinDuration:          1,
+			MaxDuration:          15,
+			SupportsVideoInput:   true,
+		},
+	}
 }
 
 // StorageConfig holds file storage configuration.
@@ -512,14 +564,8 @@ func (c *Config) applyDefaults() {
 	if c.VideoAPI.Timeout == 0 {
 		c.VideoAPI.Timeout = 10 * time.Minute
 	}
-	if c.VideoAPI.Defaults.Resolution == "" {
-		c.VideoAPI.Defaults.Resolution = "1080p"
-	}
-	if c.VideoAPI.Defaults.Ratio == "" {
-		c.VideoAPI.Defaults.Ratio = "9:16"
-	}
-	if c.VideoAPI.Defaults.Duration == 0 {
-		c.VideoAPI.Defaults.Duration = 15
+	if c.VideoAPI.CreditMultiplier == 0 {
+		c.VideoAPI.CreditMultiplier = 1000
 	}
 
 	// Per-platform image size defaults (ratio:tier format).

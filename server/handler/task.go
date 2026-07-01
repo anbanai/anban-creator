@@ -94,12 +94,13 @@ type createTaskRequest struct {
 	// sku_images) to its quantity; the task cost = sum(unit price × quantity).
 	// ProductPhotos are server-owned URLs (from /files/upload) materialized into
 	// the agent workspace by the executor.
-	ProductPhotos            []string       `json:"product_photos,omitempty"`
-	SelectedModules          map[string]int `json:"selected_modules,omitempty"`
-	TargetPlatform           string         `json:"target_platform,omitempty"`
-	SellingPoints            string         `json:"selling_points,omitempty"`
-	Language                 string         `json:"language,omitempty"`
-	ProviderStrategyOverride string         `json:"provider_strategy_override,omitempty"`
+	ProductPhotos            []string               `json:"product_photos,omitempty"`
+	SelectedModules          map[string]int         `json:"selected_modules,omitempty"`
+	TargetPlatform           string                 `json:"target_platform,omitempty"`
+	SellingPoints            string                 `json:"selling_points,omitempty"`
+	Language                 string                 `json:"language,omitempty"`
+	ProviderStrategyOverride string                 `json:"provider_strategy_override,omitempty"`
+	VideoConfig              *model.VideoTaskConfig `json:"video_config,omitempty"`
 	// ExecutionTarget, when "local", routes the task to the caller's desktop
 	// local executor instead of cloud execution. Set by the desktop studio build
 	// when a local executor is available. Empty = cloud (default). See
@@ -227,6 +228,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		Ecommerce:                ecommerceCfg,
+		Video:                    req.VideoConfig,
 		ExecutionTarget:          req.ExecutionTarget,
 	})
 	if err != nil {

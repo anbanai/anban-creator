@@ -54,11 +54,13 @@ const (
 	ScopeArticle   = "article"
 	ScopeSeednote  = "seednote"
 	ScopeEcommerce = "ecommerce"
+	ScopeVideo     = "video"
 )
 
 // File role constants.
 const (
 	FileRoleImage         = "image"
+	FileRoleVideo         = "video"
 	FileRoleCover         = "cover"
 	FileRoleHTML          = "html"
 	FileRoleMarkdown      = "markdown"
@@ -83,6 +85,7 @@ const (
 	PlatformArticle   = "article"
 	PlatformSeednote  = "seednote"
 	PlatformEcommerce = "ecommerce"
+	PlatformVideo     = "video"
 )
 
 // ValidImageRatios is the set of allowed image aspect ratios.

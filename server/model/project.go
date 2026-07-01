@@ -84,12 +84,25 @@ type Project struct {
 	// "ecommerce" projects. Zero value for non-ecommerce projects.
 	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`
 	EcommerceDefaultsSet bool                                         `gorm:"-" json:"-"`
-	Status               string                                       `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
-	CreatedAt            time.Time                                    `json:"created_at"`
-	UpdatedAt            time.Time                                    `json:"updated_at"`
+	// VideoDefaults and VideoModelPolicy configure Seedance video generation for
+	// platform="video" projects. Plans/tasks copy resolved values into snapshots.
+	VideoDefaults    datatypes.JSONType[VideoDefaults]    `gorm:"type:json" json:"video_defaults"`
+	VideoModelPolicy datatypes.JSONType[VideoModelPolicy] `gorm:"type:json" json:"video_model_policy"`
+	VideoProfileSet  bool                                 `gorm:"-" json:"-"`
+	Status           string                               `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
+	CreatedAt        time.Time                            `json:"created_at"`
+	UpdatedAt        time.Time                            `json:"updated_at"`
 }
 
 func (Project) TableName() string { return "projects" }
+
+func (p *Project) SetVideoDefaults(v VideoDefaults) {
+	p.VideoDefaults = datatypes.NewJSONType(v)
+}
+
+func (p *Project) SetVideoModelPolicy(v VideoModelPolicy) {
+	p.VideoModelPolicy = datatypes.NewJSONType(v)
+}
 
 // GetWechatAppID returns the WeChat App ID from config.
 func (p *Project) GetWechatAppID() string {

@@ -74,10 +74,7 @@ func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, coun
 }
 
 func videoGenCredits() int {
-	if billSvc == nil || billSvc.config == nil {
-		return 0
-	}
-	return billSvc.config.VideoAPI.Credits
+	return 0
 }
 
 // imageGenCredits looks up per-image credit cost from ImageAPI configs.

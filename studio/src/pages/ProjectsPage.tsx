@@ -39,6 +39,7 @@ const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号' },
   { value: 'ecommerce', label: '电商出图' },
+  { value: 'video', label: '视频生成' },
 ]
 
 const statusTabs: { label: string; value: string }[] = [
@@ -65,13 +66,34 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   ecommerce_target_platform: '',
   ecommerce_brand_brief: '',
   ecommerce_image_model_key: '',
+  video_defaults: {
+    purpose: 'planting',
+    model_key: 'seedance-2.0-mini',
+    resolution: '720p',
+    ratio: '9:16',
+    duration: 15,
+    watermark: false,
+    preflight: true,
+  },
+  video_model_policy: {
+    allowed_models: ['seedance-2.0', 'seedance-2.0-fast', 'seedance-2.0-mini'],
+    default_model: 'seedance-2.0-mini',
+    allow_auto_downgrade: false,
+    max_resolution: '720p',
+    max_duration: 15,
+  },
   reference_image_url: '',
   image_ratio: '',
   enable_publishing: false,
   require_publish_approval: false,
 }
 
+const defaultVideoDefaults = CHANNEL_FORM_DEFAULTS.video_defaults!
+const defaultVideoPolicy = CHANNEL_FORM_DEFAULTS.video_model_policy!
+
 function projectToForm(ch: Project): ProjectFormValues {
+  const videoDefaults = { ...defaultVideoDefaults, ...(ch.video_defaults || {}) }
+  const videoPolicy = { ...defaultVideoPolicy, ...(ch.video_model_policy || {}) }
   return {
     platform: ch.platform,
     name: ch.name || '',
@@ -90,6 +112,8 @@ function projectToForm(ch: Project): ProjectFormValues {
     ecommerce_target_platform: ch.ecommerce_defaults?.target_platform || '',
     ecommerce_brand_brief: ch.ecommerce_defaults?.brand_brief || '',
     ecommerce_image_model_key: ch.ecommerce_defaults?.image_model_key || '',
+    video_defaults: videoDefaults,
+    video_model_policy: videoPolicy,
     reference_image_url: ch.reference_image_url || '',
     image_ratio: (ch.image_ratio as '' | '3:4' | '1:1' | '4:3' | '16:9') || '',
     enable_publishing: ch.config?.enable_publishing ?? false,
@@ -433,6 +457,10 @@ export default function ProjectsPage() {
         image_model_key: values.ecommerce_image_model_key || undefined,
       }
     }
+    if (values.platform === 'video') {
+      payload.video_defaults = values.video_defaults
+      payload.video_model_policy = values.video_model_policy
+    }
 
     // Auto-set image_ratio based on platform if not specified
     if (!payload.image_ratio) {
@@ -465,6 +493,7 @@ export default function ProjectsPage() {
   const isWechat = selectedPlatform === 'article'
   const isSeednote = selectedPlatform === 'seednote'
   const isEcommerce = selectedPlatform === 'ecommerce'
+  const isVideo = selectedPlatform === 'video'
 
   return (
     <div className="space-y-6">
@@ -912,6 +941,169 @@ export default function ProjectsPage() {
                     )} />
                   </div>
                 </>
+              )}
+
+              {isVideo && (
+                <div className="space-y-3 rounded-lg border border-border p-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">视频生成默认配置</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">新建视频任务会读取这里的模型策略与参数默认值，任务和计划可覆盖但不会反写项目。</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField control={form.control} name="video_defaults.purpose" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>默认目标</FormLabel>
+                        <Select value={field.value || 'planting'} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="planting">种草</SelectItem>
+                            <SelectItem value="ecommerce">带货</SelectItem>
+                            <SelectItem value="lead_gen">获客</SelectItem>
+                            <SelectItem value="promotion">推广</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_defaults.model_key" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>默认模型</FormLabel>
+                        <Select value={field.value || 'seedance-2.0-mini'} onValueChange={(v) => {
+                          const next = v || ''
+                          field.onChange(next)
+                          form.setValue('video_model_policy.default_model', next, { shouldDirty: true })
+                        }}>
+                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="seedance-2.0">Seedance 2.0</SelectItem>
+                            <SelectItem value="seedance-2.0-fast">Seedance 2.0 Fast</SelectItem>
+                            <SelectItem value="seedance-2.0-mini">Seedance 2.0 Mini</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_defaults.resolution" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>默认分辨率</FormLabel>
+                        <Select value={field.value || '720p'} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="480p">480p</SelectItem>
+                            <SelectItem value="720p">720p</SelectItem>
+                            <SelectItem value="1080p">1080p</SelectItem>
+                            <SelectItem value="4k">4K</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_defaults.ratio" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>默认比例</FormLabel>
+                        <Select value={field.value || '9:16'} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="9:16">9:16</SelectItem>
+                            <SelectItem value="16:9">16:9</SelectItem>
+                            <SelectItem value="1:1">1:1</SelectItem>
+                            <SelectItem value="4:3">4:3</SelectItem>
+                            <SelectItem value="3:4">3:4</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_defaults.duration" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>默认时长</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={1} max={60} value={field.value ?? 15} onChange={(e) => field.onChange(Number(e.target.value))} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_model_policy.max_resolution" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>最高分辨率</FormLabel>
+                        <Select value={field.value || '720p'} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="480p">480p</SelectItem>
+                            <SelectItem value="720p">720p</SelectItem>
+                            <SelectItem value="1080p">1080p</SelectItem>
+                            <SelectItem value="4k">4K</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_model_policy.max_duration" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>最高时长（秒）</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={1} max={60} value={field.value ?? 15} onChange={(e) => field.onChange(Number(e.target.value))} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                  <FormField control={form.control} name="video_model_policy.allowed_models" render={({ field }) => {
+                    const selected = new Set(field.value || [])
+                    const toggle = (model: string) => {
+                      const next = new Set(selected)
+                      if (next.has(model)) {
+                        next.delete(model)
+                      } else {
+                        next.add(model)
+                      }
+                      field.onChange(Array.from(next))
+                    }
+                    return (
+                      <FormItem>
+                        <FormLabel>允许模型</FormLabel>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            ['seedance-2.0', 'Seedance 2.0'],
+                            ['seedance-2.0-fast', 'Seedance 2.0 Fast'],
+                            ['seedance-2.0-mini', 'Seedance 2.0 Mini'],
+                          ].map(([value, label]) => (
+                            <Button
+                              key={value}
+                              type="button"
+                              variant={selected.has(value) ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => toggle(value)}
+                            >
+                              {label}
+                            </Button>
+                          ))}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )
+                  }} />
+                  <div className="flex flex-wrap items-center gap-4">
+                    <FormField control={form.control} name="video_defaults.watermark" render={({ field }) => (
+                      <FormItem className="flex items-center gap-2 space-y-0">
+                        <FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl>
+                        <FormLabel className="text-sm">水印</FormLabel>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_defaults.preflight" render={({ field }) => (
+                      <FormItem className="flex items-center gap-2 space-y-0">
+                        <FormControl><Switch checked={field.value !== false} onCheckedChange={field.onChange} /></FormControl>
+                        <FormLabel className="text-sm">提交前预检</FormLabel>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_model_policy.allow_auto_downgrade" render={({ field }) => (
+                      <FormItem className="flex items-center gap-2 space-y-0">
+                        <FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl>
+                        <FormLabel className="text-sm">允许自动降级</FormLabel>
+                      </FormItem>
+                    )} />
+                  </div>
+                </div>
               )}
 
               {isWechat && (

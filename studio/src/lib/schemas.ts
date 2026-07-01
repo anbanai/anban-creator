@@ -32,7 +32,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
-  type: z.enum(["seednote", "article", "viral_analysis", "ecommerce"]),
+  type: z.enum(["seednote", "article", "viral_analysis", "ecommerce", "video"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -65,6 +65,15 @@ export const createTaskSchema = z.object({
   target_platform: z.string().optional(),
   selling_points: z.string().max(2000, "卖点不能超过 2000 个字符").optional(),
   language: z.string().optional(),
+  video_config: z.object({
+    purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).optional(),
+    model_key: z.string().optional(),
+    resolution: z.string().optional(),
+    ratio: z.string().optional(),
+    duration: z.number().int().min(1).max(60).optional(),
+    watermark: z.boolean().optional(),
+    preflight: z.boolean().optional(),
+  }).optional(),
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
     const prompt = data.prompt?.trim() || ""
@@ -120,7 +129,7 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
 export const planSchema = z.object({
   project_id: z.string().optional(),
-  type: z.enum(["seednote", "article"]),
+  type: z.enum(["seednote", "article", "video"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   image_model_key: z.string().max(50).optional(),
@@ -139,6 +148,15 @@ export const planSchema = z.object({
   // article tasks inherit them; non-article plans ignore them server-side.
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
+  video_config: z.object({
+    purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).optional(),
+    model_key: z.string().optional(),
+    resolution: z.string().optional(),
+    ratio: z.string().optional(),
+    duration: z.number().int().min(1).max(60).optional(),
+    watermark: z.boolean().optional(),
+    preflight: z.boolean().optional(),
+  }).optional(),
 }).superRefine((data, ctx) => {
   if (data.goal_mode) {
     const goal = data.goal?.trim() || ""
@@ -154,7 +172,7 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-  platform: z.enum(["seednote", "article", "ecommerce"]),
+  platform: z.enum(["seednote", "article", "ecommerce", "video"]),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
@@ -174,6 +192,22 @@ export const projectSchema = z.object({
   ecommerce_target_platform: z.string().optional(),
   ecommerce_brand_brief: z.string().max(2000, "品牌 brief 不能超过 2000 个字符").optional(),
   ecommerce_image_model_key: z.string().max(50).optional(),
+  video_defaults: z.object({
+    purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).default("planting"),
+    model_key: z.string().min(1).default("seedance-2.0-mini"),
+    resolution: z.string().min(1).default("720p"),
+    ratio: z.string().min(1).default("9:16"),
+    duration: z.number().int().min(1).max(60).default(15),
+    watermark: z.boolean().default(false),
+    preflight: z.boolean().default(true),
+  }).optional(),
+  video_model_policy: z.object({
+    allowed_models: z.array(z.string()).default(["seedance-2.0", "seedance-2.0-fast", "seedance-2.0-mini"]),
+    default_model: z.string().min(1).default("seedance-2.0-mini"),
+    allow_auto_downgrade: z.boolean().default(false),
+    max_resolution: z.string().default("720p"),
+    max_duration: z.number().int().min(1).max(60).default(15),
+  }).optional(),
   reference_image_url: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),
     { message: "请输入有效的图片 URL" },

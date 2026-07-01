@@ -107,6 +107,8 @@ type projectRequest struct {
 	Instructions       string                          `json:"instructions"`
 	InstructionsSet    bool                            `json:"-"`
 	EcommerceDefaults  *model.EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
+	VideoDefaults      *model.VideoDefaults            `json:"video_defaults,omitempty"`
+	VideoModelPolicy   *model.VideoModelPolicy         `json:"video_model_policy,omitempty"`
 	// Config fields for platform-specific credentials.
 	WechatAppID      string `json:"wechat_app_id"`
 	WechatSecret     string `json:"wechat_secret"`
@@ -155,6 +157,15 @@ func (req *projectRequest) toProject() *model.Project {
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
 		p.EcommerceDefaultsSet = true
+	}
+	if req.VideoDefaults != nil || req.VideoModelPolicy != nil {
+		if req.VideoDefaults != nil {
+			p.SetVideoDefaults(*req.VideoDefaults)
+		}
+		if req.VideoModelPolicy != nil {
+			p.SetVideoModelPolicy(*req.VideoModelPolicy)
+		}
+		p.VideoProfileSet = true
 	}
 	return p
 }

@@ -710,6 +710,26 @@ export default function TaskDetailPage() {
                 </div>
               </div>
             )}
+            {task.type === 'video' && task.video_config && (
+              <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">视频模型</p>
+                  <p className="mt-1 text-sm text-foreground">{task.video_config.model_key || task.video_config.model || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">规格</p>
+                  <p className="mt-1 text-sm text-foreground">{task.video_config.resolution || '—'} · {task.video_config.ratio || '—'} · {task.video_config.duration || '—'}s</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">估算积分</p>
+                  <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || task.video_config.estimated_credits || 0).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">已扣积分</p>
+                  <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || 0).toLocaleString()}</p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

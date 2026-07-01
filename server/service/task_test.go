@@ -55,6 +55,21 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 	return svc, repo
 }
 
+func setupTaskServiceWithCredits(t *testing.T, creditSvc *CreditService) (*TaskService, repository.Repository) {
+	t.Helper()
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
+	return svc, repo
+}
+
 // mockEnqueuer captures enqueued tasks without executing them.
 type mockEnqueuer struct {
 	enqueued []string
@@ -387,6 +402,156 @@ func TestTaskService_CreateFromPlanSnapshotsProjectWithoutPlanStyleOverrides(t *
 	}
 	if overrides := found.Overrides.Data(); overrides != (model.StyleOverrides{}) {
 		t.Fatalf("overrides = %+v, want empty", overrides)
+	}
+}
+
+func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesDynamicCredits(t *testing.T) {
+	repoForCredits := setupCreditTestRepo(t)
+	creditSvc := newPricedCreditService(repoForCredits)
+	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
+	// Use the same repository for service data and credits.
+	creditSvc.repo = repo
+	ctx := context.Background()
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-video", CreditsBalance: 10_000}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "视频项目",
+		Status:   model.ProjectStatusActive,
+	}
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "16:9",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: project.ID,
+		Prompt:    "生成一条咖啡杯种草视频",
+		Quantity:  1,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("created tasks = %d, want 1", len(tasks))
+	}
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	vc := found.VideoConfig.Data()
+	if vc.ModelKey != "seedance-2.0-mini" || vc.Model != "doubao-seedance-2-0-mini-260615" || vc.EstimatedCredits != 2480 {
+		t.Fatalf("video config = %+v", vc)
+	}
+	if found.VideoEstimatedCredits != 2480 || found.VideoCreditsCharged != 2480 {
+		t.Fatalf("task video credits = estimated %d charged %d", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	}
+	bal, err := creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	if bal != 10_000-2480 {
+		t.Fatalf("balance = %d, want %d", bal, 10_000-2480)
+	}
+}
+
+func TestTaskService_CreateManualVideoTaskUsesConfiguredCreditMultiplier(t *testing.T) {
+	repoForCredits := setupCreditTestRepo(t)
+	creditSvc := newPricedCreditService(repoForCredits)
+	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
+	svc.SetVideoCatalogAndCreditMultiplier(nil, 1200)
+	creditSvc.repo = repo
+	ctx := context.Background()
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-multiplier", InviteCode: "invite-" + userID, CreditsBalance: 10_000}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "视频项目",
+		Status:   model.ProjectStatusActive,
+	}
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "16:9",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: project.ID,
+		Prompt:    "生成一条咖啡杯种草视频",
+		Quantity:  1,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.VideoEstimatedCredits != 2976 || found.VideoCreditsCharged != 2976 {
+		t.Fatalf("task video credits = estimated %d charged %d, want 2976", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	}
+}
+
+func TestTaskService_CreateManualVideoTaskRequiresProjectProfile(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "未配置视频项目",
+		Status:   model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	_, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: project.ID,
+		Prompt:    "生成视频",
+	})
+	if err == nil || !strings.Contains(err.Error(), "project video profile is not configured") {
+		t.Fatalf("CreateManual error = %v", err)
 	}
 }
 

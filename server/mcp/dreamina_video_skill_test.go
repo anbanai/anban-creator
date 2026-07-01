@@ -32,6 +32,8 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"获客",
 			"推广",
 			"register_video_reference",
+			"get_project_video_profile",
+			"validate_video_generation_params",
 			"build_video_generation_plan",
 			"create_video_generation_task",
 			"query_video_generation_task",
@@ -45,6 +47,9 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"references/prompt-templates.md",
 			"references/mcp-contract.md",
 			"reference_role",
+			"project video profile",
+			"estimated dynamic credits",
+			"OSS-backed task file",
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s SKILL.md missing %q", plugin, want)
@@ -97,7 +102,7 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 				}
 			}
 			if ref == "mcp-contract.md" {
-				for _, want := range []string{"file_path", "ark_url", "OSS/CDN"} {
+				for _, want := range []string{"get_project_video_profile", "validate_video_generation_params", "credit_multiplier", "estimated_credits", "pricing_breakdown", "task_file_id", "file_path", "ark_url", "OSS/CDN", "Provider raw URLs", "server-measured input video duration", "Do not trust agent-supplied input video duration"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
@@ -112,6 +117,9 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"dreamina image2video",
 			"@图片1 作为首帧",
 			"dreamina CLI",
+			"credits: 3000",
+			"Duration: 15 seconds.",
+			"Ratio/resolution: `9:16` and `1080p`.",
 		} {
 			if strings.Contains(body, banned) {
 				t.Fatalf("%s SKILL.md should not mention %q", plugin, banned)

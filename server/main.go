@@ -250,7 +250,10 @@ func main() {
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
 
 	if repo != nil {
+		videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalogOrDefault())
+		videoCreditMultiplier := cfg.VideoAPI.CreditMultiplierOrDefault()
 		planSvc = service.NewPlanService(repo, log)
+		planSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
 		projectSvc = service.NewProjectService(repo, log)
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
 		feedbackSvc = service.NewFeedbackService(repo, log)
@@ -270,6 +273,7 @@ func main() {
 		}
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		// Wire executor defaults so local-executor claim responses carry the same
 		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
@@ -493,10 +497,10 @@ func main() {
 				imageSvc.SetModelConfigService(modelConfigSvc)
 			}
 		}
-		if cfg.VideoAPI.Key != "" && cfg.VideoAPI.Model != "" {
+		if cfg.VideoAPI.Key != "" {
 			videoSvc = service.NewVideoService(&cfg.VideoAPI)
 		} else {
-			log.Warn().Msg("video generation service not configured (set video_api.key/model), video tools unavailable")
+			log.Warn().Msg("video generation service not configured (set video_api.key), video tools unavailable")
 		}
 		if cfg.FunASR.Complete() || store != nil {
 			var err error

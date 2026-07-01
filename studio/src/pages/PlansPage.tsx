@@ -37,6 +37,7 @@ import EmptyState from '@/components/EmptyState'
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
+  { value: 'video', label: '视频生成' },
 ]
 
 function planToFormValues(plan: Plan): PlanFormValues {
@@ -54,6 +55,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
+    video_config: plan.video_config,
   }
 }
 
@@ -81,6 +83,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
+      video_config: undefined,
     },
   })
 
@@ -272,6 +275,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
+      video_config: values.type === 'video' ? values.video_config : undefined,
     }
 
     if (editingPlan) {
@@ -429,7 +433,13 @@ export default function PlansPage() {
                       value={field.value || ''}
                       onChange={(id, platform) => {
                         field.onChange(id)
-                        if (id) form.setValue('type', platform as PlanType)
+                        if (id) {
+                          form.setValue('type', platform as PlanType)
+                          const project = allProjects?.find((p) => p.id === id)
+                          if (platform === 'video' && project?.video_defaults) {
+                            form.setValue('video_config', project.video_defaults, { shouldDirty: false })
+                          }
+                        }
                       }}
                       excludePlatforms={['ecommerce']}
                     />
@@ -480,7 +490,7 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="image_model_key" render={({ field }) => (
+              {watchedType !== 'video' && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
                   <FormLabel>图像模型</FormLabel>
                   <FormControl>
@@ -496,9 +506,95 @@ export default function PlansPage() {
                   </FormControl>
                   <FormMessage />
                 </FormItem>
-              )} />
+              )} />}
 
-              <FormField control={form.control} name="watermark" render={({ field }) => (
+              {watchedType === 'video' && (
+                <div className="space-y-3 rounded-lg border border-border p-3">
+                  <p className="text-sm font-medium text-foreground">视频参数覆盖</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField control={form.control} name="video_config.purpose" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>目标</FormLabel>
+                        <Select value={field.value || 'planting'} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="planting">种草</SelectItem>
+                            <SelectItem value="ecommerce">带货</SelectItem>
+                            <SelectItem value="lead_gen">获客</SelectItem>
+                            <SelectItem value="promotion">推广</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_config.model_key" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>模型</FormLabel>
+                        <Select value={field.value || ''} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="seedance-2.0">Seedance 2.0</SelectItem>
+                            <SelectItem value="seedance-2.0-fast">Seedance 2.0 Fast</SelectItem>
+                            <SelectItem value="seedance-2.0-mini">Seedance 2.0 Mini</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_config.resolution" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>分辨率</FormLabel>
+                        <Select value={field.value || ''} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="480p">480p</SelectItem>
+                            <SelectItem value="720p">720p</SelectItem>
+                            <SelectItem value="1080p">1080p</SelectItem>
+                            <SelectItem value="4k">4K</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_config.ratio" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>比例</FormLabel>
+                        <Select value={field.value || ''} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="9:16">9:16</SelectItem>
+                            <SelectItem value="16:9">16:9</SelectItem>
+                            <SelectItem value="1:1">1:1</SelectItem>
+                            <SelectItem value="4:3">4:3</SelectItem>
+                            <SelectItem value="3:4">3:4</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_config.duration" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>时长（秒）</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={1} max={60} value={field.value ?? 15} onChange={(event) => field.onChange(Number(event.target.value))} />
+                        </FormControl>
+                      </FormItem>
+                    )} />
+                    <div className="flex items-end gap-4 pb-2">
+                      <FormField control={form.control} name="video_config.watermark" render={({ field }) => (
+                        <FormItem className="flex items-center gap-2 space-y-0">
+                          <FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl>
+                          <FormLabel className="text-sm">水印</FormLabel>
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="video_config.preflight" render={({ field }) => (
+                        <FormItem className="flex items-center gap-2 space-y-0">
+                          <FormControl><Switch checked={field.value !== false} onCheckedChange={field.onChange} /></FormControl>
+                          <FormLabel className="text-sm">预检</FormLabel>
+                        </FormItem>
+                      )} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {watchedType !== 'video' && <FormField control={form.control} name="watermark" render={({ field }) => (
                 <FormItem>
                   <button
                     type="button"
@@ -519,7 +615,7 @@ export default function PlansPage() {
                   </button>
                   <FormMessage />
                 </FormItem>
-              )} />
+              )} />}
 
               {/* Image composition (seednote only) */}
               {watchedType === 'seednote' && (

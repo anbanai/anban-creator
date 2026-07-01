@@ -22,14 +22,8 @@ mcp: {}
 storage: {}
 video_api:
   key: "${VOLCENGINE_ARK_API_KEY}"
-  model: "doubao-seedance-2-0-test"
   timeout: 7m
-  credits: 1234
-  defaults:
-    resolution: "720p"
-    ratio: "16:9"
-    duration: 10
-    watermark: true
+  credit_multiplier: 1200
 claude:
   plugin_dir: "../../claudecode"
 `)
@@ -48,40 +42,25 @@ claude:
 	if cfg.VideoAPI.BaseURL != DefaultVideoAPIBaseURL {
 		t.Fatalf("VideoAPI.BaseURL = %q, want %q", cfg.VideoAPI.BaseURL, DefaultVideoAPIBaseURL)
 	}
-	if cfg.VideoAPI.Model != "doubao-seedance-2-0-test" {
-		t.Fatalf("VideoAPI.Model = %q", cfg.VideoAPI.Model)
-	}
 	if cfg.VideoAPI.Timeout != 7*time.Minute {
 		t.Fatalf("VideoAPI.Timeout = %v", cfg.VideoAPI.Timeout)
 	}
-	if cfg.VideoAPI.Credits != 1234 {
-		t.Fatalf("VideoAPI.Credits = %d", cfg.VideoAPI.Credits)
-	}
-	if cfg.VideoAPI.Defaults.Resolution != "720p" || cfg.VideoAPI.Defaults.Ratio != "16:9" || cfg.VideoAPI.Defaults.Duration != 10 {
-		t.Fatalf("VideoAPI.Defaults = %#v", cfg.VideoAPI.Defaults)
-	}
-	if cfg.VideoAPI.Defaults.Watermark == nil || !*cfg.VideoAPI.Defaults.Watermark {
-		t.Fatalf("VideoAPI.Defaults.Watermark = %#v", cfg.VideoAPI.Defaults.Watermark)
+	if cfg.VideoAPI.CreditMultiplier != 1200 {
+		t.Fatalf("VideoAPI.CreditMultiplier = %d", cfg.VideoAPI.CreditMultiplier)
 	}
 }
 
-func TestVideoAPIConfigAppliesShortVideoDefaults(t *testing.T) {
+func TestVideoAPIConfigAppliesGlobalDefaultsOnly(t *testing.T) {
 	cfg := &Config{}
 	cfg.applyDefaults()
 
 	if cfg.VideoAPI.BaseURL != DefaultVideoAPIBaseURL {
 		t.Fatalf("VideoAPI.BaseURL = %q, want %q", cfg.VideoAPI.BaseURL, DefaultVideoAPIBaseURL)
 	}
-	if cfg.VideoAPI.Defaults.Resolution != "1080p" {
-		t.Fatalf("default resolution = %q", cfg.VideoAPI.Defaults.Resolution)
-	}
-	if cfg.VideoAPI.Defaults.Ratio != "9:16" {
-		t.Fatalf("default ratio = %q", cfg.VideoAPI.Defaults.Ratio)
-	}
-	if cfg.VideoAPI.Defaults.Duration != 15 {
-		t.Fatalf("default duration = %d", cfg.VideoAPI.Defaults.Duration)
-	}
 	if cfg.VideoAPI.Timeout != 10*time.Minute {
 		t.Fatalf("default timeout = %v", cfg.VideoAPI.Timeout)
+	}
+	if cfg.VideoAPI.CreditMultiplier != 1000 {
+		t.Fatalf("default credit multiplier = %d", cfg.VideoAPI.CreditMultiplier)
 	}
 }

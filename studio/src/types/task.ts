@@ -1,4 +1,6 @@
-export type TaskType = 'seednote' | 'article' | 'ecommerce'
+import type { VideoTaskConfig } from './video'
+
+export type TaskType = 'seednote' | 'article' | 'ecommerce' | 'video'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity; the package price is the
@@ -78,6 +80,10 @@ export interface Task {
   project_snapshot?: ProjectSnapshot
   // E-commerce package config (only present for platform=ecommerce tasks).
   ecommerce?: EcommerceTaskConfig
+  video_config?: VideoTaskConfig
+  video_generation_id?: string
+  video_estimated_credits?: number
+  video_credits_charged?: number
   // 执行中累计消耗的美元成本（服务端 model.Task.TotalCostUSD）。运行/失败/完成
   // 态可能填充；刚创建的 pending 任务为空。用于取消对话框展示「已消耗不退还」。
   total_cost_usd?: number | null
@@ -162,6 +168,7 @@ export interface CreateTaskRequest {
   target_platform?: string
   selling_points?: string
   language?: string
+  video_config?: VideoTaskConfig
   // ''/'cloud' (default) → cloud execution; 'local' → claim by the desktop
   // local executor and run on the user's machine (enables ffmpeg/local-shell).
   // The desktop sets this when a local executor is available; web always omits.

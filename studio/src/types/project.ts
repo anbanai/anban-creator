@@ -1,4 +1,6 @@
-export type ProjectPlatform = 'article' | 'seednote' | 'ecommerce'
+import type { VideoDefaults, VideoModelPolicy } from './video'
+
+export type ProjectPlatform = 'article' | 'seednote' | 'ecommerce' | 'video'
 export type ProjectStatus = 'active' | 'archived'
 
 export interface ProjectConfig {
@@ -31,6 +33,8 @@ export interface Project {
   reference_image_url: string
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
+  video_defaults?: VideoDefaults
+  video_model_policy?: VideoModelPolicy
   max_concurrent_tasks: number
   config: ProjectConfig
   status: ProjectStatus
@@ -78,6 +82,8 @@ export interface CreateProjectRequest {
   reference_image_url?: string
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults
+  video_defaults?: VideoDefaults
+  video_model_policy?: VideoModelPolicy
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string

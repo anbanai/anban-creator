@@ -22,6 +22,7 @@ var validPlatforms = map[string]bool{
 	model.PlatformArticle:   true,
 	model.PlatformSeednote:  true,
 	model.PlatformEcommerce: true,
+	model.PlatformVideo:     true,
 }
 
 // ProjectService handles project CRUD operations with ownership verification.
@@ -171,6 +172,10 @@ func (s *ProjectService) Update(ctx context.Context, userID, projectID string, c
 	}
 	if ch.EcommerceDefaultsSet {
 		existing.EcommerceDefaults = ch.EcommerceDefaults
+	}
+	if ch.VideoProfileSet {
+		existing.VideoDefaults = ch.VideoDefaults
+		existing.VideoModelPolicy = ch.VideoModelPolicy
 	}
 	// Merge Config: unconditionally update AppID to support credential clearing.
 	// Only update Secret if non-empty to preserve existing secret during edits.

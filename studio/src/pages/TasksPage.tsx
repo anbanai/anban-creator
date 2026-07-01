@@ -16,6 +16,7 @@ import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
@@ -382,6 +383,7 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
+      video_config: values.type === 'video' ? values.video_config : undefined,
       // Route to the desktop local executor when available and opted in.
       execution_target: localExecutorAvailable && runLocally ? 'local' : undefined,
     }))
@@ -749,6 +751,9 @@ export default function TasksPage() {
                             form.setValue('target_platform', ch.ecommerce_defaults.target_platform || '', { shouldDirty: false })
                             form.setValue('image_model_key', ch.ecommerce_defaults.image_model_key || '', { shouldDirty: false })
                           }
+                          if (platform === 'video' && ch?.video_defaults) {
+                            form.setValue('video_config', ch.video_defaults, { shouldDirty: false })
+                          }
                         } else {
                           setProjectImageRatio('')
                         }
@@ -783,7 +788,7 @@ export default function TasksPage() {
               )} />
 
               {/* Quantity selector (ecommerce bills a fixed package at qty=1) */}
-              {watchedType !== 'ecommerce' && (
+              {watchedType !== 'ecommerce' && watchedType !== 'video' && (
               <div className="space-y-2">
                 <FormLabel>数量</FormLabel>
                 <div className="flex gap-2">
@@ -803,7 +808,7 @@ export default function TasksPage() {
               )}
 
               {/* Image ratio selector (ecommerce uses per-module ratios from platform specs) */}
-              {watchedType !== 'ecommerce' && (
+              {watchedType !== 'ecommerce' && watchedType !== 'video' && (
               <FormField control={form.control} name="image_ratio" render={({ field }) => {
                 const defaultRatio = projectImageRatio || platformDefaultRatio[watchedType] || '3:4'
                 const defaultLabel = platformRatioLabel[watchedType] || `${defaultRatio}（默认）`
@@ -838,7 +843,7 @@ export default function TasksPage() {
               )}
 
               {/* Image model selector */}
-              <FormField control={form.control} name="image_model_key" render={({ field }) => (
+              {watchedType !== 'video' && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
                   <FormLabel>图像模型</FormLabel>
                   <FormControl>
@@ -854,10 +859,111 @@ export default function TasksPage() {
                   </FormControl>
                   <FormMessage />
                 </FormItem>
-              )} />
+              )} />}
+
+              {watchedType === 'video' && (
+                <div className="space-y-3 rounded-lg border border-border p-3">
+                  <p className="text-sm font-medium text-foreground">视频参数</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField control={form.control} name="video_config.purpose" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>目标</FormLabel>
+                        <Select value={field.value || selectedProject?.video_defaults?.purpose || 'planting'} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="planting">种草</SelectItem>
+                            <SelectItem value="ecommerce">带货</SelectItem>
+                            <SelectItem value="lead_gen">获客</SelectItem>
+                            <SelectItem value="promotion">推广</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_config.model_key" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>模型</FormLabel>
+                        <Select value={field.value || selectedProject?.video_defaults?.model_key || ''} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="seedance-2.0">Seedance 2.0</SelectItem>
+                            <SelectItem value="seedance-2.0-fast">Seedance 2.0 Fast</SelectItem>
+                            <SelectItem value="seedance-2.0-mini">Seedance 2.0 Mini</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_config.resolution" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>分辨率</FormLabel>
+                        <Select value={field.value || selectedProject?.video_defaults?.resolution || ''} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="480p">480p</SelectItem>
+                            <SelectItem value="720p">720p</SelectItem>
+                            <SelectItem value="1080p">1080p</SelectItem>
+                            <SelectItem value="4k">4K</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_config.ratio" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>比例</FormLabel>
+                        <Select value={field.value || selectedProject?.video_defaults?.ratio || ''} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="9:16">9:16</SelectItem>
+                            <SelectItem value="16:9">16:9</SelectItem>
+                            <SelectItem value="1:1">1:1</SelectItem>
+                            <SelectItem value="4:3">4:3</SelectItem>
+                            <SelectItem value="3:4">3:4</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="video_config.duration" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>时长（秒）</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={60}
+                            value={field.value ?? selectedProject?.video_defaults?.duration ?? 15}
+                            onChange={(event) => field.onChange(Number(event.target.value))}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <div className="flex items-end gap-4 pb-2">
+                      <FormField control={form.control} name="video_config.watermark" render={({ field }) => (
+                        <FormItem className="flex items-center gap-2 space-y-0">
+                          <FormControl>
+                            <Switch checked={field.value ?? selectedProject?.video_defaults?.watermark ?? false} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-sm">水印</FormLabel>
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="video_config.preflight" render={({ field }) => (
+                        <FormItem className="flex items-center gap-2 space-y-0">
+                          <FormControl>
+                            <Switch checked={field.value ?? selectedProject?.video_defaults?.preflight ?? true} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-sm">预检</FormLabel>
+                        </FormItem>
+                      )} />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Watermark toggle */}
-              <button
+              {watchedType !== 'video' && <button
                 type="button"
                 onClick={() => setWatermark(!watermark)}
                 className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
@@ -873,7 +979,7 @@ export default function TasksPage() {
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">开启后生成的图片将带有水印（仅火山引擎支持）</p>
                 </div>
-              </button>
+              </button>}
 
               {/* Image composition (seednote only) */}
               {watchedType === 'seednote' && (

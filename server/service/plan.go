@@ -15,13 +15,37 @@ import (
 
 // PlanService handles plan CRUD and lifecycle operations.
 type PlanService struct {
-	repo   repository.Repository
-	logger *zerolog.Logger
+	repo                  repository.Repository
+	logger                *zerolog.Logger
+	videoCatalog          VideoModelCatalog
+	videoCreditMultiplier int
 }
 
 // NewPlanService creates a new PlanService.
 func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanService {
 	return &PlanService{repo: repo, logger: logger}
+}
+
+func (s *PlanService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {
+	if s == nil {
+		return
+	}
+	s.videoCatalog = catalog
+	s.videoCreditMultiplier = creditMultiplier
+}
+
+func (s *PlanService) resolvedVideoCatalog() VideoModelCatalog {
+	if s != nil && s.videoCatalog != nil {
+		return s.videoCatalog
+	}
+	return DefaultVideoModelCatalog()
+}
+
+func (s *PlanService) resolvedVideoCreditMultiplier() int {
+	if s != nil && s.videoCreditMultiplier > 0 {
+		return s.videoCreditMultiplier
+	}
+	return 1000
 }
 
 // CreatePlanParams holds the inputs for PlanService.Create. Pointer-typed optional
@@ -50,6 +74,7 @@ type CreatePlanParams struct {
 	// non-nil honors explicit user choice.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
+	Video                    *model.VideoTaskConfig
 }
 
 // Create validates the cron expression, resolves the project, computes the next run
@@ -116,6 +141,20 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if p.ArticleWithContentImages != nil {
 		articleContent = *p.ArticleWithContentImages
 	}
+	var videoPlan *VideoGenerationPlan
+	if project.Platform == model.PlatformVideo {
+		resolved, err := ResolveVideoGenerationPlan(
+			videoRequestFromTaskConfig(p.Prompt, p.Video),
+			project.VideoDefaults.Data(),
+			project.VideoModelPolicy.Data(),
+			s.resolvedVideoCatalog(),
+			s.resolvedVideoCreditMultiplier(),
+		)
+		if err != nil {
+			return nil, err
+		}
+		videoPlan = &resolved
+	}
 
 	// A plan carries scheduling-adjacent "what to produce" image params + goal
 	// mode. Project/account style config is snapshotted when a task is spawned.
@@ -138,6 +177,11 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		HasTailImage:             hasTail,
 		ArticleWithCover:         &articleCover,
 		ArticleWithContentImages: &articleContent,
+	}
+	if videoPlan != nil {
+		vc := videoTaskConfigFromPlan(*videoPlan)
+		plan.SetVideoConfig(vc)
+		plan.VideoEstimatedCredits = videoPlan.EstimatedCredits
 	}
 
 	if err := s.repo.Plans().Create(ctx, plan); err != nil {
@@ -181,6 +225,7 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - Watermark: nil = leave unchanged; &true/&false = set
 //   - GoalMode: nil = leave unchanged; &true/&false = set
 //   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
+//   - Video: nil = leave unchanged; non-nil = re-resolve against project profile
 //
 // ID, CronExpr, Prompt, and Goal are plain strings. CronExpr=="" means "leave
 // unchanged"; empty Prompt/Goal is a valid value meaning "no prompt / no goal".
@@ -198,6 +243,7 @@ type UpdatePlanParams struct {
 	HasTailImage             *bool
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
+	Video                    *model.VideoTaskConfig
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
@@ -238,6 +284,28 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 	if p.ArticleWithContentImages != nil {
 		v := *p.ArticleWithContentImages
 		plan.ArticleWithContentImages = &v
+	}
+	if p.Video != nil {
+		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("find project: %w", err)
+		}
+		if project.Platform != model.PlatformVideo {
+			return nil, fmt.Errorf("video_config can only be set on video plans")
+		}
+		resolved, err := ResolveVideoGenerationPlan(
+			videoRequestFromTaskConfig(plan.Prompt, p.Video),
+			project.VideoDefaults.Data(),
+			project.VideoModelPolicy.Data(),
+			s.resolvedVideoCatalog(),
+			s.resolvedVideoCreditMultiplier(),
+		)
+		if err != nil {
+			return nil, err
+		}
+		vc := videoTaskConfigFromPlan(resolved)
+		plan.SetVideoConfig(vc)
+		plan.VideoEstimatedCredits = resolved.EstimatedCredits
 	}
 	// If cron expression changed, validate and recompute next run.
 	if p.CronExpr != "" && p.CronExpr != plan.CronExpr {

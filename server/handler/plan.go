@@ -90,23 +90,25 @@ type createPlanRequest struct {
 	HasTailImage    *bool `json:"has_tail_image,omitempty"`
 	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
 	// (cover NOT mandatory). nil → fall back to plan model defaults (both on).
-	ArticleWithCover         *bool `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool `json:"article_with_content_images,omitempty"`
+	ArticleWithCover         *bool                  `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool                  `json:"article_with_content_images,omitempty"`
+	VideoConfig              *model.VideoTaskConfig `json:"video_config,omitempty"`
 }
 
 type updatePlanRequest struct {
-	CronExpr                 string  `json:"cron_expr"`
-	Prompt                   string  `json:"prompt"`
-	ImageModelKey            *string `json:"image_model_key"`
-	SkipReferenceImage       *bool   `json:"skip_reference_image"`
-	ReferenceImageURL        *string `json:"reference_image_url"`
-	Watermark                *bool   `json:"watermark"`
-	Goal                     string  `json:"goal"`
-	GoalMode                 *bool   `json:"goal_mode"`
-	HasContentImage          *bool   `json:"has_content_image,omitempty"`
-	HasTailImage             *bool   `json:"has_tail_image,omitempty"`
-	ArticleWithCover         *bool   `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool   `json:"article_with_content_images,omitempty"`
+	CronExpr                 string                 `json:"cron_expr"`
+	Prompt                   string                 `json:"prompt"`
+	ImageModelKey            *string                `json:"image_model_key"`
+	SkipReferenceImage       *bool                  `json:"skip_reference_image"`
+	ReferenceImageURL        *string                `json:"reference_image_url"`
+	Watermark                *bool                  `json:"watermark"`
+	Goal                     string                 `json:"goal"`
+	GoalMode                 *bool                  `json:"goal_mode"`
+	HasContentImage          *bool                  `json:"has_content_image,omitempty"`
+	HasTailImage             *bool                  `json:"has_tail_image,omitempty"`
+	ArticleWithCover         *bool                  `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool                  `json:"article_with_content_images,omitempty"`
+	VideoConfig              *model.VideoTaskConfig `json:"video_config,omitempty"`
 }
 
 // Create handles POST /api/v1/plans.
@@ -153,6 +155,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
+		Video:                    req.VideoConfig,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
@@ -278,6 +281,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
+		Video:                    req.VideoConfig,
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")

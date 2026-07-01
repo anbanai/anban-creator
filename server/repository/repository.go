@@ -27,6 +27,7 @@ type Repository interface {
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
+	VideoGenerations() VideoGenerationRepository
 	AgentFeedbacks() AgentFeedbackRepository
 	WCFBindings() WCFBindingRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
@@ -212,6 +213,15 @@ type AgentFeedbackRepository interface {
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.AgentFeedback, error)
 }
 
+// VideoGenerationRepository provides access to video_generations.
+type VideoGenerationRepository interface {
+	Create(ctx context.Context, gen *model.VideoGeneration) error
+	FindByID(ctx context.Context, id string) (*model.VideoGeneration, error)
+	FindByArkTaskID(ctx context.Context, arkTaskID string) (*model.VideoGeneration, error)
+	FindLatestByTaskID(ctx context.Context, taskID string) (*model.VideoGeneration, error)
+	Update(ctx context.Context, gen *model.VideoGeneration) error
+}
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
@@ -234,6 +244,7 @@ type repository struct {
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
+	videoGenerations        VideoGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	wcfBindings             WCFBindingRepository
 }
@@ -256,6 +267,7 @@ func New(db *gorm.DB) Repository {
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
+	videoGenerations := newVideoGenerationRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
 	wcfBindings := newWCFBindingRepository(db)
 
@@ -277,6 +289,7 @@ func New(db *gorm.DB) Repository {
 		viralAnalyses:           viralAnalyses,
 		posterTasks:             posterTasks,
 		topicPools:              topicPools,
+		videoGenerations:        videoGenerations,
 		agentFeedbacks:          agentFeedbacks,
 		wcfBindings:             wcfBindings,
 	}
@@ -302,6 +315,9 @@ func (r *repository) PosterTasks() PosterTaskRepository       { return r.posterT
 func (r *repository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
 func (r *repository) TopicPools() TopicPoolRepository { return r.topicPools }
+func (r *repository) VideoGenerations() VideoGenerationRepository {
+	return r.videoGenerations
+}
 
 func (r *repository) WCFBindings() WCFBindingRepository { return r.wcfBindings }
 
@@ -346,6 +362,7 @@ type txRepository struct {
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
+	videoGenerations        VideoGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
 	wcfBindings             WCFBindingRepository
 }
@@ -369,6 +386,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		viralAnalyses:           newViralAnalysisRepository(tx),
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
+		videoGenerations:        newVideoGenerationRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
 		wcfBindings:             newWCFBindingRepository(tx),
 	}
@@ -394,6 +412,9 @@ func (r *txRepository) PosterTasks() PosterTaskRepository       { return r.poste
 func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository { return r.agentFeedbacks }
 
 func (r *txRepository) TopicPools() TopicPoolRepository { return r.topicPools }
+func (r *txRepository) VideoGenerations() VideoGenerationRepository {
+	return r.videoGenerations
+}
 
 func (r *txRepository) WCFBindings() WCFBindingRepository { return r.wcfBindings }
 

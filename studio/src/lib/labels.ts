@@ -197,6 +197,7 @@ export const transactionTypeLabel: Record<string, string> = {
   draft_publish: '草稿发布',
   outline: '大纲生成',
   viral_analysis: '爆文拆解',
+  video_gen: '视频生成',
 }
 
 export const operationLabel: Record<string, string> = {
@@ -208,6 +209,7 @@ export const operationLabel: Record<string, string> = {
   seo: 'SEO 优化',
   outline: '大纲生成',
   viral_analysis: '爆文拆解',
+  video_gen: '视频生成',
 }
 
 export const taskTypeLabelCN: Record<string, string> = {
@@ -215,6 +217,7 @@ export const taskTypeLabelCN: Record<string, string> = {
   seednote: '种草笔记',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
+  video: '视频生成',
 }
 
 // --- Content Types ---
@@ -226,6 +229,7 @@ export const contentTypeLabel: Record<string, string> = {
   seednote: '种草笔记',
   article: '公众号文章',
   ecommerce: '电商出图',
+  video: '视频生成',
 }
 
 // Pipeline stage → 中文标签。stage 取值来自 server/service/task_progress_stages.go
@@ -258,6 +262,7 @@ export const progressStageLabel: Record<string, string> = {
 export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
+  { value: 'video', label: '视频生成' },
   { value: 'ecommerce', label: '电商出图' },
 ]
 

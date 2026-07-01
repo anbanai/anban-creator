@@ -88,6 +88,37 @@ func createTestProject(t *testing.T, repo repository.Repository, userID, platfor
 	return ch.ID
 }
 
+func createTestVideoProject(t *testing.T, repo repository.Repository, userID string) string {
+	t.Helper()
+	watermark := false
+	ch := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "Test Video Project",
+		Status:   model.ProjectStatusActive,
+	}
+	ch.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	ch.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0", "seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "1080p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(context.Background(), ch); err != nil {
+		t.Fatalf("create test video project: %v", err)
+	}
+	return ch.ID
+}
+
 func createTestWechatProject(t *testing.T, repo repository.Repository, userID string) string {
 	t.Helper()
 	ch := &model.Project{
@@ -417,6 +448,51 @@ func TestPlanService_Update(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected error for invalid cron expression")
+	}
+}
+
+func TestPlanService_UpdateVideoConfigRevalidatesAndStoresSnapshot(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	projectID := createTestVideoProject(t, repo, "user-1")
+	created, err := svc.Create(ctx, CreatePlanParams{
+		UserID:    "user-1",
+		ProjectID: projectID,
+		CronExpr:  "0 9 * * *",
+		Prompt:    "old video prompt",
+	})
+	if err != nil {
+		t.Fatalf("create video plan: %v", err)
+	}
+	if created.VideoEstimatedCredits != 2480 {
+		t.Fatalf("initial estimated credits = %d, want 2480", created.VideoEstimatedCredits)
+	}
+	watermark := true
+	updated, err := svc.Update(ctx, UpdatePlanParams{
+		ID:     created.ID,
+		Prompt: "updated video prompt",
+		Video: &model.VideoTaskConfig{
+			Purpose:    VideoPurposePromotion,
+			ModelKey:   "seedance-2.0",
+			Resolution: "1080p",
+			Ratio:      "16:9",
+			Duration:   5,
+			Watermark:  &watermark,
+			Preflight:  true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("update video plan: %v", err)
+	}
+	vc := updated.VideoConfig.Data()
+	if vc.ModelKey != "seedance-2.0" || vc.Model != "doubao-seedance-2-0-260128" || vc.Resolution != "1080p" || vc.Duration != 5 {
+		t.Fatalf("video config was not resolved and stored: %#v", vc)
+	}
+	if vc.PricingBreakdown == nil || vc.PricingBreakdown.CNY != 12.39 {
+		t.Fatalf("pricing breakdown = %#v, want 12.39 CNY", vc.PricingBreakdown)
+	}
+	if updated.VideoEstimatedCredits != 12390 {
+		t.Fatalf("estimated credits = %d, want 12390", updated.VideoEstimatedCredits)
 	}
 }
 

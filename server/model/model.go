@@ -23,6 +23,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&TopicPool{},
 		&ImageGeneration{},
 		&ImageGenerationResult{},
+		&VideoGeneration{},
 		&AgentFeedback{},
 		&WCFBinding{},
 	)
