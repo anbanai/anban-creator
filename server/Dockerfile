@@ -18,8 +18,9 @@ FROM node:25-slim
 # jq is required by claudecode/hooks/seednote-quality-gate.sh — under the default
 # `executor: local` config the Claude Code CLI subprocess runs in this container,
 # so the SubagentStop hook fires here and needs jq to parse stdin JSON.
+# git is required by `skills add` to install GitHub-hosted video overlay skills.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates jq && \
+    apt-get install -y --no-install-recommends ca-certificates jq git && \
     rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code
@@ -35,6 +36,22 @@ ENV CLAUDE_PLUGIN_ROOT=/anbanai
 
 # Install plugin as non-root user (Claude CLI requires this for --scope user)
 USER node
+RUN git config --global http.version HTTP/1.1
+
+RUN npx -y skills@latest add heygen-com/hyperframes \
+        --agent claude-code \
+        --skill music-to-video \
+        --skill slideshow \
+        --copy \
+        -g \
+        -y && \
+    npx -y skills@latest add remotion-dev/skills \
+        --agent claude-code \
+        --skill remotion-best-practices \
+        --copy \
+        -g \
+        -y
+
 RUN claude plugin marketplace add /anbanai && \
     claude plugin install --scope user anbanwriter@anbanai
 

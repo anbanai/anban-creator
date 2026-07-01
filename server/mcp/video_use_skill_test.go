@@ -115,6 +115,39 @@ func TestVideoOverlaySkillFiles(t *testing.T) {
 	}
 }
 
+func TestServerDockerfileInstallsOfficialVideoOverlaySkills(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(wd, "..", ".."))
+	raw, err := os.ReadFile(filepath.Join(root, "server", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("server Dockerfile missing: %v", err)
+	}
+	body := string(raw)
+	for _, want := range []string{
+		"ca-certificates jq git",
+		"git config --global http.version HTTP/1.1",
+		"npx -y skills@latest add heygen-com/hyperframes",
+		"--skill music-to-video",
+		"--skill slideshow",
+		"npx -y skills@latest add remotion-dev/skills",
+		"--skill remotion-best-practices",
+		"--agent claude-code",
+		"--copy",
+		"-g",
+		"-y",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("server Dockerfile should install official video overlay skills, missing %q", want)
+		}
+	}
+	if strings.Index(body, "USER node") > strings.Index(body, "npx -y skills@latest add heygen-com/hyperframes") {
+		t.Fatalf("server Dockerfile should install official skills as the node user")
+	}
+}
+
 func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -131,6 +164,9 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 	for _, want := range []string{
 		"name: video",
 		"skills:",
+		"- music-to-video",
+		"- slideshow",
+		"- remotion-best-practices",
 		"- dreamina-video",
 		"- video-use",
 		"- hyperframes-video-overlays",
@@ -170,6 +206,9 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 	codexAgent := string(codexAgentRaw)
 	for _, want := range []string{
 		`name = "video"`,
+		"music-to-video",
+		"slideshow",
+		"remotion-best-practices",
 		"skills/video-use/SKILL.md",
 		"skills/dreamina-video/SKILL.md",
 		"skills/hyperframes-video-overlays/SKILL.md",
@@ -204,8 +243,10 @@ func TestVideoUseOverlayHandoffContract(t *testing.T) {
 	}
 	body := string(raw)
 	for _, want := range []string{
-		"Use `hyperframes-video-overlays` skill",
-		"Use `remotion-video-overlays` skill",
+		"Use official `music-to-video` or `slideshow` skills when the brief matches their HyperFrames workflows",
+		"then use `hyperframes-video-overlays` skill",
+		"Use official `remotion-best-practices` skill for Remotion implementation guidance",
+		"then use `remotion-video-overlays` skill",
 		"Use `manim-video-overlays` skill",
 		"Use `pil-video-overlays` skill",
 		"edit/animations/slot_<id>/render.webm",
