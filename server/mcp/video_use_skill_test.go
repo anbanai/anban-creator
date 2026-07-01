@@ -68,6 +68,53 @@ func TestVideoUseSkillFiles(t *testing.T) {
 	}
 }
 
+func TestVideoOverlaySkillFiles(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(wd, "..", ".."))
+	skills := []string{
+		"hyperframes-video-overlays",
+		"remotion-video-overlays",
+		"manim-video-overlays",
+		"pil-video-overlays",
+	}
+	for _, skill := range skills {
+		var firstBody string
+		for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+			skillPath := filepath.Join(root, plugin, "skills", skill, "SKILL.md")
+			raw, err := os.ReadFile(skillPath)
+			if err != nil {
+				t.Fatalf("%s %s SKILL.md missing: %v", plugin, skill, err)
+			}
+			body := string(raw)
+			for _, want := range []string{
+				"name: " + skill,
+				"edit/animations/slot_<id>/",
+				"render.webm",
+				"alpha",
+				"edl.json",
+				"overlays",
+				"file",
+				"start",
+				"end",
+				"x",
+				"y",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s %s missing %q", plugin, skill, want)
+				}
+			}
+			if firstBody == "" {
+				firstBody = body
+			} else if body != firstBody {
+				t.Fatalf("%s SKILL.md differs between plugins", skill)
+			}
+		}
+	}
+}
+
 func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -86,6 +133,10 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		"skills:",
 		"- dreamina-video",
 		"- video-use",
+		"- hyperframes-video-overlays",
+		"- remotion-video-overlays",
+		"- manim-video-overlays",
+		"- pil-video-overlays",
 		"- short-video-cover",
 		"- portrait-pose-variants",
 		"- capcut-draft",
@@ -117,7 +168,15 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		t.Fatalf("codex video agent missing: %v", err)
 	}
 	codexAgent := string(codexAgentRaw)
-	for _, want := range []string{`name = "video"`, "skills/video-use/SKILL.md", "skills/dreamina-video/SKILL.md"} {
+	for _, want := range []string{
+		`name = "video"`,
+		"skills/video-use/SKILL.md",
+		"skills/dreamina-video/SKILL.md",
+		"skills/hyperframes-video-overlays/SKILL.md",
+		"skills/remotion-video-overlays/SKILL.md",
+		"skills/manim-video-overlays/SKILL.md",
+		"skills/pil-video-overlays/SKILL.md",
+	} {
 		if !strings.Contains(codexAgent, want) {
 			t.Fatalf("codex video agent missing %q", want)
 		}
@@ -130,5 +189,31 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 	reg := string(regRaw)
 	if !strings.Contains(reg, "[agents.video]") || strings.Contains(reg, "short-video-studio") {
 		t.Fatalf("codex registration should contain video and remove short-video-studio:\n%s", reg)
+	}
+}
+
+func TestVideoUseOverlayHandoffContract(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(wd, "..", ".."))
+	raw, err := os.ReadFile(filepath.Join(root, "claudecode", "skills", "video-use", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, want := range []string{
+		"Use `hyperframes-video-overlays` skill",
+		"Use `remotion-video-overlays` skill",
+		"Use `manim-video-overlays` skill",
+		"Use `pil-video-overlays` skill",
+		"edit/animations/slot_<id>/render.webm",
+		"overlays[]",
+		"subtitles are applied LAST",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("video-use overlay handoff missing %q", want)
+		}
 	}
 }
