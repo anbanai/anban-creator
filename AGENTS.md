@@ -142,6 +142,7 @@ Development rules:
 - Do not reintroduce legacy Python helper scripts for live slicing.
 - Keep generated task artifacts explicit and file-backed, especially JSON returned by MCP tools.
 - When a skill exists in both `claudecode/skills` and `openclaw/skills`, update both unless the intended distribution difference is backed by tests.
+- When changing plugin distribution assets under `claudecode/`, `openclaw/`, or `codex/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update the affected plugin manifest `version` in the same change: `claudecode/.claude-plugin/plugin.json`, `openclaw/openclaw.plugin.json`, and/or `codex/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
 
 ## Testing Patterns
 

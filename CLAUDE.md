@@ -221,6 +221,7 @@ All implement `Provider` interface (`app/image/provider.go`).
 4. **Studio**: Uses Bun (not npm). Use `bun install`, `bun run dev`, `bun run test`.
 5. **大型重构必须验证字段完整性**：在重构 studio 页面、表单对话框、API handler 或任何用户可见的功能时，必须**逐项检查原有功能**（表单字段、按钮、交互、API endpoint）是否被完整保留。禁止以"代码净化"、"简化"、"cleanup"等名义删除已发布的用户可见功能。若确需移除某个功能，必须在 commit message 中**明确列出被删除的功能并说明原因**。重构前建议：① 列出受影响的所有表单字段/交互/按钮；② `git diff` 后逐项核对；③ 不确定的功能一律保留。
 6. **Go 优先使用泛型设计**：遇到类型参数化场景（JSON 列存储、容器类型、类型安全的 helper、仓储/工具函数）时，**优先使用泛型**——例如 `datatypes.JSONSlice[T]` / `datatypes.JSONType[T]` 处理 JSON 列、自定义泛型类型替代 `any` / `interface{}` / 裸 `string` + 手动 `json.Marshal`。优势：① 编译期类型安全；② 零值序列化为合法 JSON（nil slice → `"null"` 字面量，MySQL JSON 列接受；而非空字符串 `""` 触发 `Error 3140`）；③ 减少重复的 marshal/unmarshal 样板代码。仅当泛型会显著增加复杂度、或第三方库不兼容、或性能敏感场景才退回非泛型。
+7. **修改插件/Skill 必须更新版本号**：每次修改 `claudecode/`、`openclaw/`、`codex/` 等插件分发内容（agents、skills/`SKILL.md`、hooks、themes、writers、manifest、安装脚本或会影响插件运行/发布的文档）时，必须在同一次变更中更新对应插件 manifest 的 `version`：`claudecode/.claude-plugin/plugin.json`、`openclaw/openclaw.plugin.json`、`codex/.codex-plugin/plugin.json`。若同一能力同步改了多个分发版本，逐个更新受影响分发的版本号；默认 bump patch，除非变更范围需要 minor/major。
 
 ## Development Patterns
 
