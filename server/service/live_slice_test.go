@@ -40,7 +40,9 @@ type fakeLiveSliceTingWu struct {
 }
 
 type fakeLiveStorage struct {
-	name string
+	name         string
+	customDomain bool
+	signErr      error
 }
 
 func newFakeLiveStorage(name string) (storage.Provider, error) {
@@ -76,10 +78,13 @@ func (s *fakeLiveStorage) Read(context.Context, string) ([]byte, error) {
 func (s *fakeLiveStorage) Delete(context.Context, string) error { return nil }
 
 func (s *fakeLiveStorage) DownloadURL(_ context.Context, key string, _ int) (string, error) {
+	if s.signErr != nil {
+		return "", s.signErr
+	}
 	return "https://signed.example.com/" + key, nil
 }
 
-func (s *fakeLiveStorage) HasCustomDomain() bool { return true }
+func (s *fakeLiveStorage) HasCustomDomain() bool { return s.customDomain }
 
 func (s *fakeLiveStorage) IsOwnedURL(rawURL string) bool {
 	return strings.HasPrefix(rawURL, "https://cdn.example.com/") || strings.HasPrefix(rawURL, "https://signed.example.com/")
@@ -92,6 +97,51 @@ func (f *fakeLiveSliceTingWu) CreateTask(_ context.Context, req LiveAnalysisTask
 
 func (f *fakeLiveSliceTingWu) QueryTask(context.Context, string) (*TingWuTaskInfo, bool, error) {
 	return f.task, f.completed, nil
+}
+
+func TestCreateLiveAnalysisTaskSignsOwnedAudioURL(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{}
+	store := &fakeLiveStorage{name: "oss"}
+	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+
+	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		AudioURL: "https://cdn.example.com/uploads/live-audio/take.wav",
+	})
+	if err != nil {
+		t.Fatalf("CreateLiveAnalysisTask: %v", err)
+	}
+	if got := tw.createReq.AudioURL; got != "https://signed.example.com/uploads/live-audio/take.wav" {
+		t.Fatalf("AudioURL = %q", got)
+	}
+}
+
+func TestCreateLiveAnalysisTaskKeepsExternalAudioURL(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{}
+	store := &fakeLiveStorage{name: "oss"}
+	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+
+	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		AudioURL: "https://media.example.org/take.wav",
+	})
+	if err != nil {
+		t.Fatalf("CreateLiveAnalysisTask: %v", err)
+	}
+	if got := tw.createReq.AudioURL; got != "https://media.example.org/take.wav" {
+		t.Fatalf("AudioURL = %q", got)
+	}
+}
+
+func TestCreateLiveAnalysisTaskReportsOwnedAudioURLSignFailure(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{}
+	store := &fakeLiveStorage{name: "oss", signErr: errors.New("sign failed")}
+	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+
+	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		AudioURL: "https://cdn.example.com/uploads/live-audio/take.wav",
+	})
+	if err == nil || !strings.Contains(err.Error(), "resolve audio URL") || !strings.Contains(err.Error(), "sign failed") {
+		t.Fatalf("CreateLiveAnalysisTask error = %v", err)
+	}
 }
 
 func TestNormalizeLiveAnalysisResultBuildsSentencesChaptersAndStats(t *testing.T) {

@@ -27,8 +27,6 @@ const (
 	maxVideoASRAudioBytes = 200 << 20
 )
 
-var videoASRHTTPClient = http.DefaultClient
-
 // VideoASRClient is the direct adapter boundary for OpenAI-compatible FunASR calls.
 type VideoASRClient interface {
 	Transcribe(ctx context.Context, req VideoASRTaskRequest) (*VideoASRTaskResult, error)
@@ -118,25 +116,28 @@ func (s *VideoASRService) CreateTask(ctx context.Context, req VideoASRTaskReques
 		if s.store.Name() != "oss" {
 			return nil, fmt.Errorf("audio_key requires OSS storage")
 		}
-		audioURL, err := s.store.DownloadURL(ctx, audioKey, 3600)
-		if err != nil {
-			return nil, fmt.Errorf("create signed audio URL: %w", err)
-		}
-		data, _, err := downloadVideoASRAudio(ctx, audioURL)
+		resolved, err := ResolveMediaSourceBytes(ctx, s.store, s.logger, MediaSourceRequest{
+			Key:         audioKey,
+			MaxBytes:    maxVideoASRAudioBytes,
+			ContentType: audioContentType(strings.ToLower(filepath.Ext(audioKey))),
+		})
 		if err != nil {
 			return nil, fmt.Errorf("read audio object: %w", err)
 		}
-		req.Audio = bytes.NewReader(data)
-		req.Filename = filepath.Base(audioKey)
-		req.ContentType = audioContentType(strings.ToLower(filepath.Ext(audioKey)))
+		req.Audio = bytes.NewReader(resolved.Bytes)
+		req.Filename = resolved.Filename
+		req.ContentType = resolved.ContentType
 	} else {
-		data, contentType, err := downloadVideoASRAudio(ctx, audioURL)
+		resolved, err := ResolveMediaSourceBytes(ctx, s.store, s.logger, MediaSourceRequest{
+			RawURL:   audioURL,
+			MaxBytes: maxVideoASRAudioBytes,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("read audio URL: %w", err)
 		}
-		req.Audio = bytes.NewReader(data)
-		req.Filename = "audio"
-		req.ContentType = contentType
+		req.Audio = bytes.NewReader(resolved.Bytes)
+		req.Filename = resolved.Filename
+		req.ContentType = resolved.ContentType
 	}
 	result, err := s.client.Transcribe(ctx, req)
 	if err != nil {
@@ -171,45 +172,6 @@ func (s *VideoASRService) QueryTask(ctx context.Context, taskID string) (*VideoA
 		return nil, fmt.Errorf("video ASR task %q was not found; create_video_asr_task transcribes synchronously and only completed results can be queried", taskID)
 	}
 	return result, nil
-}
-
-func readLimitedVideoASRAudio(reader io.Reader) ([]byte, error) {
-	limited := io.LimitReader(reader, maxVideoASRAudioBytes+1)
-	data, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > maxVideoASRAudioBytes {
-		return nil, fmt.Errorf("audio URL exceeds max size %d bytes", maxVideoASRAudioBytes)
-	}
-	return data, nil
-}
-
-func downloadVideoASRAudio(ctx context.Context, audioURL string) ([]byte, string, error) {
-	if !strings.HasPrefix(audioURL, "https://") {
-		return nil, "", fmt.Errorf("audio_url must be a publicly accessible HTTPS URL")
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, audioURL, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("create audio URL request: %w", err)
-	}
-	resp, err := videoASRHTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, "", fmt.Errorf("download audio URL: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("download audio URL: unexpected status %d", resp.StatusCode)
-	}
-	data, err := readLimitedVideoASRAudio(resp.Body)
-	if err != nil {
-		return nil, "", err
-	}
-	contentType := "application/octet-stream"
-	if ct := strings.TrimSpace(resp.Header.Get("Content-Type")); ct != "" {
-		contentType = strings.Split(ct, ";")[0]
-	}
-	return data, contentType, nil
 }
 
 // OpenAIFunASRClient calls an OpenAI-compatible FunASR transcription endpoint.

@@ -87,6 +87,9 @@ type fakeVideoASRStorage struct {
 	files             map[string][]byte
 	uploadContentType string
 	downloadURL       string
+	signedKey         string
+	readKey           string
+	ownedPrefix       string
 }
 
 func (f *fakeVideoASRStorage) Name() string {
@@ -114,6 +117,7 @@ func (f *fakeVideoASRStorage) GetURL(key string) string {
 }
 
 func (f *fakeVideoASRStorage) Read(_ context.Context, key string) ([]byte, error) {
+	f.readKey = key
 	data, ok := f.files[key]
 	if !ok {
 		return nil, errors.New("not found")
@@ -124,14 +128,17 @@ func (f *fakeVideoASRStorage) Read(_ context.Context, key string) ([]byte, error
 func (f *fakeVideoASRStorage) Delete(context.Context, string) error { return nil }
 
 func (f *fakeVideoASRStorage) DownloadURL(_ context.Context, key string, _ int) (string, error) {
+	f.signedKey = key
 	if f.downloadURL != "" {
 		return f.downloadURL, nil
 	}
 	return "https://download.example.com/" + key, nil
 }
 
-func (f *fakeVideoASRStorage) HasCustomDomain() bool  { return true }
-func (f *fakeVideoASRStorage) IsOwnedURL(string) bool { return false }
+func (f *fakeVideoASRStorage) HasCustomDomain() bool { return true }
+func (f *fakeVideoASRStorage) IsOwnedURL(rawURL string) bool {
+	return f.ownedPrefix != "" && strings.HasPrefix(rawURL, f.ownedPrefix)
+}
 
 func TestVideoASRServiceCreateTaskRejectsMissingAudioSource(t *testing.T) {
 	svc := NewVideoASRServiceWithClient(&fakeVideoASRClient{}, nil)
@@ -143,15 +150,6 @@ func TestVideoASRServiceCreateTaskRejectsMissingAudioSource(t *testing.T) {
 }
 
 func TestVideoASRServiceCreateTaskTranscribesOSSKey(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "audio/wav")
-		_, _ = w.Write([]byte("fake-wav"))
-	}))
-	defer srv.Close()
-	oldClient := videoASRHTTPClient
-	videoASRHTTPClient = srv.Client()
-	t.Cleanup(func() { videoASRHTTPClient = oldClient })
-
 	fake := &fakeVideoASRClient{result: &VideoASRTaskResult{
 		TaskID: "asr-task-1",
 		Status: "SUCCEEDED",
@@ -159,7 +157,9 @@ func TestVideoASRServiceCreateTaskTranscribesOSSKey(t *testing.T) {
 			Words: []VideoTranscriptWord{{Type: "word", Text: "你好", Start: 0.12, End: 0.42, SpeakerID: "speaker_0"}},
 		},
 	}}
-	store := &fakeVideoASRStorage{name: "oss", downloadURL: srv.URL}
+	store := &fakeVideoASRStorage{name: "oss", files: map[string][]byte{
+		"uploads/video-audio/take.wav": []byte("fake-wav"),
+	}}
 	svc := NewVideoASRServiceWithClient(fake, store)
 
 	result, err := svc.CreateTask(context.Background(), VideoASRTaskRequest{
@@ -178,6 +178,93 @@ func TestVideoASRServiceCreateTaskTranscribesOSSKey(t *testing.T) {
 	}
 	if fake.transcribeReq.AudioKey != "uploads/video-audio/take.wav" || fake.transcribeReq.SpeakerCount != 2 {
 		t.Fatalf("transcribe request source not forwarded: %#v", fake.transcribeReq)
+	}
+	if store.readKey != "uploads/video-audio/take.wav" {
+		t.Fatalf("audio_key should read storage object directly, readKey=%q", store.readKey)
+	}
+}
+
+func TestVideoASRServiceCreateTaskTranscribesOwnedAudioURL(t *testing.T) {
+	fake := &fakeVideoASRClient{result: &VideoASRTaskResult{
+		TaskID: "asr-task-1",
+		Status: "SUCCEEDED",
+		Transcript: &VideoTranscript{
+			Words: []VideoTranscriptWord{{Type: "word", Text: "你好", Start: 0.12, End: 0.42}},
+		},
+	}}
+	store := &fakeVideoASRStorage{
+		name:        "oss",
+		ownedPrefix: "https://cdn.example.com/",
+		files: map[string][]byte{
+			"uploads/video-audio/take.wav": []byte("fake-wav"),
+		},
+	}
+	svc := NewVideoASRServiceWithClient(fake, store)
+
+	_, err := svc.CreateTask(context.Background(), VideoASRTaskRequest{
+		AudioURL: "https://cdn.example.com/uploads/video-audio/take.wav",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if store.readKey != "uploads/video-audio/take.wav" {
+		t.Fatalf("owned audio_url should read storage object directly, readKey=%q", store.readKey)
+	}
+	if fake.transcribeReq.Filename != "take.wav" || fake.transcribeReq.ContentType != "audio/wav" {
+		t.Fatalf("transcribe request metadata = %#v", fake.transcribeReq)
+	}
+}
+
+func TestVideoASRServiceCreateTaskTranscribesExternalAudioURLAsBytes(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/wav")
+		_, _ = w.Write([]byte("external-wav"))
+	}))
+	defer srv.Close()
+	oldClient := mediaSourceHTTPClient
+	mediaSourceHTTPClient = srv.Client()
+	t.Cleanup(func() { mediaSourceHTTPClient = oldClient })
+
+	fake := &fakeVideoASRClient{result: &VideoASRTaskResult{
+		TaskID: "asr-task-1",
+		Status: "SUCCEEDED",
+		Transcript: &VideoTranscript{
+			Words: []VideoTranscriptWord{{Type: "word", Text: "你好", Start: 0.12, End: 0.42}},
+		},
+	}}
+	svc := NewVideoASRServiceWithClient(fake, nil)
+
+	_, err := svc.CreateTask(context.Background(), VideoASRTaskRequest{
+		AudioURL: srv.URL + "/audio.wav",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	data, err := io.ReadAll(fake.transcribeReq.Audio)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "external-wav" || fake.transcribeReq.Filename != "audio.wav" {
+		t.Fatalf("external audio not forwarded as bytes: data=%q req=%#v", data, fake.transcribeReq)
+	}
+}
+
+func TestVideoASRServiceCreateTaskReportsExternalAudioURLDownloadFailure(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer srv.Close()
+	oldClient := mediaSourceHTTPClient
+	mediaSourceHTTPClient = srv.Client()
+	t.Cleanup(func() { mediaSourceHTTPClient = oldClient })
+
+	svc := NewVideoASRServiceWithClient(&fakeVideoASRClient{}, nil)
+
+	_, err := svc.CreateTask(context.Background(), VideoASRTaskRequest{
+		AudioURL: srv.URL + "/audio.wav",
+	})
+	if err == nil || !strings.Contains(err.Error(), "read audio URL") || !strings.Contains(err.Error(), "unexpected status 403") {
+		t.Fatalf("CreateTask error = %v", err)
 	}
 }
 
@@ -208,32 +295,24 @@ func TestVideoASRServiceCreateTaskRejectsOversizedAudioURL(t *testing.T) {
 		_, _ = io.Copy(w, io.LimitReader(&infiniteAReader{}, maxVideoASRAudioBytes+1))
 	}))
 	defer srv.Close()
-	oldClient := videoASRHTTPClient
-	videoASRHTTPClient = srv.Client()
-	t.Cleanup(func() { videoASRHTTPClient = oldClient })
+	oldClient := mediaSourceHTTPClient
+	mediaSourceHTTPClient = srv.Client()
+	t.Cleanup(func() { mediaSourceHTTPClient = oldClient })
 
 	svc := NewVideoASRServiceWithClient(&fakeVideoASRClient{}, nil)
 	_, err := svc.CreateTask(context.Background(), VideoASRTaskRequest{AudioURL: srv.URL})
-	if err == nil || !strings.Contains(err.Error(), "audio URL exceeds max size") {
+	if err == nil || !strings.Contains(err.Error(), "media source exceeds max size") {
 		t.Fatalf("CreateTask error = %v, want oversized URL rejection", err)
 	}
 }
 
-func TestVideoASRServiceCreateTaskRejectsOversizedAudioKeyWithoutStorageRead(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "audio/wav")
-		_, _ = io.Copy(w, io.LimitReader(&infiniteAReader{}, maxVideoASRAudioBytes+1))
-	}))
-	defer srv.Close()
-	oldClient := videoASRHTTPClient
-	videoASRHTTPClient = srv.Client()
-	t.Cleanup(func() { videoASRHTTPClient = oldClient })
-
-	store := &fakeVideoASRStorage{name: "oss", downloadURL: srv.URL}
+func TestVideoASRServiceCreateTaskReportsMissingAudioKeyObject(t *testing.T) {
+	store := &fakeVideoASRStorage{name: "oss"}
 	svc := NewVideoASRServiceWithClient(&fakeVideoASRClient{}, store)
+
 	_, err := svc.CreateTask(context.Background(), VideoASRTaskRequest{AudioKey: "uploads/video-audio/take.wav"})
-	if err == nil || !strings.Contains(err.Error(), "audio URL exceeds max size") {
-		t.Fatalf("CreateTask error = %v, want oversized audio_key rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "read audio object") || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("CreateTask error = %v, want missing audio_key object rejection", err)
 	}
 }
 

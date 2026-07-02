@@ -170,6 +170,14 @@ func (s *LiveSliceService) CreateLiveAnalysisTask(ctx context.Context, req LiveA
 	if strings.TrimSpace(req.AudioURL) == "" {
 		return nil, fmt.Errorf("audio_url is required")
 	}
+	resolved, err := ResolveMediaSource(ctx, s.store, s.logger, MediaSourceRequest{
+		RawURL: req.AudioURL,
+		TTL:    defaultAudioURLTTL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve audio URL: %w", err)
+	}
+	req.AudioURL = resolved.URL
 	taskID, err := s.tingwu.CreateTask(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("create TingWu task: %w", err)
