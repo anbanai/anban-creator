@@ -32,7 +32,7 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Build server for all platforms
+      - name: Build server and agent for all platforms
         run: |
           mkdir -p bin
 
@@ -41,6 +41,12 @@ jobs:
           GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o bin/anban-creator-server-darwin-amd64 ./server
           GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o bin/anban-creator-server-darwin-arm64 ./server
           GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/anban-creator-server-windows-amd64.exe ./server
+
+          GOOS=linux   GOARCH=amd64 go build -ldflags="-s -w" -o bin/anban-linux-amd64 ./agent
+          GOOS=linux   GOARCH=arm64 go build -ldflags="-s -w" -o bin/anban-linux-arm64 ./agent
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o bin/anban-darwin-amd64 ./agent
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o bin/anban-darwin-arm64 ./agent
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/anban-windows-amd64.exe ./agent
 
           chmod +x bin/*-linux* bin/*-darwin* 2>/dev/null || true
           echo "${{ github.ref_name }}" > bin/version.txt
@@ -62,6 +68,11 @@ jobs:
             bin/anban-creator-server-darwin-amd64
             bin/anban-creator-server-darwin-arm64
             bin/anban-creator-server-windows-amd64.exe
+            bin/anban-linux-amd64
+            bin/anban-linux-arm64
+            bin/anban-darwin-amd64
+            bin/anban-darwin-arm64
+            bin/anban-windows-amd64.exe
             bin/version.txt
             bin/checksums.txt
           draft: false

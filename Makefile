@@ -11,7 +11,7 @@ SERVER_CONFIG := server/config.yaml
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
         server-build server-run server-dev server-test \
-        agent-build-native \
+        agent-build-native plugin-binaries \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
         docker-agent-image docker-server-image docker-images
@@ -146,6 +146,8 @@ docker-image: docker-agent-image
 # Cross-compile the host-native variant; use ARCHES= to override, e.g.
 #   make agent-build-native ARCHES="darwin/arm64 darwin/amd64"
 ARCHES ?= $(shell go env GOOS)/$(shell go env GOARCH)
+PLUGIN_GOOS ?= $(shell go env GOOS)
+PLUGIN_GOARCH ?= $(shell go env GOARCH)
 
 agent-build-native:
 	@mkdir -p $(BINDIR)
@@ -156,6 +158,12 @@ agent-build-native:
 		GOOS=$${os} GOARCH=$${goarch} CGO_ENABLED=0 go build -trimpath -o $${out} ./agent; \
 	done
 	@echo "Agent native build complete: $(ARCHES)"
+
+# Build a fixed plugin-local anban binary into each plugin distribution.
+# Override PLUGIN_GOOS/PLUGIN_GOARCH when preparing a platform-specific plugin
+# package, e.g. `make plugin-binaries PLUGIN_GOOS=darwin PLUGIN_GOARCH=arm64`.
+plugin-binaries:
+	@PLUGIN_GOOS="$(PLUGIN_GOOS)" PLUGIN_GOARCH="$(PLUGIN_GOARCH)" scripts/build-plugin-binaries.sh
 
 # ---------------------------------------------------------------------------
 # Help
@@ -197,3 +205,4 @@ help:
 	@echo ""
 	@echo "Desktop (Tauri) targets:"
 	@echo "  make agent-build-native - Build anban natively (desktop sidecar)"
+	@echo "  make plugin-binaries    - Bundle anban into claudecode/codex/openclaw bin/"
