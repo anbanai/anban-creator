@@ -10,7 +10,7 @@ Anban 智能创作助手's content generation capabilities (种草笔记, 公众
 ## Design Decisions
 
 1. **Architecture**: Lobswarm pattern — Go/Fiber + Asynq + MySQL + Redis + React/Vite frontend
-2. **Project structure**: Extend within anbanwriter repo, add `server/`, `web/`, `claudecode/` directories
+2. **Project structure**: Extend within anban-creator repo, add `server/`, `web/`, `claudecode/` directories
 3. **Agent execution**: claude-agent-sdk-go with in-process MCP tools (not CLI subprocess)
 4. **CLI replacement**: MCP replaces CLI for both server-side agents and Claude Code
 5. **Login**: WeChat QR code + password login (anban.codex pattern)
@@ -33,7 +33,7 @@ See implementation plan at `.claude/plans/quirky-baking-flask.md` for full detai
 
 ## Key Design Principles
 
-- **Unified MCP interface**: All anbanwriter capabilities exposed via MCP tools, shared between SDK agents and Claude Code
+- **Unified MCP interface**: All anban-creator capabilities exposed via MCP tools, shared between SDK agents and Claude Code
 - **Reuse app/ packages**: image, draft, converter, writer, humanizer, wechat packages imported directly
 - **Per-user config injection**: MCP tools construct user-specific Config instances from DB records
 - **Real-time progress**: SSE pushes Claude's thinking/tool use to the frontend timeline

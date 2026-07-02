@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/anbanai/anban-creator/app/config"
 	"github.com/rs/zerolog"
 	"github.com/silenceper/wechat/v2"
 	wechatcache "github.com/silenceper/wechat/v2/cache"
@@ -222,7 +222,7 @@ func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, erro
 // UploadMaterialFromBytes 从字节数据上传素材
 func (s *Service) UploadMaterialFromBytes(data []byte, filename string) (*UploadMaterialResult, error) {
 	// 创建临时文件
-	tmpFile, err := os.CreateTemp("", "anbanwriter_*_"+filename)
+	tmpFile, err := os.CreateTemp("", "anban-creator_*_"+filename)
 	if err != nil {
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}
@@ -313,7 +313,7 @@ func DownloadFile(url string) (string, error) {
 			ext = pathExt
 		}
 	}
-	tmpFile, err := os.CreateTemp("", "anbanwriter_download_*"+ext)
+	tmpFile, err := os.CreateTemp("", "anban-creator_download_*"+ext)
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}

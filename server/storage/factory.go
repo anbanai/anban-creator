@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"github.com/royalrick/anbanwriter/server/config"
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/rs/zerolog"
 )
 

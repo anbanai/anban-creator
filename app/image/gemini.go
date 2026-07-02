@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/anbanai/anban-creator/app/config"
 	"github.com/rs/zerolog"
 	"google.golang.org/genai"
 )
@@ -238,7 +238,7 @@ func (p *GeminiProvider) saveInlineData(data *genai.Blob) (string, error) {
 	}
 
 	// 保存到临时文件
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anbanwriter_gemini_%d%s", time.Now().UnixNano(), ext))
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anban-creator_gemini_%d%s", time.Now().UnixNano(), ext))
 
 	if err := os.WriteFile(tmpPath, data.Data, 0644); err != nil {
 		return "", &GenerateError{

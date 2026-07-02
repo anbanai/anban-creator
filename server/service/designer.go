@@ -15,12 +15,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/app/image"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/google/uuid"
-	"github.com/royalrick/anbanwriter/app/config"
-	"github.com/royalrick/anbanwriter/app/image"
-	srvconfig "github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/storage"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )
@@ -465,7 +465,7 @@ func downloadToTempFile(ctx context.Context, url string, index int) (string, err
 		ext = urlExt
 	}
 
-	f, err := os.CreateTemp("", fmt.Sprintf("anbanwriter_download_%d_*%s", index, ext))
+	f, err := os.CreateTemp("", fmt.Sprintf("anban-creator_download_%d_*%s", index, ext))
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
@@ -504,13 +504,13 @@ func (s *DesignerService) UploadReference(ctx context.Context, userID string, fi
 }
 
 // registerReferenceFile saves the bytes to a temp file with the canonical
-// "anbanwriter_ref_{fileID}_{filename}" naming (which resolveFilePath globs
+// "anban-creator_ref_{fileID}_{filename}" naming (which resolveFilePath globs
 // against), mirrors them to remote storage when configured, and returns the fileID.
 func (s *DesignerService) registerReferenceFile(ctx context.Context, userID, filename string, data []byte) (string, error) {
 	fileID := uuid.New().String()
 
 	// Always save locally so providers can read file paths
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anbanwriter_ref_%s_%s", fileID, filename))
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anban-creator_ref_%s_%s", fileID, filename))
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		return "", fmt.Errorf("save reference file: %w", err)
 	}
@@ -786,7 +786,7 @@ func (s *DesignerService) resolveProvider() string {
 }
 
 func (s *DesignerService) resolveFilePath(fileID string) (string, error) {
-	pattern := filepath.Join(os.TempDir(), fmt.Sprintf("anbanwriter_ref_%s_*", fileID))
+	pattern := filepath.Join(os.TempDir(), fmt.Sprintf("anban-creator_ref_%s_*", fileID))
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
 		return "", fmt.Errorf("reference file not found: %s", fileID)

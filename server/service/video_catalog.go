@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 type VideoModelCatalog map[string]VideoModelSpec

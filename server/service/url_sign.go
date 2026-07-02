@@ -6,8 +6,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 // DefaultSignedURLTTL is the validity window (seconds) for generated signed URLs.

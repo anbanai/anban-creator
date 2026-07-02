@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AnbanWriter already has strong individual capabilities: channel profiles, scheduled/manual tasks, Claude/OpenClaw agent execution, MCP writing tools, AI image generation, WeChat draft publishing, file upload, progress logs, credits, and Web Studio management views. The next product step is to turn those capabilities from a toolbox into a repeatable creation workflow that users can trust every day.
+Anban Creator already has strong individual capabilities: channel profiles, scheduled/manual tasks, Claude/OpenClaw agent execution, MCP writing tools, AI image generation, WeChat draft publishing, file upload, progress logs, credits, and Web Studio management views. The next product step is to turn those capabilities from a toolbox into a repeatable creation workflow that users can trust every day.
 
 Creation Workflow v1 turns one content request into a staged, inspectable pipeline:
 

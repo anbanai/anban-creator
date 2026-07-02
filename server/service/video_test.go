@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/royalrick/anbanwriter/server/config"
+	"github.com/anbanai/anban-creator/server/config"
 )
 
 func TestVideoServiceCreateMapsReferencesAndParameters(t *testing.T) {

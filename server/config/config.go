@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
+	appconfig "github.com/anbanai/anban-creator/app/config"
 )
 
 // Config holds all server configuration.

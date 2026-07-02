@@ -13,8 +13,8 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/platform"
-	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/anbanai/anban-creator/server/platform"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type fakeProjectLLM struct {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	serveragent "github.com/royalrick/anbanwriter/server/agent"
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
 
 // newTestReporter points a real *Reporter at an httptest server, returning the

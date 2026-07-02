@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add a credits-based billing system to anbanwriter. Users earn free credits via daily sign-in (1024/day), spend credits to generate content, and can purchase additional credits through customer service (WeCom). Credits are deducted at task creation and refunded on failure.
+Add a credits-based billing system to anban-creator. Users earn free credits via daily sign-in (1024/day), spend credits to generate content, and can purchase additional credits through customer service (WeCom). Credits are deducted at task creation and refunded on failure.
 
 ## Pricing Table
 

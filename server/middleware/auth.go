@@ -4,10 +4,10 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/anbanai/anban-creator/server/auth"
+	"github.com/anbanai/anban-creator/server/handler"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/gofiber/fiber/v3"
-	"github.com/royalrick/anbanwriter/server/auth"
-	"github.com/royalrick/anbanwriter/server/handler"
-	"github.com/royalrick/anbanwriter/server/repository"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )

@@ -13,10 +13,10 @@ import (
 	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v3"
 
-	srvconfig "github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/resolver"
-	"github.com/royalrick/anbanwriter/server/storage"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/resolver"
+	"github.com/anbanai/anban-creator/server/storage"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )
@@ -338,7 +338,7 @@ type ExecutionResult struct {
 // Execute runs the Claude Code agent for the given task.
 //
 // It creates a per-task workspace directory, writes the project config as
-// .anbanwriter/settings.json, loads the abwriter plugin with the matching
+// .anban-creator/settings.json, loads the abwriter plugin with the matching
 // agent definition, and launches execution via the claude-agent-sdk-go SDK.
 func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	// 1. Resolve defaults. Agent model comes from config.yaml,
@@ -554,12 +554,12 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	sdkOpts = append(sdkOpts, claudecode.WithEnv(e.claudeEnv))
 
 	// Inject MCP server API key so plugin/.mcp.json can resolve
-	// ${ANBAN_API_KEY} for the anbanwriter MCP server.
+	// ${ANBAN_API_KEY} for the Anban Creator MCP server.
 	if mcpAPIKey != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBAN_API_KEY", mcpAPIKey))
 	}
 	// Inject MCP server base URL so plugin/.mcp.json can resolve
-	// ${ANBAN_API_URL} for the anbanwriter MCP server.
+	// ${ANBAN_API_URL} for the Anban Creator MCP server.
 	if e.serverBaseURL != "" {
 		sdkOpts = append(sdkOpts, claudecode.WithEnvVar("ANBAN_API_URL", e.serverBaseURL))
 	}
@@ -942,7 +942,7 @@ func ListWorkDirFilesRoot(workDir string) ([]map[string]any, error) {
 }
 
 // CountMeaningfulFiles recursively counts files in workDir, excluding
-// .anbanwriter/, .claude/, and dotfiles. Prefers the output/ subdirectory
+// .anban-creator/, .claude/, and dotfiles. Prefers the output/ subdirectory
 // (created by the agent via mkdir -p) to exclude agent runtime artifacts.
 // Returns the count of actual files (not directories) at any nesting depth.
 func CountMeaningfulFiles(workDir string) int {
@@ -958,7 +958,7 @@ func CountMeaningfulFiles(workDir string) int {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".anbanwriter", ".claude":
+			case ".anban-creator", ".claude":
 				return filepath.SkipDir
 			}
 			return nil

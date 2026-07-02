@@ -14,11 +14,11 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/app/converter"
-	"github.com/royalrick/anbanwriter/app/writer"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/resources"
+	"github.com/anbanai/anban-creator/app/converter"
+	"github.com/anbanai/anban-creator/app/writer"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/resources"
 )
 
 // ---------------------------------------------------------------------------

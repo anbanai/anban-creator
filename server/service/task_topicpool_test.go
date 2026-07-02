@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // setupTaskServiceWithTopicPool wires a real TopicPoolService into the task

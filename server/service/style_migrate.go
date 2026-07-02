@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/resources"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/resources"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )

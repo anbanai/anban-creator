@@ -19,10 +19,10 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/rs/zerolog"
 
-	srvconfig "github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/resolver"
-	"github.com/royalrick/anbanwriter/server/storage"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/resolver"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 var _ TaskExecutor = (*DockerExecutor)(nil)
@@ -290,7 +290,7 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 		"--topic", opts.Task.Prompt,
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--workspace", workspace,
-		"--agent-flag", "anbanwriter:" + TaskTypeToAgent(opts.Task.Type),
+		"--agent-flag", "anban:" + TaskTypeToAgent(opts.Task.Type),
 	}
 	// Note: visual style is NOT passed as a CLI flag — it reaches the agent
 	// solely via get_project_profile(task_id) (MCP), resolved from the task

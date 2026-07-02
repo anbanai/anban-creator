@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	serveragent "github.com/royalrick/anbanwriter/server/agent"
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
 
 func main() {

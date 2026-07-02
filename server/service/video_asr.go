@@ -18,8 +18,8 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (

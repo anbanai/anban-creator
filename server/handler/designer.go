@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anbanai/anban-creator/server/service"
 	"github.com/gofiber/fiber/v3"
-	"github.com/royalrick/anbanwriter/server/service"
 	"github.com/rs/zerolog"
 )
 

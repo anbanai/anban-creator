@@ -32,10 +32,10 @@
     <view class="step-card">
       <text class="step-card__title">3. 安装插件</text>
       <text class="step-text">
-        方式 A（推荐）：在 Codex CLI 里直接告诉它「帮我安装 anbanwriter Codex 插件」并贴上仓库地址，AI 会自动完成 marketplace 注册、插件安装、以及 5 个 subagent 的注册。
+        方式 A（推荐）：在 Codex CLI 里直接告诉它「帮我安装 Anban Creator Codex 插件」并贴上仓库地址，AI 会自动完成 marketplace 注册、插件安装、以及 5 个 subagent 的注册。
       </text>
-      <view class="copy-block" @tap="copyText('帮我安装 anbanwriter Codex 插件 https://github.com/anbanai/anbanwriter-codex')">
-        <text class="copy-block__code">帮我安装 anbanwriter Codex 插件 https://github.com/anbanai/anbanwriter-codex</text>
+      <view class="copy-block" @tap="copyText('帮我安装 Anban Creator Codex 插件 https://github.com/anbanai/anban-creator-codex')">
+        <text class="copy-block__code">帮我安装 Anban Creator Codex 插件 https://github.com/anbanai/anban-creator-codex</text>
         <text class="copy-block__hint">点击复制</text>
       </view>
       <text class="step-text step-text--muted">
@@ -118,10 +118,10 @@ const keyPrefixes = computed(
   () => keys.value.map((key) => key.key_prefix).join('、') || '暂无密钥',
 )
 
-const manualInstallSnippet = `git clone https://github.com/anbanai/anbanwriter-codex.git
-cd anbanwriter-codex
+const manualInstallSnippet = `git clone https://github.com/anbanai/anban-creator-codex.git
+cd anban-creator-codex
 codex plugin marketplace add .
-codex plugin install anbanwriter
+codex plugin install anban
 bash install/install-subagents.sh`
 
 const envKeySnippet = `export ANBAN_API_KEY="你的完整 API Key"`

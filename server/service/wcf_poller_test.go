@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/wcf"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/wcf"
 )
 
 // pollerFakeDispatcher records Handle invocations. Implements wcfDispatcher.

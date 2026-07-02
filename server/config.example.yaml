@@ -25,7 +25,7 @@ logging:
 # error and continues running in degraded mode (no data persistence).
 # ---------------------------------------------------------------------------
 database:
-  dsn: "${ANBAN_DATABASE_DSN:-root:anbanwriter_dev@tcp(localhost:3306)/anbanwriter?charset=utf8mb4&parseTime=True&loc=Local}"
+  dsn: "${ANBAN_DATABASE_DSN:-root:anban-creator_dev@tcp(localhost:3306)/anban-creator?charset=utf8mb4&parseTime=True&loc=Local}"
   max_open_conns: 10 # Maximum open connections to the database.
   max_idle_conns: 5 # Maximum idle connections kept in the pool.
   conn_max_lifetime: 3600 # Connection maximum lifetime in seconds.

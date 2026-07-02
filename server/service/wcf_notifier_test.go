@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 // fakeWCFSender records the last SendText call. Implements wcfSender.
@@ -175,9 +175,9 @@ func TestFormatTerminalMessageUnknownStatus(t *testing.T) {
 
 func TestFirstLine(t *testing.T) {
 	cases := map[string]string{
-		"":             "",
-		"单行":           "单行",
-		"第一行\n第二行":     "第一行",
+		"":              "",
+		"单行":            "单行",
+		"第一行\n第二行":      "第一行",
 		"   首尾空白  \n次行": "首尾空白",
 	}
 	for in, want := range cases {

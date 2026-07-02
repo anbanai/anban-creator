@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/royalrick/anbanwriter/server/resources"
+	"github.com/anbanai/anban-creator/server/resources"
 )
 
 // ErrAuthorIsWriterName is returned when a publish author (作者署名) is set to a

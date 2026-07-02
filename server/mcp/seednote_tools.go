@@ -6,7 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/royalrick/anbanwriter/server/seednote"
+	"github.com/anbanai/anban-creator/server/seednote"
 )
 
 func registerSeednoteTools(server *mcp.Server) {

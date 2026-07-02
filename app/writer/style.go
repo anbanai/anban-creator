@@ -105,7 +105,7 @@ func (sm *StyleManager) getWritersDir() string {
 	}
 
 	// Executable-relative path (for installed binaries)
-	// Binary is at bin/anbanwriter, writers/ is at project root (../writers/)
+	// Binary is at bin/anban-creator, writers/ is at project root (../writers/)
 	if exe, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exe)
 		if realExe, err := filepath.EvalSymlinks(exe); err == nil {
@@ -119,8 +119,8 @@ func (sm *StyleManager) getWritersDir() string {
 
 	paths = append(paths,
 		"writers",
-		filepath.Join(os.Getenv("HOME"), ".config", "anbanwriter", "writers"),
-		filepath.Join(os.Getenv("HOME"), ".anbanwriter", "writers"),
+		filepath.Join(os.Getenv("HOME"), ".config", "anban-creator", "writers"),
+		filepath.Join(os.Getenv("HOME"), ".anban-creator", "writers"),
 	)
 
 	for _, path := range paths {

@@ -14,16 +14,16 @@
 
     <view class="step-card">
       <text class="step-card__title">2. 安装插件市场源</text>
-      <view class="copy-block" @tap="copyText('claude plugin marketplace add anbanai/anbanwriter-claudecode')">
-        <text class="copy-block__code">claude plugin marketplace add anbanai/anbanwriter-claudecode</text>
+      <view class="copy-block" @tap="copyText('claude plugin marketplace add anbanai/anban-creator-claudecode')">
+        <text class="copy-block__code">claude plugin marketplace add anbanai/anban-creator-claudecode</text>
         <text class="copy-block__hint">点击复制</text>
       </view>
     </view>
 
     <view class="step-card">
       <text class="step-card__title">3. 安装插件</text>
-      <view class="copy-block" @tap="copyText('claude plugin install --scope user anbanwriter@anbanai')">
-        <text class="copy-block__code">claude plugin install --scope user anbanwriter@anbanai</text>
+      <view class="copy-block" @tap="copyText('claude plugin install --scope user anban@anbanai')">
+        <text class="copy-block__code">claude plugin install --scope user anban@anbanai</text>
         <text class="copy-block__hint">点击复制</text>
       </view>
     </view>

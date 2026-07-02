@@ -43,7 +43,7 @@ pub fn status(res: &Resources, cfg: &AppConfig, running: bool) -> ProvisionStatu
     let reason = if available {
         String::new()
     } else if !api_key_set {
-        "请先配置 AnbanWriter API Key（在 Studio「API 密钥」页创建后填入）".to_string()
+        "请先配置 Anban Creator API Key（在 Studio「API 密钥」页创建后填入）".to_string()
     } else if !claude_authenticated {
         "请配置 Claude 鉴权（ANTHROPIC_API_KEY 或完成 Claude OAuth 登录）".to_string()
     } else if !workspace_set {

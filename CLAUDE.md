@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Anban 智能创作助手** (anbanwriter) is a content creation platform. Core components:
+**Anban 智能创作助手** (anban-creator) is a content creation platform. Core components:
 - **Agent** (`agent/`): Standalone Go binary for containerized Claude Code task execution
 - **Server** (`server/`): Fiber v3 HTTP API with MySQL, Redis, Asynq task queue, WebSocket, and MCP endpoint
 - **Studio** (`studio/`): React 19 + TypeScript + Vite 8 frontend for content management
@@ -180,7 +180,7 @@ Graceful degradation: MySQL unreachable → degraded mode (no persistence). Redi
 
 ### App Library (used by CLI commands via plugin skills)
 
-Single WeChat account via `.anbanwriter/settings.json`. Config search priority: CWD → `CLAUDE_PLUGIN_ROOT` → `~/.config/anbanwriter/` → `~/.anbanwriter/` → executable-relative.
+Single WeChat account via `.anban-creator/settings.json`. Config search priority: CWD → `CLAUDE_PLUGIN_ROOT` → `~/.config/anban-creator/` → `~/.anban-creator/` → executable-relative.
 
 Two loading modes: `Load()`/`LoadWithDefaults()` (full validation) vs `LoadMinimal()` (skips WeChat validation).
 
@@ -268,10 +268,10 @@ Three client access points share the same server MCP API:
 
 ### Claude Code Plugin (`claudecode/`)
 
-Git submodule → `anbanai/anbanwriter-claudecode`. Uses Agent + Skill + MCP architecture.
+Git submodule → `anbanai/anban-creator-claudecode`. Uses Agent + Skill + MCP architecture.
 
 ```
-claudecode/                        # git submodule → anbanai/anbanwriter-claudecode
+claudecode/                        # git submodule → anbanai/anban-creator-claudecode
 ├── .claude-plugin/                # Plugin manifest
 ├── agents/                        # Agent definitions (markdown)
 ├── skills/                        # 18 Claude Code skills
@@ -282,10 +282,10 @@ claudecode/                        # git submodule → anbanai/anbanwriter-claud
 
 ### OpenClaw Plugin (`openclaw/`)
 
-Git submodule → `anbanai/anbanwriter-openclaw`. OpenClaw-native plugin using SKILL.md-based skills aligned with claudecode.
+Git submodule → `anbanai/anban-creator-openclaw`. OpenClaw-native plugin using SKILL.md-based skills aligned with claudecode.
 
 ```
-openclaw/                          # git submodule → anbanai/anbanwriter-openclaw
+openclaw/                          # git submodule → anbanai/anban-creator-openclaw
 ├── openclaw.plugin.json           # Plugin manifest (MCP config, skills root)
 ├── .mcp.json                      # MCP server config (bundle compatibility)
 ├── skills/                        # 18 SKILL.md skills (aligned with claudecode)
@@ -294,14 +294,14 @@ openclaw/                          # git submodule → anbanai/anbanwriter-openc
 └── writers/                       # Writing styles (YAML, shared with claudecode)
 ```
 
-Both plugins connect to the same `anbanwriter` MCP server and share themes/writers.
+Both plugins connect to the same `anban-creator` MCP server and share themes/writers.
 
 ### Codex Plugin (`codex/`)
 
 Codex-native port of `claudecode/`. Plugin bundle includes skills + MCP + hooks; the five subagents are installed separately (Codex plugins cannot bundle subagents — see GitHub issue #18988).
 
 ```
-codex/                             # git submodule → anbanai/anbanwriter-codex
+codex/                             # git submodule → anbanai/anban-creator-codex
 ├── .codex-plugin/                 # Codex plugin manifest (camelCase fields)
 ├── .mcp.json                      # MCP server config (identical to claudecode)
 ├── skills/                        # 18 SKILL.md skills (aligned with claudecode, setup adjusted for ~/.codex/config.toml)
@@ -312,15 +312,15 @@ codex/                             # git submodule → anbanai/anbanwriter-codex
 └── README.md                      # End-user install/usage guide
 ```
 
-Install flow: `codex plugin marketplace add ./codex && codex plugin install anbanwriter`, then `bash codex/install/install-subagents.sh` to register the subagents in `~/.codex/config.toml`.
+Install flow: `codex plugin marketplace add ./codex && codex plugin install anban`, then `bash codex/install/install-subagents.sh` to register the subagents in `~/.codex/config.toml`.
 
-All three plugins (`claudecode/`, `openclaw/`, `codex/`) connect to the same `anbanwriter` MCP server and share themes/writers/skill content. When a skill or agent exists in multiple distros, update all of them unless an intended divergence is asserted by a test (e.g. `server/mcp` `TestLiveSliceSkillFiles`). Agents must call MCP tools directly — no ad-hoc HTTP clients.
+All three plugins (`claudecode/`, `openclaw/`, `codex/`) connect to the same `anban-creator` MCP server and share themes/writers/skill content. When a skill or agent exists in multiple distros, update all of them unless an intended divergence is asserted by a test (e.g. `server/mcp` `TestLiveSliceSkillFiles`). Agents must call MCP tools directly — no ad-hoc HTTP clients.
 
 ## Notes
 
 - CLI uses zerolog logging — all components use zerolog, never mix with zap
 - Two Cobra patterns coexist in app/: package-level var with `init()` (older) and factory functions returning `*cobra.Command` (preferred)
 - Docker Compose provides MySQL 8.0 + Redis 7 + agent + server containers
-- Server binary is `bin/abwriter-server` (not anbanwriter-server)
+- Server binary is `bin/abwriter-server` (not anban-creator-server)
 - **Never modify base UI components in `studio/src/components/ui/`**. These are managed shadcn/ui primitives. If a base component update breaks business logic, fix the business component only — never patch the primitive.
 - `AGENTS.md` mirrors this guidance for non-Claude assistants; keep it roughly in sync when adding cross-cutting rules.

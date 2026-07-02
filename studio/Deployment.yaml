@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - env:
-            # Backend Service DNS name (e.g. server-svc or anbanwriter-server-svc).
+            # Backend Service DNS name (e.g. server-svc or anban-creator-server-svc).
             # Must be set by the deployment pipeline; the Dockerfile default is
             # only for docker-compose.
             - name: BACKEND_HOST

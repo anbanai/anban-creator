@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
-	srvconfig "github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/service"
+	appconfig "github.com/anbanai/anban-creator/app/config"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func TestParseVisionVerificationJSON_Pass(t *testing.T) {

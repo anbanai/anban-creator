@@ -2,14 +2,14 @@ import axios from 'axios'
 import { isDesktop } from '@/lib/tauri'
 import type { ApiResponse } from '@/types'
 
-const TOKEN_KEY = 'anbanwriter_token'
-const REFRESH_TOKEN_KEY = 'anbanwriter_refresh_token'
-const USER_KEY = 'anbanwriter_user'
+const TOKEN_KEY = 'anban_creator_token'
+const REFRESH_TOKEN_KEY = 'anban_creator_refresh_token'
+const USER_KEY = 'anban_creator_user'
 // Mirror of the desktop-configured cloud API base. The Tauri shell seeds this
 // via a webview initialization script before the SPA boots, so resolution stays
 // synchronous (the very first request — login — fires before any IPC could
 // resolve). The settings UI updates it through setApiBase().
-const API_BASE_STORAGE_KEY = 'anbanwriter_api_base'
+const API_BASE_STORAGE_KEY = 'anban_creator_api_base'
 
 /**
  * Resolve the axios baseURL at module load, with no async/IPC so the first
@@ -23,7 +23,7 @@ export const DEFAULT_CLOUD_API_BASE = 'https://api.anbanai.com/api/v1'
 
 function resolveApiBase(): string {
   if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL
-  // Only the desktop shell seeds localStorage.anbanwriter_api_base. Honoring it
+  // Only the desktop shell seeds localStorage.anban_creator_api_base. Honoring it
   // on the plain web/self-hosted build would let any writer of that key (XSS, a
   // malicious browser extension, or a shared machine) silently redirect every
   // authenticated request — including /auth/refresh — to an attacker-controlled

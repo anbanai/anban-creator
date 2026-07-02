@@ -48,10 +48,10 @@ export default function ClaudeGuide() {
 
       <InstallStep
         cliName="Claude Code CLI"
-        oneLiner="帮我安装 anbanwriter Claude Code 插件 https://github.com/anbanai/anbanwriter-claudecode"
+        oneLiner="帮我安装 Anban Creator Claude Code 插件 https://github.com/anbanai/anban-creator-claudecode"
         oneLinerHint="AI 会自动添加 marketplace 源并完成插件安装。"
-        advancedCli={`claude plugin marketplace add anbanai/anbanwriter-claudecode
-claude plugin install --scope user anbanwriter@anbanai`}
+        advancedCli={`claude plugin marketplace add anbanai/anban-creator-claudecode
+claude plugin install --scope user anban@anbanai`}
         advancedHint="安装后可以用 `/plugin` 命令确认插件是否已经安装成功。"
       />
 
@@ -110,12 +110,12 @@ claude plugin install --scope user anbanwriter@anbanai`}
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">指定 Agent 示例：</p>
             <CodeBlock
-              code={`claude --dangerously-skip-permissions --verbose --agent anbanwriter:article AI Agent 入门指南
-claude --dangerously-skip-permissions --verbose --agent anbanwriter:seednote 降噪耳机种草笔记`}
+              code={`claude --dangerously-skip-permissions --verbose --agent anban:article AI Agent 入门指南
+claude --dangerously-skip-permissions --verbose --agent anban:seednote 降噪耳机种草笔记`}
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            如果只是第一次验证，优先跑 `anbanwriter:article` 或直接输入一条自然语言需求，最容易确认整条链路是否通了。
+            如果只是第一次验证，优先跑 `anban:article` 或直接输入一条自然语言需求，最容易确认整条链路是否通了。
           </p>
         </div>
       </StepCard>

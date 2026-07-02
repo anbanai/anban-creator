@@ -1462,7 +1462,7 @@ Step 4: 高级设置（可选）
 
 **App.vue onLaunch 流程：**
 
-1. `uni.getStorageSync('anbanwriter_token')` 检查缓存 token
+1. `uni.getStorageSync('anban_creator_token')` 检查缓存 token
 2. Token 有效 → 调用 `GET /api/v1/auth/me` 刷新用户数据
 3. Token 无效或不存在 → `uni.login()` 获取 code → `POST /api/v1/auth/wx-login` → 存储 JWT
 4. 失败 → 显示错误 + 重试按钮
@@ -1478,9 +1478,9 @@ Step 4: 高级设置（可选）
 
 ### 存储 Key
 
-- `anbanwriter_token`
-- `anbanwriter_refresh_token`
-- `anbanwriter_user`
+- `anban_creator_token`
+- `anban_creator_refresh_token`
+- `anban_creator_user`
 
 ## API 层
 

@@ -1,4 +1,4 @@
-# AnbanWriter Makefile
+# Anban Creator Makefile
 # Content creation platform: MCP Server + Web Studio
 
 .DELETE_ON_ERROR:
@@ -162,7 +162,7 @@ agent-build-native:
 # ---------------------------------------------------------------------------
 
 help:
-	@echo "AnbanWriter - Content Creation Platform"
+	@echo "Anban Creator - Content Creation Platform"
 	@echo ""
 	@echo "Shared targets:"
 	@echo "  make test          - Run all tests"

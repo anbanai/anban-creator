@@ -47,7 +47,7 @@ Requirements:
 
 **Execute (persistent mode):**
 1. Create host workspace dir `/tmp/abwriter/{taskID}` (same as before)
-2. Write config files into workspace (`.anbanwriter/settings.json`, `.claude/.mcp.json`)
+2. Write config files into workspace (`.anban-creator/settings.json`, `.claude/.mcp.json`)
 3. Build `claude` command with `--cwd /workspace/{taskID}` (subdirectory instead of root)
 4. Use Docker API `ContainerExecCreate` + `ContainerExecAttach` to run the command
 5. Capture stdout/stderr from exec response (multiplexed stream, same 8-byte header format)

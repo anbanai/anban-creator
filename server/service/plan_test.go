@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	appdraft "github.com/anbanai/anban-creator/app/draft"
+	"github.com/anbanai/anban-creator/app/wechat"
 	"github.com/google/uuid"
-	appdraft "github.com/royalrick/anbanwriter/app/draft"
-	"github.com/royalrick/anbanwriter/app/wechat"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 type stubDraftClient struct {

@@ -11,7 +11,7 @@ fn default_api_base() -> String {
 }
 
 /// Persisted desktop configuration. Stored as JSON in the platform config dir
-/// (`anbanwriter-desktop.json`). Loaded once at startup; mutations go through
+/// (`anban-creator-desktop.json`). Loaded once at startup; mutations go through
 /// the IPC commands which re-save the file.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -56,7 +56,7 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    /// Load config from `dir/anbanwriter-desktop.json`, falling back to defaults
+    /// Load config from `dir/anban-creator-desktop.json`, falling back to defaults
     /// (and persisting them) when missing or unreadable.
     pub fn load(dir: &Path) -> Self {
         let path = config_path(dir);
@@ -81,7 +81,7 @@ impl AppConfig {
         }
         let text = serde_json::to_string_pretty(self)?;
         fs::write(path, text)?;
-        // Tighten permissions: this file holds the user's AnbanWriter API key
+        // Tighten permissions: this file holds the user's Anban Creator API key
         // and ANTHROPIC_API_KEY in plaintext. The default umask is typically
         // 0o644 (world-readable); restrict to owner-only on unix. (OS
         // keychain-backed storage for the secrets is a follow-up.)
@@ -95,5 +95,5 @@ impl AppConfig {
 }
 
 pub fn config_path(dir: &Path) -> PathBuf {
-    dir.join("anbanwriter-desktop.json")
+    dir.join("anban-creator-desktop.json")
 }

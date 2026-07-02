@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // Publish-approval gate errors (Batch 4A). The handler maps these to HTTP 409

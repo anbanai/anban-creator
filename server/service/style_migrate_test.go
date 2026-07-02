@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/google/uuid"
-	"github.com/royalrick/anbanwriter/server/model"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )

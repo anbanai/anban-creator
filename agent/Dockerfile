@@ -19,7 +19,7 @@ COPY claudecode/   /anbanai/
 
 USER node
 RUN claude plugin marketplace add /anbanai && \
-    claude plugin install --scope user anbanwriter@anbanai
+    claude plugin install --scope user anban@anbanai
 USER root
 
 WORKDIR /workspace

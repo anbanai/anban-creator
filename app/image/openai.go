@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/app/wechat"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/royalrick/anbanwriter/app/config"
-	"github.com/royalrick/anbanwriter/app/wechat"
 	"github.com/rs/zerolog"
 )
 
@@ -689,7 +689,7 @@ func (p *OpenAIProvider) saveBase64Image(b64data string) (string, error) {
 		}
 	}
 
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anbanwriter_openai_%d.png", time.Now().UnixNano()))
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("anban-creator_openai_%d.png", time.Now().UnixNano()))
 	if err := os.WriteFile(tmpPath, imageData, 0644); err != nil {
 		return "", &GenerateError{
 			Provider: p.Name(),

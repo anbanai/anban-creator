@@ -381,7 +381,7 @@ function copyInviteLink() {
   if (!inviteCode.value) return
   // Mini-program has no public web origin; build an H5 register deep-link.
   // The host is the server's web frontend if configured; otherwise a placeholder.
-  const host = 'https://anbanwriter.com'
+  const host = 'https://anban-creator.com'
   const link = `${host}/register?invite=${inviteCode.value}`
   uni.setClipboardData({
     data: link,

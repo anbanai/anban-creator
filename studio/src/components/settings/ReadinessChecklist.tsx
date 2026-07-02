@@ -18,7 +18,7 @@ export function ReadinessChecklist({
 }) {
   return (
     <ul className={cn('grid grid-cols-2 gap-x-4 gap-y-1 text-xs', className)}>
-      <Readiness ok={status?.api_key_set} label="AnbanWriter API Key" />
+      <Readiness ok={status?.api_key_set} label="Anban Creator API Key" />
       <Readiness ok={status?.claude_authenticated} label="Claude 鉴权" />
       <Readiness ok={status?.workspace_set} label="本地工作区" />
       <Readiness ok={status?.agent_present} label="abwriter-agent" />

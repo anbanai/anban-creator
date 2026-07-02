@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	serveragent "github.com/royalrick/anbanwriter/server/agent"
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
 
 type Config struct {
@@ -73,7 +73,7 @@ func ParseConfig() (*Config, error) {
 		return nil, fmt.Errorf("workspace is required")
 	}
 	if cfg.AgentFlag == "" {
-		cfg.AgentFlag = "anbanwriter:" + serveragent.TaskTypeToAgent(cfg.TaskType)
+		cfg.AgentFlag = "anban:" + serveragent.TaskTypeToAgent(cfg.TaskType)
 	}
 	if cfg.MaxTurns <= 0 {
 		cfg.MaxTurns = serveragent.DefaultMaxTurns(cfg.TaskType, nil)

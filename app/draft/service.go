@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/royalrick/anbanwriter/app/config"
-	"github.com/royalrick/anbanwriter/app/wechat"
+	"github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/app/wechat"
 	"github.com/rs/zerolog"
 	"github.com/silenceper/wechat/v2/officialaccount/draft"
 )

@@ -20,8 +20,8 @@ const (
 // outbound notifications require the user to have sent at least one command
 // first (e.g. 帮助) to activate the channel.
 type WCFBinding struct {
-	ID               string     `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID           string     `gorm:"type:char(36);uniqueIndex;not null" json:"user_id"`
+	ID     string `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID string `gorm:"type:char(36);uniqueIndex;not null" json:"user_id"`
 	// LoginSessionID is the wcfLink login session this user's pending bind is
 	// tied to. Stored server-side at StartBind and re-checked at PollBindStatus
 	// so an authenticated user can't poll ANOTHER user's in-flight login by

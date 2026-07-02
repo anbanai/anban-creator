@@ -1,6 +1,6 @@
 package service
 
-import "github.com/royalrick/anbanwriter/server/model"
+import "github.com/anbanai/anban-creator/server/model"
 
 // stagePercentByType maps task.Type → stage name → percent.
 // Used as a fallback when update_task_progress is called without an explicit

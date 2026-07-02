@@ -11,7 +11,7 @@ import (
 	"github.com/fasthttp/websocket"
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/royalrick/anbanwriter/server/auth"
+	"github.com/anbanai/anban-creator/server/auth"
 )
 
 // setupWSApp starts a minimal Fiber app exposing the authenticated /ws route

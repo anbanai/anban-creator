@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 func TestParseCommand(t *testing.T) {

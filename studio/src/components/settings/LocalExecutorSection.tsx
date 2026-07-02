@@ -23,7 +23,7 @@ import { applyApiBase } from '@/lib/http-client'
 
 /**
  * Desktop-only local-executor configuration. Renders only inside the Tauri
- * shell (the parent gates on isDesktop()). Lets the user supply the AnbanWriter
+ * shell (the parent gates on isDesktop()). Lets the user supply the Anban Creator
  * API key + workspace + Claude credentials, then start/stop the background
  * claim loop. In the browser this section is never mounted.
  */
@@ -154,7 +154,7 @@ export default function LocalExecutorSection() {
         {/* Config form */}
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="le-api-key" className="text-xs">AnbanWriter API Key</Label>
+            <Label htmlFor="le-api-key" className="text-xs">Anban Creator API Key</Label>
             <Input
               id="le-api-key"
               type="password"

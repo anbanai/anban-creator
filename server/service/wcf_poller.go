@@ -8,9 +8,9 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/wcf"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/wcf"
 )
 
 // WCFCursorKey is the Redis key holding the highest event id the poller has
@@ -22,8 +22,8 @@ import (
 // sidecar's event DB is ever reset (its autoincrement restarts from 1), this key
 // must be deleted manually — otherwise lastID sits above the sidecar's new max id
 // and ListEvents(after_id=lastID) returns nothing until autoincrement catches up,
-// silently dropping new commands. On a reset: DEL anbanwriter:wcf:last_event_id.
-const WCFCursorKey = "anbanwriter:wcf:last_event_id"
+// silently dropping new commands. On a reset: DEL anban:wcf:last_event_id.
+const WCFCursorKey = "anban:wcf:last_event_id"
 
 // wcfDispatcher is the subset of the command dispatcher the poller needs,
 // extracted as an interface so the poller's trust boundary can be unit-tested

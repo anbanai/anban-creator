@@ -157,7 +157,7 @@ export default function FirstRunWizard() {
             </p>
             <p className="text-xs text-muted-foreground">配置需要三样东西：</p>
             <ul className="space-y-1 text-xs text-foreground/80">
-              <li>• <b>AnbanWriter API Key</b>（在「设置 → 平台密钥」创建）</li>
+              <li>• <b>Anban Creator API Key</b>（在「设置 → 平台密钥」创建）</li>
               <li>• <b>Claude 鉴权</b>（ANTHROPIC_API_KEY，或留空用 OAuth）</li>
               <li>• <b>本地工作区根目录</b>（任务的临时工作目录）</li>
             </ul>
@@ -173,7 +173,7 @@ export default function FirstRunWizard() {
         {step === 1 && (
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="wiz-api-key" className="text-xs">AnbanWriter API Key</Label>
+              <Label htmlFor="wiz-api-key" className="text-xs">Anban Creator API Key</Label>
               <Input
                 id="wiz-api-key"
                 type="password"

@@ -1,8 +1,8 @@
 package platform
 
 import (
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/seednote"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/seednote"
 )
 
 // NewProvider creates a PlatformDataProvider for the given platform.

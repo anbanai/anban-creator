@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
-	"github.com/royalrick/anbanwriter/server/config"
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/rs/zerolog"
 )
 

@@ -11,14 +11,16 @@ import (
 	"strings"
 	"time"
 
-	serveragent "github.com/royalrick/anbanwriter/server/agent"
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 )
 
 // httpStatusError carries the HTTP status of a failed report so the retry layer
 // can decide retryability without re-parsing the message string.
 type httpStatusError struct{ code int }
 
-func (e *httpStatusError) Error() string { return fmt.Sprintf("report request failed: HTTP %d", e.code) }
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("report request failed: HTTP %d", e.code)
+}
 
 // isRetryableStatus reports whether an HTTP status warrants a retry. 5xx and the
 // two transient 4xx codes (408 request-timeout, 429 rate-limit) may succeed on a

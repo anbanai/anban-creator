@@ -142,11 +142,11 @@ Agent 在 image-plan 阶段根据内容主题自动判断，无需用户指定�
 
 ```bash
 # 批量生成内容图（N-2 张，不含尾图）
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
+anban-creator image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
 # 输出：image_01.png ... image_0{N-2}.png
 
 # 单独生成尾图
-anbanwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
+anban-creator image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
 ```
 
 ## image-plan.md 模板更新

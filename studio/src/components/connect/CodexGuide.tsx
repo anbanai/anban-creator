@@ -48,12 +48,12 @@ export default function CodexGuide() {
 
       <InstallStep
         cliName="Codex CLI"
-        oneLiner="帮我安装 anbanwriter Codex 插件 https://github.com/anbanai/anbanwriter-codex"
+        oneLiner="帮我安装 Anban Creator Codex 插件 https://github.com/anbanai/anban-creator-codex"
         oneLinerHint="AI 会自动完成 marketplace 注册、插件安装、以及 5 个 subagent 的注册。"
-        advancedCli={`git clone https://github.com/anbanai/anbanwriter-codex.git
-cd anbanwriter-codex
+        advancedCli={`git clone https://github.com/anbanai/anban-creator-codex.git
+cd anban-creator-codex
 codex plugin marketplace add .
-codex plugin install anbanwriter
+codex plugin install anban
 bash install/install-subagents.sh`}
         advancedHint="最后一行脚本会把 5 个 subagent 注册到 `~/.codex/config.toml`（幂等，可重复执行）。"
       />

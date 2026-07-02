@@ -92,7 +92,7 @@ export function useTaskStream(taskId: Ref<string>, opts: UseTaskStreamOptions = 
 
   // ---- SSE: H5 / browsers with fetch streaming ----
   async function startSSE(id: string) {
-    const token = uni.getStorageSync('anbanwriter_token')
+    const token = uni.getStorageSync('anban_creator_token')
     if (!token) {
       startPolling(id)
       return
