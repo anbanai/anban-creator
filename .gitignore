@@ -1,6 +1,6 @@
 # Binaries (current directory only)
-/anbanwriter
-/anbanwriter.exe
+/anban-creator
+/anban-creator.exe
 agent/agent
 
 # Ignore all binaries (anywhere in the repo)
@@ -23,7 +23,7 @@ vendor/
 go.work
 
 # Configuration files (contain sensitive information)
-.anbanwriter/
+.anban-creator/
 server/config.yaml
 
 # Log files

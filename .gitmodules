@@ -1,12 +1,12 @@
 [submodule "claudecode"]
 	path = claudecode
-	url = https://github.com/anbanai/anbanwriter-claudecode.git
+	url = https://github.com/anbanai/anban-creator-claudecode.git
 [submodule "openclaw"]
 	path = openclaw
-	url = https://github.com/anbanai/anbanwriter-openclaw.git
+	url = https://github.com/anbanai/anban-creator-openclaw.git
 [submodule "codex"]
 	path = codex
-	url = https://github.com/anbanai/anbanwriter-codex.git
+	url = https://github.com/anbanai/anban-creator-codex.git
 [submodule "wcflink"]
 	path = wcflink
 	url = https://github.com/lich0821/wcfLink.git

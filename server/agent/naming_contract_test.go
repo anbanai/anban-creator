@@ -15,6 +15,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertJSONField(t, filepath.Join(root, "codex", ".codex-plugin", "plugin.json"), "name", "anban")
 	assertJSONField(t, filepath.Join(root, "openclaw", "openclaw.plugin.json"), "id", "anban")
 	assertJSONField(t, filepath.Join(root, "openclaw", "openclaw.plugin.json"), "name", "Anban 智能创作助手")
+	assertClaudeMarketplacePlugin(t, filepath.Join(root, "claudecode", ".claude-plugin", "marketplace.json"))
 
 	for _, path := range []string{
 		filepath.Join(root, "claudecode", ".mcp.json"),
@@ -27,6 +28,8 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, "openclaw", "src", "index.ts"), `id: "anban"`)
 
 	for _, path := range []string{
+		filepath.Join(root, ".gitignore"),
+		filepath.Join(root, ".gitmodules"),
 		filepath.Join(root, "CLAUDE.md"),
 		filepath.Join(root, "agent", "Dockerfile"),
 		filepath.Join(root, "server", "Dockerfile"),
@@ -39,7 +42,50 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	} {
 		assertFileNotContains(t, path, "plugin install "+"anban-creator")
 		assertFileNotContains(t, path, "anban-creator"+"@anbanai")
+		assertFileNotContains(t, path, "anban"+"writer")
+		assertFileNotContains(t, path, "Anban"+"Writer")
+		assertFileNotContains(t, path, "案"+"板")
 	}
+}
+
+func assertClaudeMarketplacePlugin(t *testing.T, path string) {
+	t.Helper()
+	var object struct {
+		Name    string `json:"name"`
+		Owner   named  `json:"owner"`
+		Plugins []struct {
+			Name       string `json:"name"`
+			Homepage   string `json:"homepage"`
+			Repository string `json:"repository"`
+			Author     named  `json:"author"`
+		} `json:"plugins"`
+	}
+	readJSONFile(t, path, &object)
+	if object.Name != "anbanai" {
+		t.Fatalf("%s marketplace name = %q, want %q", path, object.Name, "anbanai")
+	}
+	if object.Owner.Name != "anbanai" {
+		t.Fatalf("%s owner name = %q, want %q", path, object.Owner.Name, "anbanai")
+	}
+	if len(object.Plugins) != 1 {
+		t.Fatalf("%s has %d plugins, want exactly one", path, len(object.Plugins))
+	}
+	plugin := object.Plugins[0]
+	if plugin.Name != "anban" {
+		t.Fatalf("%s plugin name = %q, want %q", path, plugin.Name, "anban")
+	}
+	if plugin.Author.Name != "anbanai" {
+		t.Fatalf("%s author name = %q, want %q", path, plugin.Author.Name, "anbanai")
+	}
+	for _, got := range []string{plugin.Homepage, plugin.Repository} {
+		if !strings.Contains(got, "github.com/anbanai/anban-creator-claudecode") {
+			t.Fatalf("%s plugin URL = %q, want anban-creator-claudecode", path, got)
+		}
+	}
+}
+
+type named struct {
+	Name string `json:"name"`
 }
 
 func assertJSONField(t *testing.T, path, field, want string) {
