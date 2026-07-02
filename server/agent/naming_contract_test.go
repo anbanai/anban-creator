@@ -30,6 +30,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 
 	for _, path := range []string{
 		filepath.Join(root, "CLAUDE.md"),
+		filepath.Join(root, "claudecode", "README.md"),
 		filepath.Join(root, "agent", "Dockerfile"),
 		filepath.Join(root, "server", "Dockerfile"),
 		filepath.Join(root, "studio", "src", "components", "connect", "ClaudeGuide.tsx"),
@@ -39,12 +40,22 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 		filepath.Join(root, "codex", "README.md"),
 		filepath.Join(root, "codex", "install", "install-subagents.sh"),
 	} {
+		assertFileNotContains(t, path, "anbancreator"+"@anbanai")
+		assertFileNotContains(t, path, "creator"+"@anbanai")
 		assertFileNotContains(t, path, "plugin install "+"anban-creator")
 		assertFileNotContains(t, path, "anban-creator"+"@anbanai")
+		assertFileNotContains(t, path, "ab"+"c:")
 		assertFileNotContains(t, path, "anban"+"writer")
 		assertFileNotContains(t, path, "Anban"+"Writer")
 		assertFileNotContains(t, path, "案"+"板")
 	}
+	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "plugin@marketplace")
+	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban@anbanai")
+	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "mcp__plugin_anban_creator__")
+	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban:<agent>")
+	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "claude plugin install --scope user anban@anbanai")
+	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "--agent anban:article")
+	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "mcp__plugin_anban_creator__")
 	assertTrackedFilesDoNotContainLegacyNames(t, root)
 }
 
@@ -101,6 +112,10 @@ func assertTrackedFilesDoNotContainLegacyNames(t *testing.T, root string) {
 		}
 		body := readTextFile(t, fullPath)
 		for _, banned := range []string{
+			"anbancreator" + "@anbanai",
+			"creator" + "@anbanai",
+			"anban-creator" + "@anbanai",
+			"ab" + "c:",
 			"anban" + "writer",
 			"Anban" + "Writer",
 			"案" + "板",
