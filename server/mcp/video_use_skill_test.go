@@ -52,7 +52,7 @@ func TestVideoUseSkillFiles(t *testing.T) {
 		requireValidSkillFrontmatter(t, plugin, "video-use", body)
 		for _, want := range []string{
 			"name: video-use",
-			"upload_video_audio",
+			"prepare_file_upload",
 			"create_video_asr_task",
 			"query_video_asr_task",
 			"pack_video_transcripts",
@@ -207,7 +207,7 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		"- capcut-draft",
 		"mcpServers:",
 		"- anban",
-		"upload_video_audio",
+		"prepare_file_upload",
 		"create_video_asr_task",
 		"query_video_asr_task",
 		"pack_video_transcripts",

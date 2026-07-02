@@ -3,9 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"strconv"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -34,35 +33,55 @@ func TestVideoASRHandlersValidateMissingServiceAndArgs(t *testing.T) {
 	}
 }
 
-func TestUploadVideoAudioRejectsPrivateStorageURL(t *testing.T) {
+func TestPrepareFileUploadReturnsSignedVideoAudioUpload(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	store := &fakeVideoReferenceStorage{name: "oss", url: "/api/v1/files/uploads/video-audio/audio.wav"}
+	store := &fakeVideoReferenceStorage{name: "oss", url: "https://cdn.example.com/uploads/video-audio/audio.wav"}
 	svcs = &Services{Store: store, VideoASRSvc: service.NewVideoASRServiceWithClient(nil, store)}
 
-	audioPath := filepath.Join(t.TempDir(), "audio.wav")
-	if err := os.WriteFile(audioPath, []byte("fake-wav"), 0644); err != nil {
-		t.Fatalf("write audio: %v", err)
-	}
 	req := &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"file_path":` + strconv.Quote(audioPath) + `}`)},
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"purpose":"video_audio","filename":"take.wav","content_type":"audio/wav"}`)},
 	}
-	result, err := uploadVideoAudioHandler(context.Background(), req)
+	result, err := prepareFileUploadHandler(context.Background(), req)
 	if err != nil {
-		t.Fatalf("uploadVideoAudioHandler returned error: %v", err)
+		t.Fatalf("prepareFileUploadHandler returned error: %v", err)
 	}
-	if !result.IsError {
-		t.Fatal("expected private storage URL to be rejected")
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, "OSS/CDN") || !strings.Contains(text, "HTTPS") {
-		t.Fatalf("unexpected error text: %q", text)
+	for _, want := range []string{
+		`"method":"PUT"`,
+		`"key":"uploads/video-audio/`,
+		`"upload_url":"https://upload.example.com/put?signature=1"`,
+		`"download_url":"https://download.example.com/get?signature=1"`,
+		`"public_url":"https://cdn.example.com/`,
+		`"Content-Type":"audio/wav"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("payload missing %q: %s", want, text)
+		}
+	}
+	if store.uploadContentType != "audio/wav" {
+		t.Fatalf("UploadURL content type = %q, want audio/wav", store.uploadContentType)
 	}
 }
 
 func TestCreateVideoASRTaskHandlerReturnsTranscript(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/wav")
+		_, _ = w.Write([]byte("fake-wav"))
+	}))
+	defer srv.Close()
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = srv.Client().Transport
+	t.Cleanup(func() { http.DefaultTransport = oldTransport })
+
+	store := &fakeVideoReferenceStorage{name: "oss", url: "https://cdn.example.com/uploads/video-audio/take.wav", files: map[string][]byte{
+		"uploads/video-audio/take.wav": []byte("fake-wav"),
+	}, downloadURL: srv.URL}
 	svcs = &Services{VideoASRSvc: service.NewVideoASRServiceWithClient(&fakeMCPVideoASRClient{
 		result: &service.VideoASRTaskResult{
 			TaskID: "asr-task-1",
@@ -71,14 +90,10 @@ func TestCreateVideoASRTaskHandlerReturnsTranscript(t *testing.T) {
 				Words: []service.VideoTranscriptWord{{Type: "word", Text: "你好", Start: 0, End: 0.3}},
 			},
 		},
-	}, nil)}
+	}, store)}
 
-	audioPath := filepath.Join(t.TempDir(), "audio.wav")
-	if err := os.WriteFile(audioPath, []byte("fake-wav"), 0644); err != nil {
-		t.Fatalf("write audio: %v", err)
-	}
 	req := &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"file_path":` + strconv.Quote(audioPath) + `}`)},
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"audio_key":"uploads/video-audio/take.wav"}`)},
 	}
 	result, err := createVideoASRTaskHandler(context.Background(), req)
 	if err != nil {
@@ -95,23 +110,69 @@ func TestCreateVideoASRTaskHandlerReturnsTranscript(t *testing.T) {
 	}
 }
 
-func TestCreateVideoASRTaskHandlerRejectsMissingFilePath(t *testing.T) {
+func TestPrepareFileUploadRejectsInvalidInputs(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{name: "oss", url: "https://cdn.example.com/uploads/video-audio/audio.wav"}
+	svcs = &Services{Store: store, VideoASRSvc: service.NewVideoASRServiceWithClient(nil, store)}
+
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{"unsupported purpose", `{"purpose":"avatar","filename":"a.wav","content_type":"audio/wav"}`, "unsupported upload purpose"},
+		{"missing filename", `{"purpose":"video_audio","content_type":"audio/wav"}`, "filename is required"},
+		{"non audio", `{"purpose":"video_audio","filename":"a.png","content_type":"image/png"}`, "audio content_type is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &mcp.CallToolRequest{
+				Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(tt.args)},
+			}
+			result, err := prepareFileUploadHandler(context.Background(), req)
+			if err != nil {
+				t.Fatalf("prepareFileUploadHandler returned error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("expected error")
+			}
+			if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, tt.want) {
+				t.Fatalf("error = %q, want %q", text, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateVideoASRTaskHandlerRejectsMissingAudioSourceAndFilePath(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
 	svcs = &Services{VideoASRSvc: service.NewVideoASRServiceWithClient(&fakeMCPVideoASRClient{}, nil)}
 
-	req := &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{}`)},
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{"missing audio source", `{}`, "audio_key or audio_url is required"},
+		{"local file path removed", `{"file_path":"/tmp/audio.wav"}`, "file_path is no longer supported"},
 	}
-	result, err := createVideoASRTaskHandler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("createVideoASRTaskHandler returned error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected missing file_path to be rejected")
-	}
-	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "file_path is required") {
-		t.Fatalf("unexpected error text: %q", text)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &mcp.CallToolRequest{
+				Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(tt.args)},
+			}
+			result, err := createVideoASRTaskHandler(context.Background(), req)
+			if err != nil {
+				t.Fatalf("createVideoASRTaskHandler returned error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("expected error")
+			}
+			if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, tt.want) {
+				t.Fatalf("error = %q, want %q", text, tt.want)
+			}
+		})
 	}
 }
 
@@ -132,6 +193,8 @@ func TestQueryVideoASRTaskHandlerRejectsUnknownTaskID(t *testing.T) {
 	}
 	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "was not found") {
 		t.Fatalf("unexpected error text: %q", text)
+	} else if strings.Contains(text, "local") {
+		t.Fatalf("query error should not mention local-only ASR: %q", text)
 	}
 }
 

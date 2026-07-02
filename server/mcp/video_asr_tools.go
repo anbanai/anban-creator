@@ -12,39 +12,41 @@ import (
 
 func registerVideoASRTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
-		Name:        "upload_video_audio",
-		Description: "Upload a local audio file extracted from source video to configured OSS/CDN storage. Optional for video-use; OpenAI-compatible FunASR transcription normally uses local file_path directly.",
+		Name:        "prepare_file_upload",
+		Description: "Prepare a policy-controlled OSS direct upload. For video-use audio, call with purpose=video_audio, upload the local file to upload_url with PUT, then pass audio_key to create_video_asr_task.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"file_path":       map[string]any{"type": "string", "description": "Local audio file path generated with ffmpeg by the video-use workflow"},
-				"expires_seconds": map[string]any{"type": "integer", "description": "Signed URL TTL in seconds when no custom OSS domain is configured", "default": 86400},
+				"purpose":         map[string]any{"type": "string", "description": "Upload purpose. Currently supported: video_audio"},
+				"filename":        map[string]any{"type": "string", "description": "Original local filename, used only to preserve extension"},
+				"content_type":    map[string]any{"type": "string", "description": "MIME type for the object, e.g. audio/wav"},
+				"expires_seconds": map[string]any{"type": "integer", "description": "Signed upload/download URL TTL in seconds", "default": 86400},
 			},
-			"required": []any{"file_path"},
+			"required": []any{"purpose", "filename", "content_type"},
 		},
-	}, uploadVideoAudioHandler)
+	}, prepareFileUploadHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "create_video_asr_task",
-		Description: "Transcribe a local audio file through the server-side OpenAI-compatible FunASR API and return normalized video-use transcript JSON. API keys stay on the server.",
+		Description: "Transcribe an OSS-backed audio object or HTTPS audio URL through server-side OpenAI-compatible FunASR and return normalized video-use transcript JSON. API keys stay on the server.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"file_path":     map[string]any{"type": "string", "description": "Local audio file path generated with ffmpeg by the video-use workflow"},
+				"audio_key":     map[string]any{"type": "string", "description": "OSS object key returned by prepare_file_upload for purpose=video_audio"},
+				"audio_url":     map[string]any{"type": "string", "description": "Existing public or signed HTTPS audio URL"},
 				"language_hint": map[string]any{"type": "string", "description": "Optional language hint such as zh or en"},
 				"speaker_count": map[string]any{"type": "integer", "description": "Optional expected speaker count for diarization"},
 			},
-			"required": []any{"file_path"},
 		},
 	}, createVideoASRTaskHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "query_video_asr_task",
-		Description: "Return a completed local FunASR transcription result by task_id. create_video_asr_task is synchronous; this is a compatibility cache lookup.",
+		Description: "Return a completed FunASR transcription result by task_id. create_video_asr_task is synchronous; this is a compatibility cache lookup.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"task_id": map[string]any{"type": "string", "description": "Completed local FunASR result ID returned by create_video_asr_task"},
+				"task_id": map[string]any{"type": "string", "description": "Completed FunASR result ID returned by create_video_asr_task"},
 			},
 			"required": []any{"task_id"},
 		},
@@ -64,19 +66,26 @@ func registerVideoASRTools(server *mcp.Server) {
 	}, packVideoTranscriptsHandler)
 }
 
-func uploadVideoAudioHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.VideoASRSvc == nil {
-		return errorResult("video ASR service not available"), nil
+func prepareFileUploadHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.Store == nil {
+		return errorResult("storage provider is not available"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
-	filePath, _ := args["file_path"].(string)
+	purpose, _ := args["purpose"].(string)
+	filename, _ := args["filename"].(string)
+	contentType, _ := args["content_type"].(string)
 	expires := 0
 	if v, ok := numberAsInt64(args["expires_seconds"]); ok {
 		expires = int(v)
 	}
-	result, err := svcs.VideoASRSvc.UploadAudio(ctx, filePath, expires)
+	result, err := service.PrepareFileUpload(ctx, svcs.Store, service.FileUploadPrepareRequest{
+		Purpose:        purpose,
+		Filename:       filename,
+		ContentType:    contentType,
+		ExpiresSeconds: expires,
+	})
 	if err != nil {
-		return errorResult("upload video audio: " + err.Error()), nil
+		return errorResult("prepare file upload: " + err.Error()), nil
 	}
 	return textResult(result)
 }
@@ -87,6 +96,8 @@ func createVideoASRTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*
 	}
 	args := parseArgs(req.Params.Arguments)
 	filePath, _ := args["file_path"].(string)
+	audioKey, _ := args["audio_key"].(string)
+	audioURL, _ := args["audio_url"].(string)
 	languageHint, _ := args["language_hint"].(string)
 	speakerCount := 0
 	if v, ok := numberAsInt64(args["speaker_count"]); ok {
@@ -94,6 +105,8 @@ func createVideoASRTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*
 	}
 	result, err := svcs.VideoASRSvc.CreateTask(ctx, service.VideoASRTaskRequest{
 		FilePath:     filePath,
+		AudioKey:     audioKey,
+		AudioURL:     audioURL,
 		LanguageHint: languageHint,
 		SpeakerCount: speakerCount,
 	})

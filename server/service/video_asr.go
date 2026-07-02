@@ -1,12 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"mime"
+	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -22,7 +22,12 @@ import (
 	"github.com/royalrick/anbanwriter/server/storage"
 )
 
-const defaultVideoAudioURLTTL = 24 * 3600
+const (
+	videoAudioKeyPrefix   = "uploads/video-audio/"
+	maxVideoASRAudioBytes = 200 << 20
+)
+
+var videoASRHTTPClient = http.DefaultClient
 
 // VideoASRClient is the direct adapter boundary for OpenAI-compatible FunASR calls.
 type VideoASRClient interface {
@@ -50,75 +55,13 @@ func NewVideoASRServiceWithClient(client VideoASRClient, store storage.Provider)
 	return &VideoASRService{client: client, store: store, cache: map[string]*VideoASRTaskResult{}}
 }
 
-type VideoAudioUploadResult struct {
-	URL           string `json:"url"`
-	Key           string `json:"key"`
-	DownloadURL   string `json:"download_url,omitempty"`
-	Size          int64  `json:"size"`
-	MimeType      string `json:"mime_type"`
-	ExpiresSecond int    `json:"expires_seconds"`
-}
-
-func (s *VideoASRService) UploadAudio(ctx context.Context, filePath string, expiresSeconds int) (*VideoAudioUploadResult, error) {
-	if s == nil || s.store == nil {
-		return nil, fmt.Errorf("storage provider is not available; configure OSS/CDN storage before using upload_video_audio")
-	}
-	if s.store.Name() != "oss" {
-		return nil, fmt.Errorf("upload_video_audio requires OSS storage; configure OSS/CDN storage before using this optional URL helper")
-	}
-	if strings.TrimSpace(filePath) == "" {
-		return nil, fmt.Errorf("file_path is required")
-	}
-	info, err := os.Stat(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("stat audio file: %w", err)
-	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("file_path must point to an audio file, got directory")
-	}
-	if expiresSeconds <= 0 {
-		expiresSeconds = defaultVideoAudioURLTTL
-	}
-
-	ext := strings.ToLower(filepath.Ext(filePath))
-	contentType := audioContentType(ext)
-	if contentType == "application/octet-stream" {
-		if t := mime.TypeByExtension(ext); t != "" {
-			contentType = t
-		}
-	}
-	key := fmt.Sprintf("uploads/video-audio/%s%s", uuid.NewString(), ext)
-	uploaded, err := s.store.UploadFile(ctx, key, filePath, contentType)
-	if err != nil {
-		return nil, fmt.Errorf("upload video audio to OSS: %w", err)
-	}
-	if uploaded.Size == 0 {
-		uploaded.Size = info.Size()
-	}
-
-	downloadURL := uploaded.URL
-	if !s.store.HasCustomDomain() {
-		downloadURL, err = s.store.DownloadURL(ctx, key, expiresSeconds)
-		if err != nil {
-			return nil, fmt.Errorf("create signed audio URL: %w", err)
-		}
-	}
-	if !strings.HasPrefix(downloadURL, "https://") {
-		return nil, fmt.Errorf("uploaded audio URL is not publicly accessible HTTPS; configure OSS/CDN storage or pass an existing public HTTPS URL")
-	}
-	return &VideoAudioUploadResult{
-		URL:           uploaded.URL,
-		Key:           uploaded.Key,
-		DownloadURL:   downloadURL,
-		Size:          uploaded.Size,
-		MimeType:      uploaded.MimeType,
-		ExpiresSecond: expiresSeconds,
-	}, nil
-}
-
 type VideoASRTaskRequest struct {
 	FilePath     string `json:"file_path,omitempty"`
-	AudioURL     string `json:"audio_url"`
+	AudioKey     string `json:"audio_key,omitempty"`
+	AudioURL     string `json:"audio_url,omitempty"`
+	Audio        io.Reader
+	Filename     string `json:"-"`
+	ContentType  string `json:"-"`
 	LanguageHint string `json:"language_hint,omitempty"`
 	SpeakerCount int    `json:"speaker_count,omitempty"`
 }
@@ -157,15 +100,43 @@ func (s *VideoASRService) CreateTask(ctx context.Context, req VideoASRTaskReques
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("FunASR client is not configured")
 	}
-	if strings.TrimSpace(req.FilePath) == "" {
-		return nil, fmt.Errorf("file_path is required")
+	if strings.TrimSpace(req.FilePath) != "" {
+		return nil, fmt.Errorf("file_path is no longer supported; use prepare_file_upload and pass audio_key")
 	}
-	info, err := os.Stat(req.FilePath)
-	if err != nil {
-		return nil, fmt.Errorf("stat audio file: %w", err)
+	audioKey := strings.TrimSpace(req.AudioKey)
+	audioURL := strings.TrimSpace(req.AudioURL)
+	if audioKey == "" && audioURL == "" {
+		return nil, fmt.Errorf("audio_key or audio_url is required")
 	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("file_path must point to an audio file, got directory")
+	if audioKey != "" {
+		if !strings.HasPrefix(audioKey, videoAudioKeyPrefix) {
+			return nil, fmt.Errorf("audio_key must be under %s", videoAudioKeyPrefix)
+		}
+		if s.store == nil {
+			return nil, fmt.Errorf("storage provider is not available")
+		}
+		if s.store.Name() != "oss" {
+			return nil, fmt.Errorf("audio_key requires OSS storage")
+		}
+		audioURL, err := s.store.DownloadURL(ctx, audioKey, 3600)
+		if err != nil {
+			return nil, fmt.Errorf("create signed audio URL: %w", err)
+		}
+		data, _, err := downloadVideoASRAudio(ctx, audioURL)
+		if err != nil {
+			return nil, fmt.Errorf("read audio object: %w", err)
+		}
+		req.Audio = bytes.NewReader(data)
+		req.Filename = filepath.Base(audioKey)
+		req.ContentType = audioContentType(strings.ToLower(filepath.Ext(audioKey)))
+	} else {
+		data, contentType, err := downloadVideoASRAudio(ctx, audioURL)
+		if err != nil {
+			return nil, fmt.Errorf("read audio URL: %w", err)
+		}
+		req.Audio = bytes.NewReader(data)
+		req.Filename = "audio"
+		req.ContentType = contentType
 	}
 	result, err := s.client.Transcribe(ctx, req)
 	if err != nil {
@@ -197,9 +168,48 @@ func (s *VideoASRService) QueryTask(ctx context.Context, taskID string) (*VideoA
 	result := s.cache[taskID]
 	s.mu.RUnlock()
 	if result == nil {
-		return nil, fmt.Errorf("video ASR task %q was not found; create_video_asr_task transcribes synchronously and only completed local results can be queried", taskID)
+		return nil, fmt.Errorf("video ASR task %q was not found; create_video_asr_task transcribes synchronously and only completed results can be queried", taskID)
 	}
 	return result, nil
+}
+
+func readLimitedVideoASRAudio(reader io.Reader) ([]byte, error) {
+	limited := io.LimitReader(reader, maxVideoASRAudioBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxVideoASRAudioBytes {
+		return nil, fmt.Errorf("audio URL exceeds max size %d bytes", maxVideoASRAudioBytes)
+	}
+	return data, nil
+}
+
+func downloadVideoASRAudio(ctx context.Context, audioURL string) ([]byte, string, error) {
+	if !strings.HasPrefix(audioURL, "https://") {
+		return nil, "", fmt.Errorf("audio_url must be a publicly accessible HTTPS URL")
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, audioURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("create audio URL request: %w", err)
+	}
+	resp, err := videoASRHTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, "", fmt.Errorf("download audio URL: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("download audio URL: unexpected status %d", resp.StatusCode)
+	}
+	data, err := readLimitedVideoASRAudio(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := "application/octet-stream"
+	if ct := strings.TrimSpace(resp.Header.Get("Content-Type")); ct != "" {
+		contentType = strings.Split(ct, ";")[0]
+	}
+	return data, contentType, nil
 }
 
 // OpenAIFunASRClient calls an OpenAI-compatible FunASR transcription endpoint.
@@ -234,13 +244,19 @@ func (c *OpenAIFunASRClient) Transcribe(ctx context.Context, req VideoASRTaskReq
 	if c == nil {
 		return nil, fmt.Errorf("FunASR client is not configured")
 	}
-	file, err := os.Open(req.FilePath)
-	if err != nil {
-		return nil, fmt.Errorf("open audio file for FunASR: %w", err)
+	if req.Audio == nil {
+		return nil, fmt.Errorf("audio reader is required")
 	}
-	defer file.Close()
+	filename := strings.TrimSpace(req.Filename)
+	if filename == "" {
+		filename = "audio"
+	}
+	contentType := strings.TrimSpace(req.ContentType)
+	if contentType == "" {
+		contentType = audioContentType(strings.ToLower(filepath.Ext(filename)))
+	}
 	params := openai.AudioTranscriptionNewParams{
-		File:                   openai.File(file, filepath.Base(req.FilePath), audioContentType(strings.ToLower(filepath.Ext(req.FilePath)))),
+		File:                   openai.File(req.Audio, filename, contentType),
 		Model:                  openai.AudioModel(c.model),
 		ResponseFormat:         openai.AudioResponseFormatVerboseJSON,
 		TimestampGranularities: []string{"word", "segment"},
@@ -264,7 +280,12 @@ func (c *OpenAIFunASRClient) Transcribe(ctx context.Context, req VideoASRTaskReq
 		transcript.Metadata = map[string]any{}
 	}
 	transcript.Metadata["model"] = c.model
-	transcript.Metadata["file_path"] = req.FilePath
+	if req.AudioKey != "" {
+		transcript.Metadata["audio_key"] = req.AudioKey
+	}
+	if req.AudioURL != "" {
+		transcript.Metadata["audio_url"] = req.AudioURL
+	}
 	return &VideoASRTaskResult{
 		TaskID:     "asr-" + uuid.NewString(),
 		Status:     "SUCCEEDED",

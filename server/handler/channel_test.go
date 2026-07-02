@@ -50,6 +50,10 @@ func (f *fakeStorageProvider) UploadFile(context.Context, string, string, string
 	return nil, fmt.Errorf("not implemented")
 }
 
+func (f *fakeStorageProvider) UploadURL(context.Context, string, string, int) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+
 func (f *fakeStorageProvider) GetURL(key string) string { return "/api/v1/files/" + key }
 
 func (f *fakeStorageProvider) Read(_ context.Context, key string) ([]byte, error) {

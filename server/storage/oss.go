@@ -125,6 +125,19 @@ func (p *OSSProvider) UploadFile(_ context.Context, key string, filePath string,
 	}, nil
 }
 
+// UploadURL generates a time-limited signed PUT URL for direct client uploads.
+func (p *OSSProvider) UploadURL(_ context.Context, key string, contentType string, expirySeconds int) (string, error) {
+	options := []oss.Option{}
+	if contentType != "" {
+		options = append(options, oss.ContentType(contentType))
+	}
+	signedURL, err := p.bucket.SignURL(key, oss.HTTPPut, int64(expirySeconds), options...)
+	if err != nil {
+		return "", fmt.Errorf("oss sign upload url for %s: %w", key, err)
+	}
+	return signedURL, nil
+}
+
 // GetURL returns the public URL for the given key.
 // If a custom domain is configured, it is used; otherwise the default
 // OSS bucket endpoint is used.

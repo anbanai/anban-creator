@@ -63,6 +63,10 @@ func (s *fakeLiveStorage) UploadFile(ctx context.Context, key string, filePath s
 	return s.Upload(ctx, key, f, contentType)
 }
 
+func (s *fakeLiveStorage) UploadURL(_ context.Context, key string, _ string, _ int) (string, error) {
+	return "https://signed-upload.example.com/" + key, nil
+}
+
 func (s *fakeLiveStorage) GetURL(key string) string { return "https://cdn.example.com/" + key }
 
 func (s *fakeLiveStorage) Read(context.Context, string) ([]byte, error) {

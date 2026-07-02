@@ -18,6 +18,7 @@ type Provider interface {
 	Name() string
 	Upload(ctx context.Context, key string, reader io.Reader, contentType string) (*UploadResult, error)
 	UploadFile(ctx context.Context, key string, filePath string, contentType string) (*UploadResult, error)
+	UploadURL(ctx context.Context, key string, contentType string, expirySeconds int) (string, error)
 	GetURL(key string) string
 	Read(ctx context.Context, key string) ([]byte, error)
 	Delete(ctx context.Context, key string) error

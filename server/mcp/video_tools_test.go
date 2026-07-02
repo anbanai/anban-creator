@@ -30,10 +30,12 @@ import (
 )
 
 type fakeVideoReferenceStorage struct {
-	name  string
-	url   string
-	key   string
-	files map[string][]byte
+	name              string
+	url               string
+	key               string
+	files             map[string][]byte
+	uploadContentType string
+	downloadURL       string
 }
 
 func (f *fakeVideoReferenceStorage) Name() string {
@@ -74,8 +76,15 @@ func (f *fakeVideoReferenceStorage) Read(_ context.Context, key string) ([]byte,
 	return append([]byte(nil), data...), nil
 }
 func (f *fakeVideoReferenceStorage) Delete(context.Context, string) error { return nil }
+func (f *fakeVideoReferenceStorage) UploadURL(_ context.Context, _ string, contentType string, _ int) (string, error) {
+	f.uploadContentType = contentType
+	return "https://upload.example.com/put?signature=1", nil
+}
 func (f *fakeVideoReferenceStorage) DownloadURL(context.Context, string, int) (string, error) {
-	return f.url, nil
+	if f.downloadURL != "" {
+		return f.downloadURL, nil
+	}
+	return "https://download.example.com/get?signature=1", nil
 }
 func (f *fakeVideoReferenceStorage) HasCustomDomain() bool {
 	return strings.HasPrefix(f.url, "https://")

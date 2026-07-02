@@ -51,6 +51,9 @@ func (f *fakeStore) Read(_ context.Context, key string) ([]byte, error) {
 	return nil, fmt.Errorf("not found: %s", key)
 }
 func (f *fakeStore) Delete(context.Context, string) error { return nil }
+func (f *fakeStore) UploadURL(context.Context, string, string, int) (string, error) {
+	return "", errors.New("not implemented")
+}
 func (f *fakeStore) DownloadURL(context.Context, string, int) (string, error) {
 	return "", errors.New("not implemented")
 }

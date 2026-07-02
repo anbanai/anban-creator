@@ -114,6 +114,11 @@ func (p *LocalProvider) UploadFile(_ context.Context, key string, filePath strin
 	return p.Upload(context.Background(), key, f, contentType)
 }
 
+// UploadURL is not supported by local storage because direct uploads need OSS.
+func (p *LocalProvider) UploadURL(context.Context, string, string, int) (string, error) {
+	return "", fmt.Errorf("signed upload URLs require OSS storage")
+}
+
 // GetURL returns the relative URL path for serving the file via the API.
 func (p *LocalProvider) GetURL(key string) string {
 	return "/api/v1/files/" + key

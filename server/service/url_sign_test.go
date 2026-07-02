@@ -26,6 +26,9 @@ func (s *signFakeStore) Upload(context.Context, string, io.Reader, string) (*sto
 func (s *signFakeStore) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {
 	return nil, nil
 }
+func (s *signFakeStore) UploadURL(context.Context, string, string, int) (string, error) {
+	return "", nil
+}
 func (s *signFakeStore) GetURL(key string) string                     { return "https://cdn.example.com/" + key }
 func (s *signFakeStore) Read(context.Context, string) ([]byte, error) { return nil, nil }
 func (s *signFakeStore) Delete(context.Context, string) error         { return nil }
