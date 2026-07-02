@@ -38,14 +38,14 @@ func registerVideoTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "register_video_reference",
-		Description: "Register a publicly accessible HTTPS image/audio/video/text reference for Seedance video generation. Local/private URLs are rejected because Ark cannot fetch them; upload media to OSS/CDN first.",
+		Description: "Register a publicly accessible HTTPS image/audio/video/text reference for Seedance video generation. Local/private URLs are rejected because Ark cannot fetch them; upload media to OSS/CDN first. file_path is server-local only.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id":     map[string]any{"type": "string"},
 				"type":           map[string]any{"type": "string", "enum": []any{"text", "image_url", "audio_url", "video_url"}},
 				"url":            map[string]any{"type": "string"},
-				"file_path":      map[string]any{"type": "string"},
+				"file_path":      map[string]any{"type": "string", "description": "Server-local media path only; agent/client-local files should be uploaded or registered as task files first."},
 				"task_id":        map[string]any{"type": "string"},
 				"task_file_id":   map[string]any{"type": "string"},
 				"text":           map[string]any{"type": "string"},

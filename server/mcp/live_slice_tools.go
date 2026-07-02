@@ -14,11 +14,11 @@ import (
 func registerLiveSliceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "upload_live_audio",
-		Description: "Upload a local live-video audio file to configured OSS storage and return a URL that Alibaba TingWu can fetch. Local storage is rejected because TingWu needs a public or signed URL.",
+		Description: "Legacy server-local upload for live audio. Agent/client-local files should use prepare_file_upload(purpose=live_audio), PUT to upload_url, then pass audio_key to create_live_analysis_task.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"file_path":       map[string]any{"type": "string", "description": "Local audio file path, usually generated with ffmpeg by the live-slice workflow"},
+				"file_path":       map[string]any{"type": "string", "description": "Server-local audio file path only. Do not pass an agent/client-local path such as /Users/... unless the MCP server runs on that same filesystem."},
 				"expires_seconds": map[string]any{"type": "integer", "description": "Signed URL TTL in seconds when no custom OSS domain is configured", "default": 86400},
 			},
 			"required": []any{"file_path"},
@@ -31,6 +31,7 @@ func registerLiveSliceTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"audio_key":                  map[string]any{"type": "string", "description": "OSS object key returned by prepare_file_upload for purpose=live_audio. Preferred for agent/client-local files."},
 				"audio_url":                  map[string]any{"type": "string", "description": "Public or signed audio URL accessible by TingWu"},
 				"auto_chapters_enabled":      map[string]any{"type": "boolean", "description": "Enable auto chapters", "default": true},
 				"summarization_enabled":      map[string]any{"type": "boolean", "description": "Enable summary, Q&A, and mind map", "default": true},
@@ -38,7 +39,6 @@ func registerLiveSliceTools(server *mcp.Server) {
 				"diarization_enabled":        map[string]any{"type": "boolean", "description": "Enable speaker diarization", "default": false},
 				"script_template_enable":     map[string]any{"type": "boolean", "description": "Ask TingWu to generate reusable live-script structure", "default": false},
 			},
-			"required": []any{"audio_url"},
 		},
 	}, createLiveAnalysisTaskHandler)
 
@@ -369,11 +369,13 @@ func createLiveAnalysisTaskHandler(ctx context.Context, req *mcp.CallToolRequest
 	}
 	args := parseArgs(req.Params.Arguments)
 	audioURL, _ := args["audio_url"].(string)
-	if audioURL == "" {
-		return errorResult("audio_url is required"), nil
+	audioKey, _ := args["audio_key"].(string)
+	if audioKey == "" && audioURL == "" {
+		return errorResult("audio_key or audio_url is required"), nil
 	}
 
 	task, err := svcs.LiveSliceSvc.CreateLiveAnalysisTask(ctx, service.LiveAnalysisTaskRequest{
+		AudioKey:                 audioKey,
 		AudioURL:                 audioURL,
 		AutoChaptersEnabled:      boolFromArg(args["auto_chapters_enabled"], true),
 		SummarizationEnabled:     boolFromArg(args["summarization_enabled"], true),

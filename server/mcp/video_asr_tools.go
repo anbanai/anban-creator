@@ -13,11 +13,11 @@ import (
 func registerVideoASRTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_file_upload",
-		Description: "Prepare a policy-controlled OSS direct upload. For video-use audio, call with purpose=video_audio, upload the local file to upload_url with PUT, then pass audio_key to create_video_asr_task.",
+		Description: "Prepare a policy-controlled OSS direct upload for agent/client-local files. Use purpose=video_audio for video-use ASR or purpose=live_audio for live-slicer TingWu, upload the local file to upload_url with PUT, then pass audio_key to the matching task tool.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"purpose":         map[string]any{"type": "string", "description": "Upload purpose. Currently supported: video_audio"},
+				"purpose":         map[string]any{"type": "string", "description": "Upload purpose. Supported: video_audio, live_audio"},
 				"filename":        map[string]any{"type": "string", "description": "Original local filename, used only to preserve extension"},
 				"content_type":    map[string]any{"type": "string", "description": "MIME type for the object, e.g. audio/wav"},
 				"expires_seconds": map[string]any{"type": "integer", "description": "Signed upload/download URL TTL in seconds", "default": 86400},

@@ -566,6 +566,8 @@ func main() {
 			SeednoteClient:   seednoteClient,
 			TopicPoolSvc:     topicPoolSvc,
 			AgentFeedbackSvc: agentFeedbackSvc,
+			TingWuConfigured: cfg.TingWu.Complete(),
+			FunASRConfigured: cfg.FunASR.Complete(),
 		})
 		mcp.SetBillingServices(creditSvc, modelConfigSvc, cfg)
 		mcp.SetLogger(log)

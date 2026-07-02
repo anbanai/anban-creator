@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ func mcpLoggingMiddleware(next http.Handler, zlog *zerolog.Logger) http.Handler 
 						if rpcMethod == "tools/call" {
 							if params, ok := msg["params"].(map[string]any); ok {
 								toolName, _ := params["name"].(string)
-								argsJSON, _ := json.Marshal(params["arguments"])
+								argsJSON, _ := json.Marshal(redactMCPLogValue(params["arguments"]))
 								argsStr := string(argsJSON)
 								if len(argsStr) > 1000 {
 									argsStr = argsStr[:1000] + "...(truncated)"
@@ -201,6 +202,51 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, zlog *
 		}
 		return nil, auth.ErrInvalidToken
 	}
+}
+
+var mcpLogURLArgKeys = map[string]bool{
+	"audio_url":    true,
+	"image_url":    true,
+	"url":          true,
+	"upload_url":   true,
+	"download_url": true,
+}
+
+func redactMCPLogValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, item := range x {
+			if mcpLogURLArgKeys[k] {
+				if s, ok := item.(string); ok {
+					out[k] = redactURLQuery(s)
+					continue
+				}
+			}
+			out[k] = redactMCPLogValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, item := range x {
+			out[i] = redactMCPLogValue(item)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func redactURLQuery(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.RawQuery == "" {
+		return raw
+	}
+	parsed.RawQuery = "REDACTED"
+	return parsed.String()
 }
 
 // getUserID extracts the authenticated user ID from the MCP request context.

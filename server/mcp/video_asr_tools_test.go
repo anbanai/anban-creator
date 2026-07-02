@@ -67,6 +67,34 @@ func TestPrepareFileUploadReturnsSignedVideoAudioUpload(t *testing.T) {
 	}
 }
 
+func TestPrepareFileUploadReturnsSignedLiveAudioUpload(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{name: "oss", url: "https://cdn.example.com/uploads/live-audio/audio.mp3"}
+	svcs = &Services{Store: store}
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"purpose":"live_audio","filename":"live.mp3","content_type":"audio/mpeg"}`)},
+	}
+	result, err := prepareFileUploadHandler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("prepareFileUploadHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	for _, want := range []string{
+		`"method":"PUT"`,
+		`"key":"uploads/live-audio/`,
+		`"Content-Type":"audio/mpeg"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("payload missing %q: %s", want, text)
+		}
+	}
+}
+
 func TestCreateVideoASRTaskHandlerReturnsTranscript(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })

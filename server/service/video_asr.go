@@ -228,6 +228,9 @@ func (c *OpenAIFunASRClient) Transcribe(ctx context.Context, req VideoASRTaskReq
 	}
 	resp, err := c.client.Audio.Transcriptions.New(ctx, params)
 	if err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil, fmt.Errorf("transcribe audio with FunASR: %w; funasr.base_url must be an OpenAI-compatible FunASR ASR endpoint that serves POST /audio/transcriptions, not a generic MaaS/chat endpoint", err)
+		}
 		return nil, fmt.Errorf("transcribe audio with FunASR: %w", err)
 	}
 	raw := []byte(resp.RawJSON())

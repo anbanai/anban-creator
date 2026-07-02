@@ -34,6 +34,8 @@ type Services struct {
 	SeednoteClient   *seednote.Client
 	TopicPoolSvc     *service.TopicPoolService
 	AgentFeedbackSvc *service.AgentFeedbackService
+	TingWuConfigured bool
+	FunASRConfigured bool
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -52,6 +54,7 @@ func RegisterTools(server *mcp.Server) {
 	registerTemplateTools(server)
 	registerResourceTools(server)
 	registerSeednoteTools(server)
+	registerMediaPipelineTools(server)
 	registerLiveSliceTools(server)
 	registerTopicPoolTools(server)
 	registerProgressTools(server)

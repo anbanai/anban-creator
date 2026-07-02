@@ -28,6 +28,7 @@ const (
 	defaultAudioURLTTL   = 24 * 3600
 	defaultMinClipLength = 5
 	defaultMaxClipLength = 180
+	liveAudioKeyPrefix   = "uploads/live-audio/"
 )
 
 // LiveSliceService coordinates storage, TingWu transcription, and LLM-based live slicing.
@@ -76,10 +77,10 @@ type LiveAudioUploadResult struct {
 // UploadLiveAudio uploads local audio to OSS and returns a URL suitable for TingWu.
 func (s *LiveSliceService) UploadLiveAudio(ctx context.Context, filePath string, expiresSeconds int) (*LiveAudioUploadResult, error) {
 	if s.store == nil {
-		return nil, fmt.Errorf("storage provider is not available; configure OSS or pass audio_url directly")
+		return nil, fmt.Errorf("legacy server-local upload_live_audio requires storage provider access; agent/client-local files should use prepare_file_upload(purpose=\"live_audio\"), PUT the file to upload_url, then call create_live_analysis_task with audio_key")
 	}
 	if s.store.Name() != "oss" {
-		return nil, fmt.Errorf("upload_live_audio requires OSS storage because TingWu must fetch a public URL; configure OSS or pass audio_url directly")
+		return nil, fmt.Errorf("legacy server-local upload_live_audio requires OSS storage because TingWu must fetch a public URL; configure OSS, or for agent/client-local files use prepare_file_upload(purpose=\"live_audio\"), PUT the file to upload_url, then call create_live_analysis_task with audio_key")
 	}
 	if strings.TrimSpace(filePath) == "" {
 		return nil, fmt.Errorf("file_path is required")
@@ -149,6 +150,7 @@ func audioContentType(ext string) string {
 // LiveAnalysisTaskRequest is the normalized MCP/service input for TingWu task creation.
 type LiveAnalysisTaskRequest struct {
 	AudioURL                 string `json:"audio_url"`
+	AudioKey                 string `json:"audio_key,omitempty"`
 	AutoChaptersEnabled      bool   `json:"auto_chapters_enabled"`
 	SummarizationEnabled     bool   `json:"summarization_enabled"`
 	MeetingAssistanceEnabled bool   `json:"meeting_assistance_enabled"`
@@ -167,15 +169,36 @@ func (s *LiveSliceService) CreateLiveAnalysisTask(ctx context.Context, req LiveA
 	if s.tingwu == nil {
 		return nil, fmt.Errorf("TingWu client is not configured")
 	}
-	if strings.TrimSpace(req.AudioURL) == "" {
-		return nil, fmt.Errorf("audio_url is required")
+	audioKey := strings.TrimSpace(req.AudioKey)
+	audioURL := strings.TrimSpace(req.AudioURL)
+	if audioKey == "" && audioURL == "" {
+		return nil, fmt.Errorf("audio_key or audio_url is required")
 	}
-	resolved, err := ResolveMediaSource(ctx, s.store, s.logger, MediaSourceRequest{
-		RawURL: req.AudioURL,
-		TTL:    defaultAudioURLTTL,
-	})
+	var sourceReq MediaSourceRequest
+	if audioKey != "" {
+		if !strings.HasPrefix(audioKey, liveAudioKeyPrefix) {
+			return nil, fmt.Errorf("audio_key must be under %s", liveAudioKeyPrefix)
+		}
+		if s.store == nil || s.store.Name() != "oss" {
+			return nil, fmt.Errorf("audio_key requires OSS storage")
+		}
+		sourceReq = MediaSourceRequest{
+			Key:         audioKey,
+			TTL:         defaultAudioURLTTL,
+			ContentType: audioContentType(strings.ToLower(filepath.Ext(audioKey))),
+		}
+	} else {
+		sourceReq = MediaSourceRequest{
+			RawURL: audioURL,
+			TTL:    defaultAudioURLTTL,
+		}
+	}
+	resolved, err := ResolveMediaSource(ctx, s.store, s.logger, sourceReq)
 	if err != nil {
-		return nil, fmt.Errorf("resolve audio URL: %w", err)
+		if audioKey == "" {
+			return nil, fmt.Errorf("resolve audio URL: %w", err)
+		}
+		return nil, fmt.Errorf("resolve live audio source: %w", err)
 	}
 	req.AudioURL = resolved.URL
 	taskID, err := s.tingwu.CreateTask(ctx, req)

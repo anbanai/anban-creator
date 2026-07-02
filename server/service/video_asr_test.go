@@ -72,6 +72,33 @@ func TestOpenAIFunASRClientTranscribesWithOpenAICompatibleAudioAPI(t *testing.T)
 	}
 }
 
+func TestOpenAIFunASRClientAddsEndpointHintOn404(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	client, err := NewOpenAIFunASRClient(config.FunASRConfig{
+		BaseURL: server.URL,
+		APIKey:  "not-needed",
+		Model:   "sensevoice",
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAIFunASRClient: %v", err)
+	}
+	_, err = client.Transcribe(context.Background(), VideoASRTaskRequest{
+		Audio:       bytes.NewReader([]byte("fake-wav")),
+		Filename:    "audio.wav",
+		ContentType: "audio/wav",
+	})
+	if err == nil {
+		t.Fatal("expected 404 transcription error")
+	}
+	for _, want := range []string{"POST /audio/transcriptions", "OpenAI-compatible", "FunASR"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error missing %q: %v", want, err)
+		}
+	}
+}
+
 type fakeVideoASRClient struct {
 	transcribeReq VideoASRTaskRequest
 	result        *VideoASRTaskResult

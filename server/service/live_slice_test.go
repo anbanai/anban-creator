@@ -115,6 +115,48 @@ func TestCreateLiveAnalysisTaskSignsOwnedAudioURL(t *testing.T) {
 	}
 }
 
+func TestCreateLiveAnalysisTaskSignsAudioKey(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{}
+	store := &fakeLiveStorage{name: "oss"}
+	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+
+	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		AudioKey: "uploads/live-audio/take.mp3",
+	})
+	if err != nil {
+		t.Fatalf("CreateLiveAnalysisTask: %v", err)
+	}
+	if got := tw.createReq.AudioURL; got != "https://signed.example.com/uploads/live-audio/take.mp3" {
+		t.Fatalf("AudioURL = %q", got)
+	}
+}
+
+func TestCreateLiveAnalysisTaskRejectsNonLiveAudioKey(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{}
+	store := &fakeLiveStorage{name: "oss"}
+	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+
+	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		AudioKey: "uploads/video-audio/take.wav",
+	})
+	if err == nil || !strings.Contains(err.Error(), "audio_key must be under uploads/live-audio/") {
+		t.Fatalf("CreateLiveAnalysisTask error = %v, want live audio prefix rejection", err)
+	}
+}
+
+func TestCreateLiveAnalysisTaskRejectsAudioKeyWithoutOSS(t *testing.T) {
+	tw := &fakeLiveSliceTingWu{}
+	store := &fakeLiveStorage{name: "local"}
+	svc := NewLiveSliceServiceWithClients(tw, nil, store, nil)
+
+	_, err := svc.CreateLiveAnalysisTask(context.Background(), LiveAnalysisTaskRequest{
+		AudioKey: "uploads/live-audio/take.mp3",
+	})
+	if err == nil || !strings.Contains(err.Error(), "audio_key requires OSS storage") {
+		t.Fatalf("CreateLiveAnalysisTask error = %v, want OSS requirement", err)
+	}
+}
+
 func TestCreateLiveAnalysisTaskKeepsExternalAudioURL(t *testing.T) {
 	tw := &fakeLiveSliceTingWu{}
 	store := &fakeLiveStorage{name: "oss"}

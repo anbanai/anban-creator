@@ -211,6 +211,7 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		"create_video_asr_task",
 		"query_video_asr_task",
 		"pack_video_transcripts",
+		"普通素材剪辑不得调用",
 		"register_video_reference",
 		"create_video_generation_task",
 	} {
@@ -218,8 +219,10 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 			t.Fatalf("video agent missing %q", want)
 		}
 	}
-	if strings.Contains(body, "short-video-studio") {
-		t.Fatalf("video agent should not mention old short-video-studio name")
+	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("video agent should not mention %q", banned)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(root, "claudecode", "agents", "short-video-studio.md")); !os.IsNotExist(err) {
 		t.Fatalf("old claudecode short-video-studio agent should be removed")

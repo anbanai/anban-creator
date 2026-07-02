@@ -47,12 +47,12 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "upload_image",
-		Description: "Upload a local image. For WeChat projects, uploads to WeChat CDN; for other platforms, uploads to configured storage. Returns the URL.",
+		Description: "Upload a server-local image. For WeChat projects, uploads to WeChat CDN; for other platforms, uploads to configured storage. Agent/client-local files must first be made available to the MCP server or generated/downloaded by server-side tools.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID (determines WeChat credentials)"},
-				"file_path":  map[string]any{"type": "string", "description": "Local file path of the image to upload"},
+				"file_path":  map[string]any{"type": "string", "description": "Server-local file path of the image to upload"},
 			},
 			"required": []any{"project_id", "file_path"},
 		},
@@ -60,11 +60,11 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "compress_image",
-		Description: "Compress a local image file (resize and re-encode). Returns the path to the compressed file. No credit deduction.",
+		Description: "Compress a server-local image file (resize and re-encode). Returns the server-local path to the compressed file. No credit deduction.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"file_path": map[string]any{"type": "string", "description": "Local file path of the image to compress"},
+				"file_path": map[string]any{"type": "string", "description": "Server-local file path of the image to compress"},
 				"max_width": map[string]any{"type": "integer", "description": "Maximum width in pixels (0 = use server default)", "default": 0},
 			},
 			"required": []any{"file_path"},

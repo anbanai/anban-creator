@@ -3,13 +3,65 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
+
+type fakeMCPLiveSliceTingWu struct {
+	createReq service.LiveAnalysisTaskRequest
+}
+
+func (f *fakeMCPLiveSliceTingWu) CreateTask(_ context.Context, req service.LiveAnalysisTaskRequest) (string, error) {
+	f.createReq = req
+	return "tw-task-1", nil
+}
+
+func (f *fakeMCPLiveSliceTingWu) QueryTask(context.Context, string) (*service.TingWuTaskInfo, bool, error) {
+	return nil, false, nil
+}
+
+type fakeMCPLiveStorage struct {
+	name string
+}
+
+func (s *fakeMCPLiveStorage) Name() string {
+	if s.name != "" {
+		return s.name
+	}
+	return "oss"
+}
+
+func (s *fakeMCPLiveStorage) Upload(context.Context, string, io.Reader, string) (*storage.UploadResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *fakeMCPLiveStorage) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *fakeMCPLiveStorage) UploadURL(context.Context, string, string, int) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (s *fakeMCPLiveStorage) GetURL(key string) string { return "https://cdn.example.com/" + key }
+func (s *fakeMCPLiveStorage) Read(context.Context, string) ([]byte, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *fakeMCPLiveStorage) Delete(context.Context, string) error { return nil }
+func (s *fakeMCPLiveStorage) DownloadURL(_ context.Context, key string, _ int) (string, error) {
+	return "https://signed.example.com/" + key, nil
+}
+func (s *fakeMCPLiveStorage) HasCustomDomain() bool { return false }
+func (s *fakeMCPLiveStorage) IsOwnedURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "https://cdn.example.com/") || strings.HasPrefix(rawURL, "https://signed.example.com/")
+}
 
 func TestLiveSliceHandlersValidateMissingServiceAndArgs(t *testing.T) {
 	old := svcs
@@ -29,6 +81,53 @@ func TestLiveSliceHandlersValidateMissingServiceAndArgs(t *testing.T) {
 	}
 	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "live slice service not available") {
 		t.Fatalf("unexpected error text: %q", text)
+	}
+}
+
+func TestUploadLiveAudioHandlerLegacyErrorMentionsDirectUpload(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(nil, nil, nil, nil)}
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"file_path":"/client/audio.mp3"}`)},
+	}
+
+	result, err := uploadLiveAudioHandler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("uploadLiveAudioHandler returned error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected legacy upload to fail without storage")
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	for _, want := range []string{"legacy", "server-local", "prepare_file_upload", "audio_key"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("legacy upload error missing %q: %q", want, text)
+		}
+	}
+}
+
+func TestCreateLiveAnalysisTaskHandlerAcceptsAudioKey(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	tw := &fakeMCPLiveSliceTingWu{}
+	store := &fakeMCPLiveStorage{name: "oss"}
+	svcs = &Services{LiveSliceSvc: service.NewLiveSliceServiceWithClients(tw, nil, store, nil)}
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"audio_key":"uploads/live-audio/take.mp3"}`)},
+	}
+
+	result, err := createLiveAnalysisTaskHandler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("createLiveAnalysisTaskHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	if got := tw.createReq.AudioURL; got != "https://signed.example.com/uploads/live-audio/take.mp3" {
+		t.Fatalf("AudioURL = %q", got)
 	}
 }
 

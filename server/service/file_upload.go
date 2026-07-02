@@ -14,8 +14,19 @@ import (
 
 const (
 	FileUploadPurposeVideoAudio = "video_audio"
+	FileUploadPurposeLiveAudio  = "live_audio"
 	defaultFileUploadURLTTL     = 24 * 3600
 )
+
+type fileUploadPurposePolicy struct {
+	keyPrefix string
+	validate  func(string) bool
+}
+
+var fileUploadPurposePolicies = map[string]fileUploadPurposePolicy{
+	FileUploadPurposeVideoAudio: {keyPrefix: "uploads/video-audio/", validate: isAllowedAudioContentType},
+	FileUploadPurposeLiveAudio:  {keyPrefix: "uploads/live-audio/", validate: isAllowedAudioContentType},
+}
 
 type PreparedFileUpload struct {
 	Key           string            `json:"key"`
@@ -43,7 +54,8 @@ func PrepareFileUpload(ctx context.Context, store storage.Provider, req FileUplo
 	}
 
 	purpose := strings.TrimSpace(req.Purpose)
-	if purpose != FileUploadPurposeVideoAudio {
+	policy, ok := fileUploadPurposePolicies[purpose]
+	if !ok {
 		return nil, fmt.Errorf("unsupported upload purpose %q", purpose)
 	}
 	filename := strings.TrimSpace(req.Filename)
@@ -56,8 +68,8 @@ func PrepareFileUpload(ctx context.Context, store storage.Provider, req FileUplo
 	if contentType == "" {
 		contentType = audioContentType(ext)
 	}
-	if !isAllowedVideoAudioContentType(contentType) {
-		return nil, fmt.Errorf("audio content_type is required for video_audio uploads")
+	if !policy.validate(contentType) {
+		return nil, fmt.Errorf("audio content_type is required for %s uploads", purpose)
 	}
 	if ext == "" {
 		if exts, _ := mime.ExtensionsByType(contentType); len(exts) > 0 {
@@ -72,7 +84,7 @@ func PrepareFileUpload(ctx context.Context, store storage.Provider, req FileUplo
 	if expires <= 0 {
 		expires = defaultFileUploadURLTTL
 	}
-	key := fmt.Sprintf("uploads/video-audio/%s%s", uuid.NewString(), ext)
+	key := fmt.Sprintf("%s%s%s", policy.keyPrefix, uuid.NewString(), ext)
 	uploadURL, err := store.UploadURL(ctx, key, contentType, expires)
 	if err != nil {
 		return nil, fmt.Errorf("create signed upload URL: %w", err)
@@ -92,7 +104,7 @@ func PrepareFileUpload(ctx context.Context, store storage.Provider, req FileUplo
 	}, nil
 }
 
-func isAllowedVideoAudioContentType(contentType string) bool {
+func isAllowedAudioContentType(contentType string) bool {
 	switch strings.ToLower(strings.TrimSpace(contentType)) {
 	case "audio/aac", "audio/flac", "audio/mpeg", "audio/mp4", "audio/ogg", "audio/wav", "audio/wave", "audio/x-wav":
 		return true
