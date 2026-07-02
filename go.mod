@@ -1,4 +1,4 @@
-module github.com/royalrick/anbanwriter
+module github.com/anbanai/anban-creator
 
 go 1.26.0
 

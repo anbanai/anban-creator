@@ -49,7 +49,7 @@ func (d *Downloader) HandleToolResult(ctx context.Context, call trackedToolCall,
 }
 
 // toolBaseName extracts the base tool name from a potentially namespaced name.
-// "mcp__anban__generate_image" → "generate_image"
+// "mcp__plugin_anban_creator__generate_image" → "generate_image"
 // "generate_image" → "generate_image"
 func toolBaseName(name string) string {
 	if strings.HasPrefix(name, "mcp__") {

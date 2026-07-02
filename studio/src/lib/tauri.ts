@@ -55,7 +55,7 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 /**
  * The cloud API base the desktop targets (e.g. `https://api.anbanai.com/api/v1`),
  * or null in a browser. The Tauri shell also mirrors this into
- * `localStorage.anbanwriter_api_base` via a webview initialization script so
+ * `localStorage.anban_creator_api_base` via a webview initialization script so
  * http-client can resolve it synchronously before the first request; this
  * command is used by the settings UI to read/update it at runtime.
  */
@@ -68,7 +68,7 @@ export async function getApiBase(): Promise<string | null> {
  */
 export async function setApiBase(base: string): Promise<boolean> {
   const ok = (await invoke<boolean>('set_api_base', { base })) ?? false
-  if (ok) localStorage.setItem('anbanwriter_api_base', base)
+  if (ok) localStorage.setItem('anban_creator_api_base', base)
   return ok
 }
 

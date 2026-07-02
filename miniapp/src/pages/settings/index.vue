@@ -249,7 +249,7 @@ function handleChangeAvatar() {
             const body = JSON.parse(uploadRes.data)
             if (body.code === 0 && body.data?.avatar) {
               authStore.user!.avatar = body.data.avatar
-              uni.setStorageSync('anbanwriter_user', JSON.stringify(authStore.user))
+              uni.setStorageSync('anban_creator_user', JSON.stringify(authStore.user))
               uni.showToast({ title: '头像已更新', icon: 'success' })
             } else {
               uni.showToast({ title: body.msg || '更新失败', icon: 'none' })

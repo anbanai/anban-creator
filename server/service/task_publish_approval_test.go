@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 // These tests cover the Batch 4A publish-approval state machine (holdApprove/

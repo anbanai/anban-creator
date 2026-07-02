@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	serveragent "github.com/royalrick/anbanwriter/server/agent"
+	serveragent "github.com/anbanai/anban-creator/server/agent"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
 )

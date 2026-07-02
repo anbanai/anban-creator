@@ -13,7 +13,7 @@ import (
 	"github.com/gofiber/contrib/v3/websocket"
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/royalrick/anbanwriter/server/auth"
+	"github.com/anbanai/anban-creator/server/auth"
 )
 
 // Frame write cadence used when pushing data to connected clients.

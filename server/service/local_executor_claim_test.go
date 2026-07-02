@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/royalrick/anbanwriter/server/agent"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 // newLocalSeedTask creates and persists a pending local-target task owned by
@@ -70,7 +70,7 @@ func TestClaimLocalTask_HappyPath(t *testing.T) {
 		t.Fatalf("cfg.MaxTurns = %d, want > 0", cfg.MaxTurns)
 	}
 	if cfg.AgentFlag == "" {
-		t.Fatalf("cfg.AgentFlag empty, expected anbanwriter:<agent>")
+		t.Fatalf("cfg.AgentFlag empty, expected anban:<agent>")
 	}
 	if cfg.Topic != task.Prompt {
 		t.Fatalf("cfg.Topic = %q, want %q", cfg.Topic, task.Prompt)

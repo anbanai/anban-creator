@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/redis/go-redis/v9"
-	"github.com/royalrick/anbanwriter/server/config"
 	"github.com/rs/zerolog"
 	mail "github.com/wneessen/go-mail"
 )

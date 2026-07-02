@@ -9,7 +9,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 // ModelConfigHandler handles per-user AI model configuration endpoints.

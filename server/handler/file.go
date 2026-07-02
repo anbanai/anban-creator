@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 // FileHandler handles file upload endpoints.

@@ -15,13 +15,13 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/royalrick/anbanwriter/server/auth"
-	"github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/handler"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/router"
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/auth"
+	"github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/handler"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/router"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 // ---------------------------------------------------------------------------

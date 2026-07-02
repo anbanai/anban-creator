@@ -15,7 +15,7 @@ func TestVideoAPIConfigDefaultsAndEnvExpansion(t *testing.T) {
 	body := []byte(`
 server: {}
 database:
-  dsn: "user:pass@tcp(localhost:3306)/anbanwriter"
+  dsn: "user:pass@tcp(localhost:3306)/anban-creator"
 jwt:
   secret_key: test-secret-key
 mcp: {}

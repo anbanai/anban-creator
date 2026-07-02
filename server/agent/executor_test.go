@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
-	srvconfig "github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/resolver"
+	appconfig "github.com/anbanai/anban-creator/app/config"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/resolver"
 )
 
 func TestFilterAgentEnvPreservesClaudeConfig(t *testing.T) {
@@ -422,9 +422,9 @@ func TestCountMeaningfulFiles(t *testing.T) {
 		{
 			name: "only excluded dirs",
 			setup: func(t *testing.T, dir string) {
-				os.MkdirAll(filepath.Join(dir, ".anbanwriter"), 0755)
+				os.MkdirAll(filepath.Join(dir, ".anban-creator"), 0755)
 				os.MkdirAll(filepath.Join(dir, ".claude"), 0755)
-				os.WriteFile(filepath.Join(dir, ".anbanwriter", "settings.json"), []byte("{}"), 0644)
+				os.WriteFile(filepath.Join(dir, ".anban-creator", "settings.json"), []byte("{}"), 0644)
 				os.WriteFile(filepath.Join(dir, ".claude", ".mcp.json"), []byte("{}"), 0644)
 			},
 			want: 0,
@@ -460,8 +460,8 @@ func TestCountMeaningfulFiles(t *testing.T) {
 		{
 			name: "mixed with excluded",
 			setup: func(t *testing.T, dir string) {
-				os.MkdirAll(filepath.Join(dir, ".anbanwriter"), 0755)
-				os.WriteFile(filepath.Join(dir, ".anbanwriter", "settings.json"), []byte("{}"), 0644)
+				os.MkdirAll(filepath.Join(dir, ".anban-creator"), 0755)
+				os.WriteFile(filepath.Join(dir, ".anban-creator", "settings.json"), []byte("{}"), 0644)
 				os.WriteFile(filepath.Join(dir, "index.html"), []byte("<p>hi</p>"), 0644)
 				os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("bin"), 0644)
 			},
@@ -984,7 +984,7 @@ func TestLoadAgentDefinition(t *testing.T) {
 						t.Error("designer must omit tools to inherit MCP tools")
 					}
 				} else if len(def.Tools) != 0 {
-					// All MCP-needing agents omit `tools:` to inherit the full mcp__anban__*
+					// All MCP-needing agents omit `tools:` to inherit the full mcp__plugin_anban_creator__*
 					// toolset (Claude Code treats `tools` as an allowlist — see
 					// claudecode/CLAUDE.md). designer is asserted above; the others must
 					// also omit. The legacy "must specify tools" policy was dropped when

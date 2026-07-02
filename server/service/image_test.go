@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
-	appimage "github.com/royalrick/anbanwriter/app/image"
-	srvconfig "github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
+	appconfig "github.com/anbanai/anban-creator/app/config"
+	appimage "github.com/anbanai/anban-creator/app/image"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/rs/zerolog"
 )
 

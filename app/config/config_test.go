@@ -10,7 +10,7 @@ import (
 func TestLoad_DefaultConfig(t *testing.T) {
 	// 使用临时配置文件，避免加载用户配置
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "anbanwriter.json")
+	configPath := filepath.Join(tmpDir, "anban-creator.json")
 
 	// 创建一个最小的配置文件（只包含必需的微信配置）
 	minimalConfig := `{
@@ -212,7 +212,7 @@ func TestFindConfigFile(t *testing.T) {
 }
 
 func TestDefaultConfigPath(t *testing.T) {
-	want := filepath.Join(".anbanwriter", "settings.json")
+	want := filepath.Join(".anban-creator", "settings.json")
 	if got := DefaultConfigPath(); got != want {
 		t.Errorf("DefaultConfigPath() = %q, want %q", got, want)
 	}

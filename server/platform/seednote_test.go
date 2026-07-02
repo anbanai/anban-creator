@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/royalrick/anbanwriter/server/seednote"
+	"github.com/anbanai/anban-creator/server/seednote"
 )
 
 // NOTE: TestExtractSeednoteNoteID and TestNormalizeSeednoteMetricCount are in seednote_metrics_test.go.

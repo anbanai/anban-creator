@@ -72,7 +72,7 @@ func TestIsValidImageFile_UnsupportedExt(t *testing.T) {
 }
 
 func TestIsValidImageFile_Missing(t *testing.T) {
-	if IsValidImageFile("/no/such/anbanwriter-file.png") {
+	if IsValidImageFile("/no/such/anban-creator-file.png") {
 		t.Fatal("IsValidImageFile must reject a missing file")
 	}
 }

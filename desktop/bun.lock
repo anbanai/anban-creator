@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "anbanwriter-desktop",
+      "name": "anban-creator-desktop",
       "dependencies": {
         "@tauri-apps/api": "^2",
       },

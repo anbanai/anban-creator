@@ -8,7 +8,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 // WCFBindingService is the handler-side interface for the WeChat-binding

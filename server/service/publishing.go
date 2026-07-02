@@ -7,12 +7,12 @@ import (
 
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
-	"github.com/royalrick/anbanwriter/app/draft"
-	"github.com/royalrick/anbanwriter/app/wechat"
-	"github.com/royalrick/anbanwriter/server/agent"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
+	appconfig "github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/app/draft"
+	"github.com/anbanai/anban-creator/app/wechat"
+	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 // PublishingService handles WeChat draft publishing.

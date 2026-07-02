@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

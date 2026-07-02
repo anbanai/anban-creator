@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // Retry clones a failed task's configuration into a fresh pending task and

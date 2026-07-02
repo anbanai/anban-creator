@@ -7,9 +7,9 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 // ImageModelHandler exposes the list of image models the current user can select

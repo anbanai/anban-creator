@@ -53,7 +53,7 @@ RUN npx -y skills@1.5.14 add heygen-com/hyperframes \
         -y
 
 RUN claude plugin marketplace add /anbanai && \
-    claude plugin install --scope user anbanwriter@anbanai
+    claude plugin install --scope user anban@anbanai
 
 # Ensure data directories are writable by node user.
 # Switch back to root only to create/chown directories, then drop to node.

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // mimeTypes maps file extensions to MIME types.
@@ -95,7 +95,7 @@ func DetermineTaskFileRole(filename, mimeType string) string {
 // ShouldSkipTaskFileDir reports whether a directory should be excluded from task uploads.
 func ShouldSkipTaskFileDir(name string) bool {
 	switch name {
-	case ".anbanwriter", ".claude":
+	case ".anban-creator", ".claude":
 		return true
 	default:
 		return false

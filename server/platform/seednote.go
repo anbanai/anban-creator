@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/royalrick/anbanwriter/server/seednote"
+	"github.com/anbanai/anban-creator/server/seednote"
 )
 
 // SeednoteProvider fetches Seednote data via the xiaohongshu-mcp Docker sidecar.

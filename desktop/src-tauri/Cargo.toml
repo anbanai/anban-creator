@@ -1,14 +1,14 @@
 [package]
-name = "anbanwriter-desktop"
+name = "anban-creator-desktop"
 version = "0.1.0"
-description = "AnbanWriter desktop shell — cloud data + local execution"
-authors = ["AnbanWriter"]
+description = "Anban Creator desktop shell — cloud data + local execution"
+authors = ["Anban Creator"]
 edition = "2021"
 rust-version = "1.77"
 
 # The library name is what mobile targets and the tauri build look for.
 [lib]
-name = "anbanwriter_desktop_lib"
+name = "anban_creator_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

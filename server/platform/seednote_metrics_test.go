@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/royalrick/anbanwriter/server/seednote"
+	"github.com/anbanai/anban-creator/server/seednote"
 )
 
 func TestExtractSeednoteNoteID(t *testing.T) {

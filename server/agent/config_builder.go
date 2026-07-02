@@ -13,11 +13,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
-	srvconfig "github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/resolver"
-	"github.com/royalrick/anbanwriter/server/storage"
+	appconfig "github.com/anbanai/anban-creator/app/config"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/resolver"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 // maxReferenceImageBytes caps downloaded reference image size to prevent
@@ -161,8 +161,8 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 	return cfg, nil
 }
 
-// writeSettingsJSON writes the app config to the workspace's .anbanwriter/settings.json.
-// The abwriter CLI binary reads config from CWD/.anbanwriter/settings.json as its
+// writeSettingsJSON writes the app config to the workspace's .anban-creator/settings.json.
+// The abwriter CLI binary reads config from CWD/.anban-creator/settings.json as its
 // highest-priority search path.
 func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	path := filepath.Join(workDir, appconfig.ConfigDir, appconfig.ConfigFileName)
@@ -203,7 +203,7 @@ func TaskTypeToAgent(taskType string) string {
 }
 
 // DownloadReferenceImage downloads a project's brand reference image to the
-// workspace's .anbanwriter directory. The image is saved as reference.png for
+// workspace's .anban-creator directory. The image is saved as reference.png for
 // use by both Claude Code (visual context) and abwriter CLI (--ref flag).
 //
 // Resolution order:
@@ -278,7 +278,7 @@ func DownloadReferenceImage(ctx context.Context, store storage.Provider, logger 
 }
 
 // DownloadProductImages downloads each product photo URL into the workspace's
-// .anbanwriter/products/ directory (used by e-commerce tasks), preserving upload
+// .anban-creator/products/ directory (used by e-commerce tasks), preserving upload
 // order with 1-indexed names (product_01.<ext>, product_02.<ext>, ...). It also
 // writes index.json listing the exact filenames so the agent can reference them
 // deterministically (extensions vary by upload). Returns the count successfully

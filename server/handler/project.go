@@ -18,12 +18,12 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/platform"
-	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/seednote"
-	"github.com/royalrick/anbanwriter/server/service"
-	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/platform"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/seednote"
+	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 // ProjectHandler handles project-related HTTP endpoints.

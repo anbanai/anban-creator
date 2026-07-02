@@ -206,7 +206,7 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		"- portrait-pose-variants",
 		"- capcut-draft",
 		"mcpServers:",
-		"- anban",
+		"- creator",
 		"prepare_file_upload",
 		"create_video_asr_task",
 		"query_video_asr_task",

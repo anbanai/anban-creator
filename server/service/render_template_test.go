@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // ---------------------------------------------------------------------------

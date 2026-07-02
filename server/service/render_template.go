@@ -10,8 +10,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/app/converter"
-	"github.com/royalrick/anbanwriter/server/resources"
+	"github.com/anbanai/anban-creator/app/converter"
+	"github.com/anbanai/anban-creator/server/resources"
 )
 
 // ---------------------------------------------------------------------------

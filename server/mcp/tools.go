@@ -8,12 +8,12 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/resources"
-	"github.com/royalrick/anbanwriter/server/seednote"
-	"github.com/royalrick/anbanwriter/server/service"
-	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/resources"
+	"github.com/anbanai/anban-creator/server/seednote"
+	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 // Services holds the service instances needed by MCP tools.
@@ -394,10 +394,10 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		// generate_image's ref_image_paths) for max product fidelity; Volcengine/
 		// Seedream take a single ref (strong i2i), so the agent uses one anchor ref
 		// + product-bible text block. Product photos are downloaded by the executor
-		// into .anbanwriter/products/ (see agent.DownloadProductImages); the agent
+		// into .anban-creator/products/ (see agent.DownloadProductImages); the agent
 		// reads index.json there for the exact filenames.
 		ec := map[string]any{
-			"product_photo_dir": ".anbanwriter/products",
+			"product_photo_dir": ".anban-creator/products",
 			"consistency_audit": true, // verify_with_vision self-check loop
 		}
 		if task != nil {

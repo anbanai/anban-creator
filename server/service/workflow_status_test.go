@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 func TestDetermineWorkflowArtifactRole(t *testing.T) {

@@ -10,8 +10,8 @@
 package resolver
 
 import (
-	"github.com/royalrick/anbanwriter/app/writer"
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/app/writer"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // Resolved holds the effective (post-resolution) value and its source for every

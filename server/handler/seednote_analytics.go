@@ -9,7 +9,7 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 type SeednoteAnalyticsService interface {

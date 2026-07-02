@@ -11,8 +11,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/wcf"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/wcf"
 )
 
 // maxWeChatPromptRunes caps the prompt a user can submit via WeChat. Mirrors the

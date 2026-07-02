@@ -1,4 +1,4 @@
-# AnbanWriter Desktop (Tauri v2)
+# Anban Creator Desktop (Tauri v2)
 
 A high-performance desktop shell around the existing **Studio** web frontend.
 Same data, same features — but **task execution moves local**: the desktop
@@ -82,7 +82,7 @@ bun tauri build    # production .app / .dmg (builds Studio first)
 
 1. **Log in** to Studio (JWT, same as web) — all cloud features work unchanged.
 2. Open **本地工作台 / 设置** (the desktop settings surface):
-   - **AnbanWriter API Key** — create one in Studio → API 密钥, paste it here
+   - **Anban Creator API Key** — create one in Studio → API 密钥, paste it here
      (the local executor authenticates `/agent/claim` with it).
    - **Claude 鉴权** — paste an `ANTHROPIC_API_KEY`, or run the bundled
      `claude` OAuth login once.
@@ -113,7 +113,7 @@ bun tauri build    # production .app / .dmg (builds Studio first)
 - **The Rust here is scaffolded, not build-verified in CI** — the Tauri build
   is run locally (`bun tauri build`). Expect to iterate on exact
   `tauri-plugin-*` v2 method names during the first compile.
-- **localStorage seeding**: `lib.rs` injects `anbanwriter_api_base` into the
+- **localStorage seeding**: `lib.rs` injects `anban_creator_api_base` into the
   webview via an initialization script so axios resolves the cloud base before
   the first request. The Studio `http-client.ts` reads it synchronously.
 - See the root project's `CLAUDE.md` for the server-side claim protocol

@@ -11,7 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 // fakeWCFBindingService implements handler.WCFBindingService so the HTTP layer

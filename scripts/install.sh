@@ -43,7 +43,7 @@ mkdir -p "$INSTALL_DIR"
 
 # 下载
 echo "正在下载..."
-DOWNLOAD_URL="https://github.com/royalrick/anbanwriter/releases/latest/download/$BINARY"
+DOWNLOAD_URL="https://github.com/anbanai/anban-creator/releases/latest/download/$BINARY"
 echo "下载地址: $DOWNLOAD_URL"
 
 if command -v curl >/dev/null 2>&1; then

@@ -16,7 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 // statusWriter wraps http.ResponseWriter to capture the status code.

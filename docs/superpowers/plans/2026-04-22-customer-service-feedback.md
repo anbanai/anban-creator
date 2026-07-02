@@ -71,7 +71,7 @@ func AutoMigrate(db *gorm.DB) error {
 
 - [ ] **Step 3: Verify model compiles**
 
-Run: `cd /Users/medivh/WORKSPACE/anbanwriter && go build ./server/model/...`
+Run: `cd /Users/medivh/WORKSPACE/anban-creator && go build ./server/model/...`
 Expected: no errors
 
 - [ ] **Step 4: Commit**
@@ -132,7 +132,7 @@ package repository
 import (
 	"context"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 	"gorm.io/gorm"
 )
 
@@ -151,7 +151,7 @@ func (r *feedbackRepository) Create(ctx context.Context, feedback *model.Feedbac
 
 - [ ] **Step 4: Verify compilation**
 
-Run: `cd /Users/medivh/WORKSPACE/anbanwriter && go build ./server/repository/...`
+Run: `cd /Users/medivh/WORKSPACE/anban-creator && go build ./server/repository/...`
 Expected: no errors
 
 - [ ] **Step 5: Commit**
@@ -182,8 +182,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 // FeedbackService handles feedback business logic.
@@ -232,7 +232,7 @@ func (s *FeedbackService) Create(ctx context.Context, userID, feedbackType, cont
 
 - [ ] **Step 2: Verify compilation**
 
-Run: `cd /Users/medivh/WORKSPACE/anbanwriter && go build ./server/service/...`
+Run: `cd /Users/medivh/WORKSPACE/anban-creator && go build ./server/service/...`
 Expected: no errors
 
 - [ ] **Step 3: Commit**
@@ -261,7 +261,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 // FeedbackHandler handles feedback-related HTTP endpoints.
@@ -323,9 +323,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func setupFeedbackHandler(t *testing.T) (*FeedbackHandler, repository.Repository) {
@@ -409,7 +409,7 @@ func TestFeedbackService_Create(t *testing.T) {
 
 - [ ] **Step 3: Run tests to verify they pass**
 
-Run: `cd /Users/medivh/WORKSPACE/anbanwriter && go test -v ./server/handler/ -run TestFeedbackService`
+Run: `cd /Users/medivh/WORKSPACE/anban-creator && go test -v ./server/handler/ -run TestFeedbackService`
 Expected: all PASS
 
 - [ ] **Step 4: Commit**
@@ -477,12 +477,12 @@ if svc.FeedbackHandler != nil {
 
 - [ ] **Step 3: Verify full server compilation**
 
-Run: `cd /Users/medivh/WORKSPACE/anbanwriter && go build ./server/...`
+Run: `cd /Users/medivh/WORKSPACE/anban-creator && go build ./server/...`
 Expected: no errors
 
 - [ ] **Step 4: Run all server tests**
 
-Run: `cd /Users/medivh/WORKSPACE/anbanwriter && go test -v ./server/...`
+Run: `cd /Users/medivh/WORKSPACE/anban-creator && go test -v ./server/...`
 Expected: all PASS
 
 - [ ] **Step 5: Commit**
@@ -550,7 +550,7 @@ export const api = {
 
 - [ ] **Step 3: Verify TypeScript compiles**
 
-Run: `cd /Users/medivh/WORKSPACE/anbanwriter/studio && bun run tsc --noEmit 2>&1 | head -20`
+Run: `cd /Users/medivh/WORKSPACE/anban-creator/studio && bun run tsc --noEmit 2>&1 | head -20`
 Expected: no errors related to feedback files
 
 - [ ] **Step 4: Commit**
@@ -711,7 +711,7 @@ The user needs to provide the actual WeChat QR code image. Place it at `studio/p
 
 - [ ] **Step 3: Verify TypeScript compiles**
 
-Run: `cd /Users/medivh/WORKSPACE/anbanwriter/studio && bun run tsc --noEmit 2>&1 | head -20`
+Run: `cd /Users/medivh/WORKSPACE/anban-creator/studio && bun run tsc --noEmit 2>&1 | head -20`
 Expected: no errors related to FeedbackFab
 
 - [ ] **Step 4: Commit**
@@ -755,7 +755,7 @@ export default function AppLayout() {
 
 - [ ] **Step 2: Verify full build**
 
-Run: `cd /Users/medivh/WORKSPACE/anbanwriter/studio && bun run tsc --noEmit`
+Run: `cd /Users/medivh/WORKSPACE/anban-creator/studio && bun run tsc --noEmit`
 Expected: no errors
 
 - [ ] **Step 3: Commit**

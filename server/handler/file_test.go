@@ -12,11 +12,11 @@ import (
 func setupFileHandlerTest(userID string) *fiber.App {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	store := &fakeStorageProvider{data: map[string][]byte{
-		"user-1/designer/gen-1/0.png":              []byte("png-bytes"),
-		"uploads/projects/user-1/ref.png":          []byte("project-png"),
-		"uploads/references/user-1/source.png":     []byte("ref-png"),
-		"user-2/designer/gen-2/0.png":              []byte("other-user-png"),
-		"user-1/anbanwriter_ref_fileid_source.png": []byte("ref-bytes"),
+		"user-1/designer/gen-1/0.png":                []byte("png-bytes"),
+		"uploads/projects/user-1/ref.png":            []byte("project-png"),
+		"uploads/references/user-1/source.png":       []byte("ref-png"),
+		"user-2/designer/gen-2/0.png":                []byte("other-user-png"),
+		"user-1/anban-creator_ref_fileid_source.png": []byte("ref-bytes"),
 	}}
 	h := NewFileHandler(store, &logger)
 
@@ -89,12 +89,12 @@ func TestServeFile_RejectsUnauthenticatedRequest(t *testing.T) {
 }
 
 func TestServeFile_RejectsReferenceFilePath(t *testing.T) {
-	// Paths like "{userID}/anbanwriter_ref_..." are reference files saved by
+	// Paths like "{userID}/anban-creator_ref_..." are reference files saved by
 	// uploadReferenceFromUrl. They are NOT served by /api/v1/files/* — clients
 	// never load them directly. Make sure we don't accidentally allow them.
 	app := setupFileHandlerTest("user-1")
 
-	resp, err := app.Test(httptest.NewRequest("GET", "/files/user-1/anbanwriter_ref_fileid_source.png", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/files/user-1/anban-creator_ref_fileid_source.png", nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}

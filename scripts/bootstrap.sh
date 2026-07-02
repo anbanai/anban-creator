@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-REPO="royalrick/abwriter"
+REPO="anbanai/anban-creator"
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 BIN_DIR="$ROOT/bin"
 LOG="$BIN_DIR/.bootstrap.log"

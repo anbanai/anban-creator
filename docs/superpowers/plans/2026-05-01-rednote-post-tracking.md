@@ -406,7 +406,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -836,9 +836,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/platform"
-	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/platform"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 type fakeSeednotePlatform struct {
@@ -1040,9 +1040,9 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/platform"
-	"github.com/royalrick/anbanwriter/server/repository"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/platform"
+	"github.com/anbanai/anban-creator/server/repository"
 )
 
 const (
@@ -1689,7 +1689,7 @@ seednoteTrackingSvc = service.NewSeednoteTrackingService(
 taskSvc.SetSeednoteTrackingService(seednoteTrackingSvc)
 ```
 
-3. Add `github.com/royalrick/anbanwriter/server/platform` to imports.
+3. Add `github.com/anbanai/anban-creator/server/platform` to imports.
 4. Change `startAsynqServer` signature:
 
 ```go
@@ -1757,7 +1757,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 type fakeSeednoteAnalyticsService struct {
@@ -1829,7 +1829,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 type SeednoteAnalyticsService interface {

@@ -1,9 +1,9 @@
 import type { ApiResponse } from '@/types'
 
 const API_BASE_URL = '/api/v1'
-const TOKEN_KEY = 'anbanwriter_token'
-const REFRESH_TOKEN_KEY = 'anbanwriter_refresh_token'
-const USER_KEY = 'anbanwriter_user'
+const TOKEN_KEY = 'anban_creator_token'
+const REFRESH_TOKEN_KEY = 'anban_creator_refresh_token'
+const USER_KEY = 'anban_creator_user'
 const DEFAULT_TIMEOUT = 30000
 
 let isRefreshing = false

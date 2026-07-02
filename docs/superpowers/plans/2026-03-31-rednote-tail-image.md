@@ -167,7 +167,7 @@ Agent 在 image-plan 阶段根据内容主题自动判断，无需用户指定�
 
 ```bash
 # 单独生成尾图（与封面风格一致）
-anbanwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
+anban-creator image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
 ```
 
 > **关键规则**：尾图单独生成，不使用 `--count`。输出固定命名为 `tail.png`。
@@ -259,13 +259,13 @@ git commit -m "feat(seednote): add tail image design spec with follow/comment/tr
 
 将第 139-141 行 CLI 命令：
 ```bash
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-1 --ref ./cover.png -o ./
+anban-creator image generate "{paged_prompt}" --mode xhs --count N-1 --ref ./cover.png -o ./
 # 输出自动命名为 image_01.png, image_02.png ... image_0{N-1}.png
 ```
 
 替换为：
 ```bash
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
+anban-creator image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
 # 输出自动命名为 image_01.png, image_02.png ... image_0{N-2}.png
 # 尾图单独生成见 tail.md
 ```
@@ -307,24 +307,24 @@ git commit -m "refactor(seednote): extract tail image spec from content.md to ta
 将第 47-52 行：
 ```markdown
 # 批量生成内容图（N-1 张 + 尾图）
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-1 -o ./
+anban-creator image generate "{paged_prompt}" --mode xhs --count N-1 -o ./
 
 # 带参考图（保持风格一致）
-anbanwriter image generate "{prompt}" --mode xhs --cover --ref ./cover.png -o ./cover.png
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-1 --ref ./cover.png -o ./
+anban-creator image generate "{prompt}" --mode xhs --cover --ref ./cover.png -o ./cover.png
+anban-creator image generate "{paged_prompt}" --mode xhs --count N-1 --ref ./cover.png -o ./
 ```
 
 替换为：
 ```markdown
 # 批量生成内容图（N-2 张，不含尾图）
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 -o ./
+anban-creator image generate "{paged_prompt}" --mode xhs --count N-2 -o ./
 
 # 单独生成尾图
-anbanwriter image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
+anban-creator image generate "{tail_prompt}" --mode xhs --ref ./cover.png -o ./tail.png
 
 # 带参考图（保持风格一致）
-anbanwriter image generate "{prompt}" --mode xhs --cover --ref ./cover.png -o ./cover.png
-anbanwriter image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
+anban-creator image generate "{prompt}" --mode xhs --cover --ref ./cover.png -o ./cover.png
+anban-creator image generate "{paged_prompt}" --mode xhs --count N-2 --ref ./cover.png -o ./
 ```
 
 - [ ] **Step 3: 更新关键规则说明**

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type fakeLiveSliceLLM struct {

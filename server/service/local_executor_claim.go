@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/royalrick/anbanwriter/server/agent"
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // maxExecutorInfoBytes caps the desktop-supplied diagnostics blob written to the
@@ -50,7 +50,7 @@ type LocalExecutionConfig struct {
 	TaskID                   string `json:"task_id"`
 	TaskType                 string `json:"task_type"`
 	Topic                    string `json:"topic"`
-	AgentFlag                string `json:"agent_flag"` // "anbanwriter:<agent>"
+	AgentFlag                string `json:"agent_flag"` // "anban:<agent>"
 	MaxTurns                 int    `json:"max_turns"`
 	Model                    string `json:"model,omitempty"`
 	Goal                     string `json:"goal,omitempty"`
@@ -101,7 +101,7 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutio
 		TaskID:                   task.ID,
 		TaskType:                 task.Type,
 		Topic:                    task.Prompt,
-		AgentFlag:                "anbanwriter:" + agent.TaskTypeToAgent(task.Type),
+		AgentFlag:                "anban:" + agent.TaskTypeToAgent(task.Type),
 		MaxTurns:                 agent.DefaultMaxTurns(task.Type, s.maxTurnsOverrides),
 		Model:                    s.defaultModel,
 		Goal:                     task.Goal,

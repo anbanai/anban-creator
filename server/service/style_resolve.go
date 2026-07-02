@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/resolver"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/resolver"
 )
 
 // ResolveStyle and Resolved live in the leaf resolver package so the agent package

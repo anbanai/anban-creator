@@ -10,9 +10,9 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	serveragent "github.com/royalrick/anbanwriter/server/agent"
-	"github.com/royalrick/anbanwriter/server/service"
-	"github.com/royalrick/anbanwriter/server/storage"
+	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const agentUserIDContextKey = "agent_user_id"

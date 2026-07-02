@@ -63,7 +63,8 @@ npm install -g @anthropic-ai/claude-code
 
 展示插件安装命令：
 ```bash
-/install-plugin anbanai/anbanwriter
+claude plugin marketplace add anbanai/anban-creator-claudecode
+claude plugin install --scope user anban@anbanai
 ```
 提示：安装后通过 `/plugin` 确认版本。
 
@@ -80,7 +81,7 @@ export ANBAN_API_URL="https://你的域名"  # 本地开发默认 http://localho
 
 ### 步骤 4: 图片生成配置（可选）
 
-展示 `~/.anbanwriter/settings.json` 配置模板，包含 provider 对比表格（OpenAI / Gemini / 火山引擎）。
+展示 `~/.anban-creator/settings.json` 配置模板，包含 provider 对比表格（OpenAI / Gemini / 火山引擎）。
 
 ### 步骤 5: 微信公众号配置（可选）
 

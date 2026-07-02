@@ -1,9 +1,9 @@
 {
-  "name": "anbanwriter-desktop",
+  "name": "anban-creator-desktop",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "AnbanWriter desktop shell (Tauri v2) — cloud data + local execution.",
+  "description": "Anban Creator desktop shell (Tauri v2) — cloud data + local execution.",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",

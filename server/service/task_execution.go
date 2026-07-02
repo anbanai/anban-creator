@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/royalrick/anbanwriter/server/agent"
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // HandleExecution is called by the async worker to execute a task.

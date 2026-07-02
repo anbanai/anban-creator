@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/royalrick/anbanwriter/server/resources"
+	"github.com/anbanai/anban-creator/server/resources"
 )
 
 // registerResourceTools registers resource discovery MCP tools.

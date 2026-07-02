@@ -12,7 +12,7 @@ const (
 	MinWeChatPixels = 3686400
 
 	// ConfigDir 项目本地配置目录
-	ConfigDir = ".anbanwriter"
+	ConfigDir = ".anban-creator"
 	// ConfigFileName 配置文件名
 	ConfigFileName = "settings.json"
 
@@ -209,7 +209,7 @@ func findConfigFile() string {
 	// 用户目录（优先于可执行文件相对路径，避免开发目录污染）
 	if home, err := os.UserHomeDir(); err == nil {
 		paths = append(paths,
-			filepath.Join(home, ".config", "anbanwriter", ConfigFileName),
+			filepath.Join(home, ".config", "anban-creator", ConfigFileName),
 			filepath.Join(home, ConfigDir, ConfigFileName),
 		)
 	}
@@ -221,8 +221,8 @@ func findConfigFile() string {
 			exeDir = filepath.Dir(realExe)
 		}
 		paths = append(paths,
-			filepath.Join(exeDir, ConfigDir, ConfigFileName),       // 同级: scripts/.anbanwriter/
-			filepath.Join(exeDir, "..", ConfigDir, ConfigFileName), // 上级: .anbanwriter/（项目根目录）
+			filepath.Join(exeDir, ConfigDir, ConfigFileName),       // 同级: scripts/.anban-creator/
+			filepath.Join(exeDir, "..", ConfigDir, ConfigFileName), // 上级: .anban-creator/（项目根目录）
 		)
 	}
 

@@ -12,8 +12,8 @@ import (
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 
-	"github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 const (

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AnbanWriter",
+  "productName": "Anban Creator",
   "version": "0.1.0",
-  "identifier": "com.anbanwriter.desktop",
+  "identifier": "ai.anban.creator.desktop",
   "build": {
     "frontendDist": "../../studio/dist",
     "beforeDevCommand": {

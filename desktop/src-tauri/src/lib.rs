@@ -17,7 +17,7 @@ fn init_script(api_base: &str) -> String {
     // Serialize as a JSON string literal (handles quotes/escapes safely).
     let base_json = serde_json::to_string(api_base).unwrap_or_else(|_| "\"\"".to_string());
     format!(
-        "(function(){{try{{window.localStorage.setItem('anbanwriter_api_base',{base});}}catch(e){{}}}})();",
+        "(function(){{try{{window.localStorage.setItem('anban_creator_api_base',{base});}}catch(e){{}}}})();",
         base = base_json
     )
 }
@@ -28,7 +28,7 @@ fn init_script(api_base: &str) -> String {
 /// No custom items → no accelerator parsing → no runtime-panic risk.
 fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, SubmenuBuilder};
-    let app_menu = SubmenuBuilder::new(app, "AnbanWriter")
+    let app_menu = SubmenuBuilder::new(app, "Anban Creator")
         .about(None)
         .separator()
         .services()
@@ -88,7 +88,7 @@ pub fn run() {
             let saved = window_state::load(&config_dir);
             let mut builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                    .title("AnbanWriter")
+                    .title("Anban Creator")
                     .min_inner_size(960.0, 640.0)
                     .initialization_script(init_script(&api_base_for_script));
             if let Some(s) = &saved {

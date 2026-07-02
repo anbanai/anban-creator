@@ -48,10 +48,10 @@ export default function OpenClawGuide() {
 
       <InstallStep
         cliName="OpenClaw CLI"
-        oneLiner="帮我安装 anbanwriter OpenClaw 插件 https://github.com/anbanai/anbanwriter-openclaw"
+        oneLiner="帮我安装 Anban Creator OpenClaw 插件 https://github.com/anbanai/anban-creator-openclaw"
         oneLinerHint="AI 会自动完成仓库克隆与原生插件注册。"
-        advancedCli={`git clone https://github.com/anbanai/anbanwriter-openclaw.git
-cd anbanwriter-openclaw
+        advancedCli={`git clone https://github.com/anbanai/anban-creator-openclaw.git
+cd anban-creator-openclaw
 openclaw plugins install ./`}
       />
 

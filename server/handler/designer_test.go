@@ -9,9 +9,9 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
-	srvconfig "github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/service"
+	appconfig "github.com/anbanai/anban-creator/app/config"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func setupDesignerHandlerTest() *fiber.App {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	serveragent "github.com/royalrick/anbanwriter/server/agent"
-	"github.com/royalrick/anbanwriter/server/model"
+	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 // ValidateAgentTaskAccess loads a task and verifies that the authenticated agent

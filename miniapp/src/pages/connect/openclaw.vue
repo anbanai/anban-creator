@@ -14,9 +14,9 @@
 
     <view class="step-card">
       <text class="step-card__title">2. 克隆插件</text>
-      <view class="copy-block" @tap="copyText('git clone https://github.com/anbanai/anbanwriter-openclaw.git\ncd anbanwriter-openclaw')">
-        <text class="copy-block__code">git clone https://github.com/anbanai/anbanwriter-openclaw.git
-cd anbanwriter-openclaw</text>
+      <view class="copy-block" @tap="copyText('git clone https://github.com/anbanai/anban-creator-openclaw.git\ncd anban-creator-openclaw')">
+        <text class="copy-block__code">git clone https://github.com/anbanai/anban-creator-openclaw.git
+cd anban-creator-openclaw</text>
         <text class="copy-block__hint">点击复制</text>
       </view>
     </view>

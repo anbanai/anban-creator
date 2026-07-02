@@ -15,9 +15,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/storage"
+	appconfig "github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 // fakeStore is a minimal storage.Provider for DownloadReferenceImage tests.

@@ -10,9 +10,9 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/service"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 const planCheckerLockKey = "plan_checker:lock"

@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/royalrick/anbanwriter/server/storage"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (

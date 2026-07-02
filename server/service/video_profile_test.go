@@ -3,8 +3,8 @@ package service
 import (
 	"testing"
 
-	"github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
+	"github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 func TestResolveVideoGenerationPlanRequiresProjectProfile(t *testing.T) {

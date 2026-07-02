@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    anbanwriter_desktop_lib::run()
+    anban_creator_desktop_lib::run()
 }

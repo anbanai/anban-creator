@@ -13,7 +13,7 @@ import (
 	credential "github.com/aliyun/credentials-go/credentials"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/royalrick/anbanwriter/server/config"
+	"github.com/anbanai/anban-creator/server/config"
 )
 
 // AlibabaTingWuClient calls Alibaba TingWu directly without an anban.ai service hop.

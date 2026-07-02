@@ -207,7 +207,7 @@ mod tests {
             task_id: "task-1".to_string(),
             task_type: "article".to_string(),
             topic: "topic".to_string(),
-            agent_flag: "anbanwriter:wechatarticle".to_string(),
+            agent_flag: "anban:wechatarticle".to_string(),
             max_turns: 12,
             model: None,
             goal: None,

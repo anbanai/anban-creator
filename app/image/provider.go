@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/royalrick/anbanwriter/app/config"
+	"github.com/anbanai/anban-creator/app/config"
 	"github.com/rs/zerolog"
 )
 

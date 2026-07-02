@@ -10,11 +10,11 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	appconfig "github.com/royalrick/anbanwriter/app/config"
-	srvconfig "github.com/royalrick/anbanwriter/server/config"
-	"github.com/royalrick/anbanwriter/server/model"
-	"github.com/royalrick/anbanwriter/server/repository"
-	"github.com/royalrick/anbanwriter/server/service"
+	appconfig "github.com/anbanai/anban-creator/app/config"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/service"
 )
 
 func setupModelConfigHandlerTest(t *testing.T) *fiber.App {

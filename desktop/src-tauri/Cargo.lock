@@ -33,7 +33,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "anbanwriter-desktop"
+name = "anban-creator-desktop"
 version = "0.1.0"
 dependencies = [
  "log",
