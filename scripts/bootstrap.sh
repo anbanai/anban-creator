@@ -81,8 +81,10 @@ if [ "$CURRENT_VERSION" != "$LATEST" ] || [ ! -x "$SERVER_DEST" ]; then
   install_asset "$SERVER_ASSET" "$SERVER_DEST"
 fi
 
-if [ "$CURRENT_VERSION" != "$LATEST" ] || [ ! -x "$AGENT_DEST" ]; then
+if [ ! -x "$AGENT_DEST" ]; then
   install_asset "$AGENT_ASSET" "$AGENT_DEST"
+else
+  echo "Keeping bundled $AGENT_DEST"
 fi
 
 echo "$LATEST" > "$VERSION_FILE"

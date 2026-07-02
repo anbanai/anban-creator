@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -69,6 +70,69 @@ func TestPluginBootstrapInstallsAnbanBinary(t *testing.T) {
 		} else if body != first {
 			t.Fatalf("bootstrap scripts must stay identical; %s differs", path)
 		}
+	}
+}
+
+func TestPluginBootstrapPreservesBundledAnbanBinary(t *testing.T) {
+	root := repositoryRoot(t)
+	pluginRoot := t.TempDir()
+	binDir := filepath.Join(pluginRoot, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentPath := filepath.Join(binDir, "anban")
+	if err := os.WriteFile(agentPath, []byte("bundled-anban\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeBin := t.TempDir()
+	writeExecutable(t, filepath.Join(fakeBin, "uname"), `#!/usr/bin/env bash
+case "$1" in
+  -s) echo Darwin ;;
+  -m) echo arm64 ;;
+  *) /usr/bin/uname "$@" ;;
+esac
+`)
+	writeExecutable(t, filepath.Join(fakeBin, "curl"), `#!/usr/bin/env bash
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+    break
+  fi
+  prev="$arg"
+done
+if printf '%s\n' "$*" | grep -q 'api.github.com'; then
+  printf '{"tag_name":"v9.9.9"}\n'
+  exit 0
+fi
+if [ -z "$out" ]; then
+  echo "missing -o" >&2
+  exit 2
+fi
+printf 'downloaded asset\n' > "$out"
+`)
+
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "bootstrap.sh"))
+	cmd.Env = append(os.Environ(),
+		"ANBAN_PLUGIN_ROOT="+pluginRoot,
+		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bootstrap failed: %v\n%s", err, output)
+	}
+
+	raw, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(raw); got != "bundled-anban\n" {
+		t.Fatalf("bootstrap overwrote bundled bin/anban: got %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(binDir, "anban-creator-server")); err != nil {
+		t.Fatalf("bootstrap should still install missing server binary: %v", err)
 	}
 }
 
@@ -190,5 +254,12 @@ func assertPluginVersion(t *testing.T, root, plugin, want string) {
 	}
 	if manifest.Version != want {
 		t.Fatalf("%s version = %q, want %q", plugin, manifest.Version, want)
+	}
+}
+
+func writeExecutable(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
