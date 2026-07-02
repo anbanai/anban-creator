@@ -699,7 +699,7 @@ func (s *TaskService) CleanupExpiredWorkspaces(ctx context.Context) error {
 		if s.workspaceDir != "" {
 			workDir = filepath.Join(s.workspaceDir, task.ID)
 		} else {
-			workDir = filepath.Join(os.TempDir(), "abwriter", task.ID)
+			workDir = agent.DefaultWorkspaceDir(task.ID)
 		}
 		if err := os.RemoveAll(workDir); err != nil {
 			s.logger.Warn().Err(err).Str("task_id", task.ID).Str("path", workDir).Msg("failed to remove workspace directory")

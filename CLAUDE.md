@@ -26,7 +26,7 @@ Four git submodules: `claudecode/`, `openclaw/`, `codex/` (plugin distributions)
 ### Server & Agent
 
 ```bash
-make server-build             # Build server binary to bin/abwriter-server
+make server-build             # Build server binary to bin/anban-creator-server
 make server-run               # Build and run server with config
 make server-dev               # Run server via go run (development)
 make server-test              # Run server tests (go test -v ./server/...)
@@ -36,7 +36,7 @@ make docker-server-image      # Build server Docker image (Go binary)
 make docker-images            # Build both images
 ```
 
-> ⚠️ Never run `go build ./server` or `go build ./agent` from the repo root — Go tries to write the `server`/`agent` binary where same-named directories already exist and fails. Use `make server-build` or `go build -o /tmp/abwriter-server ./server`.
+> ⚠️ Never run `go build ./server` or `go build ./agent` from the repo root — Go tries to write the `server`/`agent` binary where same-named directories already exist and fails. Use `make server-build` or `go build -o /tmp/anban-creator-server ./server`.
 
 ### Go Tests
 
@@ -331,6 +331,6 @@ All three plugins (`claudecode/`, `openclaw/`, `codex/`) connect to the same `cr
 - CLI uses zerolog logging — all components use zerolog, never mix with zap
 - Two Cobra patterns coexist in app/: package-level var with `init()` (older) and factory functions returning `*cobra.Command` (preferred)
 - Docker Compose provides MySQL 8.0 + Redis 7 + agent + server containers
-- Server binary is `bin/abwriter-server` (not anban-creator-server)
+- Server binary is `bin/anban-creator-server`
 - **Never modify base UI components in `studio/src/components/ui/`**. These are managed shadcn/ui primitives. If a base component update breaks business logic, fix the business component only — never patch the primitive.
 - `AGENTS.md` mirrors this guidance for non-Claude assistants; keep it roughly in sync when adding cross-cutting rules.

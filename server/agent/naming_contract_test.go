@@ -121,6 +121,7 @@ func assertTrackedFilesDoNotContainLegacyNames(t *testing.T, root string) {
 			"案" + "板",
 			"royal" + "rick",
 			"royal" + "morty/anban" + "writer",
+			"ab" + "writer",
 		} {
 			if strings.Contains(strings.ToLower(body), strings.ToLower(banned)) {
 				t.Fatalf("%s still contains banned term %q", path, banned)

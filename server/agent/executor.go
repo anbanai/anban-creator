@@ -338,7 +338,7 @@ type ExecutionResult struct {
 // Execute runs the Claude Code agent for the given task.
 //
 // It creates a per-task workspace directory, writes the project config as
-// .anban-creator/settings.json, loads the abwriter plugin with the matching
+// .anban-creator/settings.json, loads the Anban Creator plugin with the matching
 // agent definition, and launches execution via the claude-agent-sdk-go SDK.
 func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	// 1. Resolve defaults. Agent model comes from config.yaml,
@@ -357,7 +357,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	if e.workspaceDir != "" {
 		workDir = filepath.Join(e.workspaceDir, opts.Task.ID)
 	} else {
-		workDir = filepath.Join(os.TempDir(), "abwriter", opts.Task.ID)
+		workDir = DefaultWorkspaceDir(opts.Task.ID)
 	}
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)

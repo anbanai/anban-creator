@@ -9,7 +9,7 @@ RUN go mod download
 
 # Copy source and build.
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /abwriter-server ./server/
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server ./server/
 
 # Stage 2: Runtime with Node.js + Claude CLI + Plugin
 FROM node:25-slim
@@ -25,7 +25,7 @@ RUN apt-get update && \
 
 RUN npm install -g @anthropic-ai/claude-code
 
-COPY --from=builder /abwriter-server /app/abwriter-server
+COPY --from=builder /anban-creator-server /app/anban-creator-server
 
 # COPY server/config.yaml /app/conf/config.yaml
 
@@ -64,4 +64,4 @@ RUN mkdir -p /app/data/files /app/data/workspace /app/data/logs/tasks && \
 USER node
 
 WORKDIR /app
-CMD ["/app/abwriter-server", "-config", "/app/conf/config.yaml"]
+CMD ["/app/anban-creator-server", "-config", "/app/conf/config.yaml"]

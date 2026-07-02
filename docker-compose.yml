@@ -1,19 +1,21 @@
+name: anban-creator
+
 services:
   mysql:
     image: mysql:8.0
-    container_name: abwriter-mysql
+    container_name: anban-creator-mysql
     restart: unless-stopped
     ports:
       - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-abwriter_dev}
-      MYSQL_DATABASE: abwriter
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-anban_creator_dev}
+      MYSQL_DATABASE: anban_creator
       MYSQL_CHARSET: utf8mb4
       MYSQL_COLLATION: utf8mb4_bin
     volumes:
       - ./data/mysql:/var/lib/mysql
     networks:
-      - abwriter-network
+      - anban-creator-network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -22,14 +24,14 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: abwriter-redis
+    container_name: anban-creator-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
       - ./data/redis:/data
     networks:
-      - abwriter-network
+      - anban-creator-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -43,7 +45,7 @@ services:
     # linux/arm64/v8". Force amd64 and run under Docker Desktop's QEMU/Rosetta
     # emulation. It's an MCP sidecar, so the emulation overhead is acceptable.
     platform: linux/amd64
-    container_name: abwriter-seednote
+    container_name: anban-creator-seednote
     restart: unless-stopped
     ports:
       - "18060:18060"
@@ -53,7 +55,7 @@ services:
       ROD_BROWSER_BIN: /usr/bin/google-chrome
       COOKIES_PATH: /app/data/cookies.json
     networks:
-      - abwriter-network
+      - anban-creator-network
     healthcheck:
       # GET, not --spider (HEAD): this image returns 404 for HEAD /health but
       # 200 for GET /health, so a HEAD-based probe falsely marks it unhealthy.
@@ -70,13 +72,13 @@ services:
     build:
       context: .
       dockerfile: docker/wcflink.Dockerfile
-    image: abwriter-wcflink:latest
+    image: anban-creator-wcflink:latest
     # Force build-only: this image is produced from the wcflink/ submodule and
     # has no registry artifact. Without this, Compose probes Docker Hub for the
-    # (nonexistent) abwriter-wcflink image and aborts on a transient registry
+    # (nonexistent) anban-creator-wcflink image and aborts on a transient registry
     # EOF instead of falling back to the Dockerfile build.
     pull_policy: build
-    container_name: abwriter-wcflink
+    container_name: anban-creator-wcflink
     restart: unless-stopped
     ports:
       # Loopback-only: wcfLink's HTTP API is unauthenticated — anyone who can
@@ -94,7 +96,7 @@ services:
       WCFLINK_DB_PATH: "/app/state/wcf.db"
       WCFLINK_LOG_LEVEL: "info"
     networks:
-      - abwriter-network
+      - anban-creator-network
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:18070/health/live"]
       interval: 10s
@@ -107,13 +109,13 @@ services:
   #   build:
   #     context: .
   #     dockerfile: agent/Dockerfile
-  #   image: abwriter-agent:latest
-  #   container_name: abwriter-agent
+  #   image: anban-creator-agent:latest
+  #   container_name: anban-creator-agent
   #   restart: unless-stopped
   #   volumes:
   #     - ./data/workspace:/workspace
   #   networks:
-  #     - abwriter-network
+  #     - anban-creator-network
   #   extra_hosts:
   #     - "host.docker.internal:host-gateway"
 
@@ -121,8 +123,8 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
-    image: abwriter-server:latest
-    container_name: abwriter-server
+    image: anban-creator-server:latest
+    container_name: anban-creator-server
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -134,7 +136,7 @@ services:
       wcflink:
         condition: service_started
     environment:
-      ANBAN_DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-abwriter_dev}@tcp(mysql:3306)/abwriter?charset=utf8mb4&parseTime=True&loc=Local"
+      ANBAN_DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-anban_creator_dev}@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local"
       ANBAN_REDIS_ADDR: "redis:6379"
       ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: "/app/data/workspace"
       # WeChat bot (wcfLink sidecar). Uses the compose service name, not localhost.
@@ -147,7 +149,7 @@ services:
       - ./data/workspace:/app/data/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - abwriter-network
+      - anban-creator-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -159,12 +161,12 @@ services:
     build:
       context: ./studio
       dockerfile: Dockerfile
-    image: abwriter-studio:latest
+    image: anban-creator-studio:latest
     # Local-build-only image (no registry artifact). Without this compose probes
-    # Docker Hub for abwriter-studio and may abort on a registry hiccup instead
+    # Docker Hub for anban-creator-studio and may abort on a registry hiccup instead
     # of building — same rationale as the wcflink service above.
     pull_policy: build
-    container_name: abwriter-studio
+    container_name: anban-creator-studio
     restart: unless-stopped
     ports:
       - "8081:80"
@@ -174,8 +176,8 @@ services:
     environment:
       BACKEND_HOST: server
     networks:
-      - abwriter-network
+      - anban-creator-network
 
 networks:
-  abwriter-network:
+  anban-creator-network:
     driver: bridge

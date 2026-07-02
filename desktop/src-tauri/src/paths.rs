@@ -7,7 +7,7 @@ use tauri::{Manager, path::BaseDirectory};
 /// guide the user. See desktop/populate-resources.sh for how these are filled.
 #[derive(Clone, Debug, Default)]
 pub struct Resources {
-    /// `abwriter-agent` sidecar binary (built via `make agent-build-native`).
+    /// `anban-creator-agent` sidecar binary (built via `make agent-build-native`).
     pub agent_bin: Option<PathBuf>,
     /// Bundled Node runtime executable (used by claude-agent-sdk-go to spawn
     /// the `claude` CLI).
@@ -24,7 +24,7 @@ pub struct Resources {
 /// debug) — provisioning surfaces a friendly status rather than crashing.
 pub fn resolve(app: &tauri::AppHandle) -> Resources {
     Resources {
-        agent_bin: resolve_one(app, "resources/bin/abwriter-agent"),
+        agent_bin: resolve_one(app, "resources/bin/anban-creator-agent"),
         node_bin: resolve_one(app, "resources/bin/node"),
         claude_cli: resolve_one(app, "resources/claude"),
         plugin_dir: resolve_one(app, "resources/claudecode"),

@@ -204,7 +204,7 @@ func findInsertionPoints(html string) []int {
 // 错误定义
 var (
 	ErrEmptyMarkdown = &ConvertError{Code: "EMPTY_MARKDOWN", Message: "markdown content cannot be empty", HintMsg: "请提供非空的 Markdown 内容"}
-	ErrInvalidTheme  = &ConvertError{Code: "INVALID_THEME", Message: "invalid theme name", HintMsg: "使用 'abwriter convert --help' 查看支持的主题"}
+	ErrInvalidTheme  = &ConvertError{Code: "INVALID_THEME", Message: "invalid theme name", HintMsg: "请在 Studio 或 themes 资源目录中选择支持的主题"}
 	ErrAIFailure     = &ConvertError{Code: "AI_FAILURE", Message: "AI generation failed", HintMsg: "检查 AI API 配置是否正确"}
 )
 

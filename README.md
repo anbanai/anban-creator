@@ -25,7 +25,7 @@ Server build:
 
 ```bash
 make server-build
-./bin/abwriter-server -config server/config.yaml
+./bin/anban-creator-server -config server/config.yaml
 ```
 
 Frontend build:

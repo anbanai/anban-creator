@@ -49,7 +49,7 @@ fn emit(app: &AppHandle, task_id: &str, level: &'static str, message: impl Into<
     );
 }
 
-/// Spawn the bundled `abwriter-agent` for a claimed task and stream its output
+/// Spawn the bundled `anban-creator-agent` for a claimed task and stream its output
 /// to the frontend via `local-run://event` until it exits. The agent reports
 /// progress + results back to the cloud itself (using --api-key/--server-url,
 /// which the SDK surfaces as ANBAN_API_KEY/ANBAN_API_URL); we only observe.

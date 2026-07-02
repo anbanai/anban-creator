@@ -157,7 +157,7 @@ type agentClaimRequest struct {
 //
 // A desktop local executor polls this endpoint to atomically claim its oldest
 // pending local-target task. On success it returns the full task config
-// (service.LocalExecutionConfig) which the desktop turns into an abwriter-agent
+// (service.LocalExecutionConfig) which the desktop turns into an anban-creator-agent
 // argv (mirroring the cloud DockerExecutor), supplying its own server_url +
 // API key. The claimed task is already status=running, so cloud Asynq never
 // picks it up. Returns 204 No Content when nothing is claimable.
@@ -235,7 +235,7 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 
 // Complete handles POST /api/v1/agent/complete.
 //
-// A desktop local executor calls this once when abwriter-agent finishes, with
+// A desktop local executor calls this once when anban-creator-agent finishes, with
 // the final ExecutionResult. The service finalizes the task (status → completed
 // or failed, slot release, dispatch, refund-on-failure) — guarded to
 // local_claimed tasks and idempotent, so a cloud task or a repeat call is a

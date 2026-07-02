@@ -370,7 +370,7 @@ type ClaudeConfig struct {
 	Model          string            `yaml:"model"`    // Model for agent execution (empty = use env vars like ANTHROPIC_MODEL)
 	Executor       string            `yaml:"executor"` // "local" (default) or "docker"
 	Env            map[string]string `yaml:"env"`
-	PluginDir      string            `yaml:"plugin_dir"`       // Path to the abwriter plugin directory (contains agents/, skills/)
+	PluginDir      string            `yaml:"plugin_dir"`       // Path to the Anban Creator plugin directory (contains agents/, skills/)
 	Sandbox        bool              `yaml:"sandbox"`          // Enable sandbox isolation for agent execution (recommended in k8s)
 	Docker         DockerConfig      `yaml:"docker"`           // Docker executor settings (used when executor=docker)
 	MaxTurns       map[string]int    `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 300, "seednote": 150}
@@ -380,7 +380,7 @@ type ClaudeConfig struct {
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
-	Image         string `yaml:"image"`          // Docker image name (default: "abwriter-agent:latest")
+	Image         string `yaml:"image"`          // Docker image name (default: "anban-creator-agent:latest")
 	CPUCores      int64  `yaml:"cpu_cores"`      // CPU limit in cores (default: 2)
 	MemoryMB      int64  `yaml:"memory_mb"`      // Memory limit in MB (default: 4096)
 	TimeoutSec    int    `yaml:"timeout_sec"`    // Container execution timeout in seconds (default: 1800 = 30 min)
@@ -680,7 +680,7 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	if c.Claude.Docker.Image == "" {
-		c.Claude.Docker.Image = "abwriter-agent:latest"
+		c.Claude.Docker.Image = "anban-creator-agent:latest"
 	}
 	if c.Claude.Docker.CPUCores == 0 {
 		c.Claude.Docker.CPUCores = 2
@@ -743,7 +743,7 @@ func (c *Config) resolvePaths() {
 	}
 }
 
-// detectPluginDir attempts to locate the abwriter plugin directory
+// detectPluginDir attempts to locate the Anban Creator plugin directory
 // that contains agents/. It checks the claudecode submodule first,
 // then the legacy plugin/ subdirectory, then searches upward from CWD.
 func detectPluginDir() string {

@@ -38,7 +38,7 @@ func EffectiveProject(ch *model.Project, task *model.Task) *model.Project {
 // resolved style dimensions. For new tasks this project is the frozen task
 // snapshot; old rows without a snapshot fall back through legacy task overrides.
 // This bridges the multi-user server config to the single-account app config used
-// by the abwriter CLI binary.
+// by the Anban Creator agent runtime.
 //
 // resolved carries the effective values (resolver.ResolveStyle); only
 // the dimensions each platform's settings.json slot consumes are read here:
@@ -162,7 +162,7 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 }
 
 // writeSettingsJSON writes the app config to the workspace's .anban-creator/settings.json.
-// The abwriter CLI binary reads config from CWD/.anban-creator/settings.json as its
+// The Anban Creator runtime reads config from CWD/.anban-creator/settings.json as its
 // highest-priority search path.
 func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	path := filepath.Join(workDir, appconfig.ConfigDir, appconfig.ConfigFileName)
@@ -204,7 +204,7 @@ func TaskTypeToAgent(taskType string) string {
 
 // DownloadReferenceImage downloads a project's brand reference image to the
 // workspace's .anban-creator directory. The image is saved as reference.png for
-// use by both Claude Code (visual context) and abwriter CLI (--ref flag).
+// use by both Claude Code visual context and image generation reference inputs.
 //
 // Resolution order:
 //  1. If store is non-nil and imageURL is server-owned (OSS or local storage),

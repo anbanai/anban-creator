@@ -33,8 +33,8 @@ go test ./server/mcp
 go test ./app/image
 
 # Build binaries without colliding with existing directories
-go build -o /tmp/abwriter-server ./server
-go build -o /tmp/abwriter-agent ./agent
+go build -o /tmp/anban-creator-server ./server
+go build -o /tmp/anban-creator-agent ./agent
 
 # Repository Make targets
 make test

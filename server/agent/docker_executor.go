@@ -33,7 +33,7 @@ type UserKeyProvider interface {
 	EnsureSystemKey(ctx context.Context) (string, error)
 }
 
-// DockerExecutor runs the standalone abwriter-agent inside Docker containers.
+// DockerExecutor runs the standalone Anban Creator agent inside Docker containers.
 type DockerExecutor struct {
 	logger            *zerolog.Logger
 	imageAPICfg       *srvconfig.ImageAPIConfig
@@ -97,11 +97,11 @@ func (e *DockerExecutor) Close() error {
 }
 
 // CleanupOrphanedContainers removes stopped ephemeral task containers
-// (abwriter-task-*) left behind by previous runs. Safe to call at startup.
+// left behind by previous runs. Safe to call at startup.
 func (e *DockerExecutor) CleanupOrphanedContainers() {
 	containers, err := e.dockerCLI.ContainerList(context.Background(), container.ListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.KeyValuePair{Key: "name", Value: "^/abwriter-task-"}),
+		Filters: filters.NewArgs(filters.KeyValuePair{Key: "name", Value: OrphanedContainerNameFilter}),
 	})
 	if err != nil {
 		e.logger.Warn().Err(err).Msg("failed to list containers for orphan cleanup")
@@ -117,11 +117,11 @@ func (e *DockerExecutor) CleanupOrphanedContainers() {
 		removed++
 	}
 	if removed > 0 {
-		e.logger.Info().Int("removed", removed).Msg("cleaned up orphaned abwriter containers")
+		e.logger.Info().Int("removed", removed).Msg("cleaned up orphaned Anban Creator containers")
 	}
 }
 
-// Execute runs the standalone abwriter-agent in Docker and returns its final JSON result.
+// Execute runs the standalone Anban Creator agent in Docker and returns its final JSON result.
 func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*ExecutionResult, error) {
 	// Claude Code agent model comes only from config.yaml.
 	agentModel := e.defaultModel
@@ -134,7 +134,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 	if e.dockerCfg.ContainerName != "" && e.dockerCfg.WorkspaceDir != "" {
 		workDir = filepath.Join(e.dockerCfg.WorkspaceDir, opts.Task.ID)
 	} else {
-		workDir = filepath.Join(os.TempDir(), "abwriter", opts.Task.ID)
+		workDir = DefaultWorkspaceDir(opts.Task.ID)
 	}
 	if err := os.MkdirAll(workDir, 0o777); err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
@@ -282,7 +282,7 @@ func (e *DockerExecutor) resolveAgentAPIKey(ctx context.Context, opts *Execution
 
 func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel string, maxTurns int, workspace, apiKey string) []string {
 	cmd := []string{
-		"abwriter-agent",
+		AgentBinaryName,
 		"--server-url", strings.TrimRight(e.serverURL, "/"),
 		"--api-key", apiKey,
 		"--task-id", opts.Task.ID,
@@ -492,7 +492,7 @@ func (e *DockerExecutor) executeInNewContainer(ctx context.Context, taskID, work
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 
-	containerName := "abwriter-task-" + taskID
+	containerName := EphemeralContainerName(taskID)
 	resp, err := e.dockerCLI.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
 	if err != nil {
 		return execResult{err: fmt.Errorf("docker create: %w", err)}

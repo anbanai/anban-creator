@@ -14,7 +14,7 @@ Studio SPA (webview) ──(JWT + /api + SSE)──►  Cloud server (anbanai)
 Rust local executor ──(user API key)──► POST /api/v1/agent/claim ──► Cloud
       │  (claims the oldest pending local-target task)
       ▼  spawn sidecar
-abwriter-agent + Node + claude-code + claudecode plugin + ffmpeg
+anban-creator-agent + Node + claude-code + claudecode plugin + ffmpeg
       │  (real local workspace + shell)
       └──(/agent/progress + /agent/upload)──► Cloud ──(SSE)──► Studio UI
 ```
@@ -45,7 +45,7 @@ desktop/
 │       ├── provision.rs      # dependency-readiness status
 │       ├── commands.rs       # IPC commands (get_api_base, save_blob, …)
 │       ├── executor.rs       # tokio claim loop (poll → spawn → emit events)
-│       └── sidecar.rs        # spawn abwriter-agent, mirror DockerExecutor argv
+│       └── sidecar.rs        # spawn anban-creator-agent, mirror DockerExecutor argv
 └── README.md
 ```
 
@@ -65,7 +65,7 @@ desktop/
 bash desktop/populate-resources.sh
 ```
 
-Fills `src-tauri/resources/` with: `abwriter-agent` (native), `node`,
+Fills `src-tauri/resources/` with: `anban-creator-agent` (native), `node`,
 `@anthropic-ai/claude-code`, the `claudecode` plugin, and `ffmpeg`.
 
 ### 2. Install + run
@@ -96,7 +96,7 @@ bun tauri build    # production .app / .dmg (builds Studio first)
   reports a ready executor). The server sets a 30s claim deadline and does
   **not** enqueue it to cloud Asynq.
 - The Rust executor polls `POST {api_base}/agent/claim` every ~2s; on a 200 it
-  gets the full task config and spawns `abwriter-agent` with the argv from
+  gets the full task config and spawns `anban-creator-agent` with the argv from
   `server/agent/docker_executor.go::buildAgentCommand` (same flags the cloud
   Docker executor uses), supplying the local workspace + bundled plugin dir.
 - The agent runs Claude Code locally (via `claude-agent-sdk-go`) and reports

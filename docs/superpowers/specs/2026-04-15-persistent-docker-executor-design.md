@@ -17,7 +17,7 @@ Add `ContainerName` to `DockerConfig` in `server/config/config.go`:
 ```yaml
 claude:
   docker:
-    container_name: "abwriter-persistent"  # optional; empty = old create+destroy mode
+    container_name: "anban-creator-persistent"  # optional; empty = old create+destroy mode
 ```
 
 Env override: `ANBAN_CLAUDE_DOCKER_CONTAINER_NAME`.
@@ -29,14 +29,14 @@ When `ContainerName` is set, the executor uses persistent mode. When empty, it u
 The persistent container must be started externally with:
 
 ```bash
-docker run -d --name abwriter-persistent \
-  -v /tmp/abwriter:/workspace \
+docker run -d --name anban-creator-persistent \
+  -v /tmp/anban-creator:/workspace \
   --add-host=host.docker.internal:host-gateway \
-  abwriter-agent:latest sleep infinity
+  anban-creator-agent:latest sleep infinity
 ```
 
 Requirements:
-- Bind-mount the server's temp dir (`/tmp/abwriter`) to `/workspace` inside the container
+- Bind-mount the server's temp dir (`/tmp/anban-creator`) to `/workspace` inside the container
 - `host.docker.internal` mapping so the container can reach the server's MCP endpoint
 - Main process `sleep infinity` to keep the container alive
 
@@ -46,7 +46,7 @@ Requirements:
 - If `ContainerName` is set, verify the container exists and is running. Log a warning if not (will fall back to create+destroy on each task).
 
 **Execute (persistent mode):**
-1. Create host workspace dir `/tmp/abwriter/{taskID}` (same as before)
+1. Create host workspace dir `/tmp/anban-creator/{taskID}` (same as before)
 2. Write config files into workspace (`.anban-creator/settings.json`, `.claude/.mcp.json`)
 3. Build `claude` command with `--cwd /workspace/{taskID}` (subdirectory instead of root)
 4. Use Docker API `ContainerExecCreate` + `ContainerExecAttach` to run the command
@@ -84,7 +84,7 @@ Multiple `docker exec` calls can run simultaneously against the same container. 
 1. Start persistent container manually
 2. Configure `container_name` in config.yaml
 3. Trigger a task from Studio
-4. Verify: `docker exec -it abwriter-persistent bash` shows workspace directories
+4. Verify: `docker exec -it anban-creator-persistent bash` shows workspace directories
 5. Verify: server debug logs show full Claude conversation
 6. Verify: multiple tasks can run concurrently
 7. Remove `container_name` from config → verify fallback to create+destroy mode

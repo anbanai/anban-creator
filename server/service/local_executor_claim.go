@@ -42,7 +42,7 @@ func parseExecutorMeta(raw []byte) (model.ExecutorMeta, error) {
 const LocalClaimWindow = 30 * time.Second
 
 // LocalExecutionConfig is the full task config returned to a desktop local
-// executor on a successful claim. The desktop builds the abwriter-agent argv
+// executor on a successful claim. The desktop builds the anban-creator-agent argv
 // from this (mirroring agent.DockerExecutor.buildAgentCommand) and supplies
 // server_url + the user's own API key from its local settings — those are NOT
 // echoed here (the desktop already holds them and echoing keys is unsafe).
@@ -70,7 +70,7 @@ type LocalExecutionConfig struct {
 //
 // On a successful claim the task is already status=running +
 // execution_target=local_claimed, so cloud Asynq will never pick it up. The
-// claiming desktop then spawns abwriter-agent, which reports progress/results
+// claiming desktop then spawns anban-creator-agent, which reports progress/results
 // back through the existing /api/v1/agent/progress + /agent/upload endpoints.
 func (s *TaskService) ClaimLocalTask(ctx context.Context, userID, executorInfo string) (*LocalExecutionConfig, error) {
 	info, err := parseExecutorMeta([]byte(executorInfo))
@@ -171,7 +171,7 @@ func (s *TaskService) ReclaimExpiredLocalTasks(ctx context.Context) (int, error)
 // Guarded + idempotent: finalizes ONLY when the task is still
 // execution_target=local_claimed AND status=running (CAS). A repeat /complete
 // call, a task already reaped/terminal, or a cloud task that happens to call
-// /complete is a no-op — so the shared abwriter-agent binary (used by both cloud
+// /complete is a no-op — so the shared anban-creator-agent binary (used by both cloud
 // Docker and the desktop) can call this endpoint in both modes without
 // double-finalizing cloud tasks, whose authoritative finalization remains the
 // server-side HandleExecution.

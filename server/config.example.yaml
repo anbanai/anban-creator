@@ -25,7 +25,7 @@ logging:
 # error and continues running in degraded mode (no data persistence).
 # ---------------------------------------------------------------------------
 database:
-  dsn: "${ANBAN_DATABASE_DSN:-root:anban-creator_dev@tcp(localhost:3306)/anban-creator?charset=utf8mb4&parseTime=True&loc=Local}"
+  dsn: "${ANBAN_DATABASE_DSN:-root:anban_creator_dev@tcp(localhost:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local}"
   max_open_conns: 10 # Maximum open connections to the database.
   max_idle_conns: 5 # Maximum idle connections kept in the pool.
   conn_max_lifetime: 3600 # Connection maximum lifetime in seconds.
@@ -280,7 +280,7 @@ cors:
 claude:
   model: "" # Agent execution model override. Empty = use ANTHROPIC_MODEL env var.
   executor: local # "local" (subprocess) or "docker" (container).
-  plugin_dir: "" # Path to the abwriter plugin directory (local executor only).
+  plugin_dir: "" # Path to the Anban Creator plugin directory (local executor only).
   # Auto-detected by searching for agents/ in parent directories.
   # 如需 env 控制写 plugin_dir: ${ANBAN_CLAUDE_PLUGIN_DIR}。
   # In k8s/Docker: typically "/app" or "/anbanai".
@@ -296,8 +296,8 @@ claude:
 
   # Docker executor settings (used when executor=docker).
   docker:
-    image: "abwriter-agent:latest" # Docker image with Claude CLI + abwriter plugin.
-    container_name: "abwriter" # Persistent container to reuse via docker exec (empty = create+destroy per task).
+    image: "anban-creator-agent:latest" # Docker image with Claude CLI + Anban Creator plugin.
+    container_name: "anban-creator-agent" # Persistent container to reuse via docker exec (empty = create+destroy per task).
     workspace_dir: "${ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR:-./data/workspace}" # Host-side workspace base dir (must match docker-compose volume mount source).
     cpu_cores: 2 # CPU limit per task container.
     memory_mb: 4096 # Memory limit per task container (MB).

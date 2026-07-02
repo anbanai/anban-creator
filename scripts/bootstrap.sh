@@ -1,5 +1,5 @@
 #!/bin/bash
-# Auto-download/update abwriter binary from GitHub releases.
+# Auto-download/update Anban Creator binary from GitHub releases.
 # Designed to run in background from SessionStart hook.
 # All output goes to bin/.bootstrap.log; failures are silent.
 
@@ -22,7 +22,7 @@ case "$ARCH" in
   aarch64) ARCH="arm64" ;;
 esac
 
-BINARY_NAME="abwriter-${OS}-${ARCH}"
+BINARY_NAME="anban-creator-server-${OS}-${ARCH}"
 [ "$OS" = "windows" ] && BINARY_NAME="${BINARY_NAME}.exe"
 
 # Get latest version from GitHub API
@@ -35,7 +35,7 @@ fi
 echo "Latest version: $LATEST"
 
 # Compare with local version
-if [ -f "$VERSION_FILE" ] && [ "$(cat "$VERSION_FILE")" = "$LATEST" ] && [ -x "$BIN_DIR/abwriter" ]; then
+if [ -f "$VERSION_FILE" ] && [ "$(cat "$VERSION_FILE")" = "$LATEST" ] && [ -x "$BIN_DIR/anban-creator-server" ]; then
   echo "Already up to date"
   exit 0
 fi
@@ -43,10 +43,10 @@ fi
 # Download
 URL="https://github.com/${REPO}/releases/download/${LATEST}/${BINARY_NAME}"
 echo "Downloading $URL ..."
-curl -fsSL "$URL" -o "$BIN_DIR/abwriter.new"
-chmod +x "$BIN_DIR/abwriter.new"
+curl -fsSL "$URL" -o "$BIN_DIR/anban-creator-server.new"
+chmod +x "$BIN_DIR/anban-creator-server.new"
 
 # Atomic replace
-mv -f "$BIN_DIR/abwriter.new" "$BIN_DIR/abwriter"
+mv -f "$BIN_DIR/anban-creator-server.new" "$BIN_DIR/anban-creator-server"
 echo "$LATEST" > "$VERSION_FILE"
 echo "Updated to $LATEST"

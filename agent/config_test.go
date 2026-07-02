@@ -39,7 +39,7 @@ func TestConfigUserPrompt_ArticleImageFlagsCanDisableAllImages(t *testing.T) {
 
 func TestParseConfig_ArticleImageFlagsDefaultTrue(t *testing.T) {
 	withArgs(t,
-		"abwriter-agent",
+		"anban-creator-agent",
 		"--server-url", "http://localhost:18060",
 		"--api-key", "key",
 		"--task-id", "task-1",
