@@ -67,8 +67,7 @@ impl SaveThrottle {
             Err(_) => return false,
         };
         let now = Instant::now();
-        let allow = guard
-            .map_or(true, |t| now.duration_since(t) >= self.min_interval);
+        let allow = guard.map_or(true, |t| now.duration_since(t) >= self.min_interval);
         if allow {
             *guard = Some(now);
         }

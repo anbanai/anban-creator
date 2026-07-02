@@ -73,7 +73,7 @@ export async function setApiBase(base: string): Promise<boolean> {
 }
 
 /**
- * Whether a local executor (the bundled anban-creator-agent + claude runtime) is
+ * Whether a local executor (the bundled anban + claude runtime) is
  * provisioned and ready to claim tasks on this machine. False in a browser.
  */
 export async function isLocalExecutorAvailable(): Promise<boolean> {

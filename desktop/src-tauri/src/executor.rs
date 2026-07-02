@@ -16,7 +16,7 @@ const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 const ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Full task config returned by POST /api/v1/agent/claim (mirrors server
-/// service.LocalExecutionConfig). The desktop builds the anban-creator-agent argv
+/// service.LocalExecutionConfig). The desktop builds the anban run argv
 /// from this in sidecar::run_agent.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]

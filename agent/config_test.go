@@ -1,8 +1,8 @@
 package main
 
 import (
-	"flag"
-	"os"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -38,32 +38,86 @@ func TestConfigUserPrompt_ArticleImageFlagsCanDisableAllImages(t *testing.T) {
 }
 
 func TestParseConfig_ArticleImageFlagsDefaultTrue(t *testing.T) {
-	withArgs(t,
-		"anban-creator-agent",
+	err := newAgentCommand(nil, nil, func(_ context.Context, cfg *Config) error {
+		if !cfg.ArticleWithCover || !cfg.ArticleWithContentImages {
+			t.Fatalf("article image flags should default true, got cover=%v content=%v", cfg.ArticleWithCover, cfg.ArticleWithContentImages)
+		}
+		return nil
+	}).Run(context.Background(), []string{
+		"anban",
+		"run",
 		"--server-url", "http://localhost:18060",
 		"--api-key", "key",
 		"--task-id", "task-1",
 		"--task-type", "article",
 		"--topic", "时间管理",
-	)
-
-	cfg, err := ParseConfig()
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.ArticleWithCover || !cfg.ArticleWithContentImages {
-		t.Fatalf("article image flags should default true, got cover=%v content=%v", cfg.ArticleWithCover, cfg.ArticleWithContentImages)
+}
+
+func TestParseConfig_ArticleImageFlagsCanDisableAllImages(t *testing.T) {
+	err := newAgentCommand(nil, nil, func(_ context.Context, cfg *Config) error {
+		if cfg.ArticleWithCover || cfg.ArticleWithContentImages {
+			t.Fatalf("article image flags should parse explicit false values, got cover=%v content=%v", cfg.ArticleWithCover, cfg.ArticleWithContentImages)
+		}
+		return nil
+	}).Run(context.Background(), []string{
+		"anban",
+		"run",
+		"--server-url", "http://localhost:18060",
+		"--api-key", "key",
+		"--task-id", "task-1",
+		"--task-type", "article",
+		"--article-with-cover=false",
+		"--article-with-content-images=false",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
-func withArgs(t *testing.T, args ...string) {
-	t.Helper()
-	oldArgs := os.Args
-	oldCommandLine := flag.CommandLine
-	t.Cleanup(func() {
-		os.Args = oldArgs
-		flag.CommandLine = oldCommandLine
+func TestAgentCommandRejectsBareRunFlags(t *testing.T) {
+	called := false
+	err := newAgentCommand(nil, nil, func(_ context.Context, _ *Config) error {
+		called = true
+		return nil
+	}).Run(context.Background(), []string{
+		"anban",
+		"--server-url", "http://localhost:18060",
+		"--api-key", "key",
+		"--task-id", "task-1",
+		"--task-type", "article",
 	})
-	os.Args = args
-	flag.CommandLine = flag.NewFlagSet(args[0], flag.ContinueOnError)
+	if err == nil {
+		t.Fatal("expected bare root flags to fail")
+	}
+	if called {
+		t.Fatal("run action should not be called for bare root flags")
+	}
+}
+
+func TestAgentCommandRequiresSubcommand(t *testing.T) {
+	err := newAgentCommand(nil, nil, nil).Run(context.Background(), []string{"anban"})
+	if err == nil {
+		t.Fatal("expected root command without subcommand to fail")
+	}
+}
+
+func TestAgentCommandPropagatesRunErrors(t *testing.T) {
+	want := errors.New("boom")
+	err := newAgentCommand(nil, nil, func(_ context.Context, _ *Config) error {
+		return want
+	}).Run(context.Background(), []string{
+		"anban",
+		"run",
+		"--server-url", "http://localhost:18060",
+		"--api-key", "key",
+		"--task-id", "task-1",
+		"--task-type", "article",
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("expected run error %v, got %v", want, err)
+	}
 }

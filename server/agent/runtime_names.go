@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	AgentBinaryName              = "anban-creator-agent"
+	AgentBinaryName              = "anban"
 	DefaultWorkspaceBaseName     = "anban-creator"
 	EphemeralContainerNamePrefix = "anban-creator-task-"
 	DockerAgentImageDefault      = "anban-creator-agent:latest"

@@ -107,12 +107,16 @@ pub fn run() {
 
             // Persist geometry on resize/move, throttled to once/second (those
             // events fire continuously during a drag/resize).
-            let throttle = Arc::new(window_state::SaveThrottle::new(std::time::Duration::from_secs(1)));
+            let throttle = Arc::new(window_state::SaveThrottle::new(
+                std::time::Duration::from_secs(1),
+            ));
             let win = main_window.clone();
             let cd = config_dir.clone();
             main_window.on_window_event(move |event| {
-                if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_))
-                    && throttle.allow()
+                if matches!(
+                    event,
+                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_)
+                ) && throttle.allow()
                 {
                     let size = win.inner_size().unwrap_or_default();
                     let pos = win.outer_position().unwrap_or_default();
@@ -170,7 +174,10 @@ async fn commands_start(app: &tauri::AppHandle) -> Result<bool, String> {
     if !provision::status(&state.resources, &cfg, false).available {
         return Ok(false);
     }
-    if state.running.swap(true, std::sync::atomic::Ordering::SeqCst) {
+    if state
+        .running
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
         return Ok(true);
     }
     let cancel = tokio_util::sync::CancellationToken::new();

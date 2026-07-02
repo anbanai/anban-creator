@@ -49,7 +49,7 @@ fn emit(app: &AppHandle, task_id: &str, level: &'static str, message: impl Into<
     );
 }
 
-/// Spawn the bundled `anban-creator-agent` for a claimed task and stream its output
+/// Spawn the bundled `anban` for a claimed task and stream its output
 /// to the frontend via `local-run://event` until it exits. The agent reports
 /// progress + results back to the cloud itself (using --api-key/--server-url,
 /// which the SDK surfaces as ANBAN_API_KEY/ANBAN_API_URL); we only observe.
@@ -154,6 +154,7 @@ fn agent_args(
     cfg: &LocalExecutionConfig,
 ) -> Vec<String> {
     let mut args = vec![
+        "run".to_string(),
         "--server-url".to_string(),
         server_url.to_string(),
         "--api-key".to_string(),
@@ -185,14 +186,13 @@ fn agent_args(
     }
     // Bool flags mirror the Go flag defaults and server/agent/docker_executor.go.
     args.extend([
-        "--has-content-image".to_string(),
-        cfg.has_content_image.to_string(),
-        "--has-tail-image".to_string(),
-        cfg.has_tail_image.to_string(),
-        "--article-with-cover".to_string(),
-        cfg.article_with_cover.to_string(),
-        "--article-with-content-images".to_string(),
-        cfg.article_with_content_images.to_string(),
+        format!("--has-content-image={}", cfg.has_content_image),
+        format!("--has-tail-image={}", cfg.has_tail_image),
+        format!("--article-with-cover={}", cfg.article_with_cover),
+        format!(
+            "--article-with-content-images={}",
+            cfg.article_with_content_images
+        ),
     ]);
     args
 }
@@ -225,15 +225,10 @@ mod tests {
             &cfg,
         );
 
-        assert_flag_value(&args, "--article-with-cover", "false");
-        assert_flag_value(&args, "--article-with-content-images", "true");
-    }
-
-    fn assert_flag_value(args: &[String], flag: &str, want: &str) {
-        let pos = args
+        assert_eq!(args.first().map(String::as_str), Some("run"));
+        assert!(args.iter().any(|arg| arg == "--article-with-cover=false"));
+        assert!(args
             .iter()
-            .position(|arg| arg == flag)
-            .expect("flag missing");
-        assert_eq!(args.get(pos + 1).map(String::as_str), Some(want));
+            .any(|arg| arg == "--article-with-content-images=true"));
     }
 }

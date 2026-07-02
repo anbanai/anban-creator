@@ -1,12 +1,12 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"strings"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/urfave/cli/v3"
 )
 
 type Config struct {
@@ -26,36 +26,45 @@ type Config struct {
 	ArticleWithContentImages bool
 }
 
-func ParseConfig() (*Config, error) {
-	cfg := &Config{}
-	flag.StringVar(&cfg.ServerURL, "server-url", "", "base server URL, e.g. http://host.docker.internal:18060")
-	flag.StringVar(&cfg.APIKey, "api-key", "", "agent API key")
-	flag.StringVar(&cfg.TaskID, "task-id", "", "task ID")
-	flag.StringVar(&cfg.TaskType, "task-type", "", "task type")
-	flag.StringVar(&cfg.Topic, "topic", "", "task topic/prompt")
-	flag.StringVar(&cfg.Goal, "goal", "", "goal-mode condition (prepended as /goal slash command so Claude Code runs its built-in goal loop)")
-	flag.StringVar(&cfg.Workspace, "workspace", "/workspace", "workspace directory")
-	flag.StringVar(&cfg.Model, "model", "", "Claude model override")
-	flag.StringVar(&cfg.AgentFlag, "agent-flag", "", "Claude Code --agent flag")
-	flag.IntVar(&cfg.MaxTurns, "max-turns", 0, "maximum Claude turns")
-	// Seednote image composition defaults match the task model column defaults
-	// (content on, tail off). Server overrides via CLI when dispatching the agent
-	// so the in-prompt directive reflects the user's task/plan choice.
-	flag.BoolVar(&cfg.HasContentImage, "has-content-image", true, "seednote: generate image_01.png (content page)")
-	flag.BoolVar(&cfg.HasTailImage, "has-tail-image", false, "seednote: generate tail.png")
-	flag.BoolVar(&cfg.ArticleWithCover, "article-with-cover", true, "article: generate cover image")
-	flag.BoolVar(&cfg.ArticleWithContentImages, "article-with-content-images", true, "article: generate in-text images")
-	flag.Parse()
+func runFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{Name: "server-url", Usage: "base server URL, e.g. http://host.docker.internal:18060", Required: true, Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "api-key", Usage: "agent API key", Required: true, Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "task-id", Usage: "task ID", Required: true, Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "task-type", Usage: "task type", Required: true, Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "topic", Usage: "task topic/prompt", Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "goal", Usage: "goal-mode condition (prepended as /goal slash command so Claude Code runs its built-in goal loop)", Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "workspace", Usage: "workspace directory", Value: "/workspace", Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "model", Usage: "Claude model override", Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "agent-flag", Usage: "Claude Code --agent flag", Config: cli.StringConfig{TrimSpace: true}},
+		&cli.IntFlag{Name: "max-turns", Usage: "maximum Claude turns"},
+		// Seednote image composition defaults match the task model column defaults
+		// (content on, tail off). Server overrides via CLI when dispatching the agent
+		// so the in-prompt directive reflects the user's task/plan choice.
+		&cli.BoolFlag{Name: "has-content-image", Usage: "seednote: generate image_01.png (content page)", Value: true},
+		&cli.BoolFlag{Name: "has-tail-image", Usage: "seednote: generate tail.png"},
+		&cli.BoolFlag{Name: "article-with-cover", Usage: "article: generate cover image", Value: true},
+		&cli.BoolFlag{Name: "article-with-content-images", Usage: "article: generate in-text images", Value: true},
+	}
+}
 
-	cfg.ServerURL = strings.TrimRight(strings.TrimSpace(cfg.ServerURL), "/")
-	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
-	cfg.TaskID = strings.TrimSpace(cfg.TaskID)
-	cfg.TaskType = strings.TrimSpace(cfg.TaskType)
-	cfg.Topic = strings.TrimSpace(cfg.Topic)
-	cfg.Goal = strings.TrimSpace(cfg.Goal)
-	cfg.Workspace = strings.TrimSpace(cfg.Workspace)
-	cfg.Model = strings.TrimSpace(cfg.Model)
-	cfg.AgentFlag = strings.TrimSpace(cfg.AgentFlag)
+func ParseConfig(cmd *cli.Command) (*Config, error) {
+	cfg := &Config{
+		ServerURL:                strings.TrimRight(cmd.String("server-url"), "/"),
+		APIKey:                   cmd.String("api-key"),
+		TaskID:                   cmd.String("task-id"),
+		TaskType:                 cmd.String("task-type"),
+		Topic:                    cmd.String("topic"),
+		Goal:                     cmd.String("goal"),
+		Workspace:                cmd.String("workspace"),
+		Model:                    cmd.String("model"),
+		AgentFlag:                cmd.String("agent-flag"),
+		MaxTurns:                 cmd.Int("max-turns"),
+		HasContentImage:          cmd.Bool("has-content-image"),
+		HasTailImage:             cmd.Bool("has-tail-image"),
+		ArticleWithCover:         cmd.Bool("article-with-cover"),
+		ArticleWithContentImages: cmd.Bool("article-with-content-images"),
+	}
 
 	if cfg.ServerURL == "" {
 		return nil, fmt.Errorf("server-url is required")

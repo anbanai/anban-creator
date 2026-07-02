@@ -55,7 +55,7 @@ func registerVideoASRTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "prepare_video_transcript_download",
-		Description: "Return a signed download URL for a normalized video-use transcript JSON object. Agents should save it locally with anban-creator-agent video save-asr-result.",
+		Description: "Return a signed download URL for a normalized video-use transcript JSON object. Agents should save it locally with anban video save-asr-result.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

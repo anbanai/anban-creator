@@ -49,7 +49,7 @@ pub fn status(res: &Resources, cfg: &AppConfig, running: bool) -> ProvisionStatu
     } else if !workspace_set {
         "请选择本地工作区根目录".to_string()
     } else if !agent_present {
-        "缺少内置 anban-creator-agent 二进制（请运行 populate-resources.sh）".to_string()
+        "缺少内置 anban 二进制（请运行 populate-resources.sh）".to_string()
     } else if !node_present || !claude_present {
         "缺少内置 Node / claude-code 运行时（请运行 populate-resources.sh）".to_string()
     } else if !plugin_present {

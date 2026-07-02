@@ -130,7 +130,13 @@ pub async fn start_local_executor(app: AppHandle) -> bool {
         *slot = Some(cancel.clone());
     }
 
-    tauri::async_runtime::spawn(crate::executor::run_loop(app, h.config, h.running, h.resources, cancel));
+    tauri::async_runtime::spawn(crate::executor::run_loop(
+        app,
+        h.config,
+        h.running,
+        h.resources,
+        cancel,
+    ));
     true
 }
 
@@ -159,8 +165,12 @@ fn is_safe_external_url(url: &str) -> bool {
     if !(lower.starts_with("http://") || lower.starts_with("https://")) {
         return false;
     }
-    !url.chars()
-        .any(|c| matches!(c, '&' | '|' | '>' | '<' | '^' | '(' | ')' | '%' | '"' | ';' | '`' | '\n' | '\r'))
+    !url.chars().any(|c| {
+        matches!(
+            c,
+            '&' | '|' | '>' | '<' | '^' | '(' | ')' | '%' | '"' | ';' | '`' | '\n' | '\r'
+        )
+    })
 }
 
 /// Open a URL in the user's default browser/app (replaces window.open in the SPA).

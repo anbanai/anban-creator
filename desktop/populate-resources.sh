@@ -24,18 +24,20 @@ echo "==> Resource target: $RES_DIR"
 mkdir -p "$BIN_DIR" "$RES_DIR/claude" "$RES_DIR/claudecode"
 
 # ---------------------------------------------------------------------------
-# 1. anban-creator-agent sidecar (native Go build for this host arch).
+# 1. anban sidecar (native Go build for this host arch).
 # ---------------------------------------------------------------------------
-echo "==> Building anban-creator-agent (native)…"
+echo "==> Building anban (native)…"
 ( cd "$REPO_ROOT" && make agent-build-native )
-AGENT_BIN=$(ls "$REPO_ROOT"/bin/anban-creator-agent-* 2>/dev/null | head -n1 || true)
-if [[ -z "$AGENT_BIN" ]]; then
-  echo "ERROR: agent build produced no binary under bin/." >&2
+HOST_OS="$(go env GOOS)"
+HOST_ARCH="$(go env GOARCH)"
+AGENT_BIN="$REPO_ROOT/bin/anban-$HOST_OS-$HOST_ARCH"
+if [[ ! -x "$AGENT_BIN" ]]; then
+  echo "ERROR: agent build produced no binary at $AGENT_BIN." >&2
   exit 1
 fi
-cp "$AGENT_BIN" "$BIN_DIR/anban-creator-agent"
-chmod +x "$BIN_DIR/anban-creator-agent"
-echo "    -> $BIN_DIR/anban-creator-agent"
+cp "$AGENT_BIN" "$BIN_DIR/anban"
+chmod +x "$BIN_DIR/anban"
+echo "    -> $BIN_DIR/anban"
 
 # ---------------------------------------------------------------------------
 # 2. Node runtime (copy the dev machine's node binary; PATH is overridden at

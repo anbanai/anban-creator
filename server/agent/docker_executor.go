@@ -283,6 +283,7 @@ func (e *DockerExecutor) resolveAgentAPIKey(ctx context.Context, opts *Execution
 func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel string, maxTurns int, workspace, apiKey string) []string {
 	cmd := []string{
 		AgentBinaryName,
+		"run",
 		"--server-url", strings.TrimRight(e.serverURL, "/"),
 		"--api-key", apiKey,
 		"--task-id", opts.Task.ID,
@@ -303,14 +304,14 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 	// match the task model column defaults (content on, tail off).
 	if opts.Task.Type == model.PlatformSeednote {
 		cmd = append(cmd,
-			"--has-content-image", strconv.FormatBool(opts.Task.HasContentImage),
-			"--has-tail-image", strconv.FormatBool(opts.Task.HasTailImage),
+			"--has-content-image="+strconv.FormatBool(opts.Task.HasContentImage),
+			"--has-tail-image="+strconv.FormatBool(opts.Task.HasTailImage),
 		)
 	}
 	if opts.Task.Type == model.PlatformArticle {
 		cmd = append(cmd,
-			"--article-with-cover", strconv.FormatBool(opts.Task.ArticleWithCover == nil || *opts.Task.ArticleWithCover),
-			"--article-with-content-images", strconv.FormatBool(opts.Task.ArticleWithContentImages == nil || *opts.Task.ArticleWithContentImages),
+			"--article-with-cover="+strconv.FormatBool(opts.Task.ArticleWithCover == nil || *opts.Task.ArticleWithCover),
+			"--article-with-content-images="+strconv.FormatBool(opts.Task.ArticleWithContentImages == nil || *opts.Task.ArticleWithContentImages),
 		)
 	}
 	if agentModel != "" {

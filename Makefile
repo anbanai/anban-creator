@@ -116,7 +116,7 @@ docker-down:
 docker-logs:
 	@docker compose logs -f
 
-# Build the anban-creator-agent Docker image (required for executor: docker)
+# Build the Anban agent Docker image (required for executor: docker)
 docker-agent-image:
 	@git submodule update --init --recursive
 	@echo "Building $(AGENT_IMAGE)..." && \
@@ -140,7 +140,7 @@ docker-image: docker-agent-image
 # Desktop (Tauri) targets
 # ---------------------------------------------------------------------------
 
-# Build the anban-creator-agent binary natively (no Docker) for the host platform.
+# Build the anban binary natively (no Docker) for the host platform.
 # The desktop app bundles this as a sidecar to claim & run tasks on the user's
 # machine via claude-agent-sdk-go (which spawns the local `claude` CLI).
 # Cross-compile the host-native variant; use ARCHES= to override, e.g.
@@ -151,8 +151,8 @@ agent-build-native:
 	@mkdir -p $(BINDIR)
 	@set -e; for arch in $(ARCHES); do \
 		os=$${arch%/*}; goarch=$${arch#*/}; \
-		out="$(BINDIR)/anban-creator-agent-$${os}-$${goarch}"; \
-		echo "Building anban-creator-agent for $${os}/$${goarch}..."; \
+		out="$(BINDIR)/anban-$${os}-$${goarch}"; \
+		echo "Building anban for $${os}/$${goarch}..."; \
 		GOOS=$${os} GOARCH=$${goarch} CGO_ENABLED=0 go build -trimpath -o $${out} ./agent; \
 	done
 	@echo "Agent native build complete: $(ARCHES)"
@@ -196,4 +196,4 @@ help:
 	@echo "  make docker-image       - Build agent image (alias)"
 	@echo ""
 	@echo "Desktop (Tauri) targets:"
-	@echo "  make agent-build-native - Build anban-creator-agent natively (desktop sidecar)"
+	@echo "  make agent-build-native - Build anban natively (desktop sidecar)"

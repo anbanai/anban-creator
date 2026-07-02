@@ -21,7 +21,7 @@ export function ReadinessChecklist({
       <Readiness ok={status?.api_key_set} label="Anban Creator API Key" />
       <Readiness ok={status?.claude_authenticated} label="Claude 鉴权" />
       <Readiness ok={status?.workspace_set} label="本地工作区" />
-      <Readiness ok={status?.agent_present} label="anban-creator-agent" />
+      <Readiness ok={status?.agent_present} label="anban" />
       <Readiness ok={status?.node_present} label="Node 运行时" />
       <Readiness ok={status?.claude_present} label="claude-code" />
       <Readiness ok={status?.plugin_present} label="claudecode 插件" />

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -77,5 +78,46 @@ func TestRunVideoCommandValidateEDLRejectsOverlayMismatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "overlay") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAgentCommandRunsVideoPackTranscripts(t *testing.T) {
+	dir := t.TempDir()
+	transcriptsDir := filepath.Join(dir, "transcripts")
+	if err := os.MkdirAll(transcriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(transcriptsDir, "take-a.json"), []byte(`{"words":[{"type":"word","text":"第一","start":0,"end":0.2}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "takes_packed.md")
+	var stdout bytes.Buffer
+
+	err := newAgentCommand(&stdout, nil, nil).Run(context.Background(), []string{
+		"anban",
+		"video",
+		"pack-transcripts",
+		"--transcripts-dir", transcriptsDir,
+		"--out", out,
+	})
+	if err != nil {
+		t.Fatalf("agent command returned error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"output_path"`) {
+		t.Fatalf("stdout should include output_path JSON, got %s", stdout.String())
+	}
+}
+
+func TestAgentCommandRejectsUnknownVideoSubcommand(t *testing.T) {
+	err := newAgentCommand(nil, nil, nil).Run(context.Background(), []string{"anban", "video", "missing"})
+	if err == nil {
+		t.Fatal("expected unknown video subcommand to fail")
+	}
+}
+
+func TestAgentCommandRequiresVideoSubcommand(t *testing.T) {
+	err := newAgentCommand(nil, nil, nil).Run(context.Background(), []string{"anban", "video"})
+	if err == nil {
+		t.Fatal("expected video command without subcommand to fail")
 	}
 }
