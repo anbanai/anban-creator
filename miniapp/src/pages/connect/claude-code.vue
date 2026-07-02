@@ -22,6 +22,7 @@
 
     <view class="step-card">
       <text class="step-card__title">3. 安装插件</text>
+      <text class="step-text">anban 是插件 ID，anbanai 是发布方；MCP server key 固定为 creator，工具名前缀为 mcp__plugin_anban_creator__。</text>
       <view class="copy-block" @tap="copyText('claude plugin install --scope user anban@anbanai')">
         <text class="copy-block__code">claude plugin install --scope user anban@anbanai</text>
         <text class="copy-block__hint">点击复制</text>

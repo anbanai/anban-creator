@@ -266,6 +266,16 @@ Task progress events use `TaskProgressNotifier` interface (`server/service/task_
 
 Three client access points share the same server MCP API:
 
+### Naming Contract
+
+The public naming model is **brand + capability**:
+
+- Claude Code install uses `plugin@marketplace`: install `anban@anbanai`, where `anban` is the plugin ID and `anbanai` is the marketplace/publisher.
+- The MCP server key is `creator`, because Claude Code treats the server name in `.mcp.json` as the label for that server's tools and for commands such as MCP removal/status; it is not the plugin ID.
+- Plugin-provided MCP tools use both names, so the expected tool prefix is `mcp__plugin_anban_creator__...`.
+- Agent namespaces use the plugin/brand ID, for example `anban:<agent>`.
+- Do not use compact aliases or alternate install names based on `creator`, the unhyphenated product name, or the full product slug.
+
 ### Claude Code Plugin (`claudecode/`)
 
 Git submodule → `anbanai/anban-creator-claudecode`. Uses Agent + Skill + MCP architecture.
@@ -294,7 +304,7 @@ openclaw/                          # git submodule → anbanai/anban-creator-ope
 └── writers/                       # Writing styles (YAML, shared with claudecode)
 ```
 
-Both plugins connect to the same `anban-creator` MCP server and share themes/writers.
+Both plugins connect to the same `creator` MCP server key for Anban Creator capabilities and share themes/writers.
 
 ### Codex Plugin (`codex/`)
 
@@ -314,7 +324,7 @@ codex/                             # git submodule → anbanai/anban-creator-cod
 
 Install flow: `codex plugin marketplace add ./codex && codex plugin install anban`, then `bash codex/install/install-subagents.sh` to register the subagents in `~/.codex/config.toml`.
 
-All three plugins (`claudecode/`, `openclaw/`, `codex/`) connect to the same `anban-creator` MCP server and share themes/writers/skill content. When a skill or agent exists in multiple distros, update all of them unless an intended divergence is asserted by a test (e.g. `server/mcp` `TestLiveSliceSkillFiles`). Agents must call MCP tools directly — no ad-hoc HTTP clients.
+All three plugins (`claudecode/`, `openclaw/`, `codex/`) connect to the same `creator` MCP server key for Anban Creator capabilities and share themes/writers/skill content. When a skill or agent exists in multiple distros, update all of them unless an intended divergence is asserted by a test (e.g. `server/mcp` `TestLiveSliceSkillFiles`). Agents must call MCP tools directly — no ad-hoc HTTP clients.
 
 ## Notes
 
