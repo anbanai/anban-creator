@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -341,6 +342,7 @@ type fakeAudioASRStorage struct {
 	uploadContentType string
 	downloadURL       string
 	signedKey         string
+	signedKeys        []string
 	readKey           string
 	ownedPrefix       string
 }
@@ -352,12 +354,25 @@ func (f *fakeAudioASRStorage) Name() string {
 	return "fake"
 }
 
-func (f *fakeAudioASRStorage) Upload(context.Context, string, io.Reader, string) (*storage.UploadResult, error) {
-	return nil, errors.New("not implemented")
+func (f *fakeAudioASRStorage) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	if f.files == nil {
+		f.files = map[string][]byte{}
+	}
+	f.files[key] = append([]byte(nil), data...)
+	return &storage.UploadResult{URL: f.GetURL(key), Key: key, Size: int64(len(data)), MimeType: contentType}, nil
 }
 
-func (f *fakeAudioASRStorage) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {
-	return nil, errors.New("not implemented")
+func (f *fakeAudioASRStorage) UploadFile(ctx context.Context, key string, filePath string, contentType string) (*storage.UploadResult, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return f.Upload(ctx, key, file, contentType)
 }
 
 func (f *fakeAudioASRStorage) UploadURL(_ context.Context, key string, contentType string, _ int) (string, error) {
@@ -382,6 +397,7 @@ func (f *fakeAudioASRStorage) Delete(context.Context, string) error { return nil
 
 func (f *fakeAudioASRStorage) DownloadURL(_ context.Context, key string, _ int) (string, error) {
 	f.signedKey = key
+	f.signedKeys = append(f.signedKeys, key)
 	if f.downloadURL != "" {
 		return f.downloadURL, nil
 	}
@@ -391,6 +407,15 @@ func (f *fakeAudioASRStorage) DownloadURL(_ context.Context, key string, _ int) 
 func (f *fakeAudioASRStorage) HasCustomDomain() bool { return true }
 func (f *fakeAudioASRStorage) IsOwnedURL(rawURL string) bool {
 	return f.ownedPrefix != "" && strings.HasPrefix(rawURL, f.ownedPrefix)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAudioASRServiceCreateTaskRejectsMissingAudioSource(t *testing.T) {
@@ -429,8 +454,14 @@ func TestAudioASRServiceCreateTaskTranscribesOSSKey(t *testing.T) {
 	if fake.transcribeReq.AudioURL != "https://download.example.com/uploads/video-audio/take.wav" || fake.transcribeReq.AudioKey != "uploads/video-audio/take.wav" || fake.transcribeReq.SpeakerCount != 2 {
 		t.Fatalf("transcribe request source not forwarded: %#v", fake.transcribeReq)
 	}
-	if store.signedKey != "uploads/video-audio/take.wav" {
-		t.Fatalf("audio_key should sign storage object, signedKey=%q", store.signedKey)
+	if !containsString(store.signedKeys, "uploads/video-audio/take.wav") {
+		t.Fatalf("audio_key should sign storage object, signedKeys=%q", store.signedKeys)
+	}
+	if result.TranscriptKey != "uploads/video-transcripts/asr-task-1.json" || result.WordCount != 1 {
+		t.Fatalf("compact transcript metadata not populated: %#v", result)
+	}
+	if !strings.Contains(string(store.files[result.TranscriptKey]), "你好") {
+		t.Fatalf("stored transcript missing normalized JSON: %s", store.files[result.TranscriptKey])
 	}
 }
 
@@ -457,15 +488,15 @@ func TestAudioASRServiceCreateTaskTranscribesOwnedAudioURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	if store.signedKey != "uploads/video-audio/take.wav" {
-		t.Fatalf("owned audio_url should sign storage object, signedKey=%q", store.signedKey)
+	if !containsString(store.signedKeys, "uploads/video-audio/take.wav") {
+		t.Fatalf("owned audio_url should sign storage object, signedKeys=%q", store.signedKeys)
 	}
 	if fake.transcribeReq.AudioURL != "https://download.example.com/uploads/video-audio/take.wav" {
 		t.Fatalf("transcribe request metadata = %#v", fake.transcribeReq)
 	}
 }
 
-func TestAudioASRServiceCreateTaskPassesExternalAudioURLThrough(t *testing.T) {
+func TestAudioASRServiceCreateTaskRequiresTranscriptStorage(t *testing.T) {
 	fake := &fakeAudioASRCompatClient{result: &AudioASRTaskResult{
 		TaskID: "asr-task-1",
 		Status: "SUCCEEDED",
@@ -478,8 +509,8 @@ func TestAudioASRServiceCreateTaskPassesExternalAudioURLThrough(t *testing.T) {
 	_, err := svc.CreateTask(context.Background(), AudioASRTaskRequest{
 		AudioURL: "https://media.example.org/audio.wav",
 	})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "transcript storage is required") {
+		t.Fatalf("CreateTask error = %v, want transcript storage requirement", err)
 	}
 	if fake.transcribeReq.AudioURL != "https://media.example.org/audio.wav" || fake.transcribeReq.Audio != nil {
 		t.Fatalf("external audio URL not passed through: %#v", fake.transcribeReq)

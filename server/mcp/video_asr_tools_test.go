@@ -95,7 +95,7 @@ func TestPrepareFileUploadReturnsSignedLiveAudioUpload(t *testing.T) {
 	}
 }
 
-func TestCreateVideoASRTaskHandlerReturnsTranscript(t *testing.T) {
+func TestCreateVideoASRTaskHandlerReturnsCompactReceipt(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +110,7 @@ func TestCreateVideoASRTaskHandlerReturnsTranscript(t *testing.T) {
 	store := &fakeVideoReferenceStorage{name: "oss", url: "https://cdn.example.com/uploads/video-audio/take.wav", files: map[string][]byte{
 		"uploads/video-audio/take.wav": []byte("fake-wav"),
 	}, downloadURL: srv.URL}
-	svcs = &Services{AudioASRSvc: service.NewAudioASRServiceWithClient(&fakeMCPVideoASRClient{
+	svcs = &Services{Store: store, AudioASRSvc: service.NewAudioASRServiceWithClient(&fakeMCPVideoASRClient{
 		result: &service.AudioASRTaskResult{
 			TaskID: "asr-task-1",
 			Status: "SUCCEEDED",
@@ -131,7 +131,42 @@ func TestCreateVideoASRTaskHandlerReturnsTranscript(t *testing.T) {
 		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	for _, want := range []string{"asr-task-1", "SUCCEEDED", "你好", "words"} {
+	for _, want := range []string{"asr-task-1", "SUCCEEDED", "transcript_object_key", "download_url", "word_count"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("payload missing %q: %s", want, text)
+		}
+	}
+	if strings.Contains(text, `"words"`) || strings.Contains(text, "你好") {
+		t.Fatalf("compact ASR receipt should not inline full transcript: %s", text)
+	}
+	if store.key == "" || !strings.Contains(store.key, "uploads/video-transcripts/") {
+		t.Fatalf("transcript should be uploaded to video transcript storage, key=%q", store.key)
+	}
+	if !strings.Contains(string(store.files[store.key]), "你好") {
+		t.Fatalf("stored transcript missing content: %s", store.files[store.key])
+	}
+}
+
+func TestPrepareVideoTranscriptDownloadReturnsSignedURL(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{name: "oss", url: "https://cdn.example.com/uploads/video-transcripts/take.json", files: map[string][]byte{
+		"uploads/video-transcripts/asr-task-1.json": []byte(`{"words":[]}`),
+	}}
+	svcs = &Services{Store: store}
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"transcript_object_key":"uploads/video-transcripts/asr-task-1.json"}`)},
+	}
+	result, err := prepareVideoTranscriptDownloadHandler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("prepareVideoTranscriptDownloadHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	for _, want := range []string{"download_url", "uploads/video-transcripts/asr-task-1.json"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("payload missing %q: %s", want, text)
 		}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,8 +21,9 @@ import (
 )
 
 const (
-	videoAudioKeyPrefix = "uploads/video-audio/"
-	funASRDefaultModel  = "fun-asr"
+	videoAudioKeyPrefix      = "uploads/video-audio/"
+	videoTranscriptKeyPrefix = "uploads/video-transcripts/"
+	funASRDefaultModel       = "fun-asr"
 )
 
 // AudioASRClient is the direct adapter boundary for Aliyun Fun-ASR calls.
@@ -83,6 +85,10 @@ type AudioASRTaskResult struct {
 	TaskID           string           `json:"task_id"`
 	Status           string           `json:"status"`
 	TranscriptionURL string           `json:"transcription_url,omitempty"`
+	TranscriptKey    string           `json:"transcript_object_key,omitempty"`
+	TranscriptURL    string           `json:"download_url,omitempty"`
+	WordCount        int              `json:"word_count,omitempty"`
+	DurationSeconds  float64          `json:"duration_seconds,omitempty"`
 	Transcript       *VideoTranscript `json:"transcript,omitempty"`
 	Error            string           `json:"error,omitempty"`
 }
@@ -162,10 +168,82 @@ func (s *AudioASRService) CreateTask(ctx context.Context, req AudioASRTaskReques
 	if result.Status == "" {
 		result.Status = "SUCCEEDED"
 	}
+	if err := s.persistTranscript(ctx, result); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	s.cache[result.TaskID] = result
 	s.mu.Unlock()
 	return result, nil
+}
+
+func (s *AudioASRService) persistTranscript(ctx context.Context, result *AudioASRTaskResult) error {
+	if result == nil || result.Transcript == nil {
+		return nil
+	}
+	result.WordCount = countTranscriptWords(result.Transcript)
+	result.DurationSeconds = transcriptDuration(result.Transcript)
+	if s.store == nil {
+		return fmt.Errorf("transcript storage is required for compact video ASR receipts")
+	}
+	raw, err := json.Marshal(result.Transcript)
+	if err != nil {
+		return fmt.Errorf("marshal video transcript: %w", err)
+	}
+	key := filepath.ToSlash(filepath.Join(videoTranscriptKeyPrefix, sanitizeASRStorageName(result.TaskID)+".json"))
+	upload, err := s.store.Upload(ctx, key, bytes.NewReader(raw), "application/json")
+	if err != nil {
+		return fmt.Errorf("upload video transcript: %w", err)
+	}
+	result.TranscriptKey = upload.Key
+	if result.TranscriptKey == "" {
+		result.TranscriptKey = key
+	}
+	url, err := s.store.DownloadURL(ctx, result.TranscriptKey, defaultMediaSourceTTL)
+	if err == nil {
+		result.TranscriptURL = url
+	}
+	return nil
+}
+
+func countTranscriptWords(transcript *VideoTranscript) int {
+	if transcript == nil {
+		return 0
+	}
+	count := 0
+	for _, w := range transcript.Words {
+		if (w.Type == "" || w.Type == "word" || w.Type == "audio_event") && strings.TrimSpace(w.Text) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func transcriptDuration(transcript *VideoTranscript) float64 {
+	if transcript == nil {
+		return 0
+	}
+	var maxEnd float64
+	for _, w := range transcript.Words {
+		if w.End > maxEnd {
+			maxEnd = w.End
+		}
+	}
+	for _, p := range transcript.Phrases {
+		if p.End > maxEnd {
+			maxEnd = p.End
+		}
+	}
+	return maxEnd
+}
+
+func sanitizeASRStorageName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "transcript-" + uuid.NewString()
+	}
+	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-")
+	return replacer.Replace(raw)
 }
 
 func (s *AudioASRService) resolveAudioASRSourceURL(ctx context.Context, key, rawURL string) (*MediaSource, error) {

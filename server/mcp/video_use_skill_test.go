@@ -55,12 +55,23 @@ func TestVideoUseSkillFiles(t *testing.T) {
 			"prepare_file_upload",
 			"create_video_asr_task",
 			"query_video_asr_task",
+			"prepare_video_transcript_download",
 			"pack_video_transcripts",
+			"anban-creator-agent video",
+			"media-manifest.json",
+			"display rotation",
+			"draft",
+			"preview",
+			"final",
+			"file-based transcript",
+			"output_width/output_height",
+			"overlay dimensions",
 			"FunASR",
 			"Aliyun FunASR HTTP",
 			"Source Han Sans",
 			"思源黑体",
 			"subtitles are applied LAST",
+			"master.srt",
 			"setpts=PTS-STARTPTS+T/TB",
 			"takes_packed.md",
 			"edl.json",
@@ -210,7 +221,17 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		"prepare_file_upload",
 		"create_video_asr_task",
 		"query_video_asr_task",
+		"prepare_video_transcript_download",
 		"pack_video_transcripts",
+		"anban-creator-agent video",
+		"media-manifest.json",
+		"display rotation",
+		"save-asr-result",
+		"pack-transcripts",
+		"match-script",
+		"draft",
+		"preview",
+		"final",
 		"普通素材剪辑不得调用",
 		"register_video_reference",
 		"create_video_generation_task",
@@ -247,9 +268,27 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		"skills/remotion-video-overlays/SKILL.md",
 		"skills/manim-video-overlays/SKILL.md",
 		"skills/pil-video-overlays/SKILL.md",
+		"anban-creator-agent video",
+		"media-manifest.json",
+		"display rotation",
+		"prepare_video_transcript_download",
+		"save-asr-result",
+		"pack-transcripts",
+		"match-script",
+		"draft",
+		"preview",
+		"final",
 	} {
 		if !strings.Contains(codexAgent, want) {
 			t.Fatalf("codex video agent missing %q", want)
+		}
+	}
+	for _, banned := range []string{
+		"保存返回的 normalized JSON",
+		"调用 pack_video_transcripts，保存 edit/takes_packed.md",
+	} {
+		if strings.Contains(codexAgent, banned) {
+			t.Fatalf("codex video agent still contains old flow %q", banned)
 		}
 	}
 

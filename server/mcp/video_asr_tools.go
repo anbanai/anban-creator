@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -28,7 +29,7 @@ func registerVideoASRTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "create_video_asr_task",
-		Description: "Transcribe an OSS-backed audio object or HTTPS audio URL through server-side Aliyun FunASR HTTP and return normalized video-use transcript JSON. API keys stay on the server.",
+		Description: "Transcribe an OSS-backed audio object or HTTPS audio URL through server-side Aliyun FunASR HTTP and return a compact receipt with transcript_object_key/download_url. API keys stay on the server.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -51,6 +52,19 @@ func registerVideoASRTools(server *mcp.Server) {
 			"required": []any{"task_id"},
 		},
 	}, queryVideoASRTaskHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "prepare_video_transcript_download",
+		Description: "Return a signed download URL for a normalized video-use transcript JSON object. Agents should save it locally with anban-creator-agent video save-asr-result.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task_id":               map[string]any{"type": "string", "description": "Completed ASR task ID"},
+				"transcript_object_key": map[string]any{"type": "string", "description": "Transcript object key returned by create_video_asr_task"},
+				"expires_seconds":       map[string]any{"type": "integer", "default": 86400},
+			},
+		},
+	}, prepareVideoTranscriptDownloadHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "pack_video_transcripts",
@@ -114,7 +128,7 @@ func createVideoASRTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*
 	if err != nil {
 		return errorResult("create video ASR task: " + err.Error()), nil
 	}
-	return textResult(result)
+	return textResult(audioASRReceipt(result))
 }
 
 func queryVideoASRTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -128,7 +142,45 @@ func queryVideoASRTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*m
 	if err != nil {
 		return errorResult("query video ASR task: " + err.Error()), nil
 	}
-	return textResult(result)
+	return textResult(audioASRReceipt(result))
+}
+
+func prepareVideoTranscriptDownloadHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.Store == nil {
+		return errorResult("storage provider is not available"), nil
+	}
+	args := parseArgs(req.Params.Arguments)
+	taskID, _ := args["task_id"].(string)
+	key, _ := args["transcript_object_key"].(string)
+	expires := 86400
+	if v, ok := numberAsInt64(args["expires_seconds"]); ok && v > 0 {
+		expires = int(v)
+	}
+	if strings.TrimSpace(key) == "" && strings.TrimSpace(taskID) != "" {
+		if svc := currentAudioASRService(); svc != nil {
+			result, err := svc.QueryTask(ctx, taskID)
+			if err != nil {
+				return errorResult("prepare video transcript download: " + err.Error()), nil
+			}
+			key = result.TranscriptKey
+		}
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return errorResult("transcript_object_key or task_id is required"), nil
+	}
+	if !strings.HasPrefix(key, "uploads/video-transcripts/") {
+		return errorResult("transcript_object_key must be under uploads/video-transcripts/"), nil
+	}
+	url, err := svcs.Store.DownloadURL(ctx, key, expires)
+	if err != nil {
+		return errorResult("prepare video transcript download: " + err.Error()), nil
+	}
+	return textResult(map[string]any{
+		"transcript_object_key": key,
+		"download_url":          url,
+		"expires_seconds":       expires,
+	})
 }
 
 func currentAudioASRService() *service.AudioASRService {
@@ -139,6 +191,31 @@ func currentAudioASRService() *service.AudioASRService {
 		return svcs.AudioASRSvc
 	}
 	return svcs.VideoASRSvc
+}
+
+func audioASRReceipt(result *service.AudioASRTaskResult) map[string]any {
+	if result == nil {
+		return map[string]any{}
+	}
+	receipt := map[string]any{
+		"task_id":          result.TaskID,
+		"status":           result.Status,
+		"word_count":       result.WordCount,
+		"duration_seconds": result.DurationSeconds,
+	}
+	if result.TranscriptKey != "" {
+		receipt["transcript_object_key"] = result.TranscriptKey
+	}
+	if result.TranscriptURL != "" {
+		receipt["download_url"] = result.TranscriptURL
+	}
+	if result.TranscriptionURL != "" {
+		receipt["provider_transcription_url"] = result.TranscriptionURL
+	}
+	if result.Error != "" {
+		receipt["error"] = result.Error
+	}
+	return receipt
 }
 
 func packVideoTranscriptsHandler(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -12,6 +12,10 @@ import (
 )
 
 func main() {
+	if maybeRunVideoCommand(os.Args[1:], os.Stdout, os.Stderr) {
+		return
+	}
+
 	cfg, err := ParseConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "invalid config: %v\n", err)

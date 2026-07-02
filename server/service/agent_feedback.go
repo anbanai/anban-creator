@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -25,8 +26,18 @@ func NewAgentFeedbackService(repo repository.Repository, logger *zerolog.Logger)
 
 // Create stores agent feedback for a task.
 func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, scores, errors, optimizations, summary string) (*model.AgentFeedback, error) {
-	if _, err := s.repo.Tasks().FindByID(ctx, taskID); err != nil {
-		return nil, fmt.Errorf("task not found: %w", err)
+	if strings.TrimSpace(taskID) == "" {
+		return nil, fmt.Errorf("task_id is required")
+	}
+	if !isLocalFeedbackTaskID(taskID) {
+		if _, err := s.repo.Tasks().FindByID(ctx, taskID); err != nil {
+			return nil, fmt.Errorf("task not found: %w", err)
+		}
+	} else if s.logger != nil {
+		s.logger.Info().Str("task_id", taskID).Str("agent_name", agentName).Msg("accepting local agent feedback without persisted task")
+	}
+	if strings.TrimSpace(agentName) == "" {
+		return nil, fmt.Errorf("agent_name is required")
 	}
 	if scores != "" && !json.Valid([]byte(scores)) {
 		return nil, fmt.Errorf("scores must be valid JSON")
@@ -45,6 +56,11 @@ func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, sc
 		return nil, err
 	}
 	return feedback, nil
+}
+
+func isLocalFeedbackTaskID(taskID string) bool {
+	taskID = strings.TrimSpace(taskID)
+	return strings.HasPrefix(taskID, "local-") || strings.HasPrefix(taskID, "video-local-")
 }
 
 // FindByTaskID returns all feedback entries for a task.
