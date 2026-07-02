@@ -184,7 +184,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "claudecode",
 			path:        filepath.Join(root, "claudecode", "hooks", "hooks.json"),
-			wantVersion: "2.10.10",
+			wantVersion: "2.10.11",
 			wantSnippets: []string{
 				"SessionStart",
 				"${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh",
@@ -193,7 +193,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "codex",
 			path:        filepath.Join(root, "codex", "install", "install-subagents.sh"),
-			wantVersion: "2.10.8",
+			wantVersion: "2.10.9",
 			wantSnippets: []string{
 				"ANBAN_PLUGIN_ROOT=\"$PLUGIN_ROOT\"",
 				"scripts/bootstrap.sh",
@@ -202,7 +202,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "openclaw",
 			path:        filepath.Join(root, "openclaw", "src", "index.ts"),
-			wantVersion: "2.7.8",
+			wantVersion: "2.7.9",
 			wantSnippets: []string{
 				"bootstrapAnbanBinary(api)",
 				"scripts/bootstrap.sh",
@@ -224,6 +224,66 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 			assertPluginVersion(t, root, tc.name, tc.wantVersion)
 		})
 	}
+}
+
+func TestAnbanSetupEnsuresPluginLocalCLI(t *testing.T) {
+	root := repositoryRoot(t)
+	var firstSharedSection string
+	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+		path := filepath.Join(root, plugin, "skills", "anban-setup", "SKILL.md")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s anban-setup missing: %v", plugin, err)
+		}
+		body := string(raw)
+		for _, want := range []string{
+			"## 本地 CLI 预检",
+			"在调用 `list_projects` 之前",
+			"ANBAN_PLUGIN_ROOT",
+			"CLAUDE_PLUGIN_ROOT",
+			"PLUGIN_ROOT",
+			"bin/anban",
+			"bin/anban.exe",
+			"scripts/bootstrap.sh",
+			"anban --help",
+			"重新安装 Anban 插件",
+			"联系 Anban 支持",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s anban-setup missing %q", plugin, want)
+			}
+		}
+		for _, banned := range []string{
+			"make plugin-binaries",
+			"GOOS",
+			"GOARCH",
+			"手动复制二进制",
+		} {
+			if strings.Contains(body, banned) {
+				t.Fatalf("%s anban-setup should not expose developer-only instruction %q", plugin, banned)
+			}
+		}
+		shared := anbanSetupCLISection(t, plugin, body)
+		if firstSharedSection == "" {
+			firstSharedSection = shared
+		} else if shared != firstSharedSection {
+			t.Fatalf("%s anban-setup local CLI section differs from claudecode", plugin)
+		}
+	}
+}
+
+func anbanSetupCLISection(t *testing.T, plugin, body string) string {
+	t.Helper()
+	start := strings.Index(body, "## 本地 CLI 预检")
+	if start < 0 {
+		t.Fatalf("%s anban-setup missing local CLI section", plugin)
+	}
+	rest := body[start:]
+	end := strings.Index(rest[len("## 本地 CLI 预检"):], "\n## ")
+	if end < 0 {
+		return strings.TrimSpace(rest)
+	}
+	return strings.TrimSpace(rest[:len("## 本地 CLI 预检")+end])
 }
 
 func repositoryRoot(t *testing.T) string {
