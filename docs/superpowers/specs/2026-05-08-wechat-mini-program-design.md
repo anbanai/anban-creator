@@ -1,8 +1,8 @@
-# Anbanwriter WeChat Mini Program Design
+# Anban Creator WeChat Mini Program Design
 
 ## Context
 
-Anbanwriter Studio 是一个基于 React 的 Web 前端，提供内容创作管理功能。用户需要移动端访问能力，尤其是微信小程序，以便随时随地管理账号、创建任务、查看进度。后端 API 已完整（含 `wx-login` 微信登录端点），只需新建 uni-app 小程序前端。
+Anban Creator Studio 是一个基于 React 的 Web 前端，提供内容创作管理功能。用户需要移动端访问能力，尤其是微信小程序，以便随时随地管理账号、创建任务、查看进度。后端 API 已完整（含 `wx-login` 微信登录端点），只需新建 uni-app 小程序前端。
 
 **目标：** 用 uni-app 构建微信小程序，移植所有面向普通用户的业务功能，排除桌面/开发者专属功能。
 

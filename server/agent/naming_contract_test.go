@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,8 +29,6 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, "openclaw", "src", "index.ts"), `id: "anban"`)
 
 	for _, path := range []string{
-		filepath.Join(root, ".gitignore"),
-		filepath.Join(root, ".gitmodules"),
 		filepath.Join(root, "CLAUDE.md"),
 		filepath.Join(root, "agent", "Dockerfile"),
 		filepath.Join(root, "server", "Dockerfile"),
@@ -46,6 +45,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 		assertFileNotContains(t, path, "Anban"+"Writer")
 		assertFileNotContains(t, path, "案"+"板")
 	}
+	assertTrackedFilesDoNotContainLegacyNames(t, root)
 }
 
 func assertClaudeMarketplacePlugin(t *testing.T, path string) {
@@ -86,6 +86,51 @@ func assertClaudeMarketplacePlugin(t *testing.T, path string) {
 
 type named struct {
 	Name string `json:"name"`
+}
+
+func assertTrackedFilesDoNotContainLegacyNames(t *testing.T, root string) {
+	t.Helper()
+	for _, path := range trackedFiles(t, root) {
+		fullPath := filepath.Join(root, path)
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		body := readTextFile(t, fullPath)
+		for _, banned := range []string{
+			"anban" + "writer",
+			"Anban" + "Writer",
+			"案" + "板",
+			"royal" + "rick",
+			"royal" + "morty/anban" + "writer",
+		} {
+			if strings.Contains(strings.ToLower(body), strings.ToLower(banned)) {
+				t.Fatalf("%s still contains banned term %q", path, banned)
+			}
+		}
+	}
+}
+
+func trackedFiles(t *testing.T, root string) []string {
+	t.Helper()
+	cmd := exec.Command("git", "ls-files", "-z")
+	cmd.Dir = root
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(output), "\x00"), "\x00")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line == "" || line == "go.sum" {
+			continue
+		}
+		out = append(out, filepath.FromSlash(line))
+	}
+	return out
 }
 
 func assertJSONField(t *testing.T, path, field, want string) {
