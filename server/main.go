@@ -487,7 +487,7 @@ func main() {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
 		var videoSvc *service.VideoService
-		var videoASRSvc *service.VideoASRService
+		var audioASRSvc *service.AudioASRService
 		var writingSvc *service.WritingService
 		var liveSliceSvc *service.LiveSliceService
 
@@ -502,16 +502,16 @@ func main() {
 		} else {
 			log.Warn().Msg("video generation service not configured (set video_api.key), video tools unavailable")
 		}
-		if cfg.FunASR.Complete() || store != nil {
+		if cfg.FunASR.Complete() {
 			var err error
-			videoASRSvc, err = service.NewVideoASRService(cfg.FunASR, store, log)
+			audioASRSvc, err = service.NewAudioASRService(cfg.FunASR, store, log)
 			if err != nil {
-				log.Warn().Err(err).Msg("video ASR service unavailable")
+				log.Warn().Err(err).Msg("audio ASR service unavailable")
 			} else {
 				log.Info().
 					Bool("funasr_configured", cfg.FunASR.Complete()).
 					Bool("storage_configured", store != nil).
-					Msg("video ASR service initialized")
+					Msg("audio ASR service initialized")
 			}
 		}
 		if mysqlDB != nil && imageSvc != nil {
@@ -557,7 +557,7 @@ func main() {
 			PlanSvc:          planSvc,
 			ImageSvc:         imageSvc,
 			VideoSvc:         videoSvc,
-			VideoASRSvc:      videoASRSvc,
+			AudioASRSvc:      audioASRSvc,
 			WritingSvc:       writingSvc,
 			PublishingSvc:    publishingSvc,
 			WorkspaceSvc:     workspaceSvc,

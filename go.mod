@@ -38,6 +38,7 @@ require (
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
+	resty.dev/v3 v3.0.0-rc.2
 )
 
 require (

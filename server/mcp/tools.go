@@ -25,6 +25,7 @@ type Services struct {
 	PlanSvc          *service.PlanService
 	ImageSvc         *service.ImageService
 	VideoSvc         *service.VideoService
+	AudioASRSvc      *service.AudioASRService
 	VideoASRSvc      *service.VideoASRService
 	WritingSvc       *service.WritingService
 	PublishingSvc    *service.PublishingService

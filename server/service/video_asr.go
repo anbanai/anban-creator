@@ -1,12 +1,10 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,46 +12,61 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 	"github.com/rs/zerolog"
+	"resty.dev/v3"
 
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
 const (
-	videoAudioKeyPrefix   = "uploads/video-audio/"
-	maxVideoASRAudioBytes = 200 << 20
+	videoAudioKeyPrefix = "uploads/video-audio/"
+	funASRDefaultModel  = "fun-asr"
 )
 
-// VideoASRClient is the direct adapter boundary for OpenAI-compatible FunASR calls.
-type VideoASRClient interface {
-	Transcribe(ctx context.Context, req VideoASRTaskRequest) (*VideoASRTaskResult, error)
+// AudioASRClient is the direct adapter boundary for Aliyun Fun-ASR calls.
+type AudioASRClient interface {
+	Transcribe(ctx context.Context, req AudioASRTaskRequest) (*AudioASRTaskResult, error)
 }
 
-// VideoASRService coordinates storage and provider-side word-level ASR.
-type VideoASRService struct {
-	client VideoASRClient
+// VideoASRClient is kept as a compatibility alias for existing video-use callers.
+type VideoASRClient = AudioASRClient
+
+// AudioASRService coordinates storage and provider-side word-level ASR.
+type AudioASRService struct {
+	client AudioASRClient
 	store  storage.Provider
 	logger *zerolog.Logger
 	mu     sync.RWMutex
-	cache  map[string]*VideoASRTaskResult
+	cache  map[string]*AudioASRTaskResult
 }
 
-func NewVideoASRService(cfg config.FunASRConfig, store storage.Provider, logger *zerolog.Logger) (*VideoASRService, error) {
-	client, err := NewOpenAIFunASRClient(cfg)
+// VideoASRService is kept as a compatibility alias for existing video-use callers.
+type VideoASRService = AudioASRService
+
+func NewAudioASRService(cfg config.FunASRConfig, store storage.Provider, logger *zerolog.Logger) (*AudioASRService, error) {
+	client, err := NewFunASRHTTPClient(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return NewVideoASRServiceWithClient(client, store), nil
+	svc := NewAudioASRServiceWithClient(client, store)
+	svc.logger = logger
+	return svc, nil
+}
+
+func NewVideoASRService(cfg config.FunASRConfig, store storage.Provider, logger *zerolog.Logger) (*VideoASRService, error) {
+	return NewAudioASRService(cfg, store, logger)
+}
+
+func NewAudioASRServiceWithClient(client AudioASRClient, store storage.Provider) *AudioASRService {
+	return &AudioASRService{client: client, store: store, cache: map[string]*AudioASRTaskResult{}}
 }
 
 func NewVideoASRServiceWithClient(client VideoASRClient, store storage.Provider) *VideoASRService {
-	return &VideoASRService{client: client, store: store, cache: map[string]*VideoASRTaskResult{}}
+	return NewAudioASRServiceWithClient(client, store)
 }
 
-type VideoASRTaskRequest struct {
+type AudioASRTaskRequest struct {
 	FilePath     string `json:"file_path,omitempty"`
 	AudioKey     string `json:"audio_key,omitempty"`
 	AudioURL     string `json:"audio_url,omitempty"`
@@ -64,13 +77,17 @@ type VideoASRTaskRequest struct {
 	SpeakerCount int    `json:"speaker_count,omitempty"`
 }
 
-type VideoASRTaskResult struct {
+type VideoASRTaskRequest = AudioASRTaskRequest
+
+type AudioASRTaskResult struct {
 	TaskID           string           `json:"task_id"`
 	Status           string           `json:"status"`
 	TranscriptionURL string           `json:"transcription_url,omitempty"`
 	Transcript       *VideoTranscript `json:"transcript,omitempty"`
 	Error            string           `json:"error,omitempty"`
 }
+
+type VideoASRTaskResult = AudioASRTaskResult
 
 type VideoTranscript struct {
 	Words    []VideoTranscriptWord      `json:"words"`
@@ -94,7 +111,7 @@ type VideoTranscriptPhrase struct {
 	SpeakerID string  `json:"speaker_id,omitempty"`
 }
 
-func (s *VideoASRService) CreateTask(ctx context.Context, req VideoASRTaskRequest) (*VideoASRTaskResult, error) {
+func (s *AudioASRService) CreateTask(ctx context.Context, req AudioASRTaskRequest) (*AudioASRTaskResult, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("FunASR client is not configured")
 	}
@@ -116,26 +133,19 @@ func (s *VideoASRService) CreateTask(ctx context.Context, req VideoASRTaskReques
 		if s.store.Name() != "oss" {
 			return nil, fmt.Errorf("audio_key requires OSS storage")
 		}
-		resolved, err := ResolveMediaSourceBytes(ctx, s.store, s.logger, MediaSourceRequest{
-			Key:         audioKey,
-			MaxBytes:    maxVideoASRAudioBytes,
-			ContentType: audioContentType(strings.ToLower(filepath.Ext(audioKey))),
-		})
+		resolved, err := s.resolveAudioASRSourceURL(ctx, audioKey, "")
 		if err != nil {
-			return nil, fmt.Errorf("read audio object: %w", err)
+			return nil, fmt.Errorf("resolve audio object: %w", err)
 		}
-		req.Audio = bytes.NewReader(resolved.Bytes)
+		req.AudioURL = resolved.URL
 		req.Filename = resolved.Filename
 		req.ContentType = resolved.ContentType
 	} else {
-		resolved, err := ResolveMediaSourceBytes(ctx, s.store, s.logger, MediaSourceRequest{
-			RawURL:   audioURL,
-			MaxBytes: maxVideoASRAudioBytes,
-		})
+		resolved, err := s.resolveAudioASRSourceURL(ctx, "", audioURL)
 		if err != nil {
-			return nil, fmt.Errorf("read audio URL: %w", err)
+			return nil, fmt.Errorf("resolve audio URL: %w", err)
 		}
-		req.Audio = bytes.NewReader(resolved.Bytes)
+		req.AudioURL = resolved.URL
 		req.Filename = resolved.Filename
 		req.ContentType = resolved.ContentType
 	}
@@ -158,7 +168,45 @@ func (s *VideoASRService) CreateTask(ctx context.Context, req VideoASRTaskReques
 	return result, nil
 }
 
-func (s *VideoASRService) QueryTask(ctx context.Context, taskID string) (*VideoASRTaskResult, error) {
+func (s *AudioASRService) resolveAudioASRSourceURL(ctx context.Context, key, rawURL string) (*MediaSource, error) {
+	if strings.TrimSpace(key) != "" {
+		if s.store == nil {
+			return nil, fmt.Errorf("storage provider is not available")
+		}
+		url, err := s.store.DownloadURL(ctx, key, defaultMediaSourceTTL)
+		if err != nil {
+			return nil, fmt.Errorf("create signed audio URL: %w", err)
+		}
+		return &MediaSource{
+			Key:         key,
+			URL:         url,
+			Filename:    filepath.Base(key),
+			ContentType: audioContentType(strings.ToLower(filepath.Ext(key))),
+		}, nil
+	}
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil, fmt.Errorf("audio URL is required")
+	}
+	if s.store != nil && s.store.IsOwnedURL(rawURL) {
+		key, ok := storage.StorageKeyFromURL(rawURL)
+		if !ok {
+			return nil, fmt.Errorf("owned audio URL has no storage key")
+		}
+		return s.resolveAudioASRSourceURL(ctx, key, "")
+	}
+	if !strings.HasPrefix(rawURL, "https://") {
+		return nil, fmt.Errorf("external media URL must be an HTTPS URL")
+	}
+	return &MediaSource{
+		URL:         rawURL,
+		Filename:    mediaSourceFilename(rawURL),
+		ContentType: audioContentType(strings.ToLower(filepath.Ext(mediaSourceFilename(rawURL)))),
+		External:    true,
+	}, nil
+}
+
+func (s *AudioASRService) QueryTask(ctx context.Context, taskID string) (*AudioASRTaskResult, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("FunASR client is not configured")
 	}
@@ -169,124 +217,275 @@ func (s *VideoASRService) QueryTask(ctx context.Context, taskID string) (*VideoA
 	result := s.cache[taskID]
 	s.mu.RUnlock()
 	if result == nil {
-		return nil, fmt.Errorf("video ASR task %q was not found; create_video_asr_task transcribes synchronously and only completed results can be queried", taskID)
+		return nil, fmt.Errorf("audio ASR task %q was not found; create_video_asr_task transcribes synchronously and only completed results can be queried", taskID)
 	}
 	return result, nil
 }
 
-// OpenAIFunASRClient calls an OpenAI-compatible FunASR transcription endpoint.
-type OpenAIFunASRClient struct {
-	model  string
-	client openai.Client
+// FunASRHTTPClient calls Aliyun Fun-ASR recorded speech recognition HTTP APIs.
+type FunASRHTTPClient struct {
+	baseURL      string
+	model        string
+	client       *resty.Client
+	download     *resty.Client
+	pollInterval time.Duration
+	timeout      time.Duration
 }
 
-func NewOpenAIFunASRClient(cfg config.FunASRConfig) (*OpenAIFunASRClient, error) {
+func NewFunASRHTTPClient(cfg config.FunASRConfig) (*FunASRHTTPClient, error) {
 	if cfg.Empty() {
 		return nil, nil
 	}
-	if !cfg.Complete() {
-		return nil, fmt.Errorf("incomplete FunASR config: base_url, api_key, and model are required")
+	if strings.TrimSpace(cfg.BaseURL) == "" || strings.TrimSpace(cfg.APIKey) == "" {
+		return nil, fmt.Errorf("incomplete FunASR config: base_url and api_key are required")
 	}
 	timeout := cfg.Timeout
 	if timeout == 0 {
 		timeout = 10 * time.Minute
 	}
-	httpClient := &http.Client{Timeout: timeout}
-	return &OpenAIFunASRClient{
-		model: strings.TrimSpace(cfg.Model),
-		client: openai.NewClient(
-			option.WithBaseURL(strings.TrimRight(cfg.BaseURL, "/")),
-			option.WithAPIKey(cfg.APIKey),
-			option.WithHTTPClient(httpClient),
-		),
+	model := strings.TrimSpace(cfg.Model)
+	if model == "" {
+		model = funASRDefaultModel
+	}
+	client := resty.New().
+		SetBaseURL(strings.TrimRight(cfg.BaseURL, "/")).
+		SetAuthToken(strings.TrimSpace(cfg.APIKey)).
+		SetHeader("Accept", "application/json").
+		SetTimeout(timeout)
+	download := resty.New().
+		SetHeader("Accept", "application/json").
+		SetTimeout(timeout)
+	return &FunASRHTTPClient{
+		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
+		model:        model,
+		client:       client,
+		download:     download,
+		pollInterval: 2 * time.Second,
+		timeout:      timeout,
 	}, nil
 }
 
-func (c *OpenAIFunASRClient) Transcribe(ctx context.Context, req VideoASRTaskRequest) (*VideoASRTaskResult, error) {
-	if c == nil {
+func (c *FunASRHTTPClient) Transcribe(ctx context.Context, req AudioASRTaskRequest) (*AudioASRTaskResult, error) {
+	if c == nil || c.client == nil {
 		return nil, fmt.Errorf("FunASR client is not configured")
 	}
-	if req.Audio == nil {
-		return nil, fmt.Errorf("audio reader is required")
+	audioURL := strings.TrimSpace(req.AudioURL)
+	if audioURL == "" {
+		return nil, fmt.Errorf("audio_url is required")
 	}
-	filename := strings.TrimSpace(req.Filename)
-	if filename == "" {
-		filename = "audio"
+
+	runCtx := ctx
+	cancel := func() {}
+	if _, ok := ctx.Deadline(); !ok && c.timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, c.timeout)
 	}
-	contentType := strings.TrimSpace(req.ContentType)
-	if contentType == "" {
-		contentType = audioContentType(strings.ToLower(filepath.Ext(filename)))
-	}
-	params := openai.AudioTranscriptionNewParams{
-		File:                   openai.File(req.Audio, filename, contentType),
-		Model:                  openai.AudioModel(c.model),
-		ResponseFormat:         openai.AudioResponseFormatVerboseJSON,
-		TimestampGranularities: []string{"word", "segment"},
-	}
-	if strings.TrimSpace(req.LanguageHint) != "" {
-		params.Language = openai.String(strings.TrimSpace(req.LanguageHint))
-	}
-	resp, err := c.client.Audio.Transcriptions.New(ctx, params)
+	defer cancel()
+
+	submit, err := c.submitTask(runCtx, audioURL)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") || strings.Contains(strings.ToLower(err.Error()), "not found") {
-			return nil, fmt.Errorf("transcribe audio with FunASR: %w; funasr.base_url must be an OpenAI-compatible FunASR ASR endpoint that serves POST /audio/transcriptions, not a generic MaaS/chat endpoint", err)
-		}
-		return nil, fmt.Errorf("transcribe audio with FunASR: %w", err)
+		return nil, err
 	}
-	raw := []byte(resp.RawJSON())
-	if len(raw) == 0 {
-		raw, _ = json.Marshal(resp)
+	taskID := strings.TrimSpace(submit.Output.TaskID)
+	if taskID == "" {
+		return nil, fmt.Errorf("FunASR submit task returned no task id")
 	}
-	transcript, err := NormalizeOpenAIVideoTranscript(raw)
+
+	query, result, err := c.pollTask(runCtx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.downloadTranscript(runCtx, result.TranscriptionURL)
+	if err != nil {
+		return nil, err
+	}
+	transcript, err := NormalizeFunASRRecordedTranscript(raw)
 	if err != nil {
 		return nil, err
 	}
 	if transcript.Metadata == nil {
 		transcript.Metadata = map[string]any{}
 	}
+	transcript.Metadata["provider"] = "aliyun-fun-asr-http"
 	transcript.Metadata["model"] = c.model
+	transcript.Metadata["task_id"] = taskID
+	transcript.Metadata["file_url"] = result.FileURL
+	transcript.Metadata["transcription_url"] = result.TranscriptionURL
 	if req.AudioKey != "" {
 		transcript.Metadata["audio_key"] = req.AudioKey
 	}
 	if req.AudioURL != "" {
 		transcript.Metadata["audio_url"] = req.AudioURL
 	}
-	return &VideoASRTaskResult{
-		TaskID:     "asr-" + uuid.NewString(),
-		Status:     "SUCCEEDED",
-		Transcript: transcript,
+	return &AudioASRTaskResult{
+		TaskID:           taskID,
+		Status:           query.Output.TaskStatus,
+		TranscriptionURL: result.TranscriptionURL,
+		Transcript:       transcript,
 	}, nil
 }
 
-type openAIVideoTranscript struct {
-	Text     string                     `json:"text"`
-	Language string                     `json:"language"`
-	Duration float64                    `json:"duration"`
-	Segments []openAIVideoSegment       `json:"segments"`
-	Words    []openAIVideoWord          `json:"words"`
-	Raw      map[string]json.RawMessage `json:"-"`
+func (c *FunASRHTTPClient) submitTask(ctx context.Context, audioURL string) (*funASRTaskResponse, error) {
+	body := map[string]any{
+		"model": c.model,
+		"input": map[string]any{
+			"file_urls": []string{audioURL},
+		},
+		"parameters": map[string]any{
+			"channel_id": []int{0},
+		},
+	}
+	var out funASRTaskResponse
+	resp, err := c.client.R().
+		SetContext(ctx).
+		SetHeader("Content-Type", "application/json").
+		SetHeader("X-DashScope-Async", "enable").
+		SetBody(body).
+		SetResult(&out).
+		Post("/api/v1/services/audio/asr/transcription")
+	if err != nil {
+		return nil, fmt.Errorf("submit FunASR task: %w", err)
+	}
+	if resp.IsStatusFailure() {
+		return nil, fmt.Errorf("submit FunASR task failed: status %d: %s", resp.StatusCode(), strings.TrimSpace(resp.String()))
+	}
+	if strings.TrimSpace(out.Output.TaskID) == "" {
+		return nil, fmt.Errorf("FunASR submit task returned no task id")
+	}
+	return &out, nil
 }
 
-type openAIVideoSegment struct {
-	Start     float64           `json:"start"`
-	End       float64           `json:"end"`
-	Text      string            `json:"text"`
-	Speaker   string            `json:"speaker"`
-	SpeakerID string            `json:"speaker_id"`
-	Words     []openAIVideoWord `json:"words"`
+func (c *FunASRHTTPClient) pollTask(ctx context.Context, taskID string) (*funASRTaskResponse, funASRTaskResult, error) {
+	ticker := time.NewTicker(c.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		query, err := c.queryTask(ctx, taskID)
+		if err != nil {
+			return nil, funASRTaskResult{}, err
+		}
+		switch strings.ToUpper(strings.TrimSpace(query.Output.TaskStatus)) {
+		case "SUCCEEDED":
+			for _, result := range query.Output.Results {
+				if strings.EqualFold(result.SubtaskStatus, "SUCCEEDED") && strings.TrimSpace(result.TranscriptionURL) != "" {
+					return query, result, nil
+				}
+			}
+			return nil, funASRTaskResult{}, fmt.Errorf("FunASR task %s succeeded but returned no successful transcription_url", taskID)
+		case "FAILED", "CANCELED":
+			return nil, funASRTaskResult{}, fmt.Errorf("FunASR task %s %s: %s", taskID, query.Output.TaskStatus, query.failureSummary())
+		case "", "PENDING", "RUNNING":
+		default:
+			return nil, funASRTaskResult{}, fmt.Errorf("FunASR task %s returned unknown status %q", taskID, query.Output.TaskStatus)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, funASRTaskResult{}, fmt.Errorf("poll FunASR task %s: %w", taskID, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
-type openAIVideoWord struct {
-	Start     float64 `json:"start"`
-	End       float64 `json:"end"`
-	Word      string  `json:"word"`
-	Text      string  `json:"text"`
-	Speaker   string  `json:"speaker"`
-	SpeakerID string  `json:"speaker_id"`
+func (c *FunASRHTTPClient) queryTask(ctx context.Context, taskID string) (*funASRTaskResponse, error) {
+	var out funASRTaskResponse
+	resp, err := c.client.R().
+		SetContext(ctx).
+		SetResult(&out).
+		Get("/api/v1/tasks/" + taskID)
+	if err != nil {
+		return nil, fmt.Errorf("query FunASR task %s: %w", taskID, err)
+	}
+	if resp.IsStatusFailure() {
+		return nil, fmt.Errorf("query FunASR task %s failed: status %d: %s", taskID, resp.StatusCode(), strings.TrimSpace(resp.String()))
+	}
+	return &out, nil
 }
 
-func NormalizeOpenAIVideoTranscript(raw []byte) (*VideoTranscript, error) {
-	var parsed openAIVideoTranscript
+func (c *FunASRHTTPClient) downloadTranscript(ctx context.Context, rawURL string) ([]byte, error) {
+	download := c.download
+	if download == nil {
+		download = resty.New().SetTimeout(c.timeout)
+	}
+	resp, err := download.R().
+		SetContext(ctx).
+		Get(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("download FunASR transcript: %w", err)
+	}
+	if resp.IsStatusFailure() {
+		return nil, fmt.Errorf("download FunASR transcript failed: status %d: %s", resp.StatusCode(), strings.TrimSpace(resp.String()))
+	}
+	return append([]byte(nil), resp.Bytes()...), nil
+}
+
+type funASRTaskResponse struct {
+	RequestID string           `json:"request_id"`
+	Output    funASRTaskOutput `json:"output"`
+}
+
+type funASRTaskOutput struct {
+	TaskID     string             `json:"task_id"`
+	TaskStatus string             `json:"task_status"`
+	Results    []funASRTaskResult `json:"results"`
+}
+
+type funASRTaskResult struct {
+	FileURL          string `json:"file_url"`
+	TranscriptionURL string `json:"transcription_url"`
+	SubtaskStatus    string `json:"subtask_status"`
+	Code             string `json:"code"`
+	Message          string `json:"message"`
+}
+
+func (r funASRTaskResponse) failureSummary() string {
+	parts := make([]string, 0, len(r.Output.Results))
+	for _, result := range r.Output.Results {
+		if result.Code != "" || result.Message != "" || result.SubtaskStatus != "" {
+			parts = append(parts, strings.TrimSpace(strings.Join([]string{result.SubtaskStatus, result.Code, result.Message}, " ")))
+		}
+	}
+	if len(parts) == 0 {
+		return "no result details"
+	}
+	return strings.Join(parts, "; ")
+}
+
+type funASRRecordedTranscript struct {
+	FileURL     string                     `json:"file_url"`
+	Properties  funASRRecordedProperties   `json:"properties"`
+	Transcripts []funASRRecordedChannel    `json:"transcripts"`
+	Raw         map[string]json.RawMessage `json:"-"`
+}
+
+type funASRRecordedProperties struct {
+	OriginalDurationInMilliseconds int64 `json:"original_duration_in_milliseconds"`
+	OriginalSamplingRate           int64 `json:"original_sampling_rate"`
+}
+
+type funASRRecordedChannel struct {
+	ChannelID int                      `json:"channel_id"`
+	Text      string                   `json:"text"`
+	Sentences []funASRRecordedSentence `json:"sentences"`
+}
+
+type funASRRecordedSentence struct {
+	BeginTime  int64                `json:"begin_time"`
+	EndTime    int64                `json:"end_time"`
+	Text       string               `json:"text"`
+	SentenceID int64                `json:"sentence_id"`
+	SpeakerID  any                  `json:"speaker_id"`
+	Words      []funASRRecordedWord `json:"words"`
+}
+
+type funASRRecordedWord struct {
+	BeginTime   int64  `json:"begin_time"`
+	EndTime     int64  `json:"end_time"`
+	Text        string `json:"text"`
+	Punctuation string `json:"punctuation"`
+}
+
+func NormalizeFunASRRecordedTranscript(raw []byte) (*VideoTranscript, error) {
+	var parsed funASRRecordedTranscript
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("decode FunASR transcript: %w", err)
 	}
@@ -295,100 +494,74 @@ func NormalizeOpenAIVideoTranscript(raw []byte) (*VideoTranscript, error) {
 	out := &VideoTranscript{
 		Words:    []VideoTranscriptWord{},
 		Phrases:  []VideoTranscriptPhrase{},
-		Metadata: map[string]any{"provider": "openai-compatible-funasr"},
+		Metadata: map[string]any{"provider": "aliyun-fun-asr-http"},
 		Raw:      rawMap,
 	}
-	if parsed.Language != "" {
-		out.Metadata["language"] = parsed.Language
+	if parsed.FileURL != "" {
+		out.Metadata["file_url"] = parsed.FileURL
 	}
-	if parsed.Duration > 0 {
-		out.Metadata["duration"] = parsed.Duration
+	if parsed.Properties.OriginalDurationInMilliseconds > 0 {
+		out.Metadata["duration"] = millisToSeconds(float64(parsed.Properties.OriginalDurationInMilliseconds))
 	}
-
-	for _, segment := range parsed.Segments {
-		speaker := normalizeSpeakerID(firstASRNonEmpty(segment.SpeakerID, segment.Speaker))
-		out.Phrases = append(out.Phrases, VideoTranscriptPhrase{
-			Start:     segment.Start,
-			End:       segment.End,
-			Text:      strings.TrimSpace(segment.Text),
-			SpeakerID: speaker,
-		})
-	}
-
-	words := parsed.Words
-	if len(words) == 0 {
-		for _, segment := range parsed.Segments {
-			for _, word := range segment.Words {
-				if word.Speaker == "" && word.SpeakerID == "" {
-					word.Speaker = firstASRNonEmpty(segment.SpeakerID, segment.Speaker)
-				}
-				words = append(words, word)
-			}
-		}
+	if parsed.Properties.OriginalSamplingRate > 0 {
+		out.Metadata["sample_rate"] = parsed.Properties.OriginalSamplingRate
 	}
 
 	var prevEnd *float64
-	if len(words) > 0 {
-		for _, word := range words {
-			text := strings.TrimSpace(firstASRNonEmpty(word.Word, word.Text))
-			if text == "" {
+	for _, transcript := range parsed.Transcripts {
+		for _, sentence := range transcript.Sentences {
+			speaker := normalizeSpeakerID(anyASRString(sentence.SpeakerID))
+			start := millisToSeconds(float64(sentence.BeginTime))
+			end := millisToSeconds(float64(sentence.EndTime))
+			text := strings.TrimSpace(sentence.Text)
+			if text != "" {
+				out.Phrases = append(out.Phrases, VideoTranscriptPhrase{
+					Start:     start,
+					End:       end,
+					Text:      text,
+					SpeakerID: speaker,
+				})
+			}
+			if len(sentence.Words) == 0 {
+				if text == "" {
+					continue
+				}
+				if prevEnd != nil && start > *prevEnd {
+					out.Words = append(out.Words, VideoTranscriptWord{Type: "spacing", Start: *prevEnd, End: start})
+				}
+				out.Words = append(out.Words, VideoTranscriptWord{
+					Type:      "word",
+					Text:      text,
+					Start:     start,
+					End:       end,
+					SpeakerID: speaker,
+				})
+				prevEnd = &end
 				continue
 			}
-			start := word.Start
-			end := word.End
-			if prevEnd != nil && start > *prevEnd {
-				out.Words = append(out.Words, VideoTranscriptWord{Type: "spacing", Start: *prevEnd, End: start})
+			for _, word := range sentence.Words {
+				wordText := strings.TrimSpace(word.Text)
+				if wordText == "" {
+					continue
+				}
+				wordText += word.Punctuation
+				wordStart := millisToSeconds(float64(word.BeginTime))
+				wordEnd := millisToSeconds(float64(word.EndTime))
+				if prevEnd != nil && wordStart > *prevEnd {
+					out.Words = append(out.Words, VideoTranscriptWord{Type: "spacing", Start: *prevEnd, End: wordStart})
+				}
+				out.Words = append(out.Words, VideoTranscriptWord{
+					Type:      "word",
+					Text:      wordText,
+					Start:     wordStart,
+					End:       wordEnd,
+					SpeakerID: speaker,
+				})
+				prevEnd = &wordEnd
 			}
-			wordSpeaker := normalizeSpeakerID(firstASRNonEmpty(word.SpeakerID, word.Speaker, speakerForTime(parsed.Segments, start, end)))
-			out.Words = append(out.Words, VideoTranscriptWord{
-				Type:      "word",
-				Text:      text,
-				Start:     start,
-				End:       end,
-				SpeakerID: wordSpeaker,
-			})
-			prevEnd = &end
 		}
-		return out, nil
-	}
-
-	for _, segment := range parsed.Segments {
-		if strings.TrimSpace(segment.Text) == "" {
-			continue
-		}
-		if prevEnd != nil && segment.Start > *prevEnd {
-			out.Words = append(out.Words, VideoTranscriptWord{Type: "spacing", Start: *prevEnd, End: segment.Start})
-		}
-		speaker := normalizeSpeakerID(firstASRNonEmpty(segment.SpeakerID, segment.Speaker))
-		out.Words = append(out.Words, VideoTranscriptWord{
-			Type:      "word",
-			Text:      strings.TrimSpace(segment.Text),
-			Start:     segment.Start,
-			End:       segment.End,
-			SpeakerID: speaker,
-		})
-		end := segment.End
-		prevEnd = &end
-	}
-	if len(out.Phrases) == 0 && strings.TrimSpace(parsed.Text) != "" {
-		out.Words = append(out.Words, VideoTranscriptWord{
-			Type:  "word",
-			Text:  strings.TrimSpace(parsed.Text),
-			Start: 0,
-			End:   parsed.Duration,
-		})
-		out.Phrases = append(out.Phrases, VideoTranscriptPhrase{Start: 0, End: parsed.Duration, Text: strings.TrimSpace(parsed.Text)})
 	}
 	return out, nil
-}
-
-func speakerForTime(segments []openAIVideoSegment, start, end float64) string {
-	for _, segment := range segments {
-		if start >= segment.Start && end <= segment.End {
-			return firstASRNonEmpty(segment.SpeakerID, segment.Speaker)
-		}
-	}
-	return ""
 }
 
 func PackVideoTranscripts(transcripts map[string]VideoTranscript, silenceThreshold float64) (string, error) {
@@ -502,6 +675,25 @@ func normalizeSpeakerID(raw string) string {
 		return raw
 	}
 	return "speaker_" + raw
+}
+
+func anyASRString(raw any) string {
+	switch v := raw.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case float64:
+		return fmt.Sprintf("%.0f", v)
+	case int:
+		return fmt.Sprintf("%d", v)
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case json.Number:
+		return v.String()
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func speakerTag(speakerID string) string {

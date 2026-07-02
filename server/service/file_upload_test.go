@@ -7,7 +7,7 @@ import (
 )
 
 func TestPrepareFileUploadRejectsUnsupportedStorage(t *testing.T) {
-	store := &fakeVideoASRStorage{name: "local"}
+	store := &fakeAudioASRStorage{name: "local"}
 
 	_, err := PrepareFileUpload(context.Background(), store, FileUploadPrepareRequest{
 		Purpose:     FileUploadPurposeVideoAudio,
@@ -20,7 +20,7 @@ func TestPrepareFileUploadRejectsUnsupportedStorage(t *testing.T) {
 }
 
 func TestPrepareFileUploadRejectsNonAudioMIME(t *testing.T) {
-	store := &fakeVideoASRStorage{name: "oss"}
+	store := &fakeAudioASRStorage{name: "oss"}
 
 	_, err := PrepareFileUpload(context.Background(), store, FileUploadPrepareRequest{
 		Purpose:     FileUploadPurposeVideoAudio,
@@ -33,7 +33,7 @@ func TestPrepareFileUploadRejectsNonAudioMIME(t *testing.T) {
 }
 
 func TestPrepareFileUploadAcceptsLiveAudioPurpose(t *testing.T) {
-	store := &fakeVideoASRStorage{name: "oss"}
+	store := &fakeAudioASRStorage{name: "oss"}
 
 	result, err := PrepareFileUpload(context.Background(), store, FileUploadPrepareRequest{
 		Purpose:     FileUploadPurposeLiveAudio,

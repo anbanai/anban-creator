@@ -341,7 +341,7 @@ func (c TingWuConfig) Complete() bool {
 		strings.TrimSpace(c.AccessSecret) != ""
 }
 
-// FunASRConfig holds OpenAI-compatible FunASR file ASR configuration.
+// FunASRConfig holds Aliyun Fun-ASR recorded speech HTTP configuration.
 type FunASRConfig struct {
 	BaseURL string        `yaml:"base_url"`
 	APIKey  string        `yaml:"api_key"`
@@ -356,11 +356,10 @@ func (c FunASRConfig) Empty() bool {
 		strings.TrimSpace(c.Model) == ""
 }
 
-// Complete reports whether all settings required for OpenAI-compatible FunASR calls exist.
+// Complete reports whether all required settings for Aliyun Fun-ASR HTTP calls exist.
 func (c FunASRConfig) Complete() bool {
 	return strings.TrimSpace(c.BaseURL) != "" &&
-		strings.TrimSpace(c.APIKey) != "" &&
-		strings.TrimSpace(c.Model) != ""
+		strings.TrimSpace(c.APIKey) != ""
 }
 
 // ClaudeConfig holds configuration for the Claude CLI subprocess.
@@ -836,9 +835,6 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.FunASR.APIKey) == "" {
 			errs = append(errs, "funasr.api_key is required when any FunASR setting is configured")
-		}
-		if strings.TrimSpace(c.FunASR.Model) == "" {
-			errs = append(errs, "funasr.model is required when any FunASR setting is configured")
 		}
 	}
 

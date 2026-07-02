@@ -141,7 +141,7 @@ func TestFunASRConfigRejectsPartialConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected partial FunASR config to fail validation")
 	}
-	if got := err.Error(); !strings.Contains(got, "funasr.model is required") || !strings.Contains(got, "funasr.base_url is required") {
+	if got := err.Error(); !strings.Contains(got, "funasr.base_url is required") || strings.Contains(got, "funasr.model is required") {
 		t.Fatalf("unexpected validation error: %s", got)
 	}
 }
@@ -152,9 +152,8 @@ func TestFunASRConfigComplete(t *testing.T) {
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
 		Claude:   ClaudeConfig{Executor: "docker"},
 		FunASR: FunASRConfig{
-			BaseURL: "http://localhost:8000/v1",
-			APIKey:  "not-needed",
-			Model:   "sensevoice",
+			BaseURL: "https://workspace.cn-beijing.maas.aliyuncs.com",
+			APIKey:  "dashscope-key",
 		},
 	}
 	cfg.applyDefaults()

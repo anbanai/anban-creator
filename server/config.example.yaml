@@ -219,14 +219,14 @@ tingwu:
   access_secret: "" # Alibaba Cloud AccessKey Secret
 
 # ---------------------------------------------------------------------------
-# FunASR: OpenAI-compatible audio transcription for video-use editing
-# Optional. The MCP server uploads the local audio file to this endpoint with the
-# OpenAI audio transcription SDK. 如需 env 控制，各字段写 ${ANBAN_FUNASR_API_KEY} 等。
+# FunASR: Aliyun recorded speech HTTP transcription for video-use editing.
+# Optional. The MCP server submits signed OSS/download URLs to DashScope Fun-ASR
+# and polls until the async task finishes. 如需 env 控制，各字段写 ${ANBAN_FUNASR_API_KEY} 等。
 # ---------------------------------------------------------------------------
 funasr:
-  base_url: "http://localhost:8000/v1" # OpenAI-compatible FunASR API base
-  api_key: "not-needed" # Local FunASR deployments commonly ignore this
-  model: "sensevoice" # e.g. sensevoice, paraformer, paraformer-en, fun-asr-nano
+  base_url: "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com" # Aliyun MaaS regional host
+  api_key: "${DASHSCOPE_API_KEY}" # Bailian/DashScope API key
+  model: "fun-asr" # optional; defaults to fun-asr
   timeout: 10m
 
 # ---------------------------------------------------------------------------

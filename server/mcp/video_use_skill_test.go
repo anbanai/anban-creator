@@ -57,7 +57,7 @@ func TestVideoUseSkillFiles(t *testing.T) {
 			"query_video_asr_task",
 			"pack_video_transcripts",
 			"FunASR",
-			"OpenAI-compatible",
+			"Aliyun FunASR HTTP",
 			"Source Han Sans",
 			"思源黑体",
 			"subtitles are applied LAST",

@@ -28,7 +28,7 @@ func TestVideoASRHandlersValidateMissingServiceAndArgs(t *testing.T) {
 	if !result.IsError {
 		t.Fatal("expected error when service is missing")
 	}
-	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "video ASR service not available") {
+	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "audio ASR service not available") {
 		t.Fatalf("unexpected error text: %q", text)
 	}
 }
@@ -37,7 +37,7 @@ func TestPrepareFileUploadReturnsSignedVideoAudioUpload(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
 	store := &fakeVideoReferenceStorage{name: "oss", url: "https://cdn.example.com/uploads/video-audio/audio.wav"}
-	svcs = &Services{Store: store, VideoASRSvc: service.NewVideoASRServiceWithClient(nil, store)}
+	svcs = &Services{Store: store, AudioASRSvc: service.NewAudioASRServiceWithClient(nil, store)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"purpose":"video_audio","filename":"take.wav","content_type":"audio/wav"}`)},
@@ -110,8 +110,8 @@ func TestCreateVideoASRTaskHandlerReturnsTranscript(t *testing.T) {
 	store := &fakeVideoReferenceStorage{name: "oss", url: "https://cdn.example.com/uploads/video-audio/take.wav", files: map[string][]byte{
 		"uploads/video-audio/take.wav": []byte("fake-wav"),
 	}, downloadURL: srv.URL}
-	svcs = &Services{VideoASRSvc: service.NewVideoASRServiceWithClient(&fakeMCPVideoASRClient{
-		result: &service.VideoASRTaskResult{
+	svcs = &Services{AudioASRSvc: service.NewAudioASRServiceWithClient(&fakeMCPVideoASRClient{
+		result: &service.AudioASRTaskResult{
 			TaskID: "asr-task-1",
 			Status: "SUCCEEDED",
 			Transcript: &service.VideoTranscript{
@@ -142,7 +142,7 @@ func TestPrepareFileUploadRejectsInvalidInputs(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
 	store := &fakeVideoReferenceStorage{name: "oss", url: "https://cdn.example.com/uploads/video-audio/audio.wav"}
-	svcs = &Services{Store: store, VideoASRSvc: service.NewVideoASRServiceWithClient(nil, store)}
+	svcs = &Services{Store: store, AudioASRSvc: service.NewAudioASRServiceWithClient(nil, store)}
 
 	tests := []struct {
 		name string
@@ -175,7 +175,7 @@ func TestPrepareFileUploadRejectsInvalidInputs(t *testing.T) {
 func TestCreateVideoASRTaskHandlerRejectsMissingAudioSourceAndFilePath(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{VideoASRSvc: service.NewVideoASRServiceWithClient(&fakeMCPVideoASRClient{}, nil)}
+	svcs = &Services{AudioASRSvc: service.NewAudioASRServiceWithClient(&fakeMCPVideoASRClient{}, nil)}
 
 	tests := []struct {
 		name string
@@ -207,7 +207,7 @@ func TestCreateVideoASRTaskHandlerRejectsMissingAudioSourceAndFilePath(t *testin
 func TestQueryVideoASRTaskHandlerRejectsUnknownTaskID(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	svcs = &Services{VideoASRSvc: service.NewVideoASRServiceWithClient(&fakeMCPVideoASRClient{}, nil)}
+	svcs = &Services{AudioASRSvc: service.NewAudioASRServiceWithClient(&fakeMCPVideoASRClient{}, nil)}
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"task_id":"missing"}`)},
@@ -254,9 +254,9 @@ func TestPackVideoTranscriptsHandlerReturnsMarkdown(t *testing.T) {
 }
 
 type fakeMCPVideoASRClient struct {
-	result *service.VideoASRTaskResult
+	result *service.AudioASRTaskResult
 }
 
-func (f *fakeMCPVideoASRClient) Transcribe(context.Context, service.VideoASRTaskRequest) (*service.VideoASRTaskResult, error) {
+func (f *fakeMCPVideoASRClient) Transcribe(context.Context, service.AudioASRTaskRequest) (*service.AudioASRTaskResult, error) {
 	return f.result, nil
 }

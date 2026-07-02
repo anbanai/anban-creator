@@ -28,7 +28,7 @@ func registerVideoASRTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "create_video_asr_task",
-		Description: "Transcribe an OSS-backed audio object or HTTPS audio URL through server-side OpenAI-compatible FunASR and return normalized video-use transcript JSON. API keys stay on the server.",
+		Description: "Transcribe an OSS-backed audio object or HTTPS audio URL through server-side Aliyun FunASR HTTP and return normalized video-use transcript JSON. API keys stay on the server.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -42,7 +42,7 @@ func registerVideoASRTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "query_video_asr_task",
-		Description: "Return a completed FunASR transcription result by task_id. create_video_asr_task is synchronous; this is a compatibility cache lookup.",
+		Description: "Return a completed Aliyun Fun-ASR transcription result by task_id. create_video_asr_task is synchronous; this is a compatibility cache lookup.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -91,8 +91,9 @@ func prepareFileUploadHandler(ctx context.Context, req *mcp.CallToolRequest) (*m
 }
 
 func createVideoASRTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.VideoASRSvc == nil {
-		return errorResult("video ASR service not available"), nil
+	audioASRSvc := currentAudioASRService()
+	if audioASRSvc == nil {
+		return errorResult("audio ASR service not available"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
 	filePath, _ := args["file_path"].(string)
@@ -103,7 +104,7 @@ func createVideoASRTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*
 	if v, ok := numberAsInt64(args["speaker_count"]); ok {
 		speakerCount = int(v)
 	}
-	result, err := svcs.VideoASRSvc.CreateTask(ctx, service.VideoASRTaskRequest{
+	result, err := audioASRSvc.CreateTask(ctx, service.AudioASRTaskRequest{
 		FilePath:     filePath,
 		AudioKey:     audioKey,
 		AudioURL:     audioURL,
@@ -117,16 +118,27 @@ func createVideoASRTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*
 }
 
 func queryVideoASRTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.VideoASRSvc == nil {
-		return errorResult("video ASR service not available"), nil
+	audioASRSvc := currentAudioASRService()
+	if audioASRSvc == nil {
+		return errorResult("audio ASR service not available"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
-	result, err := svcs.VideoASRSvc.QueryTask(ctx, taskID)
+	result, err := audioASRSvc.QueryTask(ctx, taskID)
 	if err != nil {
 		return errorResult("query video ASR task: " + err.Error()), nil
 	}
 	return textResult(result)
+}
+
+func currentAudioASRService() *service.AudioASRService {
+	if svcs == nil {
+		return nil
+	}
+	if svcs.AudioASRSvc != nil {
+		return svcs.AudioASRSvc
+	}
+	return svcs.VideoASRSvc
 }
 
 func packVideoTranscriptsHandler(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
