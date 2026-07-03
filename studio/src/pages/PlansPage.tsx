@@ -3,7 +3,7 @@ import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText, Stamp, Target, Loader2, Images, RotateCcw } from 'lucide-react'
+import { Plus, FileText, Stamp, Target, Loader2, Images } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -27,14 +27,14 @@ import { planStatusLabel, contentTypeLabel, formatDateTimeCN, cronToHuman, getBa
 import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
-import { VIDEO_PROJECT_DEFAULT_VALUE, buildVideoFormConfig, normalizeVideoConfigForSubmit, readVideoSelectValue, writeVideoSelectValue } from '@/lib/video-form'
+import { buildVideoFormConfig, normalizeVideoConfigForSubmit } from '@/lib/video-form'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
-import { VideoReferenceInput } from '@/components/video/VideoReferenceInput'
+import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
@@ -525,7 +525,7 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="prompt" render={({ field }) => (
+              {watchedType !== 'video' && <FormField control={form.control} name="prompt" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Prompt（可选）</FormLabel>
                   <FormControl>
@@ -533,7 +533,7 @@ export default function PlansPage() {
                   </FormControl>
                   <FormMessage />
                 </FormItem>
-              )} />
+              )} />}
 
               {watchedType !== 'video' && <FormField control={form.control} name="image_model_key" render={({ field }) => (
                 <FormItem>
@@ -554,132 +554,31 @@ export default function PlansPage() {
               )} />}
 
               {watchedType === 'video' && (
-                <div className="space-y-3 rounded-lg border border-border p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium text-foreground">视频参数覆盖</p>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => {
-                        const references = form.getValues('video_config.references') ?? []
-                        form.setValue('video_config', buildVideoFormConfig(selectedProject?.video_defaults, { references }), { shouldDirty: true })
-                      }}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      恢复项目默认
-                    </Button>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <FormField control={form.control} name="video_config.purpose" render={({ field }) => (
+                <VideoCreationPanel
+                  form={form}
+                  selectedProject={selectedProject}
+                  availableVideoModels={availableVideoModels}
+                  modelsLoading={videoEstimateQuery.isLoading}
+                  title="视频计划"
+                  minimumBalanceHint="视频任务需至少 100,000 积分余额；计划触发时也会再次检查。"
+                  promptField={(
+                    <FormField control={form.control} name="prompt" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>目标</FormLabel>
-                        <Select value={field.value || 'planting'} onValueChange={field.onChange}>
-                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            <SelectItem value="planting">种草</SelectItem>
-                            <SelectItem value="ecommerce">带货</SelectItem>
-                            <SelectItem value="lead_gen">获客</SelectItem>
-                            <SelectItem value="promotion">推广</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_config.model_key" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>模型</FormLabel>
-                        <Select value={readVideoSelectValue(field.value)} onValueChange={(value) => field.onChange(writeVideoSelectValue(value))}>
-                          <FormControl><SelectTrigger><SelectValue placeholder={videoEstimateQuery.isLoading ? '加载可用模型...' : '使用项目默认'} /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            <SelectItem value={VIDEO_PROJECT_DEFAULT_VALUE}>
-                              使用项目默认{selectedProject?.video_defaults?.model_key ? `（${selectedProject.video_defaults.model_key}）` : ''}
-                            </SelectItem>
-                            {availableVideoModels.map((model) => (
-                              <SelectItem key={model.key} value={model.key}>{model.display_name || model.key}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {!videoEstimateQuery.isLoading && availableVideoModels.length === 0 && (
-                          <p className="text-xs text-destructive">没有可用视频模型，请先在项目策略中选择已配置模型。</p>
-                        )}
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_config.resolution" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>分辨率</FormLabel>
-                        <Select value={readVideoSelectValue(field.value)} onValueChange={(value) => field.onChange(writeVideoSelectValue(value))}>
-                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            <SelectItem value={VIDEO_PROJECT_DEFAULT_VALUE}>
-                              使用项目默认{selectedProject?.video_defaults?.resolution ? `（${selectedProject.video_defaults.resolution}）` : ''}
-                            </SelectItem>
-                            <SelectItem value="480p">480p</SelectItem>
-                            <SelectItem value="720p">720p</SelectItem>
-                            <SelectItem value="1080p">1080p</SelectItem>
-                            <SelectItem value="4k">4K</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_config.ratio" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>比例</FormLabel>
-                        <Select value={readVideoSelectValue(field.value)} onValueChange={(value) => field.onChange(writeVideoSelectValue(value))}>
-                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            <SelectItem value={VIDEO_PROJECT_DEFAULT_VALUE}>
-                              使用项目默认{selectedProject?.video_defaults?.ratio ? `（${selectedProject.video_defaults.ratio}）` : ''}
-                            </SelectItem>
-                            <SelectItem value="9:16">9:16</SelectItem>
-                            <SelectItem value="16:9">16:9</SelectItem>
-                            <SelectItem value="1:1">1:1</SelectItem>
-                            <SelectItem value="4:3">4:3</SelectItem>
-                            <SelectItem value="3:4">3:4</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="video_config.duration" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>时长（秒）</FormLabel>
                         <FormControl>
-                          <Input
-                            type="number"
-                            min={1}
-                            max={60}
-                            placeholder={String(selectedProject?.video_defaults?.duration ?? 15)}
-                            value={field.value ?? ''}
-                            onChange={(event) => field.onChange(event.target.value === '' ? undefined : Number(event.target.value))}
-                          />
+                          <Textarea placeholder="描述每次计划要生成的视频方向，留空则根据项目自动生成" {...field} />
                         </FormControl>
+                        <FormMessage />
                       </FormItem>
                     )} />
-                    <div className="flex items-end gap-4 pb-2">
-                      <FormField control={form.control} name="video_config.watermark" render={({ field }) => (
-                        <FormItem className="flex items-center gap-2 space-y-0">
-                          <FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl>
-                          <FormLabel className="text-sm">水印</FormLabel>
-                        </FormItem>
-                      )} />
-                      <p className="pb-1 text-xs text-muted-foreground">创建前自动校验参数和费用</p>
-                    </div>
-                  </div>
-                  <FormField control={form.control} name="video_config.references" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>参考素材</FormLabel>
-                      <FormControl>
-                        <VideoReferenceInput value={field.value || []} onChange={field.onChange} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <p className="text-xs text-muted-foreground">视频任务需至少 100,000 积分余额；计划触发时也会再次检查。</p>
-                  <VideoEstimateSummary
-                    estimate={videoEstimateQuery.data}
-                    isLoading={videoEstimateQuery.isLoading}
-                    error={videoEstimateQuery.error ? getApiErrorMessage(videoEstimateQuery.error, '视频参数不可用') : undefined}
-                  />
-                </div>
+                  )}
+                  estimateSummary={(
+                    <VideoEstimateSummary
+                      estimate={videoEstimateQuery.data}
+                      isLoading={videoEstimateQuery.isLoading}
+                      error={videoEstimateQuery.error ? getApiErrorMessage(videoEstimateQuery.error, '视频参数不可用') : undefined}
+                    />
+                  )}
+                />
               )}
 
               {watchedType !== 'video' && <FormField control={form.control} name="watermark" render={({ field }) => (

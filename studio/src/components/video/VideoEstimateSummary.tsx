@@ -1,4 +1,5 @@
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
+import { videoModelDisplayName } from '@/lib/video-display'
 import type { VideoEstimateResponse } from '@/types'
 
 function formatCredits(value: number | undefined) {
@@ -69,7 +70,7 @@ export function VideoEstimateSummary({
       </div>
       {estimate.pricing_breakdown && (
         <p className="text-xs text-muted-foreground">
-          {estimate.pricing_breakdown.model_key} · {estimate.pricing_breakdown.resolution} · {estimate.pricing_breakdown.ratio} · 输出 {estimate.pricing_breakdown.output_seconds}s
+          {videoModelDisplayName(estimate.pricing_breakdown.model_key)} · {estimate.pricing_breakdown.resolution} · {estimate.pricing_breakdown.ratio} · 输出 {estimate.pricing_breakdown.output_seconds}s
           {estimate.pricing_breakdown.input_video && typeof estimate.pricing_breakdown.input_seconds === 'number'
             ? ` · 输入视频 ${estimate.pricing_breakdown.input_seconds}s`
             : ''}

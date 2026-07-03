@@ -44,6 +44,8 @@ describe('ProjectsPage layout contracts', () => {
     const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
 
     expect(source).toContain('api.video.models')
+    expect(source).toContain('videoModelDisplayName')
+    expect(source).not.toContain('model.display_name || model.key')
     expect(source).not.toContain("allowed_models: ['seedance-2.0'")
     expect(source).not.toContain('<SelectItem value="seedance-2.0"')
     expect(source).not.toContain("['seedance-2.0', 'Seedance 2.0']")
