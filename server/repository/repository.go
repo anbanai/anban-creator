@@ -133,7 +133,6 @@ type TaskRepository interface {
 	CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndStartedAt(ctx context.Context, taskID, expected, newStatus string) (bool, error)
 	CompareAndSwapStatusAndError(ctx context.Context, taskID, expected, newStatus, errorMsg string) (bool, error)
-	IncrementRetryAndSetPending(ctx context.Context, taskID string, field string) error
 	FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error)
 	FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error)
 	ClearTitles(ctx context.Context, titles []string) (int64, error)

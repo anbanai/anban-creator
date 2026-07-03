@@ -7,15 +7,13 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-// Retry clones a failed task's configuration into a fresh pending task and
-// enqueues it for execution. Credits are re-reserved at creation — the original
-// failed task was already refunded when it failed (see HandleExecutionFailure /
-// refundTaskByMode), so a retry is billed as a brand-new run with zero
-// double-charge risk.
+// Retry clones a terminal task's configuration into a fresh pending task and
+// enqueues it for execution. Credits are re-reserved at creation, so a manual
+// rerun is billed as a brand-new run while the original artifact is preserved.
 //
-// Only failed (or cancelled) tasks may be retried. The cloned task carries the
-// original's project snapshot verbatim so it uses the same frozen config as the
-// failed run.
+// Completed, failed, and cancelled tasks may be rerun. The cloned task carries
+// the original's project snapshot verbatim so it uses the same frozen config as
+// the source run.
 func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, error) {
 	src, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
@@ -23,11 +21,10 @@ func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, er
 	}
 
 	// Defensive guard; the handler also enforces this for a clean 400, but the
-	// service is the source of truth for the business rule. Both failed and
-	// cancelled tasks are terminal and already refunded, so either may be retried
-	// as a fresh billed run.
-	if src.Status != model.TaskStatusFailed && src.Status != model.TaskStatusCancelled {
-		return nil, fmt.Errorf("only failed or cancelled tasks can be retried (current status: %s)", src.Status)
+	// service is the source of truth for the business rule. Active tasks cannot
+	// be rerun because that would duplicate in-flight work and billing.
+	if src.Status != model.TaskStatusCompleted && src.Status != model.TaskStatusFailed && src.Status != model.TaskStatusCancelled {
+		return nil, fmt.Errorf("only completed, failed, or cancelled tasks can be rerun (current status: %s)", src.Status)
 	}
 
 	// Copy scalar fields to locals before taking their addresses so each *bool
@@ -79,6 +76,6 @@ func (s *TaskService) Retry(ctx context.Context, taskID string) (*model.Task, er
 	s.logger.Info().
 		Str("src_task_id", taskID).
 		Str("new_task_id", tasks[0].ID).
-		Msg("task retried as new task")
+		Msg("task rerun as new task")
 	return tasks[0], nil
 }
