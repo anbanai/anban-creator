@@ -13,20 +13,20 @@ describe('video generation UX contracts', () => {
   it('task creation uses server video estimate and reference assets', () => {
     const source = pageSource('TasksPage.tsx')
 
-    expect(source).toContain('VideoReferenceInput')
+    expect(source).toContain('VideoCreationPanel')
     expect(source).toContain('VideoEstimateSummary')
     expect(source).toContain('api.video.estimate')
-    expect(source).not.toContain('<SelectItem value="seedance-2.0"')
+    expect(source).not.toContain('model.display_name || model.key')
     expect(source).toContain('视频任务需至少')
   })
 
   it('plan creation uses server video estimate and reference assets', () => {
     const source = pageSource('PlansPage.tsx')
 
-    expect(source).toContain('VideoReferenceInput')
+    expect(source).toContain('VideoCreationPanel')
     expect(source).toContain('VideoEstimateSummary')
     expect(source).toContain('api.video.estimate')
-    expect(source).not.toContain('<SelectItem value="seedance-2.0"')
+    expect(source).not.toContain('model.display_name || model.key')
     expect(source).toContain('视频任务需至少')
   })
 

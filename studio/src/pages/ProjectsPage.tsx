@@ -34,6 +34,7 @@ import EmptyState from '@/components/EmptyState'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
 import { useImageModels } from '@/hooks/useImageModels'
+import { videoModelDisplayName } from '@/lib/video-display'
 
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
@@ -1044,7 +1045,7 @@ export default function ProjectsPage() {
                           <FormControl><SelectTrigger><SelectValue placeholder={videoModelsLoading ? '加载模型...' : '选择已配置模型'} /></SelectTrigger></FormControl>
                           <SelectContent>
                             {configuredVideoModels.map((model) => (
-                              <SelectItem key={model.key} value={model.key}>{model.display_name || model.key}</SelectItem>
+                              <SelectItem key={model.key} value={model.key} label={videoModelDisplayName(model)}>{videoModelDisplayName(model)}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1139,7 +1140,7 @@ export default function ProjectsPage() {
                               size="sm"
                               onClick={() => toggle(model.key)}
                             >
-                              {model.display_name || model.key}
+                              {videoModelDisplayName(model)}
                             </Button>
                           ))}
                         </div>
