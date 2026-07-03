@@ -531,6 +531,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		// written into workDir is picked up by Claude Code as project memory.
 		claudecode.WithSettingSources(claudecode.SettingSourceUser, claudecode.SettingSourceProject),
 		claudecode.WithAgent(agentName, *agentDef),
+		WithManagedAgentRuntimePolicy(),
 	}
 
 	if e.pluginDir != "" {
