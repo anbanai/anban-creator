@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
@@ -228,28 +230,36 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	artifactValidation := agent.ArtifactValidation{Valid: true}
-	if result.WorkDir != "" || task.Type == model.PlatformSeednote {
-		artifactValidation = agent.ValidateTaskArtifactsFromWorkDir(task, result.WorkDir)
-		if !artifactValidation.Valid {
-			errMsg := artifactValidation.Error()
-			errEvt := s.logger.Error().
-				Str("task_id", taskID).
-				Str("model", result.Model).
-				Str("user_id", userID).
-				Int("num_turns", result.NumTurns).
-				Int("tool_use_count", result.ToolUseCount).
-				Int("meaningful_files", artifactValidation.MeaningfulFileCount).
-				Strs("missing_files", artifactValidation.Missing)
-			if toolSummaryStr := formatToolUseSummary(result.ToolUseSummary); toolSummaryStr != "" {
-				errEvt = errEvt.Str("tools_used", toolSummaryStr)
-			}
-			if files, listErr := agent.ListWorkDirFiles(result.WorkDir); listErr == nil {
-				errEvt = errEvt.Interface("files", files)
-			}
-			errEvt.Msg(errMsg)
-			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("%s", errMsg))
+	if task.Type == model.PlatformVideo {
+		var err error
+		artifactValidation, err = s.validateVideoCompletionArtifacts(persistCtx, task)
+		if err != nil {
+			s.logger.Error().Err(err).Str("task_id", taskID).Msg("list video task files for artifact validation")
+			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("list video task files: %w", err))
 			return nil
 		}
+	} else if result.WorkDir != "" || task.Type == model.PlatformSeednote {
+		artifactValidation = agent.ValidateTaskArtifactsFromWorkDir(task, result.WorkDir)
+	}
+	if !artifactValidation.Valid {
+		errMsg := artifactValidation.Error()
+		errEvt := s.logger.Error().
+			Str("task_id", taskID).
+			Str("model", result.Model).
+			Str("user_id", userID).
+			Int("num_turns", result.NumTurns).
+			Int("tool_use_count", result.ToolUseCount).
+			Int("meaningful_files", artifactValidation.MeaningfulFileCount).
+			Strs("missing_files", artifactValidation.Missing)
+		if toolSummaryStr := formatToolUseSummary(result.ToolUseSummary); toolSummaryStr != "" {
+			errEvt = errEvt.Str("tools_used", toolSummaryStr)
+		}
+		if files, listErr := agent.ListWorkDirFiles(result.WorkDir); listErr == nil {
+			errEvt = errEvt.Interface("files", files)
+		}
+		errEvt.Msg(errMsg)
+		_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("%s", errMsg))
+		return nil
 	}
 	meaningfulFileCount := artifactValidation.MeaningfulFileCount
 
@@ -335,6 +345,90 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	return nil
+}
+
+func (s *TaskService) validateVideoCompletionArtifacts(ctx context.Context, task *model.Task) (agent.ArtifactValidation, error) {
+	files, err := s.repo.TaskFiles().FindByTaskID(ctx, task.ID)
+	if err != nil {
+		return agent.ArtifactValidation{}, err
+	}
+	if !requiresGeneratedVideoTaskFile(task) {
+		return agent.ValidateTaskArtifactsFromTaskFiles(task, files), nil
+	}
+	gen, err := s.videoGenerationForTask(ctx, task)
+	if err != nil {
+		return agent.ArtifactValidation{}, err
+	}
+	if gen == nil {
+		return agent.ArtifactValidation{Reason: "video missing generated video task file"}, nil
+	}
+	var ids map[string]string
+	if len(gen.TaskFileIDs) > 0 {
+		_ = json.Unmarshal(gen.TaskFileIDs, &ids)
+	}
+	generatedID := strings.TrimSpace(ids["generated_video"])
+	if generatedID == "" {
+		return agent.ArtifactValidation{Reason: "video missing generated video task file"}, nil
+	}
+	for _, file := range files {
+		if file != nil && file.ID == generatedID {
+			if !isVideoTaskFile(file) {
+				return agent.ArtifactValidation{Reason: "video missing generated video task file"}, nil
+			}
+			return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: 1}, nil
+		}
+	}
+	return agent.ArtifactValidation{Reason: "video missing generated video task file"}, nil
+}
+
+func requiresGeneratedVideoTaskFile(task *model.Task) bool {
+	if task == nil || task.Type != model.PlatformVideo {
+		return false
+	}
+	return strings.TrimSpace(task.VideoGenerationID) != "" || task.VideoEstimatedCredits > 0 || task.VideoCreditsCharged > 0
+}
+
+func isVideoTaskFile(file *model.TaskFile) bool {
+	if file == nil || file.FileSize <= 0 {
+		return false
+	}
+	mime := strings.ToLower(strings.TrimSpace(file.MimeType))
+	name := strings.ToLower(strings.TrimSpace(file.FileName))
+	path := strings.ToLower(strings.TrimSpace(file.FilePath))
+	if strings.HasPrefix(mime, "video/") {
+		return true
+	}
+	for _, value := range []string{name, path} {
+		switch filepath.Ext(value) {
+		case ".mp4", ".mov", ".webm", ".m4v":
+			return true
+		}
+	}
+	return false
+}
+
+func (s *TaskService) videoGenerationForTask(ctx context.Context, task *model.Task) (*model.VideoGeneration, error) {
+	if s == nil || s.repo == nil || s.repo.VideoGenerations() == nil || task == nil {
+		return nil, nil
+	}
+	if id := strings.TrimSpace(task.VideoGenerationID); id != "" {
+		gen, err := s.repo.VideoGenerations().FindByID(ctx, id)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return gen, nil
+	}
+	gen, err := s.repo.VideoGenerations().FindLatestByTaskID(ctx, task.ID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return gen, nil
 }
 
 // HandleExecutionFromPayload is a convenience method that loads the task from the DB

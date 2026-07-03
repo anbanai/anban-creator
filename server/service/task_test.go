@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -33,7 +34,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
-		&model.CreditTransaction{}, &model.TopicPool{},
+		&model.CreditTransaction{}, &model.TopicPool{}, &model.VideoGeneration{},
 		&model.IlinkBinding{}, &model.IlinkNotification{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
@@ -897,6 +898,297 @@ func TestTaskService_HandleExecutionRejectsSeednoteWithoutWorkDir(t *testing.T) 
 	}
 	if !strings.Contains(found.ErrorMessage, "seednote missing required deliverables") {
 		t.Fatalf("error = %q, want missing deliverables", found.ErrorMessage)
+	}
+}
+
+func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFile(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	workDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workDir, "input-manifest.md"), []byte("workflow: dreamina-video"), 0644); err != nil {
+		t.Fatalf("write input manifest: %v", err)
+	}
+	task := &model.Task{
+		ID:                    uuid.New().String(),
+		UserID:                userID,
+		ProjectID:             projectID,
+		Type:                  model.PlatformVideo,
+		Status:                model.TaskStatusRunning,
+		VideoEstimatedCredits: 2400,
+		VideoCreditsCharged:   2400,
+		MaxRetries:            model.DefaultRetries,
+		RetryCount:            model.DefaultRetries,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+		WorkDir: workDir,
+		ToolUseSummary: map[string]int{
+			"Write":                    1,
+			"register_video_reference": 1,
+		},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", found.Status)
+	}
+	if found.ErrorMessage != "video missing generated video task file" {
+		t.Fatalf("error = %q, want video missing generated video task file", found.ErrorMessage)
+	}
+}
+
+func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFileWhenWorkDirMissing(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	task := &model.Task{
+		ID:                    uuid.New().String(),
+		UserID:                userID,
+		ProjectID:             projectID,
+		Type:                  model.PlatformVideo,
+		Status:                model.TaskStatusRunning,
+		VideoEstimatedCredits: 2400,
+		VideoCreditsCharged:   2400,
+		MaxRetries:            model.DefaultRetries,
+		RetryCount:            model.DefaultRetries,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+		ToolUseSummary: map[string]int{
+			"create_video_generation_task": 1,
+			"query_video_generation_task":  1,
+		},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", found.Status)
+	}
+	if found.ErrorMessage != "video missing generated video task file" {
+		t.Fatalf("error = %q, want video missing generated video task file", found.ErrorMessage)
+	}
+}
+
+func TestTaskServiceHandleExecutionRejectsGeneratedVideoTaskWithOnlyInputVideoReference(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	task := &model.Task{
+		ID:                    uuid.New().String(),
+		UserID:                userID,
+		ProjectID:             projectID,
+		Type:                  model.PlatformVideo,
+		Status:                model.TaskStatusRunning,
+		VideoEstimatedCredits: 2400,
+		VideoCreditsCharged:   2400,
+		MaxRetries:            model.DefaultRetries,
+		RetryCount:            model.DefaultRetries,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID:       uuid.New().String(),
+		TaskID:   task.ID,
+		Role:     model.FileRoleOther,
+		FileName: "input-reference.mp4",
+		FilePath: "input-reference.mp4",
+		MimeType: "video/mp4",
+		FileSize: 4096,
+	}); err != nil {
+		t.Fatalf("create input video task file: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+		ToolUseSummary: map[string]int{
+			"register_video_reference":     1,
+			"create_video_generation_task": 1,
+			"query_video_generation_task":  1,
+		},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", found.Status)
+	}
+	if found.ErrorMessage != "video missing generated video task file" {
+		t.Fatalf("error = %q, want video missing generated video task file", found.ErrorMessage)
+	}
+}
+
+func TestTaskServiceHandleExecutionAcceptsRegisteredVideoFile(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	generationID := uuid.New().String()
+	fileID := uuid.New().String()
+	task := &model.Task{
+		ID:                    uuid.New().String(),
+		UserID:                userID,
+		ProjectID:             projectID,
+		Type:                  model.PlatformVideo,
+		Status:                model.TaskStatusRunning,
+		VideoGenerationID:     generationID,
+		VideoEstimatedCredits: 2400,
+		VideoCreditsCharged:   2400,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID:       fileID,
+		TaskID:   task.ID,
+		Role:     model.FileRoleOther,
+		FileName: "generated-video.mp4",
+		FilePath: "generated-video.mp4",
+		MimeType: "video/mp4",
+		FileSize: 4096,
+	}); err != nil {
+		t.Fatalf("create video task file: %v", err)
+	}
+	if err := repo.VideoGenerations().Create(ctx, &model.VideoGeneration{
+		ID:          generationID,
+		UserID:      userID,
+		ProjectID:   projectID,
+		TaskID:      task.ID,
+		Status:      "archived",
+		TaskFileIDs: datatypes.JSON([]byte(fmt.Sprintf(`{"generated_video":%q}`, fileID))),
+	}); err != nil {
+		t.Fatalf("create video generation: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+		ToolUseSummary: map[string]int{
+			"create_video_generation_task":     1,
+			"query_video_generation_task":      1,
+			"download_video_generation_result": 1,
+		},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status == model.TaskStatusFailed && found.ErrorMessage == "video missing registered video deliverable" {
+		t.Fatalf("video task failed artifact validation despite registered file: %#v", found)
+	}
+}
+
+func TestTaskServiceHandleExecutionAcceptsNonGenerationVideoWorkflowArtifact(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformVideo)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformVideo,
+		Status:    model.TaskStatusRunning,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID:       uuid.New().String(),
+		TaskID:   task.ID,
+		Role:     model.FileRoleCover,
+		FileName: "cover.png",
+		FilePath: "cover.png",
+		MimeType: "image/png",
+		FileSize: 2048,
+	}); err != nil {
+		t.Fatalf("create cover task file: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+		ToolUseSummary: map[string]int{
+			"generate_image": 1,
+			"download_image": 1,
+		},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status == model.TaskStatusFailed {
+		t.Fatalf("non-generation video workflow artifact should not fail validation: %#v", found)
 	}
 }
 

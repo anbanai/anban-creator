@@ -213,11 +213,20 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 		return s.failLocalTask(ctx, task, agent.NestedAgentDelegationError)
 	}
 
-	files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("local complete: list task files: %w", err)
+	var artifactValidation agent.ArtifactValidation
+	if task.Type == model.PlatformVideo {
+		var err error
+		artifactValidation, err = s.validateVideoCompletionArtifacts(ctx, task)
+		if err != nil {
+			return fmt.Errorf("local complete: validate video artifacts: %w", err)
+		}
+	} else {
+		files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("local complete: list task files: %w", err)
+		}
+		artifactValidation = agent.ValidateTaskArtifactsFromTaskFiles(task, files)
 	}
-	artifactValidation := agent.ValidateTaskArtifactsFromTaskFiles(task, files)
 	if !artifactValidation.Valid {
 		errMsg := artifactValidation.Error()
 		s.logger.Warn().

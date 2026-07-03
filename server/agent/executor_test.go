@@ -341,6 +341,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 		{model.ScopeArticle, "wechatarticle"},
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeEcommerce, "ecommerce"},
+		{model.ScopeVideo, "video"},
 		{"unknown", "seednote"},
 	}
 

@@ -197,6 +197,8 @@ func TaskTypeToAgent(taskType string) string {
 		return "seednote"
 	case model.ScopeEcommerce:
 		return "ecommerce"
+	case model.ScopeVideo:
+		return "video"
 	default:
 		return "seednote"
 	}
