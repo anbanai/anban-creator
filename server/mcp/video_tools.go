@@ -497,9 +497,9 @@ func videoCreditMultiplier() int {
 
 func videoModelCatalog() service.VideoModelCatalog {
 	if billSvc != nil && billSvc.config != nil {
-		return service.VideoModelCatalogFromConfig(billSvc.config.VideoAPI.ModelCatalogOrDefault())
+		return service.VideoModelCatalogFromConfig(billSvc.config.VideoAPI.ModelCatalog)
 	}
-	return service.DefaultVideoModelCatalog()
+	return service.VideoModelCatalog{}
 }
 
 func maybeDeductVideo(ctx context.Context, userID, taskID string, credits int) error {

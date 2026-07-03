@@ -151,8 +151,15 @@ func TestVideoAPIConfigUsesCatalogAndMultiplierNotBusinessDefaults(t *testing.T)
 	if cfg.CreditMultiplierOrDefault() != 1000 {
 		t.Fatalf("default multiplier = %d, want 1000", cfg.CreditMultiplierOrDefault())
 	}
-	if len(cfg.ModelCatalogOrDefault()) < 3 {
-		t.Fatalf("model catalog should include seedance 2.0, fast, mini")
+	if len(VideoModelCatalogFromConfig(cfg.ModelCatalog)) != 0 {
+		t.Fatalf("empty video model config must not expose default models")
+	}
+}
+
+func TestVideoModelCatalogFromConfigEmptyConfigExposesNoModels(t *testing.T) {
+	catalog := VideoModelCatalogFromConfig(nil)
+	if len(catalog) != 0 {
+		t.Fatalf("empty config exposed models: %+v", catalog)
 	}
 }
 

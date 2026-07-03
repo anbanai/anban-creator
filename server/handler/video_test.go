@@ -235,3 +235,35 @@ func TestVideoModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
 		t.Fatalf("items = %+v, want only configured-video", body.Data.Items)
 	}
 }
+
+func TestVideoModelsReturnsEmptyWhenCatalogUnconfigured(t *testing.T) {
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	h := NewVideoHandler(nil, nil, nil, 1000, &logger)
+
+	app := fiber.New()
+	app.Get("/video/models", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.Models(c)
+	})
+
+	resp, err := app.Test(httptest.NewRequest("GET", "/video/models", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Data struct {
+			Items []struct {
+				Key string `json:"key"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Data.Items) != 0 {
+		t.Fatalf("items = %+v, want no models for unconfigured catalog", body.Data.Items)
+	}
+}

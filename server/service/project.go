@@ -55,7 +55,7 @@ func (s *ProjectService) resolvedVideoCatalog() VideoModelCatalog {
 	if s != nil && s.videoCatalog != nil {
 		return s.videoCatalog
 	}
-	return DefaultVideoModelCatalog()
+	return VideoModelCatalog{}
 }
 
 // Create creates a new project for the given user.
@@ -326,7 +326,7 @@ func SanitizeProjectVideoProfile(ch *model.Project, catalog VideoModelCatalog) {
 		return
 	}
 	if catalog == nil {
-		catalog = DefaultVideoModelCatalog()
+		catalog = VideoModelCatalog{}
 	}
 	defaults := ch.VideoDefaults.Data()
 	policy := ch.VideoModelPolicy.Data()

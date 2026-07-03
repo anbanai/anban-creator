@@ -182,6 +182,21 @@ video_api:
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
   timeout: 10m
   credit_multiplier: 1000 # 1 RMB = 1000 credits; project video profile controls business defaults.
+  # Explicit allow-list of server-configured video models. Studio, MCP, tasks,
+  # plans, and agents can only see/use keys listed here. Leaving this empty
+  # disables video model selection instead of exposing built-in defaults.
+  # Built-in Seedance keys inherit default capabilities/pricing unless a field
+  # below overrides it.
+  model_catalog:
+    - key: "seedance-2.0"
+      display_name: "Doubao Seedance 2.0"
+      model_id: "doubao-seedance-2-0-260128"
+    - key: "seedance-2.0-fast"
+      display_name: "Doubao Seedance 2.0 Fast"
+      model_id: "doubao-seedance-2-0-fast-260128"
+    - key: "seedance-2.0-mini"
+      display_name: "Doubao Seedance 2.0 Mini"
+      model_id: "doubao-seedance-2-0-mini-260615"
 
 # ---------------------------------------------------------------------------
 # Writing: LLM API configuration for writing services

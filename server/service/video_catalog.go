@@ -87,7 +87,7 @@ func DefaultVideoModelCatalog() VideoModelCatalog {
 func VideoModelCatalogFromConfig(entries []config.VideoModelCatalogEntry) VideoModelCatalog {
 	defaults := DefaultVideoModelCatalog()
 	if len(entries) == 0 {
-		return defaults
+		return VideoModelCatalog{}
 	}
 	catalog := VideoModelCatalog{}
 	for _, entry := range entries {
@@ -139,7 +139,7 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 		return VideoGenerationPlan{}, fmt.Errorf("project video profile is not configured")
 	}
 	if catalog == nil {
-		catalog = DefaultVideoModelCatalog()
+		catalog = VideoModelCatalog{}
 	}
 	if creditMultiplier <= 0 {
 		creditMultiplier = 1000

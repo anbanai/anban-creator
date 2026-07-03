@@ -69,6 +69,7 @@ func setupTestPlanService(t *testing.T) (*PlanService, repository.Repository) {
 	repo := repository.New(db)
 	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
 	svc := NewPlanService(repo, &logger)
+	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1000)
 	return svc, repo
 }
 

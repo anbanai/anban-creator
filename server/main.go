@@ -248,7 +248,7 @@ func main() {
 	var posterSvc *service.PosterService
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
-	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalogOrDefault())
+	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalog)
 	videoCreditMultiplier := cfg.VideoAPI.CreditMultiplierOrDefault()
 
 	if repo != nil {

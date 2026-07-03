@@ -22,7 +22,7 @@ type VideoHandler struct {
 
 func NewVideoHandler(repo repository.Repository, creditSvc *service.CreditService, catalog service.VideoModelCatalog, creditMultiplier int, logger *zerolog.Logger) *VideoHandler {
 	if catalog == nil {
-		catalog = service.DefaultVideoModelCatalog()
+		catalog = service.VideoModelCatalog{}
 	}
 	if creditMultiplier <= 0 {
 		creditMultiplier = 1000

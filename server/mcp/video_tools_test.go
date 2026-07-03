@@ -135,9 +135,21 @@ func setupMCPVideoProject(t *testing.T) (context.Context, repository.Repository,
 		t.Fatalf("create project: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
-	svcs = &Services{ProjectSvc: service.NewProjectService(repo, &logger)}
+	projectSvc := service.NewProjectService(repo, &logger)
+	projectSvc.SetVideoCatalog(service.DefaultVideoModelCatalog())
+	svcs = &Services{ProjectSvc: projectSvc}
+	SetBillingServices(nil, nil, &config.Config{VideoAPI: config.VideoAPIConfig{
+		ModelCatalog: defaultMCPVideoModelCatalogEntries(),
+	}})
 	ctx := context.Background()
 	return ctx, repo, userID, project.ID
+}
+
+func defaultMCPVideoModelCatalogEntries() []config.VideoModelCatalogEntry {
+	return []config.VideoModelCatalogEntry{
+		{Key: "seedance-2.0"},
+		{Key: "seedance-2.0-mini"},
+	}
 }
 
 func setupMCPVideoProjectWithServices(t *testing.T, store storage.Provider) (context.Context, repository.Repository, string, string) {
@@ -145,6 +157,7 @@ func setupMCPVideoProjectWithServices(t *testing.T, store storage.Provider) (con
 	ctx, repo, userID, projectID := setupMCPVideoProject(t)
 	logger := zerolog.New(io.Discard)
 	taskSvc := service.NewTaskService(repo, nil, nil, store, nil, &logger, "", nil, "", nil, nil)
+	taskSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)
 	svcs.TaskSvc = taskSvc
 	svcs.Store = store
 	return ctx, repo, userID, projectID

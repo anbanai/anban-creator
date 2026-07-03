@@ -52,6 +52,7 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1000)
 	return svc, repo
 }
 
@@ -67,6 +68,7 @@ func setupTaskServiceWithCredits(t *testing.T, creditSvc *CreditService) (*TaskS
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	svc := NewTaskService(repo, nil, &mockEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
+	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1000)
 	return svc, repo
 }
 
@@ -614,7 +616,7 @@ func TestTaskService_CreateManualVideoTaskUsesConfiguredCreditMultiplier(t *test
 	repoForCredits := setupCreditTestRepo(t)
 	creditSvc := newPricedCreditService(repoForCredits)
 	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
-	svc.SetVideoCatalogAndCreditMultiplier(nil, 1200)
+	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1200)
 	creditSvc.repo = repo
 	ctx := context.Background()
 	userID := uuid.New().String()

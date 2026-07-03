@@ -133,7 +133,7 @@ func (s *TaskService) resolvedVideoCatalog() VideoModelCatalog {
 	if s != nil && s.videoCatalog != nil {
 		return s.videoCatalog
 	}
-	return DefaultVideoModelCatalog()
+	return VideoModelCatalog{}
 }
 
 func (s *TaskService) resolvedVideoCreditMultiplier() int {

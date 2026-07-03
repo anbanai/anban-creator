@@ -324,6 +324,7 @@ func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	creditSvc := service.NewCreditService(repo, nil, &logger)
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
+	taskSvc.SetVideoCatalogAndCreditMultiplier(service.DefaultVideoModelCatalog(), 1000)
 	h := NewTaskHandler(taskSvc, &logger)
 	h.SetRepository(repo)
 

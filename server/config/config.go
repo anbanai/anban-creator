@@ -187,45 +187,6 @@ func (c VideoAPIConfig) CreditMultiplierOrDefault() int {
 	return 1000
 }
 
-func (c VideoAPIConfig) ModelCatalogOrDefault() []VideoModelCatalogEntry {
-	if len(c.ModelCatalog) > 0 {
-		return c.ModelCatalog
-	}
-	return []VideoModelCatalogEntry{
-		{
-			Key:                  "seedance-2.0",
-			DisplayName:          "Doubao Seedance 2.0",
-			ModelID:              "doubao-seedance-2-0-260128",
-			SupportedResolutions: []string{"480p", "720p", "1080p", "4k"},
-			SupportedRatios:      []string{"16:9", "9:16", "1:1", "4:3", "3:4"},
-			MinDuration:          1,
-			MaxDuration:          15,
-			SupportsVideoInput:   true,
-			Supports4K:           true,
-		},
-		{
-			Key:                  "seedance-2.0-fast",
-			DisplayName:          "Doubao Seedance 2.0 Fast",
-			ModelID:              "doubao-seedance-2-0-fast-260128",
-			SupportedResolutions: []string{"480p", "720p"},
-			SupportedRatios:      []string{"16:9", "9:16", "1:1", "4:3", "3:4"},
-			MinDuration:          1,
-			MaxDuration:          15,
-			SupportsVideoInput:   true,
-		},
-		{
-			Key:                  "seedance-2.0-mini",
-			DisplayName:          "Doubao Seedance 2.0 Mini",
-			ModelID:              "doubao-seedance-2-0-mini-260615",
-			SupportedResolutions: []string{"480p", "720p"},
-			SupportedRatios:      []string{"16:9", "9:16", "1:1", "4:3", "3:4"},
-			MinDuration:          1,
-			MaxDuration:          15,
-			SupportsVideoInput:   true,
-		},
-	}
-}
-
 // StorageConfig holds file storage configuration.
 // Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
 type StorageConfig struct {

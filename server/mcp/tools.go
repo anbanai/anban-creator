@@ -544,7 +544,7 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 
 func filterVideoCatalogForPolicy(catalog service.VideoModelCatalog, policy model.VideoModelPolicy) service.VideoModelCatalog {
 	if catalog == nil {
-		catalog = service.DefaultVideoModelCatalog()
+		catalog = service.VideoModelCatalog{}
 	}
 	if len(policy.AllowedModels) == 0 {
 		return catalog
