@@ -15,7 +15,7 @@ Client surfaces wrapping the same server API:
 
 The `app/` directory is a **library** (no `main.go`) providing content creation functionality used by both the server and agent. It handles Markdown-to-WeChat-HTML conversion, AI writing, image generation, humanization, and WeChat publishing.
 
-Four git submodules: `claudecode/`, `openclaw/`, `codex/` (plugin distributions) and `wcflink/` (the `lich0821/wcfLink` sidecar used for WeChat bot integration). Run `git submodule update --init --recursive` before building Docker images.
+Four git submodules: `claudecode/`, `openclaw/`, `codex/` (plugin distributions) and `wcflink/` (the `lich0821/wcfLink` sidecar used as the transport behind the iLink WeChat assistant channel). Run `git submodule update --init --recursive` before building Docker images.
 
 - **Language**: Go 1.26.0 (Agent + Server + app library), TypeScript (Studio + miniapp), Rust (desktop Tauri core)
 - **Logging**: Zerolog (all Go components — app library, server, agent); never mix with zap
@@ -101,9 +101,10 @@ Standalone Go binary that executes Claude Code tasks in Docker containers. The s
 Fiber v3 HTTP API. Layered architecture: handler → service → repository → MySQL/GORM.
 
 Key packages:
-- `handler/` — HTTP handlers (auth, project, plan, task, timeline, websocket, credit, agent, designer, wcf)
+- `handler/` — HTTP handlers (auth, project, plan, task, timeline, websocket, credit, agent, designer, ilink)
 - `router/` — `router.go` registers all `/api/v1` route groups, middleware, and the WS hub (the single source of truth for routes)
-- `service/` — Business logic including `task_execution.go` (agent SDK integration), `task_files.go`, `credit.go`, `publishing.go`, `task_agent.go`, `redis_notifier.go` (Redis pub/sub progress events), `task_events.go` (notifier interface), `wcf_*.go` (WeChat bot integration)
+- `service/` — Business logic including `task_execution.go` (agent SDK integration), `task_files.go`, `credit.go`, `publishing.go`, `task_agent.go`, `redis_notifier.go` (Redis pub/sub progress events), `task_events.go` (notifier interface), `ilink_*.go` (WeChat assistant binding, conversation, polling, and terminal notification outbox)
+- `wcf/` — HTTP client for the wcflink sidecar transport used by the iLink channel; do not put product-level WeChat assistant behavior here
 - `agent/` — Agent execution layer using claude-agent-sdk-go, includes MCP server and tool definitions
 - `scheduler/` — Asynq-based background task processing with `plan_checker.go`
 - `model/` — GORM models with auto-migration
