@@ -947,6 +947,12 @@ func (s *TaskService) Cancel(ctx context.Context, id string) error {
 	if s.creditSvc != nil && taskErr == nil && task != nil {
 		s.refundTaskByMode(ctx, task, "取消")
 	}
+	if taskErr == nil && task != nil {
+		if err := s.repo.Tasks().SetCompletedAt(ctx, id); err != nil {
+			s.logger.Error().Err(err).Str("task_id", id).Msg("failed to set completed_at on cancellation")
+		}
+		s.notifyTerminal(ctx, task, model.TaskStatusCancelled, "用户取消")
+	}
 	// Release concurrency slot.
 	if s.pubsub != nil {
 		var projectID string

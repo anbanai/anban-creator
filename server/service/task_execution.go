@@ -80,7 +80,10 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	// Load project if not provided.
 	if project == nil {
 		if task.ProjectID == "" {
-			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "task has no project_id")
+			errMsg := "task has no project_id"
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, errMsg)
+			_ = s.repo.Tasks().SetCompletedAt(ctx, taskID)
+			s.notifyTerminal(ctx, task, model.TaskStatusFailed, errMsg)
 			if s.pubsub != nil {
 				s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 			}
@@ -92,14 +95,20 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 				Str("task_id", taskID).
 				Str("project_id", task.ProjectID).
 				Msg("failed to load project for task")
-			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "failed to load project")
+			errMsg := "failed to load project"
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, errMsg)
+			_ = s.repo.Tasks().SetCompletedAt(ctx, taskID)
+			s.notifyTerminal(ctx, task, model.TaskStatusFailed, errMsg)
 			if task.ProjectID != "" && s.pubsub != nil {
 				s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 			}
 			return fmt.Errorf("load project: %w", err)
 		}
 		if ch.UserID != userID {
-			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "project not owned by user")
+			errMsg := "project not owned by user"
+			_ = s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, errMsg)
+			_ = s.repo.Tasks().SetCompletedAt(ctx, taskID)
+			s.notifyTerminal(ctx, task, model.TaskStatusFailed, errMsg)
 			if task.ProjectID != "" && s.pubsub != nil {
 				s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 			}

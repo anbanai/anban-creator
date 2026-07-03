@@ -26,7 +26,7 @@ import (
 
 func setupTaskTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
@@ -34,6 +34,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		&model.Plan{}, &model.Task{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
 		&model.CreditTransaction{}, &model.TopicPool{},
+		&model.IlinkBinding{}, &model.IlinkNotification{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
@@ -1169,6 +1170,96 @@ func TestTaskService_Cancel(t *testing.T) {
 	found, _ := svc.GetByID(context.Background(), task.ID)
 	if found.Status != model.TaskStatusCancelled {
 		t.Errorf("Status = %q, want %q", found.Status, model.TaskStatusCancelled)
+	}
+}
+
+func TestTaskService_CancelEnqueuesIlinkNotification(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, "wechat")
+	if err := repo.IlinkBindings().Create(context.Background(), &model.IlinkBinding{
+		ID:                uuid.NewString(),
+		UserID:            userID,
+		PlatformAccountID: stringPtr("platform-1"),
+		ExternalUserID:    stringPtr("wx-user-1"),
+		Status:            model.IlinkBindingStatusActive,
+	}); err != nil {
+		t.Fatalf("create ilink binding: %v", err)
+	}
+	log := zerolog.Nop()
+	svc.SetIlinkNotifier(NewIlinkNotifier(repo, true, &log))
+
+	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		Prompt:    "Cancel me",
+	})
+	task := taskSlice[0]
+
+	if err := svc.Cancel(context.Background(), task.ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	items, err := repo.IlinkNotifications().ListDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListDue: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("outbox items = %d, want 1", len(items))
+	}
+	if items[0].TaskID != task.ID || items[0].TaskStatus != model.TaskStatusCancelled {
+		t.Fatalf("unexpected notification: %+v", items[0])
+	}
+}
+
+func TestTaskService_HandleExecutionEarlyFailureEnqueuesIlinkNotification(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.New().String()
+	if err := repo.Users().Create(context.Background(), &model.User{
+		ID:         userID,
+		Email:      "early-failure@example.com",
+		Password:   "x",
+		InviteCode: "early-failure",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.IlinkBindings().Create(context.Background(), &model.IlinkBinding{
+		ID:                uuid.NewString(),
+		UserID:            userID,
+		PlatformAccountID: stringPtr("platform-1"),
+		ExternalUserID:    stringPtr("wx-user-1"),
+		Status:            model.IlinkBindingStatusActive,
+	}); err != nil {
+		t.Fatalf("create ilink binding: %v", err)
+	}
+	log := zerolog.Nop()
+	svc.SetIlinkNotifier(NewIlinkNotifier(repo, true, &log))
+	task := &model.Task{
+		ID:        uuid.NewString(),
+		UserID:    userID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "Missing project",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := repo.Tasks().Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := svc.HandleExecution(context.Background(), task, nil); err == nil {
+		t.Fatal("HandleExecution error = nil, want missing project error")
+	}
+
+	items, err := repo.IlinkNotifications().ListDue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListDue: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("outbox items = %d, want 1", len(items))
+	}
+	if items[0].TaskID != task.ID || items[0].TaskStatus != model.TaskStatusFailed {
+		t.Fatalf("unexpected notification: %+v", items[0])
 	}
 }
 

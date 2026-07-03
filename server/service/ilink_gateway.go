@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -43,13 +44,17 @@ func (g *IlinkGateway) ProcessEvent(ctx context.Context, ev wcf.Event) {
 		}
 		return
 	}
-	if err != nil && !strings.Contains(err.Error(), gorm.ErrRecordNotFound.Error()) {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) && !strings.Contains(err.Error(), gorm.ErrRecordNotFound.Error()) {
 		if g.logger != nil {
 			g.logger.Warn().Err(err).Str("account_id", ev.AccountID).Msg("ilink contact lookup failed")
 		}
 	}
 
 	code := strings.TrimSpace(ev.BodyText)
+	if g.bindings == nil {
+		g.reply(ctx, ev.AccountID, ev.FromUserID, "请先在 Studio 设置页获取绑定码，然后把绑定码发送给我。")
+		return
+	}
 	binding, err = g.bindings.CompleteBindByCode(ctx, code, ev.AccountID, ev.FromUserID)
 	if err != nil {
 		g.reply(ctx, ev.AccountID, ev.FromUserID, "请先在 Studio 设置页获取绑定码，然后把绑定码发送给我。")
