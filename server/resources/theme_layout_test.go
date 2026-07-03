@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -83,6 +85,12 @@ func TestEmbeddedArticleTemplatesAreDiscoverableAndRawReadable(t *testing.T) {
 		if len(tpl.TemplateRhythm) == 0 {
 			t.Errorf("template %s should expose rhythm metadata", tpl.Name)
 		}
+		if len(tpl.TemplateBestFor) == 0 {
+			t.Errorf("template %s should expose best_for metadata", tpl.Name)
+		}
+		if len(tpl.CompositionGuidance) == 0 {
+			t.Errorf("template %s should expose composition guidance", tpl.Name)
+		}
 		if _, ok := required[tpl.Name]; ok {
 			required[tpl.Name] = true
 		}
@@ -91,10 +99,59 @@ func TestEmbeddedArticleTemplatesAreDiscoverableAndRawReadable(t *testing.T) {
 		if len(raw) == 0 {
 			t.Errorf("template %s should expose raw YAML", tpl.Name)
 		}
+		var spec struct {
+			ExampleLayoutPlan string `yaml:"example_layout_plan"`
+		}
+		if err := yaml.Unmarshal(raw, &spec); err != nil {
+			t.Fatalf("unmarshal article template %s raw: %v", tpl.Name, err)
+		}
+		if strings.TrimSpace(spec.ExampleLayoutPlan) == "" {
+			t.Errorf("template %s should include example_layout_plan", tpl.Name)
+		} else {
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(spec.ExampleLayoutPlan), &parsed); err != nil {
+				t.Errorf("template %s example_layout_plan should be valid JSON: %v", tpl.Name, err)
+			}
+		}
 	}
 	for name, seen := range required {
 		if !seen {
 			t.Errorf("missing required article template %s", name)
+		}
+	}
+}
+
+func TestEmbeddedWritersExposeAgentSelectionMetadata(t *testing.T) {
+	writers := Manager().List(CategoryWriter)
+	if len(writers) == 0 {
+		t.Fatal("expected embedded writers")
+	}
+	for _, writer := range writers {
+		if writer.EnglishName == "" {
+			t.Errorf("writer %s missing english_name", writer.Name)
+		}
+		if len(writer.Aliases) < 2 {
+			t.Errorf("writer %s should expose aliases for lookup", writer.EnglishName)
+		}
+		if len(writer.WriterBestFor) == 0 {
+			t.Errorf("writer %s should expose writer_best_for", writer.EnglishName)
+		}
+		if writer.WritingTone == "" || writer.WritingVoice == "" || writer.WritingPerspective == "" {
+			t.Errorf("writer %s should expose tone/voice/perspective", writer.EnglishName)
+		}
+		if len(writer.TitleFormulas) == 0 {
+			t.Errorf("writer %s should expose title formulas", writer.EnglishName)
+		}
+		for _, formula := range writer.TitleFormulas {
+			if formula.Type == "" || formula.Template == "" || len(formula.Examples) == 0 {
+				t.Errorf("writer %s has incomplete title formula: %#v", writer.EnglishName, formula)
+			}
+		}
+		raw := string(Manager().GetRaw(CategoryWriter, writer.EnglishName))
+		for _, forbidden := range []string{"cover_style", "cover_prompt", "visual_style", "image_style"} {
+			if strings.Contains(raw, forbidden) {
+				t.Errorf("writer %s must not carry visual field %q", writer.EnglishName, forbidden)
+			}
 		}
 	}
 }

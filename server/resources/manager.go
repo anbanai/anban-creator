@@ -211,29 +211,68 @@ func (rm *ResourceManager) loadWriters() error {
 			return err
 		}
 		var raw struct {
-			Name        string `yaml:"name"`
-			EnglishName string `yaml:"english_name"`
-			Category    string `yaml:"category"`
-			Description string `yaml:"description"`
+			Name         string   `yaml:"name"`
+			EnglishName  string   `yaml:"english_name"`
+			Category     string   `yaml:"category"`
+			Description  string   `yaml:"description"`
+			Aliases      []string `yaml:"aliases"`
+			BestFor      []string `yaml:"best_for"`
+			WritingStyle struct {
+				Tone        string `yaml:"tone"`
+				Voice       string `yaml:"voice"`
+				Perspective string `yaml:"perspective"`
+			} `yaml:"writing_style"`
+			TitleFormulas []TitleFormulaSpec `yaml:"title_formulas"`
 		}
 		if err := yaml.Unmarshal(data, &raw); err != nil {
-			continue
+			return fmt.Errorf("unmarshal writer %s: %w", e.Name(), err)
 		}
 		if raw.EnglishName == "" {
-			continue
+			return fmt.Errorf("writer %s missing english_name", e.Name())
+		}
+		if raw.Name == "" || raw.Description == "" || raw.Category == "" {
+			return fmt.Errorf("writer %s missing required metadata", raw.EnglishName)
+		}
+		if len(raw.TitleFormulas) == 0 {
+			return fmt.Errorf("writer %s missing title_formulas", raw.EnglishName)
+		}
+		aliases := uniqueNonEmpty(append(raw.Aliases, raw.EnglishName, raw.Name, raw.Category))
+		bestFor := raw.BestFor
+		if len(bestFor) == 0 {
+			bestFor = []string{raw.Category, raw.Description}
 		}
 		entry := &ResourceEntry{
-			Name:        raw.Name,
-			Category:    CategoryWriter,
-			Description: raw.Description,
-			DisplayName: raw.Name,
-			EnglishName: raw.EnglishName,
-			CategoryCn:  raw.Category,
+			Name:               raw.Name,
+			Category:           CategoryWriter,
+			Description:        raw.Description,
+			DisplayName:        raw.Name,
+			EnglishName:        raw.EnglishName,
+			CategoryCn:         raw.Category,
+			Aliases:            aliases,
+			WriterBestFor:      bestFor,
+			WritingTone:        raw.WritingStyle.Tone,
+			WritingVoice:       raw.WritingStyle.Voice,
+			WritingPerspective: raw.WritingStyle.Perspective,
+			TitleFormulas:      raw.TitleFormulas,
 		}
 		rm.writers[raw.EnglishName] = entry
 		rm.rawContent[CategoryWriter][raw.EnglishName] = data
 	}
 	return nil
+}
+
+func uniqueNonEmpty(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func (rm *ResourceManager) loadLayouts() error {
@@ -261,10 +300,10 @@ func (rm *ResourceManager) loadLayouts() error {
 			Rows           *RowsSpec   `yaml:"rows"`
 		}
 		if err := yaml.Unmarshal(data, &raw); err != nil {
-			continue
+			return fmt.Errorf("unmarshal layout %s: %w", e.Name(), err)
 		}
 		if raw.Name == "" {
-			continue
+			return fmt.Errorf("layout %s missing name", e.Name())
 		}
 		entry := &ResourceEntry{
 			Name:           raw.Name,
@@ -310,10 +349,19 @@ func (rm *ResourceManager) loadArticleTemplates() error {
 			CompositionGuidance []string `yaml:"composition_guidance"`
 		}
 		if err := yaml.Unmarshal(data, &raw); err != nil {
-			continue
+			return fmt.Errorf("unmarshal article template %s: %w", e.Name(), err)
 		}
 		if raw.Name == "" {
-			continue
+			return fmt.Errorf("article template %s missing name", e.Name())
+		}
+		if raw.Description == "" || len(raw.ArticleTypes) == 0 || len(raw.BestFor) == 0 {
+			return fmt.Errorf("article template %s missing required metadata", raw.Name)
+		}
+		if len(raw.Rhythm) == 0 || len(raw.ImageCount) == 0 || raw.ImageCount["min"] <= 0 || raw.ImageCount["max"] < raw.ImageCount["min"] {
+			return fmt.Errorf("article template %s has invalid rhythm/image_count", raw.Name)
+		}
+		if len(raw.Modules.Preferred) == 0 || len(raw.CompositionGuidance) == 0 {
+			return fmt.Errorf("article template %s missing module/composition guidance", raw.Name)
 		}
 		entry := &ResourceEntry{
 			Name:                 raw.Name,

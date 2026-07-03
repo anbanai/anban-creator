@@ -101,6 +101,12 @@ func getResourceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		result["display_name"] = entry.DisplayName
 		result["english_name"] = entry.EnglishName
 		result["category_cn"] = entry.CategoryCn
+		result["aliases"] = entry.Aliases
+		result["writer_best_for"] = entry.WriterBestFor
+		result["writing_tone"] = entry.WritingTone
+		result["writing_voice"] = entry.WritingVoice
+		result["writing_perspective"] = entry.WritingPerspective
+		result["title_formulas"] = entry.TitleFormulas
 	case resources.CategoryLayout:
 		result["layout_category"] = entry.LayoutCategory
 		result["serves"] = entry.Serves

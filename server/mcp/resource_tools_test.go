@@ -63,3 +63,26 @@ func TestGetResourceExposesLayoutSchema(t *testing.T) {
 		t.Fatalf("required fields missing from layout resource: %#v", fields["required"])
 	}
 }
+
+func TestGetResourceExposesWriterMetadata(t *testing.T) {
+	args := json.RawMessage(`{"category":"writers","name":"dan-koe"}`)
+	result, err := getResourceHandler(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: args},
+	})
+	if err != nil {
+		t.Fatalf("getResourceHandler error: %v", err)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	for _, field := range []string{"aliases", "writer_best_for", "writing_tone", "writing_voice", "writing_perspective", "title_formulas"} {
+		if _, ok := parsed[field]; !ok {
+			t.Fatalf("writer resource missing %s: %#v", field, parsed)
+		}
+	}
+	if formulas, ok := parsed["title_formulas"].([]any); !ok || len(formulas) == 0 {
+		t.Fatalf("writer title_formulas missing: %#v", parsed["title_formulas"])
+	}
+}

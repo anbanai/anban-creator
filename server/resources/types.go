@@ -23,9 +23,15 @@ type ResourceEntry struct {
 	Colors  map[string]string `json:"colors,omitempty"`
 
 	// Writer fields
-	DisplayName string `json:"display_name,omitempty"`
-	EnglishName string `json:"english_name,omitempty"`
-	CategoryCn  string `json:"category_cn,omitempty"`
+	DisplayName        string             `json:"display_name,omitempty"`
+	EnglishName        string             `json:"english_name,omitempty"`
+	CategoryCn         string             `json:"category_cn,omitempty"`
+	Aliases            []string           `json:"aliases,omitempty"`
+	WriterBestFor      []string           `json:"writer_best_for,omitempty"`
+	WritingTone        string             `json:"writing_tone,omitempty"`
+	WritingVoice       string             `json:"writing_voice,omitempty"`
+	WritingPerspective string             `json:"writing_perspective,omitempty"`
+	TitleFormulas      []TitleFormulaSpec `json:"title_formulas,omitempty"`
 
 	// Layout fields
 	LayoutCategory string      `json:"layout_category,omitempty"`
@@ -89,4 +95,10 @@ type RowsSpec struct {
 	MinColumns  int         `yaml:"min_columns,omitempty" json:"min_columns,omitempty"`
 	Schema      []FieldSpec `yaml:"schema,omitempty" json:"schema,omitempty"`
 	Description string      `yaml:"description,omitempty" json:"description,omitempty"`
+}
+
+type TitleFormulaSpec struct {
+	Type     string   `yaml:"type" json:"type"`
+	Template string   `yaml:"template" json:"template"`
+	Examples []string `yaml:"examples,omitempty" json:"examples,omitempty"`
 }
