@@ -39,6 +39,7 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		// workspace (e.g., written by the desktop shell in the future) is picked up
 		// by Claude Code as project memory.
 		claudecode.WithSettingSources(claudecode.SettingSourceUser, claudecode.SettingSourceProject),
+		serveragent.WithManagedAgentRuntimePolicy(),
 		claudecode.WithExtraArgs(map[string]*string{
 			"agent": &r.cfg.AgentFlag,
 		}),

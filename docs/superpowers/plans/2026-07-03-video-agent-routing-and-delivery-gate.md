@@ -33,6 +33,11 @@
   - Register the hook before the existing video summary prompt in `claudecode/hooks/hooks.json`.
   - Patch-bump `claudecode/.claude-plugin/plugin.json` and update the server-side plugin version contract test.
 
+- [x] **Block managed-runtime delegation escapes**
+  - Add a shared Go runtime policy that passes `--disallowed-tools Agent,ScheduleWakeup` through the Claude Code SDK.
+  - Apply it to both the server SDK executor and the local/Docker agent runner.
+  - Keep MCP inheritance intact by avoiding agent frontmatter `tools:` allowlists.
+
 ## Verification
 
 - `python3 -m json.tool claudecode/hooks/hooks.json`
@@ -41,8 +46,8 @@
 - Manual hook check for missing `dreamina-video` delivery files returns `decision:block`.
 - Manual hook check with submit/result/delivery manifest exits cleanly.
 - `go test ./server/agent -count=1`
+- `go test ./agent -count=1`
 - `go test ./server/service -run 'TestTaskServiceHandleExecution.*Video|TestCompleteLocalTask_NestedAgentOnlyFails' -count=1`
 - `go test ./...`
 - `go build -o /tmp/anban-creator-server ./server`
 - `go build -o /tmp/anban ./agent`
-

@@ -8,6 +8,9 @@ import (
 
 func TestVideoAgentForbidsNestedAgentForMainWorkflow(t *testing.T) {
 	text := readRepoFile(t, "../../claudecode/agents/video.md")
+	if strings.Contains(frontmatterBlock(t, text), "\ntools:") {
+		t.Fatal("video agent must not define a tools allowlist; omitting tools lets Claude Code inherit MCP tools")
+	}
 	for _, want := range []string{
 		"禁止调用 Claude `Agent` 工具",
 		"必须在当前 video agent 上下文内完成",
