@@ -279,6 +279,75 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	}
 }
 
+func TestRetryTask_AllowsCompletedTask(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      "retry-completed@example.com",
+		Password:   "hashed",
+		InviteCode: "retrycompleted",
+		Tier:       model.TierFree,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.New().String()
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusCompleted,
+		Prompt:    "rerun this completed task",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+
+	app := fiber.New()
+	app.Post("/tasks/:id/retry", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Retry(c)
+	})
+
+	req := httptest.NewRequest("POST", "/tasks/"+taskID+"/retry", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var env struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if env.Data.ID == "" || env.Data.ID == taskID {
+		t.Fatalf("new task id = %q, want fresh id", env.Data.ID)
+	}
+	if env.Data.Status != model.TaskStatusPending {
+		t.Fatalf("new task status = %q, want pending", env.Data.Status)
+	}
+}
+
 func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)

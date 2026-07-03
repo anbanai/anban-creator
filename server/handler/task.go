@@ -399,9 +399,8 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 }
 
 // Retry handles POST /api/v1/tasks/:id/retry.
-// It creates a fresh task from a failed task's configuration and enqueues it.
-// Only failed tasks can be retried; the original stays failed (already refunded)
-// and the new task is billed as a new run.
+// It creates a fresh task from a terminal task's configuration and enqueues it.
+// The original task is preserved and the new task is billed as a new run.
 func (h *TaskHandler) Retry(c fiber.Ctx) error {
 	id, err := validateUUIDParam(c, "id")
 	if err != nil {
@@ -422,10 +421,10 @@ func (h *TaskHandler) Retry(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	// Only failed or cancelled tasks can be retried (both are terminal + already
-	// refunded); completed/pending/running cannot.
-	if task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
-		return Error(c, fiber.StatusBadRequest, "只有失败或已取消的任务可以重试")
+	// Only terminal tasks can be manually rerun. Active tasks must finish or be
+	// cancelled first to avoid duplicate in-flight work and surprise billing.
+	if task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
+		return Error(c, fiber.StatusBadRequest, "只有已完成、失败或已取消的任务可以重新执行")
 	}
 
 	// Re-validate the image model against the caller's current tier (tier may

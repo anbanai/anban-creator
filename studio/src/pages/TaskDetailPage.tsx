@@ -382,7 +382,7 @@ export default function TaskDetailPage() {
   }
 
   const canCancel = task.status === 'pending' || task.status === 'running'
-  const canRetry = task.status === 'failed' || task.status === 'cancelled'
+  const canRerun = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
   const currentTask = task
   const snapshot = task.project_snapshot
   const showProjectParameters = Boolean(snapshot?.platform || project)
@@ -394,7 +394,7 @@ export default function TaskDetailPage() {
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
 
-  // Retry re-runs this task as a fresh billed task. The server clones the full
+  // Rerun this task as a fresh billed task. The server clones the full
   // configuration (three-dimensional style, author/writer, ecommerce package,
   // image model, watermark, goal mode…) so nothing is lost — unlike the previous
   // client-side create() which only forwarded type/prompt/project/ratio.
@@ -409,9 +409,9 @@ export default function TaskDetailPage() {
         const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
         const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
         if (status === 402 || code === 40200) {
-          toast.error('积分不足，无法重试')
+          toast.error('积分不足，无法重新执行')
         } else {
-          toast.error(getApiErrorMessage(err, '重试失败，请稍后再试'))
+          toast.error(getApiErrorMessage(err, '重新执行失败，请稍后再试'))
         }
       }
     })
@@ -530,7 +530,7 @@ export default function TaskDetailPage() {
               删除
             </Button>
           )}
-          {canRetry && (
+          {canRerun && (
             <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
               <RefreshCw className="h-4 w-4" />
               重新执行
@@ -797,34 +797,34 @@ export default function TaskDetailPage() {
         <Card>
           <CardContent>
             {task.status === 'failed' ? (
-            <div className="space-y-3">
-              <p className="text-sm text-red-400">任务失败</p>
-              {task.error && (
-                <p className="mt-2 bg-red-900/20 border border-red-900/30 rounded-lg px-3 py-2 text-sm text-red-300">
-                  {task.error}
-                </p>
-              )}
-              <div className="flex flex-wrap gap-2">
+              <div className="space-y-3">
+                <p className="text-sm text-red-400">任务失败</p>
+                {task.error && (
+                  <p className="mt-2 bg-red-900/20 border border-red-900/30 rounded-lg px-3 py-2 text-sm text-red-300">
+                    {task.error}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+                    <RefreshCw className="h-4 w-4" />
+                    重新执行
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')}>
+                    返回任务列表
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => navigate('/projects')}>
+                    检查项目配置
+                  </Button>
+                </div>
+              </div>
+            ) : task.status === 'cancelled' ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm text-muted-foreground">任务已取消</p>
                 <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
                   <RefreshCw className="h-4 w-4" />
                   重新执行
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')}>
-                  返回任务列表
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigate('/projects')}>
-                  检查项目配置
-                </Button>
               </div>
-            </div>
-            ) : task.status === 'cancelled' ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm text-muted-foreground">任务已取消</p>
-              <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
-                <RefreshCw className="h-4 w-4" />
-                再试一次
-              </Button>
-            </div>
             ) : (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">

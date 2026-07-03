@@ -461,35 +461,6 @@ func generateTaskID() string {
 	return uuid.New().String()
 }
 
-// retryBackoffs defines exponential backoff delays for retries.
-var retryBackoffs = []time.Duration{
-	1 * time.Minute,
-	5 * time.Minute,
-	15 * time.Minute,
-}
-
-// rateLimitBackoffs defines longer backoff delays for rate limit (429) retries.
-var rateLimitBackoffs = []time.Duration{
-	15 * time.Minute,
-	30 * time.Minute,
-	45 * time.Minute,
-	60 * time.Minute,
-	60 * time.Minute,
-}
-
-// isRateLimitError checks if the error is caused by an upstream rate limit (429).
-func isRateLimitError(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	return strings.Contains(s, "API Error: 429") ||
-		strings.Contains(s, "rate limit") ||
-		strings.Contains(s, "rate_limit") ||
-		strings.Contains(s, "Too Many Requests") ||
-		strings.Contains(s, "\"1302\"")
-}
-
 // isPermanentAuthError checks for upstream authentication/authorization errors.
 // These are configuration problems (bad token, forbidden model, wrong endpoint)
 // and retrying the same task will not make them succeed.
@@ -510,230 +481,42 @@ func isPermanentAuthError(err error) bool {
 		strings.Contains(s, "forbidden")
 }
 
-// HandleExecutionFailure handles task execution failures with retry logic.
-// If the task has not exceeded max retries, it schedules a delayed retry.
-// Rate limit (429) errors use a separate counter with longer backoff.
-// Otherwise, it marks the task as permanently failed.
-//
-// The DB status is always updated BEFORE enqueueing. This ensures that if the
-// enqueue fails, the task stays in "pending" and will be picked up by the plan
-// checker — never stuck in "running".
+// HandleExecutionFailure marks agent execution failures as terminal. Recovery
+// is intentionally manual: users can choose "重新执行" to clone the task into a
+// fresh billed run, while the original task remains a clear failed artifact.
 func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Task, execErr error) error {
 	taskID := task.ID
 
-	// Set defaults for retry configuration.
-	if task.MaxRetries <= 0 {
-		task.MaxRetries = model.DefaultRetries
-	}
-
-	rateLimited := isRateLimitError(execErr)
-
-	if rateLimited {
-		// Rate limit errors use a separate retry counter with longer backoff.
-		if task.RateLimitRetryCount >= model.MaxRateLimitRetries {
-			s.logger.Error().
-				Err(execErr).
-				Str("task_id", taskID).
-				Int("rate_limit_retry_count", task.RateLimitRetryCount).
-				Int("max_rate_limit_retries", model.MaxRateLimitRetries).
-				Msg("task permanently failed after max rate limit retries")
-			if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
-				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
-			}
-			if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
-				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
-			}
-
-			// Release concurrency slot.
-			if task.ProjectID != "" && s.pubsub != nil {
-				s.pubsub.ReleaseSlot(ctx, task.ProjectID)
-			}
-
-			s.refundTaskByMode(ctx, task, "rate_limit_exhausted")
-			s.notifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
-
-			// A slot opened on this project — dispatch pending tasks.
-			if task.ProjectID != "" {
-				if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
-					s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
-				}
-			}
-
-			return execErr
-		}
-
-		newCount := task.RateLimitRetryCount + 1
-
-		idx := newCount - 1
-		if idx >= len(rateLimitBackoffs) {
-			idx = len(rateLimitBackoffs) - 1
-		}
-		delay := rateLimitBackoffs[idx]
-
-		s.logger.Info().
-			Err(execErr).
-			Str("task_id", taskID).
-			Int("rate_limit_retry_count", newCount).
-			Dur("backoff", delay).
-			Msg("rate limit detected, scheduling task retry with extended backoff")
-
-		// Set status to pending first, then enqueue. If enqueue fails,
-		// the task stays pending and will be picked up by the plan checker.
-		// Release the concurrency slot since the task is no longer running.
-		if task.ProjectID != "" && s.pubsub != nil {
-			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
-		}
-		if err := s.repo.Tasks().IncrementRetryAndSetPending(ctx, taskID, "rate_limit_retry_count"); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task rate limit retry count")
-		}
-
-		if s.enqueuer != nil {
-			payload, _ := json.Marshal(map[string]string{
-				"task_id": task.ID,
-				"user_id": task.UserID,
-			})
-			if err := s.enqueuer.EnqueueIn(TypeContentGenerate, payload, delay); err != nil {
-				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue rate limit retry, marking task as failed")
-				if updateErr := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "retry enqueue failed: "+err.Error()); updateErr != nil {
-					s.logger.Error().Err(updateErr).Str("task_id", taskID).Msg("failed to mark task as failed after enqueue failure")
-				}
-				// Terminal failure: refund the charge and notify the owner, mirroring
-				// the other terminal-failure branches. The concurrency slot was
-				// already released above; dispatch pending so the freed slot is used.
-				if cerr := s.repo.Tasks().SetCompletedAt(ctx, taskID); cerr != nil {
-					s.logger.Error().Err(cerr).Str("task_id", taskID).Msg("failed to set completed_at on failure")
-				}
-				s.refundTaskByMode(ctx, task, "retry_enqueue_failed")
-				s.notifyTerminal(ctx, task, model.TaskStatusFailed, "retry enqueue failed: "+err.Error())
-				if task.ProjectID != "" {
-					if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
-						s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after enqueue failure")
-					}
-				}
-				return err
-			}
-		} else {
-			s.logger.Warn().Str("task_id", taskID).Msg("no enqueuer available, task set to pending but will not be retried automatically")
-		}
-
-		return nil
-	}
-
+	reason := "execution_failed"
 	if isPermanentAuthError(execErr) {
-		s.logger.Error().
-			Err(execErr).
-			Str("task_id", taskID).
-			Msg("task permanently failed due to agent authentication/authorization error")
-		if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
-		}
-		if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
-		}
-		if task.ProjectID != "" && s.pubsub != nil {
-			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
-		}
-		s.refundTaskByMode(ctx, task, "auth_error")
-		s.notifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
-		if task.ProjectID != "" {
-			if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
-				s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
-			}
-		}
-		return execErr
+		reason = "auth_error"
 	}
 
-	// Non-rate-limit errors use the standard retry logic.
-	// Check if retry is possible.
-	if task.RetryCount >= task.MaxRetries {
-		s.logger.Error().
-			Err(execErr).
-			Str("task_id", taskID).
-			Int("retry_count", task.RetryCount).
-			Int("max_retries", task.MaxRetries).
-			Msg("task permanently failed after max retries")
-		if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
-		}
-		if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
-		}
-
-		// Release concurrency slot.
-		if task.ProjectID != "" && s.pubsub != nil {
-			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
-		}
-
-		// Refund credits for failed task (skipped for goal-mode tasks).
-		s.refundTaskByMode(ctx, task, "execution_failed")
-		s.notifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
-
-		// A slot opened on this project — dispatch pending tasks.
-		if task.ProjectID != "" {
-			if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
-				s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
-			}
-		}
-
-		return execErr
-	}
-
-	// Calculate backoff delay based on next retry count.
-	newCount := task.RetryCount + 1
-	idx := newCount - 1
-	if idx >= len(retryBackoffs) {
-		idx = len(retryBackoffs) - 1
-	}
-	delay := retryBackoffs[idx]
-
-	s.logger.Info().
+	s.logger.Error().
 		Err(execErr).
 		Str("task_id", taskID).
-		Int("retry_count", newCount).
-		Dur("backoff", delay).
-		Msg("scheduling task retry")
+		Msg("task failed; waiting for manual rerun")
+	if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
+	}
+	if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at on failure")
+	}
 
-	// Set status to pending first, then enqueue. If enqueue fails,
-	// the task stays pending and will be picked up by the plan checker.
-	// Release the concurrency slot since the task is no longer running.
 	if task.ProjectID != "" && s.pubsub != nil {
 		s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 	}
-	if err := s.repo.Tasks().IncrementRetryAndSetPending(ctx, taskID, "retry_count"); err != nil {
-		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task retry count")
-	}
 
-	// Schedule retry via enqueuer with delay.
-	if s.enqueuer != nil {
-		payload, _ := json.Marshal(map[string]string{
-			"task_id": task.ID,
-			"user_id": task.UserID,
-		})
-		if err := s.enqueuer.EnqueueIn(TypeContentGenerate, payload, delay); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to enqueue retry, marking task as failed")
-			if updateErr := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, "retry enqueue failed: "+err.Error()); updateErr != nil {
-				s.logger.Error().Err(updateErr).Str("task_id", taskID).Msg("failed to mark task as failed after enqueue failure")
-			}
-			// Terminal failure: refund the charge and notify the owner, mirroring
-			// the other terminal-failure branches. The concurrency slot was
-			// already released above; dispatch pending so the freed slot is used.
-			if cerr := s.repo.Tasks().SetCompletedAt(ctx, taskID); cerr != nil {
-				s.logger.Error().Err(cerr).Str("task_id", taskID).Msg("failed to set completed_at on failure")
-			}
-			s.refundTaskByMode(ctx, task, "retry_enqueue_failed")
-			s.notifyTerminal(ctx, task, model.TaskStatusFailed, "retry enqueue failed: "+err.Error())
-			if task.ProjectID != "" {
-				if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
-					s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after enqueue failure")
-				}
-			}
-			return err
+	s.refundTaskByMode(ctx, task, reason)
+	s.notifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
+
+	if task.ProjectID != "" {
+		if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
+			s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
 		}
-	} else {
-		s.logger.Warn().Str("task_id", taskID).Msg("no enqueuer available, task set to pending but will not be retried automatically")
 	}
 
-	return nil
+	return execErr
 }
 
 // CleanupExpiredWorkspaces cleans up workspace directories for completed/failed

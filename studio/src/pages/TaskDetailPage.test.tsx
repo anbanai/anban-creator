@@ -31,6 +31,7 @@ vi.mock('@/lib/api', async () => {
       tasks: {
         ...actual.api.tasks,
         get: vi.fn(),
+        retry: vi.fn(),
         files: vi.fn().mockResolvedValue([]),
       },
       projects: {
@@ -69,6 +70,7 @@ describe('TaskDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api.tasks.files).mockResolvedValue([])
+    vi.mocked(api.tasks.retry).mockResolvedValue(taskWith({ id: 'task-rerun', status: 'pending' }))
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
   })
@@ -106,6 +108,67 @@ describe('TaskDetailPage', () => {
     await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument())
     expect(screen.queryByText('进度')).not.toBeInTheDocument()
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
+  })
+
+  it('lets completed tasks be rerun as a fresh task', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'completed',
+      progress: 100,
+      result: { files: null, output: '' },
+    }))
+
+    render(<TaskDetailPage />)
+
+    const rerunButton = await screen.findByRole('button', { name: /重新执行/ })
+    fireEvent.click(rerunButton)
+
+    await waitFor(() => {
+      expect(api.tasks.retry).toHaveBeenCalledWith('task-1')
+      expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-rerun')
+    })
+  })
+
+  it('does not show rerun for running tasks', async () => {
+    mockTask(taskWith({
+      status: 'running',
+      progress: 42,
+      latest_progress: { stage: 'writing', title: '正在写作正文', percent: 42 },
+      result: { files: null, output: '' },
+      completed_at: '',
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('正在写作正文')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
+  })
+
+  it('does not show rerun for pending tasks', async () => {
+    mockTask(taskWith({
+      status: 'pending',
+      progress: 0,
+      latest_progress: undefined,
+      result: { files: null, output: '' },
+      completed_at: '',
+    }))
+
+    render(<TaskDetailPage />)
+
+    await waitFor(() => expect(screen.getByText('任务等待执行中...')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
+  })
+
+  it('uses consistent rerun wording for cancelled tasks', async () => {
+    mockTask(taskWith({
+      status: 'cancelled',
+      result: { files: null, output: '' },
+    }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findAllByRole('button', { name: /重新执行/ })).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /再试一次/ })).not.toBeInTheDocument()
   })
 
   it('shows project parameters without the low-value reference image preview', async () => {

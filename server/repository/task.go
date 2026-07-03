@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -206,28 +205,6 @@ func (r *taskRepository) SetStartedAt(ctx context.Context, id string) error {
 func (r *taskRepository) SetCompletedAt(ctx context.Context, id string) error {
 	now := time.Now()
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("completed_at", now).Error
-}
-
-// validRetryFields restricts which columns IncrementRetryAndSetPending accepts.
-var validRetryFields = map[string]bool{
-	"retry_count":            true,
-	"rate_limit_retry_count": true,
-}
-
-// IncrementRetryAndSetPending atomically increments the given retry counter field
-// and sets status to "pending" in a single SQL UPDATE.
-// The field parameter must be "retry_count" or "rate_limit_retry_count".
-func (r *taskRepository) IncrementRetryAndSetPending(ctx context.Context, taskID string, field string) error {
-	if !validRetryFields[field] {
-		return fmt.Errorf("invalid retry field: %s", field)
-	}
-	return r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("id = ?", taskID).
-		Updates(map[string]interface{}{
-			field:    gorm.Expr(field + " + 1"),
-			"status": model.TaskStatusPending,
-		}).Error
 }
 
 func (r *taskRepository) UpdateHeartbeat(ctx context.Context, id string) error {

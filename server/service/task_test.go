@@ -1314,6 +1314,104 @@ func TestTaskService_HandleExecutionFailure_PermanentAuthErrorDoesNotRetry(t *te
 	}
 }
 
+func TestTaskService_HandleExecutionFailure_DoesNotAutoRetry(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	enqueuer := &mockEnqueuer{}
+	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, "", nil, nil)
+
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		ProjectID:  projectID,
+		Type:       model.PlatformArticle,
+		Status:     model.TaskStatusRunning,
+		Prompt:     "manual recovery only",
+		MaxRetries: model.DefaultRetries,
+		RetryCount: 0,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	execErr := fmt.Errorf("agent execution failed: transient model error")
+	if err := svc.HandleExecutionFailure(ctx, task, execErr); err == nil {
+		t.Fatal("expected execution error to be returned")
+	}
+
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want %q", found.Status, model.TaskStatusFailed)
+	}
+	if found.RetryCount != 0 {
+		t.Fatalf("retry_count = %d, want 0", found.RetryCount)
+	}
+	if found.CompletedAt == nil {
+		t.Fatal("completed_at was not set")
+	}
+	if !strings.Contains(found.ErrorMessage, "transient model error") {
+		t.Fatalf("error_message = %q, want transient model error", found.ErrorMessage)
+	}
+	if len(enqueuer.enqueued) != 0 {
+		t.Fatalf("execution failure should not enqueue retries, got %d", len(enqueuer.enqueued))
+	}
+}
+
+func TestTaskService_RetryClonesCompletedTask(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	src := &model.Task{
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		ProjectID:  projectID,
+		Type:       model.PlatformArticle,
+		Status:     model.TaskStatusCompleted,
+		Prompt:     "finished topic",
+		ImageRatio: "16:9",
+		Goal:       "keep the same goal",
+		GoalMode:   true,
+	}
+	if err := repo.Tasks().Create(ctx, src); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+
+	clone, err := svc.Retry(ctx, src.ID)
+	if err != nil {
+		t.Fatalf("Retry completed task: %v", err)
+	}
+	if clone.ID == src.ID {
+		t.Fatal("retry reused the original task id")
+	}
+	if clone.Status != model.TaskStatusPending {
+		t.Fatalf("clone status = %q, want %q", clone.Status, model.TaskStatusPending)
+	}
+	if clone.Prompt != src.Prompt || clone.ImageRatio != src.ImageRatio || clone.Goal != src.Goal || clone.GoalMode != src.GoalMode {
+		t.Fatalf("clone config = prompt %q ratio %q goal %q mode %v, want source config", clone.Prompt, clone.ImageRatio, clone.Goal, clone.GoalMode)
+	}
+	foundSrc, err := repo.Tasks().FindByID(ctx, src.ID)
+	if err != nil {
+		t.Fatalf("find source task: %v", err)
+	}
+	if foundSrc.Status != model.TaskStatusCompleted {
+		t.Fatalf("source status = %q, want completed", foundSrc.Status)
+	}
+}
+
 func TestBuildNoOutputFilesErrorIncludesLastToolError(t *testing.T) {
 	result := &agent.ExecutionResult{
 		Model:             "claude-test",
