@@ -17,6 +17,8 @@ The `app/` directory is a **library** (no `main.go`) providing content creation 
 
 Four git submodules: `claudecode/`, `openclaw/`, `codex/` (plugin distributions) and `wcflink/` (the `lich0821/wcfLink` sidecar used as the transport behind the iLink WeChat assistant channel). Run `git submodule update --init --recursive` before building Docker images.
 
+MCP server config uses the `creator` server key. Business-facing agent, skill, and setup docs must reference bare MCP tool names such as `generate_image`; host-specific tool-name prefixes are a runtime concern and belong only in system-level config or tests.
+
 - **Language**: Go 1.26.0 (Agent + Server + app library), TypeScript (Studio + miniapp), Rust (desktop Tauri core)
 - **Logging**: Zerolog (all Go components — app library, server, agent); never mix with zap
 - **WeChat SDK**: silenceper/wechat/v2
@@ -273,7 +275,7 @@ The public naming model is **brand + capability**:
 
 - Claude Code install uses `plugin@marketplace`: install `anban@anbanai`, where `anban` is the plugin ID and `anbanai` is the marketplace/publisher.
 - The MCP server key is `creator`, because Claude Code treats the server name in `.mcp.json` as the label for that server's tools and for commands such as MCP removal/status; it is not the plugin ID.
-- Plugin-provided MCP tools use both names, so the expected tool prefix is `mcp__plugin_anban_creator__...`.
+- Runtime hosts may decorate MCP tools internally; do not put host-specific tool-name prefixes in agent, skill, or user-facing setup docs.
 - Agent namespaces use the plugin/brand ID, for example `anban:<agent>`.
 - Do not use compact aliases or alternate install names based on `creator`, the unhyphenated product name, or the full product slug.
 

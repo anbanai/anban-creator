@@ -80,3 +80,55 @@ func newTestCreditService(repo repository.Repository) *CreditService {
 		},
 	}, &logger)
 }
+
+func TestDeductForOperationStoresTaskIDAndLongOperationID(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 1000)
+	taskID := uuid.New().String()
+	operationID := "video_gen:" + taskID
+	svc := newTestCreditService(repo)
+
+	if _, err := svc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, 120, operationID, taskID); err != nil {
+		t.Fatalf("deduct operation: %v", err)
+	}
+
+	tx, err := repo.Credits().FindDeductionByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatalf("find deduction by operation id: %v", err)
+	}
+	if tx.TaskID == nil || *tx.TaskID != taskID {
+		t.Fatalf("transaction task_id = %v, want %q", tx.TaskID, taskID)
+	}
+}
+
+func TestRefundForOperationByIDKeepsTaskID(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 1000)
+	taskID := uuid.New().String()
+	operationID := "video_gen:" + taskID
+	svc := newTestCreditService(repo)
+
+	if _, err := svc.DeductForOperation(ctx, userID, model.CreditTypeVideoGen, 120, operationID, taskID); err != nil {
+		t.Fatalf("deduct operation: %v", err)
+	}
+	if err := svc.RefundForOperationByID(ctx, operationID, "视频生成提交失败退还"); err != nil {
+		t.Fatalf("refund operation: %v", err)
+	}
+
+	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	if err != nil {
+		t.Fatalf("find task transactions: %v", err)
+	}
+	if len(txs) != 2 {
+		t.Fatalf("task transactions len = %d, want deduction and refund", len(txs))
+	}
+	refund := txs[1]
+	if refund.Amount != 120 {
+		t.Fatalf("refund amount = %d, want 120", refund.Amount)
+	}
+	if refund.TaskID == nil || *refund.TaskID != taskID {
+		t.Fatalf("refund task_id = %v, want %q", refund.TaskID, taskID)
+	}
+}

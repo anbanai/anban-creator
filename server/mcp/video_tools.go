@@ -503,15 +503,31 @@ func videoModelCatalog() service.VideoModelCatalog {
 }
 
 func maybeDeductVideo(ctx context.Context, userID, taskID string, credits int) error {
-	if credits <= 0 || billSvc == nil || billSvc.creditSvc == nil || isManagedCall(ctx) {
+	if credits <= 0 {
+		logBillingSkip(userID, model.CreditTypeVideoGen, "unpriced")
 		return nil
+	}
+	if billSvc == nil || billSvc.creditSvc == nil {
+		logBillingSkip(userID, model.CreditTypeVideoGen, "no_credit_service")
+		return nil
+	}
+	if userID == "" || isAdminCall(ctx) {
+		logBillingSkip(userID, model.CreditTypeVideoGen, "admin_static_key")
+		return nil
+	}
+	if userID == "system" {
+		logBillingSkip(userID, model.CreditTypeVideoGen, "system_user")
+		return nil
+	}
+	if err := validateBillingTask(ctx, userID, taskID); err != nil {
+		return err
 	}
 	if taskID != "" && svcs != nil && svcs.TaskSvc != nil {
 		if task, err := svcs.TaskSvc.GetByID(ctx, taskID); err == nil && task.Type == model.PlatformVideo && task.VideoCreditsCharged > 0 {
 			return nil
 		}
 	}
-	_, err := billSvc.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeVideoGen, credits, videoOperationID(taskID))
+	_, err := billSvc.creditSvc.DeductForOperation(ctx, userID, model.CreditTypeVideoGen, credits, videoOperationID(taskID), taskID)
 	return err
 }
 

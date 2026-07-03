@@ -26,7 +26,7 @@ import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel } from '@/lib/labels'
+import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 
 export default function TaskDetailPage() {
@@ -122,6 +122,19 @@ export default function TaskDetailPage() {
   const progressDescription = liveProgress?.description ?? persistedProgress?.description ?? null
   const progressStage = liveProgress?.stage ?? persistedProgress?.stage ?? null
   const isRunning = task?.status === 'running'
+  const creditTransactions = task?.credit_transactions ?? []
+  const creditSummary = task?.credits_summary
+  const taskConsumedCredits = creditSummary?.task_consumed ?? task?.credits_charged ?? 0
+  const operationConsumedCredits = creditSummary?.operation_consumed ?? 0
+  const refundedCredits = creditSummary?.refunded ?? 0
+  const netConsumedCredits = creditSummary?.net_consumed ?? task?.credits_charged ?? 0
+  const showCreditDetails = Boolean(
+    task && (
+      typeof task.credits_charged === 'number' ||
+      creditSummary ||
+      creditTransactions.length > 0
+    ),
+  )
 
   const cancelMutation = useMutation({
     mutationFn: () => api.tasks.cancel(id!),
@@ -615,15 +628,75 @@ export default function TaskDetailPage() {
             <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
           </CardContent>
         </Card>
-        {typeof task.credits_charged === 'number' && (
+        {showCreditDetails && (
           <Card size="sm" className="bg-card/70">
             <CardContent>
-              <p className="text-xs text-muted-foreground">扣除积分</p>
-              <p className="mt-1 text-sm text-foreground">{task.credits_charged.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">消耗积分</p>
+              <p className="mt-1 text-sm text-foreground">{netConsumedCredits.toLocaleString()}</p>
             </CardContent>
           </Card>
         )}
       </div>
+
+      {showCreditDetails && (
+        <Card size="sm" className="border-border/70">
+          <div className="border-b border-border px-4 pb-3">
+            <h2 className="text-sm font-semibold text-foreground">积分明细</h2>
+          </div>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-muted-foreground">任务消耗</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{taskConsumedCredits.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">操作消耗</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{operationConsumedCredits.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">退还积分</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{refundedCredits.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">净消耗</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{netConsumedCredits.toLocaleString()}</p>
+              </div>
+            </div>
+            {creditTransactions.length > 0 && (
+              <div className="overflow-x-auto border-t border-border pt-3">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground">
+                      <th className="py-2 pr-3 font-medium">类型</th>
+                      <th className="py-2 pr-3 font-medium">数额</th>
+                      <th className="py-2 pr-3 font-medium">余额</th>
+                      <th className="py-2 pr-3 font-medium">描述</th>
+                      <th className="py-2 font-medium">时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {creditTransactions.map((tx) => (
+                      <tr key={tx.id} className="border-t border-border">
+                        <td className="py-2 pr-3">
+                          <Badge variant={tx.amount < 0 ? 'destructive' : 'secondary'}>
+                            {transactionTypeLabel[tx.type] || tx.type}
+                          </Badge>
+                        </td>
+                        <td className={`py-2 pr-3 font-medium ${tx.amount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                        </td>
+                        <td className="py-2 pr-3 text-muted-foreground">{tx.balance_after.toLocaleString()}</td>
+                        <td className="max-w-[260px] truncate py-2 pr-3 text-muted-foreground">{tx.description}</td>
+                        <td className="whitespace-nowrap py-2 text-xs text-muted-foreground">{formatFullDateTimeCN(tx.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {task.type === 'seednote' && task.published && (
         <SeednoteAnalyticsPanel taskId={task.id} />
@@ -643,22 +716,20 @@ export default function TaskDetailPage() {
             </Badge>
           </div>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">视觉风格</p>
-                <p className="mt-1 rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
-                  {projectParameterVisualStyle}
-                </p>
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">视觉风格</p>
+              <p className="mt-1 rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
+                {projectParameterVisualStyle}
+              </p>
+            </div>
+            <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs text-muted-foreground">图片比例</p>
+                <p className="mt-1 text-sm text-foreground">{projectParameterImageRatio}</p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                <div className="border-l border-border pl-3">
-                  <p className="text-xs text-muted-foreground">图片比例</p>
-                  <p className="mt-1 text-sm text-foreground">{projectParameterImageRatio}</p>
-                </div>
-                <div className="border-l border-border pl-3">
-                  <p className="text-xs text-muted-foreground">图片模型</p>
-                  <p className="mt-1 break-all text-sm text-foreground">{projectParameterImageModel}</p>
-                </div>
+              <div>
+                <p className="text-xs text-muted-foreground">图片模型</p>
+                <p className="mt-1 break-all text-sm text-foreground">{projectParameterImageModel}</p>
               </div>
             </div>
             {task.type === 'article' && snapshot && (
@@ -712,7 +783,7 @@ export default function TaskDetailPage() {
                   <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || task.video_config.estimated_credits || 0).toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">已扣积分</p>
+                  <p className="text-xs text-muted-foreground">已消耗积分</p>
                   <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || 0).toLocaleString()}</p>
                 </div>
               </div>
@@ -829,7 +900,7 @@ export default function TaskDetailPage() {
                 <p className="text-xs text-muted-foreground">费用明细</p>
                 <p className="mt-1 text-foreground">
                   估算 {(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()} ·
-                  已扣 {(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}
+                  已消耗 {(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}
                 </p>
                 {task.video_config?.pricing_breakdown && (
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -1092,7 +1163,7 @@ export default function TaskDetailPage() {
             <AlertDialogTitle>确定取消此任务？</AlertDialogTitle>
             <AlertDialogDescription>
               {task.status === 'pending' ? (
-                <>此任务尚未开始执行，取消后将<strong className="text-foreground">全额退还已扣积分</strong>，不会产生任何费用。{' '}</>
+                <>此任务尚未开始执行，取消后将<strong className="text-foreground">全额退还已消耗积分</strong>，不会产生任何费用。{' '}</>
               ) : (
                 <>
                   任务正在执行中，取消后将立即停止未完成的步骤。

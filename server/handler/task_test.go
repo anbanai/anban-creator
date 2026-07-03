@@ -398,6 +398,26 @@ func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create credit transaction: %v", err)
 	}
+	if err := repo.Credits().CreateTransaction(ctx, &model.CreditTransaction{
+		UserID:       userID,
+		Type:         model.CreditTypeImageGen,
+		Amount:       -80,
+		BalanceAfter: 800,
+		TaskID:       &taskID,
+		Description:  "操作扣费 (image_gen) -80",
+	}); err != nil {
+		t.Fatalf("create operation transaction: %v", err)
+	}
+	if err := repo.Credits().CreateTransaction(ctx, &model.CreditTransaction{
+		UserID:       userID,
+		Type:         model.CreditTypeTaskRefund,
+		Amount:       20,
+		BalanceAfter: 820,
+		TaskID:       &taskID,
+		Description:  "任务取消退还 +20",
+	}); err != nil {
+		t.Fatalf("create refund transaction: %v", err)
+	}
 
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
@@ -422,6 +442,13 @@ func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
 		Data struct {
 			ID             string `json:"id"`
 			CreditsCharged int    `json:"credits_charged"`
+			CreditsSummary struct {
+				TaskConsumed      int `json:"task_consumed"`
+				OperationConsumed int `json:"operation_consumed"`
+				Refunded          int `json:"refunded"`
+				NetConsumed       int `json:"net_consumed"`
+			} `json:"credits_summary"`
+			CreditTransactions []model.CreditTransaction `json:"credit_transactions"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -432,5 +459,14 @@ func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
 	}
 	if body.Data.CreditsCharged != 120 {
 		t.Fatalf("credits_charged = %d, want 120", body.Data.CreditsCharged)
+	}
+	if body.Data.CreditsSummary.TaskConsumed != 120 ||
+		body.Data.CreditsSummary.OperationConsumed != 80 ||
+		body.Data.CreditsSummary.Refunded != 20 ||
+		body.Data.CreditsSummary.NetConsumed != 180 {
+		t.Fatalf("credits_summary = %+v, want task=120 operation=80 refunded=20 net=180", body.Data.CreditsSummary)
+	}
+	if len(body.Data.CreditTransactions) != 3 {
+		t.Fatalf("credit_transactions len = %d, want 3", len(body.Data.CreditTransactions))
 	}
 }

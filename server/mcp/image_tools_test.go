@@ -273,10 +273,13 @@ func TestResolveImageBillingModelUsesTaskSelectedPreset(t *testing.T) {
 		},
 	}
 
-	provider, mdl := resolveImageBillingModel(context.Background(), "user-1", "openai-gpt-image")
+	provider, mdl, source := resolveImageBillingModel(context.Background(), "user-1", "openai-gpt-image")
 
 	if provider != "openai" || mdl != "gpt-image-2" {
 		t.Fatalf("billing model = %s/%s, want openai/gpt-image-2", provider, mdl)
+	}
+	if source != "preset:openai-gpt-image" {
+		t.Fatalf("billing source = %q, want preset:openai-gpt-image", source)
 	}
 }
 

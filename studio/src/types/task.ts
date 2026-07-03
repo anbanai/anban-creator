@@ -1,4 +1,5 @@
 import type { VideoTaskConfig } from './video'
+import type { CreditTransaction } from './credits'
 
 export type TaskType = 'seednote' | 'article' | 'ecommerce' | 'video'
 
@@ -90,6 +91,13 @@ export interface Task {
   // The upfront task credit deduction returned by task detail when a matching
   // credit transaction exists. Older rows or responses may omit it.
   credits_charged?: number | null
+  credits_summary?: {
+    task_consumed: number
+    operation_consumed: number
+    refunded: number
+    net_consumed: number
+  } | null
+  credit_transactions?: CreditTransaction[] | null
   // Where the task runs (mirrors server model.ExecutionTarget*):
   // ''/'cloud' = cloud Asynq/Docker; 'local' = awaiting a desktop local-executor
   // claim; 'local_claimed' = a desktop claimed it and is running it on the user's

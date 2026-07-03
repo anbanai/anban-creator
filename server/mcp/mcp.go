@@ -290,3 +290,11 @@ func isManagedCall(ctx context.Context) bool {
 	}
 	return slices.Contains(info.Scopes, "managed")
 }
+
+func isAdminCall(ctx context.Context) bool {
+	info := auth.TokenInfoFromContext(ctx)
+	if info == nil {
+		return false
+	}
+	return slices.Contains(info.Scopes, "admin")
+}

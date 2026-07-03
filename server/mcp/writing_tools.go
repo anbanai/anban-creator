@@ -167,6 +167,7 @@ func registerWritingTools(server *mcp.Server) {
 				"keywords":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Override keywords (optional, uses project keywords by default)"},
 				"domain":     map[string]any{"type": "string", "description": "Domain or niche focus (optional)"},
 				"count":      map[string]any{"type": "integer", "description": "Number of topics to generate (1-20, default 5)", "minimum": 1, "maximum": 20},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task ID for task-scoped credit tracking"},
 			},
 			"required": []any{"project_id"},
 		},
@@ -182,6 +183,7 @@ func registerWritingTools(server *mcp.Server) {
 				"content":    map[string]any{"type": "string", "description": "Article content to optimize"},
 				"title":      map[string]any{"type": "string", "description": "Original title to optimize"},
 				"keywords":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Current keywords (optional)"},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task ID for task-scoped credit tracking"},
 			},
 			"required": []any{"project_id", "content", "title"},
 		},
@@ -248,7 +250,7 @@ func writeArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	defer stop()
 
 	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeArticleWrite, provider, mdl, 1); err != nil {
+	if err := maybeDeduct(ctx, userID, model.CreditTypeArticleWrite, provider, mdl, 1, taskID); err != nil {
 		return billingError("write article", err), nil
 	}
 
@@ -289,7 +291,7 @@ func convertMarkdownHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	defer stop()
 
 	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeConvert, provider, mdl, 1); err != nil {
+	if err := maybeDeduct(ctx, userID, model.CreditTypeConvert, provider, mdl, 1, taskID); err != nil {
 		return billingError("convert markdown", err), nil
 	}
 
@@ -331,7 +333,7 @@ func renderTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	defer stop()
 
 	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeConvert, provider, mdl, 1); err != nil {
+	if err := maybeDeduct(ctx, userID, model.CreditTypeConvert, provider, mdl, 1, taskID); err != nil {
 		return billingError("render template", err), nil
 	}
 
@@ -407,6 +409,7 @@ func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	}
 
 	domain, _ := args["domain"].(string)
+	taskID, _ := args["task_id"].(string)
 	count := 5
 	if v, ok := args["count"].(float64); ok && int(v) > 0 {
 		count = int(v)
@@ -418,7 +421,7 @@ func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	defer stop()
 
 	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeTopicResearch, provider, mdl, 1); err != nil {
+	if err := maybeDeduct(ctx, userID, model.CreditTypeTopicResearch, provider, mdl, 1, taskID); err != nil {
 		return billingError("research topics", err), nil
 	}
 
@@ -440,6 +443,7 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	projectID, _ := args["project_id"].(string)
 	content, _ := args["content"].(string)
 	title, _ := args["title"].(string)
+	taskID, _ := args["task_id"].(string)
 	if projectID == "" {
 		return errorResult("project_id is required"), nil
 	}
@@ -465,7 +469,7 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	defer stop()
 
 	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeSEO, provider, mdl, 1); err != nil {
+	if err := maybeDeduct(ctx, userID, model.CreditTypeSEO, provider, mdl, 1, taskID); err != nil {
 		return billingError("optimize seo", err), nil
 	}
 
@@ -503,7 +507,7 @@ func generateOutlineHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	defer stop()
 
 	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeOutline, provider, mdl, 1); err != nil {
+	if err := maybeDeduct(ctx, userID, model.CreditTypeOutline, provider, mdl, 1, taskID); err != nil {
 		return billingError("generate outline", err), nil
 	}
 

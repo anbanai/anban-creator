@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
@@ -38,18 +39,42 @@ func SetLogger(log *zerolog.Logger) {
 	mcpLog = log
 }
 
-// maybeDeduct handles model operation billing with three rules:
-// 1. Managed key (task execution) -> skip
-// 2. BYOK (user's own model) -> skip
-// 3. Otherwise -> deduct by model pricing from config
-func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, count int) error {
+// maybeDeduct handles model operation billing with these rules:
+// 1. Missing/system/admin auth -> skip
+// 2. BYOK actually used for this call -> skip
+// 3. Unpriced operation -> skip
+// 4. Otherwise -> deduct by model pricing from config
+func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, count int, taskID ...string) error {
+	task := ""
+	if len(taskID) > 0 {
+		task = taskID[0]
+	}
+	return maybeDeductForResolvedModel(ctx, userID, opType, provider, mdl, count, task, "")
+}
+
+func maybeDeductForResolvedModel(ctx context.Context, userID, opType, provider, mdl string, count int, taskID, modelSource string) error {
 	if billSvc == nil || billSvc.creditSvc == nil {
+		logBillingSkip(userID, opType, "no_credit_service")
 		return nil
 	}
-	if isManagedCall(ctx) {
+	if userID == "" {
+		logBillingSkip(userID, opType, "admin_static_key")
 		return nil
 	}
-	if isByok(ctx, userID, opType) {
+	if userID == "system" {
+		logBillingSkip(userID, opType, "system_user")
+		return nil
+	}
+	if isAdminCall(ctx) {
+		logBillingSkip(userID, opType, "admin_static_key")
+		return nil
+	}
+	if isByok(ctx, userID, opType, provider, mdl, modelSource) {
+		logBillingSkip(userID, opType, "byok")
+		return nil
+	}
+	if billSvc.config == nil {
+		logBillingSkip(userID, opType, "unpriced")
 		return nil
 	}
 
@@ -62,15 +87,49 @@ func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, coun
 		var ok bool
 		cost, ok = billSvc.config.Credits.ModelCost(opType, provider, mdl)
 		if !ok {
+			logBillingSkip(userID, opType, "unpriced")
 			return nil // no pricing configured = free
 		}
 	}
 	if cost == 0 {
+		logBillingSkip(userID, opType, "unpriced")
 		return nil
 	}
 
-	_, err := billSvc.creditSvc.DeductForOperation(ctx, userID, opType, cost*count)
+	opArgs := []string{""}
+	if taskID != "" {
+		if err := validateBillingTask(ctx, userID, taskID); err != nil {
+			return err
+		}
+		opArgs = append(opArgs, taskID)
+	}
+	_, err := billSvc.creditSvc.DeductForOperation(ctx, userID, opType, cost*count, opArgs...)
 	return err
+}
+
+func validateBillingTask(ctx context.Context, userID, taskID string) error {
+	if svcs == nil || svcs.TaskSvc == nil || taskID == "" {
+		return nil
+	}
+	task, err := svcs.TaskSvc.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("validate billing task: %w", err)
+	}
+	if task.UserID != userID {
+		return fmt.Errorf("validate billing task: task does not belong to user")
+	}
+	return nil
+}
+
+func logBillingSkip(userID, opType, reason string) {
+	if mcpLog == nil {
+		return
+	}
+	mcpLog.Debug().
+		Str("user_id", userID).
+		Str("op_type", opType).
+		Str("reason", reason).
+		Msg("MCP billing skipped")
 }
 
 func videoGenCredits() int {
@@ -94,33 +153,51 @@ func imageGenCredits(provider, mdl string) int {
 			return d.Credits
 		}
 	}
+	if cost, ok := billSvc.config.Credits.ModelCost(model.CreditTypeImageGen, provider, mdl); ok {
+		return cost
+	}
 	return 0
 }
 
 // isByok checks if the user has their own model configured (BYOK).
-func isByok(ctx context.Context, userID, opType string) bool {
+func isByok(ctx context.Context, userID, opType, provider, mdl, modelSource string) bool {
 	if billSvc.modelConfigSvc == nil {
 		return false
 	}
 	switch opType {
 	case model.CreditTypeImageGen:
-		return billSvc.modelConfigSvc.HasCompleteImageOverride(ctx, userID)
+		if modelSource != "" {
+			return modelSource == "user_custom"
+		}
+		cfg := billSvc.modelConfigSvc.GetEffectiveImageConfig(ctx, userID)
+		if cfg == nil {
+			return false
+		}
+		if cfg.Cover != nil && cfg.Cover.Provider == provider && cfg.Cover.Model == mdl {
+			return true
+		}
+		return cfg.Content != nil && cfg.Content.Provider == provider && cfg.Content.Model == mdl
 	case model.CreditTypeVideoGen:
 		return false
 	case model.CreditTypeArticleWrite, model.CreditTypeConvert,
 		model.CreditTypeTopicResearch,
 		model.CreditTypeSEO, model.CreditTypeOutline:
 		// GetEffectiveWritingConfig already checks all required fields (base_url + api_key + model).
-		_, _, _, ok := billSvc.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID)
-		return ok
+		_, _, configuredModel, ok := billSvc.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID)
+		return ok && configuredModel == mdl
 	}
 	return false
 }
 
 // resolveImageModel returns the effective image provider/model for a user.
 func resolveImageModel(ctx context.Context, userID string) (provider, mdl string) {
+	provider, mdl, _ = resolveImageModelWithSource(ctx, userID)
+	return provider, mdl
+}
+
+func resolveImageModelWithSource(ctx context.Context, userID string) (provider, mdl, source string) {
 	if billSvc == nil || billSvc.config == nil {
-		return "", ""
+		return "", "", ""
 	}
 	if billSvc.modelConfigSvc != nil {
 		if cfg := billSvc.modelConfigSvc.GetEffectiveImageConfig(ctx, userID); cfg != nil {
@@ -132,40 +209,40 @@ func resolveImageModel(ctx context.Context, userID string) (provider, mdl string
 					Str("source", "user_override").
 					Msg("MCP tool using user custom image model")
 			}
-			return cfg.Cover.Provider, cfg.Cover.Model
+			return cfg.Cover.Provider, cfg.Cover.Model, "user_custom"
 		}
 	}
 	if billSvc.config.ImageAPI.Cover != nil {
-		return billSvc.config.ImageAPI.Cover.Provider, billSvc.config.ImageAPI.Cover.Model
+		return billSvc.config.ImageAPI.Cover.Provider, billSvc.config.ImageAPI.Cover.Model, "system_default"
 	}
-	return "", ""
+	return "", "", ""
 }
 
 // resolveImageBillingModel mirrors generate_image's provider selection for
 // billing/logging. A task/argument image_model_key must win over the server
 // default; otherwise a user choosing GPT Image can be billed/logged as the
 // default Volcengine model while generation uses OpenAI.
-func resolveImageBillingModel(ctx context.Context, userID, imageModelKey string) (provider, mdl string) {
+func resolveImageBillingModel(ctx context.Context, userID, imageModelKey string) (provider, mdl, source string) {
 	if imageModelKey != "" && billSvc != nil {
 		if billSvc.modelConfigSvc != nil {
-			if cfg, _ := billSvc.modelConfigSvc.ResolveImageConfigForKey(ctx, userID, imageModelKey); cfg != nil {
+			if cfg, src := billSvc.modelConfigSvc.ResolveImageConfigForKey(ctx, userID, imageModelKey); cfg != nil {
 				if cfg.Cover != nil && cfg.Cover.Provider != "" {
-					return cfg.Cover.Provider, cfg.Cover.Model
+					return cfg.Cover.Provider, cfg.Cover.Model, src
 				}
 				if cfg.Content != nil && cfg.Content.Provider != "" {
-					return cfg.Content.Provider, cfg.Content.Model
+					return cfg.Content.Provider, cfg.Content.Model, src
 				}
 			}
 		}
 		if billSvc.config != nil {
 			for _, p := range billSvc.config.ImagePresets {
 				if p.Key == imageModelKey {
-					return p.Provider, p.Model
+					return p.Provider, p.Model, "preset:" + p.Key
 				}
 			}
 		}
 	}
-	return resolveImageModel(ctx, userID)
+	return resolveImageModelWithSource(ctx, userID)
 }
 
 // resolveEcommerceImageProvider returns the provider/model the agent's

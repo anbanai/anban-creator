@@ -198,6 +198,7 @@ export const transactionTypeLabel: Record<string, string> = {
   outline: '大纲生成',
   viral_analysis: '爆文拆解',
   video_gen: '视频生成',
+  poster_generation: '海报生成',
 }
 
 export const operationLabel: Record<string, string> = {
@@ -210,6 +211,7 @@ export const operationLabel: Record<string, string> = {
   outline: '大纲生成',
   viral_analysis: '爆文拆解',
   video_gen: '视频生成',
+  poster_generation: '海报生成',
 }
 
 export const taskTypeLabelCN: Record<string, string> = {

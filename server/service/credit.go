@@ -386,7 +386,8 @@ func (s *CreditService) ModelCosts() map[string]map[string]int {
 
 // DeductForOperation deducts credits for a single MCP tool operation.
 // The amount parameter is the total credits to deduct (already calculated by the caller).
-// An optional operationID can be provided for database-level idempotency of refunds.
+// Optional args are operationID, then taskID. operationID gives refund idempotency;
+// taskID lets task detail pages show operation-level credit consumption.
 func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType string, amount int, operationID ...string) (int, error) {
 	if amount <= 0 {
 		return 0, ErrInvalidAmount
@@ -415,6 +416,10 @@ func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType s
 		if len(operationID) > 0 && operationID[0] != "" {
 			opIDCopy := operationID[0]
 			tx.OperationID = &opIDCopy
+		}
+		if len(operationID) > 1 && operationID[1] != "" {
+			taskIDCopy := operationID[1]
+			tx.TaskID = &taskIDCopy
 		}
 		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 			return fmt.Errorf("create deduction transaction: %w", err)
@@ -514,6 +519,10 @@ func (s *CreditService) RefundForOperationByID(ctx context.Context, operationID 
 			BalanceAfter: newBalance,
 			OperationID:  &opIDCopy,
 			Description:  description,
+		}
+		if deduction.TaskID != nil && *deduction.TaskID != "" {
+			taskIDCopy := *deduction.TaskID
+			tx.TaskID = &taskIDCopy
 		}
 		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 			return fmt.Errorf("create refund transaction: %w", err)

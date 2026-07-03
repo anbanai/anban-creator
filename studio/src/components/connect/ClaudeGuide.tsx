@@ -52,7 +52,7 @@ export default function ClaudeGuide() {
         oneLinerHint="AI 会自动添加 marketplace 源并完成插件安装。"
         advancedCli={`claude plugin marketplace add anbanai/anban-creator-claudecode
 claude plugin install --scope user anban@anbanai`}
-        advancedHint="`anban@anbanai` 表示插件 ID `anban` 来自发布方 `anbanai`；MCP server key 固定为 `creator`，工具名前缀为 `mcp__plugin_anban_creator__...`。"
+        advancedHint="`anban@anbanai` 表示插件 ID `anban` 来自发布方 `anbanai`；MCP server key 固定为 `creator`，具体工具名由 Claude Code 运行时处理。"
       />
 
       <StepCard step={4} title="配置 API Key">

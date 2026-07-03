@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -51,12 +52,13 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	}
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "plugin@marketplace")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban@anbanai")
-	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "mcp__plugin_anban_creator__")
+	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "The MCP server key is `creator`")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban:<agent>")
 	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "claude plugin install --scope user anban@anbanai")
 	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "--agent anban:article")
-	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "mcp__plugin_anban_creator__")
+	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "插件内的 MCP server key 固定为 `creator`")
 	assertTrackedFilesDoNotContainLegacyNames(t, root)
+	assertBusinessLayerFilesDoNotContainHostMCPPrefixes(t, root)
 }
 
 func assertClaudeMarketplacePlugin(t *testing.T, path string) {
@@ -131,6 +133,99 @@ func assertTrackedFilesDoNotContainLegacyNames(t *testing.T, root string) {
 			}
 		}
 	}
+}
+
+func assertBusinessLayerFilesDoNotContainHostMCPPrefixes(t *testing.T, root string) {
+	t.Helper()
+	doublePrefixedMCPTool := regexp.MustCompile(`mcp__[A-Za-z0-9_-]+__mcp__[A-Za-z0-9_-]+__`)
+	hostPrefixedMCPTool := regexp.MustCompile(`mcp__[A-Za-z0-9_-]+__`)
+	invalidAnbanPrefix := "mcp__" + "anban__"
+	invalidPluginPrefix := "mcp__" + "plugin_anban"
+	invalidUnderscorePrefix := "mcp_" + "anban"
+	invalidPluginName := "plugin_" + "anban"
+	for _, fullPath := range businessLayerMCPDocs(t, root) {
+		path, err := filepath.Rel(root, fullPath)
+		if err != nil {
+			t.Fatalf("rel %s: %v", fullPath, err)
+		}
+		body := readTextFile(t, fullPath)
+		if match := hostPrefixedMCPTool.FindString(body); match != "" {
+			t.Fatalf("%s contains host-prefixed MCP tool name %q; business docs must use bare MCP tool names", path, match)
+		}
+		if strings.Contains(body, invalidAnbanPrefix) {
+			t.Fatalf("%s contains invalid host MCP prefix %q", path, invalidAnbanPrefix)
+		}
+		if strings.Contains(body, invalidPluginPrefix) {
+			t.Fatalf("%s contains invalid host MCP prefix %q", path, invalidPluginPrefix)
+		}
+		if strings.Contains(body, invalidUnderscorePrefix) {
+			t.Fatalf("%s contains invalid host MCP prefix %q", path, invalidUnderscorePrefix)
+		}
+		if strings.Contains(body, invalidPluginName) {
+			t.Fatalf("%s contains invalid host MCP plugin prefix %q", path, invalidPluginName)
+		}
+		if match := doublePrefixedMCPTool.FindString(body); match != "" {
+			t.Fatalf("%s contains double-prefixed MCP tool name %q", path, match)
+		}
+	}
+}
+
+func businessLayerMCPDocs(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	addFile := func(rel string) {
+		path := filepath.Join(root, rel)
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return
+			}
+			t.Fatalf("stat %s: %v", rel, err)
+		}
+		if !info.IsDir() {
+			out = append(out, path)
+		}
+	}
+	addTree := func(rel string) {
+		base := filepath.Join(root, rel)
+		if _, err := os.Stat(base); err != nil {
+			if os.IsNotExist(err) {
+				return
+			}
+			t.Fatalf("stat %s: %v", rel, err)
+		}
+		err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				switch d.Name() {
+				case ".git", "node_modules", "dist", "build":
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			switch filepath.Ext(path) {
+			case ".md", ".tsx", ".vue":
+				out = append(out, path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", rel, err)
+		}
+	}
+
+	addFile("CLAUDE.md")
+	addFile(filepath.Join("claudecode", "README.md"))
+	addFile(filepath.Join("claudecode", "CLAUDE.md"))
+	addTree(filepath.Join("claudecode", "agents"))
+	addTree(filepath.Join("claudecode", "skills"))
+	addTree(filepath.Join("codex", "skills"))
+	addTree(filepath.Join("openclaw", "skills"))
+	addTree(filepath.Join("studio", "src", "components", "connect"))
+	addTree(filepath.Join("miniapp", "src", "pages", "connect"))
+	return out
 }
 
 func trackedFiles(t *testing.T, root string) []string {

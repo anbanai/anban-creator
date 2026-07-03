@@ -183,8 +183,8 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			Msg("MCP generate_image called")
 	}
 
-	billingProvider, billingModel := resolveImageBillingModel(ctx, userID, imageModelKey)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, billingProvider, billingModel, 1); err != nil {
+	billingProvider, billingModel, billingSource := resolveImageBillingModel(ctx, userID, imageModelKey)
+	if err := maybeDeductForResolvedModel(ctx, userID, model.CreditTypeImageGen, billingProvider, billingModel, 1, taskID, billingSource); err != nil {
 		if mcpLog != nil {
 			// billingError below also logs the err with tool name; this entry
 			// adds task_id/project_id/stage so concurrent-task greps can land.
@@ -197,6 +197,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				Str("image_model_key", imageModelKey).
 				Str("billing_provider", billingProvider).
 				Str("billing_model", billingModel).
+				Str("billing_source", billingSource).
 				Err(err).
 				Msg("MCP generate_image failed")
 		}

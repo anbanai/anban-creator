@@ -32,6 +32,7 @@ import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIco
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
+import { VIDEO_PROJECT_DEFAULT_VALUE, buildVideoFormConfig, normalizeVideoConfigForSubmit, readVideoSelectValue, writeVideoSelectValue } from '@/lib/video-form'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
@@ -416,7 +417,7 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      video_config: values.type === 'video' ? values.video_config : undefined,
+      video_config: values.type === 'video' ? normalizeVideoConfigForSubmit(values.video_config) : undefined,
       // Route to the desktop local executor when available and opted in.
       execution_target: localExecutorAvailable && runLocally ? 'local' : undefined,
     }))
@@ -784,11 +785,14 @@ export default function TasksPage() {
                             form.setValue('target_platform', ch.ecommerce_defaults.target_platform || '', { shouldDirty: false })
                             form.setValue('image_model_key', ch.ecommerce_defaults.image_model_key || '', { shouldDirty: false })
                           }
-                          if (platform === 'video' && ch?.video_defaults) {
-                            form.setValue('video_config', { ...ch.video_defaults, references: [] }, { shouldDirty: false })
+                          if (platform === 'video') {
+                            form.setValue('video_config', buildVideoFormConfig(ch?.video_defaults), { shouldDirty: false })
+                          } else {
+                            form.setValue('video_config', undefined, { shouldDirty: false })
                           }
                         } else {
                           setProjectImageRatio('')
+                          form.setValue('video_config', undefined, { shouldDirty: false })
                         }
                       }}
                     />
@@ -896,7 +900,21 @@ export default function TasksPage() {
 
               {watchedType === 'video' && (
                 <div className="space-y-3 rounded-lg border border-border p-3">
-                  <p className="text-sm font-medium text-foreground">视频参数</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-foreground">视频参数</p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => {
+                        const references = form.getValues('video_config.references') ?? []
+                        form.setValue('video_config', buildVideoFormConfig(selectedProject?.video_defaults, { references }), { shouldDirty: true })
+                      }}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      恢复项目默认
+                    </Button>
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FormField control={form.control} name="video_config.purpose" render={({ field }) => (
                       <FormItem>
@@ -916,9 +934,12 @@ export default function TasksPage() {
                     <FormField control={form.control} name="video_config.model_key" render={({ field }) => (
                       <FormItem>
                         <FormLabel>模型</FormLabel>
-                        <Select value={field.value || selectedProject?.video_defaults?.model_key || ''} onValueChange={field.onChange}>
+                        <Select value={readVideoSelectValue(field.value)} onValueChange={(value) => field.onChange(writeVideoSelectValue(value))}>
                           <FormControl><SelectTrigger><SelectValue placeholder={videoEstimateQuery.isLoading ? '加载可用模型...' : '使用项目默认'} /></SelectTrigger></FormControl>
                           <SelectContent>
+                            <SelectItem value={VIDEO_PROJECT_DEFAULT_VALUE}>
+                              使用项目默认{selectedProject?.video_defaults?.model_key ? `（${selectedProject.video_defaults.model_key}）` : ''}
+                            </SelectItem>
                             {availableVideoModels.map((model) => (
                               <SelectItem key={model.key} value={model.key}>{model.display_name || model.key}</SelectItem>
                             ))}
@@ -933,9 +954,12 @@ export default function TasksPage() {
                     <FormField control={form.control} name="video_config.resolution" render={({ field }) => (
                       <FormItem>
                         <FormLabel>分辨率</FormLabel>
-                        <Select value={field.value || selectedProject?.video_defaults?.resolution || ''} onValueChange={field.onChange}>
+                        <Select value={readVideoSelectValue(field.value)} onValueChange={(value) => field.onChange(writeVideoSelectValue(value))}>
                           <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
                           <SelectContent>
+                            <SelectItem value={VIDEO_PROJECT_DEFAULT_VALUE}>
+                              使用项目默认{selectedProject?.video_defaults?.resolution ? `（${selectedProject.video_defaults.resolution}）` : ''}
+                            </SelectItem>
                             <SelectItem value="480p">480p</SelectItem>
                             <SelectItem value="720p">720p</SelectItem>
                             <SelectItem value="1080p">1080p</SelectItem>
@@ -948,9 +972,12 @@ export default function TasksPage() {
                     <FormField control={form.control} name="video_config.ratio" render={({ field }) => (
                       <FormItem>
                         <FormLabel>比例</FormLabel>
-                        <Select value={field.value || selectedProject?.video_defaults?.ratio || ''} onValueChange={field.onChange}>
+                        <Select value={readVideoSelectValue(field.value)} onValueChange={(value) => field.onChange(writeVideoSelectValue(value))}>
                           <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
                           <SelectContent>
+                            <SelectItem value={VIDEO_PROJECT_DEFAULT_VALUE}>
+                              使用项目默认{selectedProject?.video_defaults?.ratio ? `（${selectedProject.video_defaults.ratio}）` : ''}
+                            </SelectItem>
                             <SelectItem value="9:16">9:16</SelectItem>
                             <SelectItem value="16:9">16:9</SelectItem>
                             <SelectItem value="1:1">1:1</SelectItem>
@@ -969,8 +996,9 @@ export default function TasksPage() {
                             type="number"
                             min={1}
                             max={60}
-                            value={field.value ?? selectedProject?.video_defaults?.duration ?? 15}
-                            onChange={(event) => field.onChange(Number(event.target.value))}
+                            placeholder={String(selectedProject?.video_defaults?.duration ?? 15)}
+                            value={field.value ?? ''}
+                            onChange={(event) => field.onChange(event.target.value === '' ? undefined : Number(event.target.value))}
                           />
                         </FormControl>
                         <FormMessage />

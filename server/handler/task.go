@@ -136,7 +136,16 @@ type bulkTasksResponse struct {
 
 type taskDetailResponse struct {
 	*model.Task
-	CreditsCharged *int `json:"credits_charged,omitempty"`
+	CreditsCharged     *int                       `json:"credits_charged,omitempty"`
+	CreditsSummary     *taskCreditsSummary        `json:"credits_summary,omitempty"`
+	CreditTransactions []*model.CreditTransaction `json:"credit_transactions,omitempty"`
+}
+
+type taskCreditsSummary struct {
+	TaskConsumed      int `json:"task_consumed"`
+	OperationConsumed int `json:"operation_consumed"`
+	Refunded          int `json:"refunded"`
+	NetConsumed       int `json:"net_consumed"`
 }
 
 // Create handles POST /api/v1/tasks.
@@ -313,9 +322,40 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 			charged := -tx.Amount
 			resp.CreditsCharged = &charged
 		}
+		if transactions, err := h.repo.Credits().FindByTaskIDAndUserID(c.Context(), task.ID, userID); err == nil {
+			resp.CreditTransactions = transactions
+			summary := summarizeTaskCredits(transactions)
+			resp.CreditsSummary = &summary
+		}
 	}
 
 	return Success(c, resp)
+}
+
+func summarizeTaskCredits(transactions []*model.CreditTransaction) taskCreditsSummary {
+	var summary taskCreditsSummary
+	for _, tx := range transactions {
+		if tx == nil {
+			continue
+		}
+		if tx.Amount < 0 {
+			consumed := -tx.Amount
+			if tx.Type == model.CreditTypeTaskDeduct {
+				summary.TaskConsumed += consumed
+			} else {
+				summary.OperationConsumed += consumed
+			}
+			continue
+		}
+		if tx.Amount > 0 {
+			summary.Refunded += tx.Amount
+		}
+	}
+	summary.NetConsumed = summary.TaskConsumed + summary.OperationConsumed - summary.Refunded
+	if summary.NetConsumed < 0 {
+		summary.NetConsumed = 0
+	}
+	return summary
 }
 
 // Cancel handles POST /api/v1/tasks/:id/cancel.

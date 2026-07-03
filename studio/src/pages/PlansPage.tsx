@@ -3,7 +3,7 @@ import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText, Stamp, Target, Loader2, Images } from 'lucide-react'
+import { Plus, FileText, Stamp, Target, Loader2, Images, RotateCcw } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -27,6 +27,7 @@ import { planStatusLabel, contentTypeLabel, formatDateTimeCN, cronToHuman, getBa
 import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { planSchema, type PlanFormValues } from '@/lib/schemas'
+import { VIDEO_PROJECT_DEFAULT_VALUE, buildVideoFormConfig, normalizeVideoConfigForSubmit, readVideoSelectValue, writeVideoSelectValue } from '@/lib/video-form'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
@@ -146,6 +147,7 @@ export default function PlansPage() {
     }
     return map
   }, [allProjects])
+  const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
 
   // 每次执行（单次触发）的预估积分消耗。计划是定时单任务生成器，无 quantity；
   // 仅强目标模式 ×3。镜像 TasksPage 的 taskCostFor，缺定价时回落默认 3200。
@@ -254,6 +256,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
+      video_config: undefined,
     })
     setModalOpen(true)
   }
@@ -286,6 +289,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
+      video_config: undefined,
     })
   }
 
@@ -308,7 +312,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      video_config: values.type === 'video' ? values.video_config : undefined,
+      video_config: values.type === 'video' ? normalizeVideoConfigForSubmit(values.video_config) : undefined,
     }
 
     if (editingPlan) {
@@ -469,14 +473,22 @@ export default function PlansPage() {
                         if (id) {
                           form.setValue('type', platform as PlanType)
                           const project = allProjects?.find((p) => p.id === id)
-                          if (platform === 'video' && project?.video_defaults) {
-                            form.setValue('video_config', { ...project.video_defaults, references: [] }, { shouldDirty: false })
+                          if (platform === 'video') {
+                            form.setValue('video_config', buildVideoFormConfig(project?.video_defaults), { shouldDirty: false })
+                          } else {
+                            form.setValue('video_config', undefined, { shouldDirty: false })
                           }
+                        } else {
+                          form.setValue('video_config', undefined, { shouldDirty: false })
                         }
                       }}
                       excludePlatforms={['ecommerce']}
+                      disabled={!!editingPlan}
                     />
                   </FormControl>
+                  {editingPlan && (
+                    <p className="text-xs text-muted-foreground">计划创建后项目不可更换。</p>
+                  )}
                   <FormMessage />
                 </FormItem>
               )} />
@@ -485,7 +497,7 @@ export default function PlansPage() {
                 <FormItem>
                   <FormLabel>内容类型</FormLabel>
                   <FormControl>
-                    <Select value={field.value} onValueChange={(v) => field.onChange(v as PlanType)} disabled={!!form.watch('project_id')}>
+                    <Select value={field.value} onValueChange={(v) => field.onChange(v as PlanType)} disabled={!!editingPlan || !!form.watch('project_id')}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="选择类型" />
                       </SelectTrigger>
@@ -543,7 +555,21 @@ export default function PlansPage() {
 
               {watchedType === 'video' && (
                 <div className="space-y-3 rounded-lg border border-border p-3">
-                  <p className="text-sm font-medium text-foreground">视频参数覆盖</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-foreground">视频参数覆盖</p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => {
+                        const references = form.getValues('video_config.references') ?? []
+                        form.setValue('video_config', buildVideoFormConfig(selectedProject?.video_defaults, { references }), { shouldDirty: true })
+                      }}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      恢复项目默认
+                    </Button>
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FormField control={form.control} name="video_config.purpose" render={({ field }) => (
                       <FormItem>
@@ -562,9 +588,12 @@ export default function PlansPage() {
                     <FormField control={form.control} name="video_config.model_key" render={({ field }) => (
                       <FormItem>
                         <FormLabel>模型</FormLabel>
-                        <Select value={field.value || ''} onValueChange={field.onChange}>
+                        <Select value={readVideoSelectValue(field.value)} onValueChange={(value) => field.onChange(writeVideoSelectValue(value))}>
                           <FormControl><SelectTrigger><SelectValue placeholder={videoEstimateQuery.isLoading ? '加载可用模型...' : '使用项目默认'} /></SelectTrigger></FormControl>
                           <SelectContent>
+                            <SelectItem value={VIDEO_PROJECT_DEFAULT_VALUE}>
+                              使用项目默认{selectedProject?.video_defaults?.model_key ? `（${selectedProject.video_defaults.model_key}）` : ''}
+                            </SelectItem>
                             {availableVideoModels.map((model) => (
                               <SelectItem key={model.key} value={model.key}>{model.display_name || model.key}</SelectItem>
                             ))}
@@ -578,9 +607,12 @@ export default function PlansPage() {
                     <FormField control={form.control} name="video_config.resolution" render={({ field }) => (
                       <FormItem>
                         <FormLabel>分辨率</FormLabel>
-                        <Select value={field.value || ''} onValueChange={field.onChange}>
+                        <Select value={readVideoSelectValue(field.value)} onValueChange={(value) => field.onChange(writeVideoSelectValue(value))}>
                           <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
                           <SelectContent>
+                            <SelectItem value={VIDEO_PROJECT_DEFAULT_VALUE}>
+                              使用项目默认{selectedProject?.video_defaults?.resolution ? `（${selectedProject.video_defaults.resolution}）` : ''}
+                            </SelectItem>
                             <SelectItem value="480p">480p</SelectItem>
                             <SelectItem value="720p">720p</SelectItem>
                             <SelectItem value="1080p">1080p</SelectItem>
@@ -592,9 +624,12 @@ export default function PlansPage() {
                     <FormField control={form.control} name="video_config.ratio" render={({ field }) => (
                       <FormItem>
                         <FormLabel>比例</FormLabel>
-                        <Select value={field.value || ''} onValueChange={field.onChange}>
+                        <Select value={readVideoSelectValue(field.value)} onValueChange={(value) => field.onChange(writeVideoSelectValue(value))}>
                           <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
                           <SelectContent>
+                            <SelectItem value={VIDEO_PROJECT_DEFAULT_VALUE}>
+                              使用项目默认{selectedProject?.video_defaults?.ratio ? `（${selectedProject.video_defaults.ratio}）` : ''}
+                            </SelectItem>
                             <SelectItem value="9:16">9:16</SelectItem>
                             <SelectItem value="16:9">16:9</SelectItem>
                             <SelectItem value="1:1">1:1</SelectItem>
@@ -608,7 +643,14 @@ export default function PlansPage() {
                       <FormItem>
                         <FormLabel>时长（秒）</FormLabel>
                         <FormControl>
-                          <Input type="number" min={1} max={60} value={field.value ?? 15} onChange={(event) => field.onChange(Number(event.target.value))} />
+                          <Input
+                            type="number"
+                            min={1}
+                            max={60}
+                            placeholder={String(selectedProject?.video_defaults?.duration ?? 15)}
+                            value={field.value ?? ''}
+                            onChange={(event) => field.onChange(event.target.value === '' ? undefined : Number(event.target.value))}
+                          />
                         </FormControl>
                       </FormItem>
                     )} />

@@ -113,6 +113,44 @@ describe('TaskDetailPage', () => {
       type: 'article',
       status: 'completed',
       credits_charged: 128,
+      credits_summary: {
+        task_consumed: 128,
+        operation_consumed: 80,
+        refunded: 20,
+        net_consumed: 188,
+      },
+      credit_transactions: [
+        {
+          id: 1,
+          user_id: 'user-1',
+          type: 'task_deduct',
+          amount: -128,
+          balance_after: 872,
+          task_id: 'task-1',
+          description: '任务消耗 (article) -128',
+          created_at: '2026-07-03T08:00:00Z',
+        },
+        {
+          id: 2,
+          user_id: 'user-1',
+          type: 'image_gen',
+          amount: -80,
+          balance_after: 792,
+          task_id: 'task-1',
+          description: '操作扣费 (image_gen) -80',
+          created_at: '2026-07-03T08:01:00Z',
+        },
+        {
+          id: 3,
+          user_id: 'user-1',
+          type: 'task_refund',
+          amount: 20,
+          balance_after: 812,
+          task_id: 'task-1',
+          description: '任务取消退还 +20',
+          created_at: '2026-07-03T08:02:00Z',
+        },
+      ],
       total_cost_usd: 1.23,
       result: { files: null, output: '' },
       project_snapshot: {
@@ -136,11 +174,25 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('参考图')).not.toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
+    const parameterCard = screen.getByText('项目参数').closest('[data-slot="card"]') as HTMLElement
+    const parameterContent = within(parameterCard).getByText('视觉风格').closest('[data-slot="card-content"]')
+    const visualStyleBlock = within(parameterCard).getByText('视觉风格').parentElement
+    const imageRatioBlock = within(parameterCard).getByText('图片比例').parentElement
+    const imageModelBlock = within(parameterCard).getByText('图片模型').parentElement
+    expect(visualStyleBlock?.parentElement).toBe(parameterContent)
+    expect(imageRatioBlock?.parentElement?.parentElement).toBe(parameterContent)
+    expect(imageModelBlock?.parentElement?.parentElement).toBe(parameterContent)
     expect(screen.getByText('安般')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()
-    expect(screen.getByText('扣除积分')).toBeInTheDocument()
-    expect(screen.getByText('128')).toBeInTheDocument()
+    expect(screen.getByText('消耗积分')).toBeInTheDocument()
+    expect(screen.getAllByText('任务消耗').length).toBeGreaterThan(0)
+    expect(screen.getByText('操作消耗')).toBeInTheDocument()
+    expect(screen.getByText('退还积分')).toBeInTheDocument()
+    expect(screen.getByText('净消耗')).toBeInTheDocument()
+    expect(screen.getAllByText('188').length).toBeGreaterThan(0)
+    expect(screen.getByText('图片生成')).toBeInTheDocument()
+    expect(screen.getByText('-80')).toBeInTheDocument()
     expect(screen.queryByText('执行成本')).not.toBeInTheDocument()
     expect(screen.queryByText('$1.23')).not.toBeInTheDocument()
   })

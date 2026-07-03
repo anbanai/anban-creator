@@ -13,6 +13,8 @@ export type CreditTransactionType =
   | 'draft_publish'
   | 'outline'
   | 'viral_analysis'
+  | 'video_gen'
+  | 'poster_generation'
 
 export interface CreditBalance {
   balance: number
@@ -29,6 +31,7 @@ export interface CreditTransaction {
   amount: number
   balance_after: number
   task_id?: string
+  operation_id?: string
   description: string
   created_at: string
 }

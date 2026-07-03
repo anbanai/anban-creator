@@ -8,9 +8,10 @@ interface ProjectSelectorProps {
   onChange: (projectId: string, platform: string) => void
   platform?: string
   excludePlatforms?: string[]
+  disabled?: boolean
 }
 
-export function ProjectSelector({ value, onChange, platform, excludePlatforms = [] }: ProjectSelectorProps) {
+export function ProjectSelector({ value, onChange, platform, excludePlatforms = [], disabled = false }: ProjectSelectorProps) {
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects', 'active', platform],
     queryFn: () => api.projects.list({ status: 'active', platform }),
@@ -43,6 +44,7 @@ export function ProjectSelector({ value, onChange, platform, excludePlatforms = 
       placeholder="选择项目..."
       searchPlaceholder="搜索项目..."
       emptyText="没有找到项目"
+      disabled={disabled}
     />
   )
 }

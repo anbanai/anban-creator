@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
+	appconfig "github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -282,6 +285,251 @@ func TestMaybeDeduct_NilBillingService(t *testing.T) {
 	err := maybeDeduct(context.Background(), "user-1", "convert", "", "gpt-4", 1)
 	if err != nil {
 		t.Errorf("expected nil error with nil billing service, got: %v", err)
+	}
+}
+
+func TestManagedUserMCPCallDeductsOperationCredits(t *testing.T) {
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	userID := "11111111-1111-1111-1111-111111111111"
+	projectID := "22222222-2222-2222-2222-222222222222"
+	taskID := "33333333-3333-3333-3333-333333333333"
+
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          "managed-billing@example.com",
+		Password:       "hashed",
+		InviteCode:     "managedbilling",
+		CreditsBalance: 1000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "managed billing",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	cfg := &config.Config{
+		Writing: config.WritingConfig{Model: "gpt-4o-mini"},
+		Credits: config.CreditsConfig{ModelCosts: map[string]map[string]int{
+			model.CreditTypeConvert: {"gpt-4o-mini": 12},
+		}},
+	}
+	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
+	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
+	SetServices(&Services{WritingSvc: writingSvc})
+	SetBillingServices(creditSvc, nil, cfg)
+	SetLogger(&logger)
+	t.Cleanup(func() {
+		SetServices(nil)
+		SetBillingServices(nil, nil, nil)
+		SetLogger(nil)
+	})
+
+	apiKeySvc := service.NewAPIKeyService(repo, &logger)
+	rawKey, err := apiKeySvc.EnsureUserKey(ctx, userID)
+	if err != nil {
+		t.Fatalf("ensure managed user key: %v", err)
+	}
+	handler := NewMCPHandler(apiKeySvc, "", &logger)
+
+	result := callMCPTool(t, handler, "convert_markdown", fmt.Sprintf(`{
+		"project_id": %q,
+		"markdown": "# Hello\n\nbody",
+		"task_id": %q
+	}`, projectID, taskID), rawKey)
+	if strings.Contains(result, "积分不足") {
+		t.Fatalf("unexpected billing error: %s", result)
+	}
+
+	user, err := repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		t.Fatalf("find user: %v", err)
+	}
+	if user.CreditsBalance != 988 {
+		t.Fatalf("credits balance = %d, want 988", user.CreditsBalance)
+	}
+	txs, _, err := creditSvc.ListTransactions(ctx, userID, 0, 10)
+	if err != nil {
+		t.Fatalf("list transactions: %v", err)
+	}
+	if len(txs) != 1 || txs[0].Type != model.CreditTypeConvert || txs[0].Amount != -12 {
+		t.Fatalf("transactions = %+v, want one convert -12", txs)
+	}
+	if txs[0].TaskID == nil || *txs[0].TaskID != taskID {
+		t.Fatalf("transaction task_id = %v, want %q", txs[0].TaskID, taskID)
+	}
+}
+
+func TestImageBillingSkipsActualBYOKButChargesSystemPreset(t *testing.T) {
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	userID := "44444444-4444-4444-4444-444444444444"
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          "image-billing@example.com",
+		Password:       "hashed",
+		InviteCode:     "imagebilling",
+		CreditsBalance: 1000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.ModelConfigs().Upsert(ctx, &model.UserModelConfig{
+		ID:     "55555555-5555-5555-5555-555555555555",
+		UserID: userID,
+		ImageConfigJSON: `{
+			"provider":"openai",
+			"endpoint":"https://api.openai.example",
+			"api_key":"user-key",
+			"model":"gpt-image-custom"
+		}`,
+	}); err != nil {
+		t.Fatalf("upsert model config: %v", err)
+	}
+
+	cfg := &config.Config{
+		ImageAPI: config.ImageAPIConfig{
+			Cover:   &appconfig.ImageAPI{Provider: "volcengine", Model: "seedream-default", Credits: 20},
+			Content: &appconfig.ImageAPI{Provider: "volcengine", Model: "seedream-default", Credits: 20},
+		},
+		ImagePresets: []config.ImageModelPreset{
+			{Key: "managed-openai-collision", Provider: "openai", Model: "gpt-image-custom", APIKey: "system-key", MinTier: string(model.TierFree)},
+		},
+		Credits: config.CreditsConfig{ModelCosts: map[string]map[string]int{
+			model.CreditTypeImageGen: {
+				"gemini/gemini-preset":    33,
+				"openai/gpt-image-custom": 44,
+			},
+		}},
+	}
+	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
+	modelConfigSvc := service.NewModelConfigService(repo, cfg, &logger)
+	SetBillingServices(creditSvc, modelConfigSvc, cfg)
+	SetLogger(&logger)
+	t.Cleanup(func() {
+		SetBillingServices(nil, nil, nil)
+		SetLogger(nil)
+	})
+
+	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, "openai", "gpt-image-custom", 1); err != nil {
+		t.Fatalf("deduct byok image: %v", err)
+	}
+	user, err := repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		t.Fatalf("find user after byok: %v", err)
+	}
+	if user.CreditsBalance != 1000 {
+		t.Fatalf("balance after BYOK image = %d, want 1000", user.CreditsBalance)
+	}
+
+	if err := maybeDeduct(ctx, userID, model.CreditTypeImageGen, "gemini", "gemini-preset", 1); err != nil {
+		t.Fatalf("deduct preset image: %v", err)
+	}
+	user, err = repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		t.Fatalf("find user after preset: %v", err)
+	}
+	if user.CreditsBalance != 967 {
+		t.Fatalf("balance after preset image = %d, want 967", user.CreditsBalance)
+	}
+
+	provider, mdl, source := resolveImageBillingModel(context.Background(), userID, "managed-openai-collision")
+	if provider != "openai" || mdl != "gpt-image-custom" || source != "preset:managed-openai-collision" {
+		t.Fatalf("resolved preset = (%q, %q, %q), want openai/gpt-image-custom preset source", provider, mdl, source)
+	}
+	if err := maybeDeductForResolvedModel(ctx, userID, model.CreditTypeImageGen, provider, mdl, 1, "", source); err != nil {
+		t.Fatalf("deduct managed preset with byok model collision: %v", err)
+	}
+	user, err = repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		t.Fatalf("find user after collision preset: %v", err)
+	}
+	if user.CreditsBalance != 923 {
+		t.Fatalf("balance after collision preset image = %d, want 923", user.CreditsBalance)
+	}
+}
+
+func TestMaybeDeductRejectsForeignTaskID(t *testing.T) {
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	userID := "66666666-6666-6666-6666-666666666666"
+	otherUserID := "77777777-7777-7777-7777-777777777777"
+	projectID := "88888888-8888-8888-8888-888888888888"
+	taskID := "99999999-9999-9999-9999-999999999999"
+	for _, user := range []model.User{
+		{ID: userID, Email: "owner@example.com", Password: "hashed", InviteCode: "owner", CreditsBalance: 1000},
+		{ID: otherUserID, Email: "other@example.com", Password: "hashed", InviteCode: "other", CreditsBalance: 1000},
+	} {
+		if err := repo.Users().Create(ctx, &user); err != nil {
+			t.Fatalf("create user %s: %v", user.ID, err)
+		}
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   otherUserID,
+		Platform: model.PlatformArticle,
+		Name:     "Other Article",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    otherUserID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "foreign task",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	cfg := &config.Config{
+		Writing: config.WritingConfig{Model: "gpt-4o-mini"},
+		Credits: config.CreditsConfig{ModelCosts: map[string]map[string]int{
+			model.CreditTypeConvert: {"gpt-4o-mini": 12},
+		}},
+	}
+	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	SetServices(&Services{TaskSvc: taskSvc})
+	SetBillingServices(creditSvc, nil, cfg)
+	t.Cleanup(func() {
+		SetServices(nil)
+		SetBillingServices(nil, nil, nil)
+	})
+
+	err := maybeDeduct(ctx, userID, model.CreditTypeConvert, "", "gpt-4o-mini", 1, taskID)
+	if err == nil {
+		t.Fatal("expected foreign task billing to fail")
+	}
+	user, findErr := repo.Users().FindByID(ctx, userID)
+	if findErr != nil {
+		t.Fatalf("find user: %v", findErr)
+	}
+	if user.CreditsBalance != 1000 {
+		t.Fatalf("balance = %d, want unchanged 1000", user.CreditsBalance)
 	}
 }
 
