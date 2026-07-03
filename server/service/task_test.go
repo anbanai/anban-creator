@@ -771,13 +771,17 @@ func TestTaskService_ExecuteDoesNotExtractTitleFromWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(outputDir, "content.md"), []byte("# 真实最终标题\n\ncontent"), 0644); err != nil {
 		t.Fatalf("write content: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(outputDir, "cover.png"), []byte("png"), 0644); err != nil {
+		t.Fatalf("write cover: %v", err)
+	}
 	task := &model.Task{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		ProjectID: projectID,
-		Type:      model.PlatformSeednote,
-		Status:    model.TaskStatusRunning,
-		Title:     "AI 已上报标题",
+		ID:              uuid.New().String(),
+		UserID:          userID,
+		ProjectID:       projectID,
+		Type:            model.PlatformSeednote,
+		Status:          model.TaskStatusRunning,
+		Title:           "AI 已上报标题",
+		HasContentImage: false,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -796,6 +800,164 @@ func TestTaskService_ExecuteDoesNotExtractTitleFromWorkspace(t *testing.T) {
 	}
 	if found.Title != "AI 已上报标题" {
 		t.Fatalf("title = %q, want existing AI-reported title", found.Title)
+	}
+}
+
+func TestTaskService_HandleExecutionRejectsNestedAgentOnlyResult(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	workDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte("# project"), 0644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
+	task := &model.Task{
+		ID:              uuid.New().String(),
+		UserID:          userID,
+		ProjectID:       projectID,
+		Type:            model.PlatformSeednote,
+		Status:          model.TaskStatusRunning,
+		HasContentImage: true,
+		MaxRetries:      model.DefaultRetries,
+		RetryCount:      model.DefaultRetries,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success:        true,
+		WorkDir:        workDir,
+		ToolUseSummary: map[string]int{"Agent": 1},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", found.Status)
+	}
+	if found.ErrorMessage != agent.NestedAgentDelegationError {
+		t.Fatalf("error = %q, want %q", found.ErrorMessage, agent.NestedAgentDelegationError)
+	}
+}
+
+func TestTaskService_HandleExecutionRejectsSeednoteWithoutWorkDir(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	task := &model.Task{
+		ID:              uuid.New().String(),
+		UserID:          userID,
+		ProjectID:       projectID,
+		Type:            model.PlatformSeednote,
+		Status:          model.TaskStatusRunning,
+		HasContentImage: true,
+		MaxRetries:      model.DefaultRetries,
+		RetryCount:      model.DefaultRetries,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success: true,
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", found.Status)
+	}
+	if !strings.Contains(found.ErrorMessage, "seednote missing required deliverables") {
+		t.Fatalf("error = %q, want missing deliverables", found.ErrorMessage)
+	}
+}
+
+func TestTaskService_HandleExecutionCompletesWithSeednoteDeliverables(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	workDir := t.TempDir()
+	outputDir := filepath.Join(workDir, "output")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir output: %v", err)
+	}
+	for name, data := range map[string][]byte{
+		"content.md":     []byte("# 标题\n\n正文"),
+		"image-plan.md":  []byte("# 图片内容规划"),
+		"cover.png":      []byte("png"),
+		"image_01.png":   []byte("png"),
+		"compliance.md":  []byte("ok"),
+		"topic-note.txt": []byte("ok"),
+	} {
+		if err := os.WriteFile(filepath.Join(outputDir, name), data, 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	task := &model.Task{
+		ID:              uuid.New().String(),
+		UserID:          userID,
+		ProjectID:       projectID,
+		Type:            model.PlatformSeednote,
+		Status:          model.TaskStatusRunning,
+		HasContentImage: true,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
+		Success:        true,
+		WorkDir:        workDir,
+		ToolUseSummary: map[string]int{"generate_image": 2, "Bash": 3},
+	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
+
+	if err := svc.HandleExecution(ctx, task, nil); err != nil {
+		t.Fatalf("HandleExecution: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q, want completed; err=%q", found.Status, found.ErrorMessage)
+	}
+	if found.CompletedAt == nil {
+		t.Fatal("completed_at not set")
 	}
 }
 

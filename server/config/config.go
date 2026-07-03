@@ -37,7 +37,7 @@ type Config struct {
 	Email        EmailConfig        `yaml:"email"`
 	Invitation   InvitationConfig   `yaml:"invitation"`
 	Seednote     SeednoteConfig     `yaml:"seednote"`
-	WCF          WCFConfig          `yaml:"wcf"`
+	Ilink        IlinkConfig        `yaml:"ilink"`
 }
 
 // ImageModelPreset defines a system-managed image model that users can select
@@ -88,16 +88,18 @@ type SeednoteConfig struct {
 	Timeout int    `yaml:"timeout"`  // default 30 (seconds)
 }
 
-// WCFConfig holds the wcfLink WeChat-bot sidecar configuration.
-// wcfLink is a local iLink WeChat channel service (NOT the Windows-only
-// WeChatFerry PC hook) that the server drives over HTTP to send task
-// notifications and receive WeChat commands. Opt-in: when disabled or the
-// sidecar is unreachable, all WeChat features degrade to no-ops.
-type WCFConfig struct {
-	Enabled      bool   `yaml:"enabled"`       // master switch; default false
-	BaseURL      string `yaml:"base_url"`      // default "http://localhost:18070"
-	Timeout      int    `yaml:"timeout"`       // seconds; default 30
-	PollInterval int    `yaml:"poll_interval"` // seconds between /api/events polls; default 2
+// IlinkConfig holds the ilink WeChat assistant channel configuration. wcflink is
+// the current transport implementation behind this platform channel.
+type IlinkConfig struct {
+	Enabled              bool   `yaml:"enabled"`
+	BaseURL              string `yaml:"base_url"`
+	Timeout              int    `yaml:"timeout"`
+	PollInterval         int    `yaml:"poll_interval"`
+	NotificationRetryMax int    `yaml:"notification_retry_max"`
+	AssistantAccountID   string `yaml:"assistant_account_id"`
+	AssistantName        string `yaml:"assistant_name"`
+	AssistantWechatID    string `yaml:"assistant_wechat_id"`
+	AssistantQRCodeURL   string `yaml:"assistant_qrcode_url"`
 }
 
 // EmailConfig holds email/verification code configuration.
@@ -617,15 +619,21 @@ func (c *Config) applyDefaults() {
 		c.Seednote.Timeout = 30
 	}
 
-	// wcfLink WeChat-bot sidecar defaults.
-	if c.WCF.BaseURL == "" {
-		c.WCF.BaseURL = "http://localhost:18070"
+	// ilink WeChat assistant channel defaults.
+	if c.Ilink.BaseURL == "" {
+		c.Ilink.BaseURL = "http://localhost:18070"
 	}
-	if c.WCF.Timeout == 0 {
-		c.WCF.Timeout = 30
+	if c.Ilink.Timeout == 0 {
+		c.Ilink.Timeout = 30
 	}
-	if c.WCF.PollInterval == 0 {
-		c.WCF.PollInterval = 2
+	if c.Ilink.PollInterval == 0 {
+		c.Ilink.PollInterval = 2
+	}
+	if c.Ilink.NotificationRetryMax == 0 {
+		c.Ilink.NotificationRetryMax = 5
+	}
+	if c.Ilink.AssistantName == "" {
+		c.Ilink.AssistantName = "Anban 微信助手"
 	}
 
 	// Claude executor defaults.

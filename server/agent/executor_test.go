@@ -549,57 +549,46 @@ func TestBuildUserPrompt(t *testing.T) {
 		name         string
 		taskType     string
 		topic        string
-		agentName    string
 		wantContains []string
 		wantAbsence  []string
 	}{
 		{
-			name:         "seednote with topic references agent",
+			name:         "seednote with topic runs workflow",
 			taskType:     "seednote",
 			topic:        "春季穿搭",
-			agentName:    "seednote",
-			wantContains: []string{"Use the seednote agent", "春季穿搭"},
+			wantContains: []string{"Run the full seednote creation workflow", "create content about: 春季穿搭"},
 			// P2: visual style must NEVER enter the prompt (it is read via MCP
 			// get_project_profile). This absence guard is a regression fence.
-			wantAbsence: []string{"视觉风格要求"},
+			wantAbsence: []string{"视觉风格要求", "Use the", "agent"},
 		},
 		{
-			name:         "article with topic references agent",
+			name:         "article with topic runs workflow",
 			taskType:     "article",
 			topic:        "时间管理技巧",
-			agentName:    "wechatarticle",
-			wantContains: []string{"Use the wechatarticle agent", "时间管理技巧"},
-			wantAbsence:  []string{"视觉风格要求"},
+			wantContains: []string{"Run the full article creation workflow", "create content about: 时间管理技巧"},
+			wantAbsence:  []string{"视觉风格要求", "Use the", "agent"},
 		},
 		{
-			name:         "unknown task type defaults to seednote agent",
+			name:         "unknown task type still runs workflow",
 			taskType:     "other",
 			topic:        "随便写写",
-			agentName:    "seednote",
-			wantContains: []string{"Use the seednote agent", "随便写写"},
+			wantContains: []string{"Run the full other creation workflow", "create content about: 随便写写"},
+			wantAbsence:  []string{"Use the", "agent"},
 		},
 		{
 			name:         "no topic triggers autonomous mode",
 			taskType:     "seednote",
 			topic:        "",
-			agentName:    "seednote",
-			wantContains: []string{"Use the seednote agent", "research and create content"},
-		},
-		{
-			name:         "empty agent name still produces prompt",
-			taskType:     "seednote",
-			topic:        "test topic",
-			agentName:    "",
-			wantContains: []string{"Use the  agent", "test topic"},
+			wantContains: []string{"Run the full seednote creation workflow", "Analyze the project profile"},
+			wantAbsence:  []string{"Use the", "agent"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := BuildUserPrompt(UserPromptParams{
-				TaskType:  tt.taskType,
-				Topic:     tt.topic,
-				AgentName: tt.agentName,
+				TaskType: tt.taskType,
+				Topic:    tt.topic,
 			})
 			for _, sub := range tt.wantContains {
 				if !strings.Contains(got, sub) {
@@ -626,24 +615,24 @@ func TestBuildUserPrompt_TopicPreClaimWording(t *testing.T) {
 	// drifts, the skills would re-claim on every run. (Server-side
 	// ClaimForTask idempotency on task_id still prevents true double-consume,
 	// but the skill behavior would be wrong — pin the substring here too.)
-	for _, agent := range []string{"seednote", "wechatarticle"} {
-		got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "X", AgentName: agent})
+	for _, taskType := range []string{"seednote", "article"} {
+		got := BuildUserPrompt(UserPromptParams{TaskType: taskType, Topic: "X"})
 		if !strings.Contains(got, "create content about: X") {
-			t.Errorf("agent %q: prompt %q must contain the pre-claim marker \"create content about: X\"", agent, got)
+			t.Errorf("task type %q: prompt %q must contain the pre-claim marker \"create content about: X\"", taskType, got)
 		}
 	}
 }
 
 func TestBuildUserPrompt_Goal(t *testing.T) {
 	// Empty goal — no /goal prefix.
-	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote"})
+	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭"})
 	if strings.Contains(got, "/goal ") {
 		t.Errorf("empty goal should not include /goal prefix; got %q", got)
 	}
 
 	// Non-empty goal — /goal prefix appears with the condition, followed by the base prompt.
 	goal := "文章字数不少于 1000 字"
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", Goal: goal})
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", Goal: goal})
 	if !strings.HasPrefix(got, "/goal "+goal) {
 		t.Errorf("BuildUserPrompt with goal should start with %q; got %q", "/goal "+goal, got[:min(len(got), 80)])
 	}
@@ -653,13 +642,13 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 	}
 
 	// Whitespace-only goal is treated as empty.
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", Goal: "   \n\t  "})
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", Goal: "   \n\t  "})
 	if strings.Contains(got, "/goal ") {
 		t.Errorf("whitespace-only goal should not include /goal prefix; got %q", got)
 	}
 
 	// Surrounding whitespace is trimmed.
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", Goal: "  含关键词 ABC  "})
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", Goal: "  含关键词 ABC  "})
 	wantPrefix := "/goal 含关键词 ABC"
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Errorf("goal should be trimmed; want prefix %q, got %q", wantPrefix, got[:min(len(got), 80)])
@@ -667,7 +656,7 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 
 	// Multi-line goal is flattened to a single /goal line (Claude Code's slash
 	// parser only registers the first line as the condition).
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", Goal: "字数 ≥ 1000\n包含 3 个案例\n带封面图"})
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", Goal: "字数 ≥ 1000\n包含 3 个案例\n带封面图"})
 	firstLine := got
 	if idx := strings.Index(got, "\n"); idx >= 0 {
 		firstLine = got[:idx]
@@ -687,7 +676,7 @@ func TestBuildUserPrompt_Goal(t *testing.T) {
 
 func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	// Both task_id and project_id present.
-	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", TaskID: "task-123", ProjectID: "chan-abc"})
+	got := BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", TaskID: "task-123", ProjectID: "chan-abc"})
 	if !strings.Contains(got, "本任务上下文：") {
 		t.Errorf("missing 任务上下文 line; got %q", got)
 	}
@@ -699,7 +688,7 @@ func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	}
 
 	// Only task_id.
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", TaskID: "task-123"})
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", TaskID: "task-123"})
 	if !strings.Contains(got, "本任务上下文：task_id=task-123") {
 		t.Errorf("expected only task_id in context line; got %q", got)
 	}
@@ -708,13 +697,13 @@ func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	}
 
 	// Only project_id.
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote", ProjectID: "chan-abc"})
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", ProjectID: "chan-abc"})
 	if !strings.Contains(got, "本任务上下文：project_id=chan-abc") {
 		t.Errorf("expected only project_id in context line; got %q", got)
 	}
 
 	// Both empty — line omitted entirely.
-	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭", AgentName: "seednote"})
+	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭"})
 	if strings.Contains(got, "本任务上下文") {
 		t.Errorf("context line should be omitted when both IDs empty; got %q", got)
 	}
@@ -757,7 +746,6 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 			got := BuildUserPrompt(UserPromptParams{
 				TaskType:        "seednote",
 				Topic:           "春季穿搭",
-				AgentName:       "seednote",
 				HasContentImage: tc.hasContent,
 				HasTailImage:    tc.hasTail,
 			})
@@ -779,7 +767,6 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 	articleGot := BuildUserPrompt(UserPromptParams{
 		TaskType:                 "article",
 		Topic:                    "时间管理",
-		AgentName:                "wechatarticle",
 		HasContentImage:          true,
 		HasTailImage:             true,
 		ArticleWithCover:         ptrBool(true),
@@ -836,7 +823,6 @@ func TestBuildUserPrompt_ArticleImageComposition(t *testing.T) {
 			got := BuildUserPrompt(UserPromptParams{
 				TaskType:                 "article",
 				Topic:                    "时间管理",
-				AgentName:                "wechatarticle",
 				ArticleWithCover:         tc.withCover,
 				ArticleWithContentImages: tc.withContent,
 			})

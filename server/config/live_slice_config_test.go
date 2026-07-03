@@ -48,7 +48,7 @@ func TestExpandEnvVars(t *testing.T) {
 // affected by unrelated environment variables (the hidden override layer is gone).
 func TestNewConfigEnvInterpolation(t *testing.T) {
 	t.Setenv("ANBAN_TEST_REDIS", "redis:6379")
-	t.Setenv("ANBAN_TEST_WCF_URL", "http://wcflink:18070")
+	t.Setenv("ANBAN_TEST_ILINK_URL", "http://wcflink:18070")
 	// An unrelated env var that must NOT leak into config.
 	t.Setenv("ANBAN_JWT_SECRET_KEY", "should-be-ignored-without-placeholder")
 
@@ -64,9 +64,9 @@ jwt:
   refresh_expiry: "168h"
 redis:
   addr: "${ANBAN_TEST_REDIS:-localhost:6379}"
-wcf:
+ilink:
   enabled: true
-  base_url: "${ANBAN_TEST_WCF_URL:-http://localhost:18070}"
+  base_url: "${ANBAN_TEST_ILINK_URL:-http://localhost:18070}"
 claude:
   executor: docker
 `
@@ -85,11 +85,11 @@ claude:
 	if cfg.Redis.Addr != "redis:6379" {
 		t.Errorf("redis.addr = %q, want redis:6379", cfg.Redis.Addr)
 	}
-	if cfg.WCF.BaseURL != "http://wcflink:18070" {
-		t.Errorf("wcf.base_url = %q, want http://wcflink:18070", cfg.WCF.BaseURL)
+	if cfg.Ilink.BaseURL != "http://wcflink:18070" {
+		t.Errorf("ilink.base_url = %q, want http://wcflink:18070", cfg.Ilink.BaseURL)
 	}
-	if !cfg.WCF.Enabled {
-		t.Errorf("wcf.enabled = false, want true")
+	if !cfg.Ilink.Enabled {
+		t.Errorf("ilink.enabled = false, want true")
 	}
 	// ANBAN_JWT_SECRET_KEY is set but the yaml has no ${...} for it, so it must
 	// NOT override the literal value — the hidden override layer is gone.

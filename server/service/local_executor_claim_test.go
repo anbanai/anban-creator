@@ -25,6 +25,7 @@ func newLocalSeedTask(t *testing.T, repo repository.Repository, userID, projectI
 		Type:               model.PlatformSeednote,
 		Status:             model.TaskStatusPending,
 		Prompt:             "测试选题：茶饮爆款",
+		HasContentImage:    true,
 		ExecutionTarget:    model.ExecutionTargetLocal,
 		LocalClaimDeadline: deadline,
 	}
@@ -273,6 +274,19 @@ func claimOneLocal(t *testing.T, svc *TaskService, repo repository.Repository, u
 	return task.ID
 }
 
+func addLocalSeednoteDeliverables(t *testing.T, repo repository.Repository, taskID string) {
+	t.Helper()
+	files := []*model.TaskFile{
+		{TaskID: taskID, Role: model.FileRoleOther, FileName: "content.md", FilePath: "output/seednote/title/content.md"},
+		{TaskID: taskID, Role: model.FileRoleOther, FileName: "image-plan.md", FilePath: "output/seednote/title/image-plan.md"},
+		{TaskID: taskID, Role: model.FileRoleCover, FileName: "cover.png", FilePath: "output/seednote/title/cover.png"},
+		{TaskID: taskID, Role: model.FileRoleImage, FileName: "image_01.png", FilePath: "output/seednote/title/image_01.png"},
+	}
+	if err := repo.TaskFiles().BatchCreate(context.Background(), files); err != nil {
+		t.Fatalf("create task files: %v", err)
+	}
+}
+
 // TestCompleteLocalTask_Success verifies a claimed local task transitions to
 // completed (terminal) and records completed_at — the core fix for the
 // "local tasks never complete" gap.
@@ -282,6 +296,7 @@ func TestCompleteLocalTask_Success(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, repo, taskID)
 
 	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
 		t.Fatalf("CompleteLocalTask: %v", err)
@@ -296,6 +311,56 @@ func TestCompleteLocalTask_Success(t *testing.T) {
 	}
 	if got.CompletedAt == nil {
 		t.Fatalf("completed_at not set")
+	}
+}
+
+func TestCompleteLocalTask_SuccessWithoutDeliverablesFails(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{TaskID: taskID, Role: model.FileRoleOther, FileName: "CLAUDE.md", FilePath: "CLAUDE.md"}); err != nil {
+		t.Fatalf("create runtime file: %v", err)
+	}
+	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, LogText: "done"}); err != nil {
+		t.Fatalf("CompleteLocalTask: %v", err)
+	}
+
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if got.ErrorMessage == "" {
+		t.Fatalf("expected error message for missing deliverables")
+	}
+}
+
+func TestCompleteLocalTask_NestedAgentOnlyFails(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
+	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, repo, taskID)
+
+	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true, ToolUseSummary: map[string]int{"Agent": 1}}); err != nil {
+		t.Fatalf("CompleteLocalTask: %v", err)
+	}
+
+	got, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if got.ErrorMessage != agent.NestedAgentDelegationError {
+		t.Fatalf("error = %q, want %q", got.ErrorMessage, agent.NestedAgentDelegationError)
 	}
 }
 
@@ -367,6 +432,7 @@ func TestCompleteLocalTask_Idempotent(t *testing.T) {
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	taskID := claimOneLocal(t, svc, repo, userID, projectID)
+	addLocalSeednoteDeliverables(t, repo, taskID)
 
 	if err := svc.CompleteLocalTask(ctx, taskID, &agent.ExecutionResult{Success: true}); err != nil {
 		t.Fatalf("first complete: %v", err)

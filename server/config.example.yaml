@@ -362,20 +362,23 @@ invitation:
   max_per_user: 3 # Max invitation codes each user can generate.
 
 # ---------------------------------------------------------------------------
-# wcfLink: WeChat-bot sidecar (任务通知 + 微信命令)
-# Optional. When enabled, the server drives a wcfLink sidecar (iLink WeChat
-# channel, runs in Docker on Linux — NOT the Windows-only WeChatFerry) to push
-# task success/failure notifications and accept chat commands. Users bind their
-# own WeChat via a QR in Studio. Disabled or unreachable → graceful no-op.
+# ilink: platform WeChat assistant channel (任务通知 + 微信对话)
+# Optional. wcflink is the current transport sidecar behind this platform
+# channel. Users add the platform assistant WeChat account and send a bind code.
 # 环境变量控制（显式 ${...}，无隐藏覆盖层）：
-#   docker-compose.yml 传 ANBAN_WCF_ENABLED=true / ANBAN_WCF_BASE_URL=http://wcflink:18070，
+#   docker-compose.yml 传 ANBAN_ILINK_ENABLED=true / ANBAN_ILINK_BASE_URL=http://wcflink:18070，
 #   本文件通过下面的 ${VAR:-default} 取用——Docker 走内网服务名，本地 `make server-dev` 走默认值。
 # ---------------------------------------------------------------------------
-wcf:
-  # NOTE: env bool values must be YAML literals `true`/`false` (e.g. ANBAN_WCF_ENABLED=true).
+ilink:
+  # NOTE: env bool values must be YAML literals `true`/`false` (e.g. ANBAN_ILINK_ENABLED=true).
   # Unlike the old override layer, `1`/`0`/`yes`/`on` are NOT coerced and will fail config load —
   # this is intentional: YAML is the single source of truth with strict typing.
-  enabled: ${ANBAN_WCF_ENABLED:-false} # Master switch. 本地默认关；Docker 经 compose env 打开。
-  base_url: "${ANBAN_WCF_BASE_URL:-http://localhost:18070}" # wcfLink sidecar HTTP base URL (compose service name in Docker: http://wcflink:18070).
-  timeout: 30 # HTTP client timeout (seconds). 如需 env 控制写 ${ANBAN_WCF_TIMEOUT:-30}。
-  poll_interval: 2 # Inbound event poll cadence (seconds). 如需 env 控制写 ${ANBAN_WCF_POLL_INTERVAL:-2}。
+  enabled: ${ANBAN_ILINK_ENABLED:-false} # Master switch. 本地默认关；Docker 经 compose env 打开。
+  base_url: "${ANBAN_ILINK_BASE_URL:-http://localhost:18070}" # wcflink transport HTTP base URL.
+  timeout: 30 # HTTP client timeout (seconds). 如需 env 控制写 ${ANBAN_ILINK_TIMEOUT:-30}。
+  poll_interval: 2 # Inbound event poll cadence (seconds). 如需 env 控制写 ${ANBAN_ILINK_POLL_INTERVAL:-2}。
+  notification_retry_max: 5
+  assistant_account_id: "${ANBAN_ILINK_ASSISTANT_ACCOUNT_ID:-}"
+  assistant_name: "${ANBAN_ILINK_ASSISTANT_NAME:-Anban 微信助手}"
+  assistant_wechat_id: "${ANBAN_ILINK_ASSISTANT_WECHAT_ID:-}"
+  assistant_qrcode_url: "${ANBAN_ILINK_ASSISTANT_QRCODE_URL:-}"

@@ -175,9 +175,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 				s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to reload task for refund")
 			}
 			// Notify the task owner's WeChat of the cancellation (best-effort).
-			if s.wcfNotifier != nil {
-				s.wcfNotifier.NotifyTerminal(persistCtx, task, model.TaskStatusCancelled, errMsg)
-			}
+			s.notifyTerminal(persistCtx, task, model.TaskStatusCancelled, errMsg)
 			if task.ProjectID != "" && s.pubsub != nil {
 				s.pubsub.ReleaseSlot(persistCtx, task.ProjectID)
 			}
@@ -206,81 +204,45 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		return nil // retry handled internally, don't trigger Asynq retry
 	}
 
-	var meaningfulFileCount int
-	// Always count meaningful files when a workspace exists.
-	if result.WorkDir != "" {
-		meaningfulFileCount = agent.CountMeaningfulFiles(result.WorkDir)
-	}
-
-	// Log workspace contents for diagnostics when no output files are found.
-	if meaningfulFileCount == 0 && result.WorkDir != "" {
-		diagEvt := s.logger.Info().
+	if agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
+		errMsg := agent.NestedAgentDelegationError
+		s.logger.Error().
 			Str("task_id", taskID).
-			Int("file_count", 0)
-		if files, listErr := agent.ListWorkDirFiles(result.WorkDir); listErr == nil {
-			diagEvt = diagEvt.Int("file_count", len(files)).Interface("files", files)
-		}
-		// When output/ exists but is empty, also scan workDir root for misplaced files.
-		if _, outErr := os.Stat(filepath.Join(result.WorkDir, "output")); outErr == nil {
-			if rootFiles, rootErr := agent.ListWorkDirFilesRoot(result.WorkDir); rootErr == nil {
-				if len(rootFiles) > 0 {
-					diagEvt = diagEvt.Int("root_file_count", len(rootFiles)).Interface("root_files", rootFiles)
-				}
-			}
-		}
-		toolSummaryStr := formatToolUseSummary(result.ToolUseSummary)
-		if toolSummaryStr != "" {
-			diagEvt = diagEvt.Str("tools_used", toolSummaryStr)
-		}
-		diagEvt.Msg("workspace contents on failure (no output files)")
+			Str("model", result.Model).
+			Str("user_id", userID).
+			Int("num_turns", result.NumTurns).
+			Int("tool_use_count", result.ToolUseCount).
+			Str("tools_used", formatToolUseSummary(result.ToolUseSummary)).
+			Msg(errMsg)
+		_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("%s", errMsg))
+		return nil
 	}
 
-	// Treat as failure when the agent likely failed (standalone agent binary).
-	if result.AgentLikelyFailed {
-		if meaningfulFileCount == 0 && result.WorkDir != "" {
-			errMsg := buildNoOutputFilesError(result)
+	artifactValidation := agent.ArtifactValidation{Valid: true}
+	if result.WorkDir != "" || task.Type == model.PlatformSeednote {
+		artifactValidation = agent.ValidateTaskArtifactsFromWorkDir(task, result.WorkDir)
+		if !artifactValidation.Valid {
+			errMsg := artifactValidation.Error()
 			errEvt := s.logger.Error().
 				Str("task_id", taskID).
 				Str("model", result.Model).
 				Str("user_id", userID).
 				Int("num_turns", result.NumTurns).
 				Int("tool_use_count", result.ToolUseCount).
-				Int("meaningful_files", meaningfulFileCount)
+				Int("meaningful_files", artifactValidation.MeaningfulFileCount).
+				Strs("missing_files", artifactValidation.Missing)
 			if toolSummaryStr := formatToolUseSummary(result.ToolUseSummary); toolSummaryStr != "" {
 				errEvt = errEvt.Str("tools_used", toolSummaryStr)
+			}
+			if files, listErr := agent.ListWorkDirFiles(result.WorkDir); listErr == nil {
+				errEvt = errEvt.Interface("files", files)
 			}
 			errEvt.Msg(errMsg)
 			_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("%s", errMsg))
 			return nil
 		}
-		// Agent reported failure but produced output files — allow completion with a warning.
-		s.logger.Warn().
-			Str("task_id", taskID).
-			Str("model", result.Model).
-			Str("user_id", userID).
-			Int("num_turns", result.NumTurns).
-			Int("meaningful_files", meaningfulFileCount).
-			Msg("agent likely failed but produced output files, marking as completed")
 	}
-
-	// Treat as failure when workspace has zero meaningful files
-	// (agent wrote to wrong directory or produced no output).
-	if meaningfulFileCount == 0 && result.WorkDir != "" {
-		errMsg := buildNoOutputFilesError(result)
-		errEvt := s.logger.Error().
-			Str("task_id", taskID).
-			Str("model", result.Model).
-			Str("user_id", userID).
-			Int("num_turns", result.NumTurns).
-			Int("tool_use_count", result.ToolUseCount).
-			Int("meaningful_files", meaningfulFileCount)
-		if toolSummaryStr := formatToolUseSummary(result.ToolUseSummary); toolSummaryStr != "" {
-			errEvt = errEvt.Str("tools_used", toolSummaryStr)
-		}
-		errEvt.Msg(errMsg)
-		_ = s.HandleExecutionFailure(persistCtx, task, fmt.Errorf("%s", errMsg))
-		return nil
-	}
+	meaningfulFileCount := artifactValidation.MeaningfulFileCount
 
 	// Check if task was cancelled during execution before marking as completed.
 	finalTask, err := s.repo.Tasks().FindByID(persistCtx, taskID)
@@ -347,9 +309,7 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	}
 
 	// Notify the task owner's WeChat of the terminal success (best-effort).
-	if s.wcfNotifier != nil {
-		s.wcfNotifier.NotifyTerminal(persistCtx, task, model.TaskStatusCompleted, "")
-	}
+	s.notifyTerminal(persistCtx, task, model.TaskStatusCompleted, "")
 
 	// Release concurrency slot.
 	if task.ProjectID != "" {
@@ -487,9 +447,7 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			}
 
 			s.refundTaskByMode(ctx, task, "rate_limit_exhausted")
-			if s.wcfNotifier != nil {
-				s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
-			}
+			s.notifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
 
 			// A slot opened on this project — dispatch pending tasks.
 			if task.ProjectID != "" {
@@ -543,9 +501,7 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 					s.logger.Error().Err(cerr).Str("task_id", taskID).Msg("failed to set completed_at on failure")
 				}
 				s.refundTaskByMode(ctx, task, "retry_enqueue_failed")
-				if s.wcfNotifier != nil {
-					s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, "retry enqueue failed: "+err.Error())
-				}
+				s.notifyTerminal(ctx, task, model.TaskStatusFailed, "retry enqueue failed: "+err.Error())
 				if task.ProjectID != "" {
 					if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
 						s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after enqueue failure")
@@ -575,9 +531,7 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 			s.pubsub.ReleaseSlot(ctx, task.ProjectID)
 		}
 		s.refundTaskByMode(ctx, task, "auth_error")
-		if s.wcfNotifier != nil {
-			s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
-		}
+		s.notifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
 		if task.ProjectID != "" {
 			if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
 				s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after failure")
@@ -609,9 +563,7 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 
 		// Refund credits for failed task (skipped for goal-mode tasks).
 		s.refundTaskByMode(ctx, task, "execution_failed")
-		if s.wcfNotifier != nil {
-			s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
-		}
+		s.notifyTerminal(ctx, task, model.TaskStatusFailed, execErr.Error())
 
 		// A slot opened on this project — dispatch pending tasks.
 		if task.ProjectID != "" {
@@ -666,9 +618,7 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 				s.logger.Error().Err(cerr).Str("task_id", taskID).Msg("failed to set completed_at on failure")
 			}
 			s.refundTaskByMode(ctx, task, "retry_enqueue_failed")
-			if s.wcfNotifier != nil {
-				s.wcfNotifier.NotifyTerminal(ctx, task, model.TaskStatusFailed, "retry enqueue failed: "+err.Error())
-			}
+			s.notifyTerminal(ctx, task, model.TaskStatusFailed, "retry enqueue failed: "+err.Error())
 			if task.ProjectID != "" {
 				if derr := s.DispatchPendingTasks(ctx, task.ProjectID); derr != nil {
 					s.logger.Warn().Err(derr).Str("project_id", task.ProjectID).Msg("failed to dispatch pending tasks after enqueue failure")

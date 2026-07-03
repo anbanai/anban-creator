@@ -373,13 +373,11 @@ export default function TaskDetailPage() {
   const snapshot = task.project_snapshot
   const showProjectParameters = Boolean(snapshot?.platform || project)
   const projectParameterName = snapshot?.project_name || project?.name || '—'
-  const projectParameterReferenceImage = snapshot?.reference_image_url || project?.reference_image_url || ''
   const projectParameterVisualStyle = snapshot?.visual_style || project?.visual_style || '—'
   const projectParameterImageRatio = snapshot?.image_ratio || project?.image_ratio || task.image_ratio || '—'
   const projectParameterImageModel = task.image_model_key || snapshot?.ecommerce_defaults?.image_model_key || project?.ecommerce_defaults?.image_model_key || '—'
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
-  const projectDialogReferenceImage = project?.reference_image_url || snapshot?.reference_image_url || ''
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
 
   // Retry re-runs this task as a fresh billed task. The server clones the full
@@ -436,7 +434,7 @@ export default function TaskDetailPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <Breadcrumb className="mb-2">
             <BreadcrumbList>
@@ -450,7 +448,9 @@ export default function TaskDetailPage() {
             </BreadcrumbList>
           </Breadcrumb>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-xl font-bold text-foreground">{task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}</h1>
+            <h1 className="min-w-0 max-w-4xl text-xl font-bold leading-tight text-foreground">
+              {task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}
+            </h1>
             <Badge variant="outline">
                 {renderPlatformIcon(task.type)}
                 {contentTypeLabel[task.type] || task.type}
@@ -482,7 +482,7 @@ export default function TaskDetailPage() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
           {task.status === 'completed' && (
             <Button
               variant={task.published ? 'outline' : 'default'}
@@ -590,33 +590,33 @@ export default function TaskDetailPage() {
       )}
 
       {/* Details (stats) */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Card size="sm" className="bg-card/70">
           <CardContent>
             <p className="text-xs text-muted-foreground">创建时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.created_at)}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card size="sm" className="bg-card/70">
           <CardContent>
             <p className="text-xs text-muted-foreground">开始时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.started_at)}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card size="sm" className="bg-card/70">
           <CardContent>
             <p className="text-xs text-muted-foreground">完成时间</p>
             <p className="mt-1 text-sm text-foreground">{formatFullDateTimeCN(task.completed_at)}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card size="sm" className="bg-card/70">
           <CardContent>
             <p className="text-xs text-muted-foreground">来源</p>
             <p className="mt-1 text-sm text-foreground">{task.plan_id ? '计划任务' : '手动创建'}</p>
           </CardContent>
         </Card>
         {typeof task.credits_charged === 'number' && (
-          <Card>
+          <Card size="sm" className="bg-card/70">
             <CardContent>
               <p className="text-xs text-muted-foreground">扣除积分</p>
               <p className="mt-1 text-sm text-foreground">{task.credits_charged.toLocaleString()}</p>
@@ -630,54 +630,39 @@ export default function TaskDetailPage() {
       )}
 
       {showProjectParameters && (
-        <Card>
-          <CardContent className="space-y-3">
-            <div>
+        <Card size="sm" className="border-border/70">
+          <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <p className="text-xs text-muted-foreground">项目参数</p>
-              <p className="mt-1 text-sm font-medium text-foreground">
+              <h2 className="mt-1 truncate text-base font-semibold text-foreground">
                 {projectParameterName}
-              </p>
+              </h2>
             </div>
-            <div className="grid gap-3 lg:grid-cols-[140px_minmax(0,1fr)]">
-              <div>
-                <p className="text-xs text-muted-foreground">参考图</p>
-                {projectParameterReferenceImage ? (
-                  <a
-                    href={projectParameterReferenceImage}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-1 block h-24 w-32 overflow-hidden rounded-md border border-border bg-muted"
-                  >
-                    <SignedImage
-                      src={projectParameterReferenceImage}
-                      alt="参考图"
-                      className="h-full w-full object-cover"
-                      fallbackClassName="h-full w-full"
-                    />
-                  </a>
-                ) : (
-                  <div className="mt-1 flex h-24 w-32 items-center justify-center rounded-md border border-dashed border-border bg-muted/40 text-xs text-muted-foreground">
-                    未设置
-                  </div>
-                )}
-              </div>
+            <Badge variant="outline" className="w-fit">
+              {contentTypeLabel[snapshot?.platform || project?.platform || task.type] || snapshot?.platform || project?.platform || task.type}
+            </Badge>
+          </div>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">视觉风格</p>
-                <p className="mt-1 line-clamp-4 text-sm text-foreground">{projectParameterVisualStyle}</p>
+                <p className="mt-1 rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
+                  {projectParameterVisualStyle}
+                </p>
               </div>
-            </div>
-            <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-muted-foreground">图片比例</p>
-                <p className="mt-1 text-sm text-foreground">{projectParameterImageRatio}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">图片模型</p>
-                <p className="mt-1 text-sm text-foreground">{projectParameterImageModel}</p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                <div className="border-l border-border pl-3">
+                  <p className="text-xs text-muted-foreground">图片比例</p>
+                  <p className="mt-1 text-sm text-foreground">{projectParameterImageRatio}</p>
+                </div>
+                <div className="border-l border-border pl-3">
+                  <p className="text-xs text-muted-foreground">图片模型</p>
+                  <p className="mt-1 break-all text-sm text-foreground">{projectParameterImageModel}</p>
+                </div>
               </div>
             </div>
             {task.type === 'article' && snapshot && (
-              <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-3">
+              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
                 <div>
                   <p className="text-xs text-muted-foreground">署名</p>
                   <p className="mt-1 text-sm text-foreground">{snapshot.author || project?.author || '—'}</p>
@@ -693,7 +678,7 @@ export default function TaskDetailPage() {
               </div>
             )}
             {task.type === 'ecommerce' && (snapshot?.ecommerce_defaults || project?.ecommerce_defaults) && (
-              <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
                   <p className="text-xs text-muted-foreground">目标平台</p>
                   <p className="mt-1 text-sm text-foreground">{snapshot?.ecommerce_defaults?.target_platform || project?.ecommerce_defaults?.target_platform || '—'}</p>
@@ -713,7 +698,7 @@ export default function TaskDetailPage() {
               </div>
             )}
             {task.type === 'video' && task.video_config && (
-              <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <p className="text-xs text-muted-foreground">视频模型</p>
                   <p className="mt-1 text-sm text-foreground">{task.video_config.model_key || task.video_config.model || '—'}</p>
@@ -1023,44 +1008,18 @@ export default function TaskDetailPage() {
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-[70vh] overflow-y-auto pr-1">
-              <div className="grid gap-4 sm:grid-cols-[120px_minmax(0,1fr)]">
-                <div>
-                  <p className="text-xs text-muted-foreground">参考图</p>
-                  {projectDialogReferenceImage ? (
-                    <a
-                      href={projectDialogReferenceImage}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-1 block h-24 w-28 overflow-hidden rounded-md border border-border bg-muted"
-                    >
-                      <SignedImage
-                        src={projectDialogReferenceImage}
-                        alt="项目参考图"
-                        className="h-full w-full object-cover"
-                        fallbackClassName="h-full w-full"
-                      />
-                    </a>
-                  ) : (
-                    <div className="mt-1 flex h-24 w-28 items-center justify-center rounded-md border border-dashed border-border bg-muted/40 text-xs text-muted-foreground">
-                      未设置
-                    </div>
-                  )}
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">项目名称</p>
+                  <p className="mt-1 text-base font-semibold text-foreground">{project.name}</p>
                 </div>
-                <div className="min-w-0 space-y-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground">项目名称</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">{project.name}</p>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <p className="text-xs text-muted-foreground">平台</p>
-                      <p className="mt-1 text-sm text-foreground">{contentTypeLabel[projectDialogPlatform] || projectDialogPlatform}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">图片比例</p>
-                      <p className="mt-1 text-sm text-foreground">{project.image_ratio || snapshot?.image_ratio || '—'}</p>
-                    </div>
-                  </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">平台</p>
+                  <p className="mt-1 text-sm text-foreground">{contentTypeLabel[projectDialogPlatform] || projectDialogPlatform}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">图片比例</p>
+                  <p className="mt-1 text-sm text-foreground">{project.image_ratio || snapshot?.image_ratio || '—'}</p>
                 </div>
               </div>
               <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">

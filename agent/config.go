@@ -92,11 +92,9 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 }
 
 func (c *Config) UserPrompt() string {
-	agentName := serveragent.TaskTypeToAgent(c.TaskType)
 	return serveragent.BuildUserPrompt(serveragent.UserPromptParams{
 		TaskType:                 c.TaskType,
 		Topic:                    c.Topic,
-		AgentName:                agentName,
 		Goal:                     c.Goal,
 		TaskID:                   c.TaskID,
 		ProjectID:                os.Getenv("ANBAN_DEFAULT_PROJECT"),

@@ -29,7 +29,8 @@ type Repository interface {
 	TopicPools() TopicPoolRepository
 	VideoGenerations() VideoGenerationRepository
 	AgentFeedbacks() AgentFeedbackRepository
-	WCFBindings() WCFBindingRepository
+	IlinkBindings() IlinkBindingRepository
+	IlinkNotifications() IlinkNotificationRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -246,7 +247,8 @@ type repository struct {
 	topicPools              TopicPoolRepository
 	videoGenerations        VideoGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
-	wcfBindings             WCFBindingRepository
+	ilinkBindings           IlinkBindingRepository
+	ilinkNotifications      IlinkNotificationRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -269,7 +271,8 @@ func New(db *gorm.DB) Repository {
 	topicPools := newTopicPoolRepository(db)
 	videoGenerations := newVideoGenerationRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
-	wcfBindings := newWCFBindingRepository(db)
+	ilinkBindings := newIlinkBindingRepository(db)
+	ilinkNotifications := newIlinkNotificationRepository(db)
 
 	return &repository{
 		db:                      db,
@@ -291,7 +294,8 @@ func New(db *gorm.DB) Repository {
 		topicPools:              topicPools,
 		videoGenerations:        videoGenerations,
 		agentFeedbacks:          agentFeedbacks,
-		wcfBindings:             wcfBindings,
+		ilinkBindings:           ilinkBindings,
+		ilinkNotifications:      ilinkNotifications,
 	}
 }
 
@@ -319,7 +323,12 @@ func (r *repository) VideoGenerations() VideoGenerationRepository {
 	return r.videoGenerations
 }
 
-func (r *repository) WCFBindings() WCFBindingRepository { return r.wcfBindings }
+func (r *repository) IlinkBindings() IlinkBindingRepository {
+	return r.ilinkBindings
+}
+func (r *repository) IlinkNotifications() IlinkNotificationRepository {
+	return r.ilinkNotifications
+}
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -364,7 +373,8 @@ type txRepository struct {
 	topicPools              TopicPoolRepository
 	videoGenerations        VideoGenerationRepository
 	agentFeedbacks          AgentFeedbackRepository
-	wcfBindings             WCFBindingRepository
+	ilinkBindings           IlinkBindingRepository
+	ilinkNotifications      IlinkNotificationRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -388,7 +398,8 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		topicPools:              newTopicPoolRepository(tx),
 		videoGenerations:        newVideoGenerationRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
-		wcfBindings:             newWCFBindingRepository(tx),
+		ilinkBindings:           newIlinkBindingRepository(tx),
+		ilinkNotifications:      newIlinkNotificationRepository(tx),
 	}
 }
 
@@ -416,7 +427,12 @@ func (r *txRepository) VideoGenerations() VideoGenerationRepository {
 	return r.videoGenerations
 }
 
-func (r *txRepository) WCFBindings() WCFBindingRepository { return r.wcfBindings }
+func (r *txRepository) IlinkBindings() IlinkBindingRepository {
+	return r.ilinkBindings
+}
+func (r *txRepository) IlinkNotifications() IlinkNotificationRepository {
+	return r.ilinkNotifications
+}
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

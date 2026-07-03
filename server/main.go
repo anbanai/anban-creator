@@ -162,14 +162,13 @@ func main() {
 		seednoteClient = nil
 	}
 
-	// 9.2 Create wcfLink (WeChat bot) sidecar client. Disabled entirely when
-	// cfg.WCF.Enabled is false; constructed-but-niled when the sidecar is
-	// unreachable so the rest of the stack degrades gracefully.
+	// 9.2 Create ilink transport client. wcflink remains the underlying HTTP
+	// sidecar, while ilink is the platform channel name.
 	var wcfClient *wcf.Client
-	if cfg.WCF.Enabled {
-		wcfClient = wcf.NewClient(cfg.WCF.BaseURL, time.Duration(cfg.WCF.Timeout)*time.Second)
-		if awaitSidecar(log, "wcfLink", wcfClient.HealthCheck, 30*time.Second) {
-			log.Info().Str("base_url", cfg.WCF.BaseURL).Msg("wcfLink sidecar client initialized")
+	if cfg.Ilink.Enabled {
+		wcfClient = wcf.NewClient(cfg.Ilink.BaseURL, time.Duration(cfg.Ilink.Timeout)*time.Second)
+		if awaitSidecar(log, "ilink", wcfClient.HealthCheck, 30*time.Second) {
+			log.Info().Str("base_url", cfg.Ilink.BaseURL).Msg("ilink transport client initialized")
 		} else {
 			wcfClient = nil
 		}
@@ -345,29 +344,30 @@ func main() {
 		}
 	}
 
-	// 12.2 Wire the wcfLink WeChat bot: outbound task notifications
-	// (WCFNotifier), inbound command poller + dispatcher, and the binding
-	// service the HTTP handler drives. The binding service + handler are built
-	// whenever the DB is up so Studio can self-discover availability; the
-	// notifier/dispatcher/poller only run when the sidecar is reachable.
-	var wcfNotifier *service.WCFNotifier
-	var wcfDispatcher *service.WCFCommandDispatcher
-	var wcfPoller *service.WCFPoller
-	var wcfBindingSvc *service.WCFBindingService
+	// 12.2 Wire ilink: platform WeChat assistant binding, inbound gateway,
+	// natural-language conversation, and reliable terminal notification outbox.
+	var ilinkBindingSvc *service.IlinkBindingService
+	var ilinkPoller *service.IlinkPoller
+	var ilinkWorker *service.IlinkNotificationWorker
 	if repo != nil {
-		wcfBindingSvc = service.NewWCFBindingService(repo, wcfClient, log)
+		assistantAccount := &service.IlinkAssistantAccount{
+			AccountID:   cfg.Ilink.AssistantAccountID,
+			DisplayName: cfg.Ilink.AssistantName,
+			WechatID:    cfg.Ilink.AssistantWechatID,
+			QRCodeURL:   cfg.Ilink.AssistantQRCodeURL,
+		}
+		ilinkBindingSvc = service.NewIlinkBindingService(repo, cfg.Ilink.Enabled && wcfClient != nil, assistantAccount, log)
 		if wcfClient != nil {
-			wcfNotifier = service.NewWCFNotifier(wcfClient, repo, true, log)
+			ilinkNotifier := service.NewIlinkNotifier(repo, true, log)
 			if taskSvc != nil {
-				taskSvc.SetWCFNotifier(wcfNotifier)
-				wcfDispatcher = service.NewWCFCommandDispatcher(taskSvc, wcfNotifier, log)
+				taskSvc.SetIlinkNotifier(ilinkNotifier)
 			}
-			wcfPoller = service.NewWCFPoller(
-				wcfClient, repo, wcfDispatcher, rdb,
-				time.Duration(cfg.WCF.PollInterval)*time.Second, log,
-			)
-		} else if cfg.WCF.Enabled {
-			log.Warn().Msg("wcfLink enabled but sidecar unreachable; notifications + commands disabled, binding UI reports unavailable")
+			conversation := service.NewIlinkConversationService(taskSvc, wcfClient, log)
+			gateway := service.NewIlinkGateway(repo, ilinkBindingSvc, conversation, wcfClient, log)
+			ilinkPoller = service.NewIlinkPoller(wcfClient, gateway, rdb, time.Duration(cfg.Ilink.PollInterval)*time.Second, log)
+			ilinkWorker = service.NewIlinkNotificationWorker(repo, wcfClient, cfg.Ilink.NotificationRetryMax, 2*time.Second, log)
+		} else if cfg.Ilink.Enabled {
+			log.Warn().Msg("ilink enabled but transport sidecar unreachable; notifications + chat commands disabled")
 		}
 	}
 
@@ -404,7 +404,7 @@ func main() {
 	var agentFeedbackSvc *service.AgentFeedbackService
 	var designerSvc *service.DesignerService
 	var designerHandler *handler.DesignerHandler
-	var wcfHandler *handler.WCFHandler
+	var ilinkHandler *handler.IlinkHandler
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
@@ -414,8 +414,8 @@ func main() {
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
 		seednoteAnalyticsHandler = buildSeednoteAnalyticsHandler(repo, log)
-		if wcfBindingSvc != nil {
-			wcfHandler = handler.NewWCFHandler(wcfBindingSvc, log)
+		if ilinkBindingSvc != nil {
+			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
 		if modelConfigSvc != nil {
@@ -616,13 +616,16 @@ func main() {
 		go startLocalClaimFallback(reclaimCtx, taskSvc, log)
 	}
 
-	// 15.4 Start the wcfLink inbound-command poller (only when the sidecar is
-	// reachable). Long-polls WeChat events and dispatches recognized commands;
-	// stops on shutdown via the cancellable context.
-	if wcfPoller != nil {
-		wcfPollerCtx, wcfPollerCancel := context.WithCancel(context.Background())
-		defer wcfPollerCancel()
-		go wcfPoller.Run(wcfPollerCtx)
+	// 15.4 Start ilink inbound poller and terminal notification worker.
+	if ilinkPoller != nil {
+		ilinkPollerCtx, ilinkPollerCancel := context.WithCancel(context.Background())
+		defer ilinkPollerCancel()
+		go ilinkPoller.Run(ilinkPollerCtx)
+	}
+	if ilinkWorker != nil {
+		ilinkWorkerCtx, ilinkWorkerCancel := context.WithCancel(context.Background())
+		defer ilinkWorkerCancel()
+		go ilinkWorker.Run(ilinkWorkerCtx)
 	}
 
 	// 16. Build Services struct.
@@ -659,7 +662,7 @@ func main() {
 		ResourceHandler:          resourceHandler,
 		TopicPoolHandler:         topicPoolHandler,
 		DesignerHandler:          designerHandler,
-		WCFHandler:               wcfHandler,
+		IlinkHandler:             ilinkHandler,
 		MCPHandler:               mcpHandler,
 		StorageProvider:          store,
 	}

@@ -50,10 +50,9 @@ type TaskService struct {
 	seednoteTrackingSvc   PublishedTrackingService
 	videoCatalog          VideoModelCatalog
 	videoCreditMultiplier int
-	// wcfNotifier pushes task success/failure/cancel messages to the task
-	// owner's WeChat via the wcfLink sidecar. Nil when wcf is disabled — all
-	// terminal hooks no-op. Best-effort; never fails the task pipeline.
-	wcfNotifier    *WCFNotifier
+	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
+	// through the platform WeChat assistant. Nil when ilink is disabled.
+	ilinkNotifier  *IlinkNotifier
 	topicPoolSvc   *TopicPoolService
 	goalMultiplier int
 	// executionTimeout bounds the fallback (Redis-down) in-process execution.
@@ -155,10 +154,14 @@ func (s *TaskService) SetSeednoteTrackingService(trackingSvc PublishedTrackingSe
 	s.seednoteTrackingSvc = trackingSvc
 }
 
-// SetWCFNotifier wires the WeChat notification sidecar. Notifier is nil-safe;
-// pass nil to disable all terminal-state WeChat notifications.
-func (s *TaskService) SetWCFNotifier(n *WCFNotifier) {
-	s.wcfNotifier = n
+func (s *TaskService) SetIlinkNotifier(n *IlinkNotifier) {
+	s.ilinkNotifier = n
+}
+
+func (s *TaskService) notifyTerminal(ctx context.Context, task *model.Task, status, errMsg string) {
+	if s.ilinkNotifier != nil {
+		s.ilinkNotifier.NotifyTerminal(ctx, task, status, errMsg)
+	}
 }
 
 // SetTopicPoolService sets the topic pool service for plan-task integration.

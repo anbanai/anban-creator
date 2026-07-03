@@ -23,7 +23,7 @@ import type { CreateAPIKeyResponse } from '@/types'
 import { tierLabels, tierDescriptions } from '@/lib/labels'
 import ModelConfigSection from '@/components/settings/ModelConfigSection'
 import LocalExecutorSection from '@/components/settings/LocalExecutorSection'
-import WeChatBindingSection from '@/components/settings/WeChatBindingSection'
+import IlinkBindingSection from '@/components/settings/IlinkBindingSection'
 import { isDesktop } from '@/lib/tauri'
 
 export default function SettingsPage() {
@@ -103,7 +103,7 @@ export default function SettingsPage() {
       {isDesktop() && <LocalExecutorSection />}
 
       {/* WeChat bot binding (web + desktop) — task notifications + commands */}
-      <WeChatBindingSection />
+      <IlinkBindingSection />
 
       {/* Profile Card */}
       <Card>

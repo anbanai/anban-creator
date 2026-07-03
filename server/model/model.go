@@ -25,7 +25,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&ImageGenerationResult{},
 		&VideoGeneration{},
 		&AgentFeedback{},
-		&WCFBinding{},
+		&IlinkBinding{},
+		&IlinkNotification{},
 	)
 	if err != nil {
 		return err

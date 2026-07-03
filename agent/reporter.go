@@ -60,6 +60,12 @@ func (r *Reporter) ReportProgress(ctx context.Context, message string) error {
 	})
 }
 
+func (r *Reporter) ReportHeartbeat(ctx context.Context) error {
+	return r.postJSON(ctx, "/api/v1/agent/progress", map[string]any{
+		"task_id": r.cfg.TaskID,
+	})
+}
+
 func (r *Reporter) ReportResult(ctx context.Context, result *serveragent.ExecutionResult) error {
 	if result == nil {
 		return nil

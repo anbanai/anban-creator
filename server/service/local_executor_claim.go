@@ -206,23 +206,26 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 		if result != nil && result.Error != "" {
 			errMsg = result.Error
 		}
-		swapped, err := s.repo.Tasks().CompareAndSwapStatusAndError(ctx, taskID, model.TaskStatusRunning, model.TaskStatusFailed, errMsg)
-		if err != nil {
-			return fmt.Errorf("cas local task to failed: %w", err)
-		}
-		if !swapped {
-			return nil // already terminal (e.g. reaped meanwhile)
-		}
-		if err := s.repo.Tasks().SetCompletedAt(ctx, taskID); err != nil {
-			s.logger.Error().Err(err).Str("task_id", taskID).Msg("local complete: set completed_at on failure")
-		}
-		// Re-read so refundTaskByMode sees the final (failed) status.
-		if t, err := s.repo.Tasks().FindByID(ctx, taskID); err == nil {
-			s.refundTaskByMode(ctx, t, "local_executor_failed")
-		}
-		s.releaseSlotAndDispatch(ctx, task)
-		s.logger.Warn().Str("task_id", taskID).Str("error", errMsg).Msg("local task failed")
-		return nil
+		return s.failLocalTask(ctx, task, errMsg)
+	}
+
+	if agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
+		return s.failLocalTask(ctx, task, agent.NestedAgentDelegationError)
+	}
+
+	files, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("local complete: list task files: %w", err)
+	}
+	artifactValidation := agent.ValidateTaskArtifactsFromTaskFiles(task, files)
+	if !artifactValidation.Valid {
+		errMsg := artifactValidation.Error()
+		s.logger.Warn().
+			Str("task_id", taskID).
+			Int("meaningful_files", artifactValidation.MeaningfulFileCount).
+			Strs("missing_files", artifactValidation.Missing).
+			Msg(errMsg)
+		return s.failLocalTask(ctx, task, errMsg)
 	}
 
 	// Success. Publishing model for local: the desktop agent publishes via the
@@ -259,6 +262,26 @@ func (s *TaskService) CompleteLocalTask(ctx context.Context, taskID string, resu
 	// the cloud success path (refundTaskByMode is failure/cancel only).
 	s.releaseSlotAndDispatch(ctx, task)
 	s.logger.Info().Str("task_id", taskID).Bool("published", published).Msg("local task completed")
+	return nil
+}
+
+func (s *TaskService) failLocalTask(ctx context.Context, task *model.Task, errMsg string) error {
+	swapped, err := s.repo.Tasks().CompareAndSwapStatusAndError(ctx, task.ID, model.TaskStatusRunning, model.TaskStatusFailed, errMsg)
+	if err != nil {
+		return fmt.Errorf("cas local task to failed: %w", err)
+	}
+	if !swapped {
+		return nil // already terminal (e.g. reaped meanwhile)
+	}
+	if err := s.repo.Tasks().SetCompletedAt(ctx, task.ID); err != nil {
+		s.logger.Error().Err(err).Str("task_id", task.ID).Msg("local complete: set completed_at on failure")
+	}
+	// Re-read so refundTaskByMode sees the final (failed) status.
+	if t, err := s.repo.Tasks().FindByID(ctx, task.ID); err == nil {
+		s.refundTaskByMode(ctx, t, "local_executor_failed")
+	}
+	s.releaseSlotAndDispatch(ctx, task)
+	s.logger.Warn().Str("task_id", task.ID).Str("error", errMsg).Msg("local task failed")
 	return nil
 }
 

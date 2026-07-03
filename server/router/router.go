@@ -60,7 +60,7 @@ type Services struct {
 	ResourceHandler          *handler.ResourceHandler
 	TopicPoolHandler         *handler.TopicPoolHandler
 	DesignerHandler          *handler.DesignerHandler
-	WCFHandler               *handler.WCFHandler
+	IlinkHandler             *handler.IlinkHandler
 	MCPHandler               http.Handler
 	StorageProvider          storage.Provider
 }
@@ -386,16 +386,15 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	// ---------------------------------------------------------------------------
-	// WeChat bot (wcfLink) binding endpoints — task notifications + commands
+	// ilink WeChat assistant endpoints — binding + task notifications + commands
 	// ---------------------------------------------------------------------------
 
-	if svc.WCFHandler != nil {
-		wechat := apiV1.Group("/wechat")
-		wechat.Post("/bind/start", svc.WCFHandler.StartBind)
-		wechat.Get("/bind/status", svc.WCFHandler.PollBindStatus)
-		wechat.Post("/unbind", svc.WCFHandler.Unbind)
-		wechat.Get("/status", svc.WCFHandler.GetStatus)
-		wechat.Put("/default-project", svc.WCFHandler.SetDefaultProject)
+	if svc.IlinkHandler != nil {
+		ilink := apiV1.Group("/ilink")
+		ilink.Get("/status", svc.IlinkHandler.GetStatus)
+		ilink.Post("/bind-code", svc.IlinkHandler.CreateBindCode)
+		ilink.Post("/unbind", svc.IlinkHandler.Unbind)
+		ilink.Put("/default-project", svc.IlinkHandler.SetDefaultProject)
 	}
 
 	// Model config endpoints

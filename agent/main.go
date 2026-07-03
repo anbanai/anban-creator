@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/urfave/cli/v3"
 )
+
+var agentHeartbeatInterval = 30 * time.Second
 
 func main() {
 	cmd := newAgentCommand(os.Stdout, os.Stderr, func(ctx context.Context, cfg *Config) error {
@@ -77,6 +80,13 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	heartbeatDone := startHeartbeat(heartbeatCtx, reporter)
+	defer func() {
+		stopHeartbeat()
+		<-heartbeatDone
+	}()
+
 	result, runErr := runner.Run(ctx)
 	if result == nil {
 		result = serverExecutionFailure(cfg.Workspace, runErr)
@@ -114,6 +124,25 @@ func runAgent(ctx context.Context, cfg *Config, stdout, stderr io.Writer) error 
 		return fmt.Errorf("agent execution failed")
 	}
 	return nil
+}
+
+func startHeartbeat(ctx context.Context, reporter *Reporter) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = reporter.ReportHeartbeat(ctx)
+		ticker := time.NewTicker(agentHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = reporter.ReportHeartbeat(ctx)
+			}
+		}
+	}()
+	return done
 }
 
 func serverExecutionFailure(workspace string, err error) *serveragent.ExecutionResult {

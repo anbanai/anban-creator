@@ -35,7 +35,7 @@ func filterAgentEnv(env map[string]string) map[string]string {
 // UserPromptParams holds the inputs for BuildUserPrompt. Struct keeps call sites
 // readable as fields are added and prevents argument-order bugs.
 //
-// The prompt is BEHAVIORAL ONLY (agent + topic, task/project ids, compact
+// The prompt is BEHAVIORAL ONLY (task type + topic, task/project ids, compact
 // runtime controls, goal condition). The visual / writer / author / theme
 // dimensions never enter the prompt — they are single-sourced via
 // resolver.ResolveStyle and delivered to the agent through two purposeful
@@ -45,7 +45,6 @@ func filterAgentEnv(env map[string]string) map[string]string {
 type UserPromptParams struct {
 	TaskType  string // model.PlatformArticle / model.PlatformSeednote
 	Topic     string // user prompt; empty triggers autonomous research mode
-	AgentName string
 	Goal      string // goal-mode condition; empty = no /goal prefix
 	TaskID    string // injected as task_id=<x> into the prompt body
 	ProjectID string // injected as project_id=<x> into the prompt body
@@ -93,12 +92,12 @@ func BuildUserPrompt(p UserPromptParams) string {
 	var base string
 	if p.Topic == "" {
 		base = fmt.Sprintf(
-			"Use the %s agent to research and create content. "+
+			"Run the full %s creation workflow. "+
 				"Analyze the project profile, keywords, and historical topics "+
 				"to choose the optimal theme, then execute the full creation workflow.",
-			p.AgentName)
+			p.TaskType)
 	} else {
-		base = fmt.Sprintf("Use the %s agent to create content about: %s", p.AgentName, p.Topic)
+		base = fmt.Sprintf("Run the full %s creation workflow; create content about: %s", p.TaskType, p.Topic)
 	}
 	if controls := describeRuntimeControls(p); controls != "" {
 		base += "\n\n" + controls
@@ -507,7 +506,6 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	userPrompt := BuildUserPrompt(UserPromptParams{
 		TaskType:                 opts.Task.Type,
 		Topic:                    opts.Task.Prompt,
-		AgentName:                agentName,
 		Goal:                     opts.Task.Goal,
 		TaskID:                   opts.Task.ID,
 		ProjectID:                projectID,
@@ -946,29 +944,7 @@ func ListWorkDirFilesRoot(workDir string) ([]map[string]any, error) {
 // (created by the agent via mkdir -p) to exclude agent runtime artifacts.
 // Returns the count of actual files (not directories) at any nesting depth.
 func CountMeaningfulFiles(workDir string) int {
-	scanDir := workDir
-	if info, err := os.Stat(filepath.Join(workDir, "output")); err == nil && info.IsDir() {
-		scanDir = filepath.Join(workDir, "output")
-	}
-
-	count := 0
-	filepath.WalkDir(scanDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".anban-creator", ".claude":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if strings.HasPrefix(d.Name(), ".") {
-			return nil
-		}
-		count++
-		return nil
-	})
+	_, count := collectWorkDirArtifacts(workDir)
 	return count
 }
 

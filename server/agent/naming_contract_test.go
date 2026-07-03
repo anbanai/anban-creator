@@ -105,6 +105,9 @@ func assertTrackedFilesDoNotContainLegacyNames(t *testing.T, root string) {
 		fullPath := filepath.Join(root, path)
 		info, err := os.Stat(fullPath)
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			t.Fatalf("stat %s: %v", path, err)
 		}
 		if info.IsDir() {

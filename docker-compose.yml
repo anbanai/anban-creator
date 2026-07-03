@@ -139,9 +139,9 @@ services:
       ANBAN_DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-anban_creator_dev}@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local"
       ANBAN_REDIS_ADDR: "redis:6379"
       ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR: "/app/data/workspace"
-      # WeChat bot (wcfLink sidecar). Uses the compose service name, not localhost.
-      ANBAN_WCF_ENABLED: "true"
-      ANBAN_WCF_BASE_URL: "http://wcflink:18070"
+      # ilink WeChat assistant channel. Uses the compose service name, not localhost.
+      ANBAN_ILINK_ENABLED: "true"
+      ANBAN_ILINK_BASE_URL: "http://wcflink:18070"
     volumes:
       - ./server/config.yaml:/app/conf/config.yaml:ro
       - ./data/files:/app/data/files

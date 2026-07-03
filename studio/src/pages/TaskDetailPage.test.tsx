@@ -108,7 +108,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
   })
 
-  it('shows project parameters with the reference image before the visual style', async () => {
+  it('shows project parameters without the low-value reference image preview', async () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
@@ -132,8 +132,9 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByText('项目参数')).toBeInTheDocument()
     expect(screen.queryByText('项目快照')).not.toBeInTheDocument()
     expect(screen.getByText('快照项目')).toBeInTheDocument()
-    const referenceImage = await screen.findByRole('img', { name: '参考图' })
-    expect(referenceImage.compareDocumentPosition(screen.getByText('视觉风格')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('img', { name: '参考图' })).not.toBeInTheDocument()
+    expect(screen.queryByText('参考图')).not.toBeInTheDocument()
+    expect(screen.getByText('视觉风格')).toBeInTheDocument()
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
     expect(screen.getByText('安般')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()

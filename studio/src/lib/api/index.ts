@@ -16,7 +16,7 @@ import { resourcesApi } from './resources'
 import { topicPoolApi } from './topic-pool'
 import { designerApi } from './designer'
 import { imageModelsApi } from './image-models'
-import { wechatApi } from './wechat'
+import { ilinkApi } from './ilink'
 import { videoApi } from './video'
 
 export const api = {
@@ -38,6 +38,6 @@ export const api = {
   topicPool: topicPoolApi,
   designer: designerApi,
   imageModels: imageModelsApi,
-  wechat: wechatApi,
+  ilink: ilinkApi,
   video: videoApi,
 }
