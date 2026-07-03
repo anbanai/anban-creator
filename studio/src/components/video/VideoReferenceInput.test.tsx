@@ -3,12 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { VideoReferenceInput } from './VideoReferenceInput'
 import type { VideoReferenceAsset } from '@/types'
 import { http } from '@/lib/http-client'
+import { uploadToOSS } from '@/lib/direct-upload'
 
 vi.mock('@/lib/http-client', () => ({
   http: {
     get: vi.fn(),
-    post: vi.fn(),
   },
+}))
+
+vi.mock('@/lib/direct-upload', () => ({
+  uploadToOSS: vi.fn(),
 }))
 
 describe('VideoReferenceInput', () => {
@@ -81,9 +85,9 @@ describe('VideoReferenceInput', () => {
 
   it('uploads multiple media files, keeps successful items, and reports per-file failures', async () => {
     const onChange = vi.fn()
-    vi.mocked(http.post)
-      .mockResolvedValueOnce({ data: { data: { url: '/api/v1/files/uploads/video-references/u/cup.png', type: 'image/png', size: 123 } } })
-      .mockRejectedValueOnce({ response: { data: { msg: 'failed to measure video reference duration' } } })
+    vi.mocked(uploadToOSS)
+      .mockResolvedValueOnce({ uploadId: '1', key: 'k1', publicUrl: '/api/v1/files/uploads/video-references/u/cup.png', contentType: 'image/png', size: 123 })
+      .mockRejectedValueOnce(new Error('OSS 上传失败，请重试'))
 
     render(<VideoReferenceInput value={[]} onChange={onChange} />)
 
@@ -104,14 +108,14 @@ describe('VideoReferenceInput', () => {
         file_name: 'cup.png',
       })])
     })
-    expect(await screen.findByText('bad.mp4：无法解析视频时长，请换一个 MP4/MOV/WebM 文件或稍后重试。')).toBeInTheDocument()
+    expect(await screen.findByText('bad.mp4：OSS 上传失败，请重试')).toBeInTheDocument()
   })
 
   it('shows upload progress for the active media file', async () => {
     const onChange = vi.fn()
     let resolveUpload: (value: unknown) => void = () => {}
-    vi.mocked(http.post).mockImplementation((_url, _form, config: any) => {
-      config.onUploadProgress?.({ loaded: 25, total: 100 })
+    vi.mocked(uploadToOSS).mockImplementation(({ onProgress }) => {
+      onProgress?.(25)
       return new Promise((resolve) => {
         resolveUpload = resolve
       }) as any
@@ -129,7 +133,7 @@ describe('VideoReferenceInput', () => {
     expect(await screen.findByText('cup.png')).toBeInTheDocument()
     expect(await screen.findByText('25%')).toBeInTheDocument()
 
-    resolveUpload({ data: { data: { url: '/api/v1/files/uploads/video-references/u/cup.png', type: 'image/png', size: 123 } } })
+    resolveUpload({ uploadId: '1', key: 'k1', publicUrl: '/api/v1/files/uploads/video-references/u/cup.png', contentType: 'image/png', size: 123 })
     await waitFor(() => expect(onChange).toHaveBeenCalled())
   })
 

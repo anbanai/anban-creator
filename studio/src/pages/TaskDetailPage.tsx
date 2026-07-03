@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { videoModelDisplayName } from '@/lib/video-display'
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -772,7 +773,7 @@ export default function TaskDetailPage() {
               <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <p className="text-xs text-muted-foreground">视频模型</p>
-                  <p className="mt-1 text-sm text-foreground">{task.video_config.model_key || task.video_config.model || '—'}</p>
+                  <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(task.video_config.model_key || task.video_config.model) || '—'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">规格</p>
@@ -904,7 +905,7 @@ export default function TaskDetailPage() {
                 </p>
                 {task.video_config?.pricing_breakdown && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {task.video_config.pricing_breakdown.model_key} · {task.video_config.pricing_breakdown.resolution} · 输出 {task.video_config.pricing_breakdown.output_seconds}s
+                    {videoModelDisplayName(task.video_config.pricing_breakdown.model_key)} · {task.video_config.pricing_breakdown.resolution} · 输出 {task.video_config.pricing_breakdown.output_seconds}s
                     {task.video_config.pricing_breakdown.input_video && typeof task.video_config.pricing_breakdown.input_seconds === 'number'
                       ? ` · 输入视频 ${task.video_config.pricing_breakdown.input_seconds}s`
                       : ''}

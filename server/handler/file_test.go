@@ -107,6 +107,72 @@ func TestUploadVideoReferenceAllowsMediaAndUsesVideoReferencePrefix(t *testing.T
 	}
 }
 
+func TestUploadVideoReferenceDoesNotBlockWhenDurationProbeFails(t *testing.T) {
+	originalProbe := execVideoReferenceDurationProbe
+	execVideoReferenceDurationProbe = func(_ context.Context, _ string) ([]byte, error) {
+		return nil, context.Canceled
+	}
+	t.Cleanup(func() {
+		execVideoReferenceDurationProbe = originalProbe
+	})
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	store := &fakeStorageProvider{data: map[string][]byte{}}
+	h := NewFileHandler(store, &logger)
+
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return c.Next()
+	})
+	app.Post("/files/upload", h.Upload)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("purpose", "video_reference"); err != nil {
+		t.Fatalf("write purpose: %v", err)
+	}
+	part, err := writer.CreateFormFile("file", "sample.mp4")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom")); err != nil {
+		t.Fatalf("write mp4 bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/files/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var decoded struct {
+		Data struct {
+			Key                  string  `json:"key"`
+			InputDurationSeconds float64 `json:"input_duration_seconds"`
+			Warning              string  `json:"duration_probe_warning"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if decoded.Data.Key == "" {
+		t.Fatalf("expected uploaded key, got %+v", decoded.Data)
+	}
+	if decoded.Data.InputDurationSeconds != 0 {
+		t.Fatalf("input_duration_seconds = %v, want omitted/zero", decoded.Data.InputDurationSeconds)
+	}
+	if decoded.Data.Warning == "" {
+		t.Fatalf("duration_probe_warning missing: %+v", decoded.Data)
+	}
+}
+
 func TestServeFile_AllowsDesignerPathForOwner(t *testing.T) {
 	app := setupFileHandlerTest("user-1")
 

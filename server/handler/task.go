@@ -205,6 +205,17 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, "goal must not exceed 4000 characters")
 		}
 	}
+	if h.repo != nil {
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL}); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeEcommercePhoto, req.ProductPhotos); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, videoReferenceURLs(req.VideoConfig)); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+	}
 
 	// Build the e-commerce package config when any e-commerce field is present.
 	// The service only consults it when the project platform is "ecommerce".

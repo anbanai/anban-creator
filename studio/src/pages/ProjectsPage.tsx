@@ -1019,21 +1019,6 @@ export default function ProjectsPage() {
                     )}
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <FormField control={form.control} name="video_defaults.purpose" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>默认目标</FormLabel>
-                        <Select value={field.value || 'planting'} onValueChange={field.onChange}>
-                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            <SelectItem value="planting">种草</SelectItem>
-                            <SelectItem value="ecommerce">带货</SelectItem>
-                            <SelectItem value="lead_gen">获客</SelectItem>
-                            <SelectItem value="promotion">推广</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
                     <FormField control={form.control} name="video_defaults.model_key" render={({ field }) => (
                       <FormItem>
                         <FormLabel>默认模型</FormLabel>

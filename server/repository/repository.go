@@ -16,6 +16,7 @@ type Repository interface {
 	Plans() PlanRepository
 	Tasks() TaskRepository
 	TaskFiles() TaskFileRepository
+	PendingUploads() PendingUploadRepository
 	Projects() ProjectRepository
 	Credits() CreditRepository
 	APIKeys() APIKeyRepository
@@ -170,6 +171,15 @@ type TaskFileRepository interface {
 	ExistsByTaskIDAndID(ctx context.Context, taskID, fileID string) (bool, error)
 }
 
+// PendingUploadRepository tracks browser-direct uploads until submit finalizes them.
+type PendingUploadRepository interface {
+	CreatePendingUpload(ctx context.Context, upload *model.PendingUpload) error
+	FindPendingUploadByID(ctx context.Context, id string) (*model.PendingUpload, error)
+	FinalizePendingUploads(ctx context.Context, ids []string, finalizedAt time.Time) error
+	FindExpiredPendingUploads(ctx context.Context, before time.Time, limit int) ([]*model.PendingUpload, error)
+	MarkPendingUploadExpired(ctx context.Context, id string, expiredAt time.Time) error
+}
+
 // FeedbackRepository provides access to the feedbacks table.
 type FeedbackRepository interface {
 	Create(ctx context.Context, feedback *model.Feedback) error
@@ -234,6 +244,7 @@ type repository struct {
 	plans                   PlanRepository
 	tasks                   TaskRepository
 	files                   TaskFileRepository
+	pendingUploads          PendingUploadRepository
 	projects                ProjectRepository
 	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
@@ -258,6 +269,7 @@ func New(db *gorm.DB) Repository {
 	plans := newPlanRepository(db)
 	tasks := newTaskRepository(db)
 	files := newTaskFileRepository(db)
+	pendingUploads := newPendingUploadRepository(db)
 	projects := newProjectRepository(db)
 	credits := newCreditRepository(db)
 	apiKeys := newAPIKeyRepository(db)
@@ -281,6 +293,7 @@ func New(db *gorm.DB) Repository {
 		plans:                   plans,
 		tasks:                   tasks,
 		files:                   files,
+		pendingUploads:          pendingUploads,
 		projects:                projects,
 		credits:                 credits,
 		apiKeys:                 apiKeys,
@@ -304,6 +317,7 @@ func (r *repository) Sessions() SessionRepository                   { return r.s
 func (r *repository) Plans() PlanRepository                         { return r.plans }
 func (r *repository) Tasks() TaskRepository                         { return r.tasks }
 func (r *repository) TaskFiles() TaskFileRepository                 { return r.files }
+func (r *repository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
 func (r *repository) Projects() ProjectRepository                   { return r.projects }
 func (r *repository) Credits() CreditRepository                     { return r.credits }
 func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
@@ -360,6 +374,7 @@ type txRepository struct {
 	plans                   PlanRepository
 	tasks                   TaskRepository
 	files                   TaskFileRepository
+	pendingUploads          PendingUploadRepository
 	projects                ProjectRepository
 	credits                 CreditRepository
 	apiKeys                 APIKeyRepository
@@ -385,6 +400,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		plans:                   newPlanRepository(tx),
 		tasks:                   newTaskRepository(tx),
 		files:                   newTaskFileRepository(tx),
+		pendingUploads:          newPendingUploadRepository(tx),
 		projects:                newProjectRepository(tx),
 		credits:                 newCreditRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
@@ -408,6 +424,7 @@ func (r *txRepository) Sessions() SessionRepository                   { return r
 func (r *txRepository) Plans() PlanRepository                         { return r.plans }
 func (r *txRepository) Tasks() TaskRepository                         { return r.tasks }
 func (r *txRepository) TaskFiles() TaskFileRepository                 { return r.files }
+func (r *txRepository) PendingUploads() PendingUploadRepository       { return r.pendingUploads }
 func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
 func (r *txRepository) Credits() CreditRepository                     { return r.credits }
 func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }

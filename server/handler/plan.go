@@ -140,6 +140,14 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
 	}
+	if h.repo != nil {
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{req.ReferenceImageURL}); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, videoReferenceURLs(req.VideoConfig)); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+	}
 
 	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
 		UserID:                   userID,
@@ -278,6 +286,16 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 
 	if req.GoalMode != nil && *req.GoalMode && strings.TrimSpace(req.Goal) == "" {
 		return Error(c, fiber.StatusBadRequest, "goal must not be empty when goal_mode is true")
+	}
+	if h.repo != nil {
+		if req.ReferenceImageURL != nil {
+			if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeTaskReference, []string{*req.ReferenceImageURL}); err != nil {
+				return Error(c, fiber.StatusBadRequest, err.Error())
+			}
+		}
+		if err := finalizePendingURLs(c.Context(), h.repo.PendingUploads(), userID, service.DirectUploadPurposeVideoReference, videoReferenceURLs(req.VideoConfig)); err != nil {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 	}
 
 	plan, err := h.service.Update(c.Context(), service.UpdatePlanParams{

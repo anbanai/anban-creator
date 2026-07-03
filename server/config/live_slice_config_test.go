@@ -49,6 +49,7 @@ func TestExpandEnvVars(t *testing.T) {
 func TestNewConfigEnvInterpolation(t *testing.T) {
 	t.Setenv("ANBAN_TEST_REDIS", "redis:6379")
 	t.Setenv("ANBAN_TEST_ILINK_URL", "http://wcflink:18070")
+	t.Setenv("ANBAN_TEST_SEEDNOTE_URL", "http://seednote:18060")
 	// An unrelated env var that must NOT leak into config.
 	t.Setenv("ANBAN_JWT_SECRET_KEY", "should-be-ignored-without-placeholder")
 
@@ -64,6 +65,8 @@ jwt:
   refresh_expiry: "168h"
 redis:
   addr: "${ANBAN_TEST_REDIS:-localhost:6379}"
+seednote:
+  base_url: "${ANBAN_TEST_SEEDNOTE_URL:-http://localhost:18060}"
 ilink:
   enabled: true
   base_url: "${ANBAN_TEST_ILINK_URL:-http://localhost:18070}"
@@ -87,6 +90,9 @@ claude:
 	}
 	if cfg.Ilink.BaseURL != "http://wcflink:18070" {
 		t.Errorf("ilink.base_url = %q, want http://wcflink:18070", cfg.Ilink.BaseURL)
+	}
+	if cfg.Seednote.BaseURL != "http://seednote:18060" {
+		t.Errorf("seednote.base_url = %q, want http://seednote:18060", cfg.Seednote.BaseURL)
 	}
 	if !cfg.Ilink.Enabled {
 		t.Errorf("ilink.enabled = false, want true")

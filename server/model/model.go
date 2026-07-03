@@ -11,6 +11,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&Plan{},
 		&Task{},
 		&TaskFile{},
+		&PendingUpload{},
 		&CreditTransaction{},
 		&APIKey{},
 		&Feedback{},

@@ -80,6 +80,10 @@ storage:
   bucket_name: "" # OSS bucket name
   region: "" # OSS region, e.g. "cn-hangzhou"
   custom_domain: "" # Optional CDN domain for public file URLs
+  sts_role_arn: "" # Optional RAM role ARN for Studio browser direct uploads
+  sts_session_name: "studio-direct-upload" # Optional STS session name
+  sts_endpoint: "" # Optional STS endpoint override
+  direct_upload_expires_seconds: 900 # Studio direct upload credential TTL
   local_data_dir: "./data/files" # Local provider: where to store files
 
 # ---------------------------------------------------------------------------
@@ -360,6 +364,15 @@ asynq:
 invitation:
   enabled: false # Master switch for invite-required registration.
   max_per_user: 3 # Max invitation codes each user can generate.
+
+# ---------------------------------------------------------------------------
+# Seednote: 小红书解析 sidecar (搜索、详情、登录二维码、公开资料)
+# Optional. Docker Compose uses http://seednote:18060; local development uses
+# localhost by default. k8s should set ANBAN_SEEDNOTE_BASE_URL=http://seednote:18060.
+# ---------------------------------------------------------------------------
+seednote:
+  base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://localhost:18060}"
+  timeout: 30 # HTTP client timeout (seconds).
 
 # ---------------------------------------------------------------------------
 # ilink: platform WeChat assistant channel (任务通知 + 微信对话)

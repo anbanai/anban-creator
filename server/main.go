@@ -392,6 +392,7 @@ func main() {
 	var videoHandler *handler.VideoHandler
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
+	var uploadHandler *handler.UploadHandler
 	var feedbackHandler *handler.FeedbackHandler
 	var modelConfigHandler *handler.ModelConfigHandler
 	var imageModelHandler *handler.ImageModelHandler
@@ -432,6 +433,7 @@ func main() {
 		}
 		if store != nil {
 			projectHandler.SetStore(store)
+			projectHandler.SetPendingUploadRepository(repo.PendingUploads())
 		}
 		if seednoteClient != nil {
 			projectHandler.SetSeednoteClient(seednoteClient)
@@ -447,6 +449,9 @@ func main() {
 		agentHandler = handler.NewAgentHandler(taskSvc, apiKeySvc, store, cfg.MCP.APIKey, log)
 		if store != nil {
 			fileHandler = handler.NewFileHandler(store, log)
+			uploadHandler = handler.NewUploadHandler(store, repo.PendingUploads(), service.DirectUploadConfig{
+				Storage: cfg.Storage,
+			}, log)
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
@@ -615,6 +620,11 @@ func main() {
 		defer reclaimCancel()
 		go startLocalClaimFallback(reclaimCtx, taskSvc, log)
 	}
+	if repo != nil && store != nil && store.Name() == "oss" {
+		uploadCleanupCtx, uploadCleanupCancel := context.WithCancel(context.Background())
+		defer uploadCleanupCancel()
+		service.StartPendingUploadCleanup(uploadCleanupCtx, store, repo.PendingUploads(), 30*time.Minute, log)
+	}
 
 	// 15.4 Start ilink inbound poller and terminal notification worker.
 	if ilinkPoller != nil {
@@ -653,6 +663,7 @@ func main() {
 		TimelineHandler:          timelineHandler,
 		APIKeyHandler:            apiKeyHandler,
 		FileHandler:              fileHandler,
+		UploadHandler:            uploadHandler,
 		FeedbackHandler:          feedbackHandler,
 		ModelConfigHandler:       modelConfigHandler,
 		ImageModelHandler:        imageModelHandler,

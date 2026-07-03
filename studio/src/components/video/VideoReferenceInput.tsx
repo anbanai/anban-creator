@@ -5,6 +5,7 @@ import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { http } from '@/lib/http-client'
+import { uploadToOSS } from '@/lib/direct-upload'
 import { isInternalStorageUrl, normalizeStorageUrl } from '@/lib/storage-url'
 import { cn } from '@/lib/utils'
 import { videoReferenceRoleLabel, videoReferenceRoles } from '@/lib/video-display'
@@ -47,12 +48,13 @@ function referenceDisplayName(ref: VideoReferenceAsset) {
 }
 
 function friendlyUploadError(err: any) {
-  const raw = String(err?.response?.data?.msg || err?.message || '').toLowerCase()
+  const original = String(err?.response?.data?.msg || err?.message || '')
+  const raw = original.toLowerCase()
+  if (original.includes('上传凭证已过期')) return original
+  if (original.includes('OSS 上传失败')) return original
+  if (original.includes('未配置 OSS')) return original
   if (raw.includes('50') || raw.includes('too large') || raw.includes('size') || raw.includes('exceed')) {
     return '文件超过 50MB，请压缩后再上传。'
-  }
-  if (raw.includes('measure video') || raw.includes('duration') || raw.includes('ffprobe')) {
-    return '无法解析视频时长，请换一个 MP4/MOV/WebM 文件或稍后重试。'
   }
   if (raw.includes('unsupported') || raw.includes('format') || raw.includes('mime') || raw.includes('content type')) {
     return '格式不支持，请上传图片、音频或 MP4/MOV/WebM 视频。'
@@ -256,31 +258,24 @@ export function VideoReferenceInput({
         continue
       }
       try {
-        const form = new FormData()
-        form.append('file', file)
-        form.append('purpose', 'video_reference')
-        const res = await http.post('/files/upload', form, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          onUploadProgress: (event) => {
-            const total = event.total || file.size
-            if (!total) {
-              updateProgress(progressId, 50)
-              return
-            }
-            updateProgress(progressId, Math.min(99, Math.round((event.loaded / total) * 100)))
-          },
+        const result = await uploadToOSS({
+          purpose: 'video_reference',
+          file,
+          onProgress: (percent) => updateProgress(progressId, percent),
         })
-        const data = res.data?.data ?? res.data
         updateProgress(progressId, 100)
         appendReference({
           type: referenceTypeForFile(file),
-          url: data.url,
+          url: result.publicUrl,
           reference_role: DEFAULT_REFERENCE_ROLE,
           file_name: file.name,
-          mime_type: data.type || file.type,
-          file_size: data.size || file.size,
-          input_duration_seconds: data.input_duration_seconds,
+          mime_type: result.contentType || file.type,
+          file_size: result.size || file.size,
+          input_duration_seconds: result.inputDurationSeconds,
         })
+        if (result.warning && file.type.startsWith('video/')) {
+          errors.push(`${file.name}：素材已上传，但暂未读取到视频时长，费用将按默认输入时长估算。`)
+        }
       } catch (err: any) {
         updateProgress(progressId, 100)
         errors.push(`${file.name}：${friendlyUploadError(err)}`)

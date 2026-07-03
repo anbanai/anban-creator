@@ -151,15 +151,18 @@ func (h *FileHandler) Upload(c fiber.Ctx) error {
 	}
 
 	var inputDurationSeconds float64
+	var durationProbeWarning string
 	if purpose == "video_reference" && strings.HasPrefix(mimeType, "video/") {
 		if _, err := src.Seek(0, 0); err != nil {
 			return Error(c, fiber.StatusBadRequest, "failed to read uploaded file")
 		}
 		duration, err := probeUploadedVideoDuration(c.Context(), src, ext)
 		if err != nil {
-			return Error(c, fiber.StatusBadRequest, err.Error())
+			durationProbeWarning = "video duration probe failed; pricing estimates will use the default input duration"
+			h.logger.Warn().Err(err).Str("filename", fileHeader.Filename).Msg("video reference duration probe failed")
+		} else {
+			inputDurationSeconds = duration
 		}
-		inputDurationSeconds = duration
 	}
 
 	// Rewind reader for upload.
@@ -194,6 +197,9 @@ func (h *FileHandler) Upload(c fiber.Ctx) error {
 	}
 	if inputDurationSeconds > 0 {
 		resp["input_duration_seconds"] = inputDurationSeconds
+	}
+	if durationProbeWarning != "" {
+		resp["duration_probe_warning"] = durationProbeWarning
 	}
 	return Success(c, resp)
 }

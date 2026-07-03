@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Plus, ZoomIn } from 'lucide-react'
 import http from '@/lib/http-client'
+import { uploadToOSS, type DirectUploadPurpose } from '@/lib/direct-upload'
 import { isInternalStorageUrl, normalizeStorageUrl } from '@/lib/storage-url'
 import {
   Dialog,
@@ -18,11 +19,15 @@ interface MultiImageUploadProps {
 const MAX_SIZE_MB = 10
 const ACCEPTED = 'image/jpeg,image/png,image/webp,image/gif,image/bmp'
 
+function directPurposeForMultiImage(purpose?: string): DirectUploadPurpose {
+  return purpose === 'reference' ? 'ecommerce_product_photo' : 'task_reference'
+}
+
 // MultiImageUpload manages an ordered list of image URLs (e.g. e-commerce product
-// photos). Each upload POSTs to /files/upload and appends the returned URL; order
-// is preserved end-to-end (the server materializes them as product_01..NN in the
-// agent workspace). Mirrors ReferenceImageUpload's upload + internal-storage
-// preview pattern, extended to a list.
+// photos). Each upload uses the shared direct-upload helper and appends the
+// returned URL; order is preserved end-to-end (the server materializes them as
+// product_01..NN in the agent workspace). Mirrors ReferenceImageUpload's upload
+// + internal-storage preview pattern, extended to a list.
 export function MultiImageUpload({ value = [], onChange, purpose, max = 16 }: MultiImageUploadProps) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
@@ -51,18 +56,15 @@ export function MultiImageUpload({ value = [], onChange, purpose, max = 16 }: Mu
           setUploadError(`${file.name} 超过 ${MAX_SIZE_MB}MB，已跳过`)
           continue
         }
-        const formData = new FormData()
-        formData.append('file', file)
-        if (purpose) formData.append('purpose', purpose)
-        const res = await http.post('/files/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
+        const result = await uploadToOSS({
+          purpose: directPurposeForMultiImage(purpose),
+          file,
         })
-        const url = (res.data as { data?: { url?: string } })?.data?.url
-        if (url) next.push(url)
+        if (result.publicUrl) next.push(result.publicUrl)
       }
       if (next.length > 0) onChange?.([...urls, ...next])
     } catch (err: any) {
-      setUploadError(err?.response?.data?.msg || '上传失败，请重试')
+      setUploadError(err?.message || err?.response?.data?.msg || '上传失败，请重试')
     } finally {
       setUploading(false)
     }

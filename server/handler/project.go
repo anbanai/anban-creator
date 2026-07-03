@@ -36,6 +36,7 @@ type ProjectHandler struct {
 	modelConfigSvc *service.ModelConfigService
 	templateSvc    *service.TemplateService
 	store          storage.Provider
+	pendingUploads service.PendingUploadRepository
 	seednoteClient *seednote.Client
 }
 
@@ -69,6 +70,10 @@ func (h *ProjectHandler) SetTemplateService(svc *service.TemplateService) {
 // SetStore injects a storage provider for reading locally uploaded files.
 func (h *ProjectHandler) SetStore(s storage.Provider) {
 	h.store = s
+}
+
+func (h *ProjectHandler) SetPendingUploadRepository(repo service.PendingUploadRepository) {
+	h.pendingUploads = repo
 }
 
 // signProjectURLs resolves stored image URLs (avatar, reference image) to
@@ -289,6 +294,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
+	if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.ReferenceImageURL}); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
@@ -387,6 +395,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 
 	// Force max_concurrent_tasks based on user tier.
 	ch.MaxConcurrentTasks = h.getTierMaxConcurrent(c)
+	if err := finalizePendingURLs(c.Context(), h.pendingUploads, userID, service.DirectUploadPurposeProjectReference, []string{req.ReferenceImageURL}); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 
 	updated, err := h.service.Update(c.Context(), userID, projectID, ch)
 	if err != nil {

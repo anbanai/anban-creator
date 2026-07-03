@@ -1,0 +1,29 @@
+package handler
+
+import (
+	"context"
+	"time"
+
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/service"
+)
+
+func finalizePendingURLs(ctx context.Context, repo service.PendingUploadRepository, userID, purpose string, urls []string) error {
+	if repo == nil || len(urls) == 0 {
+		return nil
+	}
+	return service.FinalizePendingUploadURLs(ctx, repo, userID, purpose, urls, time.Now())
+}
+
+func videoReferenceURLs(cfg *model.VideoTaskConfig) []string {
+	if cfg == nil || len(cfg.References) == 0 {
+		return nil
+	}
+	urls := make([]string, 0, len(cfg.References))
+	for _, ref := range cfg.References {
+		if ref.URL != "" {
+			urls = append(urls, ref.URL)
+		}
+	}
+	return urls
+}

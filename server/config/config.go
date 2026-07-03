@@ -192,14 +192,18 @@ func (c VideoAPIConfig) CreditMultiplierOrDefault() int {
 // StorageConfig holds file storage configuration.
 // Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
 type StorageConfig struct {
-	Provider        string `yaml:"provider"` // "oss" or "local", default "local"
-	Endpoint        string `yaml:"endpoint"` // OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
-	AccessKeyID     string `yaml:"access_key_id"`
-	AccessKeySecret string `yaml:"access_key_secret"`
-	BucketName      string `yaml:"bucket_name"`
-	Region          string `yaml:"region"`
-	CustomDomain    string `yaml:"custom_domain"`  // Optional CDN domain for public file URLs
-	LocalDataDir    string `yaml:"local_data_dir"` // Default "./data/files"
+	Provider                   string `yaml:"provider"` // "oss" or "local", default "local"
+	Endpoint                   string `yaml:"endpoint"` // OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
+	AccessKeyID                string `yaml:"access_key_id"`
+	AccessKeySecret            string `yaml:"access_key_secret"`
+	BucketName                 string `yaml:"bucket_name"`
+	Region                     string `yaml:"region"`
+	CustomDomain               string `yaml:"custom_domain"`                 // Optional CDN domain for public file URLs
+	STSRoleArn                 string `yaml:"sts_role_arn"`                  // Optional RAM role used for browser direct uploads
+	STSSessionName             string `yaml:"sts_session_name"`              // Optional direct upload STS session name
+	STSEndpoint                string `yaml:"sts_endpoint"`                  // Optional STS endpoint override
+	DirectUploadExpiresSeconds int    `yaml:"direct_upload_expires_seconds"` // Default 900
+	LocalDataDir               string `yaml:"local_data_dir"`                // Default "./data/files"
 }
 
 // SizesConfig holds per-platform image size defaults (ratio:tier format, e.g. "16:9", "3:4:4K").

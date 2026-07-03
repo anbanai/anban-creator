@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, ZoomIn, Upload } from 'lucide-react'
 import http from '@/lib/http-client'
+import { uploadToOSS, type DirectUploadPurpose } from '@/lib/direct-upload'
 import { isInternalStorageUrl, normalizeStorageUrl } from '@/lib/storage-url'
 import {
   Dialog,
@@ -16,6 +17,10 @@ interface ReferenceImageUploadProps {
 
 const MAX_SIZE_MB = 10
 const ACCEPTED = "image/jpeg,image/png,image/webp,image/gif"
+
+function directPurposeForReference(purpose?: "project" | "reference"): DirectUploadPurpose {
+  return purpose === 'project' ? 'project_reference' : 'task_reference'
+}
 
 export function ReferenceImageUpload({ value, onChange, purpose, compact }: ReferenceImageUploadProps) {
   const [previewUrl, setPreviewUrl] = useState<string>('')
@@ -77,17 +82,13 @@ export function ReferenceImageUpload({ value, onChange, purpose, compact }: Refe
     setUploadError('')
     setUploading(true)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      if (purpose) formData.append('purpose', purpose)
-      const res = await http.post('/files/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const result = await uploadToOSS({
+        purpose: directPurposeForReference(purpose),
+        file,
       })
-      const data = res.data as { data?: { url?: string } }
-      const url = data.data?.url
-      if (url) onChange?.(url)
+      if (result.publicUrl) onChange?.(result.publicUrl)
     } catch (err: any) {
-      setUploadError(err?.response?.data?.msg || '上传失败，请重试')
+      setUploadError(err?.message || err?.response?.data?.msg || '上传失败，请重试')
     } finally {
       setUploading(false)
     }

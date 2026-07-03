@@ -31,6 +31,12 @@ spec:
               value: ${version_switch}
             - name: TZ
               value: Asia/Shanghai
+            - name: ANBAN_SEEDNOTE_BASE_URL
+              value: http://seednote:18060
+            - name: ANBAN_ILINK_ENABLED
+              value: "true"
+            - name: ANBAN_ILINK_BASE_URL
+              value: http://wcflink:18070
           name: ${micro_service_name}-${version_switch}
           image: ${image_repo}
           ports:

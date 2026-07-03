@@ -12,13 +12,6 @@ import { VIDEO_PROJECT_DEFAULT_VALUE, buildVideoFormConfig, readVideoSelectValue
 import { videoModelDisplayName } from '@/lib/video-display'
 import type { Project, VideoModelSpec, VideoTaskConfig } from '@/types'
 
-const purposeLabels: Record<string, string> = {
-  planting: '种草',
-  ecommerce: '带货',
-  lead_gen: '获客',
-  promotion: '推广',
-}
-
 function yesNo(value: boolean | undefined) {
   return value ? '开启' : '关闭'
 }
@@ -49,7 +42,6 @@ export function VideoCreationPanel({
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const config = form.watch('video_config') as VideoTaskConfig | undefined
   const defaults = selectedProject?.video_defaults
-  const resolvedPurpose = settingValue(config?.purpose, defaults?.purpose, 'planting')
   const resolvedModel = settingValue(config?.model_key, defaults?.model_key, '')
   const resolvedResolution = settingValue(config?.resolution, defaults?.resolution, '720p')
   const resolvedRatio = settingValue(config?.ratio, defaults?.ratio, '9:16')
@@ -94,11 +86,7 @@ export function VideoCreationPanel({
       <section className="flex flex-col gap-3">
         <div>
           <p className="text-sm font-medium text-foreground">生成设置</p>
-          <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
-              <p className="text-muted-foreground">目标</p>
-              <p className="mt-0.5 font-medium text-foreground">{purposeLabels[resolvedPurpose] || resolvedPurpose}</p>
-            </div>
+          <div className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
             <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
               <p className="text-muted-foreground">模型</p>
               <p className="mt-0.5 truncate font-medium text-foreground">{resolvedModel ? videoModelDisplayName(resolvedModel) : '项目默认'}</p>
@@ -133,20 +121,6 @@ export function VideoCreationPanel({
             </Button>
           </div>
           {advancedOpen && <div className="grid gap-3 border-t border-border p-3 sm:grid-cols-2">
-            <FormField control={form.control} name="video_config.purpose" render={({ field }) => (
-              <FormItem>
-                <FormLabel>目标</FormLabel>
-                <Select value={field.value || defaults?.purpose || 'planting'} onValueChange={field.onChange}>
-                  <FormControl><SelectTrigger className="w-full"><SelectValue /></SelectTrigger></FormControl>
-                  <SelectContent>
-                    {Object.entries(purposeLabels).map(([value, label]) => (
-                      <SelectItem key={value} value={value} label={label}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )} />
             <FormField control={form.control} name="video_config.model_key" render={({ field }) => (
               <FormItem>
                 <FormLabel>模型</FormLabel>
