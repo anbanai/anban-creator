@@ -34,6 +34,57 @@ function referenceTypeLabel(type: string) {
   return '图片'
 }
 
+function referenceDisplayName(ref: VideoReferenceAsset) {
+  return ref.file_name || ref.text || ref.url || referenceTypeLabel(ref.type)
+}
+
+function VideoReferencePreview({ ref }: { ref: VideoReferenceAsset }) {
+  const label = referenceDisplayName(ref)
+  if (ref.type === 'image_url' && ref.url) {
+    return (
+      <img
+        src={ref.url}
+        alt={label}
+        className="h-16 w-24 rounded-md border border-border object-cover"
+        loading="lazy"
+      />
+    )
+  }
+  if (ref.type === 'video_url' && ref.url) {
+    return (
+      <video
+        aria-label={label}
+        controls
+        preload="metadata"
+        className="h-16 w-24 rounded-md border border-border bg-muted object-cover"
+      >
+        <source src={ref.url} type={ref.mime_type || undefined} />
+      </video>
+    )
+  }
+  if (ref.type === 'audio_url' && ref.url) {
+    return (
+      <div className="flex h-16 w-full min-w-0 items-center rounded-md border border-border bg-muted/30 px-2 sm:w-56">
+        <audio aria-label={label} controls preload="metadata" className="h-9 w-full">
+          <source src={ref.url} type={ref.mime_type || undefined} />
+        </audio>
+      </div>
+    )
+  }
+  if (ref.type === 'text' && ref.text) {
+    return (
+      <div className="h-16 w-full overflow-hidden rounded-md border border-border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground sm:w-56">
+        {ref.text}
+      </div>
+    )
+  }
+  return (
+    <div className="flex h-16 w-24 items-center justify-center rounded-md border border-border bg-muted/30 text-muted-foreground">
+      <FileVideo className="h-5 w-5" />
+    </div>
+  )
+}
+
 export function VideoReferenceInput({
   value = [],
   onChange,
@@ -140,13 +191,19 @@ export function VideoReferenceInput({
         <div className="divide-y divide-border rounded-lg border border-border">
           {value.map((ref, index) => (
             <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="grid gap-2 p-3 sm:grid-cols-[1fr_180px_auto] sm:items-center">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <FileVideo className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">{referenceTypeLabel(ref.type)}</span>
-                  <span className="truncate text-sm text-foreground">{ref.file_name || ref.text || ref.url}</span>
+              <div className="flex min-w-0 gap-3">
+                <VideoReferencePreview ref={ref} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <FileVideo className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">{referenceTypeLabel(ref.type)}</span>
+                    <span className="truncate text-sm text-foreground">{referenceDisplayName(ref)}</span>
+                  </div>
+                  {ref.url && <p className="mt-1 truncate text-xs text-muted-foreground">{ref.url}</p>}
+                  {ref.input_duration_seconds ? (
+                    <p className="mt-1 text-xs text-muted-foreground">输入时长 {ref.input_duration_seconds.toFixed(1)} 秒</p>
+                  ) : null}
                 </div>
-                {ref.url && <p className="mt-1 truncate text-xs text-muted-foreground">{ref.url}</p>}
               </div>
               <Select value={ref.reference_role || referenceRoles[0].value} onValueChange={(role) => updateAt(index, { reference_role: role || referenceRoles[0].value })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>

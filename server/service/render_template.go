@@ -110,9 +110,9 @@ func ParseLayoutPlan(raw any) (*LayoutPlan, error) {
 // used verbatim" contract. The theme (排版样式) is resolved from the task when
 // task_id is given.
 //
-// Module wrapping (hero/quote/callout/steps/cta) is not applied by the
-// deterministic renderer; slots that specify a module still place their image
-// but the module shell is omitted (rendered status notes it).
+// Layout modules are rendered deterministically from module_vars and the
+// embedded layout schema. Image-only slots remain compatible with existing
+// visual plans, while module-only slots must satisfy required module fields.
 // ---------------------------------------------------------------------------
 
 func (s *WritingService) RenderTemplate(
@@ -142,9 +142,13 @@ func (s *WritingService) RenderTemplate(
 		theme = s.resolveEffectiveTheme(ctx, taskID, ch)
 	}
 
-	// Deterministically fold the slot images into the markdown at their planned
-	// positions, then render the whole document with the structured theme.
-	augmented := applySlotsToMarkdown(markdown, layoutPlan)
+	// Deterministically fold slot images and layout modules into the markdown at
+	// their planned positions, then render the whole document with the structured
+	// theme.
+	augmented, err := applySlotsAndModulesToMarkdown(markdown, layoutPlan)
+	if err != nil {
+		return nil, err
+	}
 
 	nopLog := zerolog.Nop()
 	cvt := converter.NewConverterWithThemes(&nopLog, resources.Manager().GetAllRaw(resources.CategoryTheme))
@@ -156,7 +160,7 @@ func (s *WritingService) RenderTemplate(
 	// Slot images are final — render their placeholders as real <img> tags.
 	html := renderImagesAsRealTags(convResult.HTML, convResult.Images, layoutPlan)
 
-	slotsRendered := auditRenderedSlots(html, imageBearingSlots(layoutPlan))
+	slotsRendered := auditRenderedSlots(html, auditableSlots(layoutPlan))
 
 	s.logger.Info().
 		Str("user_id", userID).
@@ -248,6 +252,261 @@ func applySlotsToMarkdown(markdown string, plan *LayoutPlan) string {
 		}
 	}
 	return b.String()
+}
+
+func applySlotsAndModulesToMarkdown(markdown string, plan *LayoutPlan) (string, error) {
+	existing := collectInlineImageURLs(markdown)
+	slots := make([]LayoutPlanSlot, 0, len(plan.Slots))
+	for _, slot := range plan.Slots {
+		slots = append(slots, slot)
+	}
+	if plan.Footer != nil {
+		slots = append(slots, *plan.Footer)
+	}
+
+	sections := splitMarkdownByH2(markdown)
+	openers := map[int][]string{}
+	inlines := map[int][]LayoutPlanSlot{}
+	var hero []string
+	var footer []string
+
+	for _, slot := range slots {
+		block, err := slotMarkdownBlock(slot, existing)
+		if err != nil {
+			return "", err
+		}
+		if block == "" {
+			continue
+		}
+		switch slot.SlotID {
+		case "hero":
+			if len(hero) == 0 {
+				hero = append(hero, block)
+			}
+		case "section_opener":
+			openers[slot.SectionIndex] = append(openers[slot.SectionIndex], block)
+		case "inline_detail":
+			inlines[slot.SectionIndex] = append(inlines[slot.SectionIndex], slot)
+		case "footer":
+			footer = append(footer, block)
+		}
+	}
+
+	var b strings.Builder
+	if len(hero) > 0 {
+		b.WriteString(strings.Join(hero, "\n\n"))
+		b.WriteString("\n\n")
+	}
+	for i, section := range sections {
+		b.WriteString(renderSectionWithModuleBlocks(section, openers[i], inlines[i], existing))
+		b.WriteString("\n")
+	}
+	if len(footer) > 0 {
+		b.WriteString("\n")
+		b.WriteString(strings.Join(footer, "\n\n"))
+		b.WriteString("\n")
+	}
+	return b.String(), nil
+}
+
+func renderSectionWithModuleBlocks(section string, openerBlocks []string, inlines []LayoutPlanSlot, existing map[string]bool) string {
+	head := ""
+	body := section
+	if strings.HasPrefix(section, "## ") {
+		nl := strings.IndexByte(section, '\n')
+		if nl == -1 {
+			head = section
+			body = ""
+		} else {
+			head = section[:nl+1]
+			body = section[nl+1:]
+		}
+	}
+	var b strings.Builder
+	b.WriteString(head)
+	for _, block := range openerBlocks {
+		b.WriteString(block)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(insertInlineBlocks(body, inlines, existing))
+	return b.String()
+}
+
+func insertInlineBlocks(body string, inlines []LayoutPlanSlot, existing map[string]bool) string {
+	if len(inlines) == 0 || strings.TrimSpace(body) == "" {
+		return body
+	}
+	sorted := append([]LayoutPlanSlot(nil), inlines...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].AfterParagraphIndex < sorted[j].AfterParagraphIndex })
+
+	paras := splitParagraphs(body)
+	byPara := map[int][]string{}
+	for _, in := range sorted {
+		block, err := slotMarkdownBlock(in, existing)
+		if err != nil || block == "" {
+			continue
+		}
+		idx := in.AfterParagraphIndex
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(paras) {
+			idx = len(paras) - 1
+		}
+		byPara[idx] = append(byPara[idx], block)
+	}
+	var b strings.Builder
+	for i, p := range paras {
+		b.WriteString(p)
+		if blocks, ok := byPara[i]; ok {
+			for _, block := range blocks {
+				b.WriteString("\n\n")
+				b.WriteString(block)
+			}
+		}
+		b.WriteString("\n\n")
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+func slotMarkdownBlock(slot LayoutPlanSlot, existing map[string]bool) (string, error) {
+	parts := []string{}
+	if mod, err := renderLayoutModuleMarkdown(slot); err != nil {
+		return "", err
+	} else if mod != "" {
+		parts = append(parts, mod)
+	}
+	if slot.ImageURL != "" && !existing[slot.ImageURL] {
+		parts = append(parts, slotImageMarkdown(slot))
+	}
+	return strings.Join(parts, "\n\n"), nil
+}
+
+func renderLayoutModuleMarkdown(slot LayoutPlanSlot) (string, error) {
+	if slot.Module == nil || strings.TrimSpace(*slot.Module) == "" {
+		return "", nil
+	}
+	if len(slot.ModuleVars) == 0 && strings.TrimSpace(slot.ImageURL) != "" {
+		return "", nil
+	}
+	name := strings.TrimSpace(*slot.Module)
+	entry := resources.Manager().Get(resources.CategoryLayout, name)
+	if entry == nil {
+		return "", fmt.Errorf("module %s not found", name)
+	}
+	for _, field := range requiredFields(entry) {
+		if strings.TrimSpace(slot.ModuleVars[field.Name]) == "" {
+			return "", fmt.Errorf("module %s missing required field %s", name, field.Name)
+		}
+	}
+
+	switch name {
+	case "cta":
+		return renderCTAModule(slot.ModuleVars), nil
+	case "quote":
+		return renderQuoteModule(slot.ModuleVars), nil
+	case "hero":
+		return renderHeroModule(slot.ModuleVars), nil
+	default:
+		return renderGenericModule(name, slot.ModuleVars, entry), nil
+	}
+}
+
+func requiredFields(entry *resources.ResourceEntry) []resources.FieldSpec {
+	if entry == nil || entry.Fields == nil {
+		return nil
+	}
+	return entry.Fields.Required
+}
+
+func renderCTAModule(vars map[string]string) string {
+	var b strings.Builder
+	b.WriteString("---\n\n")
+	fmt.Fprintf(&b, "### %s\n\n", vars["title"])
+	if note := strings.TrimSpace(vars["note"]); note != "" {
+		fmt.Fprintf(&b, "%s\n\n", note)
+	}
+	if link := strings.TrimSpace(vars["link"]); link != "" {
+		fmt.Fprintf(&b, "**%s**\n\n", link)
+	}
+	b.WriteString("---")
+	return b.String()
+}
+
+func renderQuoteModule(vars map[string]string) string {
+	var b strings.Builder
+	if label := strings.TrimSpace(vars["label"]); label != "" {
+		fmt.Fprintf(&b, "**%s**\n\n", label)
+	}
+	fmt.Fprintf(&b, "> %s\n", vars["text"])
+	source := strings.TrimSpace(vars["source"])
+	role := strings.TrimSpace(vars["role"])
+	if source != "" && role != "" {
+		fmt.Fprintf(&b, "> -- %s，%s\n", source, role)
+	} else if source != "" {
+		fmt.Fprintf(&b, "> -- %s\n", source)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func renderHeroModule(vars map[string]string) string {
+	var b strings.Builder
+	if eyebrow := strings.TrimSpace(vars["eyebrow"]); eyebrow != "" {
+		fmt.Fprintf(&b, "**%s**\n\n", eyebrow)
+	}
+	if title := strings.TrimSpace(vars["title"]); title != "" {
+		fmt.Fprintf(&b, "# %s\n\n", title)
+	}
+	if subtitle := strings.TrimSpace(vars["subtitle"]); subtitle != "" {
+		fmt.Fprintf(&b, "## %s\n\n", subtitle)
+	}
+	if cta := strings.TrimSpace(vars["cta_text"]); cta != "" {
+		fmt.Fprintf(&b, "*%s*\n\n---", cta)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func renderGenericModule(name string, vars map[string]string, entry *resources.ResourceEntry) string {
+	var b strings.Builder
+	title := firstModuleValue(vars, entry)
+	if title == "" {
+		title = name
+	}
+	fmt.Fprintf(&b, "### %s\n\n", title)
+	keys := make([]string, 0, len(vars))
+	for key := range vars {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := vars[key]
+		if strings.TrimSpace(value) == "" || value == title {
+			continue
+		}
+		fmt.Fprintf(&b, "%s\n\n", value)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func firstModuleValue(vars map[string]string, entry *resources.ResourceEntry) string {
+	if entry != nil && entry.Fields != nil {
+		for _, field := range append(entry.Fields.Required, entry.Fields.Optional...) {
+			if value := strings.TrimSpace(vars[field.Name]); value != "" {
+				return value
+			}
+		}
+	}
+	keys := make([]string, 0, len(vars))
+	for key := range vars {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if value := strings.TrimSpace(vars[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // mdInlineImageRe matches a markdown image's URL: ![alt](url). Captures the URL
@@ -383,6 +642,19 @@ func imageBearingSlots(plan *LayoutPlan) []LayoutPlanSlot {
 	return out
 }
 
+func auditableSlots(plan *LayoutPlan) []LayoutPlanSlot {
+	var out []LayoutPlanSlot
+	for _, slot := range plan.Slots {
+		if slot.ImageURL != "" || slot.Module != nil {
+			out = append(out, slot)
+		}
+	}
+	if plan.Footer != nil && (plan.Footer.ImageURL != "" || plan.Footer.Module != nil) {
+		out = append(out, *plan.Footer)
+	}
+	return out
+}
+
 // renderImagesAsRealTags replaces <!-- IMG:N --> placeholders with real <img>
 // tags using each image's Original URL. RenderTemplate slots carry final URLs,
 // so — unlike ConvertMarkdown — no upload pipeline intervenes.
@@ -481,10 +753,12 @@ func splitMarkdownByH2(markdown string) []string {
 }
 
 // ---------------------------------------------------------------------------
-// auditRenderedSlots checks whether each image-bearing slot's URL actually
-// appears in the rendered HTML. Soft audit: missing slots are reported but
-// don't fail the whole render. WeChat CDN URLs are UUID-unique, so substring
-// collision is vanishingly unlikely for non-adversarial input.
+// auditRenderedSlots checks whether each auditable slot rendered. Image-bearing
+// slots must include their URL in the final HTML; module-only slots are marked
+// rendered once deterministic module rendering succeeds. Soft audit: missing
+// images are reported but don't fail the whole render. WeChat CDN URLs are
+// UUID-unique, so substring collision is vanishingly unlikely for
+// non-adversarial input.
 // ---------------------------------------------------------------------------
 
 func auditRenderedSlots(html string, slots []LayoutPlanSlot) []RenderedSlotAudit {

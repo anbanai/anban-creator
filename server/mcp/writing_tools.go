@@ -92,7 +92,7 @@ func registerWritingTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "render_template",
-		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the renderer freely decide image placement and layout), render_template annotates the markdown with explicit [SLOT: ...] markers so each image is placed at the planned position and each section is wrapped in the specified layout module. When task_id is given, the theme (排版样式) comes from the task's frozen project snapshot; old rows without a snapshot fall back to legacy task/project resolution. Use this when you have a visual-rhythm-plan that dictates where each image goes (hero / section_opener / inline_detail / footer).",
+		Description: "Render Markdown to WeChat HTML using a structured layout_plan (template-based). Unlike convert_markdown (which lets the renderer freely decide image placement and layout), render_template deterministically folds planned images and layout modules into the Markdown before theme rendering. When task_id is given, the theme (排版样式) comes from the task's frozen project snapshot; old rows without a snapshot fall back to legacy task/project resolution. Use this when visual-rhythm-plan.md dictates where each image/module goes (hero / section_opener / inline_detail / footer).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -139,6 +139,23 @@ func registerWritingTools(server *mcp.Server) {
 			"required": []any{"project_id", "markdown", "layout_plan"},
 		},
 	}, renderTemplateHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "inspect_article",
+		Description: "Inspect article Markdown, layout_plan, image mode, and draft readiness without generating images, uploading assets, charging credits, or creating drafts. Use before render_template/publish_draft to surface blockers and suggested fixes.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"project_id":         map[string]any{"type": "string", "description": "Project ID"},
+				"markdown":           map[string]any{"type": "string", "description": "Article Markdown"},
+				"article_image_mode": map[string]any{"type": "string", "enum": []any{"cover_and_content", "cover_only", "content_only", "text_only"}, "description": "Structured article image mode"},
+				"layout_plan":        map[string]any{"type": "object", "description": "Optional render_template layout_plan for slot readiness checks"},
+				"cover_media_id":     map[string]any{"type": "string", "description": "Cover media_id returned by generate_image/upload_to_cdn, when cover is enabled"},
+				"task_id":            map[string]any{"type": "string", "description": "Optional task ID for future task-scoped checks"},
+			},
+			"required": []any{"project_id", "markdown"},
+		},
+	}, inspectArticleHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "research_topics",
@@ -321,6 +338,48 @@ func renderTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	result, err := svcs.WritingSvc.RenderTemplate(ctx, userID, projectID, markdown, layoutPlan, theme, taskID)
 	if err != nil {
 		return billingError("render template", err), nil
+	}
+
+	return textResult(result)
+}
+
+func inspectArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.WritingSvc == nil {
+		return errorResult("writing service not available"), nil
+	}
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+
+	projectID, _ := args["project_id"].(string)
+	if projectID == "" {
+		return errorResult("project_id is required"), nil
+	}
+	markdown, _ := args["markdown"].(string)
+	if markdown == "" {
+		return errorResult("markdown is required"), nil
+	}
+
+	var layoutPlan *service.LayoutPlan
+	if raw, ok := args["layout_plan"]; ok && raw != nil {
+		plan, err := service.ParseLayoutPlan(raw)
+		if err != nil {
+			return errorResult(fmt.Sprintf("invalid layout_plan: %v", err)), nil
+		}
+		layoutPlan = plan
+	}
+
+	imageMode, _ := args["article_image_mode"].(string)
+	coverMediaID, _ := args["cover_media_id"].(string)
+
+	result, err := svcs.WritingSvc.InspectArticle(ctx, userID, service.InspectArticleRequest{
+		ProjectID:        projectID,
+		Markdown:         markdown,
+		ArticleImageMode: imageMode,
+		LayoutPlan:       layoutPlan,
+		CoverMediaID:     coverMediaID,
+	})
+	if err != nil {
+		return errorResult(err.Error()), nil
 	}
 
 	return textResult(result)

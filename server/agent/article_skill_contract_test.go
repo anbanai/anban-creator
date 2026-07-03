@@ -43,6 +43,20 @@ func TestArticleSkillContracts_ImageControlsSizesAndTextPolicy(t *testing.T) {
 			},
 		},
 		{
+			name: "codex article visual skill",
+			path: filepath.Join(root, "codex", "skills", "article-visual-design", "SKILL.md"),
+			required: []string{
+				`size="21:9"`,
+				`size="4:3"`,
+				`size="1:1"`,
+				"受控文字策略",
+				"article_image_mode",
+				"cover_only",
+				"text_only",
+				"不依赖项目级/任务级 image ratio",
+			},
+		},
+		{
 			name: "claudecode cover skill",
 			path: filepath.Join(root, "claudecode", "skills", "article-cover-design", "SKILL.md"),
 			required: []string{
@@ -85,6 +99,7 @@ func TestArticleSkillContracts_NoUnconditionalImageRequirements(t *testing.T) {
 	paths := []string{
 		filepath.Join(root, "claudecode", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "openclaw", "skills", "article", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "article", "SKILL.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -135,6 +150,8 @@ func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testin
 		filepath.Join(root, "claudecode", "skills", "article-visual-design", "SKILL.md"),
 		filepath.Join(root, "openclaw", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "openclaw", "skills", "article-visual-design", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "article", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "article-visual-design", "SKILL.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -151,6 +168,44 @@ func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testin
 			} {
 				if !strings.Contains(text, term) {
 					t.Fatalf("%s missing content-only ref_image_path guard term %q", path, term)
+				}
+			}
+		})
+	}
+}
+
+func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "claudecode", "skills", "content-writing", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "content-writing", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "content-writing", "SKILL.md"),
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			text := string(data)
+			for _, term := range []string{
+				"render_template",
+				"inspect_article",
+				"article_templates",
+				"主路径",
+				"convert_markdown` 只用于旧版 server 兼容降级",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing content-writing render contract term %q", path, term)
+				}
+			}
+			for _, stale := range []string{
+				"Markdown 转微信 HTML：调用 `convert_markdown` MCP 工具",
+				"排版模块使用标准 Markdown 语法，由 `convert_markdown` 工具中的 LLM 自动渲染",
+				"保存为 `$DIR/05-article.html`。",
+			} {
+				if strings.Contains(text, stale) {
+					t.Fatalf("%s still contains stale content-writing render path %q", path, stale)
 				}
 			}
 		})

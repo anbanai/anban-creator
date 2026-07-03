@@ -445,6 +445,67 @@ func TestRenderTemplate_UsesSlotImageSizeForInlineStyles(t *testing.T) {
 	assertImageStyleContains(t, result.HTML, "https://cdn/inline.png", "max-width:68%")
 }
 
+func TestRenderTemplate_RendersLayoutModuleFromSlotVars(t *testing.T) {
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	userID := "user-module-render-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+
+	markdown := "# 标题\n\n## 第一节\n\n正文。\n"
+	plan := &LayoutPlan{
+		ArticleType: "long-form-essay",
+		Slots: []LayoutPlanSlot{
+			{
+				SlotID:       "footer",
+				SectionIndex: -1,
+				Module:       strPtr("cta"),
+				ModuleVars: map[string]string{
+					"title": "觉得有用？",
+					"note":  "收藏起来，下次写文章直接用。",
+				},
+			},
+		},
+	}
+
+	result, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "", "")
+	if err != nil {
+		t.Fatalf("[FAIL] RenderTemplate error: %v", err)
+	}
+	if !strings.Contains(result.HTML, "觉得有用？") {
+		t.Fatalf("[FAIL] module title missing from HTML:\n%s", result.HTML)
+	}
+	if !strings.Contains(result.HTML, "收藏起来，下次写文章直接用。") {
+		t.Fatalf("[FAIL] module note missing from HTML:\n%s", result.HTML)
+	}
+	if len(result.SlotsRendered) != 1 {
+		t.Fatalf("[FAIL] SlotsRendered len = %d, want 1", len(result.SlotsRendered))
+	}
+	audit := result.SlotsRendered[0]
+	if audit.Module != "cta" || audit.Status != "rendered" {
+		t.Fatalf("[FAIL] module audit = %#v, want cta rendered", audit)
+	}
+}
+
+func TestRenderTemplate_RejectsLayoutModuleMissingRequiredVars(t *testing.T) {
+	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
+	userID := "user-module-missing-vars-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+
+	plan := &LayoutPlan{
+		ArticleType: "long-form-essay",
+		Slots: []LayoutPlanSlot{
+			{SlotID: "footer", SectionIndex: -1, Module: strPtr("cta")},
+		},
+	}
+
+	_, err := svc.RenderTemplate(context.Background(), userID, projectID, "# 标题\n", plan, "", "")
+	if err == nil {
+		t.Fatal("[FAIL] Expected missing required module var error")
+	}
+	if !strings.Contains(err.Error(), "module cta") || !strings.Contains(err.Error(), "title") {
+		t.Fatalf("[FAIL] module error should name cta.title, got: %v", err)
+	}
+}
+
 func TestRenderTemplate_ThemeFallbackToProjectTheme(t *testing.T) {
 	svc, repo := setupConvertTest(t, &diagnosticLLM{response: "unused"})
 	userID := "user-theme-fallback-001"

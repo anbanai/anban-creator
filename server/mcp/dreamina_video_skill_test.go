@@ -32,7 +32,7 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"获客",
 			"推广",
 			"register_video_reference",
-			"get_project_video_profile",
+			"get_project_profile",
 			"validate_video_generation_params",
 			"build_video_generation_plan",
 			"create_video_generation_task",
@@ -48,6 +48,8 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"references/mcp-contract.md",
 			"reference_role",
 			"project video profile",
+			"agent_brief",
+			"video.model_catalog",
 			"estimated dynamic credits",
 			"OSS-backed task file",
 		} {
@@ -102,7 +104,7 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 				}
 			}
 			if ref == "mcp-contract.md" {
-				for _, want := range []string{"get_project_video_profile", "validate_video_generation_params", "credit_multiplier", "estimated_credits", "pricing_breakdown", "task_file_id", "file_path", "ark_url", "OSS/CDN", "Provider raw URLs", "server-measured input video duration", "Do not trust agent-supplied input video duration"} {
+				for _, want := range []string{"get_project_profile", "resolved_profile", "agent_brief", "video.model_catalog", "validate_video_generation_params", "credit_multiplier", "estimated_credits", "pricing_breakdown", "task_file_id", "file_path", "ark_url", "OSS/CDN", "Provider raw URLs", "server-measured input video duration", "Do not trust agent-supplied input video duration"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
@@ -120,6 +122,7 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"credits: 3000",
 			"Duration: 15 seconds.",
 			"Ratio/resolution: `9:16` and `1080p`.",
+			"get_project_video_profile",
 		} {
 			if strings.Contains(body, banned) {
 				t.Fatalf("%s SKILL.md should not mention %q", plugin, banned)

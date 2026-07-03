@@ -12,13 +12,13 @@ import (
 func registerResourceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "list_resources",
-		Description: "List available embedded resources (themes, writers, layouts, image presets). Returns metadata for each resource including name, description, and category-specific fields.",
+		Description: "List available embedded resources (themes, writers, layouts, image presets, article templates). Returns metadata for each resource including name, description, and category-specific fields.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"category": map[string]any{
 					"type":        "string",
-					"enum":        []any{"themes", "writers", "layouts", "image_presets"},
+					"enum":        []any{"themes", "writers", "layouts", "image_presets", "article_templates"},
 					"description": "Resource category to list",
 				},
 				"platform": map[string]any{
@@ -32,18 +32,22 @@ func registerResourceTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_resource",
-		Description: "Get detailed metadata for a specific resource including usage guidance and syntax examples (for layouts).",
+		Description: "Get detailed metadata for a specific resource including usage guidance, schema, syntax examples, and optional raw YAML.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"category": map[string]any{
 					"type":        "string",
-					"enum":        []any{"themes", "writers", "layouts", "image_presets"},
+					"enum":        []any{"themes", "writers", "layouts", "image_presets", "article_templates"},
 					"description": "Resource category",
 				},
 				"name": map[string]any{
 					"type":        "string",
 					"description": "Resource name (e.g. 'autumn-warm', 'dan-koe', 'hero', 'cover-default')",
+				},
+				"include_raw": map[string]any{
+					"type":        "boolean",
+					"description": "Include read-only raw YAML for exact agent consumption",
 				},
 			},
 			"required": []any{"category", "name"},
@@ -72,6 +76,7 @@ func getResourceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	args := parseArgs(req.Params.Arguments)
 	category, _ := args["category"].(string)
 	name, _ := args["name"].(string)
+	includeRaw, _ := args["include_raw"].(bool)
 
 	if category == "" || name == "" {
 		return errorResult("category and name are required"), nil
@@ -101,10 +106,27 @@ func getResourceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		result["serves"] = entry.Serves
 		result["when_to_use"] = entry.WhenToUse
 		result["markdown_syntax"] = entry.MarkdownSyntax
+		result["body_format"] = entry.BodyFormat
+		result["fields"] = entry.Fields
+		result["rows"] = entry.Rows
 	case resources.CategoryImagePreset:
 		result["archetype"] = entry.Archetype
 		result["aspect_ratios"] = entry.AspectRatios
 		result["default_ratio"] = entry.DefaultRatio
+	case resources.CategoryArticleTemplate:
+		result["article_type"] = entry.TemplateArticleType
+		result["article_types"] = entry.TemplateArticleTypes
+		result["best_for"] = entry.TemplateBestFor
+		result["rhythm"] = entry.TemplateRhythm
+		result["image_count"] = entry.TemplateImageCount
+		result["modules"] = entry.TemplateModules
+		result["composition_guidance"] = entry.CompositionGuidance
+	}
+
+	if includeRaw {
+		if raw := resources.Manager().GetRaw(resources.Category(category), name); len(raw) > 0 {
+			result["raw"] = string(raw)
+		}
 	}
 
 	return textResult(result)

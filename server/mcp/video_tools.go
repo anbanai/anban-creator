@@ -26,18 +26,6 @@ import (
 
 func registerVideoTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
-		Name:        "get_project_video_profile",
-		Description: "Return the project's video defaults, model policy, global Seedance model catalog, and credit multiplier. Agents must read this before planning video generation.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"project_id": map[string]any{"type": "string"},
-			},
-			"required": []any{"project_id"},
-		},
-	}, getProjectVideoProfileHandler)
-
-	server.AddTool(&mcp.Tool{
 		Name:        "register_video_reference",
 		Description: "Register a publicly accessible HTTPS image/audio/video/text reference for Seedance video generation. Local/private URLs are rejected because Ark cannot fetch them; upload media to OSS/CDN first. file_path is server-local only.",
 		InputSchema: map[string]any{
@@ -108,30 +96,6 @@ func registerVideoTools(server *mcp.Server) {
 			"required": []any{"project_id", "video_url"},
 		},
 	}, downloadVideoGenerationResultHandler)
-}
-
-func getProjectVideoProfileHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	args := parseArgs(req.Params.Arguments)
-	projectID, _ := args["project_id"].(string)
-	if strings.TrimSpace(projectID) == "" {
-		return errorResult("project_id is required"), nil
-	}
-	project, err := mcpVideoProject(ctx, projectID)
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-	if project.Platform != model.PlatformVideo {
-		return errorResult("project is not a video generation project"), nil
-	}
-	catalog := videoModelCatalog()
-	service.SanitizeProjectVideoProfile(project, catalog)
-	return textResult(map[string]any{
-		"video_defaults":       project.VideoDefaults.Data(),
-		"video_model_policy":   project.VideoModelPolicy.Data(),
-		"model_catalog":        catalog,
-		"credit_multiplier":    videoCreditMultiplier(),
-		"persistent_file_rule": "all server-persistent references and generated results must be OSS-backed task files; local agent files are temporary only",
-	})
 }
 
 func videoGenerationInputSchema() map[string]any {
@@ -520,6 +484,7 @@ func mcpVideoProject(ctx context.Context, projectID string) (*model.Project, err
 	if err != nil {
 		return nil, err
 	}
+	service.SanitizeProjectVideoProfile(project, videoModelCatalog())
 	return project, nil
 }
 

@@ -4,10 +4,11 @@ package resources
 type Category string
 
 const (
-	CategoryTheme       Category = "themes"
-	CategoryWriter      Category = "writers"
-	CategoryLayout      Category = "layouts"
-	CategoryImagePreset Category = "image_presets"
+	CategoryTheme           Category = "themes"
+	CategoryWriter          Category = "writers"
+	CategoryLayout          Category = "layouts"
+	CategoryImagePreset     Category = "image_presets"
+	CategoryArticleTemplate Category = "article_templates"
 )
 
 // ResourceEntry is a resource's metadata summary for listing and display.
@@ -27,10 +28,13 @@ type ResourceEntry struct {
 	CategoryCn  string `json:"category_cn,omitempty"`
 
 	// Layout fields
-	LayoutCategory string   `json:"layout_category,omitempty"`
-	Serves         []string `json:"serves,omitempty"`
-	WhenToUse      string   `json:"when_to_use,omitempty"`
-	MarkdownSyntax string   `json:"markdown_syntax,omitempty"`
+	LayoutCategory string      `json:"layout_category,omitempty"`
+	Serves         []string    `json:"serves,omitempty"`
+	WhenToUse      string      `json:"when_to_use,omitempty"`
+	MarkdownSyntax string      `json:"markdown_syntax,omitempty"`
+	BodyFormat     string      `json:"body_format,omitempty"`
+	Fields         *FieldsSpec `json:"fields,omitempty"`
+	Rows           *RowsSpec   `json:"rows,omitempty"`
 
 	// Image preset fields
 	Kind         string   `json:"kind,omitempty"`
@@ -38,11 +42,20 @@ type ResourceEntry struct {
 	AspectRatios []string `json:"aspect_ratios,omitempty"`
 	DefaultRatio string   `json:"default_ratio,omitempty"`
 
+	// Article template fields
+	TemplateArticleType  string         `json:"template_article_type,omitempty"`
+	TemplateArticleTypes []string       `json:"template_article_types,omitempty"`
+	TemplateBestFor      []string       `json:"template_best_for,omitempty"`
+	TemplateRhythm       map[string]any `json:"template_rhythm,omitempty"`
+	TemplateImageCount   map[string]int `json:"template_image_count,omitempty"`
+	TemplateModules      []string       `json:"template_modules,omitempty"`
+	CompositionGuidance  []string       `json:"composition_guidance,omitempty"`
+
 	Tags []string `json:"tags,omitempty"`
 }
 
 // ValidCategories is the list of all resource categories.
-var ValidCategories = []Category{CategoryTheme, CategoryWriter, CategoryLayout, CategoryImagePreset}
+var ValidCategories = []Category{CategoryTheme, CategoryWriter, CategoryLayout, CategoryImagePreset, CategoryArticleTemplate}
 
 // IsPlatformRelevant checks if a resource category is relevant for a given platform.
 func (c Category) IsPlatformRelevant(platform string) bool {
@@ -53,6 +66,27 @@ func (c Category) IsPlatformRelevant(platform string) bool {
 		return platform == "article"
 	case CategoryImagePreset:
 		return platform == "article" || platform == "seednote"
+	case CategoryArticleTemplate:
+		return platform == "article"
 	}
 	return false
+}
+
+type FieldSpec struct {
+	Name        string   `yaml:"name" json:"name"`
+	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Enum        []string `yaml:"enum,omitempty" json:"enum,omitempty"`
+	Example     string   `yaml:"example,omitempty" json:"example,omitempty"`
+}
+
+type FieldsSpec struct {
+	Required []FieldSpec `yaml:"required,omitempty" json:"required,omitempty"`
+	Optional []FieldSpec `yaml:"optional,omitempty" json:"optional,omitempty"`
+}
+
+type RowsSpec struct {
+	Delimiter   string      `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
+	MinColumns  int         `yaml:"min_columns,omitempty" json:"min_columns,omitempty"`
+	Schema      []FieldSpec `yaml:"schema,omitempty" json:"schema,omitempty"`
+	Description string      `yaml:"description,omitempty" json:"description,omitempty"`
 }

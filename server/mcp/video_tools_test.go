@@ -393,7 +393,7 @@ func TestGetProjectVideoProfileFiltersUnconfiguredPolicyModels(t *testing.T) {
 		svcs = oldSvcs
 		billSvc = oldBill
 	})
-	ctx, repo, _, projectID := setupMCPVideoProject(t)
+	ctx, repo, userID, projectID := setupMCPVideoProject(t)
 	project, err := repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatalf("find project: %v", err)
@@ -423,20 +423,104 @@ func TestGetProjectVideoProfileFiltersUnconfiguredPolicyModels(t *testing.T) {
 		MaxDuration:          15,
 	}}}})
 
-	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":` + strconv.Quote(projectID) + `}`)}}
-	result, err := getProjectVideoProfileHandler(ctx, req)
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{"project_id": projectID})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	encoded, err := json.Marshal(info)
 	if err != nil {
-		t.Fatalf("getProjectVideoProfileHandler returned error: %v", err)
+		t.Fatalf("marshal profile: %v", err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
-	}
-	text := result.Content[0].(*mcp.TextContent).Text
+	text := string(encoded)
 	if strings.Contains(text, "missing-model") {
 		t.Fatalf("profile exposed unconfigured model: %s", text)
 	}
 	if !strings.Contains(text, `"allowed_models":["seedance-2.0"]`) {
 		t.Fatalf("profile did not preserve configured allowed model: %s", text)
+	}
+}
+
+func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
+	old := svcs
+	oldBill := billSvc
+	t.Cleanup(func() {
+		svcs = old
+		billSvc = oldBill
+	})
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	task.Prompt = "生成一条咖啡杯种草视频"
+	task.SetProjectSnapshot(model.ProjectSnapshot{
+		ProjectName:  "快照视频项目",
+		Platform:     model.PlatformVideo,
+		Instructions: "面向露营人群的咖啡杯项目",
+		Keywords:     "咖啡杯,露营,便携",
+		VisualStyle:  "自然光、真实手持，禁止卡通化",
+	})
+	task.SetVideoConfig(model.VideoTaskConfig{
+		Purpose:    service.VideoPurposePlanting,
+		ModelKey:   "seedance-2.0",
+		Resolution: "1080p",
+		Ratio:      "9:16",
+		Duration:   15,
+		References: []model.VideoReferenceAsset{{
+			Type:          "image_url",
+			URL:           "https://cdn.example.com/cup.png",
+			ReferenceRole: "product appearance",
+			FileName:      "cup.png",
+		}},
+	})
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"project_id": projectID,
+		"task_id":    taskID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	resolved, ok := info["resolved_profile"].(map[string]any)
+	if !ok {
+		t.Fatalf("resolved_profile missing or wrong type: %T", info["resolved_profile"])
+	}
+	if got := resolved["name"]; got != "快照视频项目" {
+		t.Fatalf("resolved_profile.name = %v, want snapshot project name", got)
+	}
+	if got := resolved["uses_project_snapshot"]; got != true {
+		t.Fatalf("uses_project_snapshot = %v, want true", got)
+	}
+	if got := resolved["creative_constraints"]; got != "自然光、真实手持，禁止卡通化" {
+		t.Fatalf("creative_constraints = %v, want snapshot visual style", got)
+	}
+	video, ok := info["video"].(map[string]any)
+	if !ok {
+		t.Fatalf("video block missing or wrong type: %T", info["video"])
+	}
+	defaults := video["defaults"].(map[string]any)
+	if got := defaults["model_key"]; got != "seedance-2.0" {
+		t.Fatalf("video.defaults.model_key = %v, want seedance-2.0", got)
+	}
+	policy := video["policy"].(map[string]any)
+	if got := policy["default_model"]; got != "seedance-2.0" {
+		t.Fatalf("video.policy.default_model = %v, want seedance-2.0", got)
+	}
+	refs := video["references"].([]model.VideoReferenceAsset)
+	if len(refs) != 1 || refs[0].ReferenceRole != "product appearance" {
+		t.Fatalf("video.references = %#v, want task video references", refs)
+	}
+	pricing := video["pricing"].(map[string]any)
+	if got := pricing["min_balance"]; got != service.MinVideoCreationBalance {
+		t.Fatalf("video.pricing.min_balance = %v, want %d", got, service.MinVideoCreationBalance)
+	}
+	brief, ok := info["agent_brief"].(string)
+	if !ok || !strings.Contains(brief, "快照视频项目") || !strings.Contains(brief, "自然光、真实手持") || !strings.Contains(brief, "seedance-2.0") {
+		t.Fatalf("agent_brief missing video project context: %#v", info["agent_brief"])
 	}
 }
 

@@ -182,6 +182,9 @@ func TestMCPHandlerToolsList(t *testing.T) {
 	if toolNames[deprecatedTool] {
 		t.Errorf("unexpected deprecated tool %q found in tools/list response", deprecatedTool)
 	}
+	if toolNames["get_project_video_profile"] {
+		t.Errorf("unexpected removed tool %q found in tools/list response", "get_project_video_profile")
+	}
 }
 
 func TestMCPFilePathSchemaDescriptionsDeclareLocality(t *testing.T) {

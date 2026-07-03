@@ -126,12 +126,12 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get a project's resolved creation profile for AI content generation. Returns the project's instructions positioning/keywords/name plus the EFFECTIVE (already-resolved) style/theme/author dimensions: `visual_style` (图片视觉, free text), `writer` (写作者 YAML resource key e.g. dan-koe), `author` (作者署名 — the published author name; pass verbatim to publish_draft's author, omit if empty), `theme` (排版 resource key e.g. autumn-warm). Studio-only writer display metadata such as avatars/nicknames is intentionally not exposed. These dimensions are independent and never derive from each other. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials.",
+		Description: "Get the resolved project runtime profile for AI content generation. This is the single project facts entrypoint: the server applies task snapshots, sanitizes secrets, resolves style/theme/author dimensions, and returns platform-specific blocks such as video or ecommerce. Video projects include resolved_profile, agent_brief, and video defaults/policy/model_catalog/pricing/references. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials or unavailable models.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "ecommerce"}, "description": "Filter output by content type"},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "ecommerce", "video"}, "description": "Legacy output hint. New agents should omit this and let the server return the platform-specific block automatically."},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID. When provided, reads the task's frozen project_snapshot so historical tasks stay reproducible. The task must belong to the same project and user, otherwise the call is rejected. Always pass task_id when one exists."},
 			},
 			"required": []any{"project_id"},
@@ -320,7 +320,6 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	if projectID == "" {
 		return nil, "project_id is required"
 	}
-	scope, _ := args["scope"].(string)
 	taskID, _ := args["task_id"].(string)
 
 	if svcs.ProjectSvc == nil {
@@ -335,6 +334,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	// Load the requested task (if any) so its frozen project snapshot surfaces.
 	// The task must belong to the same user+project, otherwise the call is rejected.
 	var task *model.Task
+	usesProjectSnapshot := false
 	if taskID != "" {
 		if svcs.TaskSvc == nil {
 			return nil, "task service not available"
@@ -350,7 +350,11 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		}
 		if snap := task.ProjectSnapshot.Data(); snap.Platform != "" {
 			ch = model.ProjectFromSnapshot(ch, snap)
+			usesProjectSnapshot = true
 		}
+	}
+	if ch.Platform == model.PlatformVideo {
+		service.SanitizeProjectVideoProfile(ch, videoModelCatalog())
 	}
 
 	// The dimensions are independent — the writer key never drives the visual
@@ -381,8 +385,29 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		"author_source":       r.AuthorSource,
 		"theme_source":        r.ThemeSource,
 	}
+	info["resolved_profile"] = map[string]any{
+		"id":                    ch.ID,
+		"name":                  ch.Name,
+		"platform":              ch.Platform,
+		"profile_url":           ch.ProfileURL,
+		"avatar_url":            ch.AvatarURL,
+		"instructions":          ch.Instructions,
+		"positioning":           ch.Instructions,
+		"keywords":              ch.Keywords,
+		"visual_style":          r.VisualStyle,
+		"creative_constraints":  r.VisualStyle,
+		"visual_style_label":    videoAwareVisualStyleLabel(ch.Platform),
+		"reference_image_url":   ch.ReferenceImageURL,
+		"image_ratio":           ch.ImageRatio,
+		"uses_project_snapshot": usesProjectSnapshot,
+		"sources": map[string]any{
+			"visual_style": r.VisualStyleSource,
+			"instructions": profileSource(usesProjectSnapshot),
+			"keywords":     profileSource(usesProjectSnapshot),
+		},
+	}
 
-	switch scope {
+	switch ch.Platform {
 	case "seednote":
 		// For seednote, style is a visual/image style description used for image prompt generation.
 		info["image_config"] = map[string]any{
@@ -429,6 +454,11 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		}
 		info["ecommerce"] = ec
 	}
+	if ch.Platform == model.PlatformVideo {
+		videoBlock := buildVideoProfileBlock(ch, task)
+		info["video"] = videoBlock
+		info["agent_brief"] = buildProjectAgentBrief(ch, r.VisualStyle, usesProjectSnapshot, videoBlock)
+	}
 
 	// Available resource options for the platform (best-effort; the embedded
 	// resource manager may be nil in some test contexts).
@@ -436,6 +466,7 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	if mgr != nil {
 		info["available_themes"] = mgr.ListByPlatform(resources.CategoryTheme, ch.Platform)
 		info["available_writers"] = mgr.ListByPlatform(resources.CategoryWriter, ch.Platform)
+		info["available_article_templates"] = mgr.ListByPlatform(resources.CategoryArticleTemplate, ch.Platform)
 
 		// Descriptions for the RESOLVED theme / writer key (not the raw project fields).
 		if r.Theme != "" {
@@ -454,6 +485,138 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 	}
 
 	return info, ""
+}
+
+func profileSource(usesProjectSnapshot bool) string {
+	if usesProjectSnapshot {
+		return "snapshot"
+	}
+	return "project"
+}
+
+func videoAwareVisualStyleLabel(platform string) string {
+	if platform == model.PlatformVideo {
+		return "视频风格与禁忌/创作约束"
+	}
+	return "视觉风格"
+}
+
+func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any {
+	defaults := ch.VideoDefaults.Data()
+	policy := ch.VideoModelPolicy.Data()
+	catalog := filterVideoCatalogForPolicy(videoModelCatalog(), policy)
+	taskConfig := model.VideoTaskConfig{}
+	if task != nil && task.Type == model.PlatformVideo {
+		taskConfig = task.VideoConfig.Data()
+	}
+	resolvedDefaults := map[string]any{
+		"purpose":    firstNonEmpty(taskConfig.Purpose, defaults.Purpose),
+		"model_key":  firstNonEmpty(taskConfig.ModelKey, defaults.ModelKey, policy.DefaultModel),
+		"resolution": firstNonEmpty(taskConfig.Resolution, defaults.Resolution),
+		"ratio":      firstNonEmpty(taskConfig.Ratio, defaults.Ratio),
+		"duration":   firstPositiveInt64(taskConfig.Duration, defaults.Duration),
+		"watermark":  firstBoolPtr(taskConfig.Watermark, defaults.Watermark),
+		"preflight":  taskOrDefaultPreflight(taskConfig, defaults, task != nil && task.Type == model.PlatformVideo),
+	}
+	return map[string]any{
+		"defaults": resolvedDefaults,
+		"policy": map[string]any{
+			"allowed_models":       policy.AllowedModels,
+			"default_model":        policy.DefaultModel,
+			"allow_auto_downgrade": policy.AllowAutoDowngrade,
+			"max_resolution":       policy.MaxResolution,
+			"max_duration":         policy.MaxDuration,
+			"model_selection_rule": "Only keys present in model_catalog and allowed_models are usable; the server rejects unavailable models.",
+			"auto_downgrade_label": "参数不支持时自动降到可用分辨率",
+		},
+		"model_catalog": catalog,
+		"references":    taskConfig.References,
+		"task_config":   taskConfig,
+		"pricing": map[string]any{
+			"credit_multiplier":       videoCreditMultiplier(),
+			"min_balance":             service.MinVideoCreationBalance,
+			"min_balance_description": "视频任务/计划创建和触发前需至少 100000 积分余额；实际扣费按动态估算费用。",
+			"estimate_rule":           "Server estimates credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",
+		},
+		"persistent_file_rule": "all server-persistent references and generated results must be OSS-backed task files; local agent files are temporary only",
+	}
+}
+
+func filterVideoCatalogForPolicy(catalog service.VideoModelCatalog, policy model.VideoModelPolicy) service.VideoModelCatalog {
+	if catalog == nil {
+		catalog = service.DefaultVideoModelCatalog()
+	}
+	if len(policy.AllowedModels) == 0 {
+		return catalog
+	}
+	filtered := service.VideoModelCatalog{}
+	for _, key := range policy.AllowedModels {
+		if spec, ok := catalog[key]; ok {
+			filtered[key] = spec
+		}
+	}
+	return filtered
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstPositiveInt64(values ...int64) int64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstBoolPtr(values ...*bool) any {
+	for _, value := range values {
+		if value != nil {
+			return *value
+		}
+	}
+	return nil
+}
+
+func taskOrDefaultPreflight(taskConfig model.VideoTaskConfig, defaults model.VideoDefaults, hasVideoTask bool) bool {
+	if hasVideoTask && taskConfig.Preflight {
+		return true
+	}
+	return defaults.Preflight
+}
+
+func buildProjectAgentBrief(ch *model.Project, creativeConstraints string, usesProjectSnapshot bool, videoBlock map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "项目：%s\n", ch.Name)
+	fmt.Fprintf(&b, "平台：%s\n", ch.Platform)
+	if ch.Instructions != "" {
+		fmt.Fprintf(&b, "项目定位：%s\n", ch.Instructions)
+	}
+	if ch.Keywords != "" {
+		fmt.Fprintf(&b, "关键词：%s\n", ch.Keywords)
+	}
+	if creativeConstraints != "" {
+		fmt.Fprintf(&b, "视频风格与禁忌/创作约束：%s\n", creativeConstraints)
+	}
+	if usesProjectSnapshot {
+		b.WriteString("配置来源：任务创建时冻结的项目快照\n")
+	}
+	if defaults, ok := videoBlock["defaults"].(map[string]any); ok {
+		fmt.Fprintf(&b, "视频默认参数：model=%v, resolution=%v, ratio=%v, duration=%v, watermark=%v\n",
+			defaults["model_key"], defaults["resolution"], defaults["ratio"], defaults["duration"], defaults["watermark"])
+	}
+	if pricing, ok := videoBlock["pricing"].(map[string]any); ok {
+		fmt.Fprintf(&b, "积分规则：创建/触发视频任务需余额至少 %v 积分，实际扣费以服务端动态估价为准。\n", pricing["min_balance"])
+	}
+	b.WriteString("模型规则：只能使用本 profile 返回的 video.model_catalog 与 video.policy.allowed_models 中的模型 key；未返回的模型不可使用。")
+	return b.String()
 }
 
 func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

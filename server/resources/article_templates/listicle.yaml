@@ -1,0 +1,51 @@
+name: listicle
+category: article
+description: |
+  清单/盘点模板——N 个并列项的有序罗列。
+  封面 + 每个清单项一张图，强调秩序感、并列对比。
+  视觉上所有清单项图建议使用同一种构图，强化"清单"识别度。
+article_types: [listicle, ranking, collection, top-N]
+best_for:
+  - '"N 个 XXX" 类型文章（3-10 项）'
+  - '工具/资源/书籍/方法盘点'
+  - '排行榜、对比清单'
+rhythm:
+  hero: required
+  section_opener: required
+  inline_detail: forbidden
+  footer: required
+image_count:
+  min: 4  # hero + ≥2 section_openers + footer = minimum 4 images for a real list
+  max: 8
+section_image_size: full-width
+modules:
+  preferred: [steps, metrics, callout, summary]
+  forbidden: [quote]
+pairs_well_with: [steps, metrics]
+composition_guidance:
+  - 所有 section 图使用同一种构图（推荐 俯拍 或 重复图案）
+  - 视觉主体建议包含数字/序号暗示（如"3 个茶杯"对应第 3 项）
+  - 避免戏剧化构图，保持秩序感和克制
+  - 颜色基调统一，让读者一眼识别这是同一组清单
+vision_verification:
+  required: true
+  strictness: medium
+  must_match_fields: [visual_brief, required_entities]
+  additional_checks:
+    - "图片是否传达了该清单项的核心信息（而非泛化场景）"
+slot_strategy: |
+  1. hero slot：封面图，2.35:1，建议含"清单"视觉暗示（如并列物件、序号）
+  2. section_opener slots：每个清单项一张，16:9，置于 ### 项号之后
+  3. footer slot：必选，使用 summary 或 cta 模块收束
+example_layout_plan: |
+  {
+    "article_type": "listicle",
+    "template_name": "listicle",
+    "slots": [
+      { "slot_id": "hero", "section_index": 0, "image_url": "<cover_cdn>", "image_size": "full-bleed", "module": "hero" },
+      { "slot_id": "section_opener", "section_index": 1, "image_url": "<img_01_cdn>", "image_size": "full-width", "module": "metrics" },
+      { "slot_id": "section_opener", "section_index": 2, "image_url": "<img_02_cdn>", "image_size": "full-width", "module": "metrics" },
+      { "slot_id": "section_opener", "section_index": 3, "image_url": "<img_03_cdn>", "image_size": "full-width", "module": "metrics" },
+      { "slot_id": "footer", "section_index": -1, "image_url": null, "module": "summary" }
+    ]
+  }

@@ -12,11 +12,12 @@ import (
 
 // ResourceManager provides read-only access to embedded YAML resources.
 type ResourceManager struct {
-	themes       map[string]*ResourceEntry
-	writers      map[string]*ResourceEntry
-	layouts      map[string]*ResourceEntry
-	imagePresets map[string]*ResourceEntry
-	rawContent   map[Category]map[string][]byte
+	themes           map[string]*ResourceEntry
+	writers          map[string]*ResourceEntry
+	layouts          map[string]*ResourceEntry
+	imagePresets     map[string]*ResourceEntry
+	articleTemplates map[string]*ResourceEntry
+	rawContent       map[Category]map[string][]byte
 }
 
 var globalManager *ResourceManager
@@ -35,16 +36,18 @@ func Manager() *ResourceManager { return globalManager }
 // NewResourceManager loads all embedded resources.
 func NewResourceManager() (*ResourceManager, error) {
 	rm := &ResourceManager{
-		themes:       make(map[string]*ResourceEntry),
-		writers:      make(map[string]*ResourceEntry),
-		layouts:      make(map[string]*ResourceEntry),
-		imagePresets: make(map[string]*ResourceEntry),
-		rawContent:   make(map[Category]map[string][]byte),
+		themes:           make(map[string]*ResourceEntry),
+		writers:          make(map[string]*ResourceEntry),
+		layouts:          make(map[string]*ResourceEntry),
+		imagePresets:     make(map[string]*ResourceEntry),
+		articleTemplates: make(map[string]*ResourceEntry),
+		rawContent:       make(map[Category]map[string][]byte),
 	}
 	rm.rawContent[CategoryTheme] = make(map[string][]byte)
 	rm.rawContent[CategoryWriter] = make(map[string][]byte)
 	rm.rawContent[CategoryLayout] = make(map[string][]byte)
 	rm.rawContent[CategoryImagePreset] = make(map[string][]byte)
+	rm.rawContent[CategoryArticleTemplate] = make(map[string][]byte)
 
 	if err := rm.loadThemes(); err != nil {
 		return nil, fmt.Errorf("load themes: %w", err)
@@ -57,6 +60,9 @@ func NewResourceManager() (*ResourceManager, error) {
 	}
 	if err := rm.loadImagePresets(); err != nil {
 		return nil, fmt.Errorf("load image presets: %w", err)
+	}
+	if err := rm.loadArticleTemplates(); err != nil {
+		return nil, fmt.Errorf("load article templates: %w", err)
 	}
 	return rm, nil
 }
@@ -79,6 +85,10 @@ func (rm *ResourceManager) List(category Category) []ResourceEntry {
 		}
 	case CategoryImagePreset:
 		for _, e := range rm.imagePresets {
+			items = append(items, *e)
+		}
+	case CategoryArticleTemplate:
+		for _, e := range rm.articleTemplates {
 			items = append(items, *e)
 		}
 	}
@@ -106,6 +116,11 @@ func (rm *ResourceManager) Get(category Category, name string) *ResourceEntry {
 		}
 	case CategoryImagePreset:
 		if e, ok := rm.imagePresets[name]; ok {
+			cp := *e
+			return &cp
+		}
+	case CategoryArticleTemplate:
+		if e, ok := rm.articleTemplates[name]; ok {
 			cp := *e
 			return &cp
 		}
@@ -235,12 +250,15 @@ func (rm *ResourceManager) loadLayouts() error {
 			return err
 		}
 		var raw struct {
-			Name           string   `yaml:"name"`
-			Category       string   `yaml:"category"`
-			Serves         []string `yaml:"serves"`
-			Description    string   `yaml:"description"`
-			WhenToUse      string   `yaml:"when_to_use"`
-			MarkdownSyntax string   `yaml:"markdown_syntax"`
+			Name           string      `yaml:"name"`
+			Category       string      `yaml:"category"`
+			Serves         []string    `yaml:"serves"`
+			Description    string      `yaml:"description"`
+			WhenToUse      string      `yaml:"when_to_use"`
+			MarkdownSyntax string      `yaml:"markdown_syntax"`
+			BodyFormat     string      `yaml:"body_format"`
+			Fields         *FieldsSpec `yaml:"fields"`
+			Rows           *RowsSpec   `yaml:"rows"`
 		}
 		if err := yaml.Unmarshal(data, &raw); err != nil {
 			continue
@@ -256,9 +274,61 @@ func (rm *ResourceManager) loadLayouts() error {
 			Serves:         raw.Serves,
 			WhenToUse:      raw.WhenToUse,
 			MarkdownSyntax: raw.MarkdownSyntax,
+			BodyFormat:     raw.BodyFormat,
+			Fields:         raw.Fields,
+			Rows:           raw.Rows,
 		}
 		rm.layouts[raw.Name] = entry
 		rm.rawContent[CategoryLayout][raw.Name] = data
+	}
+	return nil
+}
+
+func (rm *ResourceManager) loadArticleTemplates() error {
+	entries, err := fs.ReadDir(ArticleTemplatesFS, "article_templates")
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") && !strings.HasSuffix(e.Name(), ".yml") {
+			continue
+		}
+		data, err := fs.ReadFile(ArticleTemplatesFS, "article_templates/"+e.Name())
+		if err != nil {
+			return err
+		}
+		var raw struct {
+			Name         string         `yaml:"name"`
+			Description  string         `yaml:"description"`
+			ArticleTypes []string       `yaml:"article_types"`
+			BestFor      []string       `yaml:"best_for"`
+			Rhythm       map[string]any `yaml:"rhythm"`
+			ImageCount   map[string]int `yaml:"image_count"`
+			Modules      struct {
+				Preferred []string `yaml:"preferred"`
+			} `yaml:"modules"`
+			CompositionGuidance []string `yaml:"composition_guidance"`
+		}
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			continue
+		}
+		if raw.Name == "" {
+			continue
+		}
+		entry := &ResourceEntry{
+			Name:                 raw.Name,
+			Category:             CategoryArticleTemplate,
+			Description:          raw.Description,
+			TemplateArticleType:  raw.Name,
+			TemplateArticleTypes: raw.ArticleTypes,
+			TemplateBestFor:      raw.BestFor,
+			TemplateRhythm:       raw.Rhythm,
+			TemplateImageCount:   raw.ImageCount,
+			TemplateModules:      raw.Modules.Preferred,
+			CompositionGuidance:  raw.CompositionGuidance,
+		}
+		rm.articleTemplates[raw.Name] = entry
+		rm.rawContent[CategoryArticleTemplate][raw.Name] = data
 	}
 	return nil
 }

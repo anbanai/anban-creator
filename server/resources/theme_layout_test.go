@@ -54,3 +54,47 @@ func TestEmbeddedThemesExposeColorsAndLayoutMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddedArticleTemplatesAreDiscoverableAndRawReadable(t *testing.T) {
+	templates := Manager().List(CategoryArticleTemplate)
+	if len(templates) == 0 {
+		t.Fatal("expected embedded article templates")
+	}
+
+	required := map[string]bool{
+		"long-form-essay": false,
+		"listicle":        false,
+		"tutorial":        false,
+		"story-narrative": false,
+	}
+	for _, tpl := range templates {
+		if tpl.Category != CategoryArticleTemplate {
+			t.Errorf("template %s category = %q, want %q", tpl.Name, tpl.Category, CategoryArticleTemplate)
+		}
+		if tpl.Description == "" {
+			t.Errorf("template %s should expose description", tpl.Name)
+		}
+		if tpl.TemplateArticleType == "" {
+			t.Errorf("template %s should expose article type", tpl.Name)
+		}
+		if len(tpl.TemplateModules) == 0 {
+			t.Errorf("template %s should expose preferred modules", tpl.Name)
+		}
+		if len(tpl.TemplateRhythm) == 0 {
+			t.Errorf("template %s should expose rhythm metadata", tpl.Name)
+		}
+		if _, ok := required[tpl.Name]; ok {
+			required[tpl.Name] = true
+		}
+
+		raw := Manager().GetRaw(CategoryArticleTemplate, tpl.Name)
+		if len(raw) == 0 {
+			t.Errorf("template %s should expose raw YAML", tpl.Name)
+		}
+	}
+	for name, seen := range required {
+		if !seen {
+			t.Errorf("missing required article template %s", name)
+		}
+	}
+}

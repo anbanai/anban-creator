@@ -538,6 +538,62 @@ func TestBuildAccountInfo_NoTemplateNamespace(t *testing.T) {
 	}
 }
 
+func TestBuildAccountInfo_EcommerceProjectAutoReturnsEcommerceBlockWithoutScope(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New().String()
+	ch := &model.Project{
+		ID:           uuid.New().String(),
+		UserID:       userID,
+		Platform:     model.PlatformEcommerce,
+		Name:         "ecommerce-project",
+		Instructions: "茶品牌电商项目",
+		Keywords:     "茶叶,礼盒",
+	}
+	if err := repo.Projects().Create(ctx, ch); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &model.Task{
+		ID:            uuid.New().String(),
+		UserID:        userID,
+		ProjectID:     ch.ID,
+		Type:          model.PlatformEcommerce,
+		Status:        model.TaskStatusPending,
+		ImageModelKey: "openai-gpt-image",
+	}
+	task.SetEcommerce(model.EcommerceConfig{
+		SelectedModules: map[string]int{"main_images": 3},
+		ProductPhotos:   []string{"https://cdn.example.com/tea.png"},
+		TargetPlatform:  "tmall",
+		SellingPoints:   "高山春茶",
+		Language:        "zh-CN",
+		BrandBrief:      "年轻化茶品牌",
+	})
+	task.SetProjectSnapshot(model.SnapshotProject(ch))
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	info, errMsg := buildAccountInfo(ctx, userID, map[string]any{
+		"project_id": ch.ID,
+		"task_id":    task.ID,
+	})
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	ec, ok := info["ecommerce"].(map[string]any)
+	if !ok {
+		t.Fatalf("ecommerce block missing without scope: %#v", info)
+	}
+	if got := ec["product_photo_count"]; got != 1 {
+		t.Fatalf("product_photo_count = %v, want 1", got)
+	}
+	if got := ec["target_platform"]; got != "tmall" {
+		t.Fatalf("target_platform = %v, want tmall", got)
+	}
+}
+
 func TestParseStringArray(t *testing.T) {
 	args := map[string]any{
 		"refs":   []any{"/a.png", "/b.png", "", 123, "/c.png"},
