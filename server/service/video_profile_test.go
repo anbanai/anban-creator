@@ -1,6 +1,8 @@
 package service
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/config"
@@ -13,6 +15,16 @@ func TestResolveVideoGenerationPlanRequiresProjectProfile(t *testing.T) {
 	}, model.VideoDefaults{}, model.VideoModelPolicy{}, DefaultVideoModelCatalog(), 1000)
 	if err == nil {
 		t.Fatal("expected missing project video profile to fail")
+	}
+	if got := err.Error(); got != "project video profile is not configured" {
+		t.Fatalf("error = %q", got)
+	}
+}
+
+func TestVideoGenerationConfigErrorPreservesMessageAndSentinel(t *testing.T) {
+	err := wrapVideoGenerationConfigError(errors.New("project video profile is not configured"))
+	if !errors.Is(err, ErrVideoGenerationConfig) {
+		t.Fatal("wrapped error should match ErrVideoGenerationConfig")
 	}
 	if got := err.Error(); got != "project video profile is not configured" {
 		t.Fatalf("error = %q", got)
@@ -155,5 +167,59 @@ func TestVideoModelCatalogFromConfigMergesConfiguredModelIDWithDefaultPricing(t 
 	}
 	if !spec.SupportsVideoInput || len(spec.NoInputPricePerSecond) == 0 || spec.NoInputPricePerSecond["720p"] == 0 {
 		t.Fatalf("default capabilities/pricing were not preserved: %#v", spec)
+	}
+}
+
+func TestVideoModelCatalogFromConfigOnlyExposesConfiguredModelsWhenProvided(t *testing.T) {
+	catalog := VideoModelCatalogFromConfig([]config.VideoModelCatalogEntry{{
+		Key:                  "configured-video",
+		DisplayName:          "Configured Video",
+		ModelID:              "provider-configured-video",
+		SupportedResolutions: []string{"720p"},
+		SupportedRatios:      []string{"9:16"},
+		MinDuration:          1,
+		MaxDuration:          15,
+		NoInputPricePerSecond: map[string]float64{
+			"720p": 1,
+		},
+	}})
+
+	if _, ok := catalog["configured-video"]; !ok {
+		t.Fatalf("configured model missing from catalog: %+v", catalog)
+	}
+	if _, ok := catalog["seedance-2.0-mini"]; ok {
+		t.Fatalf("default model leaked into explicitly configured catalog: %+v", catalog)
+	}
+}
+
+func TestResolveVideoGenerationPlanRejectsAllowedModelMissingFromCatalog(t *testing.T) {
+	_, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
+		Prompt: "生成视频",
+	}, model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "missing-model",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+	}, model.VideoModelPolicy{
+		AllowedModels: []string{"missing-model"},
+		DefaultModel:  "missing-model",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	}, VideoModelCatalog{
+		"configured-video": {
+			Key:                  "configured-video",
+			ModelID:              "provider-configured-video",
+			SupportedResolutions: []string{"720p"},
+			SupportedRatios:      []string{"9:16"},
+			MinDuration:          1,
+			MaxDuration:          15,
+			NoInputPricePerSecond: map[string]float64{
+				"720p": 1,
+			},
+		},
+	}, 1000)
+	if err == nil || !strings.Contains(err.Error(), "video model missing-model is not configured") {
+		t.Fatalf("ResolveVideoGenerationPlan error = %v, want not configured", err)
 	}
 }

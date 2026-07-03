@@ -17,8 +17,9 @@ type ResourceEntry struct {
 	Description string   `json:"description,omitempty"`
 
 	// Theme fields
-	Mood    string `json:"mood,omitempty"`
-	BestFor string `json:"best_for,omitempty"`
+	Mood    string            `json:"mood,omitempty"`
+	BestFor string            `json:"best_for,omitempty"`
+	Colors  map[string]string `json:"colors,omitempty"`
 
 	// Writer fields
 	DisplayName string `json:"display_name,omitempty"`

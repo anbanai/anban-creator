@@ -244,6 +244,9 @@ func (s *VideoService) buildArkCreateRequest(req VideoGenerationRequest) (arkmod
 	if err := validateVideoGenerationRequest(resolved); err != nil {
 		return arkmodel.CreateContentGenerationTaskRequest{}, resolved, err
 	}
+	if strings.TrimSpace(resolved.Prompt) == "" {
+		return arkmodel.CreateContentGenerationTaskRequest{}, resolved, fmt.Errorf("prompt is required")
+	}
 	content := make([]*arkmodel.CreateContentGenerationContentItem, 0, len(resolved.ReferenceSet)+1)
 	content = append(content, &arkmodel.CreateContentGenerationContentItem{
 		Type: arkmodel.ContentGenerationContentItemTypeText,
@@ -290,9 +293,6 @@ func (s *VideoService) applyDefaults(req VideoGenerationRequest) VideoGeneration
 }
 
 func validateVideoGenerationRequest(req VideoGenerationRequest) error {
-	if strings.TrimSpace(req.Prompt) == "" {
-		return fmt.Errorf("prompt is required")
-	}
 	if strings.TrimSpace(req.Model) == "" {
 		return fmt.Errorf("video model is required")
 	}

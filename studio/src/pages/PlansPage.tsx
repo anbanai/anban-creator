@@ -33,6 +33,8 @@ import { useImageModels } from '@/hooks/useImageModels'
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
+import { VideoReferenceInput } from '@/components/video/VideoReferenceInput'
+import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -96,6 +98,14 @@ export default function PlansPage() {
 
   const watchedType = useWatch({ control: form.control, name: 'type' })
   const watchedGoalMode = useWatch({ control: form.control, name: 'goal_mode' })
+  const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
+  const watchedPrompt = useWatch({ control: form.control, name: 'prompt' })
+  const watchedVideoConfig = useWatch({ control: form.control, name: 'video_config' })
+  const [debouncedVideoEstimateInput, setDebouncedVideoEstimateInput] = useState<{
+    project_id: string
+    prompt?: string
+    video_config?: PlanFormValues['video_config']
+  } | null>(null)
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -150,6 +160,29 @@ export default function PlansPage() {
     staleTime: 30_000,
   })
   const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3200
+
+  useEffect(() => {
+    if (!modalOpen || watchedType !== 'video' || !watchedProjectId) {
+      setDebouncedVideoEstimateInput(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      setDebouncedVideoEstimateInput({
+        project_id: watchedProjectId,
+        prompt: watchedPrompt || '',
+        video_config: watchedVideoConfig,
+      })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [modalOpen, watchedType, watchedProjectId, watchedPrompt, watchedVideoConfig])
+
+  const videoEstimateQuery = useQuery({
+    queryKey: ['video-estimate', 'plan', debouncedVideoEstimateInput],
+    queryFn: () => api.video.estimate(debouncedVideoEstimateInput!),
+    enabled: Boolean(debouncedVideoEstimateInput),
+    retry: false,
+  })
+  const availableVideoModels = videoEstimateQuery.data?.available_models ?? []
 
   const createMutation = useMutation({
     mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
@@ -437,7 +470,7 @@ export default function PlansPage() {
                           form.setValue('type', platform as PlanType)
                           const project = allProjects?.find((p) => p.id === id)
                           if (platform === 'video' && project?.video_defaults) {
-                            form.setValue('video_config', project.video_defaults, { shouldDirty: false })
+                            form.setValue('video_config', { ...project.video_defaults, references: [] }, { shouldDirty: false })
                           }
                         }
                       }}
@@ -530,13 +563,16 @@ export default function PlansPage() {
                       <FormItem>
                         <FormLabel>模型</FormLabel>
                         <Select value={field.value || ''} onValueChange={field.onChange}>
-                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
+                          <FormControl><SelectTrigger><SelectValue placeholder={videoEstimateQuery.isLoading ? '加载可用模型...' : '使用项目默认'} /></SelectTrigger></FormControl>
                           <SelectContent>
-                            <SelectItem value="seedance-2.0">Seedance 2.0</SelectItem>
-                            <SelectItem value="seedance-2.0-fast">Seedance 2.0 Fast</SelectItem>
-                            <SelectItem value="seedance-2.0-mini">Seedance 2.0 Mini</SelectItem>
+                            {availableVideoModels.map((model) => (
+                              <SelectItem key={model.key} value={model.key}>{model.display_name || model.key}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
+                        {!videoEstimateQuery.isLoading && availableVideoModels.length === 0 && (
+                          <p className="text-xs text-destructive">没有可用视频模型，请先在项目策略中选择已配置模型。</p>
+                        )}
                       </FormItem>
                     )} />
                     <FormField control={form.control} name="video_config.resolution" render={({ field }) => (
@@ -583,14 +619,24 @@ export default function PlansPage() {
                           <FormLabel className="text-sm">水印</FormLabel>
                         </FormItem>
                       )} />
-                      <FormField control={form.control} name="video_config.preflight" render={({ field }) => (
-                        <FormItem className="flex items-center gap-2 space-y-0">
-                          <FormControl><Switch checked={field.value !== false} onCheckedChange={field.onChange} /></FormControl>
-                          <FormLabel className="text-sm">预检</FormLabel>
-                        </FormItem>
-                      )} />
+                      <p className="pb-1 text-xs text-muted-foreground">创建前自动校验参数和费用</p>
                     </div>
                   </div>
+                  <FormField control={form.control} name="video_config.references" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>参考素材</FormLabel>
+                      <FormControl>
+                        <VideoReferenceInput value={field.value || []} onChange={field.onChange} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <p className="text-xs text-muted-foreground">视频任务需至少 100,000 积分余额；计划触发时也会再次检查。</p>
+                  <VideoEstimateSummary
+                    estimate={videoEstimateQuery.data}
+                    isLoading={videoEstimateQuery.isLoading}
+                    error={videoEstimateQuery.error ? getApiErrorMessage(videoEstimateQuery.error, '视频参数不可用') : undefined}
+                  />
                 </div>
               )}
 

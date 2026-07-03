@@ -8,6 +8,7 @@ import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Sta
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import type { TaskType, TaskStatus, CreateTaskRequest, Project, WorkflowStatus } from '@/types'
 import type { Resolver } from 'react-hook-form'
 import { ProjectSelector } from '@/components/ProjectSelector'
@@ -34,6 +35,8 @@ import { createTaskSchema, type CreateTaskFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
+import { VideoReferenceInput } from '@/components/video/VideoReferenceInput'
+import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -141,8 +144,38 @@ export default function TasksPage() {
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
+  const watchedPrompt = useWatch({ control: form.control, name: 'prompt' })
+  const watchedVideoConfig = useWatch({ control: form.control, name: 'video_config' })
   // 选定项目的配置预览。创建任务时这些值会冻结为 task.project_snapshot。
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
+  const [debouncedVideoEstimateInput, setDebouncedVideoEstimateInput] = useState<{
+    project_id: string
+    prompt?: string
+    video_config?: CreateTaskFormValues['video_config']
+  } | null>(null)
+
+  useEffect(() => {
+    if (!modalOpen || watchedType !== 'video' || !watchedProjectId) {
+      setDebouncedVideoEstimateInput(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      setDebouncedVideoEstimateInput({
+        project_id: watchedProjectId,
+        prompt: watchedPrompt || '',
+        video_config: watchedVideoConfig,
+      })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [modalOpen, watchedType, watchedProjectId, watchedPrompt, watchedVideoConfig])
+
+  const videoEstimateQuery = useQuery({
+    queryKey: ['video-estimate', debouncedVideoEstimateInput],
+    queryFn: () => api.video.estimate(debouncedVideoEstimateInput!),
+    enabled: Boolean(debouncedVideoEstimateInput),
+    retry: false,
+  })
+  const availableVideoModels = videoEstimateQuery.data?.available_models ?? []
 
   // E-commerce package cost = Σ(module price × quantity), mirroring the server's
   // CreditService.EcommercePackageCost. `known=false` when pricing lacks a selected
@@ -247,8 +280,8 @@ export default function TasksPage() {
       resetModal()
       navigate(`/tasks/${task.id}`)
     },
-    onError: () => {
-      toast.error('创建任务失败，请重试')
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '创建任务失败，请重试'))
     },
   })
 
@@ -752,7 +785,7 @@ export default function TasksPage() {
                             form.setValue('image_model_key', ch.ecommerce_defaults.image_model_key || '', { shouldDirty: false })
                           }
                           if (platform === 'video' && ch?.video_defaults) {
-                            form.setValue('video_config', ch.video_defaults, { shouldDirty: false })
+                            form.setValue('video_config', { ...ch.video_defaults, references: [] }, { shouldDirty: false })
                           }
                         } else {
                           setProjectImageRatio('')
@@ -768,7 +801,7 @@ export default function TasksPage() {
                 <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 space-y-1">
                   <p className="text-xs font-medium text-foreground/80">将使用项目「{selectedProject.name}」的快照</p>
                   <p className="text-xs text-muted-foreground">
-                    视觉风格 {selectedProject.visual_style || '—'}
+                    {watchedType === 'video' ? '视频风格与禁忌' : '视觉风格'} {selectedProject.visual_style || '—'}
                     {watchedType === 'article' && (
                       <> · 署名 {selectedProject.author || '—'} · 写作风格 {selectedProject.writer || '—'} · 排版 {selectedProject.theme || '默认'}</>
                     )}
@@ -884,14 +917,17 @@ export default function TasksPage() {
                       <FormItem>
                         <FormLabel>模型</FormLabel>
                         <Select value={field.value || selectedProject?.video_defaults?.model_key || ''} onValueChange={field.onChange}>
-                          <FormControl><SelectTrigger><SelectValue placeholder="使用项目默认" /></SelectTrigger></FormControl>
+                          <FormControl><SelectTrigger><SelectValue placeholder={videoEstimateQuery.isLoading ? '加载可用模型...' : '使用项目默认'} /></SelectTrigger></FormControl>
                           <SelectContent>
-                            <SelectItem value="seedance-2.0">Seedance 2.0</SelectItem>
-                            <SelectItem value="seedance-2.0-fast">Seedance 2.0 Fast</SelectItem>
-                            <SelectItem value="seedance-2.0-mini">Seedance 2.0 Mini</SelectItem>
+                            {availableVideoModels.map((model) => (
+                              <SelectItem key={model.key} value={model.key}>{model.display_name || model.key}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <FormMessage />
+                        {!videoEstimateQuery.isLoading && availableVideoModels.length === 0 && (
+                          <p className="text-xs text-destructive">没有可用视频模型，请先在项目策略中选择已配置模型。</p>
+                        )}
                       </FormItem>
                     )} />
                     <FormField control={form.control} name="video_config.resolution" render={({ field }) => (
@@ -949,16 +985,24 @@ export default function TasksPage() {
                           <FormLabel className="text-sm">水印</FormLabel>
                         </FormItem>
                       )} />
-                      <FormField control={form.control} name="video_config.preflight" render={({ field }) => (
-                        <FormItem className="flex items-center gap-2 space-y-0">
-                          <FormControl>
-                            <Switch checked={field.value ?? selectedProject?.video_defaults?.preflight ?? true} onCheckedChange={field.onChange} />
-                          </FormControl>
-                          <FormLabel className="text-sm">预检</FormLabel>
-                        </FormItem>
-                      )} />
+                      <p className="pb-1 text-xs text-muted-foreground">创建前自动校验参数和费用</p>
                     </div>
                   </div>
+                  <FormField control={form.control} name="video_config.references" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>参考素材</FormLabel>
+                      <FormControl>
+                        <VideoReferenceInput value={field.value || []} onChange={field.onChange} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <p className="text-xs text-muted-foreground">视频任务需至少 100,000 积分余额；实际扣费按下方动态估算。</p>
+                  <VideoEstimateSummary
+                    estimate={videoEstimateQuery.data}
+                    isLoading={videoEstimateQuery.isLoading}
+                    error={videoEstimateQuery.error ? getApiErrorMessage(videoEstimateQuery.error, '视频参数不可用') : undefined}
+                  />
                 </div>
               )}
 

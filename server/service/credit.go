@@ -17,6 +17,7 @@ import (
 var (
 	ErrAlreadySignedIn     = errors.New("already signed in today")
 	ErrInsufficientCredits = errors.New("insufficient credits")
+	ErrMinimumVideoBalance = errors.New("minimum video balance not met")
 	ErrInvalidAmount       = errors.New("invalid credit amount")
 	ErrUnknownTaskType     = errors.New("unknown task type for credit costing")
 )

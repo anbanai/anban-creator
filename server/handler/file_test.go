@@ -1,8 +1,14 @@
 package handler
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"io"
+	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -29,6 +35,76 @@ func setupFileHandlerTest(userID string) *fiber.App {
 	})
 	app.Get("/files/*", h.ServeFile)
 	return app
+}
+
+func TestUploadVideoReferenceAllowsMediaAndUsesVideoReferencePrefix(t *testing.T) {
+	originalProbe := execVideoReferenceDurationProbe
+	execVideoReferenceDurationProbe = func(_ context.Context, _ string) ([]byte, error) {
+		return []byte("7.25\n"), nil
+	}
+	t.Cleanup(func() {
+		execVideoReferenceDurationProbe = originalProbe
+	})
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	store := &fakeStorageProvider{data: map[string][]byte{}}
+	h := NewFileHandler(store, &logger)
+
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return c.Next()
+	})
+	app.Post("/files/upload", h.Upload)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("purpose", "video_reference"); err != nil {
+		t.Fatalf("write purpose: %v", err)
+	}
+	part, err := writer.CreateFormFile("file", "sample.mp4")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom")); err != nil {
+		t.Fatalf("write mp4 bytes: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/files/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var decoded struct {
+		Data struct {
+			URL                  string  `json:"url"`
+			Key                  string  `json:"key"`
+			Type                 string  `json:"type"`
+			InputDurationSeconds float64 `json:"input_duration_seconds"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.HasPrefix(decoded.Data.Key, "uploads/video-references/user-1/") {
+		t.Fatalf("key = %q, want video reference prefix", decoded.Data.Key)
+	}
+	if decoded.Data.URL == "" || !strings.HasPrefix(decoded.Data.Type, "video/") {
+		t.Fatalf("upload response = %+v", decoded.Data)
+	}
+	if decoded.Data.InputDurationSeconds != 7.25 {
+		t.Fatalf("input_duration_seconds = %v, want 7.25", decoded.Data.InputDurationSeconds)
+	}
+	if _, ok := store.data[decoded.Data.Key]; !ok {
+		t.Fatalf("uploaded key %q missing from fake store", decoded.Data.Key)
+	}
 }
 
 func TestServeFile_AllowsDesignerPathForOwner(t *testing.T) {

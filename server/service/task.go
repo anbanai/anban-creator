@@ -30,6 +30,8 @@ type PublishedTrackingService interface {
 // TypeContentGenerate is the Asynq task type for content generation.
 const TypeContentGenerate = "content:generate"
 
+const MinVideoCreationBalance = 100000
+
 // TaskService handles task CRUD, manual creation, and execution orchestration.
 type TaskService struct {
 	repo                  repository.Repository
@@ -357,7 +359,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			s.resolvedVideoCreditMultiplier(),
 		)
 		if err != nil {
-			return nil, err
+			return nil, wrapVideoGenerationConfigError(err)
 		}
 		videoPlan = &resolved
 	}
@@ -399,6 +401,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		} else if taskType == model.PlatformVideo {
 			if videoPlan == nil || videoPlan.EstimatedCredits <= 0 {
 				return nil, fmt.Errorf("video estimated credits must be positive")
+			}
+			if err := s.requireVideoCreationBalance(ctx, p.UserID); err != nil {
+				return nil, err
 			}
 			taskID := generateTaskID()
 			if _, err := s.creditSvc.DeductForTaskWithAmount(ctx, p.UserID, taskType, taskID, videoPlan.EstimatedCredits); err != nil {
@@ -578,7 +583,42 @@ func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) Video
 	req.Duration = cfg.Duration
 	req.Watermark = cfg.Watermark
 	req.Preflight = &cfg.Preflight
+	req.ReferenceSet = videoReferencesFromAssets(cfg.References)
 	return req
+}
+
+func videoReferencesFromAssets(assets []model.VideoReferenceAsset) []VideoReferenceInput {
+	if len(assets) == 0 {
+		return nil
+	}
+	refs := make([]VideoReferenceInput, 0, len(assets))
+	for _, asset := range assets {
+		refs = append(refs, VideoReferenceInput{
+			Type:                 asset.Type,
+			URL:                  asset.URL,
+			Text:                 asset.Text,
+			ReferenceRole:        asset.ReferenceRole,
+			InputDurationSeconds: asset.InputDurationSeconds,
+		})
+	}
+	return refs
+}
+
+func videoAssetsFromReferences(refs []VideoReferenceInput) []model.VideoReferenceAsset {
+	if len(refs) == 0 {
+		return nil
+	}
+	assets := make([]model.VideoReferenceAsset, 0, len(refs))
+	for _, ref := range refs {
+		assets = append(assets, model.VideoReferenceAsset{
+			Type:                 ref.Type,
+			URL:                  ref.URL,
+			Text:                 ref.Text,
+			ReferenceRole:        ref.ReferenceRole,
+			InputDurationSeconds: ref.InputDurationSeconds,
+		})
+	}
+	return assets
 }
 
 func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
@@ -591,9 +631,24 @@ func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
 		Duration:         plan.Duration,
 		Watermark:        plan.Watermark,
 		Preflight:        plan.Preflight,
+		References:       videoAssetsFromReferences(plan.References),
 		EstimatedCredits: plan.EstimatedCredits,
 		PricingBreakdown: plan.PricingBreakdown,
 	}
+}
+
+func (s *TaskService) requireVideoCreationBalance(ctx context.Context, userID string) error {
+	if s == nil || s.creditSvc == nil {
+		return nil
+	}
+	balance, err := s.creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("check video credit balance: %w", err)
+	}
+	if balance < MinVideoCreationBalance {
+		return fmt.Errorf("video tasks require at least %d credits: %w: %w", MinVideoCreationBalance, ErrMinimumVideoBalance, ErrInsufficientCredits)
+	}
+	return nil
 }
 
 // CreateFromPlan creates a task linked to a plan and enqueues it for execution.
@@ -662,6 +717,14 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		if taskType == model.PlatformVideo {
 			if planVideoConfig == nil || planVideoConfig.EstimatedCredits <= 0 {
 				s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping video plan task without estimated credits")
+				return nil, nil
+			}
+			if err := s.requireVideoCreationBalance(ctx, plan.UserID); err != nil {
+				if errors.Is(err, ErrInsufficientCredits) {
+					s.logger.Warn().Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping video plan task due to minimum balance")
+					return nil, nil
+				}
+				s.logger.Error().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("failed to check video plan task minimum balance")
 				return nil, nil
 			}
 			if _, err := s.creditSvc.DeductForTaskWithAmount(ctx, plan.UserID, taskType, taskID, planVideoConfig.EstimatedCredits); err != nil {

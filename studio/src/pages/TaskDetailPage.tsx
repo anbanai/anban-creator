@@ -91,6 +91,8 @@ export default function TaskDetailPage() {
     enabled: !!task?.project_id,
   })
   const project = projectDetail?.project
+  const videoFiles = files?.filter((file) => file.mime_type?.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.file_name)) ?? []
+  const primaryVideoFile = videoFiles[0]
 
   const MAX_PERSISTED_LOGS = 500
   const persistedLogs = (task?.progress_log
@@ -798,6 +800,81 @@ export default function TaskDetailPage() {
 
       {task.status === 'completed' && (
         <WorkflowReviewSummary workflow={task.workflow_status} />
+      )}
+
+      {task.type === 'video' && (task.video_config || primaryVideoFile) && (
+        <Card>
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <h2 className="text-sm font-semibold text-foreground">视频结果</h2>
+            {primaryVideoFile?.url && (
+              <a href={primaryVideoFile.url} target="_blank" rel="noreferrer" download={primaryVideoFile.file_name}>
+                <Button size="sm" variant="outline">
+                  <Download className="h-4 w-4" />
+                  下载 MP4
+                </Button>
+              </a>
+            )}
+          </div>
+          <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+            <div className="min-w-0">
+              {primaryVideoFile?.url ? (
+                <video
+                  src={primaryVideoFile.url}
+                  controls
+                  className="aspect-video w-full rounded-lg border border-border bg-black object-contain"
+                />
+              ) : (
+                <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 text-sm text-muted-foreground">
+                  暂无可预览 MP4
+                </div>
+              )}
+            </div>
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">生成任务 ID</p>
+                  <p className="mt-1 break-all text-foreground">{task.video_generation_id || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">规格</p>
+                  <p className="mt-1 text-foreground">{task.video_config?.resolution || '—'} · {task.video_config?.ratio || '—'} · {task.video_config?.duration || '—'}s</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">费用明细</p>
+                <p className="mt-1 text-foreground">
+                  估算 {(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()} ·
+                  已扣 {(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}
+                </p>
+                {task.video_config?.pricing_breakdown && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {task.video_config.pricing_breakdown.model_key} · {task.video_config.pricing_breakdown.resolution} · 输出 {task.video_config.pricing_breakdown.output_seconds}s
+                    {task.video_config.pricing_breakdown.input_video && typeof task.video_config.pricing_breakdown.input_seconds === 'number'
+                      ? ` · 输入视频 ${task.video_config.pricing_breakdown.input_seconds}s`
+                      : ''}
+                  </p>
+                )}
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">参考素材</p>
+                {task.video_config?.references && task.video_config.references.length > 0 ? (
+                  <div className="mt-1 divide-y divide-border rounded-md border border-border">
+                    {task.video_config.references.map((ref, index) => (
+                      <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-2 py-1.5 text-xs">
+                        <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
+                        {ref.input_duration_seconds && (
+                          <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </Card>
       )}
 
       {/* Files (top priority - most useful content) */}

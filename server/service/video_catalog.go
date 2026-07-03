@@ -85,12 +85,16 @@ func DefaultVideoModelCatalog() VideoModelCatalog {
 }
 
 func VideoModelCatalogFromConfig(entries []config.VideoModelCatalogEntry) VideoModelCatalog {
-	catalog := DefaultVideoModelCatalog()
+	defaults := DefaultVideoModelCatalog()
+	if len(entries) == 0 {
+		return defaults
+	}
+	catalog := VideoModelCatalog{}
 	for _, entry := range entries {
 		if strings.TrimSpace(entry.Key) == "" {
 			continue
 		}
-		spec, existed := catalog[entry.Key]
+		spec, existed := defaults[entry.Key]
 		spec.Key = entry.Key
 		if entry.DisplayName != "" {
 			spec.DisplayName = entry.DisplayName
@@ -159,7 +163,7 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 	}
 	spec, ok := catalog[modelKey]
 	if !ok {
-		return VideoGenerationPlan{}, fmt.Errorf("unknown video model: %s", modelKey)
+		return VideoGenerationPlan{}, fmt.Errorf("video model %s is not configured or unavailable", modelKey)
 	}
 	resolved.Model = spec.ModelID
 	if resolved.Resolution == "" {

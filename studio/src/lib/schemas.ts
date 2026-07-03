@@ -73,6 +73,16 @@ export const createTaskSchema = z.object({
     duration: z.number().int().min(1).max(60).optional(),
     watermark: z.boolean().optional(),
     preflight: z.boolean().optional(),
+    references: z.array(z.object({
+      type: z.enum(["text", "image_url", "audio_url", "video_url"]),
+      url: z.string().optional(),
+      text: z.string().optional(),
+      reference_role: z.string().optional(),
+      file_name: z.string().optional(),
+      mime_type: z.string().optional(),
+      file_size: z.number().optional(),
+      input_duration_seconds: z.number().optional(),
+    })).optional(),
   }).optional(),
 }).superRefine((data, ctx) => {
   if (data.type === "viral_analysis") {
@@ -156,6 +166,16 @@ export const planSchema = z.object({
     duration: z.number().int().min(1).max(60).optional(),
     watermark: z.boolean().optional(),
     preflight: z.boolean().optional(),
+    references: z.array(z.object({
+      type: z.enum(["text", "image_url", "audio_url", "video_url"]),
+      url: z.string().optional(),
+      text: z.string().optional(),
+      reference_role: z.string().optional(),
+      file_name: z.string().optional(),
+      mime_type: z.string().optional(),
+      file_size: z.number().optional(),
+      input_duration_seconds: z.number().optional(),
+    })).optional(),
   }).optional(),
 }).superRefine((data, ctx) => {
   if (data.goal_mode) {
@@ -194,7 +214,7 @@ export const projectSchema = z.object({
   ecommerce_image_model_key: z.string().max(50).optional(),
   video_defaults: z.object({
     purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).default("planting"),
-    model_key: z.string().min(1).default("seedance-2.0-mini"),
+    model_key: z.string().default(""),
     resolution: z.string().min(1).default("720p"),
     ratio: z.string().min(1).default("9:16"),
     duration: z.number().int().min(1).max(60).default(15),
@@ -202,8 +222,8 @@ export const projectSchema = z.object({
     preflight: z.boolean().default(true),
   }).optional(),
   video_model_policy: z.object({
-    allowed_models: z.array(z.string()).default(["seedance-2.0", "seedance-2.0-fast", "seedance-2.0-mini"]),
-    default_model: z.string().min(1).default("seedance-2.0-mini"),
+    allowed_models: z.array(z.string()).default([]),
+    default_model: z.string().default(""),
     allow_auto_downgrade: z.boolean().default(false),
     max_resolution: z.string().default("720p"),
     max_duration: z.number().int().min(1).max(60).default(15),

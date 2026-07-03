@@ -42,8 +42,16 @@ var _ storage.Provider = (*fakeStorageProvider)(nil)
 
 func (f *fakeStorageProvider) Name() string { return "fake" }
 
-func (f *fakeStorageProvider) Upload(context.Context, string, io.Reader, string) (*storage.UploadResult, error) {
-	return nil, fmt.Errorf("not implemented")
+func (f *fakeStorageProvider) Upload(_ context.Context, key string, reader io.Reader, contentType string) (*storage.UploadResult, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	if f.data == nil {
+		f.data = map[string][]byte{}
+	}
+	f.data[key] = data
+	return &storage.UploadResult{Key: key, URL: f.GetURL(key), Size: int64(len(data)), MimeType: contentType}, nil
 }
 
 func (f *fakeStorageProvider) UploadFile(context.Context, string, string, string) (*storage.UploadResult, error) {

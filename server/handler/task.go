@@ -233,6 +233,12 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	})
 	if err != nil {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create task failed")
+		if errors.Is(err, service.ErrMinimumVideoBalance) {
+			return Error(c, fiber.StatusPaymentRequired, "视频任务需至少 100000 积分余额")
+		}
+		if errors.Is(err, service.ErrVideoGenerationConfig) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 		if errors.Is(err, service.ErrInsufficientCredits) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
 				"code": 40200,
@@ -380,6 +386,12 @@ func (h *TaskHandler) Retry(c fiber.Ctx) error {
 	newTask, err := h.service.Retry(c.Context(), id)
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", id).Msg("retry task failed")
+		if errors.Is(err, service.ErrMinimumVideoBalance) {
+			return Error(c, fiber.StatusPaymentRequired, "视频任务需至少 100000 积分余额")
+		}
+		if errors.Is(err, service.ErrVideoGenerationConfig) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 		if errors.Is(err, service.ErrInsufficientCredits) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
 				"code": 40200,

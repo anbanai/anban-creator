@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { Project, ProjectStats, CreateProjectRequest, PlatformConfig, Template } from '@/types'
+import type { Project, ProjectStats, CreateProjectRequest, PlatformConfig, Template, TemplateType, VideoDefaults, VideoModelPolicy, VideoModelSpec } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ProjectCard } from '@/components/ProjectCard'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -68,7 +68,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   ecommerce_image_model_key: '',
   video_defaults: {
     purpose: 'planting',
-    model_key: 'seedance-2.0-mini',
+    model_key: '',
     resolution: '720p',
     ratio: '9:16',
     duration: 15,
@@ -76,8 +76,8 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
     preflight: true,
   },
   video_model_policy: {
-    allowed_models: ['seedance-2.0', 'seedance-2.0-fast', 'seedance-2.0-mini'],
-    default_model: 'seedance-2.0-mini',
+    allowed_models: [],
+    default_model: '',
     allow_auto_downgrade: false,
     max_resolution: '720p',
     max_duration: 15,
@@ -91,9 +91,19 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
 const defaultVideoDefaults = CHANNEL_FORM_DEFAULTS.video_defaults!
 const defaultVideoPolicy = CHANNEL_FORM_DEFAULTS.video_model_policy!
 
-function projectToForm(ch: Project): ProjectFormValues {
+function projectToForm(ch: Project, configuredVideoModels: VideoModelSpec[] = []): ProjectFormValues {
+  const configuredKeys = new Set(configuredVideoModels.map((model) => model.key))
   const videoDefaults = { ...defaultVideoDefaults, ...(ch.video_defaults || {}) }
   const videoPolicy = { ...defaultVideoPolicy, ...(ch.video_model_policy || {}) }
+  if (configuredKeys.size > 0) {
+    if (videoDefaults.model_key && !configuredKeys.has(videoDefaults.model_key)) {
+      videoDefaults.model_key = ''
+    }
+    videoPolicy.allowed_models = (videoPolicy.allowed_models || []).filter((key) => configuredKeys.has(key))
+    if (videoPolicy.default_model && !configuredKeys.has(videoPolicy.default_model)) {
+      videoPolicy.default_model = ''
+    }
+  }
   return {
     platform: ch.platform,
     name: ch.name || '',
@@ -145,6 +155,11 @@ export default function ProjectsPage() {
   })
 
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
+  const isWechat = selectedPlatform === 'article'
+  const isSeednote = selectedPlatform === 'seednote'
+  const isEcommerce = selectedPlatform === 'ecommerce'
+  const isVideo = selectedPlatform === 'video'
+  const visualTemplateType: TemplateType | null = isWechat ? 'article' : isSeednote ? 'seednote' : isEcommerce ? 'ecommerce' : null
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
@@ -153,6 +168,35 @@ export default function ProjectsPage() {
   const themeValue = useWatch({ control: form.control, name: 'theme' })
   const ecommerceModules = useWatch({ control: form.control, name: 'ecommerce_default_selected_modules' })
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
+
+  const { data: videoModelsResponse, isLoading: videoModelsLoading } = useQuery({
+    queryKey: ['video-models'],
+    queryFn: () => api.video.models(),
+    staleTime: 60_000,
+  })
+  const configuredVideoModels = videoModelsResponse?.items ?? []
+  const configuredVideoModelKeys = useMemo(() => new Set(configuredVideoModels.map((model) => model.key)), [configuredVideoModels])
+  const defaultConfiguredVideoModel = configuredVideoModels[0]?.key || ''
+
+  useEffect(() => {
+    if (!isVideo || configuredVideoModels.length === 0) return
+    const currentDefaults: VideoDefaults = form.getValues('video_defaults') || {}
+    const currentPolicy: VideoModelPolicy = form.getValues('video_model_policy') || {}
+    const allowed = (currentPolicy.allowed_models || []).filter((key: string) => configuredVideoModelKeys.has(key))
+    const nextAllowed = allowed.length > 0 ? allowed : configuredVideoModels.map((model) => model.key)
+    const nextDefault = configuredVideoModelKeys.has(currentPolicy.default_model || '')
+      ? currentPolicy.default_model || ''
+      : (configuredVideoModelKeys.has(currentDefaults.model_key || '') ? currentDefaults.model_key || '' : defaultConfiguredVideoModel)
+    if (!currentDefaults.model_key || !configuredVideoModelKeys.has(currentDefaults.model_key)) {
+      form.setValue('video_defaults.model_key', nextDefault, { shouldDirty: false })
+    }
+    if (JSON.stringify(currentPolicy.allowed_models || []) !== JSON.stringify(nextAllowed)) {
+      form.setValue('video_model_policy.allowed_models', nextAllowed, { shouldDirty: false })
+    }
+    if (currentPolicy.default_model !== nextDefault) {
+      form.setValue('video_model_policy.default_model', nextDefault, { shouldDirty: false })
+    }
+  }, [isVideo, configuredVideoModels, configuredVideoModelKeys, defaultConfiguredVideoModel, form])
 
   const setEcommerceModuleQty = (key: string, qty: number) => {
     const cur = form.getValues('ecommerce_default_selected_modules') ?? {}
@@ -381,7 +425,7 @@ export default function ProjectsPage() {
   function openEdit(project: Project) {
     setEditingProject(project)
     setProfileFetchHint(null)
-    form.reset(projectToForm(project))
+    form.reset(projectToForm(project, configuredVideoModels))
     skipAutoFetchRef.current = true
     setSelectedTemplate(null)
     setModalOpen(true)
@@ -458,8 +502,20 @@ export default function ProjectsPage() {
       }
     }
     if (values.platform === 'video') {
-      payload.video_defaults = values.video_defaults
-      payload.video_model_policy = values.video_model_policy
+      const allowedModels = (values.video_model_policy?.allowed_models || []).filter((key) => configuredVideoModelKeys.has(key))
+      const modelKey = configuredVideoModelKeys.has(values.video_defaults?.model_key || '') ? values.video_defaults?.model_key : ''
+      const defaultModel = configuredVideoModelKeys.has(values.video_model_policy?.default_model || '')
+        ? values.video_model_policy?.default_model
+        : modelKey
+      payload.video_defaults = {
+        ...values.video_defaults,
+        model_key: modelKey,
+      }
+      payload.video_model_policy = {
+        ...values.video_model_policy,
+        allowed_models: allowedModels,
+        default_model: defaultModel,
+      }
     }
 
     // Auto-set image_ratio based on platform if not specified
@@ -490,10 +546,6 @@ export default function ProjectsPage() {
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
-  const isWechat = selectedPlatform === 'article'
-  const isSeednote = selectedPlatform === 'seednote'
-  const isEcommerce = selectedPlatform === 'ecommerce'
-  const isVideo = selectedPlatform === 'video'
 
   return (
     <div className="space-y-6">
@@ -802,14 +854,14 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
-              {isWechat && (
-                <TemplatePicker type="article" selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
+              {visualTemplateType && (
+                <TemplatePicker type={visualTemplateType} selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
               )}
 
               <FormField control={form.control} name="visual_style" render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between gap-2">
-                    <FormLabel>视觉风格</FormLabel>
+                    <FormLabel>{isVideo ? '视频风格与禁忌' : '视觉风格'}</FormLabel>
                     {(isSeednote || isEcommerce) && (
                       <ReferenceImageUpload
                         value={referenceImageUrl}
@@ -845,6 +897,11 @@ export default function ProjectsPage() {
                         placeholder="描述品牌视觉风格基线，如：高端极简白底、国潮暖橙插画、电商爆款高饱和促销感。作为主图/详情/封面跨图一致的视觉锚点"
                         {...field}
                       />
+                    ) : isVideo ? (
+                      <Textarea
+                        placeholder="描述视频的画面风格、镜头语言、主体一致性要求、禁忌和不可改变的创作约束"
+                        {...field}
+                      />
                     ) : (
                       <Textarea
                         placeholder="描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由项目定位与内容主题三维分析自动确定"
@@ -857,17 +914,16 @@ export default function ProjectsPage() {
                       ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示'
                       : isEcommerce
                         ? '品牌视觉维度——作为电商素材跨图一致的视觉基线（产品图在任务级上传）'
-                        : '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'}
+                        : isVideo
+                          ? '视频创作维度——用于约束画面风格、运动、主体一致性和禁忌；agent 会通过项目视频档案读取。'
+                          : '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />
 
-              {/* 电商视觉模板：选模板一次性导入视觉风格基线。 */}
               {isEcommerce && (
                 <>
-                  <TemplatePicker type="ecommerce" selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
-
                   <div className="space-y-3 rounded-lg border border-border p-3">
                     <div>
                       <p className="text-sm font-medium text-foreground">电商默认配置</p>
@@ -948,6 +1004,11 @@ export default function ProjectsPage() {
                   <div>
                     <p className="text-sm font-medium text-foreground">视频生成默认配置</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">新建视频任务会读取这里的模型策略与参数默认值，任务和计划可覆盖但不会反写项目。</p>
+                    {!videoModelsLoading && configuredVideoModels.length === 0 && (
+                      <p className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+                        当前服务端没有配置可用视频模型，无法创建视频项目策略。
+                      </p>
+                    )}
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FormField control={form.control} name="video_defaults.purpose" render={({ field }) => (
@@ -968,16 +1029,16 @@ export default function ProjectsPage() {
                     <FormField control={form.control} name="video_defaults.model_key" render={({ field }) => (
                       <FormItem>
                         <FormLabel>默认模型</FormLabel>
-                        <Select value={field.value || 'seedance-2.0-mini'} onValueChange={(v) => {
+                        <Select value={configuredVideoModelKeys.has(field.value || '') ? field.value : ''} onValueChange={(v) => {
                           const next = v || ''
                           field.onChange(next)
                           form.setValue('video_model_policy.default_model', next, { shouldDirty: true })
                         }}>
-                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <FormControl><SelectTrigger><SelectValue placeholder={videoModelsLoading ? '加载模型...' : '选择已配置模型'} /></SelectTrigger></FormControl>
                           <SelectContent>
-                            <SelectItem value="seedance-2.0">Seedance 2.0</SelectItem>
-                            <SelectItem value="seedance-2.0-fast">Seedance 2.0 Fast</SelectItem>
-                            <SelectItem value="seedance-2.0-mini">Seedance 2.0 Mini</SelectItem>
+                            {configuredVideoModels.map((model) => (
+                              <SelectItem key={model.key} value={model.key}>{model.display_name || model.key}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -1049,7 +1110,7 @@ export default function ProjectsPage() {
                     )} />
                   </div>
                   <FormField control={form.control} name="video_model_policy.allowed_models" render={({ field }) => {
-                    const selected = new Set(field.value || [])
+                    const selected = new Set((field.value || []).filter((key) => configuredVideoModelKeys.has(key)))
                     const toggle = (model: string) => {
                       const next = new Set(selected)
                       if (next.has(model)) {
@@ -1063,22 +1124,21 @@ export default function ProjectsPage() {
                       <FormItem>
                         <FormLabel>允许模型</FormLabel>
                         <div className="flex flex-wrap gap-2">
-                          {[
-                            ['seedance-2.0', 'Seedance 2.0'],
-                            ['seedance-2.0-fast', 'Seedance 2.0 Fast'],
-                            ['seedance-2.0-mini', 'Seedance 2.0 Mini'],
-                          ].map(([value, label]) => (
+                          {configuredVideoModels.map((model) => (
                             <Button
-                              key={value}
+                              key={model.key}
                               type="button"
-                              variant={selected.has(value) ? 'default' : 'outline'}
+                              variant={selected.has(model.key) ? 'default' : 'outline'}
                               size="sm"
-                              onClick={() => toggle(value)}
+                              onClick={() => toggle(model.key)}
                             >
-                              {label}
+                              {model.display_name || model.key}
                             </Button>
                           ))}
                         </div>
+                        {configuredVideoModels.length === 0 && (
+                          <p className="text-xs text-muted-foreground">没有可选模型。请先在服务端配置视频模型 catalog。</p>
+                        )}
                         <FormMessage />
                       </FormItem>
                     )
@@ -1092,14 +1152,14 @@ export default function ProjectsPage() {
                     )} />
                     <FormField control={form.control} name="video_defaults.preflight" render={({ field }) => (
                       <FormItem className="flex items-center gap-2 space-y-0">
-                        <FormControl><Switch checked={field.value !== false} onCheckedChange={field.onChange} /></FormControl>
-                        <FormLabel className="text-sm">提交前预检</FormLabel>
+                        <FormControl><Switch checked={field.value !== false} onCheckedChange={field.onChange} className="sr-only" /></FormControl>
+                        <FormLabel className="text-sm text-muted-foreground">创建前自动校验参数和费用</FormLabel>
                       </FormItem>
                     )} />
                     <FormField control={form.control} name="video_model_policy.allow_auto_downgrade" render={({ field }) => (
                       <FormItem className="flex items-center gap-2 space-y-0">
                         <FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl>
-                        <FormLabel className="text-sm">允许自动降级</FormLabel>
+                        <FormLabel className="text-sm">参数不支持时自动降到可用分辨率</FormLabel>
                       </FormItem>
                     )} />
                   </div>

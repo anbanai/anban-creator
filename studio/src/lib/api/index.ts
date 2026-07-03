@@ -17,6 +17,7 @@ import { topicPoolApi } from './topic-pool'
 import { designerApi } from './designer'
 import { imageModelsApi } from './image-models'
 import { wechatApi } from './wechat'
+import { videoApi } from './video'
 
 export const api = {
   auth: authApi,
@@ -38,4 +39,5 @@ export const api = {
   designer: designerApi,
   imageModels: imageModelsApi,
   wechat: wechatApi,
+  video: videoApi,
 }

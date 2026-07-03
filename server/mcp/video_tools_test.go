@@ -304,6 +304,29 @@ func TestRegisterVideoReferenceReturnsPublicURL(t *testing.T) {
 	}
 }
 
+func TestRegisterVideoReferencePreservesSavedVideoDuration(t *testing.T) {
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":"p1",
+			"type":"video_url",
+			"url":"https://cdn.example.com/uploads/video-references/u/input.mp4",
+			"reference_role":"motion_reference",
+			"input_duration_seconds":7.25
+		}`)},
+	}
+	result, err := registerVideoReferenceHandler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("registerVideoReferenceHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, `"input_duration_seconds":7.25`) || !strings.Contains(text, `"reference_role":"motion_reference"`) {
+		t.Fatalf("registered reference did not preserve saved metadata: %s", text)
+	}
+}
+
 func TestRegisterVideoReferenceUploadsLocalFileAsTaskFileWhenTaskIDProvided(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
@@ -363,6 +386,60 @@ func TestBuildVideoGenerationPlanHandlerValidatesArguments(t *testing.T) {
 	}
 }
 
+func TestGetProjectVideoProfileFiltersUnconfiguredPolicyModels(t *testing.T) {
+	oldSvcs := svcs
+	oldBill := billSvc
+	t.Cleanup(func() {
+		svcs = oldSvcs
+		billSvc = oldBill
+	})
+	ctx, repo, _, projectID := setupMCPVideoProject(t)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0", "missing-model"},
+		DefaultModel:  "missing-model",
+		MaxResolution: "1080p",
+		MaxDuration:   15,
+	})
+	project.SetVideoDefaults(model.VideoDefaults{
+		ModelKey:   "missing-model",
+		Resolution: "1080p",
+		Ratio:      "9:16",
+		Duration:   15,
+	})
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	SetBillingServices(nil, nil, &config.Config{VideoAPI: config.VideoAPIConfig{ModelCatalog: []config.VideoModelCatalogEntry{{
+		Key:                  "seedance-2.0",
+		DisplayName:          "Configured Seedance",
+		ModelID:              "doubao-seedance-2-0-260128",
+		SupportedResolutions: []string{"1080p"},
+		SupportedRatios:      []string{"9:16"},
+		MinDuration:          1,
+		MaxDuration:          15,
+	}}}})
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":` + strconv.Quote(projectID) + `}`)}}
+	result, err := getProjectVideoProfileHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("getProjectVideoProfileHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if strings.Contains(text, "missing-model") {
+		t.Fatalf("profile exposed unconfigured model: %s", text)
+	}
+	if !strings.Contains(text, `"allowed_models":["seedance-2.0"]`) {
+		t.Fatalf("profile did not preserve configured allowed model: %s", text)
+	}
+}
+
 func TestBuildVideoGenerationPlanHandlerReturnsPayloadPreview(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
@@ -390,6 +467,53 @@ func TestBuildVideoGenerationPlanHandlerReturnsPayloadPreview(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("payload missing %q: %s", want, text)
 		}
+	}
+}
+
+func TestBuildVideoPlanAllowsTaskSavedVideoReferenceDuration(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/input.mp4"}
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	task, err := repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	task.SetVideoConfig(model.VideoTaskConfig{
+		References: []model.VideoReferenceAsset{{
+			Type:                 service.VideoReferenceVideo,
+			URL:                  "https://cdn.example.com/uploads/video-references/u/input.mp4",
+			ReferenceRole:        "motion_reference",
+			InputDurationSeconds: 7.25,
+		}},
+	})
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
+			"prompt":"基于已有动作参考生成一条种草视频",
+			"references":[{
+				"type":"video_url",
+				"url":"https://cdn.example.com/uploads/video-references/u/input.mp4",
+				"reference_role":"motion_reference",
+				"input_duration_seconds":7.25
+			}]
+		}`)},
+	}
+	result, err := buildVideoGenerationPlanHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("buildVideoGenerationPlanHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, `"input_video":true`) || !strings.Contains(text, `"input_seconds":7.25`) {
+		t.Fatalf("pricing did not include saved video input duration: %s", text)
 	}
 }
 

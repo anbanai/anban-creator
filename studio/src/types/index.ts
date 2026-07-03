@@ -89,7 +89,17 @@ export type { ResourceEntry, ResourceListResponse } from './resource'
 // Image Model
 export type { ImageModelOption, ImageModelListResponse } from './imageModel'
 
-export type { VideoDefaults, VideoModelPolicy, VideoPricingBreakdown, VideoTaskConfig } from './video'
+export type {
+  VideoDefaults,
+  VideoEstimateRequest,
+  VideoEstimateResponse,
+  VideoModelPolicy,
+  VideoModelSpec,
+  VideoPricingBreakdown,
+  VideoReferenceAsset,
+  VideoReferenceType,
+  VideoTaskConfig,
+} from './video'
 
 // Topic Pool
 export type { TopicPoolStatus, TopicPool } from './topic-pool'

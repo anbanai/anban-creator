@@ -120,7 +120,7 @@ export function PersonaBlock({
 
   if (readOnly) {
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-3">
         <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-medium">发布署名</Label>
@@ -143,7 +143,7 @@ export function PersonaBlock({
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="space-y-3">
       <section className="space-y-2 rounded-lg border border-input p-3">
         <div className="flex items-center justify-between">
           <Label htmlFor="persona-author-name" className="text-sm font-medium">

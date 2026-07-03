@@ -19,6 +19,7 @@ type PlanService struct {
 	logger                *zerolog.Logger
 	videoCatalog          VideoModelCatalog
 	videoCreditMultiplier int
+	creditSvc             *CreditService
 }
 
 // NewPlanService creates a new PlanService.
@@ -32,6 +33,13 @@ func (s *PlanService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatal
 	}
 	s.videoCatalog = catalog
 	s.videoCreditMultiplier = creditMultiplier
+}
+
+func (s *PlanService) SetCreditService(creditSvc *CreditService) {
+	if s == nil {
+		return
+	}
+	s.creditSvc = creditSvc
 }
 
 func (s *PlanService) resolvedVideoCatalog() VideoModelCatalog {
@@ -143,6 +151,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	}
 	var videoPlan *VideoGenerationPlan
 	if project.Platform == model.PlatformVideo {
+		if err := s.requireVideoCreationBalance(ctx, p.UserID); err != nil {
+			return nil, err
+		}
 		resolved, err := ResolveVideoGenerationPlan(
 			videoRequestFromTaskConfig(p.Prompt, p.Video),
 			project.VideoDefaults.Data(),
@@ -151,7 +162,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 			s.resolvedVideoCreditMultiplier(),
 		)
 		if err != nil {
-			return nil, err
+			return nil, wrapVideoGenerationConfigError(err)
 		}
 		videoPlan = &resolved
 	}
@@ -189,6 +200,20 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	}
 
 	return plan, nil
+}
+
+func (s *PlanService) requireVideoCreationBalance(ctx context.Context, userID string) error {
+	if s == nil || s.creditSvc == nil {
+		return nil
+	}
+	balance, err := s.creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("check video credit balance: %w", err)
+	}
+	if balance < MinVideoCreationBalance {
+		return fmt.Errorf("video tasks require at least %d credits: %w: %w", MinVideoCreationBalance, ErrMinimumVideoBalance, ErrInsufficientCredits)
+	}
+	return nil
 }
 
 // GetByID returns a plan by its ID.
@@ -301,7 +326,7 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 			s.resolvedVideoCreditMultiplier(),
 		)
 		if err != nil {
-			return nil, err
+			return nil, wrapVideoGenerationConfigError(err)
 		}
 		vc := videoTaskConfigFromPlan(resolved)
 		plan.SetVideoConfig(vc)

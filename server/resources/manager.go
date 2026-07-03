@@ -160,6 +160,7 @@ func (rm *ResourceManager) loadThemes() error {
 				Colors  string `yaml:"colors"`
 				BestFor string `yaml:"best_for"`
 			} `yaml:"style_info"`
+			Colors map[string]string `yaml:"colors"`
 		}
 		if err := yaml.Unmarshal(data, &raw); err != nil {
 			continue
@@ -173,6 +174,7 @@ func (rm *ResourceManager) loadThemes() error {
 			Description: raw.Description,
 			Mood:        raw.StyleInfo.Mood,
 			BestFor:     raw.StyleInfo.BestFor,
+			Colors:      raw.Colors,
 		}
 		rm.themes[raw.Name] = entry
 		rm.rawContent[CategoryTheme][raw.Name] = data

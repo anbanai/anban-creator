@@ -1,16 +1,17 @@
 package resources
 
 import (
-	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
 
-func TestEmbeddedThemesUseCompactWeChatWidth(t *testing.T) {
-	type themeLayout struct {
+func TestEmbeddedThemesExposeColorsAndLayoutMetadata(t *testing.T) {
+	type themeSpec struct {
+		Colors map[string]string `yaml:"colors"`
 		Layout struct {
 			ContainerPadding string `yaml:"container_padding"`
+			MaxWidth         string `yaml:"max_width"`
 			CardPadding      string `yaml:"card_padding"`
 		} `yaml:"layout"`
 	}
@@ -21,39 +22,35 @@ func TestEmbeddedThemesUseCompactWeChatWidth(t *testing.T) {
 	}
 
 	for name, data := range rawThemes {
-		var theme themeLayout
+		var theme themeSpec
 		if err := yaml.Unmarshal(data, &theme); err != nil {
 			t.Fatalf("unmarshal theme %s: %v", name, err)
 		}
-		if !hasZeroHorizontalPadding(theme.Layout.ContainerPadding) {
-			t.Errorf("theme %s container_padding = %q, want zero horizontal padding", name, theme.Layout.ContainerPadding)
-		}
-		if !hasCompactCardHorizontalPadding(theme.Layout.CardPadding) {
-			t.Errorf("theme %s card_padding = %q, want 16px horizontal padding", name, theme.Layout.CardPadding)
-		}
-	}
-}
 
-func hasZeroHorizontalPadding(value string) bool {
-	parts := strings.Fields(value)
-	switch len(parts) {
-	case 2:
-		return parts[1] == "0"
-	case 4:
-		return parts[1] == "0" && parts[3] == "0"
-	default:
-		return value == "0"
-	}
-}
+		entry := Manager().Get(CategoryTheme, name)
+		if entry == nil {
+			t.Fatalf("theme %s missing from resource manager", name)
+		}
+		if len(theme.Colors) == 0 {
+			t.Errorf("theme %s has no YAML colors", name)
+		}
+		if len(entry.Colors) == 0 {
+			t.Errorf("theme %s resource entry did not expose colors", name)
+		}
+		for key, want := range theme.Colors {
+			if got := entry.Colors[key]; got != want {
+				t.Errorf("theme %s color %s = %q, want %q", name, key, got, want)
+			}
+		}
 
-func hasCompactCardHorizontalPadding(value string) bool {
-	parts := strings.Fields(value)
-	switch len(parts) {
-	case 2:
-		return parts[1] == "16px"
-	case 4:
-		return parts[1] == "16px" && parts[3] == "16px"
-	default:
-		return false
+		if theme.Layout.ContainerPadding == "" {
+			t.Errorf("theme %s must declare container_padding so WeChat whitespace is theme-owned", name)
+		}
+		if theme.Layout.MaxWidth == "" {
+			t.Errorf("theme %s must declare max_width so WeChat width is theme-owned", name)
+		}
+		if theme.Layout.CardPadding == "" {
+			t.Errorf("theme %s must declare card_padding so WeChat whitespace is theme-owned", name)
+		}
 	}
 }

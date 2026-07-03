@@ -46,6 +46,7 @@ type Services struct {
 	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	AgentHandler             *handler.AgentHandler
 	CreditHandler            *handler.CreditHandler
+	VideoHandler             *handler.VideoHandler
 	ProjectHandler           *handler.ProjectHandler
 	TimelineHandler          *handler.TimelineHandler
 	APIKeyHandler            *handler.APIKeyHandler
@@ -332,6 +333,11 @@ func NewRouter(svc *Services) *fiber.App {
 	// File upload endpoint.
 	if svc.FileHandler != nil {
 		apiV1.Post("/files/upload", svc.FileHandler.Upload)
+	}
+
+	if svc.VideoHandler != nil {
+		apiV1.Get("/video/models", svc.VideoHandler.Models)
+		apiV1.Post("/video/estimate", svc.VideoHandler.Estimate)
 	}
 
 	// ---------------------------------------------------------------------------

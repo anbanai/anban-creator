@@ -110,9 +110,10 @@ type projectRequest struct {
 	VideoDefaults      *model.VideoDefaults            `json:"video_defaults,omitempty"`
 	VideoModelPolicy   *model.VideoModelPolicy         `json:"video_model_policy,omitempty"`
 	// Config fields for platform-specific credentials.
-	WechatAppID      string `json:"wechat_app_id"`
-	WechatSecret     string `json:"wechat_secret"`
-	EnablePublishing bool   `json:"enable_publishing"`
+	WechatAppID            string `json:"wechat_app_id"`
+	WechatSecret           string `json:"wechat_secret"`
+	EnablePublishing       bool   `json:"enable_publishing"`
+	RequirePublishApproval bool   `json:"require_publish_approval"`
 }
 
 func hasJSONField(body []byte, field string) bool {
@@ -149,9 +150,10 @@ func (req *projectRequest) toProject() *model.Project {
 		Instructions:          instructions,
 		InstructionsSet:       instructionsSet,
 		Config: model.ProjectConfig{
-			WechatAppID:      req.WechatAppID,
-			WechatSecret:     req.WechatSecret,
-			EnablePublishing: req.EnablePublishing,
+			WechatAppID:            req.WechatAppID,
+			WechatSecret:           req.WechatSecret,
+			EnablePublishing:       req.EnablePublishing,
+			RequirePublishApproval: req.RequirePublishApproval,
 		},
 	}
 	if req.EcommerceDefaults != nil {
@@ -191,7 +193,7 @@ func (h *ProjectHandler) List(c fiber.Ctx) error {
 
 	// Sanitize all projects before returning.
 	for _, ch := range projects {
-		service.SanitizeProject(ch)
+		h.service.SanitizeProjectForResponse(ch)
 		h.signProjectURLs(c.Context(), ch)
 	}
 
@@ -290,11 +292,14 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
+		if errors.Is(err, service.ErrVideoModelUnavailable) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create project: "+err.Error())
 	}
 
-	service.SanitizeProject(created)
+	h.service.SanitizeProjectForResponse(created)
 	h.signProjectURLs(c.Context(), created)
 
 	// For Seednote projects, include recommended templates.
@@ -341,7 +346,7 @@ func (h *ProjectHandler) Get(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to get project")
 	}
 
-	service.SanitizeProject(ch)
+	h.service.SanitizeProjectForResponse(ch)
 	h.signProjectURLs(c.Context(), ch)
 	return Success(c, fiber.Map{
 		"project": ch,
@@ -391,11 +396,14 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrProjectOwnedByUser) {
 			return Forbidden(c, "you do not have access to this project")
 		}
+		if errors.Is(err, service.ErrVideoModelUnavailable) {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
 		h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update project")
 	}
 
-	service.SanitizeProject(updated)
+	h.service.SanitizeProjectForResponse(updated)
 	h.signProjectURLs(c.Context(), updated)
 	return Success(c, updated)
 }
@@ -822,6 +830,8 @@ func (req *projectRequest) getFieldValue(key string) string {
 		return req.WechatSecret
 	case "enable_publishing":
 		return fmt.Sprintf("%v", req.EnablePublishing)
+	case "require_publish_approval":
+		return fmt.Sprintf("%v", req.RequirePublishApproval)
 	default:
 		return ""
 	}

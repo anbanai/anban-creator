@@ -248,14 +248,16 @@ func main() {
 	var posterSvc *service.PosterService
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
+	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalogOrDefault())
+	videoCreditMultiplier := cfg.VideoAPI.CreditMultiplierOrDefault()
 
 	if repo != nil {
-		videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalogOrDefault())
-		videoCreditMultiplier := cfg.VideoAPI.CreditMultiplierOrDefault()
 		planSvc = service.NewPlanService(repo, log)
 		planSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
 		projectSvc = service.NewProjectService(repo, log)
+		projectSvc.SetVideoCatalog(videoCatalog)
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
+		planSvc.SetCreditService(creditSvc)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
 		templateSvc = service.NewTemplateService(repo, log)
@@ -387,6 +389,7 @@ func main() {
 	var projectHandler *handler.ProjectHandler
 	var timelineHandler *handler.TimelineHandler
 	var creditHandler *handler.CreditHandler
+	var videoHandler *handler.VideoHandler
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
 	var feedbackHandler *handler.FeedbackHandler
@@ -437,6 +440,7 @@ func main() {
 		if creditSvc != nil {
 			creditHandler = handler.NewCreditHandler(creditSvc, &cfg.Credits, &cfg.ImageAPI, cfg.Credits.AdminAPIKey, log)
 		}
+		videoHandler = handler.NewVideoHandler(repo, creditSvc, videoCatalog, videoCreditMultiplier, log)
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}
@@ -642,6 +646,7 @@ func main() {
 		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
 		AgentHandler:             agentHandler,
 		CreditHandler:            creditHandler,
+		VideoHandler:             videoHandler,
 		TimelineHandler:          timelineHandler,
 		APIKeyHandler:            apiKeyHandler,
 		FileHandler:              fileHandler,

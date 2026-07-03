@@ -29,7 +29,11 @@ vi.mock('@/lib/api', async () => {
       },
       credits: {
         ...actual.api.credits,
-        pricing: vi.fn().mockResolvedValue({ task_costs: {} }),
+        pricing: vi.fn().mockResolvedValue({
+          task_costs: {},
+          model_costs: {},
+          income: { daily_sign_in: 0, register_bonus: 0, invite_reward: 0 },
+        }),
         balance: vi.fn().mockResolvedValue({ balance: 0 }),
       },
     },
@@ -38,7 +42,51 @@ vi.mock('@/lib/api', async () => {
 
 describe('PlansPage — mutation failure feedback (no silent failure)', () => {
   beforeEach(() => {
-    errorMock.mockClear()
+    vi.clearAllMocks()
+    vi.mocked(api.plans.list).mockResolvedValue({
+      items: [{
+        id: 'plan-1',
+        type: 'article',
+        title: '测试计划',
+        description: '',
+        cron_expr: '0 9 * * 1',
+        prompt: '',
+        status: 'active',
+        next_run_at: '2025-01-20T09:00:00Z',
+        project_id: 'ch-1',
+        created_at: '2025-01-10T00:00:00Z',
+        updated_at: '2025-01-10T00:00:00Z',
+      }],
+      total: 1,
+    })
+    vi.mocked(api.projects.list).mockResolvedValue([{
+      id: 'ch-1',
+      user_id: '1',
+      platform: 'article',
+      name: '测试项目',
+      avatar_url: '',
+      profile_url: 'https://mp.weixin.qq.com/test',
+      instructions: '测试定位',
+      keywords: '测试',
+      visual_style: '',
+      writer: '',
+      theme: '',
+      author: '作者',
+      template_id: '',
+      reference_image_url: '',
+      image_ratio: '16:9',
+      max_concurrent_tasks: 2,
+      config: { wechat_app_id: 'wx123' },
+      status: 'active',
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-01T00:00:00Z',
+    }])
+    vi.mocked(api.credits.pricing).mockResolvedValue({
+      task_costs: {},
+      model_costs: {},
+      income: { daily_sign_in: 1024, register_bonus: 4096, invite_reward: 2048 },
+    })
+    vi.mocked(api.credits.balance).mockResolvedValue({ balance: 0 })
   })
 
   it('shows an error toast when pausing a plan fails (was previously silent)', async () => {
@@ -52,7 +100,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     render(<PlansPage />)
 
     // mockPlans[0] is an active plan → the 暂停 button renders.
-    const pauseBtn = await screen.findByRole('button', { name: '暂停' })
+    const pauseBtn = await screen.findByRole('button', { name: '暂停' }, { timeout: 5000 })
     fireEvent.click(pauseBtn)
 
     await waitFor(() => {

@@ -413,7 +413,7 @@ func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesDynamicCredi
 	creditSvc.repo = repo
 	ctx := context.Background()
 	userID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-video", CreditsBalance: 10_000}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-video", CreditsBalance: 200_000}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	project := &model.Project{
@@ -470,8 +470,143 @@ func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesDynamicCredi
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if bal != 10_000-2480 {
-		t.Fatalf("balance = %d, want %d", bal, 10_000-2480)
+	if bal != 200_000-2480 {
+		t.Fatalf("balance = %d, want %d", bal, 200_000-2480)
+	}
+}
+
+func TestTaskService_CreateManualVideoTaskStoresReferenceAssets(t *testing.T) {
+	repoForCredits := setupCreditTestRepo(t)
+	creditSvc := newPricedCreditService(repoForCredits)
+	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
+	creditSvc.repo = repo
+	ctx := context.Background()
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-refs", InviteCode: "invite-" + userID, CreditsBalance: 200_000}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "视频项目",
+		Status:   model.ProjectStatusActive,
+	}
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "16:9",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: project.ID,
+		Prompt:    "生成一条咖啡杯种草视频",
+		Quantity:  1,
+		Video: &model.VideoTaskConfig{
+			References: []model.VideoReferenceAsset{
+				{
+					Type:                 VideoReferenceImage,
+					URL:                  "https://cdn.example.com/cup.png",
+					ReferenceRole:        "product appearance",
+					FileName:             "cup.png",
+					MimeType:             "image/png",
+					FileSize:             1234,
+					InputDurationSeconds: 0,
+				},
+				{
+					Type:                 VideoReferenceVideo,
+					URL:                  "https://cdn.example.com/source.mp4",
+					ReferenceRole:        "motion reference",
+					FileName:             "source.mp4",
+					MimeType:             "video/mp4",
+					FileSize:             5678,
+					InputDurationSeconds: 4.2,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	vc := found.VideoConfig.Data()
+	if len(vc.References) != 2 {
+		t.Fatalf("references = %+v, want 2", vc.References)
+	}
+	if vc.PricingBreakdown == nil || !vc.PricingBreakdown.InputVideo || vc.PricingBreakdown.InputSeconds != 4.2 {
+		t.Fatalf("pricing breakdown = %+v, want input video with measured seconds", vc.PricingBreakdown)
+	}
+}
+
+func TestTaskService_CreateManualVideoTaskRequiresMinimumBalance(t *testing.T) {
+	repoForCredits := setupCreditTestRepo(t)
+	creditSvc := newPricedCreditService(repoForCredits)
+	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
+	creditSvc.repo = repo
+	ctx := context.Background()
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-min-balance", InviteCode: "invite-" + userID, CreditsBalance: 99_999}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "视频项目",
+		Status:   model.ProjectStatusActive,
+	}
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "16:9",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	_, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: project.ID,
+		Prompt:    "生成一条咖啡杯种草视频",
+	})
+	if err == nil || !strings.Contains(err.Error(), "video tasks require at least 100000 credits") {
+		t.Fatalf("CreateManual error = %v, want minimum balance error", err)
+	}
+	bal, err := creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	if bal != 99_999 {
+		t.Fatalf("balance = %d, want unchanged 99999", bal)
 	}
 }
 
@@ -483,7 +618,7 @@ func TestTaskService_CreateManualVideoTaskUsesConfiguredCreditMultiplier(t *test
 	creditSvc.repo = repo
 	ctx := context.Background()
 	userID := uuid.New().String()
-	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-multiplier", InviteCode: "invite-" + userID, CreditsBalance: 10_000}); err != nil {
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-multiplier", InviteCode: "invite-" + userID, CreditsBalance: 200_000}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	project := &model.Project{

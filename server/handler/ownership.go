@@ -6,9 +6,9 @@ import "strings"
 // user is allowed to access.
 //
 // The shared base allows the user's own uploads under
-// uploads/{projects,references,channels}/{userID}/. "uploads/channels/" is the
-// legacy prefix from the channel→project rename and is kept so existing user
-// uploads remain accessible.
+// uploads/{projects,references,video-references,channels}/{userID}/.
+// "uploads/channels/" is the legacy prefix from the channel→project rename and
+// is kept so existing user uploads remain accessible.
 //
 // Callers pass any additional user-scoped prefixes they also permit, e.g.
 // "{userID}/designer/" for designer-generated images or "{userID}/" for task
@@ -18,6 +18,7 @@ func isUserOwnedStorageKey(userID, cleanKey string, extraPrefixes ...string) boo
 	prefixes := append([]string{
 		"uploads/projects/" + userID + "/",
 		"uploads/references/" + userID + "/",
+		"uploads/video-references/" + userID + "/",
 		"uploads/channels/" + userID + "/", // legacy channel→project rename prefix
 	}, extraPrefixes...)
 	for _, p := range prefixes {

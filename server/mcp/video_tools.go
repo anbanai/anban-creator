@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -122,10 +123,12 @@ func getProjectVideoProfileHandler(ctx context.Context, req *mcp.CallToolRequest
 	if project.Platform != model.PlatformVideo {
 		return errorResult("project is not a video generation project"), nil
 	}
+	catalog := videoModelCatalog()
+	service.SanitizeProjectVideoProfile(project, catalog)
 	return textResult(map[string]any{
 		"video_defaults":       project.VideoDefaults.Data(),
 		"video_model_policy":   project.VideoModelPolicy.Data(),
-		"model_catalog":        videoModelCatalog(),
+		"model_catalog":        catalog,
 		"credit_multiplier":    videoCreditMultiplier(),
 		"persistent_file_rule": "all server-persistent references and generated results must be OSS-backed task files; local agent files are temporary only",
 	})
@@ -167,6 +170,9 @@ func registerVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest
 	textValue, _ := args["text"].(string)
 	referenceRole, _ := args["reference_role"].(string)
 	var measuredDuration float64
+	if duration, ok := numberAsFloat64(args["input_duration_seconds"]); ok && duration > 0 {
+		measuredDuration = duration
+	}
 	var taskFile *model.TaskFile
 	if strings.TrimSpace(taskFileID) != "" {
 		resolvedURL, duration, tf, err := videoReferenceURLFromTaskFile(ctx, taskID, taskFileID, refType)
@@ -471,7 +477,7 @@ func resolveMCPVideoPlan(ctx context.Context, projectID string, videoReq service
 	if project.Platform != model.PlatformVideo {
 		return nil, fmt.Errorf("project is not a video generation project")
 	}
-	if err := requireMeasuredVideoReferences(videoReq.ReferenceSet); err != nil {
+	if err := requireMeasuredVideoReferences(ctx, videoReq.ReferenceSet, videoReq.TaskID); err != nil {
 		return nil, err
 	}
 	plan, err := service.ResolveVideoGenerationPlan(
@@ -622,16 +628,47 @@ func parseVideoReferences(raw any) []service.VideoReferenceInput {
 	return refs
 }
 
-func requireMeasuredVideoReferences(refs []service.VideoReferenceInput) error {
+func requireMeasuredVideoReferences(ctx context.Context, refs []service.VideoReferenceInput, taskID string) error {
 	for _, ref := range refs {
 		if ref.Type != service.VideoReferenceVideo {
 			continue
 		}
-		if strings.TrimSpace(ref.TaskFileID) == "" || ref.InputDurationSeconds <= 0 {
+		if strings.TrimSpace(ref.TaskFileID) != "" && ref.InputDurationSeconds > 0 {
+			continue
+		}
+		if ref.InputDurationSeconds > 0 && videoReferenceMatchesTaskConfig(ctx, taskID, ref) {
+			continue
+		}
+		if ref.InputDurationSeconds <= 0 {
 			return fmt.Errorf("video_url references must be registered with register_video_reference using task_file_id so the server can measure input video duration")
 		}
+		return fmt.Errorf("video_url references with saved input duration must match the current task video_config; use register_video_reference with task_file_id for new raw video references")
 	}
 	return nil
+}
+
+func videoReferenceMatchesTaskConfig(ctx context.Context, taskID string, ref service.VideoReferenceInput) bool {
+	if strings.TrimSpace(taskID) == "" || svcs == nil || svcs.TaskSvc == nil {
+		return false
+	}
+	task, err := svcs.TaskSvc.GetByID(ctx, taskID)
+	if err != nil || task.Type != model.PlatformVideo {
+		return false
+	}
+	cfg := task.VideoConfig.Data()
+	for _, asset := range cfg.References {
+		if asset.Type != service.VideoReferenceVideo {
+			continue
+		}
+		if strings.TrimSpace(asset.URL) != strings.TrimSpace(ref.URL) {
+			continue
+		}
+		if asset.InputDurationSeconds <= 0 {
+			continue
+		}
+		return math.Abs(asset.InputDurationSeconds-ref.InputDurationSeconds) < 0.01
+	}
+	return false
 }
 
 func numberAsInt64(raw any) (int64, bool) {

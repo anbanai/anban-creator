@@ -4,6 +4,7 @@ export interface ResourceEntry {
   description?: string
   mood?: string
   best_for?: string
+  colors?: Record<string, string>
   display_name?: string
   english_name?: string
   category_cn?: string

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -86,5 +87,80 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 		case *ptr:
 			t.Errorf("%s = true, want false", label)
 		}
+	}
+}
+
+func TestCreatePlan_VideoMinimumBalanceReturnsPaymentRequired(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          "video-plan-balance@example.com",
+		Password:       "hashed",
+		InviteCode:     "videoplanbalance",
+		CreditsBalance: 99_999,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project := &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "Video",
+		Status:   model.ProjectStatusActive,
+	}
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    service.VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	creditSvc := service.NewCreditService(repo, nil, &logger)
+	planSvc := service.NewPlanService(repo, &logger)
+	planSvc.SetCreditService(creditSvc)
+	h := NewPlanHandler(planSvc, &logger)
+
+	app := fiber.New()
+	app.Post("/plans", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	body := `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"计划生成视频"}`
+	req := httptest.NewRequest("POST", "/plans", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusPaymentRequired {
+		t.Fatalf("status = %d, want 402", resp.StatusCode)
+	}
+	var bodyResp struct {
+		Msg string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&bodyResp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if bodyResp.Msg != "视频任务需至少 100000 积分余额" {
+		t.Fatalf("msg = %q, want video minimum balance hint", bodyResp.Msg)
 	}
 }

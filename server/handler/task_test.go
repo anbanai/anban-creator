@@ -279,6 +279,80 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	}
 }
 
+func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          "video-task-balance@example.com",
+		Password:       "hashed",
+		InviteCode:     "videotaskbalance",
+		CreditsBalance: 99_999,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project := &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "Video",
+		Status:   model.ProjectStatusActive,
+	}
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    service.VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	creditSvc := service.NewCreditService(repo, nil, &logger)
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, creditSvc, &logger, "", nil, "", nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Create(c)
+	})
+
+	req := httptest.NewRequest("POST", "/tasks", strings.NewReader(`{"project_id":"`+projectID+`","prompt":"生成视频"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusPaymentRequired {
+		t.Fatalf("status = %d, want 402", resp.StatusCode)
+	}
+	var body struct {
+		Msg string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Msg != "视频任务需至少 100000 积分余额" {
+		t.Fatalf("msg = %q, want video minimum balance hint", body.Msg)
+	}
+}
+
 func TestGetTaskByIDIncludesCreditsCharged(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)

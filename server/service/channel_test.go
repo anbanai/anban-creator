@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -160,5 +161,115 @@ func TestProjectServiceUpdateInstructionsSetControlsClear(t *testing.T) {
 	}
 	if updated.Instructions != "" {
 		t.Fatalf("Instructions after explicit clear = %q, want empty", updated.Instructions)
+	}
+}
+
+func TestProjectServiceUpdatePersistsRequirePublishApproval(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	created, err := svc.Create(context.Background(), "user-1", &model.Project{
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Config: model.ProjectConfig{
+			EnablePublishing:       true,
+			RequirePublishApproval: false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
+		Config: model.ProjectConfig{
+			EnablePublishing:       true,
+			RequirePublishApproval: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !updated.Config.RequirePublishApproval {
+		t.Fatal("RequirePublishApproval was not persisted on update")
+	}
+}
+
+func TestProjectServiceRejectsUnconfiguredVideoPolicyOnCreateAndUpdate(t *testing.T) {
+	svc, _ := setupTestProjectService(t)
+	svc.SetVideoCatalog(VideoModelCatalog{
+		"configured-video": {
+			Key:                  "configured-video",
+			ModelID:              "provider-configured-video",
+			SupportedResolutions: []string{"720p"},
+			SupportedRatios:      []string{"9:16"},
+			MinDuration:          1,
+			MaxDuration:          15,
+			NoInputPricePerSecond: map[string]float64{
+				"720p": 1,
+			},
+		},
+	})
+
+	create := &model.Project{
+		Platform: model.PlatformVideo,
+		Name:     "Video",
+	}
+	create.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "missing-video",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+		Preflight:  true,
+	})
+	create.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"missing-video"},
+		DefaultModel:  "missing-video",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if _, err := svc.Create(context.Background(), "user-1", create); err == nil || !strings.Contains(err.Error(), "模型未配置或不可用") {
+		t.Fatalf("Create error = %v, want unconfigured model rejection", err)
+	}
+
+	ok := &model.Project{
+		Platform: model.PlatformVideo,
+		Name:     "Video",
+	}
+	ok.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "configured-video",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+		Preflight:  true,
+	})
+	ok.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"configured-video"},
+		DefaultModel:  "configured-video",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	created, err := svc.Create(context.Background(), "user-1", ok)
+	if err != nil {
+		t.Fatalf("Create configured project: %v", err)
+	}
+
+	update := &model.Project{}
+	update.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "missing-video",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+		Preflight:  true,
+	})
+	update.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"configured-video", "missing-video"},
+		DefaultModel:  "missing-video",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	update.VideoProfileSet = true
+	if _, err := svc.Update(context.Background(), "user-1", created.ID, update); err == nil || !strings.Contains(err.Error(), "模型未配置或不可用") {
+		t.Fatalf("Update error = %v, want unconfigured model rejection", err)
 	}
 }

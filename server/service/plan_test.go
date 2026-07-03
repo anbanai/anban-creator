@@ -496,6 +496,34 @@ func TestPlanService_UpdateVideoConfigRevalidatesAndStoresSnapshot(t *testing.T)
 	}
 }
 
+func TestPlanService_CreateVideoPlanRequiresMinimumBalance(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	creditSvc := newPricedCreditService(repo)
+	svc.SetCreditService(creditSvc)
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          userID + "@example.com",
+		Password:       "hashed",
+		InviteCode:     "invite-" + userID[:8],
+		CreditsBalance: 99_999,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := createTestVideoProject(t, repo, userID)
+
+	_, err := svc.Create(ctx, CreatePlanParams{
+		UserID:    userID,
+		ProjectID: projectID,
+		CronExpr:  "0 9 * * *",
+		Prompt:    "计划生成视频",
+	})
+	if err == nil || !strings.Contains(err.Error(), "video tasks require at least 100000 credits") {
+		t.Fatalf("Create video plan error = %v, want minimum balance error", err)
+	}
+}
+
 func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
