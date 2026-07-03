@@ -160,6 +160,7 @@ export default function ProjectsPage() {
   const isEcommerce = selectedPlatform === 'ecommerce'
   const isVideo = selectedPlatform === 'video'
   const visualTemplateType: TemplateType | null = isWechat ? 'article' : isSeednote ? 'seednote' : isEcommerce ? 'ecommerce' : null
+  const supportsVisualReference = !!visualTemplateType
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = useWatch({ control: form.control, name: 'enable_publishing' })
   const referenceImageUrl = useWatch({ control: form.control, name: 'reference_image_url' })
@@ -263,9 +264,9 @@ export default function ProjectsPage() {
     return () => clearTimeout(timer)
   }, [modalOpen, profileUrl, selectedPlatform, platformConfigMap])
 
-  // Auto-analyze reference image to fill visual style (seednote only)
+  // Auto-analyze reference image to fill visual style for image-based project types.
   useEffect(() => {
-    if (!modalOpen || !referenceImageUrl || selectedPlatform !== 'seednote') return
+    if (!modalOpen || !referenceImageUrl || !supportsVisualReference) return
     if (styleManuallyEditedRef.current) return
     // Skip if URL matches the project's saved value — don't clobber existing style on edit
     if (editingProject && referenceImageUrl === editingProject.reference_image_url) return
@@ -288,7 +289,7 @@ export default function ProjectsPage() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [modalOpen, referenceImageUrl, selectedPlatform, editingProject, form])
+  }, [modalOpen, referenceImageUrl, supportsVisualReference, editingProject, form])
 
   // Reset manual-edit flag when modal reopens
   useEffect(() => {
@@ -854,73 +855,79 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
-              {visualTemplateType && (
-                <TemplatePicker type={visualTemplateType} selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
-              )}
-
-              <FormField control={form.control} name="visual_style" render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center justify-between gap-2">
-                    <FormLabel>{isVideo ? '视频风格与禁忌' : '视觉风格'}</FormLabel>
-                    {(isSeednote || isEcommerce) && (
-                      <ReferenceImageUpload
-                        value={referenceImageUrl}
-                        onChange={(url) => form.setValue('reference_image_url', url, { shouldDirty: true })}
-                        purpose="project"
-                        compact
-                      />
-                    )}
+              {supportsVisualReference ? (
+                <section className="space-y-3 rounded-lg border border-border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">图文视觉配置</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">先选视觉模板，再用参考图识别和 prompt 微调最终风格。</p>
+                    </div>
+                    <ReferenceImageUpload
+                      value={referenceImageUrl}
+                      onChange={(url) => form.setValue('reference_image_url', url, { shouldDirty: true })}
+                      purpose="project"
+                      compact
+                    />
                   </div>
-                  <FormControl>
-                    {isSeednote ? (
-                      <div className="relative">
-                        <Textarea
-                          placeholder="描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格"
-                          className={analyzingStyle ? 'pr-10' : ''}
-                          {...field}
-                          onChange={(e) => {
-                            styleManuallyEditedRef.current = true
-                            field.onChange(e)
-                          }}
-                        />
-                        {analyzingStyle && (
-                          <div className="absolute right-2 top-2">
-                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                          </div>
-                        )}
-                        {analyzingStyle && (
-                          <p className="text-xs text-muted-foreground">正在分析参考图...</p>
-                        )}
-                      </div>
-                    ) : isEcommerce ? (
-                      <Textarea
-                        placeholder="描述品牌视觉风格基线，如：高端极简白底、国潮暖橙插画、电商爆款高饱和促销感。作为主图/详情/封面跨图一致的视觉锚点"
-                        {...field}
-                      />
-                    ) : isVideo ? (
+
+                  {visualTemplateType && (
+                    <TemplatePicker type={visualTemplateType} selected={selectedTemplate} onSelect={handleProjectTemplateImport} />
+                  )}
+
+                  <FormField control={form.control} name="visual_style" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>视觉风格</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <Textarea
+                            placeholder={isSeednote
+                              ? '描述你想要的图片视觉风格，如：手绘感，暖色调，小清新，治愈系水彩插画风格'
+                              : isEcommerce
+                                ? '描述品牌视觉风格基线，如：高端极简白底、国潮暖橙插画、电商爆款高饱和促销感。作为主图/详情/封面跨图一致的视觉锚点'
+                                : '描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由项目定位与内容主题三维分析自动确定'}
+                            className={analyzingStyle ? 'pr-10' : ''}
+                            {...field}
+                            onChange={(e) => {
+                              styleManuallyEditedRef.current = true
+                              field.onChange(e)
+                            }}
+                          />
+                          {analyzingStyle && (
+                            <div className="absolute right-2 top-2">
+                              <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                            </div>
+                          )}
+                        </div>
+                      </FormControl>
+                      {analyzingStyle && (
+                        <p className="text-xs text-muted-foreground">正在分析参考图...</p>
+                      )}
+                      <FormDescription>
+                        {isSeednote
+                          ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示'
+                          : isEcommerce
+                            ? '品牌视觉维度——作为电商素材跨图一致的视觉基线（产品图在任务级上传）'
+                            : '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </section>
+              ) : (
+                <FormField control={form.control} name="visual_style" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{isVideo ? '视频风格与禁忌' : '视觉风格'}</FormLabel>
+                    <FormControl>
                       <Textarea
                         placeholder="描述视频的画面风格、镜头语言、主体一致性要求、禁忌和不可改变的创作约束"
                         {...field}
                       />
-                    ) : (
-                      <Textarea
-                        placeholder="描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由项目定位与内容主题三维分析自动确定"
-                        {...field}
-                      />
-                    )}
-                  </FormControl>
-                  <FormDescription>
-                    {isSeednote
-                      ? '描述 AI 生成图片的视觉风格，将用于封面和内容图的风格提示'
-                      : isEcommerce
-                        ? '品牌视觉维度——作为电商素材跨图一致的视觉基线（产品图在任务级上传）'
-                        : isVideo
-                          ? '视频创作维度——用于约束画面风格、运动、主体一致性和禁忌；agent 会通过项目视频档案读取。'
-                          : '图片视觉维度——仅决定封面与配图的视觉，与写作风格、排版样式相互独立'}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />
+                    </FormControl>
+                    <FormDescription>视频创作维度——用于约束画面风格、运动、主体一致性和禁忌；agent 会通过项目视频档案读取。</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              )}
 
               {isEcommerce && (
                 <>
