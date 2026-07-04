@@ -56,6 +56,30 @@ func TestDockerfilesUseOpenHandsAgentRuntime(t *testing.T) {
 	}
 }
 
+func TestOpenHandsRuntimeDockerfilesInstallPackagesAsRoot(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "server", "Dockerfile"),
+		filepath.Join(root, "agent", "Dockerfile"),
+	} {
+		t.Run(filepath.ToSlash(path), func(t *testing.T) {
+			body := readTextFile(t, path)
+			from := strings.Index(body, "FROM ghcr.io/openhands/agent-server:1.23.0-python")
+			if from < 0 {
+				t.Fatalf("%s missing OpenHands runtime stage", path)
+			}
+			apt := strings.Index(body[from:], "apt-get update")
+			if apt < 0 {
+				t.Fatalf("%s missing apt-get update in OpenHands runtime stage", path)
+			}
+			beforeApt := body[from : from+apt]
+			if !strings.Contains(beforeApt, "USER root") {
+				t.Fatalf("%s must switch to USER root before apt-get update because the OpenHands base image may default to a non-root user", path)
+			}
+		})
+	}
+}
+
 func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 	root := repositoryRoot(t)
 	body := readTextFile(t, filepath.Join(root, ".dockerignore"))

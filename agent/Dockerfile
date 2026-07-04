@@ -10,6 +10,8 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/anban ./agent
 
 FROM ghcr.io/openhands/agent-server:1.23.0-python
 
+USER root
+
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl git jq fontconfig fonts-noto-cjk python3 tini; \

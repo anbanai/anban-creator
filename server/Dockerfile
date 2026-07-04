@@ -15,6 +15,8 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban ./agent
 # Stage 2: API server runtime plus local agent sandbox.
 FROM ghcr.io/openhands/agent-server:1.23.0-python
 
+USER root
+
 # Install Anban agent runtime requirements. The OpenHands base may already
 # include ffmpeg/ffprobe; install ffmpeg only when either binary is missing.
 RUN set -eux; \
