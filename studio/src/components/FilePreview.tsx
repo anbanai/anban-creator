@@ -25,15 +25,21 @@ function isMarkdownFile(fileName: string): boolean {
   return /\.md$/i.test(fileName)
 }
 
+function isVideoFile(file: TaskFile): boolean {
+  return file.mime_type?.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.file_name)
+}
+
 // --- Modal Content Renderer (stateless per-file renderer) ---
 
 function FilePreviewModalContent({
   file,
   taskId,
+  details,
   children,
 }: {
   file: TaskFile
   taskId: string
+  details?: React.ReactNode
   children?: React.ReactNode
 }) {
   const [loading, setLoading] = useState(false)
@@ -43,7 +49,7 @@ function FilePreviewModalContent({
   const blobUrlRef = useRef('')
 
   const isImage = file.mime_type?.startsWith('image/')
-  const isVideo = file.mime_type?.startsWith('video/')
+  const isVideo = isVideoFile(file)
   const isHTML = file.mime_type === 'text/html'
   const isText = !isImage && !isVideo && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
   const isMD = isText && isMarkdownFile(file.file_name)
@@ -135,9 +141,9 @@ function FilePreviewModalContent({
   return (
     <DialogContent className={modalClass}>
       <DialogHeader>
-        <DialogTitle className="truncate">{file.file_name}</DialogTitle>
+        <DialogTitle className="truncate">{isVideo ? '视频结果' : file.file_name}</DialogTitle>
         <DialogDescription>
-          {file.mime_type} &middot; {formatSize(file.file_size)}
+          {isVideo ? `${file.file_name} · ` : ''}{file.mime_type} &middot; {formatSize(file.file_size)}
         </DialogDescription>
       </DialogHeader>
 
@@ -165,6 +171,8 @@ function FilePreviewModalContent({
           className="max-h-[70vh] w-full rounded-lg"
         />
       )}
+
+      {!loading && isVideo && details}
 
       {!loading && isHTML && htmlContent && (
         <iframe
@@ -273,7 +281,17 @@ function FilePreviewModalContent({
 
 // --- FilePreviewGallery (grouped modal with navigation) ---
 
-export function FilePreviewGallery({ files, taskId, inlineItemClassName }: { files: TaskFile[]; taskId: string; inlineItemClassName?: string }) {
+export function FilePreviewGallery({
+  files,
+  taskId,
+  inlineItemClassName,
+  renderPreviewDetails,
+}: {
+  files: TaskFile[]
+  taskId: string
+  inlineItemClassName?: string
+  renderPreviewDetails?: (file: TaskFile) => React.ReactNode
+}) {
   const [open, setOpen] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
 
@@ -334,7 +352,7 @@ export function FilePreviewGallery({ files, taskId, inlineItemClassName }: { fil
       ))}
       {open && currentFile && (
         <Dialog open={open} onOpenChange={setOpen}>
-          <FilePreviewModalContent file={currentFile} taskId={taskId}>
+          <FilePreviewModalContent file={currentFile} taskId={taskId} details={renderPreviewDetails?.(currentFile)}>
             {hasMultiple && (
               <>
                 {/* Counter */}
@@ -380,7 +398,7 @@ function FilePreviewInline({
   onClick: () => void
 }) {
   const isImage = file.mime_type?.startsWith('image/')
-  const isVideo = file.mime_type?.startsWith('video/')
+  const isVideo = isVideoFile(file)
   const isHTML = file.mime_type === 'text/html'
   const isText = !isImage && !isVideo && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
   const isMD = isText && isMarkdownFile(file.file_name)
@@ -455,6 +473,23 @@ function FilePreviewInline({
           </div>
         </div>
         <p className="truncate text-xs text-muted-foreground" title={file.file_name}>{file.file_name}</p>
+        <div className="flex gap-2">
+          <button
+            onClick={onClick}
+            aria-label={`预览 ${file.file_name}`}
+            className="flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            预览
+          </button>
+          <button
+            onClick={handleDownload}
+            className="flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent"
+          >
+            <Download className="h-3.5 w-3.5" />
+            下载
+          </button>
+        </div>
       </div>
     )
   }

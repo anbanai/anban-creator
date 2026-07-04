@@ -219,7 +219,7 @@ export const projectSchema = z.object({
     model_key: z.string().default(""),
     resolution: z.string().min(1).default("720p"),
     ratio: z.string().min(1).default("9:16"),
-    duration: z.number().int().min(1).max(60).default(15),
+    duration: z.number().int().min(1).max(600).default(15),
     watermark: z.boolean().default(false),
     preflight: z.boolean().default(true),
   }).optional(),
@@ -228,7 +228,7 @@ export const projectSchema = z.object({
     default_model: z.string().default(""),
     allow_auto_downgrade: z.boolean().default(false),
     max_resolution: z.string().default("720p"),
-    max_duration: z.number().int().min(1).max(60).default(15),
+    max_duration: z.number().int().min(1).max(600).default(120),
   }).optional(),
   reference_image_url: z.string().refine(
     (val) => val === "" || val.startsWith("/") || /^https?:\/\//.test(val),

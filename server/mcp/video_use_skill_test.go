@@ -234,7 +234,7 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		"final",
 		"普通素材剪辑不得调用",
 		"register_video_reference",
-		"create_video_generation_task",
+		"create_video_generation_job",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("video agent missing %q", want)

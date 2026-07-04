@@ -227,10 +227,14 @@ type AgentFeedbackRepository interface {
 // VideoGenerationRepository provides access to video_generations.
 type VideoGenerationRepository interface {
 	Create(ctx context.Context, gen *model.VideoGeneration) error
+	CreateSegment(ctx context.Context, segment *model.VideoGenerationSegment) error
 	FindByID(ctx context.Context, id string) (*model.VideoGeneration, error)
 	FindByArkTaskID(ctx context.Context, arkTaskID string) (*model.VideoGeneration, error)
+	FindSegmentByArkTaskID(ctx context.Context, arkTaskID string) (*model.VideoGenerationSegment, error)
 	FindLatestByTaskID(ctx context.Context, taskID string) (*model.VideoGeneration, error)
+	ListSegments(ctx context.Context, generationID string) ([]*model.VideoGenerationSegment, error)
 	Update(ctx context.Context, gen *model.VideoGeneration) error
+	UpdateSegment(ctx context.Context, segment *model.VideoGenerationSegment) error
 }
 
 // -----------------------------------------------------------------------------

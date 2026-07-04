@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -790,7 +791,7 @@ func TestQueryAndDownloadVideoGenerationUpdatePersistentRecordAndOSSFile(t *test
 	if err != nil {
 		t.Fatalf("find downloaded generation: %v", err)
 	}
-	if !strings.Contains(string(updated.TaskFileIDs), "generated_video") {
+	if !strings.Contains(string(updated.TaskFileIDs), "final_video") {
 		t.Fatalf("download did not persist task file IDs: %s", string(updated.TaskFileIDs))
 	}
 	files, err := repo.TaskFiles().FindByTaskID(ctx, taskID)
@@ -799,6 +800,205 @@ func TestQueryAndDownloadVideoGenerationUpdatePersistentRecordAndOSSFile(t *test
 	}
 	if len(files) != 1 || files[0].StorageProvider == "" || files[0].OSSKey == "" {
 		t.Fatalf("generated video was not registered as OSS task file: %#v", files)
+	}
+}
+
+func TestValidateVideoDeliveryRequiresExistingFinalVideoTaskFile(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	gen := &model.VideoGeneration{
+		UserID:      userID,
+		ProjectID:   projectID,
+		TaskID:      taskID,
+		Status:      "archived",
+		TaskFileIDs: datatypes.JSON([]byte(`{"final_video":"missing-file-id"}`)),
+	}
+	if err := repo.VideoGenerations().Create(ctx, gen); err != nil {
+		t.Fatalf("create generation: %v", err)
+	}
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(taskID) + `,
+		"video_generation_id":` + strconv.Quote(gen.ID) + `
+	}`)}}
+	result, err := validateVideoDeliveryHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("validateVideoDeliveryHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected validate error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, `"valid":false`) || !strings.Contains(text, "final_video task file is not registered") {
+		t.Fatalf("validate result = %s, want missing registered file", text)
+	}
+}
+
+func TestDownloadVideoGenerationResultsRejectsInvalidSegmentShape(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	gen := &model.VideoGeneration{
+		UserID:    userID,
+		ProjectID: projectID,
+		TaskID:    taskID,
+		Status:    "succeeded",
+	}
+	if err := repo.VideoGenerations().Create(ctx, gen); err != nil {
+		t.Fatalf("create generation: %v", err)
+	}
+	if err := repo.VideoGenerations().CreateSegment(ctx, &model.VideoGenerationSegment{
+		VideoGenerationID: gen.ID,
+		UserID:            userID,
+		ProjectID:         projectID,
+		TaskID:            taskID,
+		Index:             1,
+		Status:            "succeeded",
+		Duration:          15,
+	}); err != nil {
+		t.Fatalf("create segment: %v", err)
+	}
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(taskID) + `,
+		"video_generation_id":` + strconv.Quote(gen.ID) + `,
+		"segments":["not-an-object"]
+	}`)}}
+	result, err := downloadVideoGenerationResultsHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("downloadVideoGenerationResultsHandler returned error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected invalid segment shape to fail")
+	}
+	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "segments[0] must be an object") {
+		t.Fatalf("unexpected error text: %q", text)
+	}
+}
+
+func TestDownloadVideoGenerationResultsDoesNotMarkPartialMultiSegmentAsFinal(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/segment.mp4"}
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	gen := &model.VideoGeneration{
+		UserID:    userID,
+		ProjectID: projectID,
+		TaskID:    taskID,
+		Status:    "succeeded",
+	}
+	if err := repo.VideoGenerations().Create(ctx, gen); err != nil {
+		t.Fatalf("create generation: %v", err)
+	}
+	for i := 1; i <= 2; i++ {
+		if err := repo.VideoGenerations().CreateSegment(ctx, &model.VideoGenerationSegment{
+			VideoGenerationID: gen.ID,
+			UserID:            userID,
+			ProjectID:         projectID,
+			TaskID:            taskID,
+			Index:             i,
+			Status:            "succeeded",
+			Duration:          15,
+		}); err != nil {
+			t.Fatalf("create segment %d: %v", i, err)
+		}
+	}
+	videoSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write([]byte("fake-segment-video"))
+	}))
+	defer videoSrv.Close()
+	oldClient := http.DefaultClient
+	http.DefaultClient = videoSrv.Client()
+	t.Cleanup(func() { http.DefaultClient = oldClient })
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(taskID) + `,
+		"video_generation_id":` + strconv.Quote(gen.ID) + `,
+		"segments":[{"index":1,"video_url":` + strconv.Quote(videoSrv.URL+"/segment-01.mp4") + `}]
+	}`)}}
+	result, err := downloadVideoGenerationResultsHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("downloadVideoGenerationResultsHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected download error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	updated, err := repo.VideoGenerations().FindByID(ctx, gen.ID)
+	if err != nil {
+		t.Fatalf("find generation: %v", err)
+	}
+	if strings.Contains(string(updated.TaskFileIDs), "final_video") {
+		t.Fatalf("partial multi-segment download must not set final_video: %s", string(updated.TaskFileIDs))
+	}
+	if updated.Status == "archived" {
+		t.Fatalf("partial multi-segment download must not archive job before compose")
+	}
+}
+
+func TestQueryVideoGenerationJobDoesNotCompleteWhenProviderQueryFails(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	gen := &model.VideoGeneration{
+		UserID:    userID,
+		ProjectID: projectID,
+		TaskID:    taskID,
+		Status:    "submitted",
+	}
+	if err := repo.VideoGenerations().Create(ctx, gen); err != nil {
+		t.Fatalf("create generation: %v", err)
+	}
+	if err := repo.VideoGenerations().CreateSegment(ctx, &model.VideoGenerationSegment{
+		VideoGenerationID: gen.ID,
+		UserID:            userID,
+		ProjectID:         projectID,
+		TaskID:            taskID,
+		Index:             1,
+		ArkTaskID:         "cgt-video-1",
+		Status:            "succeeded",
+		Duration:          15,
+	}); err != nil {
+		t.Fatalf("create segment: %v", err)
+	}
+	arkSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"temporary provider outage"}}`))
+	}))
+	defer arkSrv.Close()
+	svcs.VideoSvc = service.NewVideoService(&config.VideoAPIConfig{Key: "test-key", BaseURL: arkSrv.URL, Timeout: time.Second})
+
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+		"project_id":` + strconv.Quote(projectID) + `,
+		"task_id":` + strconv.Quote(taskID) + `,
+		"video_generation_id":` + strconv.Quote(gen.ID) + `
+	}`)}}
+	result, err := queryVideoGenerationJobHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("queryVideoGenerationJobHandler returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected query error result: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "query_error") {
+		t.Fatalf("query response missing query_error: %s", text)
+	}
+	updated, err := repo.VideoGenerations().FindByID(ctx, gen.ID)
+	if err != nil {
+		t.Fatalf("find generation: %v", err)
+	}
+	if updated.Status == "succeeded" {
+		t.Fatalf("provider query failure must not complete job: %#v", updated)
 	}
 }
 

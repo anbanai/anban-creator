@@ -30,13 +30,15 @@ describe('video generation UX contracts', () => {
     expect(source).toContain('视频任务需至少')
   })
 
-  it('task detail has a video-specific result preview section', () => {
+  it('task detail shows video results through generated file preview', () => {
     const source = pageSource('TaskDetailPage.tsx')
+    const previewSource = readFileSync(join(here, '../components/FilePreview.tsx'), 'utf8')
 
-    expect(source).toContain('视频结果')
-    expect(source).toContain('<video')
+    expect(source).toContain('renderPreviewDetails')
     expect(source).toContain('参考素材')
     expect(source).toContain('生成任务 ID')
     expect(source).toContain('费用明细')
+    expect(previewSource).toContain('视频结果')
+    expect(previewSource).toContain('<video')
   })
 })

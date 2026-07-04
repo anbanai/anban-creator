@@ -64,6 +64,7 @@ export default function TaskDetailPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showProjectDialog, setShowProjectDialog] = useState(false)
   const [showResumeDialog, setShowResumeDialog] = useState(false)
+  const [showCreditDialog, setShowCreditDialog] = useState(false)
   const [resumePrompt, setResumePrompt] = useState('')
   const [resumeFiles, setResumeFiles] = useState<ResumeFileInput[]>([])
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
@@ -104,8 +105,8 @@ export default function TaskDetailPage() {
     enabled: !!task?.project_id,
   })
   const project = projectDetail?.project
-  const videoFiles = files?.filter((file) => file.mime_type?.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.file_name)) ?? []
-  const primaryVideoFile = videoFiles[0]
+  const isVideoTaskFile = (file: TaskFile) => file.mime_type?.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.file_name)
+  const videoFiles = files?.filter(isVideoTaskFile) ?? []
 
   const MAX_PERSISTED_LOGS = 500
   const persistedLogs = (task?.progress_log
@@ -413,7 +414,7 @@ export default function TaskDetailPage() {
   }
 
   const canCancel = task.status === 'pending' || task.status === 'running'
-  const canRerun = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+  const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
   const currentTask = task
   const snapshot = task.project_snapshot
   const showProjectParameters = Boolean(snapshot?.platform || project)
@@ -424,25 +425,33 @@ export default function TaskDetailPage() {
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
+  const videoTargetDuration = task.video_config?.target_duration_seconds || task.video_config?.pricing_breakdown?.output_seconds || task.video_config?.duration
+  const videoSegmentCount = task.video_config?.segments?.length || task.video_config?.pricing_breakdown?.segment_count || 0
+  const videoSpecSummary = [
+    task.video_config?.resolution || '—',
+    task.video_config?.ratio || '—',
+    videoTargetDuration ? `目标 ${videoTargetDuration}s` : '目标 —',
+    videoSegmentCount > 0 ? `${videoSegmentCount} 段` : null,
+  ].filter(Boolean).join(' · ')
 
-  // Copy-rerun this task as a fresh billed task. The server clones the full
+  // Clone this task as a fresh billed task. The server clones the full
   // configuration (three-dimensional style, author/writer, ecommerce package,
   // image model, watermark, goal mode…) so nothing is lost — unlike the previous
   // client-side create() which only forwarded type/prompt/project/ratio.
-  async function handleRetry() {
+  async function handleClone() {
     await submit(async () => {
       try {
-        const nextTask = await api.tasks.retry(currentTask.id)
-        toast.success('已复制为新任务，配置已保留')
+        const nextTask = await api.tasks.clone(currentTask.id)
+        toast.success('已克隆为新任务，配置已保留')
         queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
         navigate(`/tasks/${nextTask.id}`)
       } catch (err: unknown) {
         const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
         const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
         if (status === 402 || code === 40200) {
-          toast.error('积分不足，无法复制重跑')
+          toast.error('积分不足，无法克隆任务')
         } else {
-          toast.error(getApiErrorMessage(err, '复制重跑失败，请稍后再试'))
+          toast.error(getApiErrorMessage(err, '克隆任务失败，请稍后再试'))
         }
       }
     })
@@ -593,15 +602,15 @@ export default function TaskDetailPage() {
               删除
             </Button>
           )}
-          {canRerun && (
+          {canClone && (
             <>
               <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
                 <Send className="h-4 w-4" />
                 继续执行
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+              <Button variant="outline" size="sm" onClick={() => void handleClone()}>
                 <RefreshCw className="h-4 w-4" />
-                复制重跑
+                克隆任务
               </Button>
             </>
           )}
@@ -666,7 +675,7 @@ export default function TaskDetailPage() {
             <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
             <div>
               <p className="text-sm font-medium text-foreground">已驳回发布</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">该文章未发布，可修改后继续执行或复制重跑。</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">该文章未发布，可修改后继续执行或克隆任务。</p>
             </div>
           </CardContent>
         </Card>
@@ -700,20 +709,27 @@ export default function TaskDetailPage() {
         </Card>
         {showCreditDetails && (
           <Card size="sm" className="bg-card/70">
-            <CardContent>
-              <p className="text-xs text-muted-foreground">消耗积分</p>
-              <p className="mt-1 text-sm text-foreground">{netConsumedCredits.toLocaleString()}</p>
+            <CardContent className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs text-muted-foreground">消耗积分</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{netConsumedCredits.toLocaleString()}</p>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setShowCreditDialog(true)}>
+                查看积分明细
+              </Button>
             </CardContent>
           </Card>
         )}
       </div>
 
       {showCreditDetails && (
-        <Card size="sm" className="border-border/70">
-          <div className="border-b border-border px-4 pb-3">
-            <h2 className="text-sm font-semibold text-foreground">积分明细</h2>
-          </div>
-          <CardContent className="space-y-4">
+        <Dialog open={showCreditDialog} onOpenChange={setShowCreditDialog}>
+          <DialogContent className="sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>积分明细</DialogTitle>
+              <DialogDescription>本任务累计消耗、退还与交易记录。</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-4">
               <div>
                 <p className="text-xs text-muted-foreground">任务消耗</p>
@@ -764,8 +780,9 @@ export default function TaskDetailPage() {
                 </table>
               </div>
             )}
-          </CardContent>
-        </Card>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       {task.type === 'seednote' && task.published && (
@@ -846,7 +863,7 @@ export default function TaskDetailPage() {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">规格</p>
-                  <p className="mt-1 text-sm text-foreground">{task.video_config.resolution || '—'} · {task.video_config.ratio || '—'} · {task.video_config.duration || '—'}s</p>
+                  <p className="mt-1 text-sm text-foreground">{videoSpecSummary}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">估算积分</p>
@@ -878,9 +895,9 @@ export default function TaskDetailPage() {
                     <Send className="h-4 w-4" />
                     继续执行
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+                  <Button variant="outline" size="sm" onClick={() => void handleClone()}>
                     <RefreshCw className="h-4 w-4" />
-                    复制重跑
+                    克隆任务
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')}>
                     返回任务列表
@@ -897,9 +914,9 @@ export default function TaskDetailPage() {
                   <Send className="h-4 w-4" />
                   继续执行
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+                <Button variant="outline" size="sm" onClick={() => void handleClone()}>
                   <RefreshCw className="h-4 w-4" />
-                  复制重跑
+                  克隆任务
                 </Button>
               </div>
             ) : (
@@ -934,81 +951,6 @@ export default function TaskDetailPage() {
 
       {task.status === 'completed' && (
         <WorkflowReviewSummary workflow={task.workflow_status} />
-      )}
-
-      {task.type === 'video' && (task.video_config || primaryVideoFile) && (
-        <Card>
-          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold text-foreground">视频结果</h2>
-            {primaryVideoFile?.url && (
-              <a href={primaryVideoFile.url} target="_blank" rel="noreferrer" download={primaryVideoFile.file_name}>
-                <Button size="sm" variant="outline">
-                  <Download className="h-4 w-4" />
-                  下载 MP4
-                </Button>
-              </a>
-            )}
-          </div>
-          <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
-            <div className="min-w-0">
-              {primaryVideoFile?.url ? (
-                <video
-                  src={primaryVideoFile.url}
-                  controls
-                  className="aspect-video w-full rounded-lg border border-border bg-black object-contain"
-                />
-              ) : (
-                <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 text-sm text-muted-foreground">
-                  暂无可预览 MP4
-                </div>
-              )}
-            </div>
-            <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs text-muted-foreground">生成任务 ID</p>
-                  <p className="mt-1 break-all text-foreground">{task.video_generation_id || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">规格</p>
-                  <p className="mt-1 text-foreground">{task.video_config?.resolution || '—'} · {task.video_config?.ratio || '—'} · {task.video_config?.duration || '—'}s</p>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">费用明细</p>
-                <p className="mt-1 text-foreground">
-                  估算 {(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()} ·
-                  已消耗 {(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}
-                </p>
-                {task.video_config?.pricing_breakdown && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {videoModelDisplayName(task.video_config.pricing_breakdown.model_key)} · {task.video_config.pricing_breakdown.resolution} · 输出 {task.video_config.pricing_breakdown.output_seconds}s
-                    {task.video_config.pricing_breakdown.input_video && typeof task.video_config.pricing_breakdown.input_seconds === 'number'
-                      ? ` · 输入视频 ${task.video_config.pricing_breakdown.input_seconds}s`
-                      : ''}
-                  </p>
-                )}
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">参考素材</p>
-                {task.video_config?.references && task.video_config.references.length > 0 ? (
-                  <div className="mt-1 divide-y divide-border rounded-md border border-border">
-                    {task.video_config.references.map((ref, index) => (
-                      <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-2 py-1.5 text-xs">
-                        <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
-                        {ref.input_duration_seconds && (
-                          <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </Card>
       )}
 
       {/* Files (top priority - most useful content) */}
@@ -1051,6 +993,65 @@ export default function TaskDetailPage() {
                     </div>
                   )
                 })()}
+                {/* Video files */}
+                {(() => {
+                  if (videoFiles.length === 0) return null
+                  return (
+                    <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
+                      <FilePreviewGallery
+                        files={videoFiles}
+                        taskId={task.id}
+                        inlineItemClassName="shrink-0 snap-start"
+                        renderPreviewDetails={() => (
+                          <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-xs text-muted-foreground">生成任务 ID</p>
+                                <p className="mt-1 break-all text-foreground">{task.video_generation_id || '—'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">规格</p>
+                                <p className="mt-1 text-foreground">{videoSpecSummary}</p>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">费用明细</p>
+                              <p className="mt-1 text-foreground">
+                                估算 {(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()} ·
+                                已消耗 {(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}
+                              </p>
+                              {task.video_config?.pricing_breakdown && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {videoModelDisplayName(task.video_config.pricing_breakdown.model_key)} · {task.video_config.pricing_breakdown.resolution} · 输出 {task.video_config.pricing_breakdown.output_seconds}s
+                                  {task.video_config.pricing_breakdown.input_video && typeof task.video_config.pricing_breakdown.input_seconds === 'number'
+                                    ? ` · 输入视频 ${task.video_config.pricing_breakdown.input_seconds}s`
+                                    : ''}
+                                </p>
+                              )}
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">参考素材</p>
+                              {task.video_config?.references && task.video_config.references.length > 0 ? (
+                                <div className="mt-1 divide-y divide-border rounded-md border border-border">
+                                  {task.video_config.references.map((ref, index) => (
+                                    <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-2 py-1.5 text-xs">
+                                      <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
+                                      {ref.input_duration_seconds && (
+                                        <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      />
+                    </div>
+                  )
+                })()}
                 {/* HTML files */}
                 {(() => {
                   const htmlFiles = files.filter((f: TaskFile) => f.mime_type === 'text/html')
@@ -1063,7 +1064,7 @@ export default function TaskDetailPage() {
                 })()}
                 {/* Other files */}
                 {(() => {
-                  const otherFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/') && f.mime_type !== 'text/html')
+                  const otherFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/') && !isVideoTaskFile(f) && f.mime_type !== 'text/html')
                   if (otherFiles.length === 0) return null
                   return (
                     <div className="space-y-2">

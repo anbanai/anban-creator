@@ -356,25 +356,25 @@ func (s *TaskService) validateVideoCompletionArtifacts(ctx context.Context, task
 		return agent.ArtifactValidation{}, err
 	}
 	if gen == nil {
-		return agent.ArtifactValidation{Reason: "video missing generated video task file"}, nil
+		return agent.ArtifactValidation{Reason: "video missing final video task file"}, nil
 	}
 	var ids map[string]string
 	if len(gen.TaskFileIDs) > 0 {
 		_ = json.Unmarshal(gen.TaskFileIDs, &ids)
 	}
-	generatedID := strings.TrimSpace(ids["generated_video"])
-	if generatedID == "" {
-		return agent.ArtifactValidation{Reason: "video missing generated video task file"}, nil
+	finalID := strings.TrimSpace(ids["final_video"])
+	if finalID == "" {
+		return agent.ArtifactValidation{Reason: "video missing final video task file"}, nil
 	}
 	for _, file := range files {
-		if file != nil && file.ID == generatedID {
+		if file != nil && file.ID == finalID {
 			if !isVideoTaskFile(file) {
-				return agent.ArtifactValidation{Reason: "video missing generated video task file"}, nil
+				return agent.ArtifactValidation{Reason: "video missing final video task file"}, nil
 			}
 			return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: 1}, nil
 		}
 	}
-	return agent.ArtifactValidation{Reason: "video missing generated video task file"}, nil
+	return agent.ArtifactValidation{Reason: "video missing final video task file"}, nil
 }
 
 func requiresGeneratedVideoTaskFile(task *model.Task) bool {
@@ -478,7 +478,7 @@ func isPermanentAuthError(err error) bool {
 }
 
 // HandleExecutionFailure marks agent execution failures as terminal. Recovery
-// is intentionally manual: users can choose "复制重跑" to clone the task into a
+// is intentionally manual: users can choose "克隆任务" to clone the task into a
 // fresh billed run, while the original task remains a clear failed artifact.
 func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Task, execErr error) error {
 	taskID := task.ID
@@ -491,7 +491,7 @@ func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Ta
 	s.logger.Error().
 		Err(execErr).
 		Str("task_id", taskID).
-		Msg("task failed; waiting for manual rerun")
+		Msg("task failed; waiting for manual resume or clone")
 	if err := s.repo.Tasks().UpdateStatusAndError(ctx, taskID, model.TaskStatusFailed, execErr.Error()); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to update task status to failed")
 	}

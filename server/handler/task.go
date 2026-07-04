@@ -115,7 +115,7 @@ type bulkDownloadTaskFilesRequest struct {
 	TaskIDs []string `json:"task_ids"`
 }
 
-// bulkTaskIDsRequest is the shared request body for bulk cancel / retry / delete.
+// bulkTaskIDsRequest is the shared request body for bulk cancel / clone / delete.
 type bulkTaskIDsRequest struct {
 	TaskIDs []string `json:"task_ids"`
 }
@@ -126,7 +126,7 @@ type bulkTaskResult struct {
 	ID        string `json:"id"`
 	OK        bool   `json:"ok"`
 	Reason    string `json:"reason,omitempty"`
-	NewTaskID string `json:"new_task_id,omitempty"` // retry only
+	NewTaskID string `json:"new_task_id,omitempty"` // clone only
 }
 
 // bulkTasksResponse summarises a best-effort bulk operation.
@@ -401,10 +401,10 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"message": "task cancelled"})
 }
 
-// Retry handles POST /api/v1/tasks/:id/retry.
+// Clone handles POST /api/v1/tasks/:id/clone.
 // It creates a fresh task from a terminal task's configuration and enqueues it.
 // The original task is preserved and the new task is billed as a new run.
-func (h *TaskHandler) Retry(c fiber.Ctx) error {
+func (h *TaskHandler) Clone(c fiber.Ctx) error {
 	id, err := validateUUIDParam(c, "id")
 	if err != nil {
 		return err
@@ -415,7 +415,7 @@ func (h *TaskHandler) Retry(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	// Verify ownership before retrying.
+	// Verify ownership before cloning.
 	task, err := h.service.GetByID(c.Context(), id)
 	if err != nil {
 		return Error(c, fiber.StatusNotFound, "task not found")
@@ -424,10 +424,10 @@ func (h *TaskHandler) Retry(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	// Only terminal tasks can be manually rerun. Active tasks must finish or be
+	// Only terminal tasks can be manually cloned. Active tasks must finish or be
 	// cancelled first to avoid duplicate in-flight work and surprise billing.
 	if task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
-		return Error(c, fiber.StatusBadRequest, "只有已完成、失败或已取消的任务可以复制重跑")
+		return Error(c, fiber.StatusBadRequest, "只有已完成、失败或已取消的任务可以克隆")
 	}
 
 	// Re-validate the image model against the caller's current tier (tier may
@@ -436,9 +436,9 @@ func (h *TaskHandler) Retry(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, err.Error())
 	}
 
-	newTask, err := h.service.Retry(c.Context(), id)
+	newTask, err := h.service.Clone(c.Context(), id)
 	if err != nil {
-		h.logger.Error().Err(err).Str("task_id", id).Msg("retry task failed")
+		h.logger.Error().Err(err).Str("task_id", id).Msg("clone task failed")
 		if errors.Is(err, service.ErrMinimumVideoBalance) {
 			return Error(c, fiber.StatusPaymentRequired, "视频任务需至少 100000 积分余额")
 		}
@@ -451,7 +451,7 @@ func (h *TaskHandler) Retry(c fiber.Ctx) error {
 				"msg":  "insufficient_credits",
 			})
 		}
-		return Error(c, fiber.StatusInternalServerError, "复制重跑任务失败")
+		return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
 	}
 
 	return Success(c, newTask)
@@ -538,7 +538,7 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		case errors.Is(err, service.ErrTaskResumeNotTerminal):
 			return Error(c, fiber.StatusConflict, "只有已完成、失败或已取消的任务可以继续执行")
 		case errors.Is(err, service.ErrTaskResumeWorkspaceMissing):
-			return Error(c, fiber.StatusConflict, "原任务工作目录已清理，无法继续执行。可以使用“复制重跑”创建新任务。")
+			return Error(c, fiber.StatusConflict, "原任务工作目录已清理，无法继续执行。可以使用“克隆任务”创建新任务。")
 		case errors.Is(err, service.ErrTaskResumeConflict):
 			return Error(c, fiber.StatusConflict, "任务状态已变化，请刷新后重试")
 		default:
@@ -730,11 +730,11 @@ func (h *TaskHandler) BulkCancel(c fiber.Ctx) error {
 	return Success(c, bulkTasksResponse{Total: len(ids), Succeeded: succeeded, Skipped: len(ids) - succeeded, Results: results})
 }
 
-// BulkRetry handles POST /api/v1/tasks/bulk-retry.
-// Best-effort: retries each failed/cancelled task owned by the caller into a
-// fresh billed task. Stops charging once credits are insufficient (each Retry
+// BulkClone handles POST /api/v1/tasks/bulk-clone.
+// Best-effort: clones each failed/cancelled task owned by the caller into a
+// fresh billed task. Stops charging once credits are insufficient (each Clone
 // re-reserves credits); remaining tasks are skipped with "insufficient_credits".
-func (h *TaskHandler) BulkRetry(c fiber.Ctx) error {
+func (h *TaskHandler) BulkClone(c fiber.Ctx) error {
 	ids, err := h.parseBulkTaskIDs(c)
 	if err != nil {
 		return err
@@ -757,7 +757,7 @@ func (h *TaskHandler) BulkRetry(c fiber.Ctx) error {
 			continue
 		}
 		if task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
-			results = append(results, bulkTaskResult{ID: id, Reason: "not_retryable"})
+			results = append(results, bulkTaskResult{ID: id, Reason: "not_cloneable"})
 			continue
 		}
 		// Re-validate the image model against the caller's current tier.
@@ -765,13 +765,13 @@ func (h *TaskHandler) BulkRetry(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "image_model_unavailable"})
 			continue
 		}
-		newTask, err := h.service.Retry(c.Context(), id)
+		newTask, err := h.service.Clone(c.Context(), id)
 		if err != nil {
 			if errors.Is(err, service.ErrInsufficientCredits) {
 				results = append(results, bulkTaskResult{ID: id, Reason: "insufficient_credits"})
 				continue
 			}
-			h.logger.Error().Err(err).Str("task_id", id).Msg("bulk retry: task failed")
+			h.logger.Error().Err(err).Str("task_id", id).Msg("bulk clone: task failed")
 			results = append(results, bulkTaskResult{ID: id, Reason: "failed"})
 			continue
 		}

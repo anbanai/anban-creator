@@ -45,7 +45,7 @@ export function VideoCreationPanel({
   const resolvedModel = settingValue(config?.model_key, defaults?.model_key, '')
   const resolvedResolution = settingValue(config?.resolution, defaults?.resolution, '720p')
   const resolvedRatio = settingValue(config?.ratio, defaults?.ratio, '9:16')
-  const resolvedDuration = settingValue(config?.duration, defaults?.duration, 15)
+  const resolvedFallbackDuration = settingValue(config?.duration, defaults?.duration, 15)
   const resolvedWatermark = settingValue(config?.watermark, defaults?.watermark, false)
 
   const restoreDefaults = () => {
@@ -129,8 +129,8 @@ export function VideoCreationPanel({
               <p className="mt-0.5 font-medium text-foreground">{resolvedRatio} · {resolvedResolution}</p>
             </div>
             <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
-              <p className="text-muted-foreground">时长 / 水印</p>
-              <p className="mt-0.5 font-medium text-foreground">{resolvedDuration}s · 水印{yesNo(resolvedWatermark)}</p>
+              <p className="text-muted-foreground">兜底时长 / 水印</p>
+              <p className="mt-0.5 font-medium text-foreground">{resolvedFallbackDuration}s · 水印{yesNo(resolvedWatermark)}</p>
             </div>
           </div>
         </div>
@@ -213,17 +213,18 @@ export function VideoCreationPanel({
             )} />
             <FormField control={form.control} name="video_config.duration" render={({ field }) => (
               <FormItem>
-                <FormLabel>时长（秒）</FormLabel>
+                <FormLabel>兜底目标时长（秒）</FormLabel>
                 <FormControl>
                   <Input
                     type="number"
                     min={1}
-                    max={60}
+                    max={600}
                     placeholder={String(defaults?.duration ?? 15)}
                     value={field.value ?? ''}
                     onChange={(event) => field.onChange(event.target.value === '' ? undefined : Number(event.target.value))}
                   />
                 </FormControl>
+                <p className="text-xs text-muted-foreground">没有明确用户时长或参考视频时才使用；模型单段上限由服务端自动拆分。</p>
                 <FormMessage />
               </FormItem>
             )} />

@@ -25,6 +25,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&ImageGeneration{},
 		&ImageGenerationResult{},
 		&VideoGeneration{},
+		&VideoGenerationSegment{},
 		&AgentFeedback{},
 		&IlinkBinding{},
 		&IlinkNotification{},

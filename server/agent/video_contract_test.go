@@ -14,9 +14,15 @@ func TestVideoCreatorAgentStaysOnGenerationWorkflow(t *testing.T) {
 	for _, want := range []string{
 		"禁止调用 Claude `Agent` 工具",
 		"videocreator",
-		"create_video_generation_task",
-		"query_video_generation_task",
-		"download_video_generation_result",
+		`agent_name="videocreator"`,
+		"不得用 dreamina-video 作为 agent_name",
+		"目标成片时长",
+		"单次生成片段",
+		"create_video_generation_job",
+		"query_video_generation_job",
+		"download_video_generation_results",
+		"compose_video_segments",
+		"validate_video_delivery",
 		"不得自动进入字幕",
 	} {
 		if !strings.Contains(text, want) {

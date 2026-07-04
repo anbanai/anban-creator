@@ -38,7 +38,7 @@ function cleanReferences(references: VideoReferenceAsset[] | undefined) {
   return next.length > 0 ? next : undefined
 }
 
-export function normalizeVideoConfigForSubmit(config: VideoTaskConfig | undefined) {
+export function normalizeVideoConfigForSubmit(config: VideoTaskConfig | undefined, defaults?: VideoDefaults) {
   if (!config) return undefined
 
   const next: VideoTaskConfig = {}
@@ -50,13 +50,13 @@ export function normalizeVideoConfigForSubmit(config: VideoTaskConfig | undefine
   const workflow = config.workflow === 'editor' ? 'editor' : 'creator'
 
   next.workflow = workflow
-  if (purpose) next.purpose = purpose as VideoTaskConfig['purpose']
-  if (modelKey) next.model_key = modelKey
-  if (resolution) next.resolution = resolution
-  if (ratio) next.ratio = ratio
-  if (typeof config.duration === 'number' && config.duration > 0) next.duration = config.duration
-  if (typeof config.watermark === 'boolean') next.watermark = config.watermark
-  if (typeof config.preflight === 'boolean') next.preflight = config.preflight
+  if (purpose && purpose !== defaults?.purpose) next.purpose = purpose as VideoTaskConfig['purpose']
+  if (modelKey && modelKey !== defaults?.model_key) next.model_key = modelKey
+  if (resolution && resolution !== defaults?.resolution) next.resolution = resolution
+  if (ratio && ratio !== defaults?.ratio) next.ratio = ratio
+  if (typeof config.duration === 'number' && config.duration > 0 && config.duration !== defaults?.duration) next.duration = config.duration
+  if (typeof config.watermark === 'boolean' && config.watermark !== defaults?.watermark) next.watermark = config.watermark
+  if (typeof config.preflight === 'boolean' && config.preflight !== defaults?.preflight) next.preflight = config.preflight
   if (references) next.references = references
 
   return Object.keys(next).length > 0 ? next : undefined

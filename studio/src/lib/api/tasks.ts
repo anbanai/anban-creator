@@ -22,11 +22,10 @@ export const tasksApi = {
   cancel: (id: string) =>
     unwrap<void>(http.post(`/tasks/${id}/cancel`)),
 
-  // Rerun a completed/failed/cancelled task by cloning its full configuration (three-
-  // dimensional style, author/writer, ecommerce config, image model, etc.)
-  // into a fresh billed task on the server. Returns the new task.
-  retry: (id: string) =>
-    unwrap<Task>(http.post(`/tasks/${id}/retry`)),
+  // Clone a completed/failed/cancelled task into a fresh billed task while
+  // preserving the full frozen configuration. Returns the new task.
+  clone: (id: string) =>
+    unwrap<Task>(http.post(`/tasks/${id}/clone`)),
 
   resume: (id: string, data: ResumeTaskRequest) => {
     const form = new FormData()
@@ -48,12 +47,12 @@ export const tasksApi = {
 
   // Bulk operations — best-effort, ≤100 ids; the server returns a per-task
   // summary (succeeded/skipped + reasons). Each action only sends the subset it
-  // can act on (cancel: pending/running; retry: failed/cancelled; delete:
+  // can act on (cancel: pending/running; clone: failed/cancelled; delete:
   // non-running), so the count the user sees equals what is actually submitted.
   bulkCancel: (ids: string[]) =>
     unwrap<BulkTasksResponse>(http.post('/tasks/bulk-cancel', { task_ids: ids })),
-  bulkRetry: (ids: string[]) =>
-    unwrap<BulkTasksResponse>(http.post('/tasks/bulk-retry', { task_ids: ids })),
+  bulkClone: (ids: string[]) =>
+    unwrap<BulkTasksResponse>(http.post('/tasks/bulk-clone', { task_ids: ids })),
   bulkDelete: (ids: string[]) =>
     unwrap<BulkTasksResponse>(http.post('/tasks/bulk-delete', { task_ids: ids })),
 

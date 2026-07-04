@@ -81,7 +81,7 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
     default_model: '',
     allow_auto_downgrade: false,
     max_resolution: '720p',
-    max_duration: 15,
+    max_duration: 120,
   },
   reference_image_url: '',
   image_ratio: '',
@@ -1070,10 +1070,11 @@ export default function ProjectsPage() {
                     )} />
                     <FormField control={form.control} name="video_defaults.duration" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>默认时长</FormLabel>
+                        <FormLabel>兜底目标时长（秒）</FormLabel>
                         <FormControl>
-                          <Input type="number" min={1} max={60} value={field.value ?? 15} onChange={(e) => field.onChange(Number(e.target.value))} />
+                          <Input type="number" min={1} max={600} value={field.value ?? 15} onChange={(e) => field.onChange(Number(e.target.value))} />
                         </FormControl>
+                        <p className="text-xs text-muted-foreground">仅在用户未指定时长且无参考视频时使用；不会限制模型单段生成长度。</p>
                         <FormMessage />
                       </FormItem>
                     )} />
@@ -1094,10 +1095,11 @@ export default function ProjectsPage() {
                     )} />
                     <FormField control={form.control} name="video_model_policy.max_duration" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>最高时长（秒）</FormLabel>
+                        <FormLabel>成片最高时长（秒）</FormLabel>
                         <FormControl>
-                          <Input type="number" min={1} max={60} value={field.value ?? 15} onChange={(e) => field.onChange(Number(e.target.value))} />
+                          <Input type="number" min={1} max={600} value={field.value ?? 120} onChange={(e) => field.onChange(Number(e.target.value))} />
                         </FormControl>
+                        <p className="text-xs text-muted-foreground">服务端会按模型单段上限自动拆分镜头。</p>
                         <FormMessage />
                       </FormItem>
                     )} />

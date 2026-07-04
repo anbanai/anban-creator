@@ -17,12 +17,12 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 )
 
-// These tests cover the Batch 3A bulk endpoints (BulkCancel / BulkRetry /
+// These tests cover the Batch 3A bulk endpoints (BulkCancel / BulkClone /
 // BulkDelete): request validation, per-task status routing, ownership, and the
 // summary counts. They deliberately exercise the handler layer against a
 // nil-credit / nil-pubsub TaskService — Cancel and Delete are nil-safe (every
 // credit/pubsub access is guarded; cancelFuncs is a sync.Map), so the cancel
-// and delete success paths run for real. Retry's success path re-reserves
+// and delete success paths run for real. Clone's success path re-reserves
 // credits via CreateManual and is therefore NOT exercised here (a real credit
 // service would be required); only its status-gating is tested.
 
@@ -58,7 +58,7 @@ func bulkTestApp(t *testing.T, userID string) (app *fiber.App, repo repository.R
 
 	app = fiber.New()
 	app.Post("/tasks/bulk-cancel", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkCancel(c) })
-	app.Post("/tasks/bulk-retry", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkRetry(c) })
+	app.Post("/tasks/bulk-clone", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkClone(c) })
 	app.Post("/tasks/bulk-delete", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.BulkDelete(c) })
 	return app, repo, projectID
 }
@@ -148,7 +148,7 @@ func TestBulk_RequestValidation(t *testing.T) {
 	}{
 		{"cancel empty ids", "/tasks/bulk-cancel", `{"task_ids":[]}`, fiber.StatusBadRequest},
 		{"cancel missing field", "/tasks/bulk-cancel", `{}`, fiber.StatusBadRequest},
-		{"retry bad uuid", "/tasks/bulk-retry", `{"task_ids":["not-a-uuid"]}`, fiber.StatusBadRequest},
+		{"clone bad uuid", "/tasks/bulk-clone", `{"task_ids":["not-a-uuid"]}`, fiber.StatusBadRequest},
 		{"delete over 100", "/tasks/bulk-delete", `{"task_ids":["` + strings.Repeat(uuid.New().String()+`","`, 101) + `"]}`, fiber.StatusBadRequest},
 	}
 	for _, tt := range tests {
@@ -258,13 +258,13 @@ func TestBulkDelete_RoutesByStatus(t *testing.T) {
 	}
 }
 
-func TestBulkRetry_StatusGatingOnly(t *testing.T) {
+func TestBulkClone_StatusGatingOnly(t *testing.T) {
 	userID := uuid.New().String()
 	app, repo, projectID := bulkTestApp(t, userID)
 
-	// Non-retryable own tasks: each must be skipped as not_retryable BEFORE the
-	// handler calls service.Retry (which would need a credit service). We do not
-	// seed any failed/cancelled own task, so Retry's body is never entered.
+	// Non-cloneable own tasks: each must be skipped as not_cloneable BEFORE the
+	// handler calls service.Clone (which would need a credit service). We do not
+	// seed any failed/cancelled own task, so Clone's body is never entered.
 	pending := seedBulkTask(t, repo, userID, projectID, model.TaskStatusPending)
 	running := seedBulkTask(t, repo, userID, projectID, model.TaskStatusRunning)
 	completed := seedBulkTask(t, repo, userID, projectID, model.TaskStatusCompleted)
@@ -273,14 +273,14 @@ func TestBulkRetry_StatusGatingOnly(t *testing.T) {
 	foreignFailed := seedBulkTask(t, repo, uuid.New().String(), projectID, model.TaskStatusFailed)
 	missingID := uuid.New().String()
 
-	res := callBulk(t, app, "/tasks/bulk-retry", []string{pending, running, completed, foreignFailed, missingID})
+	res := callBulk(t, app, "/tasks/bulk-clone", []string{pending, running, completed, foreignFailed, missingID})
 	if res.Succeeded != 0 || res.Skipped != 5 {
 		t.Fatalf("succeeded/skipped = %d/%d, want 0/5", res.Succeeded, res.Skipped)
 	}
 	byID := bulkResultByID(res)
 	for _, id := range []string{pending, running, completed} {
-		if got := byID[id]; got.OK || got.Reason != "not_retryable" {
-			t.Fatalf("non-retryable task %s = %+v, want reason not_retryable", id, got)
+		if got := byID[id]; got.OK || got.Reason != "not_cloneable" {
+			t.Fatalf("non-cloneable task %s = %+v, want reason not_cloneable", id, got)
 		}
 	}
 	if got := byID[foreignFailed]; got.OK || got.Reason != "forbidden" {

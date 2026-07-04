@@ -90,6 +90,156 @@ func TestResolveVideoGenerationPlanAppliesProjectDefaultsAndDynamicCredits(t *te
 	}
 }
 
+func TestResolveVideoGenerationPlanSplitsTargetDurationByModelLimit(t *testing.T) {
+	plan, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
+		Prompt:   "生成一条 1 分钟茶文化短视频",
+		Duration: 60,
+	}, model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+	}, model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   120,
+	}, DefaultVideoModelCatalog(), 1000)
+	if err != nil {
+		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
+	}
+	if plan.TargetDurationSeconds != 60 {
+		t.Fatalf("target duration = %d, want 60", plan.TargetDurationSeconds)
+	}
+	if plan.TargetDurationSource != VideoDurationSourceUser {
+		t.Fatalf("target duration source = %q, want user", plan.TargetDurationSource)
+	}
+	if len(plan.Segments) != 4 {
+		t.Fatalf("segments = %d, want 4: %#v", len(plan.Segments), plan.Segments)
+	}
+	for i, seg := range plan.Segments {
+		if seg.Index != i+1 {
+			t.Fatalf("segment %d index = %d, want %d", i, seg.Index, i+1)
+		}
+		if seg.Duration != 15 {
+			t.Fatalf("segment %d duration = %d, want 15", i, seg.Duration)
+		}
+		if seg.Duration > 15 {
+			t.Fatalf("segment %d exceeds model limit: %d", i, seg.Duration)
+		}
+		if seg.EstimatedCredits != 7440 {
+			t.Fatalf("segment %d credits = %d, want 7440", i, seg.EstimatedCredits)
+		}
+	}
+	if plan.EstimatedCredits != 29760 {
+		t.Fatalf("total credits = %d, want 29760", plan.EstimatedCredits)
+	}
+	if plan.PricingBreakdown == nil || plan.PricingBreakdown.OutputSeconds != 60 {
+		t.Fatalf("pricing output seconds = %#v, want 60", plan.PricingBreakdown)
+	}
+}
+
+func TestResolveVideoGenerationPlanUsesReferenceVideoDurationWhenUserDurationMissing(t *testing.T) {
+	plan, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
+		Prompt: "按参考视频节奏生成同款",
+		ReferenceSet: []VideoReferenceInput{{
+			Type:                 VideoReferenceVideo,
+			URL:                  "https://example.com/reference.mp4",
+			InputDurationSeconds: 60.2,
+		}},
+	}, model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   15,
+	}, model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   120,
+	}, DefaultVideoModelCatalog(), 1000)
+	if err != nil {
+		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
+	}
+	if plan.TargetDurationSeconds != 60 {
+		t.Fatalf("target duration = %d, want rounded reference duration 60", plan.TargetDurationSeconds)
+	}
+	if plan.TargetDurationSource != VideoDurationSourceReferenceVideo {
+		t.Fatalf("duration source = %q, want reference_video", plan.TargetDurationSource)
+	}
+	if len(plan.Segments) != 4 {
+		t.Fatalf("segments = %d, want 4", len(plan.Segments))
+	}
+}
+
+func TestResolveVideoGenerationPlanRequiresAIPlannedDurationReason(t *testing.T) {
+	_, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
+		Prompt:                 "生成一条茶文化短视频",
+		PlannedDurationSeconds: 45,
+	}, model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+	}, model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   120,
+	}, DefaultVideoModelCatalog(), 1000)
+	if err == nil || !strings.Contains(err.Error(), "target_duration_reason is required") {
+		t.Fatalf("ResolveVideoGenerationPlan error = %v, want reason requirement", err)
+	}
+}
+
+func TestResolveVideoGenerationPlanRebalancesShortRemainder(t *testing.T) {
+	catalog := DefaultVideoModelCatalog()
+	spec := catalog["seedance-2.0-mini"]
+	spec.MinDuration = 5
+	spec.MaxDuration = 15
+	catalog["seedance-2.0-mini"] = spec
+
+	plan, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
+		Prompt:   "生成 46 秒视频",
+		Duration: 46,
+	}, model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+	}, model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   120,
+	}, catalog, 1000)
+	if err != nil {
+		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
+	}
+	got := make([]int64, 0, len(plan.Segments))
+	var total int64
+	for _, seg := range plan.Segments {
+		got = append(got, seg.Duration)
+		total += seg.Duration
+		if seg.Duration < 5 || seg.Duration > 15 {
+			t.Fatalf("segment duration %d outside [5,15]; segments=%v", seg.Duration, got)
+		}
+	}
+	if total != 46 {
+		t.Fatalf("segment total = %d, want 46; segments=%v", total, got)
+	}
+	want := []int64{12, 12, 11, 11}
+	if len(got) != len(want) {
+		t.Fatalf("segments = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("segments = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestResolveVideoGenerationPlanRejectsUnsupportedModelResolution(t *testing.T) {
 	_, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
 		Prompt:     "生成视频",

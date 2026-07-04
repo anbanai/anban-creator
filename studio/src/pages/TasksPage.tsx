@@ -259,7 +259,7 @@ export default function TasksPage() {
   )
   const selectedCompletedTasks = selectedTasks.filter((task) => task.status === 'completed')
   const selectedCancellable = selectedTasks.filter((task) => task.status === 'pending' || task.status === 'running')
-  const selectedRetryable = selectedTasks.filter((task) => task.status === 'failed' || task.status === 'cancelled')
+  const selectedCloneable = selectedTasks.filter((task) => task.status === 'failed' || task.status === 'cancelled')
   const selectedDeletable = selectedTasks.filter((task) => task.status !== 'running')
   const completedTasksOnPage = filteredTasks.filter((task) => task.status === 'completed')
   const allCompletedSelected = completedTasksOnPage.length > 0 && completedTasksOnPage.every((task) => selectedTaskIdSet.has(task.id))
@@ -308,10 +308,10 @@ export default function TasksPage() {
     onError: () => toast.error('批量下载失败，请稍后重试'),
   })
 
-  // Bulk cancel / retry / delete — best-effort; the server returns a per-task
+  // Bulk cancel / clone / delete — best-effort; the server returns a per-task
   // summary. Each operates only on the subset it can act on; on success we toast
   // the succeeded/skipped counts, invalidate the list, and clear the selection.
-  const [bulkAction, setBulkAction] = useState<'cancel' | 'retry' | 'delete' | null>(null)
+  const [bulkAction, setBulkAction] = useState<'cancel' | 'clone' | 'delete' | null>(null)
   const toastBulk = (verb: string, res: { succeeded: number; skipped: number }) =>
     toast.success(`已${verb} ${res.succeeded} 个任务${res.skipped ? `，跳过 ${res.skipped} 个` : ''}`)
   const onBulkDone = (res: { succeeded: number; skipped: number }) => {
@@ -328,14 +328,14 @@ export default function TasksPage() {
     },
     onError: () => toast.error('批量取消失败，请稍后重试'),
   })
-  const bulkRetryMutation = useMutation({
-    mutationFn: (taskIds: string[]) => api.tasks.bulkRetry(taskIds),
+  const bulkCloneMutation = useMutation({
+    mutationFn: (taskIds: string[]) => api.tasks.bulkClone(taskIds),
     onSuccess: (res) => {
-      toastBulk('重新创建', res)
+      toastBulk('克隆', res)
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       onBulkDone(res)
     },
-    onError: () => toast.error('批量重试失败，请稍后重试'),
+    onError: () => toast.error('批量克隆失败，请稍后重试'),
   })
   const bulkDeleteMutation = useMutation({
     mutationFn: (taskIds: string[]) => api.tasks.bulkDelete(taskIds),
@@ -349,7 +349,7 @@ export default function TasksPage() {
   const bulkAnyPending =
     bulkDownloadMutation.isPending ||
     bulkCancelMutation.isPending ||
-    bulkRetryMutation.isPending ||
+    bulkCloneMutation.isPending ||
     bulkDeleteMutation.isPending
 
   function openCreate() {
@@ -416,7 +416,7 @@ export default function TasksPage() {
       target_platform: values.type === 'ecommerce' ? (values.target_platform || undefined) : undefined,
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
-      video_config: values.type === 'video' ? normalizeVideoConfigForSubmit(values.video_config) : undefined,
+      video_config: values.type === 'video' ? normalizeVideoConfigForSubmit(values.video_config, selectedProject?.video_defaults) : undefined,
       // Route to the desktop local executor when available and opted in.
       execution_target: localExecutorAvailable && runLocally ? 'local' : undefined,
     }))
@@ -450,7 +450,7 @@ export default function TasksPage() {
   // subset it can act on (matching the button counts the user saw).
   function confirmBulkAction() {
     if (bulkAction === 'cancel') bulkCancelMutation.mutate(selectedCancellable.map((t) => t.id))
-    else if (bulkAction === 'retry') bulkRetryMutation.mutate(selectedRetryable.map((t) => t.id))
+    else if (bulkAction === 'clone') bulkCloneMutation.mutate(selectedCloneable.map((t) => t.id))
     else if (bulkAction === 'delete') bulkDeleteMutation.mutate(selectedDeletable.map((t) => t.id))
   }
 
@@ -459,9 +459,9 @@ export default function TasksPage() {
       title: '批量取消任务？',
       desc: `将取消 ${selectedCancellable.length} 个待执行/运行中的任务。未消耗的部分将退还积分，此操作不可撤销。`,
     },
-    retry: {
-      title: '批量重试任务？',
-      desc: `将为 ${selectedRetryable.length} 个失败/已取消任务重新创建（按新任务重新计费），原任务保留。`,
+    clone: {
+      title: '批量克隆任务？',
+      desc: `将为 ${selectedCloneable.length} 个失败/已取消任务克隆新任务（按新任务重新计费），原任务保留。`,
     },
     delete: {
       title: '批量删除任务？',
@@ -596,7 +596,7 @@ export default function TasksPage() {
                 </Button>
               )}
               {/* 批量操作：每个按钮只对它能作用的子集生效（计数即实际提交数），
-                  点击进入二次确认。cancel/retry=outline，delete=destructive 以示不可逆。 */}
+                  点击进入二次确认。cancel/clone=outline，delete=destructive 以示不可逆。 */}
               <Button
                 variant="outline"
                 size="sm"
@@ -609,11 +609,11 @@ export default function TasksPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setBulkAction('retry')}
-                disabled={selectedRetryable.length === 0 || bulkAnyPending}
+                onClick={() => setBulkAction('clone')}
+                disabled={selectedCloneable.length === 0 || bulkAnyPending}
               >
                 <RotateCcw className="h-4 w-4" />
-                重试{selectedRetryable.length > 0 ? ` (${selectedRetryable.length})` : ''}
+                克隆{selectedCloneable.length > 0 ? ` (${selectedCloneable.length})` : ''}
               </Button>
               <Button
                 variant="destructive"
@@ -1296,7 +1296,7 @@ export default function TasksPage() {
               disabled={bulkAnyPending}
               onClick={confirmBulkAction}
             >
-              确认{bulkAction === 'delete' ? '删除' : bulkAction === 'cancel' ? '取消任务' : bulkAction === 'retry' ? '重试' : ''}
+              确认{bulkAction === 'delete' ? '删除' : bulkAction === 'cancel' ? '取消任务' : bulkAction === 'clone' ? '克隆' : ''}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -172,9 +172,11 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 	if resolved.Ratio == "" {
 		resolved.Ratio = defaults.Ratio
 	}
-	if resolved.Duration == 0 {
-		resolved.Duration = defaults.Duration
+	targetDuration, targetSource, targetReason, err := resolveTargetVideoDuration(req, defaults)
+	if err != nil {
+		return VideoGenerationPlan{}, err
 	}
+	resolved.Duration = targetDuration
 	if resolved.Watermark == nil {
 		resolved.Watermark = defaults.Watermark
 	}
@@ -206,46 +208,148 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 	if !stringInFold(resolved.Ratio, spec.SupportedRatios) {
 		return VideoGenerationPlan{}, fmt.Errorf("model %s does not support ratio %s", modelKey, resolved.Ratio)
 	}
-	if resolved.Duration < spec.MinDuration || resolved.Duration > spec.MaxDuration {
-		return VideoGenerationPlan{}, fmt.Errorf("model %s duration must be between %d and %d seconds", modelKey, spec.MinDuration, spec.MaxDuration)
-	}
 	hasInputVideo, inputSeconds := videoInputStats(resolved.ReferenceSet)
 	if hasInputVideo && !spec.SupportsVideoInput {
 		return VideoGenerationPlan{}, fmt.Errorf("model %s does not support video input", modelKey)
 	}
-	cny, err := estimateVideoCNY(spec, resolved.Resolution, resolved.Duration, hasInputVideo, inputSeconds)
+	segmentDurations, err := splitVideoDuration(targetDuration, spec.MinDuration, spec.MaxDuration)
 	if err != nil {
 		return VideoGenerationPlan{}, err
 	}
-	credits := int(math.Ceil(cny * float64(creditMultiplier)))
+	segments := make([]VideoGenerationSegmentPlan, 0, len(segmentDurations))
+	pricingSegments := make([]model.VideoPricingSegmentBreakdown, 0, len(segmentDurations))
+	var totalCNY float64
+	totalCredits := 0
+	var cursor int64
+	for i, duration := range segmentDurations {
+		cny, err := estimateVideoCNY(spec, resolved.Resolution, duration, hasInputVideo, inputSeconds)
+		if err != nil {
+			return VideoGenerationPlan{}, err
+		}
+		credits := int(math.Ceil(cny * float64(creditMultiplier)))
+		index := i + 1
+		segmentPrompt := resolved.Prompt
+		if len(segmentDurations) > 1 {
+			segmentPrompt = fmt.Sprintf("%s\n\nSegment %d/%d: generate the continuous portion from %ds to %ds of the final video. Keep character, setting, lighting, and style consistent with adjacent segments.", resolved.Prompt, index, len(segmentDurations), cursor, cursor+duration)
+		}
+		segments = append(segments, VideoGenerationSegmentPlan{
+			Index:            index,
+			StartSecond:      cursor,
+			EndSecond:        cursor + duration,
+			Duration:         duration,
+			Prompt:           segmentPrompt,
+			ModelKey:         modelKey,
+			Model:            resolved.Model,
+			Resolution:       resolved.Resolution,
+			Ratio:            resolved.Ratio,
+			EstimatedCredits: credits,
+		})
+		pricingSegments = append(pricingSegments, model.VideoPricingSegmentBreakdown{
+			Index:   index,
+			Seconds: duration,
+			CNY:     cny,
+			Credits: credits,
+		})
+		totalCNY += cny
+		totalCredits += credits
+		cursor += duration
+	}
 	breakdown := &model.VideoPricingBreakdown{
-		CNY:              round2(cny),
+		CNY:              round2(totalCNY),
 		CreditMultiplier: creditMultiplier,
 		InputVideo:       hasInputVideo,
 		InputSeconds:     inputSeconds,
-		OutputSeconds:    resolved.Duration,
+		OutputSeconds:    targetDuration,
+		SegmentCount:     len(segments),
 		Resolution:       resolved.Resolution,
 		Ratio:            resolved.Ratio,
 		ModelKey:         modelKey,
+		Segments:         pricingSegments,
 	}
 	plan := VideoGenerationPlan{
-		Purpose:          resolved.Purpose,
-		Prompt:           resolved.Prompt,
-		ModelKey:         modelKey,
-		Model:            resolved.Model,
-		Resolution:       resolved.Resolution,
-		Ratio:            resolved.Ratio,
-		Duration:         resolved.Duration,
-		Seed:             resolved.Seed,
-		CameraFixed:      resolved.CameraFixed,
-		Watermark:        resolved.Watermark,
-		Preflight:        preflight,
-		ServiceTier:      resolved.ServiceTier,
-		References:       resolved.ReferenceSet,
-		EstimatedCredits: credits,
-		PricingBreakdown: breakdown,
+		Purpose:                   resolved.Purpose,
+		Prompt:                    resolved.Prompt,
+		ModelKey:                  modelKey,
+		Model:                     resolved.Model,
+		Resolution:                resolved.Resolution,
+		Ratio:                     resolved.Ratio,
+		Duration:                  targetDuration,
+		TargetDurationSeconds:     targetDuration,
+		TargetDurationSource:      targetSource,
+		TargetDurationReason:      targetReason,
+		SegmentMaxDurationSeconds: spec.MaxDuration,
+		SegmentMinDurationSeconds: spec.MinDuration,
+		Segments:                  segments,
+		Seed:                      resolved.Seed,
+		CameraFixed:               resolved.CameraFixed,
+		Watermark:                 resolved.Watermark,
+		Preflight:                 preflight,
+		ServiceTier:               resolved.ServiceTier,
+		References:                resolved.ReferenceSet,
+		EstimatedCredits:          totalCredits,
+		PricingBreakdown:          breakdown,
 	}
 	return plan, nil
+}
+
+func resolveTargetVideoDuration(req VideoGenerationRequest, defaults model.VideoDefaults) (int64, string, string, error) {
+	if req.Duration > 0 {
+		return req.Duration, VideoDurationSourceUser, "user requested explicit target duration", nil
+	}
+	if _, inputSeconds := videoInputStats(req.ReferenceSet); inputSeconds > 0 {
+		return int64(math.Round(inputSeconds)), VideoDurationSourceReferenceVideo, "matched measured reference video duration", nil
+	}
+	if req.PlannedDurationSeconds > 0 {
+		reason := strings.TrimSpace(req.TargetDurationReason)
+		if reason == "" {
+			return 0, "", "", fmt.Errorf("target_duration_reason is required when target duration source is ai_planned")
+		}
+		return req.PlannedDurationSeconds, VideoDurationSourceAIPlanned, reason, nil
+	}
+	if defaults.Duration > 0 {
+		return defaults.Duration, VideoDurationSourceProjectDefault, "project default target duration", nil
+	}
+	return 0, "", "", fmt.Errorf("target duration is required")
+}
+
+func splitVideoDuration(target, minDuration, maxDuration int64) ([]int64, error) {
+	if minDuration <= 0 {
+		minDuration = 1
+	}
+	if maxDuration <= 0 {
+		return nil, fmt.Errorf("model max duration must be configured")
+	}
+	if minDuration > maxDuration {
+		return nil, fmt.Errorf("model min duration %d exceeds max duration %d", minDuration, maxDuration)
+	}
+	if target < minDuration {
+		return nil, fmt.Errorf("target duration %d is shorter than model min duration %d", target, minDuration)
+	}
+	segmentCount := int(math.Ceil(float64(target) / float64(maxDuration)))
+	for {
+		if segmentCount <= 0 {
+			return nil, fmt.Errorf("target duration is required")
+		}
+		base := target / int64(segmentCount)
+		remainder := target % int64(segmentCount)
+		if base >= minDuration && base <= maxDuration {
+			segments := make([]int64, segmentCount)
+			for i := 0; i < segmentCount; i++ {
+				segments[i] = base
+				if int64(i) < remainder {
+					segments[i]++
+				}
+				if segments[i] < minDuration || segments[i] > maxDuration {
+					return nil, fmt.Errorf("cannot split target duration %d into legal model segments", target)
+				}
+			}
+			return segments, nil
+		}
+		segmentCount++
+		if int64(segmentCount)*minDuration > target {
+			return nil, fmt.Errorf("cannot split target duration %d into legal model segments", target)
+		}
+	}
 }
 
 func estimateVideoCNY(spec VideoModelSpec, resolution string, duration int64, hasInputVideo bool, inputSeconds float64) (float64, error) {

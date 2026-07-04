@@ -37,7 +37,7 @@ type ResumeTaskFile struct {
 	Size         int64
 }
 
-// Resume requeues an existing terminal task in the same workspace. Unlike Retry,
+// Resume requeues an existing terminal task in the same workspace. Unlike Clone,
 // it does not create a new task and does not bill a fresh task charge.
 func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params ResumeTaskParams) (*model.Task, error) {
 	prompt := strings.TrimSpace(params.Prompt)

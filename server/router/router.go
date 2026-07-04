@@ -300,7 +300,7 @@ func NewRouter(svc *Services) *fiber.App {
 		// Bulk operations (static segments, registered before /tasks/:id to win
 		// over the param route; best-effort, ≤100 ids, per-task results).
 		apiV1.Post("/tasks/bulk-cancel", svc.TaskHandler.BulkCancel)
-		apiV1.Post("/tasks/bulk-retry", svc.TaskHandler.BulkRetry)
+		apiV1.Post("/tasks/bulk-clone", svc.TaskHandler.BulkClone)
 		apiV1.Post("/tasks/bulk-delete", svc.TaskHandler.BulkDelete)
 		apiV1.Get("/tasks/:id", svc.TaskHandler.GetByID)
 		if svc.SeednoteAnalyticsHandler != nil {
@@ -308,7 +308,7 @@ func NewRouter(svc *Services) *fiber.App {
 		}
 		apiV1.Delete("/tasks/:id", svc.TaskHandler.Delete)
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)
-		apiV1.Post("/tasks/:id/retry", svc.TaskHandler.Retry)
+		apiV1.Post("/tasks/:id/clone", svc.TaskHandler.Clone)
 		apiV1.Post("/tasks/:id/resume", svc.TaskHandler.Resume)
 		// Publish-approval gate (Batch 4A): resume or close a held publish.
 		apiV1.Post("/tasks/:id/publish-approve", svc.TaskHandler.PublishApprove)

@@ -258,7 +258,7 @@ type CreateManualParams struct {
 	// Overrides is deprecated. New Studio/API flows do not set task-level style
 	// overrides; runtime style/account config comes from ProjectSnapshot.
 	Overrides *model.StyleOverrides
-	// ProjectSnapshot, when set, is copied verbatim. Retry uses this to preserve
+	// ProjectSnapshot, when set, is copied verbatim. Clone uses this to preserve
 	// the original task's frozen config. New manual tasks leave it nil and snapshot
 	// the current project at creation time.
 	ProjectSnapshot *model.ProjectSnapshot
@@ -590,6 +590,7 @@ func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) Video
 	req.Resolution = cfg.Resolution
 	req.Ratio = cfg.Ratio
 	req.Duration = cfg.Duration
+	req.TargetDurationReason = cfg.TargetDurationReason
 	req.Watermark = cfg.Watermark
 	req.Preflight = &cfg.Preflight
 	req.ReferenceSet = videoReferencesFromAssets(cfg.References)
@@ -632,18 +633,46 @@ func videoAssetsFromReferences(refs []VideoReferenceInput) []model.VideoReferenc
 
 func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
 	return model.VideoTaskConfig{
-		Purpose:          plan.Purpose,
-		ModelKey:         plan.ModelKey,
-		Model:            plan.Model,
-		Resolution:       plan.Resolution,
-		Ratio:            plan.Ratio,
-		Duration:         plan.Duration,
-		Watermark:        plan.Watermark,
-		Preflight:        plan.Preflight,
-		References:       videoAssetsFromReferences(plan.References),
-		EstimatedCredits: plan.EstimatedCredits,
-		PricingBreakdown: plan.PricingBreakdown,
+		Purpose:                   plan.Purpose,
+		ModelKey:                  plan.ModelKey,
+		Model:                     plan.Model,
+		Resolution:                plan.Resolution,
+		Ratio:                     plan.Ratio,
+		Duration:                  plan.Duration,
+		TargetDurationSeconds:     plan.TargetDurationSeconds,
+		TargetDurationSource:      plan.TargetDurationSource,
+		TargetDurationReason:      plan.TargetDurationReason,
+		SegmentMaxDurationSeconds: plan.SegmentMaxDurationSeconds,
+		SegmentMinDurationSeconds: plan.SegmentMinDurationSeconds,
+		Segments:                  videoTaskSegmentsFromPlan(plan.Segments),
+		Watermark:                 plan.Watermark,
+		Preflight:                 plan.Preflight,
+		References:                videoAssetsFromReferences(plan.References),
+		EstimatedCredits:          plan.EstimatedCredits,
+		PricingBreakdown:          plan.PricingBreakdown,
 	}
+}
+
+func videoTaskSegmentsFromPlan(segments []VideoGenerationSegmentPlan) []model.VideoTaskSegmentConfig {
+	if len(segments) == 0 {
+		return nil
+	}
+	out := make([]model.VideoTaskSegmentConfig, 0, len(segments))
+	for _, seg := range segments {
+		out = append(out, model.VideoTaskSegmentConfig{
+			Index:            seg.Index,
+			StartSecond:      seg.StartSecond,
+			EndSecond:        seg.EndSecond,
+			Duration:         seg.Duration,
+			Prompt:           seg.Prompt,
+			ModelKey:         seg.ModelKey,
+			Model:            seg.Model,
+			Resolution:       seg.Resolution,
+			Ratio:            seg.Ratio,
+			EstimatedCredits: seg.EstimatedCredits,
+		})
+	}
+	return out
 }
 
 func (s *TaskService) requireVideoCreationBalance(ctx context.Context, userID string) error {

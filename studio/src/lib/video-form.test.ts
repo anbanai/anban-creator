@@ -65,4 +65,24 @@ describe('video form helpers', () => {
       references: [{ type: 'text', text: '镜头要明亮' }],
     })
   })
+
+  it('does not submit inherited fallback duration as an explicit user duration', () => {
+    const defaults: VideoDefaults = {
+      purpose: 'planting',
+      model_key: 'seedance-2.0-mini',
+      resolution: '720p',
+      ratio: '9:16',
+      duration: 15,
+      watermark: false,
+      preflight: true,
+    }
+
+    expect(normalizeVideoConfigForSubmit(buildVideoFormConfig(defaults), defaults)).toEqual({
+      workflow: 'creator',
+    })
+    expect(normalizeVideoConfigForSubmit({ ...buildVideoFormConfig(defaults), duration: 60 }, defaults)).toEqual({
+      workflow: 'creator',
+      duration: 60,
+    })
+  })
 })

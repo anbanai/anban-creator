@@ -31,7 +31,7 @@ vi.mock('@/lib/api', async () => {
       tasks: {
         ...actual.api.tasks,
         get: vi.fn(),
-        retry: vi.fn(),
+        clone: vi.fn(),
         resume: vi.fn(),
         files: vi.fn().mockResolvedValue([]),
       },
@@ -71,7 +71,7 @@ describe('TaskDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api.tasks.files).mockResolvedValue([])
-    vi.mocked(api.tasks.retry).mockResolvedValue(taskWith({ id: 'task-rerun', status: 'pending' }))
+    vi.mocked(api.tasks.clone).mockResolvedValue(taskWith({ id: 'task-clone', status: 'pending' }))
     vi.mocked(api.tasks.resume).mockResolvedValue(taskWith({ id: 'task-1', status: 'pending' }))
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
@@ -112,7 +112,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
   })
 
-  it('lets completed tasks be copied as a fresh task', async () => {
+  it('lets completed tasks be cloned as a fresh task', async () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'completed',
@@ -122,12 +122,12 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const rerunButton = await screen.findByRole('button', { name: /复制重跑/ })
+    const rerunButton = await screen.findByRole('button', { name: /克隆任务/ })
     fireEvent.click(rerunButton)
 
     await waitFor(() => {
-      expect(api.tasks.retry).toHaveBeenCalledWith('task-1')
-      expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-rerun')
+      expect(api.tasks.clone).toHaveBeenCalledWith('task-1')
+      expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone')
     })
   })
 
@@ -164,7 +164,7 @@ describe('TaskDetailPage', () => {
         files: [file],
         fileLabels: ['修改意见'],
       })
-      expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/task-rerun')
+      expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/task-clone')
     })
   })
 
@@ -202,7 +202,7 @@ describe('TaskDetailPage', () => {
     })
   })
 
-  it('does not show rerun for running tasks', async () => {
+  it('does not show clone for running tasks', async () => {
     mockTask(taskWith({
       status: 'running',
       progress: 42,
@@ -215,10 +215,10 @@ describe('TaskDetailPage', () => {
 
     expect(await screen.findByText('正在写作正文')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /继续执行/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /复制重跑/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /克隆任务/ })).not.toBeInTheDocument()
   })
 
-  it('does not show rerun for pending tasks', async () => {
+  it('does not show clone for pending tasks', async () => {
     mockTask(taskWith({
       status: 'pending',
       progress: 0,
@@ -231,10 +231,10 @@ describe('TaskDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('任务等待执行中...')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: /继续执行/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /复制重跑/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /克隆任务/ })).not.toBeInTheDocument()
   })
 
-  it('uses distinct continue and copy-rerun wording for cancelled tasks', async () => {
+  it('uses distinct continue and clone wording for cancelled tasks', async () => {
     mockTask(taskWith({
       status: 'cancelled',
       result: { files: null, output: '' },
@@ -243,7 +243,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findAllByRole('button', { name: /继续执行/ })).toHaveLength(2)
-    expect(screen.getAllByRole('button', { name: /复制重跑/ })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /克隆任务/ })).toHaveLength(2)
     expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /再试一次/ })).not.toBeInTheDocument()
   })
@@ -326,15 +326,73 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()
     expect(screen.getByText('消耗积分')).toBeInTheDocument()
-    expect(screen.getAllByText('任务消耗').length).toBeGreaterThan(0)
-    expect(screen.getByText('操作消耗')).toBeInTheDocument()
-    expect(screen.getByText('退还积分')).toBeInTheDocument()
-    expect(screen.getByText('净消耗')).toBeInTheDocument()
+    expect(screen.queryByText('任务消耗')).not.toBeInTheDocument()
+    expect(screen.queryByText('操作消耗')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /查看积分明细/ }))
+    const creditDialog = await screen.findByRole('dialog')
+    expect(within(creditDialog).getByText('积分明细')).toBeInTheDocument()
+    expect(within(creditDialog).getAllByText('任务消耗').length).toBeGreaterThan(0)
+    expect(within(creditDialog).getByText('操作消耗')).toBeInTheDocument()
+    expect(within(creditDialog).getByText('退还积分')).toBeInTheDocument()
+    expect(within(creditDialog).getByText('净消耗')).toBeInTheDocument()
     expect(screen.getAllByText('188').length).toBeGreaterThan(0)
     expect(screen.getByText('图片生成')).toBeInTheDocument()
     expect(screen.getByText('-80')).toBeInTheDocument()
     expect(screen.queryByText('执行成本')).not.toBeInTheDocument()
     expect(screen.queryByText('$1.23')).not.toBeInTheDocument()
+  })
+
+  it('shows generated video files in the files list and opens the video result in a dialog', async () => {
+    mockTask(taskWith({
+      type: 'video',
+      status: 'completed',
+      video_generation_id: 'vg-1',
+      video_estimated_credits: 7440,
+      video_credits_charged: 7440,
+      video_config: {
+        workflow: 'creator',
+        model_key: 'seedance-2.0-mini',
+        resolution: '720p',
+        ratio: '9:16',
+        duration: 15,
+        estimated_credits: 7440,
+        references: [{ type: 'video_url', url: 'https://cdn.example.com/ref.mp4', reference_role: 'rhythm', input_duration_seconds: 60 }],
+      },
+      result: { files: null, output: '' },
+    }))
+    vi.mocked(api.tasks.files).mockResolvedValue([
+      {
+        id: 'file-video',
+        task_id: 'task-1',
+        role: 'output',
+        file_name: 'final.mp4',
+        mime_type: 'video/mp4',
+        file_size: 8200000,
+        url: 'https://cdn.example.com/final.mp4',
+        created_at: '2026-07-04T08:00:00Z',
+      },
+      {
+        id: 'file-plan',
+        task_id: 'task-1',
+        role: 'output',
+        file_name: 'quality-review.md',
+        mime_type: 'text/markdown',
+        file_size: 512,
+        url: '/api/v1/files/file-plan',
+        created_at: '2026-07-04T08:00:00Z',
+      },
+    ])
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('生成文件 (2)')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '视频结果' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /预览 final\.mp4/ }))
+    const videoDialog = await screen.findByRole('dialog')
+    expect(within(videoDialog).getByRole('heading', { name: '视频结果' })).toBeInTheDocument()
+    expect(within(videoDialog).getByText('生成任务 ID')).toBeInTheDocument()
+    expect(within(videoDialog).getByText('参考素材')).toBeInTheDocument()
+    expect(within(videoDialog).getByText(/已消耗 7,440/)).toBeInTheDocument()
   })
 
   it('opens project details in a dialog instead of navigating to the projects list', async () => {
@@ -376,7 +434,7 @@ describe('TaskDetailPage', () => {
 
     screen.getByRole('button', { name: /复制/ }).click()
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith('## 阶段日志\n- 已完成选题\n```txt\nraw block\n```')
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('## 阶段日志\n- 已完成选题\n```txt\nraw block\n```'))
     })
   })
 })

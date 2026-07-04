@@ -20,6 +20,11 @@ export interface VideoDefaults {
   resolution?: string
   ratio?: string
   duration?: number
+  target_duration_seconds?: number
+  target_duration_source?: 'user' | 'reference_video' | 'ai_planned' | 'project_default'
+  target_duration_reason?: string
+  segment_max_duration_seconds?: number
+  segment_min_duration_seconds?: number
   watermark?: boolean
   preflight?: boolean
 }
@@ -38,14 +43,33 @@ export interface VideoPricingBreakdown {
   input_video: boolean
   input_seconds?: number
   output_seconds: number
+  segment_count?: number
   resolution: string
   ratio: string
   model_key: string
+  segments?: Array<{
+    index: number
+    seconds: number
+    cny: number
+    credits: number
+  }>
 }
 
 export interface VideoTaskConfig extends VideoDefaults {
   model?: string
   references?: VideoReferenceAsset[]
+  segments?: Array<{
+    index: number
+    start_second: number
+    end_second: number
+    duration: number
+    prompt?: string
+    model_key?: string
+    model?: string
+    resolution?: string
+    ratio?: string
+    estimated_credits?: number
+  }>
   estimated_credits?: number
   pricing_breakdown?: VideoPricingBreakdown
 }

@@ -283,7 +283,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	}
 }
 
-func TestRetryTask_AllowsCompletedTask(t *testing.T) {
+func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -291,9 +291,9 @@ func TestRetryTask_AllowsCompletedTask(t *testing.T) {
 	projectID := uuid.New().String()
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:         userID,
-		Email:      "retry-completed@example.com",
+		Email:      "clone-completed@example.com",
 		Password:   "hashed",
-		InviteCode: "retrycompleted",
+		InviteCode: "clonecompleted",
 		Tier:       model.TierFree,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
@@ -314,7 +314,7 @@ func TestRetryTask_AllowsCompletedTask(t *testing.T) {
 		ProjectID: projectID,
 		Type:      model.PlatformArticle,
 		Status:    model.TaskStatusCompleted,
-		Prompt:    "rerun this completed task",
+		Prompt:    "clone this completed task",
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -325,12 +325,12 @@ func TestRetryTask_AllowsCompletedTask(t *testing.T) {
 	h.SetRepository(repo)
 
 	app := fiber.New()
-	app.Post("/tasks/:id/retry", func(c fiber.Ctx) error {
+	app.Post("/tasks/:id/clone", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
-		return h.Retry(c)
+		return h.Clone(c)
 	})
 
-	req := httptest.NewRequest("POST", "/tasks/"+taskID+"/retry", nil)
+	req := httptest.NewRequest("POST", "/tasks/"+taskID+"/clone", nil)
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)

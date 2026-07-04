@@ -45,20 +45,22 @@ var validVideoReferenceTypes = map[string]bool{
 
 // VideoGenerationRequest is the service-facing request for Ark content generation.
 type VideoGenerationRequest struct {
-	Prompt       string                `json:"prompt"`
-	Purpose      string                `json:"purpose,omitempty"`
-	Model        string                `json:"model,omitempty"`
-	Resolution   string                `json:"resolution,omitempty"`
-	Ratio        string                `json:"ratio,omitempty"`
-	Duration     int64                 `json:"duration,omitempty"`
-	Seed         *int64                `json:"seed,omitempty"`
-	CameraFixed  *bool                 `json:"camera_fixed,omitempty"`
-	Watermark    *bool                 `json:"watermark,omitempty"`
-	Preflight    *bool                 `json:"preflight,omitempty"`
-	ServiceTier  string                `json:"service_tier,omitempty"`
-	SafetyID     string                `json:"safety_identifier,omitempty"`
-	TaskID       string                `json:"task_id,omitempty"`
-	ReferenceSet []VideoReferenceInput `json:"references,omitempty"`
+	Prompt                 string                `json:"prompt"`
+	Purpose                string                `json:"purpose,omitempty"`
+	Model                  string                `json:"model,omitempty"`
+	Resolution             string                `json:"resolution,omitempty"`
+	Ratio                  string                `json:"ratio,omitempty"`
+	Duration               int64                 `json:"duration,omitempty"`
+	PlannedDurationSeconds int64                 `json:"planned_duration_seconds,omitempty"`
+	TargetDurationReason   string                `json:"target_duration_reason,omitempty"`
+	Seed                   *int64                `json:"seed,omitempty"`
+	CameraFixed            *bool                 `json:"camera_fixed,omitempty"`
+	Watermark              *bool                 `json:"watermark,omitempty"`
+	Preflight              *bool                 `json:"preflight,omitempty"`
+	ServiceTier            string                `json:"service_tier,omitempty"`
+	SafetyID               string                `json:"safety_identifier,omitempty"`
+	TaskID                 string                `json:"task_id,omitempty"`
+	ReferenceSet           []VideoReferenceInput `json:"references,omitempty"`
 }
 
 // VideoReferenceInput describes one text/image/audio/video reference.
@@ -102,26 +104,52 @@ type VideoGenerationError struct {
 	Message string `json:"message"`
 }
 
+const (
+	VideoDurationSourceUser           = "user"
+	VideoDurationSourceReferenceVideo = "reference_video"
+	VideoDurationSourceAIPlanned      = "ai_planned"
+	VideoDurationSourceProjectDefault = "project_default"
+)
+
+type VideoGenerationSegmentPlan struct {
+	Index            int    `json:"index"`
+	StartSecond      int64  `json:"start_second"`
+	EndSecond        int64  `json:"end_second"`
+	Duration         int64  `json:"duration"`
+	Prompt           string `json:"prompt,omitempty"`
+	ModelKey         string `json:"model_key,omitempty"`
+	Model            string `json:"model,omitempty"`
+	Resolution       string `json:"resolution,omitempty"`
+	Ratio            string `json:"ratio,omitempty"`
+	EstimatedCredits int    `json:"estimated_credits,omitempty"`
+}
+
 // VideoGenerationPlan is a deterministic MCP planning artifact.
 type VideoGenerationPlan struct {
-	ProjectID         string                       `json:"project_id"`
-	Purpose           string                       `json:"purpose"`
-	Prompt            string                       `json:"prompt"`
-	ModelKey          string                       `json:"model_key,omitempty"`
-	Model             string                       `json:"model,omitempty"`
-	Resolution        string                       `json:"resolution"`
-	Ratio             string                       `json:"ratio"`
-	Duration          int64                        `json:"duration"`
-	Seed              *int64                       `json:"seed,omitempty"`
-	CameraFixed       *bool                        `json:"camera_fixed,omitempty"`
-	Watermark         *bool                        `json:"watermark,omitempty"`
-	Preflight         bool                         `json:"preflight,omitempty"`
-	ServiceTier       string                       `json:"service_tier,omitempty"`
-	References        []VideoReferenceInput        `json:"references,omitempty"`
-	EstimatedCredits  int                          `json:"estimated_credits,omitempty"`
-	PricingBreakdown  *model.VideoPricingBreakdown `json:"pricing_breakdown,omitempty"`
-	RequiredArtifacts []string                     `json:"required_artifacts"`
-	SDKPayloadPreview map[string]any               `json:"sdk_payload_preview"`
+	ProjectID                 string                       `json:"project_id"`
+	Purpose                   string                       `json:"purpose"`
+	Prompt                    string                       `json:"prompt"`
+	ModelKey                  string                       `json:"model_key,omitempty"`
+	Model                     string                       `json:"model,omitempty"`
+	Resolution                string                       `json:"resolution"`
+	Ratio                     string                       `json:"ratio"`
+	Duration                  int64                        `json:"duration"`
+	TargetDurationSeconds     int64                        `json:"target_duration_seconds"`
+	TargetDurationSource      string                       `json:"target_duration_source"`
+	TargetDurationReason      string                       `json:"target_duration_reason,omitempty"`
+	SegmentMaxDurationSeconds int64                        `json:"segment_max_duration_seconds,omitempty"`
+	SegmentMinDurationSeconds int64                        `json:"segment_min_duration_seconds,omitempty"`
+	Segments                  []VideoGenerationSegmentPlan `json:"segments,omitempty"`
+	Seed                      *int64                       `json:"seed,omitempty"`
+	CameraFixed               *bool                        `json:"camera_fixed,omitempty"`
+	Watermark                 *bool                        `json:"watermark,omitempty"`
+	Preflight                 bool                         `json:"preflight,omitempty"`
+	ServiceTier               string                       `json:"service_tier,omitempty"`
+	References                []VideoReferenceInput        `json:"references,omitempty"`
+	EstimatedCredits          int                          `json:"estimated_credits,omitempty"`
+	PricingBreakdown          *model.VideoPricingBreakdown `json:"pricing_breakdown,omitempty"`
+	RequiredArtifacts         []string                     `json:"required_artifacts"`
+	SDKPayloadPreview         map[string]any               `json:"sdk_payload_preview"`
 }
 
 // VideoService wraps Ark runtime content generation for short videos.
@@ -299,8 +327,8 @@ func validateVideoGenerationRequest(req VideoGenerationRequest) error {
 	if !validVideoPurposes[req.Purpose] {
 		return fmt.Errorf("purpose must be one of planting, ecommerce, lead_gen, promotion")
 	}
-	if req.Duration <= 0 || req.Duration > 60 {
-		return fmt.Errorf("duration must be between 1 and 60 seconds")
+	if req.Duration <= 0 || req.Duration > 600 {
+		return fmt.Errorf("duration must be between 1 and 600 seconds")
 	}
 	if req.Ratio != "" && !isAllowedVideoRatio(req.Ratio) {
 		return fmt.Errorf("ratio must be one of 9:16, 16:9, 1:1, 4:3, 3:4")

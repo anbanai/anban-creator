@@ -955,8 +955,8 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFile(t *tes
 	if found.Status != model.TaskStatusFailed {
 		t.Fatalf("status = %q, want failed", found.Status)
 	}
-	if found.ErrorMessage != "video missing generated video task file" {
-		t.Fatalf("error = %q, want video missing generated video task file", found.ErrorMessage)
+	if found.ErrorMessage != "video missing final video task file" {
+		t.Fatalf("error = %q, want video missing final video task file", found.ErrorMessage)
 	}
 }
 
@@ -990,8 +990,8 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFileWhenWor
 	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
 		Success: true,
 		ToolUseSummary: map[string]int{
-			"create_video_generation_task": 1,
-			"query_video_generation_task":  1,
+			"create_video_generation_job": 1,
+			"query_video_generation_job":  1,
 		},
 	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
 
@@ -1005,8 +1005,8 @@ func TestTaskServiceHandleExecutionRejectsVideoWithoutRegisteredVideoFileWhenWor
 	if found.Status != model.TaskStatusFailed {
 		t.Fatalf("status = %q, want failed", found.Status)
 	}
-	if found.ErrorMessage != "video missing generated video task file" {
-		t.Fatalf("error = %q, want video missing generated video task file", found.ErrorMessage)
+	if found.ErrorMessage != "video missing final video task file" {
+		t.Fatalf("error = %q, want video missing final video task file", found.ErrorMessage)
 	}
 }
 
@@ -1051,9 +1051,9 @@ func TestTaskServiceHandleExecutionRejectsGeneratedVideoTaskWithOnlyInputVideoRe
 	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
 		Success: true,
 		ToolUseSummary: map[string]int{
-			"register_video_reference":     1,
-			"create_video_generation_task": 1,
-			"query_video_generation_task":  1,
+			"register_video_reference":    1,
+			"create_video_generation_job": 1,
+			"query_video_generation_job":  1,
 		},
 	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
 
@@ -1067,12 +1067,12 @@ func TestTaskServiceHandleExecutionRejectsGeneratedVideoTaskWithOnlyInputVideoRe
 	if found.Status != model.TaskStatusFailed {
 		t.Fatalf("status = %q, want failed", found.Status)
 	}
-	if found.ErrorMessage != "video missing generated video task file" {
-		t.Fatalf("error = %q, want video missing generated video task file", found.ErrorMessage)
+	if found.ErrorMessage != "video missing final video task file" {
+		t.Fatalf("error = %q, want video missing final video task file", found.ErrorMessage)
 	}
 }
 
-func TestTaskServiceHandleExecutionAcceptsRegisteredVideoFile(t *testing.T) {
+func TestTaskServiceHandleExecutionAcceptsRegisteredFinalVideoFile(t *testing.T) {
 	db := setupTaskTestDB(t)
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
@@ -1104,8 +1104,8 @@ func TestTaskServiceHandleExecutionAcceptsRegisteredVideoFile(t *testing.T) {
 		ID:       fileID,
 		TaskID:   task.ID,
 		Role:     model.FileRoleOther,
-		FileName: "generated-video.mp4",
-		FilePath: "generated-video.mp4",
+		FileName: "final.mp4",
+		FilePath: "final.mp4",
 		MimeType: "video/mp4",
 		FileSize: 4096,
 	}); err != nil {
@@ -1117,16 +1117,16 @@ func TestTaskServiceHandleExecutionAcceptsRegisteredVideoFile(t *testing.T) {
 		ProjectID:   projectID,
 		TaskID:      task.ID,
 		Status:      "archived",
-		TaskFileIDs: datatypes.JSON([]byte(fmt.Sprintf(`{"generated_video":%q}`, fileID))),
+		TaskFileIDs: datatypes.JSON([]byte(fmt.Sprintf(`{"final_video":%q}`, fileID))),
 	}); err != nil {
 		t.Fatalf("create video generation: %v", err)
 	}
 	svc := NewTaskService(repo, &fakeTaskExecutor{result: &agent.ExecutionResult{
 		Success: true,
 		ToolUseSummary: map[string]int{
-			"create_video_generation_task":     1,
-			"query_video_generation_task":      1,
-			"download_video_generation_result": 1,
+			"create_video_generation_job":       1,
+			"query_video_generation_job":        1,
+			"download_video_generation_results": 1,
 		},
 	}}, &mockEnqueuer{}, nil, nil, &logger, "", nil, "", nil, nil)
 
@@ -1137,8 +1137,8 @@ func TestTaskServiceHandleExecutionAcceptsRegisteredVideoFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.Status == model.TaskStatusFailed && found.ErrorMessage == "video missing registered video deliverable" {
-		t.Fatalf("video task failed artifact validation despite registered file: %#v", found)
+	if found.Status != model.TaskStatusCompleted {
+		t.Fatalf("status = %q error=%q, want completed with registered final_video", found.Status, found.ErrorMessage)
 	}
 }
 
@@ -1374,7 +1374,7 @@ func TestTaskService_HandleExecutionFailure_DoesNotAutoRetry(t *testing.T) {
 	}
 }
 
-func TestTaskService_RetryClonesCompletedTask(t *testing.T) {
+func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -1394,12 +1394,12 @@ func TestTaskService_RetryClonesCompletedTask(t *testing.T) {
 		t.Fatalf("create source task: %v", err)
 	}
 
-	clone, err := svc.Retry(ctx, src.ID)
+	clone, err := svc.Clone(ctx, src.ID)
 	if err != nil {
-		t.Fatalf("Retry completed task: %v", err)
+		t.Fatalf("Clone completed task: %v", err)
 	}
 	if clone.ID == src.ID {
-		t.Fatal("retry reused the original task id")
+		t.Fatal("clone reused the original task id")
 	}
 	if clone.Status != model.TaskStatusPending {
 		t.Fatalf("clone status = %q, want %q", clone.Status, model.TaskStatusPending)

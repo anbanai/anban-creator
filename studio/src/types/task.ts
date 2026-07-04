@@ -118,12 +118,12 @@ export interface TaskResult {
 
 // Bulk operation per-task outcome (mirrors server handler.bulkTaskResult).
 // OK=false tasks carry a machine-readable Reason (not_found / forbidden /
-// not_cancellable / not_retryable / running_cancel_first / insufficient_credits / failed).
+// not_cancellable / not_cloneable / running_cancel_first / insufficient_credits / failed).
 export interface BulkTaskResult {
   id: string
   ok: boolean
   reason?: string
-  new_task_id?: string // retry only: the freshly created task id
+  new_task_id?: string // clone only: the freshly created task id
 }
 
 // Bulk operation summary (mirrors server handler.bulkTasksResponse). Best-effort:
