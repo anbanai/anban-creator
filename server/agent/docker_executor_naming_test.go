@@ -9,7 +9,8 @@ import (
 
 func TestDockerExecutorUsesAnbanRuntimeNames(t *testing.T) {
 	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
-	task := model.Task{ID: "task-1", Type: model.PlatformArticle, Prompt: "topic"}
+	task := model.Task{ID: "task-1", Type: model.PlatformVideo, Prompt: "topic"}
+	task.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
 
 	cmd := e.buildAgentCommand(&ExecutionOptions{Task: &task}, "sonnet", 100, "/workspace", "key")
 	if got, want := cmd[0], "anban"; got != want {
@@ -18,7 +19,7 @@ func TestDockerExecutorUsesAnbanRuntimeNames(t *testing.T) {
 	if got, want := cmd[1], "run"; got != want {
 		t.Fatalf("agent subcommand = %q, want %q", got, want)
 	}
-	if got, want := flagValue(cmd, "--agent-flag"), "anban:wechatarticle"; got != want {
+	if got, want := flagValue(cmd, "--agent-flag"), "anban:videoeditor"; got != want {
 		t.Fatalf("--agent-flag = %q, want %q", got, want)
 	}
 
@@ -27,6 +28,20 @@ func TestDockerExecutorUsesAnbanRuntimeNames(t *testing.T) {
 	}
 	if got, want := EphemeralContainerName(task.ID), "anban-creator-task-task-1"; got != want {
 		t.Fatalf("container name = %q, want %q", got, want)
+	}
+}
+
+func TestDockerExecutorPassesContainerAutoMemoryDirectory(t *testing.T) {
+	e := &DockerExecutor{serverURL: "http://localhost:8080/"}
+	task := model.Task{ID: "task-1", Type: model.PlatformArticle, Prompt: "topic"}
+	opts := &ExecutionOptions{
+		Task:                &task,
+		AutoMemoryDirectory: "/workspace/task-1/.claude/memory",
+	}
+
+	cmd := e.buildAgentCommand(opts, "sonnet", 100, "/workspace/task-1", "key")
+	if got, want := flagValue(cmd, "--auto-memory-directory"), "/workspace/task-1/.claude/memory"; got != want {
+		t.Fatalf("--auto-memory-directory = %q, want %q", got, want)
 	}
 }
 

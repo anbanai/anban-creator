@@ -1,6 +1,35 @@
-studio/
-data/
-bin/
-release/
-.git/
+/.git/
+/.idea/
+/.vscode/
+/.DS_Store
+
+# Local runtime data and release outputs.
+/data/
+/bin/
+/release/
+/dist/
+/build/
+/coverage/
 *.log
+
+# Frontend, desktop, mobile, and plugin distributions that are not needed for
+# building the server/agent Go binaries. claudecode/ is intentionally kept
+# because both runtime Dockerfiles copy it into the image.
+/studio/
+/desktop/
+/miniapp/
+/openclaw/
+/codex/
+/wcflink/
+/seednote-workspace/
+/eval-article-viral-strategy/
+/video-use-main/
+
+# Dependency and cache directories can appear under subprojects.
+**/node_modules/
+**/dist/
+**/build/
+**/.cache/
+**/.vite/
+**/.next/
+**/coverage/

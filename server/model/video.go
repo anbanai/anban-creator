@@ -1,5 +1,10 @@
 package model
 
+const (
+	VideoWorkflowCreator = "creator"
+	VideoWorkflowEditor  = "editor"
+)
+
 // VideoDefaults stores reusable video generation defaults on a project. Plans
 // and tasks copy these values into their own snapshots when they override them.
 type VideoDefaults struct {
@@ -24,6 +29,7 @@ type VideoModelPolicy struct {
 
 // VideoTaskConfig is the immutable plan/task snapshot used by agents and Studio.
 type VideoTaskConfig struct {
+	Workflow         string                 `json:"workflow,omitempty"`
 	Purpose          string                 `json:"purpose,omitempty"`
 	ModelKey         string                 `json:"model_key,omitempty"`
 	Model            string                 `json:"model,omitempty"`
@@ -35,6 +41,15 @@ type VideoTaskConfig struct {
 	References       []VideoReferenceAsset  `json:"references,omitempty"`
 	EstimatedCredits int                    `json:"estimated_credits,omitempty"`
 	PricingBreakdown *VideoPricingBreakdown `json:"pricing_breakdown,omitempty"`
+}
+
+func NormalizeVideoWorkflow(workflow string) string {
+	switch workflow {
+	case VideoWorkflowEditor:
+		return VideoWorkflowEditor
+	default:
+		return VideoWorkflowCreator
+	}
 }
 
 // VideoReferenceAsset is a Studio/API-facing reference saved on video tasks and

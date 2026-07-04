@@ -87,6 +87,20 @@ storage:
   local_data_dir: "./data/files" # Local provider: where to store files
 
 # ---------------------------------------------------------------------------
+# Project memory: Claude Code auto memory projection
+# Optional. Uses storage.provider (OSS in production) as the authoritative
+# archive store and stages per-task runtime memory into workspace/.claude/memory.
+# ---------------------------------------------------------------------------
+memory:
+  enabled: false
+  provider: "oss"
+  oss_prefix: "claude-memory/projects"
+  runtime_dir: ".claude/memory"
+  max_archive_bytes: 262144
+  merge_on_status: "completed"
+  lock_ttl: "60s"
+
+# ---------------------------------------------------------------------------
 # Image API: Global image generation API configuration
 # Shared across all channels. Supports cover and content image generation.
 # Provider: openai, gemini, volcengine

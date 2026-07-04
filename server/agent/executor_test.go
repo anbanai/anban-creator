@@ -341,7 +341,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 		{model.ScopeArticle, "wechatarticle"},
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeEcommerce, "ecommerce"},
-		{model.ScopeVideo, "video"},
+		{model.ScopeVideo, "videocreator"},
 		{"unknown", "seednote"},
 	}
 
@@ -352,6 +352,59 @@ func TestTaskTypeToAgent(t *testing.T) {
 				t.Errorf("TaskTypeToAgent(%q) = %q, want %q", tt.taskType, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTaskToAgentRoutesVideoWorkflows(t *testing.T) {
+	tests := []struct {
+		name string
+		task *model.Task
+		want string
+	}{
+		{
+			name: "video defaults to creator",
+			task: &model.Task{Type: model.ScopeVideo},
+			want: "videocreator",
+		},
+		{
+			name: "video creator workflow",
+			task: func() *model.Task {
+				t := &model.Task{Type: model.ScopeVideo}
+				t.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowCreator})
+				return t
+			}(),
+			want: "videocreator",
+		},
+		{
+			name: "video editor workflow",
+			task: func() *model.Task {
+				t := &model.Task{Type: model.ScopeVideo}
+				t.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
+				return t
+			}(),
+			want: "videoeditor",
+		},
+		{
+			name: "article unchanged",
+			task: &model.Task{Type: model.ScopeArticle},
+			want: "wechatarticle",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TaskToAgent(tt.task); got != tt.want {
+				t.Fatalf("TaskToAgent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFallbackAgentErrorUsesLastToolError(t *testing.T) {
+	got := fallbackAgentError("unknown error", "Bash", "ffprobe: command not found")
+	want := "last tool error from Bash: ffprobe: command not found"
+	if got != want {
+		t.Fatalf("fallbackAgentError() = %q, want %q", got, want)
 	}
 }
 
@@ -707,6 +760,29 @@ func TestBuildUserPrompt_TaskContext(t *testing.T) {
 	got = BuildUserPrompt(UserPromptParams{TaskType: "seednote", Topic: "春季穿搭"})
 	if strings.Contains(got, "本任务上下文") {
 		t.Errorf("context line should be omitted when both IDs empty; got %q", got)
+	}
+}
+
+func TestAppendResumeContextToPrompt(t *testing.T) {
+	workDir := t.TempDir()
+	resumeDir := filepath.Join(workDir, ".anban-creator", "resume")
+	if err := os.MkdirAll(resumeDir, 0o755); err != nil {
+		t.Fatalf("create resume dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(resumeDir, "latest.md"), []byte("# 继续执行补充\n\n补充指令"), 0o644); err != nil {
+		t.Fatalf("write latest.md: %v", err)
+	}
+
+	got := AppendResumeContextToPrompt("base prompt", workDir)
+	for _, want := range []string{"base prompt", "继续执行模式", ".anban-creator/resume/latest.md", "不要清空", "基于当前工作目录"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, got)
+		}
+	}
+
+	withoutResume := AppendResumeContextToPrompt("base prompt", t.TempDir())
+	if withoutResume != "base prompt" {
+		t.Fatalf("prompt without resume = %q, want unchanged", withoutResume)
 	}
 }
 

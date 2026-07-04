@@ -57,6 +57,26 @@ func TestParseConfig_ArticleImageFlagsDefaultTrue(t *testing.T) {
 	}
 }
 
+func TestParseConfig_AutoMemoryDirectory(t *testing.T) {
+	err := newAgentCommand(nil, nil, func(_ context.Context, cfg *Config) error {
+		if got, want := cfg.AutoMemoryDirectory, "/workspace/task-1/.claude/memory"; got != want {
+			t.Fatalf("AutoMemoryDirectory = %q, want %q", got, want)
+		}
+		return nil
+	}).Run(context.Background(), []string{
+		"anban",
+		"run",
+		"--server-url", "http://localhost:18060",
+		"--api-key", "key",
+		"--task-id", "task-1",
+		"--task-type", "article",
+		"--auto-memory-directory", "/workspace/task-1/.claude/memory",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseConfig_ArticleImageFlagsCanDisableAllImages(t *testing.T) {
 	err := newAgentCommand(nil, nil, func(_ context.Context, cfg *Config) error {
 		if cfg.ArticleWithCover || cfg.ArticleWithContentImages {

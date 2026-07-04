@@ -61,9 +61,42 @@ export function VideoCreationPanel({
       </div>
 
       <section className="flex flex-col gap-2">
+        <FormField control={form.control} name="video_config.workflow" render={() => (
+          <FormItem>
+            <FormLabel>工作流</FormLabel>
+            <FormControl>
+              <div
+                className="grid grid-cols-2 rounded-md border border-border p-1"
+                aria-label="视频工作流"
+                role="group"
+              >
+                <button
+                  type="button"
+                  aria-pressed={(config?.workflow ?? 'creator') === 'creator'}
+                  className="h-9 rounded-sm px-2.5 text-sm font-medium transition-colors aria-pressed:bg-muted hover:bg-muted"
+                  onClick={() => form.setValue('video_config.workflow', 'creator', { shouldDirty: true })}
+                >
+                  生成
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={config?.workflow === 'editor'}
+                  className="h-9 rounded-sm px-2.5 text-sm font-medium transition-colors aria-pressed:bg-muted hover:bg-muted"
+                  onClick={() => form.setValue('video_config.workflow', 'editor', { shouldDirty: true })}
+                >
+                  剪辑
+                </button>
+              </div>
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )} />
+      </section>
+
+      <section className="flex flex-col gap-2">
         <div>
-          <p className="text-sm font-medium text-foreground">创作要求</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">写清楚这条视频要表达什么，留空则使用项目定位自动生成。</p>
+          <p className="text-sm font-medium text-foreground">{config?.workflow === 'editor' ? '剪辑要求' : '创作要求'}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{config?.workflow === 'editor' ? '写清楚素材如何剪、字幕/调色/动效要求和交付格式。' : '写清楚这条视频要表达什么，留空则使用项目定位自动生成。'}</p>
         </div>
         {promptField}
       </section>

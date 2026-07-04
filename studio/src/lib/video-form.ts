@@ -1,6 +1,7 @@
-import type { VideoDefaults, VideoReferenceAsset, VideoTaskConfig } from '@/types'
+import type { VideoDefaults, VideoReferenceAsset, VideoTaskConfig, VideoWorkflow } from '@/types'
 
 export const VIDEO_PROJECT_DEFAULT_VALUE = '__project_default__'
+export type VideoFormConfig = VideoTaskConfig & { workflow: VideoWorkflow }
 
 export function readVideoSelectValue(value: string | null | undefined) {
   return value?.trim() || VIDEO_PROJECT_DEFAULT_VALUE
@@ -11,10 +12,12 @@ export function writeVideoSelectValue(value: string | null) {
   return value
 }
 
-export function buildVideoFormConfig(defaults?: VideoDefaults, current?: VideoTaskConfig): VideoTaskConfig {
+export function buildVideoFormConfig(defaults?: VideoDefaults, current?: VideoTaskConfig): VideoFormConfig {
+  const workflow = current?.workflow === 'editor' || defaults?.workflow === 'editor' ? 'editor' : 'creator'
   return {
     ...(defaults ?? {}),
     ...(current ?? {}),
+    workflow,
     references: current?.references ?? [],
   }
 }
@@ -44,7 +47,9 @@ export function normalizeVideoConfigForSubmit(config: VideoTaskConfig | undefine
   const resolution = cleanString(config.resolution)
   const ratio = cleanString(config.ratio)
   const references = cleanReferences(config.references)
+  const workflow = config.workflow === 'editor' ? 'editor' : 'creator'
 
+  next.workflow = workflow
   if (purpose) next.purpose = purpose as VideoTaskConfig['purpose']
   if (modelKey) next.model_key = modelKey
   if (resolution) next.resolution = resolution

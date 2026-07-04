@@ -13,7 +13,9 @@ import (
 	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v3"
 
+	appconfig "github.com/anbanai/anban-creator/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/resolver"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -116,6 +118,23 @@ func BuildUserPrompt(p UserPromptParams) string {
 		return "/goal " + trimmedGoal + "\n\n" + base
 	}
 	return base
+}
+
+// AppendResumeContextToPrompt asks the agent to continue from supplemental
+// operator input when a resumed task wrote .anban-creator/resume/latest.md.
+func AppendResumeContextToPrompt(prompt, workDir string) string {
+	if strings.TrimSpace(workDir) == "" {
+		return prompt
+	}
+	resumePath := filepath.Join(workDir, appconfig.ConfigDir, "resume", "latest.md")
+	if info, err := os.Stat(resumePath); err != nil || info.IsDir() {
+		return prompt
+	}
+	return prompt + "\n\n继续执行模式：\n" +
+		"- 这是一个基于原任务工作目录的继续执行，不是全新任务。\n" +
+		"- 请先读取 `.anban-creator/resume/latest.md`，理解用户补充指令、补充文件说明和附件相对路径。\n" +
+		"- 基于当前工作目录已有草稿、素材和产物继续完成任务；不要清空、删除或整体覆盖已有产物，除非补充指令明确要求替换。\n" +
+		"- 如果补充文件中存在同名或相近用途文件，优先按 latest.md 中的文件说明区分使用。"
 }
 
 // describeRuntimeControls emits compact, machine-readable controls for agents.
@@ -268,13 +287,14 @@ type LocalExecutor struct {
 	workspaceDir      string
 	serverBaseURL     string // server base URL for MCP (e.g. "http://localhost:8080")
 	store             storage.Provider
+	memoryMgr         *projectmemory.ProjectMemoryManager
 }
 
 // Compile-time interface check.
 var _ TaskExecutor = (*LocalExecutor)(nil)
 
 // NewLocalExecutor creates a new LocalExecutor.
-func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int, workspaceDir string, serverBaseURL string, store storage.Provider) *LocalExecutor {
+func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPIConfig, claudeEnv map[string]string, pluginDir string, sandbox bool, defaultModel string, keyProvider UserKeyProvider, maxTurnsOverrides map[string]int, workspaceDir string, serverBaseURL string, store storage.Provider, memoryMgr *projectmemory.ProjectMemoryManager) *LocalExecutor {
 	return &LocalExecutor{
 		logger:            logger,
 		imageAPICfg:       imageAPICfg,
@@ -287,6 +307,7 @@ func NewLocalExecutor(logger *zerolog.Logger, imageAPICfg *srvconfig.ImageAPICon
 		workspaceDir:      workspaceDir,
 		serverBaseURL:     serverBaseURL,
 		store:             store,
+		memoryMgr:         memoryMgr,
 	}
 }
 
@@ -298,6 +319,8 @@ type ExecutionOptions struct {
 	OnProgress    func(taskID string, message string) // callback for SSE
 	HeartbeatFunc func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter     *TaskLogWriter                      // optional per-task log file writer; nil = no log file
+	// AutoMemoryDirectory is the Claude Code-visible memory directory for this task.
+	AutoMemoryDirectory string
 }
 
 // TokenUsage captures LLM token consumption for a task execution.
@@ -418,6 +441,13 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		if err := writeProjectCLAUDEMD(workDir, effectiveProject); err != nil {
 			e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to write project CLAUDE.md, continuing")
 		}
+		if e.memoryMgr != nil && e.memoryMgr.Enabled() {
+			runtimeDir, err := e.memoryMgr.Stage(ctx, effectiveProject.ID, opts.Task.ID, workDir)
+			if err != nil {
+				return nil, fmt.Errorf("stage project memory: %w", err)
+			}
+			opts.AutoMemoryDirectory = runtimeDir
+		}
 
 		// Download effective reference image.
 		// Task-level image takes priority over project brand image.
@@ -496,7 +526,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	}
 
 	// 4. Map task type to agent name.
-	agentName := TaskTypeToAgent(opts.Task.Type)
+	agentName := TaskToAgent(opts.Task)
 
 	// 5. Build user prompt that references the agent by name.
 	projectID := ""
@@ -514,6 +544,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 		ArticleWithCover:         opts.Task.ArticleWithCover,
 		ArticleWithContentImages: opts.Task.ArticleWithContentImages,
 	})
+	userPrompt = AppendResumeContextToPrompt(userPrompt, workDir)
 
 	// Load agent definition from plugin directory and pass via WithAgent()
 	// (SDK programmatic subagents) instead of --agent CLI flag lookup.
@@ -547,6 +578,13 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 	if e.sandbox {
 		sdkOpts = append(sdkOpts, claudecode.WithSandboxEnabled(true))
 		sdkOpts = append(sdkOpts, claudecode.WithAutoAllowBashIfSandboxed(true))
+	}
+	if opts.AutoMemoryDirectory != "" {
+		settings, err := buildAutoMemorySettingsJSON(opts.AutoMemoryDirectory)
+		if err != nil {
+			return nil, fmt.Errorf("build auto memory settings: %w", err)
+		}
+		sdkOpts = append(sdkOpts, claudecode.WithSettings(settings))
 	}
 
 	// Environment variables (auth tokens, API keys, etc.).
@@ -739,7 +777,7 @@ func (e *LocalExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*E
 			case *claudecode.ResultMessage:
 				resultMsg = m
 				if m.IsError {
-					errMsg := "unknown error"
+					errMsg := fallbackAgentError("unknown error", lastToolErrorTool, lastToolError)
 					if m.Result != nil {
 						errMsg = *m.Result
 					}
@@ -1045,4 +1083,14 @@ func populateUsageFields(result *ExecutionResult, resultMsg *claudecode.ResultMe
 // PopulateUsageFields fills the cost/token fields of an ExecutionResult from a SDK ResultMessage.
 func PopulateUsageFields(result *ExecutionResult, resultMsg *claudecode.ResultMessage) {
 	populateUsageFields(result, resultMsg)
+}
+
+func fallbackAgentError(defaultMsg, toolName, toolError string) string {
+	if strings.TrimSpace(toolError) == "" {
+		return defaultMsg
+	}
+	if strings.TrimSpace(toolName) == "" {
+		return "last tool error: " + strings.TrimSpace(toolError)
+	}
+	return fmt.Sprintf("last tool error from %s: %s", strings.TrimSpace(toolName), strings.TrimSpace(toolError))
 }

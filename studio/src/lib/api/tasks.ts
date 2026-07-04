@@ -1,6 +1,12 @@
 import { http, unwrap } from '@/lib/http-client'
 import type { Task, TaskFile, CreateTaskRequest, PaginatedResponse, BulkTasksResponse } from '@/types'
 
+export interface ResumeTaskRequest {
+  prompt?: string
+  files?: File[]
+  fileLabels?: string[]
+}
+
 export const tasksApi = {
   create: async (data: CreateTaskRequest): Promise<Task> => {
     const result = await unwrap<Task | Task[]>(http.post('/tasks', data))
@@ -21,6 +27,21 @@ export const tasksApi = {
   // into a fresh billed task on the server. Returns the new task.
   retry: (id: string) =>
     unwrap<Task>(http.post(`/tasks/${id}/retry`)),
+
+  resume: (id: string, data: ResumeTaskRequest) => {
+    const form = new FormData()
+    const prompt = data.prompt?.trim() ?? ''
+    if (prompt) form.append('prompt', prompt)
+    if (data.fileLabels && data.fileLabels.length > 0) {
+      form.append('file_labels', JSON.stringify(data.fileLabels))
+    }
+    for (const file of data.files ?? []) {
+      form.append('files', file, file.name)
+    }
+    return unwrap<Task>(http.post(`/tasks/${id}/resume`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }))
+  },
 
   delete: (id: string) =>
     unwrap<void>(http.delete(`/tasks/${id}`)),

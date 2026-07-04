@@ -32,6 +32,7 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.tasks,
         get: vi.fn(),
         retry: vi.fn(),
+        resume: vi.fn(),
         files: vi.fn().mockResolvedValue([]),
       },
       projects: {
@@ -71,6 +72,7 @@ describe('TaskDetailPage', () => {
     vi.clearAllMocks()
     vi.mocked(api.tasks.files).mockResolvedValue([])
     vi.mocked(api.tasks.retry).mockResolvedValue(taskWith({ id: 'task-rerun', status: 'pending' }))
+    vi.mocked(api.tasks.resume).mockResolvedValue(taskWith({ id: 'task-1', status: 'pending' }))
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({ series: [] })
   })
@@ -110,7 +112,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
   })
 
-  it('lets completed tasks be rerun as a fresh task', async () => {
+  it('lets completed tasks be copied as a fresh task', async () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'completed',
@@ -120,12 +122,49 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const rerunButton = await screen.findByRole('button', { name: /重新执行/ })
+    const rerunButton = await screen.findByRole('button', { name: /复制重跑/ })
     fireEvent.click(rerunButton)
 
     await waitFor(() => {
       expect(api.tasks.retry).toHaveBeenCalledWith('task-1')
       expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-rerun')
+    })
+  })
+
+  it('opens a continue dialog and submits prompt files and labels for the current task', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'failed',
+      result: { files: null, output: '' },
+    }))
+
+    render(<TaskDetailPage />)
+
+    const continueButtons = await screen.findAllByRole('button', { name: /继续执行/ })
+    fireEvent.click(continueButtons[0])
+
+    const dialogTitle = await screen.findByText('继续执行此任务')
+    const dialog = dialogTitle.closest('[data-slot="dialog-content"]') as HTMLElement
+    expect(dialog).toBeTruthy()
+    fireEvent.change(within(dialog).getByLabelText('补充指令'), {
+      target: { value: '请基于现有草稿继续修改' },
+    })
+    const file = new File(['notes'], 'notes.md', { type: 'text/markdown' })
+    fireEvent.change(within(dialog).getByLabelText('补充文件'), {
+      target: { files: [file] },
+    })
+    fireEvent.change(within(dialog).getByPlaceholderText('例如：客户反馈、参考图、修改意见、产品参数'), {
+      target: { value: '修改意见' },
+    })
+    fireEvent.click(within(dialog).getByText('提交并继续').closest('button') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(api.tasks.resume).toHaveBeenCalledWith('task-1', {
+        prompt: '请基于现有草稿继续修改',
+        files: [file],
+        fileLabels: ['修改意见'],
+      })
+      expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/task-rerun')
     })
   })
 
@@ -141,7 +180,8 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByText('正在写作正文')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /继续执行/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /复制重跑/ })).not.toBeInTheDocument()
   })
 
   it('does not show rerun for pending tasks', async () => {
@@ -156,10 +196,11 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     await waitFor(() => expect(screen.getByText('任务等待执行中...')).toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /继续执行/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /复制重跑/ })).not.toBeInTheDocument()
   })
 
-  it('uses consistent rerun wording for cancelled tasks', async () => {
+  it('uses distinct continue and copy-rerun wording for cancelled tasks', async () => {
     mockTask(taskWith({
       status: 'cancelled',
       result: { files: null, output: '' },
@@ -167,7 +208,9 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findAllByRole('button', { name: /重新执行/ })).toHaveLength(2)
+    expect(await screen.findAllByRole('button', { name: /继续执行/ })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /复制重跑/ })).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /再试一次/ })).not.toBeInTheDocument()
   })
 

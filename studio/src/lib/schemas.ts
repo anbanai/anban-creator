@@ -66,6 +66,7 @@ export const createTaskSchema = z.object({
   selling_points: z.string().max(2000, "卖点不能超过 2000 个字符").optional(),
   language: z.string().optional(),
   video_config: z.object({
+    workflow: z.enum(["creator", "editor"]).default("creator"),
     purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).optional(),
     model_key: z.string().optional(),
     resolution: z.string().optional(),
@@ -159,6 +160,7 @@ export const planSchema = z.object({
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
   video_config: z.object({
+    workflow: z.enum(["creator", "editor"]).default("creator"),
     purpose: z.enum(["planting", "ecommerce", "lead_gen", "promotion"]).optional(),
     model_key: z.string().optional(),
     resolution: z.string().optional(),

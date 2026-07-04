@@ -95,7 +95,7 @@ func DetermineTaskFileRole(filename, mimeType string) string {
 // ShouldSkipTaskFileDir reports whether a directory should be excluded from task uploads.
 func ShouldSkipTaskFileDir(name string) bool {
 	switch name {
-	case ".anban-creator", ".claude":
+	case ".anban-creator", ".claude", ".git", "node_modules", "dist", "build", ".cache", ".vite":
 		return true
 	default:
 		return false
@@ -104,7 +104,16 @@ func ShouldSkipTaskFileDir(name string) bool {
 
 // ShouldSkipTaskFile reports whether a file should be excluded from task uploads.
 func ShouldSkipTaskFile(name string) bool {
-	return strings.HasPrefix(filepath.Base(name), ".")
+	base := filepath.Base(name)
+	if strings.HasPrefix(base, ".") {
+		return true
+	}
+	switch base {
+	case "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb", "tsconfig.json", "vite.config.ts", "vite.config.js", "eslint.config.js", "eslint.config.mjs":
+		return true
+	default:
+		return false
+	}
 }
 
 // CleanTaskFileRelativePath normalizes a user-provided relative task file path.
@@ -132,8 +141,9 @@ func buildTaskStorageKey(userID, taskID, relPath string) string {
 }
 
 // UploadTaskFileFromReader uploads one task output file and persists its metadata.
-// If a record with the same (taskID, filePath) already exists, the existing record is returned
-// to prevent duplicates from MCP tool retries or overlapping upload paths.
+// If the same path already exists with identical content, the existing record is
+// returned. If the path exists with new content, the storage object and DB row
+// are overwritten so resumed tasks can refresh their deliverables.
 func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, userID, relPath string, reader io.Reader, mimeType string, fileSize int64) (*model.TaskFile, error) {
 	if s.store == nil {
 		return nil, fmt.Errorf("no storage provider configured: cannot upload files for task %s", taskID)
@@ -156,16 +166,8 @@ func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, user
 		mimeType = "application/octet-stream"
 	}
 
-	// Deduplicate: if a record with the same (taskID, filePath) already exists, skip.
-	existing, err := s.repo.TaskFiles().FindExisting(ctx, taskID, cleanRelPath)
-	if err != nil {
-		return nil, fmt.Errorf("check existing task file: %w", err)
-	}
-	if existing != nil {
-		return existing, nil
-	}
-
-	// Compute content hash for content-based dedup.
+	// Compute content hash before dedup so same-path retries stay idempotent
+	// while changed files from resume executions can replace old metadata.
 	var buf bytes.Buffer
 	tee := io.TeeReader(reader, &buf)
 	h := sha256.New()
@@ -174,6 +176,14 @@ func (s *TaskService) UploadTaskFileFromReader(ctx context.Context, taskID, user
 	}
 	contentHash := hex.EncodeToString(h.Sum(nil))
 	reader = io.MultiReader(&buf, reader)
+
+	existing, err := s.repo.TaskFiles().FindExisting(ctx, taskID, cleanRelPath)
+	if err != nil {
+		return nil, fmt.Errorf("check existing task file: %w", err)
+	}
+	if existing != nil && existing.ContentHash == contentHash {
+		return existing, nil
+	}
 
 	ossKey := buildTaskStorageKey(userID, taskID, cleanRelPath)
 	uploadResult, err := s.store.Upload(ctx, ossKey, reader, mimeType)
@@ -245,18 +255,10 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		scanDir = filepath.Join(workDir, "output")
 	}
 
-	// Collect paths already recorded as task files.
-	existingFiles, err := s.repo.TaskFiles().FindByTaskID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("check existing task files: %w", err)
-	}
-	existingPaths := make(map[string]bool, len(existingFiles))
-	for _, f := range existingFiles {
-		existingPaths[f.FilePath] = true
-	}
+	task, _ := s.repo.Tasks().FindByID(ctx, taskID)
 
 	var uploadedCount int
-	err = filepath.WalkDir(scanDir, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(scanDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -282,19 +284,19 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 		}
 		relPath = filepath.ToSlash(relPath)
 
-		if existingPaths[relPath] {
-			return nil // already recorded, skip
+		if !ShouldCollectTaskFile(task, relPath) {
+			return nil
 		}
 
 		// Content-hash dedup: skip files with identical content already recorded
 		// under a different path (e.g. Downloader saves generated-0.png while
 		// the agent model also saves the same image as images/image-1.png).
 		if f, openErr := os.Open(path); openErr == nil {
-			defer f.Close()
 			h := sha256.New()
 			if _, copyErr := io.Copy(h, f); copyErr == nil {
 				contentHash := hex.EncodeToString(h.Sum(nil))
 				if dup, dupErr := s.repo.TaskFiles().FindByTaskIDAndContentHash(ctx, taskID, contentHash); dupErr == nil && dup != nil {
+					_ = f.Close()
 					s.logger.Debug().
 						Str("task_id", taskID).
 						Str("file", relPath).
@@ -302,6 +304,9 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 						Msg("skipping workspace file with identical content hash")
 					return nil
 				}
+			}
+			if closeErr := f.Close(); closeErr != nil {
+				s.logger.Warn().Err(closeErr).Str("file", relPath).Msg("failed to close task file after hashing")
 			}
 		}
 
@@ -323,6 +328,92 @@ func (s *TaskService) uploadMissingTaskFiles(ctx context.Context, taskID, userID
 			Msg("uploaded missing workspace files to storage")
 	}
 	return nil
+}
+
+// ShouldCollectTaskFile reports whether a workspace file should become a
+// user-facing task file. Video workflows use explicit delivery allowlists so
+// runtime project files never leak into task deliverables.
+func ShouldCollectTaskFile(task *model.Task, relPath string) bool {
+	if task == nil || task.Type != model.PlatformVideo {
+		return true
+	}
+	normalized := filepath.ToSlash(strings.TrimPrefix(relPath, "./"))
+	noOutput := strings.TrimPrefix(normalized, "output/")
+	ext := strings.ToLower(filepath.Ext(noOutput))
+
+	cfg := task.VideoConfig.Data()
+	isEditor := model.NormalizeVideoWorkflow(cfg.Workflow) == model.VideoWorkflowEditor
+	if isEditor {
+		if isVideoFileExtension(ext) {
+			return isVideoEditorDeliveryVideo(noOutput)
+		}
+		return isVideoEditorDeliveryFile(noOutput)
+	}
+	if isVideoFileExtension(ext) {
+		return true
+	}
+	return isVideoCreatorDeliveryFile(noOutput)
+}
+
+func isVideoFileExtension(ext string) bool {
+	switch ext {
+	case ".mp4", ".mov", ".webm", ".m4v":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVideoEditorDeliveryVideo(path string) bool {
+	switch path {
+	case "final.mp4", "preview.mp4":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVideoCreatorDeliveryFile(path string) bool {
+	switch path {
+	case "input-manifest.md",
+		"reference-anchors.md",
+		"script.md",
+		"shot-plan.md",
+		"generation-plan.json",
+		"video-generation-plan.md",
+		"video-task-submit.json",
+		"video-task-result.json",
+		"delivery-manifest.json",
+		"quality-review.md",
+		"iteration-log.md":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVideoEditorDeliveryFile(path string) bool {
+	switch path {
+	case "input-manifest.md",
+		"clip_results.json",
+		"render-report.md",
+		"quality-review.md",
+		"edit/edl.json",
+		"edit/media-manifest.json",
+		"edit/takes_packed.md",
+		"edit/edit-candidates.json":
+		return true
+	}
+	if strings.HasPrefix(path, "edit/transcripts/") && strings.HasSuffix(path, ".json") {
+		return true
+	}
+	if strings.HasPrefix(path, "capcut/") && strings.HasSuffix(path, ".json") {
+		return true
+	}
+	if strings.HasPrefix(path, "capcut-draft/") && strings.HasSuffix(path, ".json") {
+		return true
+	}
+	return false
 }
 
 // VerifyFileBelongsToTask checks that a file belongs to the specified task.

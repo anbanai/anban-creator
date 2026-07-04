@@ -29,12 +29,20 @@ describe('video form helpers', () => {
 
     expect(buildVideoFormConfig(defaults)).toEqual({
       ...defaults,
+      workflow: 'creator',
       references: [],
+    })
+  })
+
+  it('submits creator workflow by default for video generation', () => {
+    expect(normalizeVideoConfigForSubmit(buildVideoFormConfig())).toEqual({
+      workflow: 'creator',
     })
   })
 
   it('keeps explicit false values and references while dropping default select sentinels', () => {
     const config: VideoTaskConfig = {
+      workflow: 'editor',
       purpose: 'promotion',
       model_key: VIDEO_PROJECT_DEFAULT_VALUE,
       resolution: '',
@@ -49,6 +57,7 @@ describe('video form helpers', () => {
     }
 
     expect(normalizeVideoConfigForSubmit(config)).toEqual({
+      workflow: 'editor',
       purpose: 'promotion',
       ratio: '16:9',
       watermark: false,

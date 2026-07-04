@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -803,6 +804,9 @@ func TestTaskService_ExecuteDoesNotExtractTitleFromWorkspace(t *testing.T) {
 	if found.Title != "AI 已上报标题" {
 		t.Fatalf("title = %q, want existing AI-reported title", found.Title)
 	}
+	if _, err := os.Stat(workDir); err != nil {
+		t.Fatalf("workDir should remain for possible resume, stat error: %v", err)
+	}
 }
 
 func TestTaskService_HandleExecutionRejectsNestedAgentOnlyResult(t *testing.T) {
@@ -1409,6 +1413,148 @@ func TestTaskService_RetryClonesCompletedTask(t *testing.T) {
 	}
 	if foundSrc.Status != model.TaskStatusCompleted {
 		t.Fatalf("source status = %q, want completed", foundSrc.Status)
+	}
+}
+
+func TestTaskService_ResumeReusesTaskAndWritesPromptAndFiles(t *testing.T) {
+	db := setupTaskTestDB(t)
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	enqueuer := &mockEnqueuer{}
+	workspaceRoot := t.TempDir()
+	svc := NewTaskService(repo, nil, enqueuer, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	completedAt := time.Now().Add(-time.Minute)
+	resultJSON := `{"success":true}`
+	workflowStatus := `{"current_stage":"done"}`
+	task := &model.Task{
+		ID:             uuid.New().String(),
+		UserID:         userID,
+		ProjectID:      projectID,
+		Type:           model.PlatformArticle,
+		Status:         model.TaskStatusCompleted,
+		Prompt:         "finished topic",
+		Progress:       100,
+		Result:         &resultJSON,
+		ErrorMessage:   "old error",
+		CompletedAt:    &completedAt,
+		WorkflowStatus: &workflowStatus,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	workDir := filepath.Join(workspaceRoot, task.ID)
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("create workdir: %v", err)
+	}
+
+	resumed, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{
+		Prompt: "请基于现有草稿补充案例",
+		Files: []ResumeTaskFile{
+			{
+				OriginalName: "客户 反馈.txt",
+				Label:        "客户反馈",
+				Reader:       strings.NewReader("feedback"),
+				Size:         int64(len("feedback")),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if resumed.ID != task.ID {
+		t.Fatalf("resumed id = %q, want original %q", resumed.ID, task.ID)
+	}
+	if resumed.Status != model.TaskStatusPending {
+		t.Fatalf("status = %q, want pending", resumed.Status)
+	}
+	if resumed.CompletedAt != nil || resumed.Result != nil || resumed.ErrorMessage != "" || resumed.Progress != 0 || resumed.WorkflowStatus != nil {
+		t.Fatalf("resume did not reset execution state: %+v", resumed)
+	}
+	if len(enqueuer.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(enqueuer.enqueued))
+	}
+
+	resumeRoot := filepath.Join(workDir, ".anban-creator", "resume")
+	latest, err := os.ReadFile(filepath.Join(resumeRoot, "latest.md"))
+	if err != nil {
+		t.Fatalf("read latest.md: %v", err)
+	}
+	latestText := string(latest)
+	for _, want := range []string{"请基于现有草稿补充案例", "客户反馈", "客户 反馈.txt", "attachments/客户_反馈.txt"} {
+		if !strings.Contains(latestText, want) {
+			t.Fatalf("latest.md missing %q:\n%s", want, latestText)
+		}
+	}
+	matches, err := filepath.Glob(filepath.Join(resumeRoot, "*", "attachments", "客户_反馈.txt"))
+	if err != nil {
+		t.Fatalf("glob attachment: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("attachment matches = %v, want one sanitized file", matches)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read attachment: %v", err)
+	}
+	if string(data) != "feedback" {
+		t.Fatalf("attachment = %q, want feedback", string(data))
+	}
+}
+
+func TestWriteResumeInputsPublishesLatestOnlyWhenRequested(t *testing.T) {
+	workDir := t.TempDir()
+	runDir, body, err := writeResumeInputs(context.Background(), workDir, "第一次补充", nil)
+	if err != nil {
+		t.Fatalf("writeResumeInputs: %v", err)
+	}
+	if runDir == "" || body == "" {
+		t.Fatalf("writeResumeInputs returned runDir=%q body=%q", runDir, body)
+	}
+	latestPath := filepath.Join(workDir, ".anban-creator", "resume", "latest.md")
+	if _, err := os.Stat(latestPath); !os.IsNotExist(err) {
+		t.Fatalf("latest.md should not be published before CAS success, stat error: %v", err)
+	}
+
+	if err := writeResumeLatest(workDir, body); err != nil {
+		t.Fatalf("writeResumeLatest: %v", err)
+	}
+	latest, err := os.ReadFile(latestPath)
+	if err != nil {
+		t.Fatalf("read latest.md: %v", err)
+	}
+	if string(latest) != body {
+		t.Fatalf("latest.md = %q, want body %q", string(latest), body)
+	}
+}
+
+func TestTaskService_ResumeRejectsMissingWorkspace(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusFailed,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	_, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续"})
+	if !errors.Is(err, ErrTaskResumeWorkspaceMissing) {
+		t.Fatalf("Resume error = %v, want ErrTaskResumeWorkspaceMissing", err)
 	}
 }
 
