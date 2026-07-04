@@ -58,7 +58,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
-    video_config: plan.video_config,
+    video_config: plan.video_config ? buildVideoFormConfig(undefined, plan.video_config) : undefined,
   }
 }
 

@@ -423,6 +423,33 @@ func (r *taskRepository) CompareAndSwapStatusAndError(ctx context.Context, taskI
 	return result.RowsAffected > 0, nil
 }
 
+// ResetTerminalTaskForResume atomically moves a terminal task back to pending
+// and clears execution-only state so the same task ID can be executed again.
+func (r *taskRepository) ResetTerminalTaskForResume(ctx context.Context, taskID string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ? AND status IN ?", taskID, model.TerminalTaskStatuses).
+		Updates(map[string]interface{}{
+			"status":                 model.TaskStatusPending,
+			"started_at":             nil,
+			"completed_at":           nil,
+			"last_heartbeat_at":      nil,
+			"error_message":          "",
+			"result":                 nil,
+			"progress":               0,
+			"latest_progress":        datatypes.NewJSONType(model.ProgressPayload{}),
+			"workflow_status":        nil,
+			"publish_approval_state": "",
+			"pending_draft_articles": nil,
+			"published":              false,
+			"published_at":           nil,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // SetPublished toggles the published flag and updates published_at timestamp.
 func (r *taskRepository) SetPublished(ctx context.Context, id string, published bool) error {
 	updates := map[string]interface{}{"published": published}

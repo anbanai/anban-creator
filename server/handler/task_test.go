@@ -1,10 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -345,6 +349,103 @@ func TestRetryTask_AllowsCompletedTask(t *testing.T) {
 	}
 	if env.Data.Status != model.TaskStatusPending {
 		t.Fatalf("new task status = %q, want pending", env.Data.Status)
+	}
+}
+
+func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      "resume@example.com",
+		Password:   "hashed",
+		InviteCode: "resume",
+		Tier:       model.TierFree,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.New().String()
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusFailed,
+		Prompt:    "failed task",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	workspaceRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, taskID), 0o755); err != nil {
+		t.Fatalf("create workdir: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+
+	app := fiber.New()
+	app.Post("/tasks/:id/resume", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Resume(c)
+	})
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("prompt", "继续写结论"); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := writer.WriteField("file_labels", `["修改意见"]`); err != nil {
+		t.Fatalf("write labels: %v", err)
+	}
+	part, err := writer.CreateFormFile("files", "notes.md")
+	if err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	if _, err := part.Write([]byte("# notes")); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/resume", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var env struct {
+		Data model.Task `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if env.Data.ID != taskID || env.Data.Status != model.TaskStatusPending {
+		t.Fatalf("resume response = id %q status %q, want same pending task", env.Data.ID, env.Data.Status)
+	}
+	latest, err := os.ReadFile(filepath.Join(workspaceRoot, taskID, ".anban-creator", "resume", "latest.md"))
+	if err != nil {
+		t.Fatalf("read latest.md: %v", err)
+	}
+	if text := string(latest); !strings.Contains(text, "继续写结论") || !strings.Contains(text, "修改意见") || !strings.Contains(text, "notes.md") {
+		t.Fatalf("latest.md missing resume input:\n%s", text)
 	}
 }
 

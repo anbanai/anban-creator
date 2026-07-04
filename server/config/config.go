@@ -38,6 +38,7 @@ type Config struct {
 	Invitation   InvitationConfig   `yaml:"invitation"`
 	Seednote     SeednoteConfig     `yaml:"seednote"`
 	Ilink        IlinkConfig        `yaml:"ilink"`
+	Memory       MemoryConfig       `yaml:"memory"`
 }
 
 // ImageModelPreset defines a system-managed image model that users can select
@@ -354,6 +355,17 @@ type DockerConfig struct {
 	WorkspaceDir  string `yaml:"workspace_dir"`  // Host-side base directory for task workspaces (persistent container mode, must match volume mount source)
 }
 
+// MemoryConfig holds Claude Code project memory projection settings.
+type MemoryConfig struct {
+	Enabled         bool          `yaml:"enabled"`
+	Provider        string        `yaml:"provider"`
+	OSSPrefix       string        `yaml:"oss_prefix"`
+	RuntimeDir      string        `yaml:"runtime_dir"`
+	MaxArchiveBytes int64         `yaml:"max_archive_bytes"`
+	MergeOnStatus   string        `yaml:"merge_on_status"`
+	LockTTL         time.Duration `yaml:"lock_ttl"`
+}
+
 // CreditsConfig holds credits/points system configuration.
 type CreditsConfig struct {
 	DailySignIn   int                       `yaml:"daily_sign_in"`  // credits awarded per daily sign-in (default 1024)
@@ -523,6 +535,24 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Storage.LocalDataDir == "" {
 		c.Storage.LocalDataDir = "./data/files"
+	}
+	if c.Memory.Provider == "" {
+		c.Memory.Provider = "oss"
+	}
+	if c.Memory.OSSPrefix == "" {
+		c.Memory.OSSPrefix = "claude-memory/projects"
+	}
+	if c.Memory.RuntimeDir == "" {
+		c.Memory.RuntimeDir = ".claude/memory"
+	}
+	if c.Memory.MaxArchiveBytes == 0 {
+		c.Memory.MaxArchiveBytes = 262144
+	}
+	if c.Memory.MergeOnStatus == "" {
+		c.Memory.MergeOnStatus = "completed"
+	}
+	if c.Memory.LockTTL == 0 {
+		c.Memory.LockTTL = time.Minute
 	}
 	if c.VideoAPI.BaseURL == "" {
 		c.VideoAPI.BaseURL = DefaultVideoAPIBaseURL
@@ -784,6 +814,27 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Memory.Enabled {
+		if c.Memory.Provider != "oss" {
+			errs = append(errs, fmt.Sprintf("memory.provider must be \"oss\", got %q", c.Memory.Provider))
+		}
+		if strings.TrimSpace(c.Memory.OSSPrefix) == "" {
+			errs = append(errs, "memory.oss_prefix is required when memory is enabled")
+		}
+		if !safeRelativeMemoryDir(c.Memory.RuntimeDir) {
+			errs = append(errs, fmt.Sprintf("memory.runtime_dir must be a safe relative path, got %q", c.Memory.RuntimeDir))
+		}
+		if c.Memory.MaxArchiveBytes <= 0 {
+			errs = append(errs, "memory.max_archive_bytes must be positive")
+		}
+		if c.Memory.MergeOnStatus != "completed" {
+			errs = append(errs, fmt.Sprintf("memory.merge_on_status must be \"completed\", got %q", c.Memory.MergeOnStatus))
+		}
+		if c.Memory.LockTTL <= 0 {
+			errs = append(errs, "memory.lock_ttl must be positive")
+		}
+	}
+
 	if !c.TingWu.Empty() {
 		if strings.TrimSpace(c.TingWu.Endpoint) == "" {
 			errs = append(errs, "tingwu.endpoint is required when any TingWu setting is configured")
@@ -857,4 +908,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config validation failed: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func safeRelativeMemoryDir(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" || filepath.IsAbs(path) {
+		return false
+	}
+	cleaned := filepath.Clean(filepath.FromSlash(path))
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
 }

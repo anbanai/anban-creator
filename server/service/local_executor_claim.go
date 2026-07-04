@@ -101,7 +101,7 @@ func (s *TaskService) buildLocalExecutionConfig(task *model.Task) *LocalExecutio
 		TaskID:                   task.ID,
 		TaskType:                 task.Type,
 		Topic:                    task.Prompt,
-		AgentFlag:                "anban:" + agent.TaskTypeToAgent(task.Type),
+		AgentFlag:                "anban:" + agent.TaskToAgent(task),
 		MaxTurns:                 agent.DefaultMaxTurns(task.Type, s.maxTurnsOverrides),
 		Model:                    s.defaultModel,
 		Goal:                     task.Goal,

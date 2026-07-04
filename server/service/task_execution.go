@@ -32,19 +32,10 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	defer s.deregisterCancel(taskID)
 	s.registerCancel(taskID, cancel)
 
-	// Clean up workspace and task log files after execution completes.
-	// In K8s with local executor, files accumulate inside the container,
-	// so we remove them immediately once the task is done.
-	var cleanupWorkDir string
+	// Clean up task log files after execution completes. Workspaces are kept for
+	// the retention window so terminal tasks can be resumed in-place.
 	var cleanupLogPath string
 	defer func() {
-		if cleanupWorkDir != "" {
-			if err := os.RemoveAll(cleanupWorkDir); err != nil {
-				s.logger.Warn().Err(err).Str("task_id", taskID).Str("path", cleanupWorkDir).Msg("failed to cleanup workspace after execution")
-			} else {
-				s.logger.Info().Str("task_id", taskID).Str("path", cleanupWorkDir).Msg("cleaned up workspace directory")
-			}
-		}
 		if cleanupLogPath != "" {
 			if err := os.Remove(cleanupLogPath); err != nil && !os.IsNotExist(err) {
 				s.logger.Warn().Err(err).Str("task_id", taskID).Str("path", cleanupLogPath).Msg("failed to cleanup task log file")
@@ -161,8 +152,6 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 		if err := s.RebuildWorkflowStatus(persistCtx, taskID); err != nil {
 			s.logger.Warn().Err(err).Str("task_id", taskID).Msg("failed to rebuild workflow status")
 		}
-		// Schedule workspace cleanup after all processing is done.
-		cleanupWorkDir = result.WorkDir
 	}
 
 	// If the execution context was cancelled (shutdown or user cancel),
@@ -326,6 +315,13 @@ func (s *TaskService) HandleExecution(ctx context.Context, task *model.Task, pro
 	if err := s.repo.Tasks().SetCompletedAt(persistCtx, taskID); err != nil {
 		s.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to set completed_at")
 	}
+	if s.memoryMgr != nil && result.WorkDir != "" && task.ProjectID != "" {
+		if merged, err := s.memoryMgr.Merge(persistCtx, task.ProjectID, taskID, result.WorkDir); err != nil {
+			s.logger.Warn().Err(err).Str("task_id", taskID).Str("project_id", task.ProjectID).Msg("project memory merge failed")
+		} else if merged {
+			s.logger.Info().Str("task_id", taskID).Str("project_id", task.ProjectID).Msg("project memory merged")
+		}
+	}
 
 	// Notify the task owner's WeChat of the terminal success (best-effort).
 	s.notifyTerminal(persistCtx, task, model.TaskStatusCompleted, "")
@@ -482,7 +478,7 @@ func isPermanentAuthError(err error) bool {
 }
 
 // HandleExecutionFailure marks agent execution failures as terminal. Recovery
-// is intentionally manual: users can choose "重新执行" to clone the task into a
+// is intentionally manual: users can choose "复制重跑" to clone the task into a
 // fresh billed run, while the original task remains a clear failed artifact.
 func (s *TaskService) HandleExecutionFailure(ctx context.Context, task *model.Task, execErr error) error {
 	taskID := task.ID

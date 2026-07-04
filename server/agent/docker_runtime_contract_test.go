@@ -1,0 +1,75 @@
+package agent
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestDockerfilesUseOpenHandsAgentRuntime(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, tc := range []struct {
+		name       string
+		path       string
+		wantServer bool
+	}{
+		{
+			name:       "server",
+			path:       filepath.Join(root, "server", "Dockerfile"),
+			wantServer: true,
+		},
+		{
+			name: "agent",
+			path: filepath.Join(root, "agent", "Dockerfile"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := readTextFile(t, tc.path)
+			for _, want := range []string{
+				"FROM ghcr.io/openhands/agent-server:1.23.0-python",
+				"apt-get install -y --no-install-recommends ca-certificates curl git jq fontconfig fonts-noto-cjk python3",
+				"if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then",
+				"apt-get install -y --no-install-recommends ffmpeg",
+				"npm install -g @anthropic-ai/claude-code",
+				"COPY claudecode/",
+				"claude plugin install --scope user anban@anbanai",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing %q", tc.path, want)
+				}
+			}
+			if tc.wantServer {
+				for _, want := range []string{
+					"go build -ldflags=\"-s -w\" -o /anban-creator-server ./server/",
+					"go build -ldflags=\"-s -w\" -o /anban ./agent",
+					"COPY --from=builder /anban-creator-server /app/anban-creator-server",
+					"COPY --from=builder /anban /usr/local/bin/anban",
+					"ENTRYPOINT []",
+					`CMD ["/app/anban-creator-server", "-config", "/app/conf/config.yaml"]`,
+				} {
+					if !strings.Contains(body, want) {
+						t.Fatalf("%s missing server runtime contract %q", tc.path, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
+	root := repositoryRoot(t)
+	body := readTextFile(t, filepath.Join(root, ".dockerignore"))
+	for _, want := range []string{
+		"desktop/",
+		"miniapp/",
+		"openclaw/",
+		"codex/",
+		"**/node_modules/",
+		"**/dist/",
+		"**/.cache/",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf(".dockerignore missing %q", want)
+		}
+	}
+}

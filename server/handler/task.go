@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,8 @@ import (
 const (
 	maxTaskPromptCharacters = 5120
 	maxGoalTextCharacters   = 4000
+	maxTaskResumeFiles      = 10
+	maxTaskResumeFileBytes  = 25 * 1024 * 1024
 )
 
 // TaskHandler handles task-related HTTP endpoints.
@@ -424,7 +427,7 @@ func (h *TaskHandler) Retry(c fiber.Ctx) error {
 	// Only terminal tasks can be manually rerun. Active tasks must finish or be
 	// cancelled first to avoid duplicate in-flight work and surprise billing.
 	if task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
-		return Error(c, fiber.StatusBadRequest, "只有已完成、失败或已取消的任务可以重新执行")
+		return Error(c, fiber.StatusBadRequest, "只有已完成、失败或已取消的任务可以复制重跑")
 	}
 
 	// Re-validate the image model against the caller's current tier (tier may
@@ -448,10 +451,110 @@ func (h *TaskHandler) Retry(c fiber.Ctx) error {
 				"msg":  "insufficient_credits",
 			})
 		}
-		return Error(c, fiber.StatusInternalServerError, "重试任务失败")
+		return Error(c, fiber.StatusInternalServerError, "复制重跑任务失败")
 	}
 
 	return Success(c, newTask)
+}
+
+// Resume handles POST /api/v1/tasks/:id/resume.
+// It requeues the same terminal task in its original workspace with optional
+// supplemental prompt text and files.
+func (h *TaskHandler) Resume(c fiber.Ctx) error {
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	task, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
+	}
+
+	prompt := strings.TrimSpace(c.FormValue("prompt"))
+	if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {
+		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充指令不能超过 %d 个字符", maxTaskPromptCharacters))
+	}
+
+	var labels []string
+	if raw := strings.TrimSpace(c.FormValue("file_labels")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &labels); err != nil {
+			return Error(c, fiber.StatusBadRequest, "file_labels must be a JSON string array")
+		}
+	}
+
+	form, _ := c.MultipartForm()
+	fileHeaders := formFiles(form, "files")
+	if len(fileHeaders) > maxTaskResumeFiles {
+		return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充文件最多上传 %d 个", maxTaskResumeFiles))
+	}
+
+	files := make([]service.ResumeTaskFile, 0, len(fileHeaders))
+	opened := make([]io.Closer, 0, len(fileHeaders))
+	defer func() {
+		for _, f := range opened {
+			_ = f.Close()
+		}
+	}()
+	for i, header := range fileHeaders {
+		if header == nil {
+			continue
+		}
+		if header.Size > maxTaskResumeFileBytes {
+			return Error(c, fiber.StatusBadRequest, fmt.Sprintf("补充文件不能超过 %dMB", maxTaskResumeFileBytes/(1024*1024)))
+		}
+		src, err := header.Open()
+		if err != nil {
+			return Error(c, fiber.StatusBadRequest, "读取补充文件失败")
+		}
+		opened = append(opened, src)
+		label := ""
+		if i < len(labels) {
+			label = labels[i]
+		}
+		files = append(files, service.ResumeTaskFile{
+			OriginalName: header.Filename,
+			Label:        label,
+			Reader:       src,
+			Size:         header.Size,
+		})
+	}
+
+	task, err = h.service.Resume(c.Context(), userID, id, service.ResumeTaskParams{
+		Prompt: prompt,
+		Files:  files,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTaskResumeNoInput):
+			return Error(c, fiber.StatusBadRequest, "请填写补充指令或上传补充文件")
+		case errors.Is(err, service.ErrTaskResumeNotTerminal):
+			return Error(c, fiber.StatusConflict, "只有已完成、失败或已取消的任务可以继续执行")
+		case errors.Is(err, service.ErrTaskResumeWorkspaceMissing):
+			return Error(c, fiber.StatusConflict, "原任务工作目录已清理，无法继续执行。可以使用“复制重跑”创建新任务。")
+		case errors.Is(err, service.ErrTaskResumeConflict):
+			return Error(c, fiber.StatusConflict, "任务状态已变化，请刷新后重试")
+		default:
+			h.logger.Error().Err(err).Str("task_id", id).Msg("resume task failed")
+			return Error(c, fiber.StatusInternalServerError, "继续执行任务失败")
+		}
+	}
+
+	return Success(c, task)
+}
+
+func formFiles(form *multipart.Form, key string) []*multipart.FileHeader {
+	if form == nil || form.File == nil {
+		return nil
+	}
+	return form.File[key]
 }
 
 // PublishApprove handles POST /api/v1/tasks/:id/publish-approve: resumes a held

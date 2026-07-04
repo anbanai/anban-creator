@@ -119,6 +119,21 @@ func TestBuildLocalExecutionConfigCarriesArticleImageSwitches(t *testing.T) {
 	}
 }
 
+func TestBuildLocalExecutionConfigRoutesVideoEditorAgent(t *testing.T) {
+	svc, _ := setupTaskServiceWithEnqueuer(t)
+	task := &model.Task{
+		ID:     "task-video-editor-local",
+		Type:   model.PlatformVideo,
+		Prompt: "给素材加字幕并剪成短视频",
+	}
+	task.SetVideoConfig(model.VideoTaskConfig{Workflow: model.VideoWorkflowEditor})
+
+	cfg := svc.buildLocalExecutionConfig(task)
+	if cfg.AgentFlag != "anban:videoeditor" {
+		t.Fatalf("AgentFlag = %q, want anban:videoeditor", cfg.AgentFlag)
+	}
+}
+
 func TestBuildLocalExecutionConfigDefaultsArticleImageSwitchesOn(t *testing.T) {
 	svc, _ := setupTaskServiceWithEnqueuer(t)
 	task := &model.Task{

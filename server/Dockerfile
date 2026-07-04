@@ -10,22 +10,31 @@ RUN go mod download
 # Copy source and build.
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server ./server/
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban ./agent
 
-# Stage 2: Runtime with Node.js + Claude CLI + Plugin
-FROM node:25-slim
+# Stage 2: API server runtime plus local agent sandbox.
+FROM ghcr.io/openhands/agent-server:1.23.0-python
 
-# Install CA certificates for Go binary TLS verification (slim images lack these)
-# jq is required by claudecode/hooks/seednote-quality-gate.sh — under the default
-# `executor: local` config the Claude Code CLI subprocess runs in this container,
-# so the SubagentStop hook fires here and needs jq to parse stdin JSON.
-# git is required by `skills add` to install GitHub-hosted video overlay skills.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates jq git && \
+# Install Anban agent runtime requirements. The OpenHands base may already
+# include ffmpeg/ffprobe; install ffmpeg only when either binary is missing.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl git jq fontconfig fonts-noto-cjk python3 tini; \
+    if ! command -v npm >/dev/null 2>&1; then \
+      apt-get install -y --no-install-recommends nodejs npm; \
+    fi; \
+    if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then \
+      apt-get install -y --no-install-recommends ffmpeg; \
+    fi; \
+    if ! id -u node >/dev/null 2>&1; then \
+      useradd -m -s /bin/bash node; \
+    fi; \
     rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code
 
 COPY --from=builder /anban-creator-server /app/anban-creator-server
+COPY --from=builder /anban /usr/local/bin/anban
 
 # COPY server/config.yaml /app/conf/config.yaml
 
@@ -64,4 +73,5 @@ RUN mkdir -p /app/data/files /app/data/workspace /app/data/logs/tasks && \
 USER node
 
 WORKDIR /app
+ENTRYPOINT []
 CMD ["/app/anban-creator-server", "-config", "/app/conf/config.yaml"]

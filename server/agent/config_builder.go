@@ -172,6 +172,35 @@ func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	return nil
 }
 
+// BuildAutoMemorySettingsJSON returns a Claude Code settings JSON document that
+// points auto memory at the task-local runtime memory directory.
+func BuildAutoMemorySettingsJSON(autoMemoryDir string) (string, error) {
+	return buildAutoMemorySettingsJSON(autoMemoryDir)
+}
+
+func buildAutoMemorySettingsJSON(autoMemoryDir string) (string, error) {
+	autoMemoryDir = strings.TrimSpace(autoMemoryDir)
+	if autoMemoryDir == "" {
+		return "", nil
+	}
+	data, err := json.Marshal(map[string]string{"autoMemoryDirectory": autoMemoryDir})
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func containerMemoryDir(hostWorkDir, containerWorkDir, hostMemoryDir string) string {
+	hostWorkDir = filepath.Clean(hostWorkDir)
+	containerWorkDir = filepath.ToSlash(filepath.Clean(containerWorkDir))
+	hostMemoryDir = filepath.Clean(hostMemoryDir)
+	rel, err := filepath.Rel(hostWorkDir, hostMemoryDir)
+	if err != nil || filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(hostMemoryDir)
+	}
+	return filepath.ToSlash(filepath.Join(containerWorkDir, rel))
+}
+
 // writeProjectCLAUDEMD writes a project's positioning into a fixed CLAUDE.md
 // template in the workspace root. Claude Code loads CLAUDE.md from the cwd as
 // project memory, so all skills/sub-agents in the session receive the same
@@ -198,10 +227,27 @@ func TaskTypeToAgent(taskType string) string {
 	case model.ScopeEcommerce:
 		return "ecommerce"
 	case model.ScopeVideo:
-		return "video"
+		return "videocreator"
 	default:
 		return "seednote"
 	}
+}
+
+// TaskToAgent maps a full task snapshot to the Claude Code agent name. Video
+// tasks use video_config.workflow so generation and editing cannot drift into
+// each other's workflows.
+func TaskToAgent(task *model.Task) string {
+	if task == nil {
+		return TaskTypeToAgent("")
+	}
+	if task.Type == model.ScopeVideo {
+		cfg := task.VideoConfig.Data()
+		if model.NormalizeVideoWorkflow(cfg.Workflow) == model.VideoWorkflowEditor {
+			return "videoeditor"
+		}
+		return "videocreator"
+	}
+	return TaskTypeToAgent(task.Type)
 }
 
 // DownloadReferenceImage downloads a project's brand reference image to the

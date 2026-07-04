@@ -20,6 +20,7 @@ import (
 	"github.com/rs/zerolog"
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/resolver"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -45,6 +46,7 @@ type DockerExecutor struct {
 	keyProvider       UserKeyProvider
 	maxTurnsOverrides map[string]int
 	store             storage.Provider
+	memoryMgr         *projectmemory.ProjectMemoryManager
 }
 
 // NewDockerExecutor creates a new DockerExecutor.
@@ -58,6 +60,7 @@ func NewDockerExecutor(
 	keyProvider UserKeyProvider,
 	maxTurnsOverrides map[string]int,
 	store storage.Provider,
+	memoryMgr *projectmemory.ProjectMemoryManager,
 ) (*DockerExecutor, error) {
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
 	if os.Getenv("DOCKER_HOST") == "" {
@@ -85,6 +88,7 @@ func NewDockerExecutor(
 		keyProvider:       keyProvider,
 		maxTurnsOverrides: maxTurnsOverrides,
 		store:             store,
+		memoryMgr:         memoryMgr,
 	}, nil
 }
 
@@ -163,6 +167,13 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		if err := writeProjectCLAUDEMD(workDir, effectiveProject); err != nil {
 			e.logger.Warn().Err(err).Str("task_id", opts.Task.ID).Msg("failed to write project CLAUDE.md, continuing")
 		}
+		if e.memoryMgr != nil && e.memoryMgr.Enabled() {
+			runtimeDir, err := e.memoryMgr.Stage(ctx, effectiveProject.ID, opts.Task.ID, workDir)
+			if err != nil {
+				return nil, fmt.Errorf("stage project memory: %w", err)
+			}
+			opts.AutoMemoryDirectory = runtimeDir
+		}
 		// Download effective reference image.
 		// Task-level image takes priority over project brand image.
 		if opts.Task.ReferenceImageURL != "" {
@@ -208,6 +219,9 @@ func (e *DockerExecutor) Execute(ctx context.Context, opts *ExecutionOptions) (*
 		workDirInContainer = filepath.ToSlash(filepath.Join("/workspace", opts.Task.ID))
 	} else {
 		workDirInContainer = "/workspace"
+	}
+	if opts.AutoMemoryDirectory != "" {
+		opts.AutoMemoryDirectory = containerMemoryDir(workDir, workDirInContainer, opts.AutoMemoryDirectory)
 	}
 	cmd = e.buildAgentCommand(opts, agentModel, maxTurns, workDirInContainer, apiKey)
 	env := e.buildAgentEnv(opts)
@@ -291,7 +305,7 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 		"--topic", opts.Task.Prompt,
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--workspace", workspace,
-		"--agent-flag", "anban:" + TaskTypeToAgent(opts.Task.Type),
+		"--agent-flag", "anban:" + TaskToAgent(opts.Task),
 	}
 	// Note: visual style is NOT passed as a CLI flag — it reaches the agent
 	// solely via get_project_profile(task_id) (MCP), resolved from the task
@@ -313,6 +327,9 @@ func (e *DockerExecutor) buildAgentCommand(opts *ExecutionOptions, agentModel st
 			"--article-with-cover="+strconv.FormatBool(opts.Task.ArticleWithCover == nil || *opts.Task.ArticleWithCover),
 			"--article-with-content-images="+strconv.FormatBool(opts.Task.ArticleWithContentImages == nil || *opts.Task.ArticleWithContentImages),
 		)
+	}
+	if strings.TrimSpace(opts.AutoMemoryDirectory) != "" {
+		cmd = append(cmd, "--auto-memory-directory", opts.AutoMemoryDirectory)
 	}
 	if agentModel != "" {
 		cmd = append(cmd, "--model", agentModel)

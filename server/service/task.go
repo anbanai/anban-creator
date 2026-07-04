@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -68,6 +69,7 @@ type TaskService struct {
 	// DockerExecutor would pass. Set via SetExecutorDefaults during wiring.
 	defaultModel      string
 	maxTurnsOverrides map[string]int
+	memoryMgr         *projectmemory.ProjectMemoryManager
 }
 
 // NewTaskService creates a new TaskService.
@@ -118,6 +120,10 @@ func (s *TaskService) Repository() repository.Repository {
 		return nil
 	}
 	return s.repo
+}
+
+func (s *TaskService) SetProjectMemoryManager(memoryMgr *projectmemory.ProjectMemoryManager) {
+	s.memoryMgr = memoryMgr
 }
 
 func (s *TaskService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatalog, creditMultiplier int) {

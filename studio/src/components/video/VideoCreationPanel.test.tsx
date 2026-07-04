@@ -72,4 +72,13 @@ describe('VideoCreationPanel', () => {
     expect(screen.getByTestId('video-config')).toHaveTextContent('seedance-2.0-mini')
     expect(screen.getByTestId('video-config')).toHaveTextContent('保持杯身银色')
   })
+
+  it('lets the operator choose the editor workflow', () => {
+    render(<PanelHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: '剪辑' }))
+
+    expect(screen.getByTestId('video-config')).toHaveTextContent('"workflow":"editor"')
+    expect(screen.getByText('剪辑要求')).toBeInTheDocument()
+  })
 })

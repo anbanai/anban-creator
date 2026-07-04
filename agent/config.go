@@ -19,6 +19,7 @@ type Config struct {
 	Workspace                string
 	Model                    string
 	AgentFlag                string
+	AutoMemoryDirectory      string
 	MaxTurns                 int
 	HasContentImage          bool
 	HasTailImage             bool
@@ -37,6 +38,7 @@ func runFlags() []cli.Flag {
 		&cli.StringFlag{Name: "workspace", Usage: "workspace directory", Value: "/workspace", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "model", Usage: "Claude model override", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.StringFlag{Name: "agent-flag", Usage: "Claude Code --agent flag", Config: cli.StringConfig{TrimSpace: true}},
+		&cli.StringFlag{Name: "auto-memory-directory", Usage: "Claude Code auto memory directory", Config: cli.StringConfig{TrimSpace: true}},
 		&cli.IntFlag{Name: "max-turns", Usage: "maximum Claude turns"},
 		// Seednote image composition defaults match the task model column defaults
 		// (content on, tail off). Server overrides via CLI when dispatching the agent
@@ -59,6 +61,7 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 		Workspace:                cmd.String("workspace"),
 		Model:                    cmd.String("model"),
 		AgentFlag:                cmd.String("agent-flag"),
+		AutoMemoryDirectory:      cmd.String("auto-memory-directory"),
 		MaxTurns:                 cmd.Int("max-turns"),
 		HasContentImage:          cmd.Bool("has-content-image"),
 		HasTailImage:             cmd.Bool("has-tail-image"),
@@ -92,7 +95,7 @@ func ParseConfig(cmd *cli.Command) (*Config, error) {
 }
 
 func (c *Config) UserPrompt() string {
-	return serveragent.BuildUserPrompt(serveragent.UserPromptParams{
+	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{
 		TaskType:                 c.TaskType,
 		Topic:                    c.Topic,
 		Goal:                     c.Goal,
@@ -103,4 +106,5 @@ func (c *Config) UserPrompt() string {
 		ArticleWithCover:         &c.ArticleWithCover,
 		ArticleWithContentImages: &c.ArticleWithContentImages,
 	})
+	return serveragent.AppendResumeContextToPrompt(prompt, c.Workspace)
 }

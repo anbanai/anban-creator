@@ -1,4 +1,5 @@
 export type VideoPurpose = 'planting' | 'ecommerce' | 'lead_gen' | 'promotion'
+export type VideoWorkflow = 'creator' | 'editor'
 export type VideoReferenceType = 'text' | 'image_url' | 'audio_url' | 'video_url'
 
 export interface VideoReferenceAsset {
@@ -13,6 +14,7 @@ export interface VideoReferenceAsset {
 }
 
 export interface VideoDefaults {
+  workflow?: VideoWorkflow
   purpose?: VideoPurpose
   model_key?: string
   resolution?: string

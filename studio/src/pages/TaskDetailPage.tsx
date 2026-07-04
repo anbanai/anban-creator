@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Streamdown } from 'streamdown'
-import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban } from 'lucide-react'
+import { ArrowLeft, Download, Eye, Trash2, Copy, RefreshCw, Target, Loader2, ShieldCheck, Send, Ban, Upload, X } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -24,11 +24,19 @@ import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { videoModelDisplayName } from '@/lib/video-display'
+
+interface ResumeFileInput {
+  id: string
+  file: File
+  label: string
+}
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -55,9 +63,13 @@ export default function TaskDetailPage() {
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showProjectDialog, setShowProjectDialog] = useState(false)
+  const [showResumeDialog, setShowResumeDialog] = useState(false)
+  const [resumePrompt, setResumePrompt] = useState('')
+  const [resumeFiles, setResumeFiles] = useState<ResumeFileInput[]>([])
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
   const logContainerRef = useRef<HTMLDivElement | null>(null)
+  const resumeFileInputRef = useRef<HTMLInputElement | null>(null)
   const { submit } = useSubmitLock()
   const tokenRef = useRef(token)
   tokenRef.current = token
@@ -204,6 +216,25 @@ export default function TaskDetailPage() {
     },
     onError: (err) => {
       toast.error(getApiErrorMessage(err, '删除失败，请稍后重试'))
+    },
+  })
+
+  const resumeMutation = useMutation({
+    mutationFn: () => api.tasks.resume(id!, {
+      prompt: resumePrompt,
+      files: resumeFiles.map((item) => item.file),
+      fileLabels: resumeFiles.map((item) => item.label),
+    }),
+    onSuccess: () => {
+      toast.success('已提交，任务将基于原目录继续执行')
+      setShowResumeDialog(false)
+      setResumePrompt('')
+      setResumeFiles([])
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '继续执行失败，请稍后再试'))
     },
   })
 
@@ -394,7 +425,7 @@ export default function TaskDetailPage() {
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
 
-  // Rerun this task as a fresh billed task. The server clones the full
+  // Copy-rerun this task as a fresh billed task. The server clones the full
   // configuration (three-dimensional style, author/writer, ecommerce package,
   // image model, watermark, goal mode…) so nothing is lost — unlike the previous
   // client-side create() which only forwarded type/prompt/project/ratio.
@@ -402,20 +433,52 @@ export default function TaskDetailPage() {
     await submit(async () => {
       try {
         const nextTask = await api.tasks.retry(currentTask.id)
-        toast.success('已重新创建任务，全部设置已保留')
+        toast.success('已复制为新任务，配置已保留')
         queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
         navigate(`/tasks/${nextTask.id}`)
       } catch (err: unknown) {
         const status = (err as { response?: { status?: number; data?: { code?: number } } })?.response?.status
         const code = (err as { response?: { data?: { code?: number } } })?.response?.data?.code
         if (status === 402 || code === 40200) {
-          toast.error('积分不足，无法重新执行')
+          toast.error('积分不足，无法复制重跑')
         } else {
-          toast.error(getApiErrorMessage(err, '重新执行失败，请稍后再试'))
+          toast.error(getApiErrorMessage(err, '复制重跑失败，请稍后再试'))
         }
       }
     })
   }
+
+  function handleResumeFilesChange(event: ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(event.target.files ?? [])
+    if (selected.length > 0) {
+      setResumeFiles((prev) => [
+        ...prev,
+        ...selected.map((file) => ({
+          id: `${file.name}-${file.size}-${file.lastModified}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          file,
+          label: '',
+        })),
+      ])
+    }
+    event.target.value = ''
+  }
+
+  function updateResumeFileLabel(fileID: string, label: string) {
+    setResumeFiles((prev) => prev.map((item) => item.id === fileID ? { ...item, label } : item))
+  }
+
+  function removeResumeFile(fileID: string) {
+    setResumeFiles((prev) => prev.filter((item) => item.id !== fileID))
+  }
+
+  async function handleResumeSubmit() {
+    if (!resumePrompt.trim() && resumeFiles.length === 0) return
+    await submit(async () => {
+      await resumeMutation.mutateAsync()
+    })
+  }
+
+  const canSubmitResume = Boolean(resumePrompt.trim() || resumeFiles.length > 0)
 
   return (
     <div className="space-y-6">
@@ -531,10 +594,16 @@ export default function TaskDetailPage() {
             </Button>
           )}
           {canRerun && (
-            <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
-              <RefreshCw className="h-4 w-4" />
-              重新执行
-            </Button>
+            <>
+              <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
+                <Send className="h-4 w-4" />
+                继续执行
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
+                <RefreshCw className="h-4 w-4" />
+                复制重跑
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -597,7 +666,7 @@ export default function TaskDetailPage() {
             <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
             <div>
               <p className="text-sm font-medium text-foreground">已驳回发布</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">该文章未发布，可修改后重新执行任务。</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">该文章未发布，可修改后继续执行或复制重跑。</p>
             </div>
           </CardContent>
         </Card>
@@ -805,9 +874,13 @@ export default function TaskDetailPage() {
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2">
+                  <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
+                    <Send className="h-4 w-4" />
+                    继续执行
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
                     <RefreshCw className="h-4 w-4" />
-                    重新执行
+                    复制重跑
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')}>
                     返回任务列表
@@ -820,9 +893,13 @@ export default function TaskDetailPage() {
             ) : task.status === 'cancelled' ? (
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-sm text-muted-foreground">任务已取消</p>
+                <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
+                  <Send className="h-4 w-4" />
+                  继续执行
+                </Button>
                 <Button variant="outline" size="sm" onClick={() => void handleRetry()}>
                   <RefreshCw className="h-4 w-4" />
-                  重新执行
+                  复制重跑
                 </Button>
               </div>
             ) : (
@@ -1069,6 +1146,87 @@ export default function TaskDetailPage() {
           </div>
         </Card>
       )}
+
+      <Dialog open={showResumeDialog} onOpenChange={setShowResumeDialog}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>继续执行此任务</DialogTitle>
+            <DialogDescription>
+              提供补充指令和文件后，任务会基于原工作目录继续执行。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="resume-prompt" className="text-sm font-medium text-foreground">补充指令</label>
+              <Textarea
+                id="resume-prompt"
+                value={resumePrompt}
+                onChange={(event) => setResumePrompt(event.target.value)}
+                placeholder="说明希望 AI 接着做什么，例如：基于现有草稿改成更口语化，并参考我上传的新素材。"
+                className="min-h-28 resize-y"
+              />
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="resume-files" className="text-sm font-medium text-foreground">补充文件</label>
+                <Button type="button" variant="outline" size="sm" onClick={() => resumeFileInputRef.current?.click()}>
+                  <Upload className="h-4 w-4" />
+                  选择文件
+                </Button>
+              </div>
+              <Input
+                ref={resumeFileInputRef}
+                id="resume-files"
+                type="file"
+                multiple
+                className="sr-only"
+                onChange={handleResumeFilesChange}
+              />
+              {resumeFiles.length > 0 ? (
+                <div className="space-y-2">
+                  {resumeFiles.map((item) => (
+                    <div key={item.id} className="grid gap-2 rounded-lg border border-border bg-card/50 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(180px,240px)_auto] sm:items-center">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-foreground">{item.file.name}</p>
+                        <p className="text-xs text-muted-foreground">{(item.file.size / 1024).toFixed(1)} KB</p>
+                      </div>
+                      <div className="space-y-1">
+                        <label htmlFor={`resume-file-label-${item.id}`} className="sr-only">文件说明</label>
+                        <Input
+                          id={`resume-file-label-${item.id}`}
+                          value={item.label}
+                          onChange={(event) => updateResumeFileLabel(item.id, event.target.value)}
+                          placeholder="例如：客户反馈、参考图、修改意见、产品参数"
+                        />
+                      </div>
+                      <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeResumeFile(item.id)} aria-label={`移除 ${item.file.name}`}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+                  可选上传补充资料、修改意见或参考素材。
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowResumeDialog(false)}>
+              取消
+            </Button>
+            <Button
+              type="button"
+              disabled={!canSubmitResume || resumeMutation.isPending}
+              loading={resumeMutation.isPending}
+              onClick={() => void handleResumeSubmit()}
+            >
+              提交并继续
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {project && (
         <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>

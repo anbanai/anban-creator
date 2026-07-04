@@ -22,6 +22,7 @@ import (
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/handler"
 	"github.com/anbanai/anban-creator/server/mcp"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -208,11 +209,21 @@ func main() {
 		log.Error().Msg("CRITICAL: repository is nil — API key service not created, all MCP authentication will fail. Check MySQL connectivity.")
 	}
 
+	var memoryMgr *projectmemory.ProjectMemoryManager
+	if cfg.Memory.Enabled && store != nil {
+		memoryMgr = projectmemory.NewProjectMemoryManager(store, cfg.Memory, service.NewRedisMemoryLocker(rdb, log), *log)
+		log.Info().
+			Str("provider", cfg.Memory.Provider).
+			Str("oss_prefix", cfg.Memory.OSSPrefix).
+			Str("runtime_dir", cfg.Memory.RuntimeDir).
+			Msg("project memory manager initialized")
+	}
+
 	// 12. Create agent executor.
 	var agentExecutor agent.TaskExecutor
 	switch cfg.Claude.Executor {
 	case "docker":
-		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, store)
+		dockerExec, err := agent.NewDockerExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.Docker, cfg.AgentServerURL(), cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, store, memoryMgr)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create Docker executor")
 		}
@@ -226,7 +237,7 @@ func main() {
 			Bool("per_user_mcp", apiKeySvc != nil).
 			Msg("docker agent executor created")
 	default:
-		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store)
+		agentExecutor = agent.NewLocalExecutor(log, &cfg.ImageAPI, cfg.Claude.Env, cfg.Claude.PluginDir, cfg.Claude.Sandbox, cfg.Claude.Model, apiKeySvc, cfg.Claude.MaxTurns, cfg.Claude.Docker.WorkspaceDir, cfg.AgentServerURL(), store, memoryMgr)
 		log.Info().
 			Str("plugin_dir", cfg.Claude.PluginDir).
 			Bool("sandbox", cfg.Claude.Sandbox).
@@ -274,6 +285,7 @@ func main() {
 		}
 
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
+		taskSvc.SetProjectMemoryManager(memoryMgr)
 		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		// Wire executor defaults so local-executor claim responses carry the same

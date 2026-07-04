@@ -53,6 +53,13 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 		sdkOpts = append(sdkOpts, claudecode.WithModel(r.cfg.Model))
 		_ = r.reporter.ReportProgress(ctx, fmt.Sprintf("agent model: %s", r.cfg.Model))
 	}
+	if r.cfg.AutoMemoryDirectory != "" {
+		settings, err := serveragent.BuildAutoMemorySettingsJSON(r.cfg.AutoMemoryDirectory)
+		if err != nil {
+			return result, err
+		}
+		sdkOpts = append(sdkOpts, claudecode.WithSettings(settings))
+	}
 
 	var resultText string
 	var toolUseCount int
@@ -117,6 +124,12 @@ func (r *Runner) Run(ctx context.Context) (*serveragent.ExecutionResult, error) 
 				if m.IsError {
 					if m.Result != nil {
 						result.Error = *m.Result
+					} else if lastToolError != "" {
+						if lastToolErrorTool != "" {
+							result.Error = "last tool error from " + lastToolErrorTool + ": " + lastToolError
+						} else {
+							result.Error = "last tool error: " + lastToolError
+						}
 					} else {
 						result.Error = "unknown agent error"
 					}

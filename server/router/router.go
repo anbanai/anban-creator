@@ -309,6 +309,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Delete("/tasks/:id", svc.TaskHandler.Delete)
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)
 		apiV1.Post("/tasks/:id/retry", svc.TaskHandler.Retry)
+		apiV1.Post("/tasks/:id/resume", svc.TaskHandler.Resume)
 		// Publish-approval gate (Batch 4A): resume or close a held publish.
 		apiV1.Post("/tasks/:id/publish-approve", svc.TaskHandler.PublishApprove)
 		apiV1.Post("/tasks/:id/publish-reject", svc.TaskHandler.PublishReject)
