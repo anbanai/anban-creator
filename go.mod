@@ -27,7 +27,7 @@ require (
 	github.com/severity1/claude-agent-sdk-go v0.6.22
 	github.com/silenceper/wechat/v2 v2.1.13
 	github.com/urfave/cli/v3 v3.10.1
-	github.com/volcengine/volcengine-go-sdk v1.2.38
+	github.com/volcengine/volcengine-go-sdk v1.2.39
 	github.com/wneessen/go-mail v0.7.3
 	github.com/yuin/goldmark v1.8.2
 	golang.org/x/crypto v0.53.0
