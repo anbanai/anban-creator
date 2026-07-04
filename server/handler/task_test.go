@@ -449,6 +449,66 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	}
 }
 
+func TestResumeTask_RejectsEmptyInput(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:         userID,
+		Email:      "resume-empty@example.com",
+		Password:   "hashed",
+		InviteCode: "resumeempty",
+		Tier:       model.TierFree,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Article",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := uuid.New().String()
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusCompleted,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	workspaceRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, taskID), 0o755); err != nil {
+		t.Fatalf("create workdir: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	taskSvc := service.NewTaskService(repo, nil, noopTaskEnqueuer{}, nil, nil, &logger, "", nil, workspaceRoot, nil, nil)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetRepository(repo)
+
+	app := fiber.New()
+	app.Post("/tasks/:id/resume", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Resume(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/resume", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestCreateTask_VideoMinimumBalanceReturnsHelpfulMessage(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)

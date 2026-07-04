@@ -44,9 +44,12 @@ func (r *taskFileRepository) Upsert(ctx context.Context, file *model.TaskFile) (
 		return nil, result.Error
 	}
 
-	// If a conflict occurred (row was updated instead of inserted), fetch the existing row.
-	if result.RowsAffected == 0 {
-		return r.FindExisting(ctx, file.TaskID, file.FilePath)
+	persisted, err := r.FindExisting(ctx, file.TaskID, file.FilePath)
+	if err != nil {
+		return nil, err
+	}
+	if persisted != nil {
+		return persisted, nil
 	}
 	return file, nil
 }

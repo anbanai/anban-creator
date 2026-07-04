@@ -1536,6 +1536,76 @@ func TestWriteResumeInputsPublishesLatestOnlyWhenRequested(t *testing.T) {
 	}
 }
 
+func TestTaskService_ResumeRejectsNoInputAndNonTerminal(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusCompleted,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	_, err := svc.Resume(ctx, userID, task.ID, ResumeTaskParams{})
+	if !errors.Is(err, ErrTaskResumeNoInput) {
+		t.Fatalf("Resume empty input error = %v, want ErrTaskResumeNoInput", err)
+	}
+
+	task.Status = model.TaskStatusRunning
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	_, err = svc.Resume(ctx, userID, task.ID, ResumeTaskParams{Prompt: "继续"})
+	if !errors.Is(err, ErrTaskResumeNotTerminal) {
+		t.Fatalf("Resume running task error = %v, want ErrTaskResumeNotTerminal", err)
+	}
+}
+
+func TestTaskRepository_ResetTerminalTaskForResumeOnlyOneStatusSwap(t *testing.T) {
+	_, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	task := &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusFailed,
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	first, err := repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("first ResetTerminalTaskForResume: %v", err)
+	}
+	if !first {
+		t.Fatal("first ResetTerminalTaskForResume = false, want true")
+	}
+	second, err := repo.Tasks().ResetTerminalTaskForResume(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("second ResetTerminalTaskForResume: %v", err)
+	}
+	if second {
+		t.Fatal("second ResetTerminalTaskForResume = true, want false after status changed")
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.Status != model.TaskStatusPending {
+		t.Fatalf("status = %q, want pending", found.Status)
+	}
+}
+
 func TestTaskService_ResumeRejectsMissingWorkspace(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()

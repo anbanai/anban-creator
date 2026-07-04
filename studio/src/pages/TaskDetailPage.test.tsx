@@ -168,6 +168,40 @@ describe('TaskDetailPage', () => {
     })
   })
 
+  it('keeps resume file labels aligned when a file is removed', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      status: 'failed',
+      result: { files: null, output: '' },
+    }))
+
+    render(<TaskDetailPage />)
+
+    const continueButtons = await screen.findAllByRole('button', { name: /继续执行/ })
+    fireEvent.click(continueButtons[0])
+
+    const dialogTitle = await screen.findByText('继续执行此任务')
+    const dialog = dialogTitle.closest('[data-slot="dialog-content"]') as HTMLElement
+    const first = new File(['first'], 'first.md', { type: 'text/markdown' })
+    const second = new File(['second'], 'second.md', { type: 'text/markdown' })
+    fireEvent.change(within(dialog).getByLabelText('补充文件'), {
+      target: { files: [first, second] },
+    })
+    const labelInputs = within(dialog).getAllByPlaceholderText('例如：客户反馈、参考图、修改意见、产品参数')
+    fireEvent.change(labelInputs[0], { target: { value: '第一份' } })
+    fireEvent.change(labelInputs[1], { target: { value: '第二份' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '移除 first.md' }))
+    fireEvent.click(within(dialog).getByText('提交并继续').closest('button') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(api.tasks.resume).toHaveBeenCalledWith('task-1', {
+        prompt: '',
+        files: [second],
+        fileLabels: ['第二份'],
+      })
+    })
+  })
+
   it('does not show rerun for running tasks', async () => {
     mockTask(taskWith({
       status: 'running',

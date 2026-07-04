@@ -673,3 +673,50 @@ func TestTaskFileRepository_CRUD(t *testing.T) {
 		t.Errorf("expected 2 batch files, got %d", len(found))
 	}
 }
+
+func TestTaskFileRepository_UpsertReturnsPersistedRowOnConflict(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+
+	first, err := repo.TaskFiles().Upsert(ctx, &model.TaskFile{
+		ID:              "file-original",
+		TaskID:          "task-upsert",
+		Role:            "markdown",
+		FilePath:        "output/script.md",
+		FileName:        "script.md",
+		MimeType:        "text/markdown",
+		FileSize:        3,
+		ContentHash:     "old",
+		OSSKey:          "old-key",
+		StorageProvider: "oss",
+	})
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if first.ID != "file-original" {
+		t.Fatalf("first upsert ID = %q, want file-original", first.ID)
+	}
+
+	second, err := repo.TaskFiles().Upsert(ctx, &model.TaskFile{
+		ID:              "file-new",
+		TaskID:          "task-upsert",
+		Role:            "markdown",
+		FilePath:        "output/script.md",
+		FileName:        "script.md",
+		MimeType:        "text/markdown",
+		FileSize:        7,
+		ContentHash:     "new",
+		OSSKey:          "new-key",
+		StorageProvider: "oss",
+	})
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if second.ID != "file-original" {
+		t.Fatalf("second upsert ID = %q, want persisted original ID", second.ID)
+	}
+	if second.ContentHash != "new" || second.FileSize != 7 || second.OSSKey != "new-key" {
+		t.Fatalf("second upsert did not return updated row: %+v", second)
+	}
+}
