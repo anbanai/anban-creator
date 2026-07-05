@@ -117,6 +117,11 @@ func isGPTImageModel(model string) bool {
 	return strings.HasPrefix(model, "gpt-image-") || model == "chatgpt-image-latest"
 }
 
+func requiresImageUsageForBilling(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return model == "gpt-image-2" || strings.HasPrefix(model, "gpt-image-2-")
+}
+
 // isAutoSize 识别 "auto" 或 "auto:<tier>" 形式的 size。
 // 大小写不敏感、忽略前后空白；tier 后缀由 mapToImageSize 在返回时丢弃。
 func isAutoSize(size string) bool {
@@ -186,6 +191,14 @@ func (p *OpenAIProvider) Generate(ctx context.Context, prompt string, opts *Gene
 			Dur("elapsed", time.Since(start)).
 			Msg("openai: image generation failed")
 		return nil, err
+	}
+	if requiresImageUsageForBilling(p.model) && (result.Usage == nil || result.Usage.TotalTokens <= 0 || result.Usage.ImageOutputTokens <= 0) {
+		return nil, &GenerateError{
+			Provider: p.Name(),
+			Code:     "missing_usage",
+			Message:  fmt.Sprintf("%s usage is required for billing", p.model),
+			HintMsg:  "请确认 OpenAI-compatible 网关会透传 image usage；否则不能启用 GPT Image 2 生产通道。",
+		}
 	}
 
 	imgCount := 1
@@ -311,6 +324,7 @@ func (p *OpenAIProvider) generateStreaming(ctx context.Context, prompt string, o
 	stream := p.client.Images.GenerateStreaming(ctx, params)
 	var finalB64 string
 	var resultSize string
+	var usage *ImageGenerationUsage
 
 	for stream.Next() {
 		event := stream.Current()
@@ -331,6 +345,7 @@ func (p *OpenAIProvider) generateStreaming(ctx context.Context, prompt string, o
 		case openai.ImageGenCompletedEvent:
 			finalB64 = evt.B64JSON
 			resultSize = string(evt.Size)
+			usage = usageFromImageGenCompletedEvent(evt.Usage)
 		}
 	}
 
@@ -368,6 +383,7 @@ func (p *OpenAIProvider) generateStreaming(ctx context.Context, prompt string, o
 		Size:            resultSize,
 		ResponseType:    "b64_json",
 		ResponsePreview: previewBase64(finalB64),
+		Usage:           usage,
 	}, nil
 }
 
@@ -407,6 +423,7 @@ func (p *OpenAIProvider) generateEditStreaming(ctx context.Context, prompt strin
 	stream := p.client.Images.EditStreaming(ctx, *params)
 	var finalB64 string
 	var resultSize string
+	var usage *ImageGenerationUsage
 
 	for stream.Next() {
 		event := stream.Current()
@@ -427,6 +444,7 @@ func (p *OpenAIProvider) generateEditStreaming(ctx context.Context, prompt strin
 		case openai.ImageEditCompletedEvent:
 			finalB64 = evt.B64JSON
 			resultSize = string(evt.Size)
+			usage = usageFromImageEditCompletedEvent(evt.Usage)
 		}
 	}
 
@@ -463,6 +481,7 @@ func (p *OpenAIProvider) generateEditStreaming(ctx context.Context, prompt strin
 		Size:            resultSize,
 		ResponseType:    "b64_json",
 		ResponsePreview: previewBase64(finalB64),
+		Usage:           usage,
 	}, nil
 }
 
@@ -569,13 +588,25 @@ func (p *OpenAIProvider) buildEditParams(prompt string, opts *GenerateOptions, s
 
 // imageResponseToResult converts an ImagesResponse to a GenerateResult
 func (p *OpenAIProvider) imageResponseToResult(resp *openai.ImagesResponse) (*GenerateResult, error) {
+	size := p.sizeRatio
+	if resp.Size != "" {
+		size = string(resp.Size)
+	}
+	usage := usageFromImagesResponse(resp.Usage)
 	result := &GenerateResult{
 		Model: p.model,
-		Size:  p.sizeRatio,
+		Size:  size,
+		Usage: usage,
 	}
 
 	if len(resp.Data) == 1 {
-		return p.imageDataToResult(resp.Data[0])
+		single, err := p.imageDataToResult(resp.Data[0])
+		if err != nil {
+			return nil, err
+		}
+		single.Size = size
+		single.Usage = usage
+		return single, nil
 	}
 
 	// Multiple images (batch)
@@ -663,6 +694,46 @@ func (p *OpenAIProvider) imageDataToResult(img openai.Image) (*GenerateResult, e
 		Code:     "no_image",
 		Message:  "响应中没有图片 URL 或 base64 数据",
 		HintMsg:  "请确认模型支持 OpenAI Images API 图片输出",
+	}
+}
+
+func usageFromImagesResponse(usage openai.ImagesResponseUsage) *ImageGenerationUsage {
+	if usage.TotalTokens <= 0 && usage.InputTokens <= 0 && usage.OutputTokens <= 0 {
+		return nil
+	}
+	outputTokens := usage.OutputTokensDetails.ImageTokens
+	if outputTokens <= 0 {
+		outputTokens = usage.OutputTokens
+	}
+	return &ImageGenerationUsage{
+		TextInputTokens:   usage.InputTokensDetails.TextTokens,
+		ImageInputTokens:  usage.InputTokensDetails.ImageTokens,
+		ImageOutputTokens: outputTokens,
+		TotalTokens:       usage.TotalTokens,
+	}
+}
+
+func usageFromImageGenCompletedEvent(usage openai.ImageGenCompletedEventUsage) *ImageGenerationUsage {
+	if usage.TotalTokens <= 0 && usage.InputTokens <= 0 && usage.OutputTokens <= 0 {
+		return nil
+	}
+	return &ImageGenerationUsage{
+		TextInputTokens:   usage.InputTokensDetails.TextTokens,
+		ImageInputTokens:  usage.InputTokensDetails.ImageTokens,
+		ImageOutputTokens: usage.OutputTokens,
+		TotalTokens:       usage.TotalTokens,
+	}
+}
+
+func usageFromImageEditCompletedEvent(usage openai.ImageEditCompletedEventUsage) *ImageGenerationUsage {
+	if usage.TotalTokens <= 0 && usage.InputTokens <= 0 && usage.OutputTokens <= 0 {
+		return nil
+	}
+	return &ImageGenerationUsage{
+		TextInputTokens:   usage.InputTokensDetails.TextTokens,
+		ImageInputTokens:  usage.InputTokensDetails.ImageTokens,
+		ImageOutputTokens: usage.OutputTokens,
+		TotalTokens:       usage.TotalTokens,
 	}
 }
 

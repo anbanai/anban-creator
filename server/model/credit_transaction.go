@@ -5,18 +5,23 @@ import "time"
 import "gorm.io/datatypes"
 
 type CreditTransactionMetadata struct {
-	Provider          string         `json:"provider,omitempty"`
-	Model             string         `json:"model,omitempty"`
-	Route             string         `json:"route,omitempty"`
-	InputTokens       int64          `json:"input_tokens,omitempty"`
-	CachedInputTokens int64          `json:"cached_input_tokens,omitempty"`
-	OutputTokens      int64          `json:"output_tokens,omitempty"`
-	TotalTokens       int64          `json:"total_tokens,omitempty"`
-	BaseCredits       int            `json:"base_credits,omitempty"`
-	TierMultiplier    float64        `json:"tier_multiplier,omitempty"`
-	UserMultiplier    float64        `json:"user_multiplier,omitempty"`
-	FinalCredits      int            `json:"final_credits,omitempty"`
-	PriceSnapshot     map[string]any `json:"price_snapshot,omitempty"`
+	Provider               string         `json:"provider,omitempty"`
+	Model                  string         `json:"model,omitempty"`
+	Route                  string         `json:"route,omitempty"`
+	InputTokens            int64          `json:"input_tokens,omitempty"`
+	CachedInputTokens      int64          `json:"cached_input_tokens,omitempty"`
+	OutputTokens           int64          `json:"output_tokens,omitempty"`
+	TextInputTokens        int64          `json:"text_input_tokens,omitempty"`
+	TextCachedInputTokens  int64          `json:"text_cached_input_tokens,omitempty"`
+	ImageInputTokens       int64          `json:"image_input_tokens,omitempty"`
+	ImageCachedInputTokens int64          `json:"image_cached_input_tokens,omitempty"`
+	ImageOutputTokens      int64          `json:"image_output_tokens,omitempty"`
+	TotalTokens            int64          `json:"total_tokens,omitempty"`
+	BaseCredits            int            `json:"base_credits,omitempty"`
+	TierMultiplier         float64        `json:"tier_multiplier,omitempty"`
+	UserMultiplier         float64        `json:"user_multiplier,omitempty"`
+	FinalCredits           int            `json:"final_credits,omitempty"`
+	PriceSnapshot          map[string]any `json:"price_snapshot,omitempty"`
 }
 
 // CreditTransaction represents a single credit balance change (income or expense).

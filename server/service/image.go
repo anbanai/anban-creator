@@ -31,19 +31,20 @@ import (
 
 // ImageResult is the response for single image generation.
 type ImageResult struct {
-	FilePath        string `json:"file_path"`
-	DownloadURL     string `json:"download_url,omitempty"`
-	Size            string `json:"size"`
-	Width           int    `json:"width,omitempty"`
-	Height          int    `json:"height,omitempty"`
-	Prompt          string `json:"prompt,omitempty"`
-	ImageType       string `json:"image_type,omitempty"`
-	Provider        string `json:"provider,omitempty"`
-	Model           string `json:"model,omitempty"`
-	RevisedPrompt   string `json:"revised_prompt,omitempty"`
-	ResponseType    string `json:"response_type,omitempty"`
-	ResponsePreview string `json:"response_preview,omitempty"`
-	OutputMIME      string `json:"output_mime,omitempty"`
+	FilePath        string                      `json:"file_path"`
+	DownloadURL     string                      `json:"download_url,omitempty"`
+	Size            string                      `json:"size"`
+	Width           int                         `json:"width,omitempty"`
+	Height          int                         `json:"height,omitempty"`
+	Prompt          string                      `json:"prompt,omitempty"`
+	ImageType       string                      `json:"image_type,omitempty"`
+	Provider        string                      `json:"provider,omitempty"`
+	Model           string                      `json:"model,omitempty"`
+	RevisedPrompt   string                      `json:"revised_prompt,omitempty"`
+	ResponseType    string                      `json:"response_type,omitempty"`
+	ResponsePreview string                      `json:"response_preview,omitempty"`
+	OutputMIME      string                      `json:"output_mime,omitempty"`
+	Usage           *image.ImageGenerationUsage `json:"usage,omitempty"`
 	// WeChatURL/MediaID are populated when generate_image is called with
 	// upload_to_cdn=true and the image is uploaded to the project's CDN
 	// (WeChat material library for article projects) in the same call.
@@ -164,6 +165,7 @@ func buildImageResult(rawResult *image.GenerateRawResult, imageType string) *Ima
 		ResponseType:    rawResult.ResponseType,
 		ResponsePreview: rawResult.ResponsePreview,
 		OutputMIME:      rawResult.OutputMIME,
+		Usage:           rawResult.Usage,
 	}
 }
 

@@ -21,7 +21,7 @@ import (
 
 func setupSeednoteAnalyticsHandlerTest(t *testing.T) (*fiber.App, repository.Repository) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

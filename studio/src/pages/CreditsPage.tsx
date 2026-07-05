@@ -257,6 +257,11 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
   const income = pricing.income
 
   const imageModels = modelOps.find(([op]) => op === 'image_gen')?.[1] ?? {}
+  const imageGenerationPrices = pricing.model_prices?.image_generation ?? {}
+  const dynamicImagePrices = Object.entries(imageGenerationPrices)
+    .filter(([, price]) => price.pricing_type === 'openai_image_usage')
+  const fixedImagePrices = Object.entries(imageGenerationPrices)
+    .filter(([, price]) => price.pricing_type === 'per_image')
 
   const textOps = modelOps.filter(([op]) => op !== 'image_gen')
   const textModels = [...new Set(textOps.flatMap(([, models]) => Object.keys(models)))]
@@ -314,6 +319,51 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
                   value: `${cost} 积分/张`,
                 }))}
               />
+            </AccordionContent>
+          </AccordionItem>
+        )}
+
+        {(dynamicImagePrices.length > 0 || fixedImagePrices.length > 0) && (
+          <AccordionItem>
+            <AccordionTrigger>图片生成模型价格（真实成本与动态计费）</AccordionTrigger>
+            <AccordionContent>
+              <div className="space-y-4">
+                {fixedImagePrices.length > 0 && (
+                  <PricingTable
+                    rows={fixedImagePrices.map(([model, price]) => ({
+                      label: model,
+                      value: `${price.price ?? 0} ${price.currency ?? 'CNY'}/张`,
+                    }))}
+                  />
+                )}
+                {dynamicImagePrices.map(([model, price]) => (
+                  <div key={model} className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-medium text-foreground">{model}</p>
+                      <Badge variant="secondary" className="shrink-0 text-[10px]">usage 结算</Badge>
+                    </div>
+                    <PricingTable
+                      rows={[
+                        { label: '文本输入', value: `${price.text_input ?? 0} ${price.currency ?? 'USD'}/百万 token` },
+                        { label: '缓存文本输入', value: `${price.text_cached_input ?? 0} ${price.currency ?? 'USD'}/百万 token` },
+                        { label: '图片输入', value: `${price.image_input ?? 0} ${price.currency ?? 'USD'}/百万 token` },
+                        { label: '缓存图片输入', value: `${price.image_cached_input ?? 0} ${price.currency ?? 'USD'}/百万 token` },
+                        { label: '图片输出', value: `${price.image_output ?? 0} ${price.currency ?? 'USD'}/百万 token` },
+                      ]}
+                    />
+                    {price.estimate_table && (
+                      <PricingTable
+                        rows={Object.entries(price.estimate_table).flatMap(([size, qualities]) =>
+                          Object.entries(qualities).map(([quality, value]) => ({
+                            label: `${size} · ${quality}`,
+                            value: `预扣参考 ${value} ${price.currency ?? 'USD'}/张`,
+                          })),
+                        )}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
             </AccordionContent>
           </AccordionItem>
         )}

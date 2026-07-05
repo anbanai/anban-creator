@@ -1,78 +1,73 @@
 export interface ModelCapabilities {
-  maxRefImages: number
-  batch: boolean
-  maxBatch: number
-  streaming: boolean
-  inpainting: boolean
   qualityLevels: string[]
-  outputFormats: string[]
-  flexibleSize: boolean
-  watermark: boolean
   sizePresets: string[]
-  hasCompression: boolean
+  maxBatch: number
+  maxReferenceImages: number
+  supportsReference: boolean
+  supportsMask: boolean
+  outputFormats: string[]
   hasBackground: boolean
+  hasCompression: boolean
+  watermark: boolean
 }
 
-// Capabilities keyed by provider name (matches config designer.*.provider)
-const PROVIDER_CAPABILITIES: Record<string, ModelCapabilities> = {
-  openai: {
-    maxRefImages: 16,
-    batch: true,
-    maxBatch: 10,
-    streaming: true,
-    inpainting: true,
-    qualityLevels: ['auto', 'low', 'medium', 'high'],
-    outputFormats: ['png', 'jpeg', 'webp'],
-    flexibleSize: false,
-    watermark: false,
-    sizePresets: ['auto', '1024x1024', '1536x1024', '1024x1536'],
-    hasCompression: true,
-    hasBackground: true,
-  },
-  gemini: {
-    maxRefImages: 10,
-    batch: false,
-    maxBatch: 1,
-    streaming: false,
-    inpainting: false,
-    qualityLevels: [],
-    outputFormats: ['png'],
-    flexibleSize: false,
-    watermark: false,
-    sizePresets: [],
-    hasCompression: false,
-    hasBackground: false,
-  },
-  volcengine: {
-    maxRefImages: 1,
-    batch: false,
-    maxBatch: 1,
-    streaming: false,
-    inpainting: false,
-    qualityLevels: [],
-    outputFormats: ['png', 'jpeg'],
-    flexibleSize: true,
-    watermark: true,
-    sizePresets: [],
-    hasCompression: false,
-    hasBackground: false,
-  },
+export interface DesignerProviderPricing {
+  pricingType?: string
+  currency?: string
+  estimateTable?: Record<string, Record<string, number>>
+  creditsPerCny?: number
+  requiresUsage?: boolean
+  billingNote?: string
 }
 
-export function getModelCapabilities(provider: string): ModelCapabilities | undefined {
-  return PROVIDER_CAPABILITIES[provider]
+export interface RawDesignerProvider {
+  id: string
+  name: string
+  alias?: string
+  provider: string
+  provider_key?: string
+  route?: string
+  model: string
+  credits: number
+  enabled: boolean
+  idx: number
+  capabilities?: {
+    quality_levels?: string[]
+    size_presets?: string[]
+    max_batch?: number
+    max_reference_images?: number
+    supports_reference?: boolean
+    supports_mask?: boolean
+    output_formats?: string[]
+    has_background?: boolean
+    has_compression?: boolean
+    watermark?: boolean
+  }
+  pricing?: {
+    pricing_type?: string
+    currency?: string
+    estimate_table?: Record<string, Record<string, number>>
+    credits_per_cny?: number
+    requires_usage?: boolean
+    billing_note?: string
+  }
 }
 
 // Dynamic provider info from backend API
 export interface DesignerProvider {
   id: string
   name: string
+  alias?: string
   provider: string
+  providerKey?: string
+  route?: string
   model: string
   credits: number
   enabled: boolean
   idx: number
   description?: string
+  capabilities: ModelCapabilities
+  pricing: DesignerProviderPricing
 }
 
 export interface DesignerSettings {
@@ -127,6 +122,17 @@ export interface ImageGeneration {
   error?: string
   input_tokens?: number
   output_tokens?: number
+  text_input_tokens?: number
+  text_cached_input_tokens?: number
+  image_input_tokens?: number
+  image_cached_input_tokens?: number
+  image_output_tokens?: number
+  total_tokens?: number
+  estimated_cost?: number
+  final_cost?: number
+  billing_mode?: string
+  billing_status?: string
+  price_snapshot?: Record<string, unknown>
   created_at: string
   updated_at: string
   results?: ImageGenerationResult[]

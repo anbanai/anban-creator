@@ -176,18 +176,20 @@ func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 		}
 	}
 
-	// Synthesize image_gen pricing from ImageAPI config entries.
+	// Synthesize only legacy fixed image_gen pricing from ImageAPI config
+	// entries. Dynamic providers such as GPT Image 2 are represented by
+	// model_prices.image_generation and must not be exposed as a fixed unit cost.
 	imageGenCosts := map[string]int{}
 	if h.imageCfg != nil {
-		if h.imageCfg.Cover != nil && h.imageCfg.Cover.Credits > 0 {
+		if h.imageCfg.Cover != nil && h.imageCfg.Cover.Credits > 0 && !h.isDynamicImageRoute("image_generation.cover", h.imageCfg.Cover.Model) {
 			imageGenCosts[h.imageCfg.Cover.Provider+"/"+h.imageCfg.Cover.Model] = h.imageCfg.Cover.Credits
 		}
-		if h.imageCfg.Content != nil && h.imageCfg.Content.Credits > 0 {
+		if h.imageCfg.Content != nil && h.imageCfg.Content.Credits > 0 && !h.isDynamicImageRoute("image_generation.content", h.imageCfg.Content.Model) {
 			key := h.imageCfg.Content.Provider + "/" + h.imageCfg.Content.Model
 			imageGenCosts[key] = h.imageCfg.Content.Credits
 		}
-		for _, d := range h.imageCfg.Designer {
-			if d != nil && d.Credits > 0 {
+		for id, d := range h.imageCfg.Designer {
+			if d != nil && d.Credits > 0 && !h.isDynamicImageRoute("image_generation.designer."+id, d.Model) {
 				imageGenCosts[d.Provider+"/"+d.Model] = d.Credits
 			}
 		}
@@ -207,4 +209,45 @@ func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 		"ecommerce_module_prices": h.service.EcommerceModulePrices(),
 		"income":                  income,
 	})
+}
+
+func (h *CreditHandler) isDynamicImageRoute(routeName, fallbackModel string) bool {
+	if h.fullCfg == nil {
+		return false
+	}
+	route, ok := h.creditImageGenerationRoute(routeName)
+	if !ok {
+		return false
+	}
+	modelName := route.Model
+	if modelName == "" {
+		modelName = fallbackModel
+	}
+	if route.Provider == "" || modelName == "" {
+		return false
+	}
+	price, ok := h.fullCfg.ModelPrices.ImageGeneration[route.Provider+"/"+modelName]
+	if !ok {
+		return false
+	}
+	return price.PricingType == config.ImagePricingTypeOpenAIUsage
+}
+
+func (h *CreditHandler) creditImageGenerationRoute(routeName string) (config.ImageGenerationRouteConfig, bool) {
+	if h.fullCfg == nil {
+		return config.ImageGenerationRouteConfig{}, false
+	}
+	switch routeName {
+	case "image_generation.cover":
+		return h.fullCfg.ModelRoutes.ImageGeneration.Cover, true
+	case "image_generation.content":
+		return h.fullCfg.ModelRoutes.ImageGeneration.Content, true
+	default:
+		const prefix = "image_generation.designer."
+		if len(routeName) <= len(prefix) || routeName[:len(prefix)] != prefix {
+			return config.ImageGenerationRouteConfig{}, false
+		}
+		route, ok := h.fullCfg.ModelRoutes.ImageGeneration.Designer[routeName[len(prefix):]]
+		return route, ok
+	}
 }

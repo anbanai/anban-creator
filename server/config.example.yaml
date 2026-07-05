@@ -79,11 +79,9 @@ model_routes:
     cover:
       provider: "volcengine_ark"
       model: "doubao-seedream-5-0-260128"
-      size: "9:16:2k"
     content:
       provider: "volcengine_ark"
       model: "doubao-seedream-5-0-260128"
-      size: "9:16:2k"
     designer:
       seedream:
         alias: "豆包 Seedream"
@@ -96,14 +94,6 @@ model_routes:
         model: "gpt-image-2"
         enabled: true
         response_format: "url"
-    sizes:
-      article_cover: "16:9"
-      article_content: "16:9"
-      xls_cover: "3:4"
-      xls_content: "3:4"
-      seednote_cover: "3:4"
-      seednote_content: "3:4"
-
   video_generation:
     provider: "volcengine_ark"
     timeout: 10m
@@ -158,13 +148,33 @@ model_prices:
 
   image_generation:
     volcengine_ark/doubao-seedream-5-0-260128:
+      pricing_type: per_image
       currency: CNY
       unit: image
       price: 0.22
     wangcai_openai/gpt-image-2:
-      currency: CNY
-      unit: image
-      price: "${WANGCAI_GPT_IMAGE_2_COST_CNY_PER_IMAGE}"
+      pricing_type: openai_image_usage
+      currency: USD
+      unit: 1000000
+      require_usage: true
+      text_input: 5.00
+      text_cached_input: 1.25
+      image_input: 8.00
+      image_cached_input: 2.00
+      image_output: 30.00
+      estimate_table:
+        "1024x1024":
+          low: 0.006
+          medium: 0.053
+          high: 0.211
+        "1024x1536":
+          low: 0.005
+          medium: 0.041
+          high: 0.165
+        "1536x1024":
+          low: 0.005
+          medium: 0.041
+          high: 0.165
 
   video_generation:
     volcengine_ark/doubao-seedance-2-0-260128:

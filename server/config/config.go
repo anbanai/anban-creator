@@ -221,7 +221,6 @@ type VideoUnderstandingRouteConfig struct {
 type ImageGenerationRouteConfig struct {
 	Provider       string `yaml:"provider"`
 	Model          string `yaml:"model"`
-	Size           string `yaml:"size"`
 	Alias          string `yaml:"alias"`
 	Enabled        bool   `yaml:"enabled"`
 	ResponseFormat string `yaml:"response_format"`
@@ -231,7 +230,6 @@ type ImageGenerationRoutesConfig struct {
 	Cover    ImageGenerationRouteConfig            `yaml:"cover"`
 	Content  ImageGenerationRouteConfig            `yaml:"content"`
 	Designer map[string]ImageGenerationRouteConfig `yaml:"designer"`
-	Sizes    SizesConfig                           `yaml:"sizes"`
 }
 
 type VideoGenerationRouteConfig struct {
@@ -294,42 +292,61 @@ func (f *FlexibleFloat) UnmarshalYAML(value *yaml.Node) error {
 func (f FlexibleFloat) Float64() float64 { return float64(f) }
 
 type CurrencyRate struct {
-	ToCNY FlexibleFloat `yaml:"to_cny"`
+	ToCNY FlexibleFloat `yaml:"to_cny" json:"to_cny"`
 }
 
 type TokenModelPrice struct {
-	Currency    string        `yaml:"currency"`
-	Unit        int64         `yaml:"unit"`
-	CachedInput FlexibleFloat `yaml:"cached_input"`
-	Input       FlexibleFloat `yaml:"input"`
-	Output      FlexibleFloat `yaml:"output"`
+	Currency    string        `yaml:"currency" json:"currency"`
+	Unit        int64         `yaml:"unit" json:"unit"`
+	CachedInput FlexibleFloat `yaml:"cached_input" json:"cached_input"`
+	Input       FlexibleFloat `yaml:"input" json:"input"`
+	Output      FlexibleFloat `yaml:"output" json:"output"`
 }
 
 type UnitModelPrice struct {
-	Currency string        `yaml:"currency"`
-	Unit     string        `yaml:"unit"`
-	Price    FlexibleFloat `yaml:"price"`
+	Currency string        `yaml:"currency" json:"currency"`
+	Unit     string        `yaml:"unit" json:"unit"`
+	Price    FlexibleFloat `yaml:"price" json:"price"`
+}
+
+const (
+	ImagePricingTypePerImage    = "per_image"
+	ImagePricingTypeOpenAIUsage = "openai_image_usage"
+)
+
+type ImageGenerationPrice struct {
+	PricingType      string                              `yaml:"pricing_type" json:"pricing_type"`
+	Currency         string                              `yaml:"currency" json:"currency"`
+	Unit             any                                 `yaml:"unit" json:"unit"`
+	Price            FlexibleFloat                       `yaml:"price" json:"price,omitempty"`
+	TextInput        FlexibleFloat                       `yaml:"text_input" json:"text_input,omitempty"`
+	TextCachedInput  FlexibleFloat                       `yaml:"text_cached_input" json:"text_cached_input,omitempty"`
+	ImageInput       FlexibleFloat                       `yaml:"image_input" json:"image_input,omitempty"`
+	ImageCachedInput FlexibleFloat                       `yaml:"image_cached_input" json:"image_cached_input,omitempty"`
+	ImageOutput      FlexibleFloat                       `yaml:"image_output" json:"image_output,omitempty"`
+	RequireUsage     bool                                `yaml:"require_usage" json:"require_usage"`
+	EstimateTable    map[string]map[string]FlexibleFloat `yaml:"estimate_table" json:"estimate_table,omitempty"`
 }
 
 type VideoGenerationPrice struct {
-	Currency              string             `yaml:"currency"`
-	NoInputPricePerSecond map[string]float64 `yaml:"no_input_price_per_second"`
-	VideoInput5sMinPrice  map[string]float64 `yaml:"video_input_5s_min_price"`
-	VideoInput5sMaxPrice  map[string]float64 `yaml:"video_input_5s_max_price"`
+	Currency              string             `yaml:"currency" json:"currency"`
+	NoInputPricePerSecond map[string]float64 `yaml:"no_input_price_per_second" json:"no_input_price_per_second"`
+	VideoInput5sMinPrice  map[string]float64 `yaml:"video_input_5s_min_price" json:"video_input_5s_min_price"`
+	VideoInput5sMaxPrice  map[string]float64 `yaml:"video_input_5s_max_price" json:"video_input_5s_max_price"`
 }
 
 type ModelPricesConfig struct {
-	CurrencyRates   map[string]CurrencyRate         `yaml:"currency_rates"`
-	TokenModels     map[string]TokenModelPrice      `yaml:"token_models"`
-	ImageGeneration map[string]UnitModelPrice       `yaml:"image_generation"`
-	VideoGeneration map[string]VideoGenerationPrice `yaml:"video_generation"`
+	CurrencyRates   map[string]CurrencyRate         `yaml:"currency_rates" json:"currency_rates"`
+	TokenModels     map[string]TokenModelPrice      `yaml:"token_models" json:"token_models"`
+	ImageGeneration map[string]ImageGenerationPrice `yaml:"image_generation" json:"image_generation"`
+	VideoGeneration map[string]VideoGenerationPrice `yaml:"video_generation" json:"video_generation"`
 }
 
 type BillingConfig struct {
-	CreditsPerCNY         int                `yaml:"credits_per_cny"`
-	TierMultipliers       map[string]float64 `yaml:"tier_multipliers"`
-	DefaultUserMultiplier float64            `yaml:"default_user_multiplier"`
-	MinimumChargeCredits  int                `yaml:"minimum_charge_credits"`
+	CreditsPerCNY         int                `yaml:"credits_per_cny" json:"credits_per_cny"`
+	TierMultipliers       map[string]float64 `yaml:"tier_multipliers" json:"tier_multipliers"`
+	DefaultUserMultiplier float64            `yaml:"default_user_multiplier" json:"default_user_multiplier"`
+	MinimumChargeCredits  int                `yaml:"minimum_charge_credits" json:"minimum_charge_credits"`
 }
 
 type TokenUsage struct {
@@ -340,15 +357,26 @@ type TokenUsage struct {
 }
 
 type PriceSnapshot struct {
-	Provider      string  `json:"provider"`
-	Model         string  `json:"model"`
-	Currency      string  `json:"currency"`
-	Unit          int64   `json:"unit"`
-	CurrencyToCNY float64 `json:"currency_to_cny"`
-	CreditsPerCNY int     `json:"credits_per_cny"`
-	CachedInput   float64 `json:"cached_input"`
-	Input         float64 `json:"input"`
-	Output        float64 `json:"output"`
+	Provider         string  `json:"provider"`
+	Model            string  `json:"model"`
+	Currency         string  `json:"currency"`
+	Unit             int64   `json:"unit"`
+	CurrencyToCNY    float64 `json:"currency_to_cny"`
+	CreditsPerCNY    int     `json:"credits_per_cny"`
+	CachedInput      float64 `json:"cached_input"`
+	Input            float64 `json:"input"`
+	Output           float64 `json:"output"`
+	PricingType      string  `json:"pricing_type,omitempty"`
+	Price            float64 `json:"price,omitempty"`
+	TextInput        float64 `json:"text_input,omitempty"`
+	TextCachedInput  float64 `json:"text_cached_input,omitempty"`
+	ImageInput       float64 `json:"image_input,omitempty"`
+	ImageCachedInput float64 `json:"image_cached_input,omitempty"`
+	ImageOutput      float64 `json:"image_output,omitempty"`
+	Size             string  `json:"size,omitempty"`
+	Quality          string  `json:"quality,omitempty"`
+	Count            int     `json:"count,omitempty"`
+	OfficialEstimate float64 `json:"official_estimate,omitempty"`
 }
 
 type TokenCreditCost struct {
@@ -358,6 +386,29 @@ type TokenCreditCost struct {
 	UserMultiplier float64       `json:"user_multiplier"`
 	Usage          TokenUsage    `json:"usage"`
 	PriceSnapshot  PriceSnapshot `json:"price_snapshot"`
+}
+
+type ImageGenerationUsage struct {
+	Size                   string `json:"size"`
+	Quality                string `json:"quality"`
+	Count                  int    `json:"count"`
+	TextInputTokens        int64  `json:"text_input_tokens,omitempty"`
+	TextCachedInputTokens  int64  `json:"text_cached_input_tokens,omitempty"`
+	ImageInputTokens       int64  `json:"image_input_tokens,omitempty"`
+	ImageCachedInputTokens int64  `json:"image_cached_input_tokens,omitempty"`
+	ImageOutputTokens      int64  `json:"image_output_tokens,omitempty"`
+	TotalTokens            int64  `json:"total_tokens,omitempty"`
+	ReferenceImageCount    int    `json:"reference_image_count,omitempty"`
+}
+
+type ImageGenerationCreditCost struct {
+	BaseCredits    int                  `json:"base_credits"`
+	FinalCredits   int                  `json:"final_credits"`
+	TierMultiplier float64              `json:"tier_multiplier"`
+	UserMultiplier float64              `json:"user_multiplier"`
+	Usage          ImageGenerationUsage `json:"usage"`
+	Estimated      bool                 `json:"estimated"`
+	PriceSnapshot  PriceSnapshot        `json:"price_snapshot"`
 }
 
 func (c VideoAPIConfig) CreditMultiplierOrDefault() int {
@@ -443,6 +494,210 @@ func (c *Config) CalculateTokenModelCredits(provider, modelName string, usage To
 	}, nil
 }
 
+func (c *Config) CalculateImageGenerationEstimateCredits(provider, modelName string, usage ImageGenerationUsage, tier string, userMultiplier float64) (ImageGenerationCreditCost, error) {
+	return c.calculateImageGenerationCredits(provider, modelName, usage, tier, userMultiplier, true)
+}
+
+func (c *Config) CalculateImageGenerationUsageCredits(provider, modelName string, usage ImageGenerationUsage, tier string, userMultiplier float64) (ImageGenerationCreditCost, error) {
+	return c.calculateImageGenerationCredits(provider, modelName, usage, tier, userMultiplier, false)
+}
+
+func (c *Config) calculateImageGenerationCredits(provider, modelName string, usage ImageGenerationUsage, tier string, userMultiplier float64, estimate bool) (ImageGenerationCreditCost, error) {
+	if c == nil {
+		return ImageGenerationCreditCost{}, fmt.Errorf("config is nil")
+	}
+	key := provider + "/" + modelName
+	price, ok := c.ModelPrices.ImageGeneration[key]
+	if !ok {
+		return ImageGenerationCreditCost{}, fmt.Errorf("image generation price not configured for %s", key)
+	}
+	pricingType := strings.TrimSpace(price.PricingType)
+	if pricingType == "" {
+		if strings.EqualFold(strings.TrimSpace(price.UnitString()), "image") {
+			pricingType = ImagePricingTypePerImage
+		}
+	}
+	if usage.Count <= 0 {
+		usage.Count = 1
+	}
+	currency, rate, err := c.priceCurrencyRate(price.Currency)
+	if err != nil {
+		return ImageGenerationCreditCost{}, err
+	}
+	creditsPerCNY, minCharge, tierMultiplier, userMultiplier := c.billingInputs(tier, userMultiplier)
+
+	var costInCurrency float64
+	var estimated bool
+	var officialEstimate float64
+	unit := price.UnitInt64()
+	if unit <= 0 {
+		unit = 1_000_000
+	}
+	switch pricingType {
+	case ImagePricingTypePerImage:
+		if price.Price.Float64() <= 0 {
+			return ImageGenerationCreditCost{}, fmt.Errorf("per-image price must be positive for %s", key)
+		}
+		costInCurrency = price.Price.Float64() * float64(usage.Count)
+		unit = 0
+	case ImagePricingTypeOpenAIUsage:
+		if estimate {
+			size := strings.TrimSpace(usage.Size)
+			quality := normalizeImageQuality(usage.Quality)
+			if size == "" || strings.EqualFold(size, "auto") {
+				return ImageGenerationCreditCost{}, fmt.Errorf("resolved image size is required for %s estimate", key)
+			}
+			byQuality, ok := price.EstimateTable[size]
+			if !ok {
+				return ImageGenerationCreditCost{}, fmt.Errorf("estimate table missing size %s for %s", size, key)
+			}
+			estimatePrice, ok := byQuality[quality]
+			if !ok || estimatePrice.Float64() <= 0 {
+				return ImageGenerationCreditCost{}, fmt.Errorf("estimate table missing quality %s for %s size %s", quality, key, size)
+			}
+			usage.Quality = quality
+			officialEstimate = estimatePrice.Float64()
+			costInCurrency = officialEstimate * float64(usage.Count)
+			estimated = true
+		} else {
+			if usage.TotalTokens <= 0 || usage.ImageOutputTokens <= 0 {
+				return ImageGenerationCreditCost{}, fmt.Errorf("%s usage is required for billing", modelName)
+			}
+			textInput := usage.TextInputTokens - usage.TextCachedInputTokens
+			if textInput < 0 {
+				textInput = 0
+			}
+			imageInput := usage.ImageInputTokens - usage.ImageCachedInputTokens
+			if imageInput < 0 {
+				imageInput = 0
+			}
+			costInCurrency = (float64(textInput)*price.TextInput.Float64() +
+				float64(usage.TextCachedInputTokens)*price.TextCachedInput.Float64() +
+				float64(imageInput)*price.ImageInput.Float64() +
+				float64(usage.ImageCachedInputTokens)*price.ImageCachedInput.Float64() +
+				float64(usage.ImageOutputTokens)*price.ImageOutput.Float64()) / float64(unit)
+		}
+	default:
+		return ImageGenerationCreditCost{}, fmt.Errorf("unsupported image pricing_type %q for %s", price.PricingType, key)
+	}
+
+	baseCredits := int(math.Ceil(costInCurrency * rate * float64(creditsPerCNY)))
+	if baseCredits < minCharge {
+		baseCredits = minCharge
+	}
+	finalCredits := int(math.Ceil(float64(baseCredits) * tierMultiplier * userMultiplier))
+	if finalCredits < minCharge {
+		finalCredits = minCharge
+	}
+	return ImageGenerationCreditCost{
+		BaseCredits:    baseCredits,
+		FinalCredits:   finalCredits,
+		TierMultiplier: tierMultiplier,
+		UserMultiplier: userMultiplier,
+		Usage:          usage,
+		Estimated:      estimated,
+		PriceSnapshot: PriceSnapshot{
+			Provider:         provider,
+			Model:            modelName,
+			Currency:         currency,
+			Unit:             unit,
+			CurrencyToCNY:    rate,
+			CreditsPerCNY:    creditsPerCNY,
+			PricingType:      pricingType,
+			Price:            price.Price.Float64(),
+			TextInput:        price.TextInput.Float64(),
+			TextCachedInput:  price.TextCachedInput.Float64(),
+			ImageInput:       price.ImageInput.Float64(),
+			ImageCachedInput: price.ImageCachedInput.Float64(),
+			ImageOutput:      price.ImageOutput.Float64(),
+			Size:             usage.Size,
+			Quality:          usage.Quality,
+			Count:            usage.Count,
+			OfficialEstimate: officialEstimate,
+		},
+	}, nil
+}
+
+func (p ImageGenerationPrice) UnitString() string {
+	switch v := p.Unit.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		if v == math.Trunc(v) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return ""
+	}
+}
+
+func (p ImageGenerationPrice) UnitInt64() int64 {
+	switch v := p.Unit.(type) {
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case float64:
+		return int64(v)
+	case string:
+		n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		return n
+	default:
+		return 0
+	}
+}
+
+func normalizeImageQuality(quality string) string {
+	quality = strings.ToLower(strings.TrimSpace(quality))
+	if quality == "" || quality == "auto" {
+		return "medium"
+	}
+	return quality
+}
+
+func (c *Config) priceCurrencyRate(currencyValue string) (string, float64, error) {
+	currency := strings.ToUpper(strings.TrimSpace(currencyValue))
+	if currency == "" {
+		currency = "CNY"
+	}
+	if currency == "CNY" {
+		return currency, 1, nil
+	}
+	r, ok := c.ModelPrices.CurrencyRates[currency]
+	if !ok || r.ToCNY.Float64() <= 0 {
+		return "", 0, fmt.Errorf("currency rate not configured for %s", currency)
+	}
+	return currency, r.ToCNY.Float64(), nil
+}
+
+func (c *Config) billingInputs(tier string, userMultiplier float64) (creditsPerCNY int, minCharge int, tierMultiplier float64, normalizedUserMultiplier float64) {
+	creditsPerCNY = c.Billing.CreditsPerCNY
+	if creditsPerCNY <= 0 {
+		creditsPerCNY = 1000
+	}
+	minCharge = c.Billing.MinimumChargeCredits
+	if minCharge <= 0 {
+		minCharge = 1
+	}
+	tierMultiplier = c.Billing.DefaultUserMultiplier
+	if tierMultiplier <= 0 {
+		tierMultiplier = 1
+	}
+	if m, ok := c.Billing.TierMultipliers[strings.ToLower(strings.TrimSpace(tier))]; ok && m > 0 {
+		tierMultiplier = m
+	}
+	normalizedUserMultiplier = userMultiplier
+	if normalizedUserMultiplier <= 0 {
+		normalizedUserMultiplier = 1
+	}
+	return creditsPerCNY, minCharge, tierMultiplier, normalizedUserMultiplier
+}
+
 // StorageConfig holds file storage configuration.
 // Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
 type StorageConfig struct {
@@ -460,14 +715,16 @@ type StorageConfig struct {
 	LocalDataDir               string `yaml:"local_data_dir"`                // Default "./data/files"
 }
 
-// SizesConfig holds per-platform image size defaults (ratio:tier format, e.g. "16:9", "3:4:4K").
+// SizesConfig is kept for in-memory legacy ImageAPI structs. Semantic server
+// config must not use it; business image ratios live in task/project inputs and
+// Skill workflows.
 type SizesConfig struct {
-	ArticleCover    string `yaml:"article_cover"`    // default "16:9"
-	ArticleContent  string `yaml:"article_content"`  // default "16:9"
-	XLSCover        string `yaml:"xls_cover"`        // default "3:4"
-	XLSContent      string `yaml:"xls_content"`      // default "3:4"
-	SeednoteCover   string `yaml:"seednote_cover"`   // default "3:4"
-	SeednoteContent string `yaml:"seednote_content"` // default "3:4"
+	ArticleCover    string `yaml:"article_cover"`
+	ArticleContent  string `yaml:"article_content"`
+	XLSCover        string `yaml:"xls_cover"`
+	XLSContent      string `yaml:"xls_content"`
+	SeednoteCover   string `yaml:"seednote_cover"`
+	SeednoteContent string `yaml:"seednote_content"`
 }
 
 // ImageAPIConfig holds global image generation API configuration.
@@ -794,6 +1051,20 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 			return fmt.Errorf("deprecated config key credits.model_costs; use model_prices and billing")
 		}
 	}
+	if modelRoutes, ok := top["model_routes"].(map[string]any); ok {
+		if imageGeneration, ok := modelRoutes["image_generation"].(map[string]any); ok {
+			if _, ok := imageGeneration["sizes"]; ok {
+				return fmt.Errorf("deprecated config key model_routes.image_generation.sizes; put business image sizes in the relevant Skill workflow")
+			}
+			for _, routeName := range []string{"cover", "content"} {
+				if route, ok := imageGeneration[routeName].(map[string]any); ok {
+					if _, ok := route["size"]; ok {
+						return fmt.Errorf("deprecated config key model_routes.image_generation.%s.size; image size is a business workflow rule, not a model route setting", routeName)
+					}
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -878,26 +1149,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.VideoAPI.CreditMultiplier == 0 {
 		c.VideoAPI.CreditMultiplier = 1000
-	}
-
-	// Per-platform image size defaults (ratio:tier format).
-	if c.ImageAPI.Sizes.ArticleCover == "" {
-		c.ImageAPI.Sizes.ArticleCover = "16:9"
-	}
-	if c.ImageAPI.Sizes.ArticleContent == "" {
-		c.ImageAPI.Sizes.ArticleContent = "16:9"
-	}
-	if c.ImageAPI.Sizes.XLSCover == "" {
-		c.ImageAPI.Sizes.XLSCover = "3:4"
-	}
-	if c.ImageAPI.Sizes.XLSContent == "" {
-		c.ImageAPI.Sizes.XLSContent = "3:4"
-	}
-	if c.ImageAPI.Sizes.SeednoteCover == "" {
-		c.ImageAPI.Sizes.SeednoteCover = "3:4"
-	}
-	if c.ImageAPI.Sizes.SeednoteContent == "" {
-		c.ImageAPI.Sizes.SeednoteContent = "3:4"
 	}
 
 	// Credits defaults.
@@ -1100,9 +1351,6 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 			c.ImageAPI.designerOrder = append(c.ImageAPI.designerOrder, key)
 		}
 	}
-	if c.ModelRoutes.ImageGeneration.Sizes != (SizesConfig{}) {
-		c.ImageAPI.Sizes = mergeSizes(c.ModelRoutes.ImageGeneration.Sizes, c.ImageAPI.Sizes)
-	}
 	if err := c.resolveImagePresetRoutes(); err != nil {
 		return err
 	}
@@ -1128,28 +1376,6 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		}
 	}
 	return nil
-}
-
-func mergeSizes(routeSizes, defaults SizesConfig) SizesConfig {
-	if routeSizes.ArticleCover == "" {
-		routeSizes.ArticleCover = defaults.ArticleCover
-	}
-	if routeSizes.ArticleContent == "" {
-		routeSizes.ArticleContent = defaults.ArticleContent
-	}
-	if routeSizes.XLSCover == "" {
-		routeSizes.XLSCover = defaults.XLSCover
-	}
-	if routeSizes.XLSContent == "" {
-		routeSizes.XLSContent = defaults.XLSContent
-	}
-	if routeSizes.SeednoteCover == "" {
-		routeSizes.SeednoteCover = defaults.SeednoteCover
-	}
-	if routeSizes.SeednoteContent == "" {
-		routeSizes.SeednoteContent = defaults.SeednoteContent
-	}
-	return routeSizes
 }
 
 func (c *Config) resolveImagePresetRoutes() error {
@@ -1206,13 +1432,28 @@ func (c *Config) imageAPIFromRoute(routeName string, route ImageGenerationRouteC
 		BaseURL:        p.BaseURL,
 		Provider:       providerKind(route.Provider),
 		Model:          route.Model,
-		Size:           route.Size,
 		ResponseFormat: route.ResponseFormat,
 	}
 	if price, ok := c.ModelPrices.ImageGeneration[route.Provider+"/"+route.Model]; ok {
-		cfg.Credits = int(math.Ceil(price.Price.Float64() * c.currencyToCNY(price.Currency) * float64(c.creditsPerCNY())))
+		pricingType := strings.TrimSpace(price.PricingType)
+		if pricingType == "" && strings.EqualFold(price.UnitString(), "image") {
+			pricingType = ImagePricingTypePerImage
+		}
+		if isGPTImageModelName(route.Model) && pricingType != ImagePricingTypeOpenAIUsage {
+			return nil, fmt.Errorf("%s model %s requires pricing_type %s; fixed per-image pricing is not allowed", routeName, route.Model, ImagePricingTypeOpenAIUsage)
+		}
+		if pricingType == ImagePricingTypePerImage {
+			cfg.Credits = int(math.Ceil(price.Price.Float64() * c.currencyToCNY(price.Currency) * float64(c.creditsPerCNY())))
+		}
+	} else if isGPTImageModelName(route.Model) {
+		return nil, fmt.Errorf("%s model %s requires model_prices.image_generation entry with pricing_type %s", routeName, route.Model, ImagePricingTypeOpenAIUsage)
 	}
 	return cfg, nil
+}
+
+func isGPTImageModelName(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	return strings.HasPrefix(modelName, "gpt-image-") || modelName == "chatgpt-image-latest"
 }
 
 func providerKind(providerKey string) string {

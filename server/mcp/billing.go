@@ -119,6 +119,62 @@ func maybeDeductUnderstandingTokens(ctx context.Context, userID, taskID, opType 
 	return cost.FinalCredits, nil
 }
 
+func maybeDeductImageGenerationUsage(ctx context.Context, userID, taskID, route, provider, modelName string, usage config.ImageGenerationUsage) (int, error) {
+	if billSvc == nil || billSvc.creditSvc == nil || billSvc.config == nil {
+		logBillingSkip(userID, model.CreditTypeImageGen, "no_credit_or_config_service")
+		return 0, nil
+	}
+	if usage.TotalTokens <= 0 || usage.ImageOutputTokens <= 0 {
+		return 0, fmt.Errorf("%s usage is required for billing", modelName)
+	}
+	if userID == "" || userID == "system" || isAdminCall(ctx) {
+		logBillingSkip(userID, model.CreditTypeImageGen, "admin_or_system")
+		return 0, nil
+	}
+	if provider == "" || modelName == "" {
+		return 0, fmt.Errorf("image generation billing route is not configured")
+	}
+	if taskID != "" {
+		if err := validateBillingTask(ctx, userID, taskID); err != nil {
+			return 0, err
+		}
+	}
+	tier, err := billSvc.creditSvc.GetUserTier(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	cost, err := billSvc.config.CalculateImageGenerationUsageCredits(provider, modelName, usage, string(tier), 1)
+	if err != nil {
+		return 0, err
+	}
+	priceSnapshot := map[string]any{}
+	if data, err := json.Marshal(cost.PriceSnapshot); err == nil {
+		_ = json.Unmarshal(data, &priceSnapshot)
+	}
+	metadata := model.CreditTransactionMetadata{
+		Provider:               provider,
+		Model:                  modelName,
+		Route:                  route,
+		TextInputTokens:        usage.TextInputTokens,
+		TextCachedInputTokens:  usage.TextCachedInputTokens,
+		ImageInputTokens:       usage.ImageInputTokens,
+		ImageCachedInputTokens: usage.ImageCachedInputTokens,
+		ImageOutputTokens:      usage.ImageOutputTokens,
+		TotalTokens:            usage.TotalTokens,
+		BaseCredits:            cost.BaseCredits,
+		TierMultiplier:         cost.TierMultiplier,
+		UserMultiplier:         cost.UserMultiplier,
+		FinalCredits:           cost.FinalCredits,
+		PriceSnapshot:          priceSnapshot,
+	}
+	operationID := fmt.Sprintf("%s:%s:%d:%d", model.CreditTypeImageGen, taskID, usage.TotalTokens, time.Now().UnixNano())
+	_, err = billSvc.creditSvc.DeductForOperationWithMetadata(ctx, userID, model.CreditTypeImageGen, cost.FinalCredits, metadata, operationID, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return cost.FinalCredits, nil
+}
+
 func maybeDeductForResolvedModel(ctx context.Context, userID, opType, provider, mdl string, count int, taskID, modelSource string) error {
 	if billSvc == nil || billSvc.creditSvc == nil {
 		logBillingSkip(userID, opType, "no_credit_service")

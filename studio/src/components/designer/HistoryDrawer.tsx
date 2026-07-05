@@ -102,6 +102,8 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenera
                         </p>
                         <p className="mt-1 text-[10px] text-muted-foreground/80">
                           {formatTime(gen.created_at)}
+                          {gen.billing_status ? ` · ${gen.billing_status}` : ''}
+                          {gen.final_cost ? ` · ${gen.final_cost}积分` : gen.estimated_cost ? ` · 预估${gen.estimated_cost}积分` : ''}
                         </p>
                       </div>
                     </button>

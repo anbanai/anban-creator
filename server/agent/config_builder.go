@@ -102,29 +102,10 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 			}
 		}
 
-		// Set platform-specific default sizes on the ImageAPI configs.
-		// These are used by generate_image (which reads apiCfg.Size).
-		// Note: Size is set even when Cover/Content config is nil, so the default
-		// is available if the user configures provider/key later.
-		switch ch.Platform {
-		case model.ScopeArticle:
-			if cfg.Wechat.Article.Cover.Image.Size == "" {
-				cfg.Wechat.Article.Cover.Image.Size = imageAPICfg.Sizes.ArticleCover
-			}
-			if cfg.Wechat.Article.Content.Image.Size == "" {
-				cfg.Wechat.Article.Content.Image.Size = imageAPICfg.Sizes.ArticleContent
-			}
-		case model.ScopeSeednote:
-			if cfg.Seednote.Cover.Image.Size == "" {
-				cfg.Seednote.Cover.Image.Size = imageAPICfg.Sizes.SeednoteCover
-			}
-			if cfg.Seednote.Content.Image.Size == "" {
-				cfg.Seednote.Content.Image.Size = imageAPICfg.Sizes.SeednoteContent
-			}
-		}
 	}
 
-	// Apply image ratio override: task-level > project-level > server YAML defaults.
+	// Apply image ratio override: task-level > project-level. Business defaults
+	// live in the agent Skill workflows, not in server model configuration.
 	effectiveRatio := taskImageRatio
 	if effectiveRatio == "" {
 		effectiveRatio = ch.ImageRatio

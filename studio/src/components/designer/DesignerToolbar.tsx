@@ -20,8 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import { getModelCapabilities } from '@/types/designer'
-import type { DesignerSettings, DesignerProvider } from '@/types/designer'
+import type { DesignerSettings, DesignerProvider, ModelCapabilities } from '@/types/designer'
 import { api } from '@/lib/api'
 
 const SIZE_OPTIONS = [
@@ -167,7 +166,7 @@ interface DesignerToolbarProps {
   providers: DesignerProvider[]
   selectedProviderId: string
   onModelChange: (id: string) => void
-  provider: string
+  capabilities?: ModelCapabilities
   settings: DesignerSettings
   onSettingsChange: (settings: DesignerSettings) => void
   onHistoryToggle: () => void
@@ -177,12 +176,12 @@ export default function DesignerToolbar({
   providers,
   selectedProviderId,
   onModelChange,
-  provider,
+  capabilities,
   settings,
   onSettingsChange,
   onHistoryToggle,
 }: DesignerToolbarProps) {
-  const caps = getModelCapabilities(provider)
+  const caps = capabilities
   const refInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch user credit balance
@@ -198,7 +197,7 @@ export default function DesignerToolbar({
 
   function handleRefFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
-    const max = caps?.maxRefImages ?? 0
+    const max = caps?.maxReferenceImages ?? 0
     const combined = [...settings.referenceFiles, ...files].slice(0, max)
     update({ referenceFiles: combined })
     e.target.value = ''
@@ -208,10 +207,10 @@ export default function DesignerToolbar({
     update({ referenceFiles: settings.referenceFiles.filter((_, i) => i !== index) })
   }
 
-  const showCount = caps?.batch
+  const showCount = (caps?.maxBatch ?? 1) > 1
   const showQuality = (caps?.qualityLevels.length ?? 0) > 0
   const showFormat = (caps?.outputFormats.length ?? 0) > 1
-  const showRefs = (caps?.maxRefImages ?? 0) > 0
+  const showRefs = (caps?.supportsReference ?? false) && (caps?.maxReferenceImages ?? 0) > 0
 
   // Generate object URLs for reference image previews
   const [refPreviewUrls, setRefPreviewUrls] = useState<string[]>([])
@@ -459,7 +458,7 @@ export default function DesignerToolbar({
               <div className="space-y-2">
                 <h4 className={sectionHeader}>
                   <ImagePlus className="h-3 w-3" />
-                  参考图 ({settings.referenceFiles.length}/{caps!.maxRefImages})
+                  参考图 ({settings.referenceFiles.length}/{caps!.maxReferenceImages})
                 </h4>
                 <div className="space-y-1.5">
                   {refPreviewUrls.length > 0 && (
@@ -478,7 +477,7 @@ export default function DesignerToolbar({
                       ))}
                     </div>
                   )}
-                  {settings.referenceFiles.length < (caps?.maxRefImages ?? 0) && (
+                  {settings.referenceFiles.length < (caps?.maxReferenceImages ?? 0) && (
                     <Button
                       variant="ghost"
                       size="sm"

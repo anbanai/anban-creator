@@ -163,7 +163,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 		wantContentSize string
 	}{
 		{
-			name:     "article defaults",
+			name:     "article model config does not inject business defaults",
 			platform: model.ScopeArticle,
 			imageAPICfg: &srvconfig.ImageAPIConfig{
 				Sizes: srvconfig.SizesConfig{
@@ -171,11 +171,11 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 					ArticleContent: "16:9",
 				},
 			},
-			wantCoverSize:   "16:9",
-			wantContentSize: "16:9",
+			wantCoverSize:   "",
+			wantContentSize: "",
 		},
 		{
-			name:     "seednote defaults",
+			name:     "seednote model config does not inject business defaults",
 			platform: model.ScopeSeednote,
 			imageAPICfg: &srvconfig.ImageAPIConfig{
 				Sizes: srvconfig.SizesConfig{
@@ -183,11 +183,11 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 					SeednoteContent: "3:4",
 				},
 			},
-			wantCoverSize:   "3:4",
-			wantContentSize: "3:4",
+			wantCoverSize:   "",
+			wantContentSize: "",
 		},
 		{
-			name:     "explicit cover size overrides platform default",
+			name:     "explicit image config size is preserved",
 			platform: model.ScopeArticle,
 			imageAPICfg: &srvconfig.ImageAPIConfig{
 				Cover: &appconfig.ImageAPI{
@@ -201,7 +201,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 				},
 			},
 			wantCoverSize:   "9:16",
-			wantContentSize: "16:9",
+			wantContentSize: "",
 		},
 		{
 			name:            "nil imageAPICfg does not panic",
@@ -248,14 +248,7 @@ func getPlatformSizes(cfg *appconfig.Config, platform string) (cover, content st
 }
 
 func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
-	yamlCfg := &srvconfig.ImageAPIConfig{
-		Sizes: srvconfig.SizesConfig{
-			ArticleCover:    "16:9",
-			ArticleContent:  "16:9",
-			SeednoteCover:   "3:4",
-			SeednoteContent: "3:4",
-		},
-	}
+	yamlCfg := &srvconfig.ImageAPIConfig{}
 
 	tests := []struct {
 		name            string
@@ -266,7 +259,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 		wantContentSize string
 	}{
 		{
-			name: "both empty falls back to YAML defaults",
+			name: "both empty leaves size to skill workflow",
 			project: &model.Project{
 				Platform:   model.ScopeArticle,
 				Name:       "Test",
@@ -274,11 +267,11 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 			},
 			imageAPICfg:     yamlCfg,
 			taskImageRatio:  "",
-			wantCoverSize:   "16:9",
-			wantContentSize: "16:9",
+			wantCoverSize:   "",
+			wantContentSize: "",
 		},
 		{
-			name: "project ratio overrides YAML defaults",
+			name: "project ratio is applied",
 			project: &model.Project{
 				Platform:   model.ScopeArticle,
 				Name:       "Test",
@@ -302,7 +295,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 			wantContentSize: "4:3",
 		},
 		{
-			name: "task ratio without project ratio overrides YAML",
+			name: "task ratio without project ratio is applied",
 			project: &model.Project{
 				Platform:   model.ScopeSeednote,
 				Name:       "Test",

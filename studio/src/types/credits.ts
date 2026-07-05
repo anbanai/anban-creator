@@ -64,7 +64,7 @@ export interface CreditPricing {
   model_prices?: {
     currency_rates?: Record<string, { to_cny: number }>
     token_models?: Record<string, Record<string, number | string>>
-    image_generation?: Record<string, Record<string, number | string>>
+    image_generation?: Record<string, ImageGenerationPrice>
     video_generation?: Record<string, Record<string, unknown>>
   }
   billing?: {
@@ -81,4 +81,18 @@ export interface CreditPricing {
     register_bonus: number
     invite_reward: number
   }
+}
+
+export interface ImageGenerationPrice {
+  pricing_type?: 'per_image' | 'openai_image_usage' | string
+  currency?: string
+  unit?: number | string
+  price?: number
+  text_input?: number
+  text_cached_input?: number
+  image_input?: number
+  image_cached_input?: number
+  image_output?: number
+  require_usage?: boolean
+  estimate_table?: Record<string, Record<string, number>>
 }

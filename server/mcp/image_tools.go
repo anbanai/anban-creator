@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
@@ -184,24 +185,35 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	}
 
 	billingProvider, billingModel, billingSource := resolveImageBillingModel(ctx, userID, imageModelKey)
-	if err := maybeDeductForResolvedModel(ctx, userID, model.CreditTypeImageGen, billingProvider, billingModel, 1, taskID, billingSource); err != nil {
-		if mcpLog != nil {
-			// billingError below also logs the err with tool name; this entry
-			// adds task_id/project_id/stage so concurrent-task greps can land.
-			mcpLog.Warn().
-				Str("tool", "generate_image").
-				Str("task_id", taskID).
-				Str("project_id", projectID).
-				Str("user_id", userID).
-				Str("stage", "deduct").
-				Str("image_model_key", imageModelKey).
-				Str("billing_provider", billingProvider).
-				Str("billing_model", billingModel).
-				Str("billing_source", billingSource).
-				Err(err).
-				Msg("MCP generate_image failed")
+	dynamicProvider, dynamicModel, dynamicRoute, dynamicBilling := resolveDynamicImageGenerationBillingRoute(imageType, billingModel, billingSource)
+	if !dynamicBilling {
+		if err := maybeDeductForResolvedModel(ctx, userID, model.CreditTypeImageGen, billingProvider, billingModel, 1, taskID, billingSource); err != nil {
+			if mcpLog != nil {
+				// billingError below also logs the err with tool name; this entry
+				// adds task_id/project_id/stage so concurrent-task greps can land.
+				mcpLog.Warn().
+					Str("tool", "generate_image").
+					Str("task_id", taskID).
+					Str("project_id", projectID).
+					Str("user_id", userID).
+					Str("stage", "deduct").
+					Str("image_model_key", imageModelKey).
+					Str("billing_provider", billingProvider).
+					Str("billing_model", billingModel).
+					Str("billing_source", billingSource).
+					Err(err).
+					Msg("MCP generate_image failed")
+			}
+			return billingError("generate image", err), nil
 		}
-		return billingError("generate image", err), nil
+	} else if mcpLog != nil {
+		mcpLog.Debug().
+			Str("tool", "generate_image").
+			Str("task_id", taskID).
+			Str("user_id", userID).
+			Str("billing_provider", dynamicProvider).
+			Str("billing_model", dynamicModel).
+			Msg("MCP generate_image defers dynamic usage billing until provider response")
 	}
 
 	result, err := svcs.ImageSvc.GenerateImage(ctx, userID, projectID, prompt, imageType, outputPath, refPath, refPaths, taskID, size, imageModelKey, watermark)
@@ -220,6 +232,29 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 				Msg("MCP generate_image failed")
 		}
 		return billingError("generate image", err), nil
+	}
+
+	if dynamicBilling {
+		if result.Usage == nil {
+			return billingError("generate image", fmt.Errorf("%s usage is required for billing", dynamicModel)), nil
+		}
+		usage := srvconfig.ImageGenerationUsage{
+			Size:                   firstNonEmpty(result.Size, size),
+			Count:                  1,
+			TextInputTokens:        result.Usage.TextInputTokens,
+			TextCachedInputTokens:  result.Usage.TextCachedInputTokens,
+			ImageInputTokens:       result.Usage.ImageInputTokens,
+			ImageCachedInputTokens: result.Usage.ImageCachedInputTokens,
+			ImageOutputTokens:      result.Usage.ImageOutputTokens,
+			TotalTokens:            result.Usage.TotalTokens,
+			ReferenceImageCount:    len(refPaths),
+		}
+		if refPath != "" {
+			usage.ReferenceImageCount++
+		}
+		if _, err := maybeDeductImageGenerationUsage(ctx, userID, taskID, dynamicRoute, dynamicProvider, dynamicModel, usage); err != nil {
+			return billingError("generate image", err), nil
+		}
 	}
 
 	// Register the generated image as a task_file so list_task_files returns
@@ -750,6 +785,72 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		"usage":           result.Usage,
 		"credits_charged": creditsCharged,
 	})
+}
+
+func resolveDynamicImageGenerationBillingRoute(imageType, modelName, billingSource string) (providerKey, resolvedModel, routeName string, ok bool) {
+	if billSvc == nil || billSvc.config == nil {
+		return "", "", "", false
+	}
+	var route srvconfig.ImageGenerationRouteConfig
+	switch {
+	case strings.HasPrefix(billingSource, "preset:"):
+		presetKey := strings.TrimPrefix(billingSource, "preset:")
+		for _, preset := range billSvc.config.ImagePresets {
+			if preset.Key != presetKey || preset.ProviderRoute == "" {
+				continue
+			}
+			var found bool
+			route, found = imageGenerationRouteByPathForMCP(preset.ProviderRoute)
+			if !found {
+				return "", "", "", false
+			}
+			routeName = strings.TrimPrefix(strings.TrimSpace(preset.ProviderRoute), "model_routes.")
+			break
+		}
+	case billingSource == "system_default" || billingSource == "":
+		if imageType == "cover" {
+			route = billSvc.config.ModelRoutes.ImageGeneration.Cover
+			routeName = "image_generation.cover"
+		} else {
+			route = billSvc.config.ModelRoutes.ImageGeneration.Content
+			routeName = "image_generation.content"
+		}
+	default:
+		return "", "", "", false
+	}
+	if route.Provider == "" {
+		return "", "", "", false
+	}
+	if route.Model == "" {
+		route.Model = modelName
+	}
+	if route.Model == "" {
+		return "", "", "", false
+	}
+	price, exists := billSvc.config.ModelPrices.ImageGeneration[route.Provider+"/"+route.Model]
+	if !exists || price.PricingType != srvconfig.ImagePricingTypeOpenAIUsage {
+		return "", "", "", false
+	}
+	return route.Provider, route.Model, routeName, true
+}
+
+func imageGenerationRouteByPathForMCP(path string) (srvconfig.ImageGenerationRouteConfig, bool) {
+	if billSvc == nil || billSvc.config == nil {
+		return srvconfig.ImageGenerationRouteConfig{}, false
+	}
+	path = strings.TrimPrefix(strings.TrimSpace(path), "model_routes.")
+	switch path {
+	case "image_generation.cover":
+		return billSvc.config.ModelRoutes.ImageGeneration.Cover, true
+	case "image_generation.content":
+		return billSvc.config.ModelRoutes.ImageGeneration.Content, true
+	}
+	const designerPrefix = "image_generation.designer."
+	if strings.HasPrefix(path, designerPrefix) {
+		route, ok := billSvc.config.ModelRoutes.ImageGeneration.Designer[strings.TrimPrefix(path, designerPrefix)]
+		return route, ok
+	}
+	return srvconfig.ImageGenerationRouteConfig{}, false
 }
 
 // downloadHTTPSImage downloads an image from a public HTTPS URL.

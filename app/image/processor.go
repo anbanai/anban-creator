@@ -229,16 +229,17 @@ type GenerateOnlyResult struct {
 // GenerateRawResult 调用 AI provider 生成图片后返回原始结果。
 // URL 字段为 provider 直接返回的内容：远程 HTTPS URL、data URL 或本地临时文件路径（已转为 data URL）。
 type GenerateRawResult struct {
-	URL             string `json:"url"`                        // 远程 URL 或 data URL
-	Size            string `json:"size"`                       // provider 报告的尺寸（如 "1024x1024"）
-	Index           int    `json:"index"`                      // 批量时的序号
-	Prompt          string `json:"prompt,omitempty"`           // 实际发送给 provider 的最终提示词
-	Provider        string `json:"provider,omitempty"`         // provider 名称
-	Model           string `json:"model,omitempty"`            // 实际使用的模型
-	RevisedPrompt   string `json:"revised_prompt,omitempty"`   // provider 返回的优化提示词
-	ResponseType    string `json:"response_type,omitempty"`    // 返回类型：b64_json / url / empty
-	ResponsePreview string `json:"response_preview,omitempty"` // URL 原样输出，base64 截断输出
-	OutputMIME      string `json:"output_mime,omitempty"`      // 当前 URL/data URL 对应的图片 MIME
+	URL             string                `json:"url"`                        // 远程 URL 或 data URL
+	Size            string                `json:"size"`                       // provider 报告的尺寸（如 "1024x1024"）
+	Index           int                   `json:"index"`                      // 批量时的序号
+	Prompt          string                `json:"prompt,omitempty"`           // 实际发送给 provider 的最终提示词
+	Provider        string                `json:"provider,omitempty"`         // provider 名称
+	Model           string                `json:"model,omitempty"`            // 实际使用的模型
+	RevisedPrompt   string                `json:"revised_prompt,omitempty"`   // provider 返回的优化提示词
+	ResponseType    string                `json:"response_type,omitempty"`    // 返回类型：b64_json / url / empty
+	ResponsePreview string                `json:"response_preview,omitempty"` // URL 原样输出，base64 截断输出
+	OutputMIME      string                `json:"output_mime,omitempty"`      // 当前 URL/data URL 对应的图片 MIME
+	Usage           *ImageGenerationUsage `json:"usage,omitempty"`
 }
 
 // GenerateRaw 调用 AI provider 生成图片，返回原始 URL 或 data URL。
@@ -282,6 +283,7 @@ func (p *Processor) GenerateRaw(prompt string) (*GenerateRawResult, error) {
 		ResponseType:    result.ResponseType,
 		ResponsePreview: result.ResponsePreview,
 		OutputMIME:      detectImageMIMEFromURL(url),
+		Usage:           result.Usage,
 	}, nil
 }
 
@@ -337,6 +339,7 @@ func (p *Processor) GenerateRawWithSize(prompt, size string) (*GenerateRawResult
 		ResponseType:    result.ResponseType,
 		ResponsePreview: result.ResponsePreview,
 		OutputMIME:      detectImageMIMEFromURL(url),
+		Usage:           result.Usage,
 	}, nil
 }
 

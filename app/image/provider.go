@@ -70,6 +70,16 @@ type GenerateResult struct {
 	ResponseType    string           // 返回类型：b64_json / url / file / empty
 	ResponsePreview string           // 原始返回预览：URL 原样输出，base64 截断输出
 	Images          []GeneratedImage // 批量生成的多张图片
+	Usage           *ImageGenerationUsage
+}
+
+type ImageGenerationUsage struct {
+	TextInputTokens        int64
+	TextCachedInputTokens  int64
+	ImageInputTokens       int64
+	ImageCachedInputTokens int64
+	ImageOutputTokens      int64
+	TotalTokens            int64
 }
 
 // GeneratedImage 单张生成的图片

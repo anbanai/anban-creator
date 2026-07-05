@@ -65,7 +65,7 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "prompt is required")
 	}
 
-	genID, err := h.svc.CreateGenerationRecord(c.Context(), userID, req)
+	created, err := h.svc.CreateGenerationRecord(c.Context(), userID, req)
 	if err != nil {
 		if errors.Is(err, service.ErrInsufficientCredits) {
 			return Error(c, fiber.StatusPaymentRequired, "积分不足，请充值后重试")
@@ -74,11 +74,11 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, err.Error())
 	}
 
-	go h.svc.ExecuteGeneration(context.Background(), genID)
+	go h.svc.ExecuteGeneration(context.Background(), created.GenerationID)
 
 	h.logger.Info().
 		Str("user_id", userID).
-		Str("gen_id", genID).
+		Str("gen_id", created.GenerationID).
 		Str("prompt_preview", truncate(req.Prompt, 80)).
 		Str("provider", req.Provider).
 		Str("model", req.Model).
@@ -86,10 +86,7 @@ func (h *DesignerHandler) Generate(c fiber.Ctx) error {
 		Int("n", req.N).
 		Msg("designer: generation request accepted")
 
-	return Success(c, fiber.Map{
-		"generation_id": genID,
-		"status":        "generating",
-	})
+	return Success(c, created)
 }
 
 // UploadReference handles POST /api/v1/designer/upload-reference

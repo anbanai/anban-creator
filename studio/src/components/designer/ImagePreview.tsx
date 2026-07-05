@@ -21,6 +21,10 @@ export interface PreviewMetadata {
   quality?: string
   size?: string
   outputFormat?: string
+  estimatedCost?: number
+  finalCost?: number
+  billingStatus?: string
+  totalTokens?: number
   createdAt: string
 }
 
@@ -129,6 +133,10 @@ export default function ImagePreview({
     ...(metadata.outputFormat
       ? [{ label: '格式', value: metadata.outputFormat.toUpperCase() }]
       : []),
+    ...(metadata.estimatedCost ? [{ label: '预估积分', value: `${metadata.estimatedCost}` }] : []),
+    ...(metadata.finalCost ? [{ label: '最终积分', value: `${metadata.finalCost}` }] : []),
+    ...(metadata.billingStatus ? [{ label: '结算状态', value: metadata.billingStatus }] : []),
+    ...(metadata.totalTokens ? [{ label: 'Usage Tokens', value: `${metadata.totalTokens}` }] : []),
   ]
 
   return (

@@ -10,7 +10,6 @@ import {
 } from '@/components/ui/command'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import { getModelCapabilities } from '@/types/designer'
 import type { DesignerProvider } from '@/types/designer'
 import { cn } from '@/lib/utils'
 
@@ -52,7 +51,12 @@ export default function ModelSelector({
           <span className={cn('truncate font-medium', !selected && 'text-muted-foreground')}>
             {selected?.name ?? '选择模型...'}
           </span>
-          {selected && selected.credits > 0 && (
+          {selected && selected.pricing.pricingType === 'openai_image_usage' && (
+            <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[9px]">
+              用量计费
+            </Badge>
+          )}
+          {selected && selected.pricing.pricingType !== 'openai_image_usage' && selected.credits > 0 && (
             <Tooltip>
               <TooltipTrigger>
                 <Badge variant="secondary" className="h-4 shrink-0 gap-0.5 px-1.5 text-[9px]">
@@ -80,7 +84,7 @@ export default function ModelSelector({
             {sortedProviders.map((p) => {
               const isSelected = p.id === selectedProviderId && p.enabled
               const isDisabled = !p.enabled
-              const caps = getModelCapabilities(p.provider)
+              const caps = p.capabilities
               return (
                 <CommandItem
                   key={p.id}
@@ -111,7 +115,12 @@ export default function ModelSelector({
                         未启用
                       </Badge>
                     )}
-                    {!isDisabled && p.credits > 0 && (
+                    {!isDisabled && p.pricing.pricingType === 'openai_image_usage' && (
+                      <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
+                        用量计费
+                      </Badge>
+                    )}
+                    {!isDisabled && p.pricing.pricingType !== 'openai_image_usage' && p.credits > 0 && (
                       <Tooltip>
                         <TooltipTrigger>
                           <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
@@ -123,14 +132,14 @@ export default function ModelSelector({
                       </Tooltip>
                     )}
                   </div>
-                  {caps && !isDisabled && (caps.batch || caps.inpainting) && (
+                  {caps && !isDisabled && ((caps.maxBatch ?? 1) > 1 || caps.supportsMask) && (
                     <div className="ml-[22px] flex gap-1">
-                      {caps.batch && (
+                      {(caps.maxBatch ?? 1) > 1 && (
                         <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
                           批量
                         </Badge>
                       )}
-                      {caps.inpainting && (
+                      {caps.supportsMask && (
                         <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
                           局部编辑
                         </Badge>

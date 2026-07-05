@@ -71,7 +71,6 @@ func TestSemanticModelConfigDerivesRuntimeRoutes(t *testing.T) {
 	t.Setenv("MOONSHOT_API_KEY", "moonshot-test")
 	t.Setenv("VOLCENGINE_ARK_API_KEY", "ark-test")
 	t.Setenv("WANGCAI_OPENAI_API_KEY", "wangcai-test")
-	t.Setenv("WANGCAI_GPT_IMAGE_2_COST_CNY_PER_IMAGE", "0.18")
 
 	dir := t.TempDir()
 	pluginDir := fakePluginDir(t, dir)
@@ -115,11 +114,9 @@ model_routes:
     cover:
       provider: volcengine_ark
       model: doubao-seedream-5-0-260128
-      size: 9:16:2k
     content:
       provider: volcengine_ark
       model: doubao-seedream-5-0-260128
-      size: 9:16:2k
     designer:
       gpt_image_2:
         alias: GPT Image 2
@@ -127,11 +124,6 @@ model_routes:
         model: gpt-image-2
         enabled: true
         response_format: url
-    sizes:
-      article_cover: "16:9"
-      article_content: "16:9"
-      seednote_cover: "3:4"
-      seednote_content: "3:4"
   video_generation:
     provider: volcengine_ark
     timeout: 10m
@@ -158,9 +150,17 @@ model_prices:
       output: 8.00
   image_generation:
     wangcai_openai/gpt-image-2:
-      currency: CNY
-      unit: image
-      price: "${WANGCAI_GPT_IMAGE_2_COST_CNY_PER_IMAGE}"
+      pricing_type: openai_image_usage
+      currency: USD
+      unit: 1000000
+      require_usage: true
+      text_input: 5.00
+      text_cached_input: 1.25
+      image_input: 8.00
+      image_cached_input: 2.00
+      image_output: 30.00
+      estimate_table:
+        "1024x1024": {low: 0.006, medium: 0.053, high: 0.211}
 billing:
   credits_per_cny: 1000
   tier_multipliers:
@@ -201,11 +201,54 @@ claude:
 	if cfg.VideoAPI.Key != "ark-test" || len(cfg.VideoAPI.ModelCatalog) != 1 || cfg.VideoAPI.ModelCatalog[0].ModelID != "doubao-seedance-2-0-mini-260615" {
 		t.Fatalf("derived video api config = %#v", cfg.VideoAPI)
 	}
-	if cfg.ImageAPI.Sizes.SeednoteCover != "3:4" {
-		t.Fatalf("derived image sizes = %#v", cfg.ImageAPI.Sizes)
-	}
 	if len(cfg.ImagePresets) != 1 || cfg.ImagePresets[0].Provider != "openai" || cfg.ImagePresets[0].Endpoint != "http://18.141.196.64:18888/v1" || cfg.ImagePresets[0].APIKey != "wangcai-test" {
 		t.Fatalf("derived image preset route = %#v", cfg.ImagePresets)
+	}
+}
+
+func TestSemanticModelConfigRejectsImageGenerationBusinessSizes(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+	for name, body := range map[string]string{
+		"sizes block": `
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_routes:
+  image_generation:
+    sizes:
+      article_cover: "16:9"
+claude:
+  plugin_dir: "` + pluginDir + `"
+`,
+		"cover size": `
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_routes:
+  image_generation:
+    cover:
+      provider: volcengine_ark
+      model: doubao-seedream-5-0-260128
+      size: "16:9"
+claude:
+  plugin_dir: "` + pluginDir + `"
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfgPath := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".yaml")
+			if err := os.WriteFile(cfgPath, []byte(body), 0644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			_, err := NewConfig(cfgPath)
+			if err == nil || !strings.Contains(err.Error(), "image size") && !strings.Contains(err.Error(), "image_generation.sizes") {
+				t.Fatalf("error = %v, want business image size rejection", err)
+			}
+		})
 	}
 }
 
@@ -260,5 +303,139 @@ func TestTokenModelCostUsesRealCostAndTierMultiplier(t *testing.T) {
 	}
 	if cost.PriceSnapshot.Provider != "moonshot" || cost.PriceSnapshot.Model != "kimi-k2.7-code-highspeed" {
 		t.Fatalf("price snapshot = %#v", cost.PriceSnapshot)
+	}
+}
+
+func TestImageGenerationEstimateAndUsageCredits(t *testing.T) {
+	cfg := &Config{
+		ModelPrices: ModelPricesConfig{
+			CurrencyRates: map[string]CurrencyRate{
+				"USD": {ToCNY: 7.2},
+			},
+			ImageGeneration: map[string]ImageGenerationPrice{
+				"wangcai_openai/gpt-image-2": {
+					PricingType:      ImagePricingTypeOpenAIUsage,
+					Currency:         "USD",
+					Unit:             1_000_000,
+					RequireUsage:     true,
+					TextInput:        5.00,
+					TextCachedInput:  1.25,
+					ImageInput:       8.00,
+					ImageCachedInput: 2.00,
+					ImageOutput:      30.00,
+					EstimateTable: map[string]map[string]FlexibleFloat{
+						"1024x1024": {"medium": FlexibleFloat(0.053)},
+					},
+				},
+			},
+		},
+		Billing: BillingConfig{
+			CreditsPerCNY:         1000,
+			TierMultipliers:       map[string]float64{"pro": 1.15},
+			DefaultUserMultiplier: 1,
+			MinimumChargeCredits:  1,
+		},
+	}
+
+	estimate, err := cfg.CalculateImageGenerationEstimateCredits("wangcai_openai", "gpt-image-2", ImageGenerationUsage{
+		Size:    "1024x1024",
+		Quality: "medium",
+		Count:   1,
+	}, "pro", 1)
+	if err != nil {
+		t.Fatalf("CalculateImageGenerationEstimateCredits() error = %v", err)
+	}
+	if estimate.BaseCredits != 382 || estimate.FinalCredits != 440 || !estimate.Estimated {
+		t.Fatalf("estimate = %#v, want base=382 final=440 estimated=true", estimate)
+	}
+
+	usage, err := cfg.CalculateImageGenerationUsageCredits("wangcai_openai", "gpt-image-2", ImageGenerationUsage{
+		Size:              "1024x1024",
+		Quality:           "medium",
+		Count:             1,
+		TextInputTokens:   20,
+		ImageInputTokens:  100,
+		ImageOutputTokens: 1767,
+		TotalTokens:       1887,
+	}, "pro", 1)
+	if err != nil {
+		t.Fatalf("CalculateImageGenerationUsageCredits() error = %v", err)
+	}
+	if usage.Estimated {
+		t.Fatalf("usage cost should not be estimated: %#v", usage)
+	}
+	if usage.BaseCredits != 389 || usage.FinalCredits != 448 {
+		t.Fatalf("usage credits = base %d final %d, want base 389 final 448", usage.BaseCredits, usage.FinalCredits)
+	}
+	if usage.PriceSnapshot.PricingType != ImagePricingTypeOpenAIUsage || usage.PriceSnapshot.ImageOutput != 30 {
+		t.Fatalf("price snapshot = %#v", usage.PriceSnapshot)
+	}
+}
+
+func TestImageGenerationUsageCreditsRequireUsageForGPTImage2(t *testing.T) {
+	cfg := &Config{
+		ModelPrices: ModelPricesConfig{
+			CurrencyRates: map[string]CurrencyRate{"USD": {ToCNY: 7.2}},
+			ImageGeneration: map[string]ImageGenerationPrice{
+				"wangcai_openai/gpt-image-2": {
+					PricingType:  ImagePricingTypeOpenAIUsage,
+					Currency:     "USD",
+					Unit:         1_000_000,
+					RequireUsage: true,
+					ImageOutput:  30,
+				},
+			},
+		},
+		Billing: BillingConfig{CreditsPerCNY: 1000, MinimumChargeCredits: 1},
+	}
+
+	_, err := cfg.CalculateImageGenerationUsageCredits("wangcai_openai", "gpt-image-2", ImageGenerationUsage{
+		Size: "1024x1024", Quality: "medium", Count: 1,
+	}, "free", 1)
+	if err == nil || !strings.Contains(err.Error(), "usage is required") {
+		t.Fatalf("error = %v, want usage required", err)
+	}
+}
+
+func TestSemanticModelConfigRejectsGPTImage2FixedPrice(t *testing.T) {
+	t.Setenv("WANGCAI_OPENAI_API_KEY", "wangcai-test")
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+	cfgPath := filepath.Join(dir, "config.yaml")
+	body := []byte(`
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_providers:
+  wangcai_openai:
+    protocol: openai_compatible
+    base_url: http://18.141.196.64:18888/v1
+    api_key: "${WANGCAI_OPENAI_API_KEY}"
+model_routes:
+  image_generation:
+    designer:
+      gpt_image_2:
+        alias: GPT Image 2
+        provider: wangcai_openai
+        model: gpt-image-2
+        enabled: true
+model_prices:
+  image_generation:
+    wangcai_openai/gpt-image-2:
+      currency: CNY
+      unit: image
+      price: 0.38
+claude:
+  plugin_dir: "` + pluginDir + `"
+`)
+	if err := os.WriteFile(cfgPath, body, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := NewConfig(cfgPath)
+	if err == nil || !strings.Contains(err.Error(), "gpt-image-2 requires pricing_type openai_image_usage") {
+		t.Fatalf("error = %v, want gpt-image-2 fixed price rejection", err)
 	}
 }

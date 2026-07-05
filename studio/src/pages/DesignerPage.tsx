@@ -12,7 +12,6 @@ import type { InlineMaskEditorHandle } from '@/components/designer/InlineMaskEdi
 import { designerApi } from '@/lib/api/designer'
 import { getApiErrorMessage } from '@/lib/http-client'
 import type { GenerateImage, ImageGeneration, ImageGenerationResult } from '@/types/designer'
-import { getModelCapabilities } from '@/types/designer'
 import { saveActiveGeneration, loadActiveGeneration, clearActiveGeneration } from '@/lib/designer-session'
 
 const DEFAULT_SETTINGS: DesignerSettings = {
@@ -78,8 +77,19 @@ export default function DesignerPage() {
   // Auto-select first enabled provider if none selected or current selection is unavailable/disabled
   const activeProvider = providerList.find((p) => p.id === selectedProviderId && p.enabled)
   const effectiveProvider = activeProvider ?? providerList.find((p) => p.enabled)
-  const effectiveCaps = getModelCapabilities(effectiveProvider?.provider ?? '')
-  const canInpaint = effectiveCaps?.inpainting ?? false
+  const effectiveCaps = effectiveProvider?.capabilities
+  const canInpaint = effectiveCaps?.supportsMask ?? false
+
+  useEffect(() => {
+    if (!effectiveProvider || selectedProviderId) return
+    setSelectedProviderId(effectiveProvider.id)
+    setSettings((current) => ({
+      ...current,
+      size: effectiveProvider.capabilities.sizePresets[0] ?? current.size,
+      quality: effectiveProvider.capabilities.qualityLevels[0] ?? current.quality,
+      n: Math.min(current.n, Math.max(1, effectiveProvider.capabilities.maxBatch || 1)),
+    }))
+  }, [effectiveProvider, selectedProviderId])
 
   function stopPolling() {
     if (pollingRef.current) {
@@ -229,11 +239,12 @@ export default function DesignerPage() {
   function handleModelChange(providerId: string) {
     setSelectedProviderId(providerId)
     const newProvider = providerList.find((p) => p.id === providerId)
-    const caps = getModelCapabilities(newProvider?.provider ?? '')
+    const caps = newProvider?.capabilities
     setSettings({
       ...DEFAULT_SETTINGS,
-      ...(caps?.batch ? {} : { n: 1 }),
-      ...(caps?.sizePresets?.length ? {} : { size: '1:1' }),
+      size: caps?.sizePresets?.[0] ?? '1:1',
+      quality: caps?.qualityLevels?.[0] ?? DEFAULT_SETTINGS.quality,
+      n: Math.min(DEFAULT_SETTINGS.n, Math.max(1, caps?.maxBatch ?? 1)),
     })
   }
 
@@ -295,7 +306,7 @@ export default function DesignerPage() {
         providers={providerList}
         selectedProviderId={effectiveProvider?.id ?? ''}
         onModelChange={handleModelChange}
-        provider={effectiveProvider?.provider ?? ''}
+        capabilities={effectiveProvider?.capabilities}
         settings={settings}
         onSettingsChange={setSettings}
         onHistoryToggle={() => setHistoryOpen(true)}
@@ -356,6 +367,10 @@ export default function DesignerPage() {
             quality: currentGeneration.quality,
             size: currentGeneration.size,
             outputFormat: currentGeneration.output_format,
+            estimatedCost: currentGeneration.estimated_cost,
+            finalCost: currentGeneration.final_cost,
+            billingStatus: currentGeneration.billing_status,
+            totalTokens: currentGeneration.total_tokens,
             createdAt: currentGeneration.created_at,
           }}
           canInpaint={canInpaint}

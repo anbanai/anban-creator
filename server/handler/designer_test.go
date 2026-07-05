@@ -17,17 +17,51 @@ import (
 func setupDesignerHandlerTest() *fiber.App {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	enabled := true
-	designerSvc := service.NewDesignerService(nil, nil, nil, &srvconfig.ImageAPIConfig{
-		Designer: map[string]*appconfig.ImageAPI{
-			"test-openai": {
-				Alias:    "Test OpenAI",
-				Enable:   &enabled,
-				Provider: "openai",
-				Model:    "gpt-image-2",
-				Credits:  10,
+	cfg := &srvconfig.Config{
+		ModelRoutes: srvconfig.ModelRoutesConfig{
+			ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
+				Designer: map[string]srvconfig.ImageGenerationRouteConfig{
+					"test-openai": {
+						Alias:    "Test OpenAI",
+						Enabled:  true,
+						Provider: "wangcai_openai",
+						Model:    "gpt-image-2",
+					},
+				},
 			},
 		},
-	}, nil, &logger)
+		ModelPrices: srvconfig.ModelPricesConfig{
+			CurrencyRates: map[string]srvconfig.CurrencyRate{"USD": {ToCNY: 7.2}},
+			ImageGeneration: map[string]srvconfig.ImageGenerationPrice{
+				"wangcai_openai/gpt-image-2": {
+					PricingType:      srvconfig.ImagePricingTypeOpenAIUsage,
+					Currency:         "USD",
+					Unit:             1_000_000,
+					RequireUsage:     true,
+					TextInput:        5,
+					TextCachedInput:  1.25,
+					ImageInput:       8,
+					ImageCachedInput: 2,
+					ImageOutput:      30,
+					EstimateTable: map[string]map[string]srvconfig.FlexibleFloat{
+						"1024x1024": {"medium": srvconfig.FlexibleFloat(0.053)},
+					},
+				},
+			},
+		},
+		Billing: srvconfig.BillingConfig{CreditsPerCNY: 1000, MinimumChargeCredits: 1},
+		ImageAPI: srvconfig.ImageAPIConfig{
+			Designer: map[string]*appconfig.ImageAPI{
+				"test-openai": {
+					Alias:    "Test OpenAI",
+					Enable:   &enabled,
+					Provider: "openai",
+					Model:    "gpt-image-2",
+				},
+			},
+		},
+	}
+	designerSvc := service.NewDesignerService(nil, nil, nil, cfg, nil, &logger)
 	handler := NewDesignerHandler(designerSvc, &logger)
 
 	app := fiber.New()
@@ -80,6 +114,18 @@ func TestDesignerProvidersUsesStandardResponseEnvelope(t *testing.T) {
 	}
 	if providers[0].Idx != 0 {
 		t.Fatalf("providers[0].Idx = %d, want 0", providers[0].Idx)
+	}
+	if providers[0].ProviderKey != "wangcai_openai" || providers[0].Route != "image_generation.designer.test-openai" {
+		t.Fatalf("provider route fields = %+v", providers[0])
+	}
+	if providers[0].Capabilities.MaxBatch != 10 || !providers[0].Capabilities.SupportsReference || len(providers[0].Capabilities.QualityLevels) == 0 {
+		t.Fatalf("capabilities = %+v", providers[0].Capabilities)
+	}
+	if providers[0].Pricing.PricingType != srvconfig.ImagePricingTypeOpenAIUsage || !providers[0].Pricing.RequiresUsage {
+		t.Fatalf("pricing = %+v", providers[0].Pricing)
+	}
+	if providers[0].Credits != 0 {
+		t.Fatalf("legacy credits = %d, want 0 for dynamic GPT Image 2", providers[0].Credits)
 	}
 }
 

@@ -81,7 +81,7 @@ Anban 智能创作助手采用**钱包模式**管理积分：
 | 大纲生成 | glm-5-turbo | 60 |
 | 大纲生成 | glm-5.1 | 80 |
 
-> 以上为默认定价，全部通过 `config.yaml` 的 `credits.model_costs` 配置，可随时调整。
+> 以上旧按次表仅用于理解历史口径。当前生产配置不再使用 `credits.model_costs`；模型真实成本统一放在 `model_prices`，最终扣费由 `billing` 倍率计算。
 
 ### 4.3 管理员充值接口
 
@@ -155,40 +155,56 @@ credits:
   task_costs:                  # Web 端任务创建费用
     article: 4000
     seednote: 3200
-  model_costs:                 # MCP 直接调用的按模型定价
-    image_gen:
-      "volcengine/doubao-seedream-5-0-260128": 50
-      "openai/dall-e-3": 120
-      "gemini/gemini-2.0-flash": 80
-    article_write:
-      "glm-5-turbo": 300
-      "glm-5.1": 400
-    convert:
-      "glm-5-turbo": 100
-      "glm-5.1": 160
-    humanize:
-      "glm-5-turbo": 80
-      "glm-5.1": 120
-    topic_research:
-      "glm-5-turbo": 60
-      "glm-5.1": 80
-    seo:
-      "glm-5-turbo": 60
-      "glm-5.1": 80
-    outline:
-      "glm-5-turbo": 60
-      "glm-5.1": 80
   admin_api_key: ""            # 管理员充值 API Key
+
+model_prices:
+  currency_rates:
+    USD: {to_cny: 7.20}
+    CNY: {to_cny: 1.0}
+  token_models:
+    moonshot/kimi-k2.7-code:
+      currency: USD
+      unit: 1000000
+      cached_input: 0.19
+      input: 0.95
+      output: 4.00
+  image_generation:
+    volcengine_ark/doubao-seedream-5-0-260128:
+      pricing_type: per_image
+      currency: CNY
+      unit: image
+      price: 0.22
+    wangcai_openai/gpt-image-2:
+      pricing_type: openai_image_usage
+      currency: USD
+      unit: 1000000
+      require_usage: true
+      text_input: 5.00
+      text_cached_input: 1.25
+      image_input: 8.00
+      image_cached_input: 2.00
+      image_output: 30.00
+      estimate_table:
+        "1024x1024": {low: 0.006, medium: 0.053, high: 0.211}
+
+billing:
+  credits_per_cny: 1000
+  tier_multipliers:
+    free: 1.30
+    pro: 1.15
+    enterprise: 1.00
+  default_user_multiplier: 1.00
+  minimum_charge_credits: 1
 ```
 
-> **注意**：`model_costs` 的 key（如 `"glm-5.1"`）必须与 `writing.model` 或用户 BYOK 配置的模型名完全匹配，否则该模型将按免费处理。
+> **注意**：GPT Image 2 必须返回 OpenAI-compatible `usage` 才能结算；生成成功但没有 usage 会退款并失败，不交付结果。历史账单会保存价格快照，后续调价不会改写旧账单。
 
 ## 7. 业务规则
 
 | 规则 | 说明 |
 |------|------|
 | 任务费包含一切 | Web/Plan 创建任务只扣一次任务费，执行中不再扣费 |
-| MCP 按模型定价 | 直接调用 MCP 工具时按实际使用的模型定价扣费 |
+| MCP 按模型定价 | 直接调用 MCP 工具时按 `model_prices` 的真实成本和 usage 扣费 |
 | BYOK 全免 | 用户自带模型（BYOK）所有操作免费 |
 | 图片上传/发布免费 | 图片上传和草稿发布不扣费 |
 | 签到限制 | 每用户每天限签 1 次 |
