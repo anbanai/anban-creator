@@ -106,7 +106,6 @@ export default function TaskDetailPage() {
   })
   const project = projectDetail?.project
   const isVideoTaskFile = (file: TaskFile) => file.mime_type?.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.file_name)
-  const videoFiles = files?.filter(isVideoTaskFile) ?? []
 
   const MAX_PERSISTED_LOGS = 500
   const persistedLogs = (task?.progress_log
@@ -440,6 +439,70 @@ export default function TaskDetailPage() {
   const videoSubjectProfile = task.video_config?.subject_profile?.trim() || '—'
   const videoAudience = task.video_config?.audience?.trim() || '—'
   const videoSingleMessage = task.video_config?.single_message?.trim() || '—'
+  const renderVideoPreviewDetails = (file: TaskFile) => {
+    if (!isVideoTaskFile(file)) return null
+    return (
+      <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
+        <p className="text-sm font-medium text-foreground">创作参数</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs text-muted-foreground">内容类型</p>
+            <p className="mt-1 text-foreground">{videoCreativeType}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">商业目标</p>
+            <p className="mt-1 text-foreground">{videoPurpose}</p>
+          </div>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">人物 / 主体</p>
+          <p className="mt-1 whitespace-pre-wrap text-foreground">{videoSubjectProfile}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs text-muted-foreground">生成任务 ID</p>
+            <p className="mt-1 break-all text-foreground">{task.video_generation_id || '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">规格</p>
+            <p className="mt-1 text-foreground">{videoSpecSummary}</p>
+          </div>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">费用明细</p>
+          <p className="mt-1 text-foreground">
+            估算 {(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()} ·
+            已消耗 {(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}
+          </p>
+          {task.video_config?.pricing_breakdown && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {videoModelDisplayName(task.video_config.pricing_breakdown.model_key)} · {task.video_config.pricing_breakdown.resolution} · 输出 {task.video_config.pricing_breakdown.output_seconds}s
+              {task.video_config.pricing_breakdown.input_video && typeof task.video_config.pricing_breakdown.input_seconds === 'number'
+                ? ` · 输入视频 ${task.video_config.pricing_breakdown.input_seconds}s`
+                : ''}
+            </p>
+          )}
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">参考素材</p>
+          {task.video_config?.references && task.video_config.references.length > 0 ? (
+            <div className="mt-1 divide-y divide-border rounded-md border border-border">
+              {task.video_config.references.map((ref, index) => (
+                <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-2 py-1.5 text-xs">
+                  <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
+                  {ref.input_duration_seconds && (
+                    <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   // Clone this task as a fresh billed task. The server clones the full
   // configuration (three-dimensional style, author/writer, ecommerce package,
@@ -1072,97 +1135,17 @@ export default function TaskDetailPage() {
                     </div>
                   )
                 })()}
-                {/* Video files */}
+                {/* Non-image files share the same full-width preview rows. */}
                 {(() => {
-                  if (videoFiles.length === 0) return null
-                  return (
-                    <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-                      <FilePreviewGallery
-                        files={videoFiles}
-                        taskId={task.id}
-                        inlineItemClassName="shrink-0 snap-start"
-                        renderPreviewDetails={() => (
-                          <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
-                            <p className="text-sm font-medium text-foreground">创作参数</p>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <p className="text-xs text-muted-foreground">内容类型</p>
-                                <p className="mt-1 text-foreground">{videoCreativeType}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">商业目标</p>
-                                <p className="mt-1 text-foreground">{videoPurpose}</p>
-                              </div>
-                            </div>
-                            <div>
-                              <p className="text-xs text-muted-foreground">人物 / 主体</p>
-                              <p className="mt-1 whitespace-pre-wrap text-foreground">{videoSubjectProfile}</p>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <p className="text-xs text-muted-foreground">生成任务 ID</p>
-                                <p className="mt-1 break-all text-foreground">{task.video_generation_id || '—'}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">规格</p>
-                                <p className="mt-1 text-foreground">{videoSpecSummary}</p>
-                              </div>
-                            </div>
-                            <div>
-                              <p className="text-xs text-muted-foreground">费用明细</p>
-                              <p className="mt-1 text-foreground">
-                                估算 {(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()} ·
-                                已消耗 {(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}
-                              </p>
-                              {task.video_config?.pricing_breakdown && (
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {videoModelDisplayName(task.video_config.pricing_breakdown.model_key)} · {task.video_config.pricing_breakdown.resolution} · 输出 {task.video_config.pricing_breakdown.output_seconds}s
-                                  {task.video_config.pricing_breakdown.input_video && typeof task.video_config.pricing_breakdown.input_seconds === 'number'
-                                    ? ` · 输入视频 ${task.video_config.pricing_breakdown.input_seconds}s`
-                                    : ''}
-                                </p>
-                              )}
-                            </div>
-                            <div>
-                              <p className="text-xs text-muted-foreground">参考素材</p>
-                              {task.video_config?.references && task.video_config.references.length > 0 ? (
-                                <div className="mt-1 divide-y divide-border rounded-md border border-border">
-                                  {task.video_config.references.map((ref, index) => (
-                                    <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-2 py-1.5 text-xs">
-                                      <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
-                                      {ref.input_duration_seconds && (
-                                        <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      />
-                    </div>
-                  )
-                })()}
-                {/* HTML files */}
-                {(() => {
-                  const htmlFiles = files.filter((f: TaskFile) => f.mime_type === 'text/html')
-                  if (htmlFiles.length === 0) return null
-                  return (
-                    <div className="space-y-3">
-                      <FilePreviewGallery files={htmlFiles} taskId={task.id} />
-                    </div>
-                  )
-                })()}
-                {/* Other files */}
-                {(() => {
-                  const otherFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/') && !isVideoTaskFile(f) && f.mime_type !== 'text/html')
-                  if (otherFiles.length === 0) return null
+                  const nonImageFiles = files.filter((f: TaskFile) => !f.mime_type?.startsWith('image/'))
+                  if (nonImageFiles.length === 0) return null
                   return (
                     <div className="space-y-2">
-                      <FilePreviewGallery files={otherFiles} taskId={task.id} />
+                      <FilePreviewGallery
+                        files={nonImageFiles}
+                        taskId={task.id}
+                        renderPreviewDetails={renderVideoPreviewDetails}
+                      />
                     </div>
                   )
                 })()}
