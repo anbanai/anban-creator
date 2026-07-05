@@ -16,14 +16,21 @@ import (
 type CreditHandler struct {
 	service     *service.CreditService
 	cfg         *config.CreditsConfig
+	fullCfg     *config.Config
 	imageCfg    *config.ImageAPIConfig
 	adminAPIKey string
 	logger      *zerolog.Logger
 }
 
 // NewCreditHandler creates a new CreditHandler.
-func NewCreditHandler(svc *service.CreditService, cfg *config.CreditsConfig, imageCfg *config.ImageAPIConfig, adminAPIKey string, logger *zerolog.Logger) *CreditHandler {
-	return &CreditHandler{service: svc, cfg: cfg, imageCfg: imageCfg, adminAPIKey: adminAPIKey, logger: logger}
+func NewCreditHandler(svc *service.CreditService, cfg *config.Config, adminAPIKey string, logger *zerolog.Logger) *CreditHandler {
+	var credits *config.CreditsConfig
+	var imageCfg *config.ImageAPIConfig
+	if cfg != nil {
+		credits = &cfg.Credits
+		imageCfg = &cfg.ImageAPI
+	}
+	return &CreditHandler{service: svc, cfg: credits, fullCfg: cfg, imageCfg: imageCfg, adminAPIKey: adminAPIKey, logger: logger}
 }
 
 // Balance handles GET /api/v1/credits/balance.
@@ -154,6 +161,20 @@ func (h *CreditHandler) AdminGrant(c fiber.Ctx) error {
 // Pricing handles GET /api/v1/credits/pricing.
 func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 	modelCosts := h.service.ModelCosts()
+	var modelPrices config.ModelPricesConfig
+	var billing config.BillingConfig
+	if h.fullCfg != nil {
+		modelPrices = h.fullCfg.ModelPrices
+		billing = h.fullCfg.Billing
+	}
+	income := fiber.Map{}
+	if h.cfg != nil {
+		income = fiber.Map{
+			"daily_sign_in":  h.cfg.DailySignIn,
+			"register_bonus": h.cfg.RegisterBonus,
+			"invite_reward":  h.cfg.InviteReward,
+		}
+	}
 
 	// Synthesize image_gen pricing from ImageAPI config entries.
 	imageGenCosts := map[string]int{}
@@ -181,11 +202,9 @@ func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 	return Success(c, fiber.Map{
 		"task_costs":              h.service.TaskCosts(),
 		"model_costs":             modelCosts,
+		"model_prices":            modelPrices,
+		"billing":                 billing,
 		"ecommerce_module_prices": h.service.EcommerceModulePrices(),
-		"income": fiber.Map{
-			"daily_sign_in":  h.cfg.DailySignIn,
-			"register_bonus": h.cfg.RegisterBonus,
-			"invite_reward":  h.cfg.InviteReward,
-		},
+		"income":                  income,
 	})
 }

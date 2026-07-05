@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -41,6 +43,14 @@ func (s *CreditService) GetBalance(ctx context.Context, userID string) (int, err
 		return 0, fmt.Errorf("find user: %w", err)
 	}
 	return user.CreditsBalance, nil
+}
+
+func (s *CreditService) GetUserTier(ctx context.Context, userID string) (model.Tier, error) {
+	user, err := s.repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		return model.TierFree, fmt.Errorf("find user: %w", err)
+	}
+	return model.NormalizeTier(string(user.Tier)), nil
 }
 
 // GetSignInStatus returns whether the user has signed in today.
@@ -389,10 +399,26 @@ func (s *CreditService) ModelCosts() map[string]map[string]int {
 // Optional args are operationID, then taskID. operationID gives refund idempotency;
 // taskID lets task detail pages show operation-level credit consumption.
 func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType string, amount int, operationID ...string) (int, error) {
+	return s.deductForOperation(ctx, userID, opType, amount, nil, operationID...)
+}
+
+func (s *CreditService) DeductForOperationWithMetadata(ctx context.Context, userID, opType string, amount int, metadata model.CreditTransactionMetadata, operationID ...string) (int, error) {
+	return s.deductForOperation(ctx, userID, opType, amount, &metadata, operationID...)
+}
+
+func (s *CreditService) deductForOperation(ctx context.Context, userID, opType string, amount int, metadata *model.CreditTransactionMetadata, operationID ...string) (int, error) {
 	if amount <= 0 {
 		return 0, ErrInvalidAmount
 	}
 	totalCost := amount
+	var metadataJSON datatypes.JSON
+	if metadata != nil {
+		data, err := json.Marshal(metadata)
+		if err != nil {
+			return 0, fmt.Errorf("marshal operation metadata: %w", err)
+		}
+		metadataJSON = datatypes.JSON(data)
+	}
 
 	var newBalance int
 	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
@@ -412,6 +438,7 @@ func (s *CreditService) DeductForOperation(ctx context.Context, userID, opType s
 			Amount:       -totalCost,
 			BalanceAfter: newBalance,
 			Description:  fmt.Sprintf("操作扣费 (%s) -%d", opType, totalCost),
+			Metadata:     metadataJSON,
 		}
 		if len(operationID) > 0 && operationID[0] != "" {
 			opIDCopy := operationID[0]

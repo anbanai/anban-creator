@@ -26,6 +26,7 @@ function transactionBadgeVariant(type: string) {
     case 'task_refund': return 'secondary'
     case 'admin_grant': return 'outline'
     case 'image_gen':
+    case 'image_understanding':
     case 'image_upload':
     case 'article_write':
     case 'convert':
@@ -34,6 +35,7 @@ function transactionBadgeVariant(type: string) {
     case 'seo':
     case 'draft_publish':
     case 'outline':
+    case 'video_understanding':
       return 'destructive'
     default: return 'secondary'
   }

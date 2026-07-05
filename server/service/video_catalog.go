@@ -267,6 +267,7 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 	breakdown := &model.VideoPricingBreakdown{
 		CNY:              round2(totalCNY),
 		CreditMultiplier: creditMultiplier,
+		CreditsPerCNY:    creditMultiplier,
 		InputVideo:       hasInputVideo,
 		InputSeconds:     inputSeconds,
 		OutputSeconds:    targetDuration,

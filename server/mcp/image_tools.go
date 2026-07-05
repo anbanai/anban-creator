@@ -87,11 +87,11 @@ func registerImageTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "analyze_image",
-		Description: "Analyze an image using a vision AI model. Accepts a remote image URL (https://) or a server-local file path (from generate_image/download_image file_path). Returns the AI's analysis as text. Use this for: identifying entities in line art, evaluating coloring quality, auditing cross-image color consistency, verifying line art preservation. file_path analysis is limited to 10MB; for larger images compress_image first or upload_image and retry with image_url. No credit deduction.",
+		Description: "Analyze an image using the configured image-understanding model route. Accepts a remote image URL (https://) or a server-local file path (from generate_image/download_image file_path). Returns the AI's analysis, token usage, and charged credits. Use this for: identifying entities in line art, evaluating coloring quality, auditing cross-image color consistency, verifying line art preservation. file_path analysis is limited to 10MB; for larger images compress_image first or upload_image and retry with image_url.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"project_id": map[string]any{"type": "string", "description": "Project ID (determines vision model config)"},
+				"project_id": map[string]any{"type": "string", "description": "Project ID (determines model route context)"},
 				"image_url":  map[string]any{"type": "string", "description": "Remote HTTPS URL of the image to analyze"},
 				"file_path":  map[string]any{"type": "string", "description": "Server-local file path (from generate_image/download_image file_path result), max 10MB"},
 				"prompt":     map[string]any{"type": "string", "description": "Detailed analysis prompt describing what to analyze"},
@@ -483,12 +483,15 @@ func runImageVerification(ctx context.Context, userID string, result *service.Im
 		return nil, fmt.Errorf("no accessible image source for verification (need file_path or download_url)")
 	}
 
-	raw, err := svcs.WritingSvc.AnalyzeImage(ctx, userID, imageSource, prompt)
+	analysis, err := svcs.WritingSvc.AnalyzeImageDetailed(ctx, userID, imageSource, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("analyze image: %w", err)
 	}
+	if _, err := maybeDeductUnderstandingTokens(ctx, userID, "", model.CreditTypeImageUnderstanding, analysis.Usage); err != nil {
+		return nil, fmt.Errorf("bill image understanding: %w", err)
+	}
 
-	return parseVisionVerificationJSON(raw), nil
+	return parseVisionVerificationJSON(analysis.Text), nil
 }
 
 // shouldUploadAfterVerification decides whether a generate_image call with
@@ -733,13 +736,19 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 		return errorResult("either image_url or file_path is required"), nil
 	}
 
-	result, err := svcs.WritingSvc.AnalyzeImage(ctx, userID, imageSource, prompt)
+	result, err := svcs.WritingSvc.AnalyzeImageDetailed(ctx, userID, imageSource, prompt)
 	if err != nil {
 		return errorResult(fmt.Sprintf("analyze image: %v", err)), nil
 	}
+	creditsCharged, err := maybeDeductUnderstandingTokens(ctx, userID, "", model.CreditTypeImageUnderstanding, result.Usage)
+	if err != nil {
+		return errorResult(fmt.Sprintf("bill image understanding: %v", err)), nil
+	}
 
 	return textResult(map[string]any{
-		"analysis": result,
+		"analysis":        result.Text,
+		"usage":           result.Usage,
+		"credits_charged": creditsCharged,
 	})
 }
 

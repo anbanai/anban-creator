@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -99,6 +100,45 @@ func TestDeductForOperationStoresTaskIDAndLongOperationID(t *testing.T) {
 	}
 	if tx.TaskID == nil || *tx.TaskID != taskID {
 		t.Fatalf("transaction task_id = %v, want %q", tx.TaskID, taskID)
+	}
+}
+
+func TestDeductForOperationWithMetadataStoresTokenCostSnapshot(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 1000)
+	taskID := uuid.New().String()
+	operationID := "video_understanding:" + taskID
+	svc := newTestCreditService(repo)
+
+	metadata := model.CreditTransactionMetadata{
+		Provider:          "moonshot",
+		Model:             "kimi-k2.7-code-highspeed",
+		Route:             model.CreditTypeVideoUnderstanding,
+		InputTokens:       10_000,
+		CachedInputTokens: 2_000,
+		OutputTokens:      1_000,
+		TotalTokens:       11_000,
+		BaseCredits:       173,
+		TierMultiplier:    1.30,
+		UserMultiplier:    1.00,
+		FinalCredits:      225,
+		PriceSnapshot:     map[string]any{"currency": "USD", "input": 1.90, "output": 8.00},
+	}
+	if _, err := svc.DeductForOperationWithMetadata(ctx, userID, model.CreditTypeVideoUnderstanding, 225, metadata, operationID, taskID); err != nil {
+		t.Fatalf("deduct operation with metadata: %v", err)
+	}
+
+	tx, err := repo.Credits().FindDeductionByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatalf("find deduction by operation id: %v", err)
+	}
+	var got model.CreditTransactionMetadata
+	if err := json.Unmarshal(tx.Metadata, &got); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if got.Route != model.CreditTypeVideoUnderstanding || got.FinalCredits != 225 || got.TotalTokens != 11_000 {
+		t.Fatalf("metadata = %#v, want video understanding token cost snapshot", got)
 	}
 }
 

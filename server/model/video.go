@@ -98,6 +98,7 @@ type VideoReferenceAsset struct {
 type VideoPricingBreakdown struct {
 	CNY              float64                        `json:"cny"`
 	CreditMultiplier int                            `json:"credit_multiplier"`
+	CreditsPerCNY    int                            `json:"credits_per_cny"`
 	InputVideo       bool                           `json:"input_video"`
 	InputSeconds     float64                        `json:"input_seconds,omitempty"`
 	OutputSeconds    int64                          `json:"output_seconds"`

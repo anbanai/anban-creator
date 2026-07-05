@@ -188,6 +188,7 @@ export const transactionTypeLabel: Record<string, string> = {
   task_refund: '任务退还',
   admin_grant: '管理员充值',
   image_gen: '图片生成',
+  image_understanding: '图片理解',
   image_upload: '图片上传',
   article_write: '文章写作',
   convert: '格式转换',
@@ -198,11 +199,13 @@ export const transactionTypeLabel: Record<string, string> = {
   outline: '大纲生成',
   viral_analysis: '爆文拆解',
   video_gen: '视频生成',
+  video_understanding: '视频理解',
   poster_generation: '海报生成',
 }
 
 export const operationLabel: Record<string, string> = {
   image_gen: 'AI 生图',
+  image_understanding: '图片理解',
   article_write: '文章写作',
   convert: '格式转换',
   humanize: '文章润色',
@@ -211,6 +214,7 @@ export const operationLabel: Record<string, string> = {
   outline: '大纲生成',
   viral_analysis: '爆文拆解',
   video_gen: '视频生成',
+  video_understanding: '视频理解',
   poster_generation: '海报生成',
 }
 

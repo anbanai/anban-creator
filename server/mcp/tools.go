@@ -537,7 +537,7 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 		"references":    taskConfig.References,
 		"task_config":   taskConfig,
 		"pricing": map[string]any{
-			"credit_multiplier":       videoCreditMultiplier(),
+			"credits_per_cny":         videoCreditMultiplier(),
 			"min_balance":             service.MinVideoCreationBalance,
 			"min_balance_description": "视频任务/计划创建和触发前需至少 100000 积分余额；实际扣费按动态估算费用。",
 			"estimate_rule":           "Server estimates credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",

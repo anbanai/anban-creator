@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,42 +17,49 @@ import (
 
 // Config holds all server configuration.
 type Config struct {
-	Server       ServerConfig       `yaml:"server"`
-	Logging      LoggingConfig      `yaml:"logging"`
-	Database     DatabaseConfig     `yaml:"database"`
-	Redis        RedisConfig        `yaml:"redis"`
-	JWT          JWTConfig          `yaml:"jwt"`
-	WeChat       WeChatConfig       `yaml:"wechat"`
-	Storage      StorageConfig      `yaml:"storage"`
-	MCP          MCPConfig          `yaml:"mcp"`
-	ImageAPI     ImageAPIConfig     `yaml:"image_api"`
-	VideoAPI     VideoAPIConfig     `yaml:"video_api"`
-	ImagePresets []ImageModelPreset `yaml:"image_presets"`
-	Writing      WritingConfig      `yaml:"writing"`
-	Vision       VisionConfig       `yaml:"vision"`
-	TingWu       TingWuConfig       `yaml:"tingwu"`
-	FunASR       FunASRConfig       `yaml:"funasr"`
-	Claude       ClaudeConfig       `yaml:"claude"`
-	Credits      CreditsConfig      `yaml:"credits"`
-	CORS         CORSConfig         `yaml:"cors"`
-	Asynq        AsynqConfig        `yaml:"asynq"`
-	Email        EmailConfig        `yaml:"email"`
-	Invitation   InvitationConfig   `yaml:"invitation"`
-	Seednote     SeednoteConfig     `yaml:"seednote"`
-	Ilink        IlinkConfig        `yaml:"ilink"`
-	Memory       MemoryConfig       `yaml:"memory"`
+	Server             ServerConfig                    `yaml:"server"`
+	Logging            LoggingConfig                   `yaml:"logging"`
+	Database           DatabaseConfig                  `yaml:"database"`
+	Redis              RedisConfig                     `yaml:"redis"`
+	JWT                JWTConfig                       `yaml:"jwt"`
+	WeChat             WeChatConfig                    `yaml:"wechat"`
+	Storage            StorageConfig                   `yaml:"storage"`
+	MCP                MCPConfig                       `yaml:"mcp"`
+	ImageAPI           ImageAPIConfig                  `yaml:"image_api"`
+	VideoAPI           VideoAPIConfig                  `yaml:"video_api"`
+	ImagePresets       []ImageModelPreset              `yaml:"image_presets"`
+	Writing            WritingConfig                   `yaml:"writing"`
+	Vision             VisionConfig                    `yaml:"vision"`
+	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
+	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
+	ModelPrices        ModelPricesConfig               `yaml:"model_prices"`
+	Billing            BillingConfig                   `yaml:"billing"`
+	ImageUnderstanding UnderstandingRuntimeConfig      `yaml:"-"`
+	VideoUnderstanding VideoUnderstandingRuntimeConfig `yaml:"-"`
+	TingWu             TingWuConfig                    `yaml:"tingwu"`
+	FunASR             FunASRConfig                    `yaml:"funasr"`
+	Claude             ClaudeConfig                    `yaml:"claude"`
+	Credits            CreditsConfig                   `yaml:"credits"`
+	CORS               CORSConfig                      `yaml:"cors"`
+	Asynq              AsynqConfig                     `yaml:"asynq"`
+	Email              EmailConfig                     `yaml:"email"`
+	Invitation         InvitationConfig                `yaml:"invitation"`
+	Seednote           SeednoteConfig                  `yaml:"seednote"`
+	Ilink              IlinkConfig                     `yaml:"ilink"`
+	Memory             MemoryConfig                    `yaml:"memory"`
 }
 
 // ImageModelPreset defines a system-managed image model that users can select
 // when creating tasks or plans. Each preset has a minimum tier that gates access.
 type ImageModelPreset struct {
-	Key         string `yaml:"key"`          // unique identifier, e.g. "volcengine-standard"
-	DisplayName string `yaml:"display_name"` // user-facing label
-	Provider    string `yaml:"provider"`     // volcengine / gemini / openai
-	Model       string `yaml:"model"`        // concrete model id
-	Endpoint    string `yaml:"endpoint"`
-	APIKey      string `yaml:"api_key"`
-	MinTier     string `yaml:"min_tier"` // free / pro / enterprise
+	Key           string `yaml:"key"`            // unique identifier, e.g. "volcengine-standard"
+	DisplayName   string `yaml:"display_name"`   // user-facing label
+	ProviderRoute string `yaml:"provider_route"` // semantic route, e.g. image_generation.designer.seedream
+	Provider      string `yaml:"provider"`       // derived provider kind or legacy direct provider
+	Model         string `yaml:"model"`          // concrete model id
+	Endpoint      string `yaml:"endpoint"`
+	APIKey        string `yaml:"api_key"`
+	MinTier       string `yaml:"min_tier"` // free / pro / enterprise
 }
 
 // maxImageModelKeyLen matches the varchar(50) column size on Task/Plan.ImageModelKey.
@@ -171,6 +180,7 @@ type VideoAPIConfig struct {
 type VideoModelCatalogEntry struct {
 	Key                   string             `yaml:"key"`
 	DisplayName           string             `yaml:"display_name"`
+	Model                 string             `yaml:"model"`
 	ModelID               string             `yaml:"model_id"`
 	SupportedResolutions  []string           `yaml:"supported_resolutions"`
 	SupportedRatios       []string           `yaml:"supported_ratios"`
@@ -183,11 +193,254 @@ type VideoModelCatalogEntry struct {
 	VideoInput5sMaxPrice  map[string]float64 `yaml:"video_input_5s_max_price"`
 }
 
+// ModelProviderConfig describes a reusable provider endpoint/key.
+type ModelProviderConfig struct {
+	Protocol string `yaml:"protocol"`
+	BaseURL  string `yaml:"base_url"`
+	APIKey   string `yaml:"api_key"`
+}
+
+// RouteConfig binds a business route to a provider/model.
+type RouteConfig struct {
+	Provider string        `yaml:"provider"`
+	Model    string        `yaml:"model"`
+	Timeout  time.Duration `yaml:"timeout"`
+}
+
+type UnderstandingRouteConfig struct {
+	RouteConfig  `yaml:",inline"`
+	RequireUsage bool `yaml:"require_usage"`
+}
+
+type VideoUnderstandingRouteConfig struct {
+	UnderstandingRouteConfig `yaml:",inline"`
+	RequireNativeVideo       bool   `yaml:"require_native_video"`
+	MaxRecommendedResolution string `yaml:"max_recommended_resolution"`
+}
+
+type ImageGenerationRouteConfig struct {
+	Provider       string `yaml:"provider"`
+	Model          string `yaml:"model"`
+	Size           string `yaml:"size"`
+	Alias          string `yaml:"alias"`
+	Enabled        bool   `yaml:"enabled"`
+	ResponseFormat string `yaml:"response_format"`
+}
+
+type ImageGenerationRoutesConfig struct {
+	Cover    ImageGenerationRouteConfig            `yaml:"cover"`
+	Content  ImageGenerationRouteConfig            `yaml:"content"`
+	Designer map[string]ImageGenerationRouteConfig `yaml:"designer"`
+	Sizes    SizesConfig                           `yaml:"sizes"`
+}
+
+type VideoGenerationRouteConfig struct {
+	Provider     string                   `yaml:"provider"`
+	Timeout      time.Duration            `yaml:"timeout"`
+	DefaultModel string                   `yaml:"default_model"`
+	ModelCatalog []VideoModelCatalogEntry `yaml:"model_catalog"`
+}
+
+type ModelRoutesConfig struct {
+	Writing            RouteConfig                   `yaml:"writing"`
+	ImageUnderstanding UnderstandingRouteConfig      `yaml:"image_understanding"`
+	VideoUnderstanding VideoUnderstandingRouteConfig `yaml:"video_understanding"`
+	ImageGeneration    ImageGenerationRoutesConfig   `yaml:"image_generation"`
+	VideoGeneration    VideoGenerationRouteConfig    `yaml:"video_generation"`
+}
+
+type UnderstandingRuntimeConfig struct {
+	BaseURL      string
+	Key          string
+	Model        string
+	Provider     string
+	ProviderKey  string
+	Timeout      time.Duration
+	RequireUsage bool
+}
+
+type VideoUnderstandingRuntimeConfig struct {
+	UnderstandingRuntimeConfig
+	RequireNativeVideo       bool
+	MaxRecommendedResolution string
+}
+
+type FlexibleFloat float64
+
+func (f *FlexibleFloat) UnmarshalYAML(value *yaml.Node) error {
+	var raw any
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	switch v := raw.(type) {
+	case int:
+		*f = FlexibleFloat(v)
+	case int64:
+		*f = FlexibleFloat(v)
+	case float64:
+		*f = FlexibleFloat(v)
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return fmt.Errorf("parse float %q: %w", v, err)
+		}
+		*f = FlexibleFloat(parsed)
+	default:
+		return fmt.Errorf("unsupported numeric value %T", raw)
+	}
+	return nil
+}
+
+func (f FlexibleFloat) Float64() float64 { return float64(f) }
+
+type CurrencyRate struct {
+	ToCNY FlexibleFloat `yaml:"to_cny"`
+}
+
+type TokenModelPrice struct {
+	Currency    string        `yaml:"currency"`
+	Unit        int64         `yaml:"unit"`
+	CachedInput FlexibleFloat `yaml:"cached_input"`
+	Input       FlexibleFloat `yaml:"input"`
+	Output      FlexibleFloat `yaml:"output"`
+}
+
+type UnitModelPrice struct {
+	Currency string        `yaml:"currency"`
+	Unit     string        `yaml:"unit"`
+	Price    FlexibleFloat `yaml:"price"`
+}
+
+type VideoGenerationPrice struct {
+	Currency              string             `yaml:"currency"`
+	NoInputPricePerSecond map[string]float64 `yaml:"no_input_price_per_second"`
+	VideoInput5sMinPrice  map[string]float64 `yaml:"video_input_5s_min_price"`
+	VideoInput5sMaxPrice  map[string]float64 `yaml:"video_input_5s_max_price"`
+}
+
+type ModelPricesConfig struct {
+	CurrencyRates   map[string]CurrencyRate         `yaml:"currency_rates"`
+	TokenModels     map[string]TokenModelPrice      `yaml:"token_models"`
+	ImageGeneration map[string]UnitModelPrice       `yaml:"image_generation"`
+	VideoGeneration map[string]VideoGenerationPrice `yaml:"video_generation"`
+}
+
+type BillingConfig struct {
+	CreditsPerCNY         int                `yaml:"credits_per_cny"`
+	TierMultipliers       map[string]float64 `yaml:"tier_multipliers"`
+	DefaultUserMultiplier float64            `yaml:"default_user_multiplier"`
+	MinimumChargeCredits  int                `yaml:"minimum_charge_credits"`
+}
+
+type TokenUsage struct {
+	InputTokens       int64 `json:"input_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"`
+	OutputTokens      int64 `json:"output_tokens"`
+	TotalTokens       int64 `json:"total_tokens"`
+}
+
+type PriceSnapshot struct {
+	Provider      string  `json:"provider"`
+	Model         string  `json:"model"`
+	Currency      string  `json:"currency"`
+	Unit          int64   `json:"unit"`
+	CurrencyToCNY float64 `json:"currency_to_cny"`
+	CreditsPerCNY int     `json:"credits_per_cny"`
+	CachedInput   float64 `json:"cached_input"`
+	Input         float64 `json:"input"`
+	Output        float64 `json:"output"`
+}
+
+type TokenCreditCost struct {
+	BaseCredits    int           `json:"base_credits"`
+	FinalCredits   int           `json:"final_credits"`
+	TierMultiplier float64       `json:"tier_multiplier"`
+	UserMultiplier float64       `json:"user_multiplier"`
+	Usage          TokenUsage    `json:"usage"`
+	PriceSnapshot  PriceSnapshot `json:"price_snapshot"`
+}
+
 func (c VideoAPIConfig) CreditMultiplierOrDefault() int {
 	if c.CreditMultiplier > 0 {
 		return c.CreditMultiplier
 	}
 	return 1000
+}
+
+func (c *Config) CalculateTokenModelCredits(provider, modelName string, usage TokenUsage, tier string, userMultiplier float64) (TokenCreditCost, error) {
+	if c == nil {
+		return TokenCreditCost{}, fmt.Errorf("config is nil")
+	}
+	key := provider + "/" + modelName
+	price, ok := c.ModelPrices.TokenModels[key]
+	if !ok {
+		return TokenCreditCost{}, fmt.Errorf("token model price not configured for %s", key)
+	}
+	unit := price.Unit
+	if unit <= 0 {
+		unit = 1_000_000
+	}
+	currency := strings.ToUpper(strings.TrimSpace(price.Currency))
+	if currency == "" {
+		currency = "CNY"
+	}
+	rate := 1.0
+	if currency != "CNY" {
+		r, ok := c.ModelPrices.CurrencyRates[currency]
+		if !ok || r.ToCNY.Float64() <= 0 {
+			return TokenCreditCost{}, fmt.Errorf("currency rate not configured for %s", currency)
+		}
+		rate = r.ToCNY.Float64()
+	}
+	creditsPerCNY := c.Billing.CreditsPerCNY
+	if creditsPerCNY <= 0 {
+		creditsPerCNY = 1000
+	}
+	minCharge := c.Billing.MinimumChargeCredits
+	if minCharge <= 0 {
+		minCharge = 1
+	}
+	tierMultiplier := c.Billing.DefaultUserMultiplier
+	if tierMultiplier <= 0 {
+		tierMultiplier = 1
+	}
+	if m, ok := c.Billing.TierMultipliers[strings.ToLower(strings.TrimSpace(tier))]; ok && m > 0 {
+		tierMultiplier = m
+	}
+	if userMultiplier <= 0 {
+		userMultiplier = 1
+	}
+	nonCachedInput := usage.InputTokens - usage.CachedInputTokens
+	if nonCachedInput < 0 {
+		nonCachedInput = 0
+	}
+	costInCurrency := (float64(nonCachedInput)*price.Input.Float64() + float64(usage.CachedInputTokens)*price.CachedInput.Float64() + float64(usage.OutputTokens)*price.Output.Float64()) / float64(unit)
+	baseCredits := int(math.Ceil(costInCurrency * rate * float64(creditsPerCNY)))
+	if usage.TotalTokens > 0 && baseCredits < minCharge {
+		baseCredits = minCharge
+	}
+	finalCredits := int(math.Ceil(float64(baseCredits) * tierMultiplier * userMultiplier))
+	if usage.TotalTokens > 0 && finalCredits < minCharge {
+		finalCredits = minCharge
+	}
+	return TokenCreditCost{
+		BaseCredits:    baseCredits,
+		FinalCredits:   finalCredits,
+		TierMultiplier: tierMultiplier,
+		UserMultiplier: userMultiplier,
+		Usage:          usage,
+		PriceSnapshot: PriceSnapshot{
+			Provider:      provider,
+			Model:         modelName,
+			Currency:      currency,
+			Unit:          unit,
+			CurrencyToCNY: rate,
+			CreditsPerCNY: creditsPerCNY,
+			CachedInput:   price.CachedInput.Float64(),
+			Input:         price.Input.Float64(),
+			Output:        price.Output.Float64(),
+		},
+	}, nil
 }
 
 // StorageConfig holds file storage configuration.
@@ -211,6 +464,8 @@ type StorageConfig struct {
 type SizesConfig struct {
 	ArticleCover    string `yaml:"article_cover"`    // default "16:9"
 	ArticleContent  string `yaml:"article_content"`  // default "16:9"
+	XLSCover        string `yaml:"xls_cover"`        // default "3:4"
+	XLSContent      string `yaml:"xls_content"`      // default "3:4"
 	SeednoteCover   string `yaml:"seednote_cover"`   // default "3:4"
 	SeednoteContent string `yaml:"seednote_content"` // default "3:4"
 }
@@ -465,6 +720,9 @@ func NewConfig(path string) (*Config, error) {
 	}
 
 	data = expandEnvVars(data)
+	if err := rejectDeprecatedConfigKeys(data); err != nil {
+		return nil, err
+	}
 
 	cfg := &Config{}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
@@ -472,6 +730,9 @@ func NewConfig(path string) (*Config, error) {
 	}
 
 	cfg.applyDefaults()
+	if err := cfg.deriveModelRouteRuntimeConfig(); err != nil {
+		return nil, err
+	}
 	cfg.resolvePaths()
 
 	if err := cfg.Validate(); err != nil {
@@ -479,6 +740,61 @@ func NewConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func rejectDeprecatedConfigKeys(data []byte) error {
+	var top map[string]any
+	if err := yaml.Unmarshal(data, &top); err != nil {
+		return fmt.Errorf("parse config keys: %w", err)
+	}
+	deprecated := map[string]string{
+		"vision":    "model_routes.image_understanding and model_routes.video_understanding",
+		"writing":   "model_routes.writing",
+		"image_api": "model_routes.image_generation",
+		"video_api": "model_routes.video_generation",
+	}
+	for key, replacement := range deprecated {
+		if _, ok := top[key]; ok {
+			return fmt.Errorf("deprecated top-level config key %s; use %s", key, replacement)
+		}
+	}
+	known := map[string]bool{
+		"server":          true,
+		"logging":         true,
+		"database":        true,
+		"redis":           true,
+		"jwt":             true,
+		"wechat":          true,
+		"storage":         true,
+		"mcp":             true,
+		"image_presets":   true,
+		"model_providers": true,
+		"model_routes":    true,
+		"model_prices":    true,
+		"billing":         true,
+		"tingwu":          true,
+		"funasr":          true,
+		"claude":          true,
+		"credits":         true,
+		"cors":            true,
+		"asynq":           true,
+		"email":           true,
+		"invitation":      true,
+		"seednote":        true,
+		"ilink":           true,
+		"memory":          true,
+	}
+	for key := range top {
+		if !known[key] {
+			return fmt.Errorf("unknown top-level config key %s", key)
+		}
+	}
+	if credits, ok := top["credits"].(map[string]any); ok {
+		if _, ok := credits["model_costs"]; ok {
+			return fmt.Errorf("deprecated config key credits.model_costs; use model_prices and billing")
+		}
+	}
+	return nil
 }
 
 // envVarRe matches ${VAR} and ${VAR:-default}. Only braced references are
@@ -570,6 +886,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.ImageAPI.Sizes.ArticleContent == "" {
 		c.ImageAPI.Sizes.ArticleContent = "16:9"
+	}
+	if c.ImageAPI.Sizes.XLSCover == "" {
+		c.ImageAPI.Sizes.XLSCover = "3:4"
+	}
+	if c.ImageAPI.Sizes.XLSContent == "" {
+		c.ImageAPI.Sizes.XLSContent = "3:4"
 	}
 	if c.ImageAPI.Sizes.SeednoteCover == "" {
 		c.ImageAPI.Sizes.SeednoteCover = "3:4"
@@ -700,6 +1022,229 @@ func (c *Config) applyDefaults() {
 	if c.Claude.PluginDir == "" {
 		c.Claude.PluginDir = detectPluginDir()
 	}
+}
+
+func (c *Config) deriveModelRouteRuntimeConfig() error {
+	if len(c.ModelProviders) == 0 {
+		return nil
+	}
+	provider := func(routeName, providerKey string) (ModelProviderConfig, error) {
+		if strings.TrimSpace(providerKey) == "" {
+			return ModelProviderConfig{}, fmt.Errorf("%s.provider is required", routeName)
+		}
+		p, ok := c.ModelProviders[providerKey]
+		if !ok {
+			return ModelProviderConfig{}, fmt.Errorf("%s.provider %q is not configured in model_providers", routeName, providerKey)
+		}
+		if strings.TrimSpace(p.BaseURL) == "" || strings.TrimSpace(p.APIKey) == "" {
+			return ModelProviderConfig{}, fmt.Errorf("model_providers.%s base_url and api_key are required", providerKey)
+		}
+		return p, nil
+	}
+	if c.ModelRoutes.Writing.Model != "" || c.ModelRoutes.Writing.Provider != "" {
+		p, err := provider("model_routes.writing", c.ModelRoutes.Writing.Provider)
+		if err != nil {
+			return err
+		}
+		c.Writing = WritingConfig{BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.Writing.Model, Timeout: c.ModelRoutes.Writing.Timeout}
+	}
+	if c.ModelRoutes.ImageUnderstanding.Model != "" || c.ModelRoutes.ImageUnderstanding.Provider != "" {
+		p, err := provider("model_routes.image_understanding", c.ModelRoutes.ImageUnderstanding.Provider)
+		if err != nil {
+			return err
+		}
+		c.ImageUnderstanding = UnderstandingRuntimeConfig{
+			BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.ImageUnderstanding.Model,
+			Provider: providerKind(c.ModelRoutes.ImageUnderstanding.Provider), ProviderKey: c.ModelRoutes.ImageUnderstanding.Provider,
+			Timeout: c.ModelRoutes.ImageUnderstanding.Timeout, RequireUsage: c.ModelRoutes.ImageUnderstanding.RequireUsage,
+		}
+	}
+	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
+		p, err := provider("model_routes.video_understanding", c.ModelRoutes.VideoUnderstanding.Provider)
+		if err != nil {
+			return err
+		}
+		c.VideoUnderstanding = VideoUnderstandingRuntimeConfig{
+			UnderstandingRuntimeConfig: UnderstandingRuntimeConfig{
+				BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.VideoUnderstanding.Model,
+				Provider: providerKind(c.ModelRoutes.VideoUnderstanding.Provider), ProviderKey: c.ModelRoutes.VideoUnderstanding.Provider,
+				Timeout: c.ModelRoutes.VideoUnderstanding.Timeout, RequireUsage: c.ModelRoutes.VideoUnderstanding.RequireUsage,
+			},
+			RequireNativeVideo:       c.ModelRoutes.VideoUnderstanding.RequireNativeVideo,
+			MaxRecommendedResolution: c.ModelRoutes.VideoUnderstanding.MaxRecommendedResolution,
+		}
+	}
+	if c.ModelRoutes.ImageGeneration.Cover.Model != "" || c.ModelRoutes.ImageGeneration.Cover.Provider != "" {
+		cfg, err := c.imageAPIFromRoute("model_routes.image_generation.cover", c.ModelRoutes.ImageGeneration.Cover)
+		if err != nil {
+			return err
+		}
+		c.ImageAPI.Cover = cfg
+	}
+	if c.ModelRoutes.ImageGeneration.Content.Model != "" || c.ModelRoutes.ImageGeneration.Content.Provider != "" {
+		cfg, err := c.imageAPIFromRoute("model_routes.image_generation.content", c.ModelRoutes.ImageGeneration.Content)
+		if err != nil {
+			return err
+		}
+		c.ImageAPI.Content = cfg
+	}
+	if len(c.ModelRoutes.ImageGeneration.Designer) > 0 {
+		c.ImageAPI.Designer = map[string]*appconfig.ImageAPI{}
+		c.ImageAPI.designerOrder = c.ImageAPI.designerOrder[:0]
+		for key, route := range c.ModelRoutes.ImageGeneration.Designer {
+			cfg, err := c.imageAPIFromRoute("model_routes.image_generation.designer."+key, route)
+			if err != nil {
+				return err
+			}
+			c.ImageAPI.Designer[key] = cfg
+			c.ImageAPI.designerOrder = append(c.ImageAPI.designerOrder, key)
+		}
+	}
+	if c.ModelRoutes.ImageGeneration.Sizes != (SizesConfig{}) {
+		c.ImageAPI.Sizes = mergeSizes(c.ModelRoutes.ImageGeneration.Sizes, c.ImageAPI.Sizes)
+	}
+	if err := c.resolveImagePresetRoutes(); err != nil {
+		return err
+	}
+	if c.ModelRoutes.VideoGeneration.Provider != "" || len(c.ModelRoutes.VideoGeneration.ModelCatalog) > 0 {
+		p, err := provider("model_routes.video_generation", c.ModelRoutes.VideoGeneration.Provider)
+		if err != nil {
+			return err
+		}
+		c.VideoAPI.Key = p.APIKey
+		c.VideoAPI.BaseURL = p.BaseURL
+		c.VideoAPI.Timeout = c.ModelRoutes.VideoGeneration.Timeout
+		c.VideoAPI.ModelCatalog = c.ModelRoutes.VideoGeneration.ModelCatalog
+		for i := range c.VideoAPI.ModelCatalog {
+			if c.VideoAPI.ModelCatalog[i].ModelID == "" {
+				c.VideoAPI.ModelCatalog[i].ModelID = c.VideoAPI.ModelCatalog[i].Model
+			}
+			priceKey := c.ModelRoutes.VideoGeneration.Provider + "/" + c.VideoAPI.ModelCatalog[i].ModelID
+			if price, ok := c.ModelPrices.VideoGeneration[priceKey]; ok {
+				c.VideoAPI.ModelCatalog[i].NoInputPricePerSecond = price.NoInputPricePerSecond
+				c.VideoAPI.ModelCatalog[i].VideoInput5sMinPrice = price.VideoInput5sMinPrice
+				c.VideoAPI.ModelCatalog[i].VideoInput5sMaxPrice = price.VideoInput5sMaxPrice
+			}
+		}
+	}
+	return nil
+}
+
+func mergeSizes(routeSizes, defaults SizesConfig) SizesConfig {
+	if routeSizes.ArticleCover == "" {
+		routeSizes.ArticleCover = defaults.ArticleCover
+	}
+	if routeSizes.ArticleContent == "" {
+		routeSizes.ArticleContent = defaults.ArticleContent
+	}
+	if routeSizes.XLSCover == "" {
+		routeSizes.XLSCover = defaults.XLSCover
+	}
+	if routeSizes.XLSContent == "" {
+		routeSizes.XLSContent = defaults.XLSContent
+	}
+	if routeSizes.SeednoteCover == "" {
+		routeSizes.SeednoteCover = defaults.SeednoteCover
+	}
+	if routeSizes.SeednoteContent == "" {
+		routeSizes.SeednoteContent = defaults.SeednoteContent
+	}
+	return routeSizes
+}
+
+func (c *Config) resolveImagePresetRoutes() error {
+	for i := range c.ImagePresets {
+		preset := &c.ImagePresets[i]
+		if strings.TrimSpace(preset.ProviderRoute) == "" {
+			continue
+		}
+		route, err := c.imageGenerationRouteByPath(preset.ProviderRoute)
+		if err != nil {
+			return fmt.Errorf("image_presets[%d].provider_route: %w", i, err)
+		}
+		provider, ok := c.ModelProviders[route.Provider]
+		if !ok {
+			return fmt.Errorf("image_presets[%d].provider_route provider %q is not configured in model_providers", i, route.Provider)
+		}
+		preset.Provider = providerKind(route.Provider)
+		preset.Model = route.Model
+		preset.Endpoint = provider.BaseURL
+		preset.APIKey = provider.APIKey
+	}
+	return nil
+}
+
+func (c *Config) imageGenerationRouteByPath(path string) (ImageGenerationRouteConfig, error) {
+	path = strings.TrimPrefix(strings.TrimSpace(path), "model_routes.")
+	switch path {
+	case "image_generation.cover":
+		return c.ModelRoutes.ImageGeneration.Cover, nil
+	case "image_generation.content":
+		return c.ModelRoutes.ImageGeneration.Content, nil
+	}
+	const designerPrefix = "image_generation.designer."
+	if strings.HasPrefix(path, designerPrefix) {
+		key := strings.TrimPrefix(path, designerPrefix)
+		if route, ok := c.ModelRoutes.ImageGeneration.Designer[key]; ok {
+			return route, nil
+		}
+		return ImageGenerationRouteConfig{}, fmt.Errorf("designer route %q is not configured", key)
+	}
+	return ImageGenerationRouteConfig{}, fmt.Errorf("unsupported route %q", path)
+}
+
+func (c *Config) imageAPIFromRoute(routeName string, route ImageGenerationRouteConfig) (*appconfig.ImageAPI, error) {
+	p, ok := c.ModelProviders[route.Provider]
+	if !ok {
+		return nil, fmt.Errorf("%s.provider %q is not configured in model_providers", routeName, route.Provider)
+	}
+	enable := route.Enabled
+	cfg := &appconfig.ImageAPI{
+		Alias:          route.Alias,
+		Enable:         &enable,
+		Key:            p.APIKey,
+		BaseURL:        p.BaseURL,
+		Provider:       providerKind(route.Provider),
+		Model:          route.Model,
+		Size:           route.Size,
+		ResponseFormat: route.ResponseFormat,
+	}
+	if price, ok := c.ModelPrices.ImageGeneration[route.Provider+"/"+route.Model]; ok {
+		cfg.Credits = int(math.Ceil(price.Price.Float64() * c.currencyToCNY(price.Currency) * float64(c.creditsPerCNY())))
+	}
+	return cfg, nil
+}
+
+func providerKind(providerKey string) string {
+	key := strings.ToLower(providerKey)
+	switch {
+	case strings.Contains(key, "volc"):
+		return "volcengine"
+	case strings.Contains(key, "gemini") || strings.Contains(key, "google"):
+		return "gemini"
+	case strings.Contains(key, "openai"), strings.Contains(key, "moonshot"), strings.Contains(key, "kimi"), strings.Contains(key, "wangcai"):
+		return "openai"
+	default:
+		return providerKey
+	}
+}
+
+func (c *Config) currencyToCNY(currency string) float64 {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" || currency == "CNY" {
+		return 1
+	}
+	if rate, ok := c.ModelPrices.CurrencyRates[currency]; ok && rate.ToCNY.Float64() > 0 {
+		return rate.ToCNY.Float64()
+	}
+	return 1
+}
+
+func (c *Config) creditsPerCNY() int {
+	if c.Billing.CreditsPerCNY > 0 {
+		return c.Billing.CreditsPerCNY
+	}
+	return 1000
 }
 
 // AgentServerURL returns the server URL as reachable from the agent's network
