@@ -586,6 +586,10 @@ func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) Video
 		return req
 	}
 	req.Purpose = cfg.Purpose
+	req.CreativeType = cfg.CreativeType
+	req.SubjectProfile = cfg.SubjectProfile
+	req.Audience = cfg.Audience
+	req.SingleMessage = cfg.SingleMessage
 	req.Model = cfg.ModelKey
 	req.Resolution = cfg.Resolution
 	req.Ratio = cfg.Ratio
@@ -634,6 +638,10 @@ func videoAssetsFromReferences(refs []VideoReferenceInput) []model.VideoReferenc
 func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
 	return model.VideoTaskConfig{
 		Purpose:                   plan.Purpose,
+		CreativeType:              plan.CreativeType,
+		SubjectProfile:            plan.SubjectProfile,
+		Audience:                  plan.Audience,
+		SingleMessage:             plan.SingleMessage,
 		ModelKey:                  plan.ModelKey,
 		Model:                     plan.Model,
 		Resolution:                plan.Resolution,

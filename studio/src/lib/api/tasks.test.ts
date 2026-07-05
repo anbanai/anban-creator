@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/test/mocks/server'
+import { http as clientHttp } from '@/lib/http-client'
 import { tasksApi } from './tasks'
 
 describe('tasksApi', () => {
@@ -10,6 +11,10 @@ describe('tasksApi', () => {
       setItem: vi.fn(),
       removeItem: vi.fn(),
     })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('posts selected task ids when downloading a bulk zip', async () => {
@@ -28,15 +33,7 @@ describe('tasksApi', () => {
   })
 
   it('posts resume prompt files and labels as form data', async () => {
-    let contentType = ''
-    let requestBody = ''
-    server.use(
-      http.post('/api/v1/tasks/task-1/resume', async ({ request }) => {
-        contentType = request.headers.get('content-type') ?? ''
-        requestBody = await request.text()
-        return HttpResponse.json({ data: { id: 'task-1', status: 'pending' } })
-      }),
-    )
+    const post = vi.spyOn(clientHttp, 'post').mockResolvedValue({ data: { data: { id: 'task-1', status: 'pending' } } } as any)
     const file = new File(['notes'], 'notes.md', { type: 'text/markdown' })
     await tasksApi.resume('task-1', {
       prompt: '继续写',
@@ -44,11 +41,14 @@ describe('tasksApi', () => {
       fileLabels: ['修改意见'],
     })
 
-    expect(contentType).toContain('multipart/form-data')
-    expect(requestBody).toContain('name="prompt"')
-    expect(requestBody).toContain('继续写')
-    expect(requestBody).toContain('name="file_labels"')
-    expect(requestBody).toContain(JSON.stringify(['修改意见']))
-    expect(requestBody).toContain('name="files"')
+    expect(post).toHaveBeenCalledWith('/tasks/task-1/resume', expect.any(FormData), {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    const form = post.mock.calls[0][1] as FormData
+    expect(form.get('prompt')).toBe('继续写')
+    expect(form.get('file_labels')).toBe(JSON.stringify(['修改意见']))
+    const submittedFile = form.get('files')
+    expect(submittedFile).toBeInstanceOf(File)
+    expect((submittedFile as File).name).toBe('notes.md')
   })
 })

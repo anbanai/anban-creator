@@ -8,13 +8,17 @@ const (
 // VideoDefaults stores reusable video generation defaults on a project. Plans
 // and tasks copy these values into their own snapshots when they override them.
 type VideoDefaults struct {
-	Purpose    string `json:"purpose,omitempty"`
-	ModelKey   string `json:"model_key,omitempty"`
-	Resolution string `json:"resolution,omitempty"`
-	Ratio      string `json:"ratio,omitempty"`
-	Duration   int64  `json:"duration,omitempty"`
-	Watermark  *bool  `json:"watermark,omitempty"`
-	Preflight  bool   `json:"preflight,omitempty"`
+	Purpose        string `json:"purpose,omitempty"`
+	CreativeType   string `json:"creative_type,omitempty"`
+	SubjectProfile string `json:"subject_profile,omitempty"`
+	Audience       string `json:"audience,omitempty"`
+	SingleMessage  string `json:"single_message,omitempty"`
+	ModelKey       string `json:"model_key,omitempty"`
+	Resolution     string `json:"resolution,omitempty"`
+	Ratio          string `json:"ratio,omitempty"`
+	Duration       int64  `json:"duration,omitempty"`
+	Watermark      *bool  `json:"watermark,omitempty"`
+	Preflight      bool   `json:"preflight,omitempty"`
 }
 
 // VideoModelPolicy constrains which video model/parameter combinations a
@@ -31,6 +35,10 @@ type VideoModelPolicy struct {
 type VideoTaskConfig struct {
 	Workflow                  string                   `json:"workflow,omitempty"`
 	Purpose                   string                   `json:"purpose,omitempty"`
+	CreativeType              string                   `json:"creative_type,omitempty"`
+	SubjectProfile            string                   `json:"subject_profile,omitempty"`
+	Audience                  string                   `json:"audience,omitempty"`
+	SingleMessage             string                   `json:"single_message,omitempty"`
 	ModelKey                  string                   `json:"model_key,omitempty"`
 	Model                     string                   `json:"model,omitempty"`
 	Resolution                string                   `json:"resolution,omitempty"`

@@ -11,6 +11,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/rs/zerolog"
 
@@ -38,6 +39,10 @@ type LLMClient interface {
 // of blocking on a single deadline.
 type streamingLLMClient interface {
 	CompleteStream(ctx context.Context, systemPrompt, userPrompt string, onDelta func(string)) (string, error)
+}
+
+type videoURLLLMClient interface {
+	CompleteWithVideoURL(ctx context.Context, systemPrompt, userPrompt, videoURL string) (string, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +226,65 @@ func (c *openaiLLMClient) CompleteWithImage(ctx context.Context, systemPrompt, u
 	return resp.Choices[0].Message.Content, nil
 }
 
+// CompleteWithVideoURL sends a non-standard but common OpenAI-compatible
+// video_url content part. Providers/gateways that support native video
+// understanding can consume the original OSS/CDN video URL; callers fall back to
+// sampled frames when the model rejects this shape.
+func (c *openaiLLMClient) CompleteWithVideoURL(ctx context.Context, systemPrompt, userPrompt, videoURL string) (string, error) {
+	if c.timeout > 0 {
+		if _, ok := ctx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, c.timeout)
+			defer cancel()
+		}
+	}
+
+	messages := []openai.ChatCompletionMessageParamUnion{}
+	if systemPrompt != "" {
+		messages = append(messages, openai.ChatCompletionMessageParamUnion{
+			OfSystem: &openai.ChatCompletionSystemMessageParam{
+				Content: openai.ChatCompletionSystemMessageParamContentUnion{
+					OfString: openai.String(systemPrompt),
+				},
+			},
+		})
+	}
+
+	videoPart := param.Override[openai.ChatCompletionContentPartUnionParam](map[string]any{
+		"type":      "video_url",
+		"video_url": map[string]any{"url": videoURL},
+	})
+	messages = append(messages, openai.ChatCompletionMessageParamUnion{
+		OfUser: &openai.ChatCompletionUserMessageParam{
+			Content: openai.ChatCompletionUserMessageParamContentUnion{
+				OfArrayOfContentParts: []openai.ChatCompletionContentPartUnionParam{
+					videoPart,
+					{OfText: &openai.ChatCompletionContentPartTextParam{Text: userPrompt}},
+				},
+			},
+		},
+	})
+
+	params := openai.ChatCompletionNewParams{
+		Messages: messages,
+		Model:    shared.ChatModel(c.model),
+	}
+	if isKimiThinkingModel(c.model) {
+		params.SetExtraFields(map[string]any{
+			"thinking": map[string]string{"type": "disabled"},
+		})
+	}
+	resp, err := c.client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		return "", fmt.Errorf("llm video completion: %w", err)
+	}
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)",
+			c.model, resp.ID, resp.Model)
+	}
+	return resp.Choices[0].Message.Content, nil
+}
+
 // isKimiThinkingModel returns true for Kimi K2.6/K2.5 models that default to
 // thinking:enabled. These models need thinking:disabled for fast, non-reasoning tasks.
 func isKimiThinkingModel(model string) bool {
@@ -302,6 +366,31 @@ func (s *WritingService) AnalyzeImage(ctx context.Context, userID, imageSource, 
 	result, err := llm.CompleteWithImage(ctx, systemPrompt, prompt, imageSource)
 	if err != nil {
 		return "", fmt.Errorf("image analysis: %w", err)
+	}
+	return strings.TrimSpace(result), nil
+}
+
+// AnalyzeVideoURL sends an OSS/CDN video URL to a configured OpenAI-compatible
+// vision model using a native video content part. If the configured client or
+// provider does not support that shape, callers should fall back to sampled
+// frame analysis.
+func (s *WritingService) AnalyzeVideoURL(ctx context.Context, userID, videoURL, prompt string) (string, error) {
+	llm := s.visionClient
+	if llm == nil {
+		llm = s.getLLMClient(ctx, userID)
+	}
+	if llm == nil {
+		return "", fmt.Errorf("LLM service is not configured")
+	}
+	videoLLM, ok := llm.(videoURLLLMClient)
+	if !ok {
+		return "", fmt.Errorf("configured LLM client does not support native video URL input")
+	}
+
+	systemPrompt := "You are a precise video analysis assistant. Describe exactly what you see across the whole video. Be specific and detailed."
+	result, err := videoLLM.CompleteWithVideoURL(ctx, systemPrompt, prompt, videoURL)
+	if err != nil {
+		return "", fmt.Errorf("video analysis: %w", err)
 	}
 	return strings.TrimSpace(result), nil
 }

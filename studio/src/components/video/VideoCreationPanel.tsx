@@ -4,12 +4,13 @@ import { RotateCcw, Settings2 } from 'lucide-react'
 import { Button } from '@/components/common/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { VideoReferenceInput } from '@/components/video/VideoReferenceInput'
-import { VIDEO_PROJECT_DEFAULT_VALUE, buildVideoFormConfig, readVideoSelectValue, writeVideoSelectValue } from '@/lib/video-form'
-import { videoModelDisplayName } from '@/lib/video-display'
+import { VIDEO_PROJECT_DEFAULT_VALUE, buildVideoFormConfig, defaultVideoPurposeForCreativeType, readVideoSelectValue, writeVideoSelectValue } from '@/lib/video-form'
+import { videoCreativeTypeLabels, videoModelDisplayName, videoPurposeLabels } from '@/lib/video-display'
 import type { Project, VideoModelSpec, VideoTaskConfig } from '@/types'
 
 function yesNo(value: boolean | undefined) {
@@ -99,6 +100,74 @@ export function VideoCreationPanel({
           <p className="mt-0.5 text-xs text-muted-foreground">{config?.workflow === 'editor' ? '写清楚素材如何剪、字幕/调色/动效要求和交付格式。' : '写清楚这条视频要表达什么，留空则使用项目定位自动生成。'}</p>
         </div>
         {promptField}
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2">
+        <FormField control={form.control} name="video_config.creative_type" render={({ field }) => (
+          <FormItem>
+            <FormLabel>内容类型</FormLabel>
+            <Select
+              value={field.value || defaults?.creative_type || 'personal_ip'}
+              onValueChange={(value) => {
+                const previousDefaultPurpose = defaultVideoPurposeForCreativeType(field.value || defaults?.creative_type || 'personal_ip')
+                field.onChange(value)
+                const currentPurpose = form.getValues('video_config.purpose')
+                if (!currentPurpose || currentPurpose === previousDefaultPurpose) {
+                  form.setValue('video_config.purpose', defaultVideoPurposeForCreativeType(value), { shouldDirty: true })
+                }
+              }}
+            >
+              <FormControl><SelectTrigger className="w-full"><SelectValue /></SelectTrigger></FormControl>
+              <SelectContent>
+                {Object.entries(videoCreativeTypeLabels).map(([value, label]) => (
+                  <SelectItem key={value} value={value} label={label}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )} />
+        <FormField control={form.control} name="video_config.purpose" render={({ field }) => (
+          <FormItem>
+            <FormLabel>商业目标</FormLabel>
+            <Select value={field.value || defaults?.purpose || defaultVideoPurposeForCreativeType(config?.creative_type || defaults?.creative_type)} onValueChange={field.onChange}>
+              <FormControl><SelectTrigger className="w-full"><SelectValue /></SelectTrigger></FormControl>
+              <SelectContent>
+                {Object.entries(videoPurposeLabels).map(([value, label]) => (
+                  <SelectItem key={value} value={value} label={label}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )} />
+        <FormField control={form.control} name="video_config.subject_profile" render={({ field }) => (
+          <FormItem className="sm:col-span-2">
+            <FormLabel>人物 / 主体</FormLabel>
+            <FormControl>
+              <Textarea
+                placeholder="例如：30 岁效率博主，黑色衬衫，语速快但亲和；必须保持同一人设和穿搭。"
+                className="min-h-20 resize-y"
+                {...field}
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )} />
+        <FormField control={form.control} name="video_config.audience" render={({ field }) => (
+          <FormItem>
+            <FormLabel>目标受众</FormLabel>
+            <FormControl><Input placeholder="例如：想提升工作效率的职场新人" {...field} /></FormControl>
+            <FormMessage />
+          </FormItem>
+        )} />
+        <FormField control={form.control} name="video_config.single_message" render={({ field }) => (
+          <FormItem>
+            <FormLabel>核心信息</FormLabel>
+            <FormControl><Input placeholder="例如：把会议记录变成行动清单" {...field} /></FormControl>
+            <FormMessage />
+          </FormItem>
+        )} />
       </section>
 
       <section className="flex flex-col gap-2">

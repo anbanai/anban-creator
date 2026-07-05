@@ -184,7 +184,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "claudecode",
 			path:        filepath.Join(root, "claudecode", "hooks", "hooks.json"),
-			wantVersion: "2.10.17",
+			wantVersion: "2.10.18",
 			wantSnippets: []string{
 				"SessionStart",
 				"${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh",
@@ -193,7 +193,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "codex",
 			path:        filepath.Join(root, "codex", "install", "install-subagents.sh"),
-			wantVersion: "2.10.13",
+			wantVersion: "2.10.14",
 			wantSnippets: []string{
 				"ANBAN_PLUGIN_ROOT=\"$PLUGIN_ROOT\"",
 				"scripts/bootstrap.sh",
@@ -202,7 +202,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "openclaw",
 			path:        filepath.Join(root, "openclaw", "src", "index.ts"),
-			wantVersion: "2.7.12",
+			wantVersion: "2.7.13",
 			wantSnippets: []string{
 				"bootstrapAnbanBinary(api)",
 				"scripts/bootstrap.sh",

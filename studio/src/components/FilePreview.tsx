@@ -29,6 +29,23 @@ function isVideoFile(file: TaskFile): boolean {
   return file.mime_type?.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.file_name)
 }
 
+function filePreviewTone(file: TaskFile) {
+  const name = file.file_name.toLowerCase()
+  const mime = file.mime_type?.toLowerCase() || ''
+  if (isVideoFile(file)) return 'border-sky-500/45 bg-sky-500/5 text-sky-500'
+  if (/\.md$/i.test(name) || mime.includes('markdown')) return 'border-emerald-500/45 bg-emerald-500/5 text-emerald-500'
+  if (/\.(json|ya?ml)$/i.test(name) || mime.includes('json') || mime.includes('yaml')) return 'border-amber-500/45 bg-amber-500/5 text-amber-500'
+  if (/\.html?$/i.test(name) || mime === 'text/html') return 'border-violet-500/45 bg-violet-500/5 text-violet-500'
+  return 'border-border bg-muted/20 text-muted-foreground'
+}
+
+function filePreviewIcon(file: TaskFile) {
+  if (isVideoFile(file)) return Video
+  if (file.mime_type === 'text/html' || isMarkdownFile(file.file_name) || /\.(json|ya?ml)$/i.test(file.file_name)) return FileCode
+  if (file.mime_type?.startsWith('text/')) return FileText
+  return File
+}
+
 // --- Modal Content Renderer (stateless per-file renderer) ---
 
 function FilePreviewModalContent({
@@ -133,7 +150,7 @@ function FilePreviewModalContent({
   const modalClass = isImage
     ? 'sm:max-w-4xl'
     : isVideo
-      ? 'sm:max-w-3xl'
+      ? 'sm:max-w-5xl'
       : isHTML
         ? 'sm:max-w-4xl'
         : 'sm:max-w-4xl'
@@ -165,14 +182,21 @@ function FilePreviewModalContent({
       )}
 
       {!loading && isVideo && imgSrc && (
-        <video
-          src={imgSrc}
-          controls
-          className="max-h-[70vh] w-full rounded-lg"
-        />
+        <div className="grid max-h-[80vh] gap-4 sm:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="min-w-0">
+            <video
+              src={imgSrc}
+              controls
+              className="max-h-[78vh] w-full rounded-lg bg-black"
+            />
+          </div>
+          {details && (
+            <div className="min-h-0 overflow-y-auto pr-1">
+              {details}
+            </div>
+          )}
+        </div>
       )}
-
-      {!loading && isVideo && details}
 
       {!loading && isHTML && htmlContent && (
         <iframe
@@ -401,7 +425,6 @@ function FilePreviewInline({
   const isVideo = isVideoFile(file)
   const isHTML = file.mime_type === 'text/html'
   const isText = !isImage && !isVideo && !isHTML && (file.mime_type?.startsWith('text/') || file.file_name?.match(/\.(md|txt|json|yaml|yml|csv|log)$/i))
-  const isMD = isText && isMarkdownFile(file.file_name)
 
   const handleDownload = async () => {
     try {
@@ -460,59 +483,25 @@ function FilePreviewInline({
     )
   }
 
-  if (isVideo) {
-    return (
-      <div className="space-y-1">
-        <div
-          className="flex h-48 w-36 cursor-pointer items-center justify-center rounded-md ring-1 ring-border transition-opacity hover:opacity-90"
-          onClick={onClick}
-        >
-          <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
-            <Video className="h-8 w-8" />
-            <span className="text-xs">{formatSize(file.file_size)}</span>
-          </div>
-        </div>
-        <p className="truncate text-xs text-muted-foreground" title={file.file_name}>{file.file_name}</p>
-        <div className="flex gap-2">
-          <button
-            onClick={onClick}
-            aria-label={`预览 ${file.file_name}`}
-            className="flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent"
-          >
-            <Eye className="h-3.5 w-3.5" />
-            预览
-          </button>
-          <button
-            onClick={handleDownload}
-            className="flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent"
-          >
-            <Download className="h-3.5 w-3.5" />
-            下载
-          </button>
-        </div>
-      </div>
-    )
-  }
-
+  const tone = filePreviewTone(file)
+  const Icon = filePreviewIcon(file)
+  const canPreview = isVideo || isText || isHTML
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between rounded-lg border border-border p-3">
-        <div className="flex items-center gap-3">
-          {(isMD || isHTML) ? (
-            <FileCode className="h-5 w-5 text-muted-foreground" />
-          ) : (
-            <FileText className="h-5 w-5 text-muted-foreground" />
-          )}
-          <div>
-            <p className="text-sm font-medium text-foreground">{file.file_name}</p>
+      <div className={`flex items-center justify-between rounded-lg border p-3 ${tone}`}>
+        <div className="flex min-w-0 items-center gap-3">
+          <Icon className="h-5 w-5 shrink-0" />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-foreground" title={file.file_name}>{file.file_name}</p>
             <p className="text-xs text-muted-foreground">{file.mime_type} &middot; {formatSize(file.file_size)}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {(isText || isHTML) && (
+        <div className="ml-3 flex shrink-0 items-center gap-2">
+          {canPreview && (
             <button
               onClick={onClick}
               className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+              aria-label={`预览 ${file.file_name}`}
             >
               <Eye className="h-3.5 w-3.5" />
               预览

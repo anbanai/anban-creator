@@ -18,6 +18,29 @@ export function videoModelDisplayName(model: Pick<VideoModelSpec, 'key' | 'displ
   return model.display_name?.trim() || knownVideoModelNames[model.key] || model.key
 }
 
+export const videoCreativeTypeLabels: Record<string, string> = {
+  personal_ip: '个人 IP',
+  high_efficiency_joke: '高效段子',
+  product_demo: '产品演示',
+  brand_promo: '品牌推广',
+  custom: '自定义',
+}
+
+export const videoPurposeLabels: Record<string, string> = {
+  planting: '种草',
+  ecommerce: '带货',
+  lead_gen: '获客',
+  promotion: '推广',
+}
+
+export function videoCreativeTypeLabel(value: string | null | undefined) {
+  return value ? videoCreativeTypeLabels[value] || value : '—'
+}
+
+export function videoPurposeLabel(value: string | null | undefined) {
+  return value ? videoPurposeLabels[value] || value : '—'
+}
+
 export const videoReferenceRoles = [
   { value: 'subject identity', label: '主体不变' },
   { value: 'product appearance', label: '产品外观' },

@@ -90,6 +90,32 @@ func TestResolveVideoGenerationPlanAppliesProjectDefaultsAndDynamicCredits(t *te
 	}
 }
 
+func TestResolveVideoGenerationPlanDefaultsCreativeTypePurposePair(t *testing.T) {
+	plan, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
+		Prompt:       "生成一条办公室高效段子",
+		CreativeType: VideoCreativeTypeHighEfficiencyJoke,
+	}, model.VideoDefaults{
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+	}, model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	}, DefaultVideoModelCatalog(), 1000)
+	if err != nil {
+		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
+	}
+	if plan.CreativeType != VideoCreativeTypeHighEfficiencyJoke {
+		t.Fatalf("creative type = %q, want high-efficiency joke", plan.CreativeType)
+	}
+	if plan.Purpose != VideoPurposePromotion {
+		t.Fatalf("purpose = %q, want promotion", plan.Purpose)
+	}
+}
+
 func TestResolveVideoGenerationPlanSplitsTargetDurationByModelLimit(t *testing.T) {
 	plan, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
 		Prompt:   "生成一条 1 分钟茶文化短视频",

@@ -346,11 +346,17 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'video',
       status: 'completed',
+      prompt: '做一条办公室个人 IP 种草视频',
       video_generation_id: 'vg-1',
       video_estimated_credits: 7440,
       video_credits_charged: 7440,
       video_config: {
         workflow: 'creator',
+        creative_type: 'personal_ip',
+        purpose: 'planting',
+        subject_profile: '30 岁效率博主，黑色衬衫，语速快但亲和',
+        audience: '想提升工作效率的职场新人',
+        single_message: '用一个可复制的方法把会议记录变成行动清单',
         model_key: 'seedance-2.0-mini',
         resolution: '720p',
         ratio: '9:16',
@@ -385,11 +391,20 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
+    expect(await screen.findByText('输入与创作参数')).toBeInTheDocument()
+    expect(screen.getAllByText('做一条办公室个人 IP 种草视频').length).toBeGreaterThan(0)
+    expect(screen.getByText('个人 IP')).toBeInTheDocument()
+    expect(screen.getByText('种草')).toBeInTheDocument()
+    expect(screen.getByText('30 岁效率博主，黑色衬衫，语速快但亲和')).toBeInTheDocument()
+    expect(screen.getByText('想提升工作效率的职场新人')).toBeInTheDocument()
+    expect(screen.getByText('用一个可复制的方法把会议记录变成行动清单')).toBeInTheDocument()
+    expect(screen.getByText(/rhythm · https:\/\/cdn\.example\.com\/ref\.mp4/)).toBeInTheDocument()
     expect(await screen.findByText('生成文件 (2)')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '视频结果' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /预览 final\.mp4/ }))
     const videoDialog = await screen.findByRole('dialog')
     expect(within(videoDialog).getByRole('heading', { name: '视频结果' })).toBeInTheDocument()
+    expect(within(videoDialog).getByText('创作参数')).toBeInTheDocument()
     expect(within(videoDialog).getByText('生成任务 ID')).toBeInTheDocument()
     expect(within(videoDialog).getByText('参考素材')).toBeInTheDocument()
     expect(within(videoDialog).getByText(/已消耗 7,440/)).toBeInTheDocument()

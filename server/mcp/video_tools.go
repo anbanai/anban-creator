@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,6 +48,25 @@ func registerVideoTools(server *mcp.Server) {
 			"required": []any{"project_id", "type"},
 		},
 	}, registerVideoReferenceHandler)
+
+	server.AddTool(&mcp.Tool{
+		Name:        "analyze_video_reference",
+		Description: "Analyze an OSS/CDN video reference with the configured OpenAI-compatible vision model before video creation. Prefer native whole-video understanding via the model; fallback implementations may sample frames. Returns structured video-understanding JSON and registers video-understanding.json when task_id is provided.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"project_id":      map[string]any{"type": "string"},
+				"task_id":         map[string]any{"type": "string"},
+				"task_file_id":    map[string]any{"type": "string"},
+				"video_url":       map[string]any{"type": "string"},
+				"reference_role":  map[string]any{"type": "string"},
+				"purpose_hint":    map[string]any{"type": "string"},
+				"analysis_prompt": map[string]any{"type": "string"},
+				"sample_count":    map[string]any{"type": "integer"},
+			},
+			"required": []any{"project_id"},
+		},
+	}, analyzeVideoReferenceHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "build_video_generation_plan",
@@ -132,6 +152,10 @@ func videoGenerationInputSchema() map[string]any {
 			"project_id":               map[string]any{"type": "string"},
 			"prompt":                   map[string]any{"type": "string"},
 			"purpose":                  map[string]any{"type": "string", "enum": []any{"planting", "ecommerce", "lead_gen", "promotion"}},
+			"creative_type":            map[string]any{"type": "string", "enum": []any{"personal_ip", "high_efficiency_joke", "product_demo", "brand_promo", "custom"}},
+			"subject_profile":          map[string]any{"type": "string"},
+			"audience":                 map[string]any{"type": "string"},
+			"single_message":           map[string]any{"type": "string"},
 			"references":               map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
 			"duration":                 map[string]any{"type": "integer"},
 			"planned_duration_seconds": map[string]any{"type": "integer"},
@@ -209,6 +233,283 @@ func registerVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest
 		resp["task_file_id"] = taskFile.ID
 	}
 	return textResult(resp)
+}
+
+func analyzeVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.WritingSvc == nil {
+		return errorResult("writing/vision service not available"), nil
+	}
+	args := parseArgs(req.Params.Arguments)
+	projectID, _ := args["project_id"].(string)
+	if strings.TrimSpace(projectID) == "" {
+		return errorResult("project_id is required"), nil
+	}
+	taskID, _ := args["task_id"].(string)
+	taskFileID, _ := args["task_file_id"].(string)
+	videoURL, _ := args["video_url"].(string)
+	referenceRole, _ := args["reference_role"].(string)
+	purposeHint, _ := args["purpose_hint"].(string)
+	analysisPrompt, _ := args["analysis_prompt"].(string)
+	sampleCount := int64(6)
+	if v, ok := numberAsInt64(args["sample_count"]); ok && v > 0 {
+		sampleCount = v
+	}
+	if sampleCount > 8 {
+		sampleCount = 8
+	}
+	if strings.TrimSpace(taskFileID) != "" {
+		resolved, _, _, err := videoReferenceURLFromTaskFile(ctx, taskID, taskFileID, service.VideoReferenceVideo)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		videoURL = resolved
+	}
+	if err := service.ValidatePublicHTTPSURLForVideoReference(videoURL); err != nil {
+		return errorResult(err.Error()), nil
+	}
+	prompt := buildVideoUnderstandingPrompt(referenceRole, purposeHint, analysisPrompt, sampleCount)
+	userID := getUserID(ctx)
+	raw, err := svcs.WritingSvc.AnalyzeVideoURL(ctx, userID, videoURL, prompt)
+	analysisMode := "native_video"
+	metadata := map[string]any{"source_url": videoURL}
+	if err != nil {
+		var fallbackErr error
+		raw, metadata, fallbackErr = analyzeSampledVideoFrames(ctx, userID, videoURL, prompt, sampleCount, err)
+		err = fallbackErr
+		analysisMode = "sampled_frames"
+		if err != nil {
+			return errorResult("analyze video reference: " + err.Error()), nil
+		}
+	}
+	understanding := normalizeVideoUnderstanding(raw)
+	understanding["metadata"] = metadata
+	understanding["model"] = "configured_vision_model"
+	understanding["analysis_mode"] = analysisMode
+	understanding["source_url"] = videoURL
+	understanding["reference_role"] = strings.TrimSpace(referenceRole)
+	understanding["purpose_hint"] = strings.TrimSpace(purposeHint)
+
+	resp := map[string]any{
+		"analysis_mode":            analysisMode,
+		"video_understanding":      understanding,
+		"video_understanding_file": "video-understanding.json",
+	}
+	if strings.TrimSpace(taskID) != "" && svcs.TaskSvc != nil {
+		payload, _ := json.MarshalIndent(understanding, "", "  ")
+		reader := strings.NewReader(string(payload))
+		tf, err := svcs.TaskSvc.UploadTaskFileFromReader(ctx, taskID, getUserID(ctx), "video-understanding.json", reader, "application/json", int64(len(payload)))
+		if err != nil {
+			return errorResult("register video-understanding.json: " + err.Error()), nil
+		}
+		svcs.TaskSvc.EnrichFilesWithURLs(ctx, []*model.TaskFile{tf})
+		resp["task_file"] = tf
+		resp["task_file_id"] = tf.ID
+	}
+	return textResult(resp)
+}
+
+func buildVideoUnderstandingPrompt(referenceRole, purposeHint, extra string, sampleCount int64) string {
+	var b strings.Builder
+	b.WriteString("你是资深短视频导演和多模态视频理解专家。请完整理解这个参考视频，不要只总结文案或录音。")
+	b.WriteString("从画面、人物、表情、动作、场景、镜头运动、节奏、主体一致性、可复刻点和不可改变点分析。")
+	if strings.TrimSpace(referenceRole) != "" {
+		fmt.Fprintf(&b, "\nreference_role: %s", referenceRole)
+	}
+	if strings.TrimSpace(purposeHint) != "" {
+		fmt.Fprintf(&b, "\npurpose_hint: %s", purposeHint)
+	}
+	fmt.Fprintf(&b, "\nsample_count_hint: %d", sampleCount)
+	if strings.TrimSpace(extra) != "" {
+		fmt.Fprintf(&b, "\nuser_analysis_prompt: %s", extra)
+	}
+	b.WriteString(`
+
+Return strict JSON only with these fields:
+{
+  "visual_summary": "one concise but specific visual summary",
+  "timeline": [{"time_range":"0-3s","visual":"","action":"","expression":"","camera":"","rhythm":"","creative_function":""}],
+  "subjects": [],
+  "people": [{"role":"","appearance":"","expression":"","gesture":"","consistency_anchors":[]}],
+  "expressions": [],
+  "actions": [],
+  "scenes": [],
+  "camera_motion": [],
+  "rhythm": [],
+  "must_keep": [],
+  "can_change": [],
+  "must_not_change": [],
+  "planning_hints": []
+}`)
+	return b.String()
+}
+
+func normalizeVideoUnderstanding(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(raw), &parsed); err == nil && parsed != nil {
+		return parsed
+	}
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start >= 0 && end > start {
+		if err := json.Unmarshal([]byte(raw[start:end+1]), &parsed); err == nil && parsed != nil {
+			return parsed
+		}
+	}
+	return map[string]any{
+		"visual_summary":  raw,
+		"timeline":        []any{},
+		"subjects":        []any{},
+		"people":          []any{},
+		"expressions":     []any{},
+		"actions":         []any{},
+		"scenes":          []any{},
+		"camera_motion":   []any{},
+		"rhythm":          []any{},
+		"must_keep":       []any{},
+		"can_change":      []any{},
+		"must_not_change": []any{},
+		"planning_hints":  []any{"vision response was not valid JSON; raw text preserved in visual_summary"},
+	}
+}
+
+func probeVideoMetadata(ctx context.Context, videoURL string) (map[string]any, error) {
+	return probeVideoMetadataSource(ctx, videoURL)
+}
+
+func probeVideoMetadataSource(ctx context.Context, source string) (map[string]any, error) {
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		return nil, err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(probeCtx, ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", source).Output()
+	if err != nil {
+		return nil, err
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(out, &meta); err != nil {
+		return nil, err
+	}
+	return meta, nil
+}
+
+type sampledVideoFrame struct {
+	Index       int
+	TimeSeconds float64
+	Path        string
+	DataURL     string
+}
+
+func analyzeSampledVideoFrames(ctx context.Context, userID, videoURL, basePrompt string, sampleCount int64, nativeErr error) (string, map[string]any, error) {
+	frames, metadata, err := sampleVideoFramesForUnderstanding(ctx, videoURL, sampleCount)
+	if err != nil {
+		return "", metadata, err
+	}
+	defer func() {
+		if len(frames) > 0 {
+			_ = os.RemoveAll(filepath.Dir(frames[0].Path))
+		}
+	}()
+
+	observations := make([]string, 0, len(frames))
+	for _, frame := range frames {
+		framePrompt := fmt.Sprintf("This is sampled frame %d/%d from the reference video at %.2fs. Analyze visible subjects, people, expressions, actions, scene, camera clues, rhythm clues, and consistency anchors. Return concise JSON or bullet facts only.\n\nNative whole-video understanding failed: %v\n\n%s", frame.Index, len(frames), frame.TimeSeconds, nativeErr, basePrompt)
+		observation, err := svcs.WritingSvc.AnalyzeImage(ctx, userID, frame.DataURL, framePrompt)
+		if err != nil {
+			return "", metadata, fmt.Errorf("sampled frame %d analysis: %w", frame.Index, err)
+		}
+		observations = append(observations, fmt.Sprintf("Frame %d at %.2fs:\n%s", frame.Index, frame.TimeSeconds, observation))
+	}
+
+	metaJSON, _ := json.MarshalIndent(metadata, "", "  ")
+	finalPrompt := basePrompt + fmt.Sprintf("\n\nNative whole-video understanding failed: %v\n\nUse these sampled-frame observations and ffprobe metadata to synthesize the required strict JSON. Do not claim audio/transcript facts unless visible in frame observations.\n\nffprobe metadata:\n%s\n\nSampled-frame observations:\n%s", nativeErr, string(metaJSON), strings.Join(observations, "\n\n"))
+	raw, err := svcs.WritingSvc.AnalyzeImage(ctx, userID, frames[len(frames)-1].DataURL, finalPrompt)
+	return raw, metadata, err
+}
+
+func sampleVideoFramesForUnderstanding(ctx context.Context, videoURL string, sampleCount int64) ([]sampledVideoFrame, map[string]any, error) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return nil, map[string]any{"source_url": videoURL}, fmt.Errorf("ffmpeg is required for sampled-frame video understanding")
+	}
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		return nil, map[string]any{"source_url": videoURL}, fmt.Errorf("ffprobe is required for sampled-frame video understanding")
+	}
+	if sampleCount <= 0 {
+		sampleCount = 6
+	}
+	if sampleCount > 8 {
+		sampleCount = 8
+	}
+
+	tmpDir, err := os.MkdirTemp("", "anban-video-understanding-*")
+	if err != nil {
+		return nil, map[string]any{"source_url": videoURL}, err
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
+
+	videoPath := filepath.Join(tmpDir, "reference.mp4")
+	if err := downloadFile(ctx, videoURL, videoPath, 500<<20); err != nil {
+		return nil, map[string]any{"source_url": videoURL}, err
+	}
+	metadata, err := probeVideoMetadataSource(ctx, videoPath)
+	if err != nil {
+		metadata = map[string]any{"source_url": videoURL, "metadata_error": err.Error()}
+	}
+	metadata["source_url"] = videoURL
+
+	duration := durationFromProbeMetadata(metadata)
+	if duration <= 0 {
+		duration = float64(sampleCount + 1)
+	}
+
+	frames := make([]sampledVideoFrame, 0, sampleCount)
+	sampledMeta := make([]map[string]any, 0, sampleCount)
+	for i := int64(1); i <= sampleCount; i++ {
+		timeSeconds := duration * float64(i) / float64(sampleCount+1)
+		framePath := filepath.Join(tmpDir, fmt.Sprintf("frame-%02d.jpg", i))
+		extractCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		out, cmdErr := exec.CommandContext(extractCtx, ffmpeg, "-y", "-ss", strconv.FormatFloat(timeSeconds, 'f', 3, 64), "-i", videoPath, "-frames:v", "1", "-q:v", "3", framePath).CombinedOutput()
+		cancel()
+		if cmdErr != nil {
+			return nil, metadata, fmt.Errorf("ffmpeg extract frame %.2fs: %w: %s", timeSeconds, cmdErr, strings.TrimSpace(string(out)))
+		}
+		data, err := os.ReadFile(framePath)
+		if err != nil {
+			return nil, metadata, err
+		}
+		frame := sampledVideoFrame{
+			Index:       int(i),
+			TimeSeconds: timeSeconds,
+			Path:        framePath,
+			DataURL:     "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(data),
+		}
+		frames = append(frames, frame)
+		sampledMeta = append(sampledMeta, map[string]any{"index": frame.Index, "time_seconds": frame.TimeSeconds})
+	}
+	if len(frames) == 0 {
+		return nil, metadata, fmt.Errorf("no sampled frames extracted")
+	}
+	metadata["sampled_frames"] = sampledMeta
+	cleanup = false
+	return frames, metadata, nil
+}
+
+func durationFromProbeMetadata(metadata map[string]any) float64 {
+	format, _ := metadata["format"].(map[string]any)
+	raw, _ := format["duration"].(string)
+	duration, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || duration <= 0 {
+		return 0
+	}
+	return duration
 }
 
 func videoReferenceURLFromTaskFile(ctx context.Context, taskID, taskFileID, refType string) (string, float64, *model.TaskFile, error) {
@@ -934,20 +1235,28 @@ func videoOperationID(taskID string) string {
 func parseVideoGenerationRequest(args map[string]any) (service.VideoGenerationRequest, error) {
 	prompt, _ := args["prompt"].(string)
 	purpose, _ := args["purpose"].(string)
+	creativeType, _ := args["creative_type"].(string)
+	subjectProfile, _ := args["subject_profile"].(string)
+	audience, _ := args["audience"].(string)
+	singleMessage, _ := args["single_message"].(string)
 	modelName, _ := args["model"].(string)
 	resolution, _ := args["resolution"].(string)
 	ratio, _ := args["ratio"].(string)
 	serviceTier, _ := args["service_tier"].(string)
 	taskID, _ := args["task_id"].(string)
 	req := service.VideoGenerationRequest{
-		Prompt:       prompt,
-		Purpose:      purpose,
-		Model:        modelName,
-		Resolution:   resolution,
-		Ratio:        ratio,
-		ServiceTier:  serviceTier,
-		TaskID:       taskID,
-		ReferenceSet: parseVideoReferences(args["references"]),
+		Prompt:         prompt,
+		Purpose:        purpose,
+		CreativeType:   creativeType,
+		SubjectProfile: subjectProfile,
+		Audience:       audience,
+		SingleMessage:  singleMessage,
+		Model:          modelName,
+		Resolution:     resolution,
+		Ratio:          ratio,
+		ServiceTier:    serviceTier,
+		TaskID:         taskID,
+		ReferenceSet:   parseVideoReferences(args["references"]),
 	}
 	if v, ok := numberAsInt64(args["duration"]); ok {
 		req.Duration = v

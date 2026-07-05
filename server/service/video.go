@@ -22,6 +22,12 @@ const (
 	VideoPurposeLeadGen   = "lead_gen"
 	VideoPurposePromotion = "promotion"
 
+	VideoCreativeTypePersonalIP         = "personal_ip"
+	VideoCreativeTypeHighEfficiencyJoke = "high_efficiency_joke"
+	VideoCreativeTypeProductDemo        = "product_demo"
+	VideoCreativeTypeBrandPromo         = "brand_promo"
+	VideoCreativeTypeCustom             = "custom"
+
 	VideoReferenceText  = "text"
 	VideoReferenceImage = "image_url"
 	VideoReferenceAudio = "audio_url"
@@ -36,6 +42,15 @@ var validVideoPurposes = map[string]bool{
 	VideoPurposePromotion: true,
 }
 
+var validVideoCreativeTypes = map[string]bool{
+	"":                                  true,
+	VideoCreativeTypePersonalIP:         true,
+	VideoCreativeTypeHighEfficiencyJoke: true,
+	VideoCreativeTypeProductDemo:        true,
+	VideoCreativeTypeBrandPromo:         true,
+	VideoCreativeTypeCustom:             true,
+}
+
 var validVideoReferenceTypes = map[string]bool{
 	VideoReferenceText:  true,
 	VideoReferenceImage: true,
@@ -47,6 +62,10 @@ var validVideoReferenceTypes = map[string]bool{
 type VideoGenerationRequest struct {
 	Prompt                 string                `json:"prompt"`
 	Purpose                string                `json:"purpose,omitempty"`
+	CreativeType           string                `json:"creative_type,omitempty"`
+	SubjectProfile         string                `json:"subject_profile,omitempty"`
+	Audience               string                `json:"audience,omitempty"`
+	SingleMessage          string                `json:"single_message,omitempty"`
 	Model                  string                `json:"model,omitempty"`
 	Resolution             string                `json:"resolution,omitempty"`
 	Ratio                  string                `json:"ratio,omitempty"`
@@ -128,6 +147,10 @@ type VideoGenerationSegmentPlan struct {
 type VideoGenerationPlan struct {
 	ProjectID                 string                       `json:"project_id"`
 	Purpose                   string                       `json:"purpose"`
+	CreativeType              string                       `json:"creative_type,omitempty"`
+	SubjectProfile            string                       `json:"subject_profile,omitempty"`
+	Audience                  string                       `json:"audience,omitempty"`
+	SingleMessage             string                       `json:"single_message,omitempty"`
 	Prompt                    string                       `json:"prompt"`
 	ModelKey                  string                       `json:"model_key,omitempty"`
 	Model                     string                       `json:"model,omitempty"`
@@ -228,21 +251,27 @@ func (s *VideoService) BuildPlan(req VideoGenerationRequest, projectID string) (
 		contentPreview = append(contentPreview, entry)
 	}
 	return &VideoGenerationPlan{
-		ProjectID:   projectID,
-		Purpose:     resolved.Purpose,
-		Prompt:      resolved.Prompt,
-		Model:       resolved.Model,
-		Resolution:  resolved.Resolution,
-		Ratio:       resolved.Ratio,
-		Duration:    resolved.Duration,
-		Seed:        resolved.Seed,
-		CameraFixed: resolved.CameraFixed,
-		Watermark:   resolved.Watermark,
-		Preflight:   resolved.Preflight != nil && *resolved.Preflight,
-		ServiceTier: resolved.ServiceTier,
-		References:  resolved.ReferenceSet,
+		ProjectID:      projectID,
+		Purpose:        resolved.Purpose,
+		CreativeType:   resolved.CreativeType,
+		SubjectProfile: resolved.SubjectProfile,
+		Audience:       resolved.Audience,
+		SingleMessage:  resolved.SingleMessage,
+		Prompt:         resolved.Prompt,
+		Model:          resolved.Model,
+		Resolution:     resolved.Resolution,
+		Ratio:          resolved.Ratio,
+		Duration:       resolved.Duration,
+		Seed:           resolved.Seed,
+		CameraFixed:    resolved.CameraFixed,
+		Watermark:      resolved.Watermark,
+		Preflight:      resolved.Preflight != nil && *resolved.Preflight,
+		ServiceTier:    resolved.ServiceTier,
+		References:     resolved.ReferenceSet,
 		RequiredArtifacts: []string{
 			"reference-anchors.md",
+			"creative-brief.md",
+			"video-understanding.json",
 			"script.md",
 			"shot-plan.md",
 			"generation-plan.json",
@@ -314,8 +343,11 @@ func (s *VideoService) buildArkCreateRequest(req VideoGenerationRequest) (arkmod
 }
 
 func (s *VideoService) applyDefaults(req VideoGenerationRequest) VideoGenerationRequest {
+	if req.CreativeType == "" {
+		req.CreativeType = VideoCreativeTypePersonalIP
+	}
 	if req.Purpose == "" {
-		req.Purpose = VideoPurposePlanting
+		req.Purpose = DefaultVideoPurposeForCreativeType(req.CreativeType)
 	}
 	return req
 }
@@ -323,6 +355,9 @@ func (s *VideoService) applyDefaults(req VideoGenerationRequest) VideoGeneration
 func validateVideoGenerationRequest(req VideoGenerationRequest) error {
 	if strings.TrimSpace(req.Model) == "" {
 		return fmt.Errorf("video model is required")
+	}
+	if !validVideoCreativeTypes[req.CreativeType] {
+		return fmt.Errorf("creative_type must be one of personal_ip, high_efficiency_joke, product_demo, brand_promo, custom")
 	}
 	if !validVideoPurposes[req.Purpose] {
 		return fmt.Errorf("purpose must be one of planting, ecommerce, lead_gen, promotion")
@@ -351,6 +386,15 @@ func validateVideoGenerationRequest(req VideoGenerationRequest) error {
 		}
 	}
 	return nil
+}
+
+func DefaultVideoPurposeForCreativeType(creativeType string) string {
+	switch creativeType {
+	case VideoCreativeTypeHighEfficiencyJoke:
+		return VideoPurposePromotion
+	default:
+		return VideoPurposePlanting
+	}
 }
 
 func isAllowedVideoRatio(v string) bool {
@@ -387,6 +431,10 @@ func validatePublicHTTPSURL(raw string) error {
 		return fmt.Errorf("reference URL must be a publicly accessible HTTPS URL; local/private addresses are not accessible by Ark")
 	}
 	return nil
+}
+
+func ValidatePublicHTTPSURLForVideoReference(raw string) error {
+	return validatePublicHTTPSURL(raw)
 }
 
 func mapVideoReferenceToArkContent(ref VideoReferenceInput) (*arkmodel.CreateContentGenerationContentItem, error) {

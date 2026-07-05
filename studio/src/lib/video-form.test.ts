@@ -3,6 +3,7 @@ import type { VideoDefaults, VideoTaskConfig } from '@/types'
 import {
   VIDEO_PROJECT_DEFAULT_VALUE,
   buildVideoFormConfig,
+  defaultVideoPurposeForCreativeType,
   normalizeVideoConfigForSubmit,
   readVideoSelectValue,
   writeVideoSelectValue,
@@ -29,6 +30,7 @@ describe('video form helpers', () => {
 
     expect(buildVideoFormConfig(defaults)).toEqual({
       ...defaults,
+      creative_type: 'personal_ip',
       workflow: 'creator',
       references: [],
     })
@@ -37,6 +39,17 @@ describe('video form helpers', () => {
   it('submits creator workflow by default for video generation', () => {
     expect(normalizeVideoConfigForSubmit(buildVideoFormConfig())).toEqual({
       workflow: 'creator',
+      creative_type: 'personal_ip',
+      purpose: 'planting',
+    })
+  })
+
+  it('defaults high-efficiency jokes to promotion purpose', () => {
+    expect(defaultVideoPurposeForCreativeType('high_efficiency_joke')).toBe('promotion')
+    expect(normalizeVideoConfigForSubmit({ creative_type: 'high_efficiency_joke' })).toEqual({
+      workflow: 'creator',
+      creative_type: 'high_efficiency_joke',
+      purpose: 'promotion',
     })
   })
 
@@ -58,6 +71,7 @@ describe('video form helpers', () => {
 
     expect(normalizeVideoConfigForSubmit(config)).toEqual({
       workflow: 'editor',
+      creative_type: 'personal_ip',
       purpose: 'promotion',
       ratio: '16:9',
       watermark: false,
@@ -79,9 +93,11 @@ describe('video form helpers', () => {
 
     expect(normalizeVideoConfigForSubmit(buildVideoFormConfig(defaults), defaults)).toEqual({
       workflow: 'creator',
+      creative_type: 'personal_ip',
     })
     expect(normalizeVideoConfigForSubmit({ ...buildVideoFormConfig(defaults), duration: 60 }, defaults)).toEqual({
       workflow: 'creator',
+      creative_type: 'personal_ip',
       duration: 60,
     })
   })

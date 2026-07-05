@@ -510,13 +510,17 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 		taskConfig = task.VideoConfig.Data()
 	}
 	resolvedDefaults := map[string]any{
-		"purpose":    firstNonEmpty(taskConfig.Purpose, defaults.Purpose),
-		"model_key":  firstNonEmpty(taskConfig.ModelKey, defaults.ModelKey, policy.DefaultModel),
-		"resolution": firstNonEmpty(taskConfig.Resolution, defaults.Resolution),
-		"ratio":      firstNonEmpty(taskConfig.Ratio, defaults.Ratio),
-		"duration":   firstPositiveInt64(taskConfig.Duration, defaults.Duration),
-		"watermark":  firstBoolPtr(taskConfig.Watermark, defaults.Watermark),
-		"preflight":  taskOrDefaultPreflight(taskConfig, defaults, task != nil && task.Type == model.PlatformVideo),
+		"purpose":         firstNonEmpty(taskConfig.Purpose, defaults.Purpose),
+		"creative_type":   firstNonEmpty(taskConfig.CreativeType, defaults.CreativeType),
+		"subject_profile": firstNonEmpty(taskConfig.SubjectProfile, defaults.SubjectProfile),
+		"audience":        firstNonEmpty(taskConfig.Audience, defaults.Audience),
+		"single_message":  firstNonEmpty(taskConfig.SingleMessage, defaults.SingleMessage),
+		"model_key":       firstNonEmpty(taskConfig.ModelKey, defaults.ModelKey, policy.DefaultModel),
+		"resolution":      firstNonEmpty(taskConfig.Resolution, defaults.Resolution),
+		"ratio":           firstNonEmpty(taskConfig.Ratio, defaults.Ratio),
+		"duration":        firstPositiveInt64(taskConfig.Duration, defaults.Duration),
+		"watermark":       firstBoolPtr(taskConfig.Watermark, defaults.Watermark),
+		"preflight":       taskOrDefaultPreflight(taskConfig, defaults, task != nil && task.Type == model.PlatformVideo),
 	}
 	return map[string]any{
 		"defaults": resolvedDefaults,

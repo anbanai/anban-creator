@@ -180,6 +180,218 @@ func createMCPVideoTask(t *testing.T, repo repository.Repository, userID, projec
 	return task.ID
 }
 
+type fakeVideoVisionLLM struct {
+	imageSource string
+	videoSource string
+	userPrompt  string
+	response    string
+	err         error
+	errors      []error
+	calls       []fakeVideoVisionCall
+}
+
+func (f *fakeVideoVisionLLM) Complete(context.Context, string, string) (string, error) {
+	return "", errors.New("text completion should not be used for video reference analysis")
+}
+
+type fakeVideoVisionCall struct {
+	kind        string
+	imageSource string
+	userPrompt  string
+}
+
+type staticVideoTransport struct {
+	data []byte
+}
+
+func (t staticVideoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Header:     http.Header{"Content-Type": []string{"video/mp4"}},
+		Body:       io.NopCloser(bytes.NewReader(t.data)),
+		Request:    req,
+	}, nil
+}
+
+func (f *fakeVideoVisionLLM) CompleteWithVideoURL(_ context.Context, _ string, userPrompt, videoURL string) (string, error) {
+	f.videoSource = videoURL
+	f.userPrompt = userPrompt
+	f.calls = append(f.calls, fakeVideoVisionCall{kind: "video", imageSource: videoURL, userPrompt: userPrompt})
+	if len(f.errors) >= len(f.calls) && f.errors[len(f.calls)-1] != nil {
+		return "", f.errors[len(f.calls)-1]
+	}
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.videoResponse()
+}
+
+func (f *fakeVideoVisionLLM) CompleteWithImage(_ context.Context, _ string, userPrompt, imageSource string) (string, error) {
+	f.imageSource = imageSource
+	f.userPrompt = userPrompt
+	f.calls = append(f.calls, fakeVideoVisionCall{kind: "image", imageSource: imageSource, userPrompt: userPrompt})
+	if len(f.errors) >= len(f.calls) && f.errors[len(f.calls)-1] != nil {
+		return "", f.errors[len(f.calls)-1]
+	}
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.videoResponse()
+}
+
+func (f *fakeVideoVisionLLM) videoResponse() (string, error) {
+	if f.response != "" {
+		return f.response, nil
+	}
+	return `{
+		"visual_summary":"办公室里一位效率博主面对镜头讲解会议记录方法。",
+		"timeline":[{"time_range":"0-3s","visual":"人物看向镜头，右手指向白板","action":"开场钩子"}],
+		"subjects":["效率博主"],
+		"people":[{"role":"主体","appearance":"黑色衬衫，短发","expression":"自信、亲和"}],
+		"expressions":["自信","亲和"],
+		"actions":["指向白板","讲解"],
+		"scenes":["办公室"],
+		"camera_motion":["中景固定镜头"],
+		"rhythm":["快节奏口播"],
+		"must_keep":["黑色衬衫主体身份","办公室场景","快节奏口播"],
+		"can_change":["手势细节","白板内容"],
+		"must_not_change":["主体年龄气质","职业场景"],
+		"planning_hints":["每个镜头重复主体身份锚点","开头三秒给明确利益点"]
+	}`, nil
+}
+
+func TestAnalyzeVideoReferenceUsesVisionModelAndRegistersArtifact(t *testing.T) {
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/video-understanding.json"}
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	taskID := createMCPVideoTask(t, repo, "", projectID)
+	vision := &fakeVideoVisionLLM{}
+	logger := zerolog.New(io.Discard)
+	writingSvc := service.NewWritingService(repo, vision, "", time.Minute, &logger)
+	svcs.WritingSvc = writingSvc
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
+			"video_url":"https://cdn.example.com/ref.mp4",
+			"reference_role":"subject identity",
+			"purpose_hint":"personal_ip"
+		}`)},
+	}
+	result, err := analyzeVideoReferenceHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("analyzeVideoReferenceHandler returned error: %v", err)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	for _, want := range []string{`"analysis_mode":"native_video"`, `"visual_summary"`, `"must_keep"`, `"video-understanding.json"`, `"task_file"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("analysis response missing %q: %s", want, text)
+		}
+	}
+	if vision.videoSource != "https://cdn.example.com/ref.mp4" {
+		t.Fatalf("vision videoSource = %q, want video URL", vision.videoSource)
+	}
+	if !strings.Contains(vision.userPrompt, "subject identity") || !strings.Contains(vision.userPrompt, "personal_ip") {
+		t.Fatalf("vision prompt did not include role and purpose hint: %s", vision.userPrompt)
+	}
+	files, err := repo.TaskFiles().FindByTaskID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("list task files: %v", err)
+	}
+	found := false
+	for _, f := range files {
+		if f.FileName == "video-understanding.json" && f.MimeType == "application/json" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("registered task files did not include video-understanding.json: %#v", files)
+	}
+}
+
+func TestAnalyzeVideoReferenceFallsBackToSampledFrames(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg is required for sampled-frame fallback test")
+	}
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe is required for sampled-frame fallback test")
+	}
+	videoData := makeTinyMP4(t, "1")
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = staticVideoTransport{data: videoData}
+	t.Cleanup(func() { http.DefaultTransport = oldTransport })
+
+	ctx, _, _, projectID := setupMCPVideoProject(t)
+	vision := &fakeVideoVisionLLM{errors: []error{errors.New("native video URL unsupported")}}
+	logger := zerolog.New(io.Discard)
+	svcs.WritingSvc = service.NewWritingService(nil, vision, "", time.Minute, &logger)
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"video_url":"https://cdn.example.com/ref.mp4",
+			"sample_count":2
+		}`)},
+	}
+	result, err := analyzeVideoReferenceHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("analyzeVideoReferenceHandler returned error: %v", err)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, `"analysis_mode":"sampled_frames"`) || !strings.Contains(text, `"sampled_frames"`) {
+		t.Fatalf("expected sampled-frame response, got: %s", text)
+	}
+	if len(vision.calls) < 4 {
+		t.Fatalf("vision calls = %d, want native + sampled frames + synthesis", len(vision.calls))
+	}
+	if vision.calls[0].kind != "video" {
+		t.Fatalf("first vision call kind = %q, want native video", vision.calls[0].kind)
+	}
+	if vision.calls[1].kind != "image" || !strings.HasPrefix(vision.calls[1].imageSource, "data:image/jpeg;base64,") {
+		t.Fatalf("fallback second call imageSource = %.40q, want sampled frame data URL", vision.calls[1].imageSource)
+	}
+	if !strings.Contains(vision.calls[len(vision.calls)-1].userPrompt, "Sampled-frame observations") {
+		t.Fatalf("synthesis prompt missing sampled-frame observations: %s", vision.calls[len(vision.calls)-1].userPrompt)
+	}
+}
+
+func TestAnalyzeVideoReferenceRejectsPrivateURL(t *testing.T) {
+	ctx, _, _, projectID := setupMCPVideoProject(t)
+	logger := zerolog.New(io.Discard)
+	svcs.WritingSvc = service.NewWritingService(nil, &fakeVideoVisionLLM{}, "", time.Minute, &logger)
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"video_url":"http://127.0.0.1/ref.mp4"
+		}`)},
+	}
+	result, err := analyzeVideoReferenceHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("analyzeVideoReferenceHandler returned error: %v", err)
+	}
+	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "publicly accessible HTTPS") {
+		t.Fatalf("expected public HTTPS error, got: %s", text)
+	}
+}
+
+func TestAnalyzeVideoReferenceRequiresVisionService(t *testing.T) {
+	ctx, _, _, projectID := setupMCPVideoProject(t)
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"video_url":"https://cdn.example.com/ref.mp4"
+		}`)},
+	}
+	result, err := analyzeVideoReferenceHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("analyzeVideoReferenceHandler returned error: %v", err)
+	}
+	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "writing/vision service not available") {
+		t.Fatalf("expected vision service error, got: %s", text)
+	}
+}
+
 func newArkTaskServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

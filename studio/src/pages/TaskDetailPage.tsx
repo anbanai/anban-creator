@@ -30,7 +30,7 @@ import { Input } from '@/components/ui/input'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
-import { videoModelDisplayName } from '@/lib/video-display'
+import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
 
 interface ResumeFileInput {
   id: string
@@ -433,6 +433,13 @@ export default function TaskDetailPage() {
     videoTargetDuration ? `目标 ${videoTargetDuration}s` : '目标 —',
     videoSegmentCount > 0 ? `${videoSegmentCount} 段` : null,
   ].filter(Boolean).join(' · ')
+  const videoInputReferences = task.video_config?.references ?? []
+  const showVideoInputParameters = task.type === 'video' && Boolean(task.video_config)
+  const videoCreativeType = videoCreativeTypeLabel(task.video_config?.creative_type)
+  const videoPurpose = videoPurposeLabel(task.video_config?.purpose)
+  const videoSubjectProfile = task.video_config?.subject_profile?.trim() || '—'
+  const videoAudience = task.video_config?.audience?.trim() || '—'
+  const videoSingleMessage = task.video_config?.single_message?.trim() || '—'
 
   // Clone this task as a fresh billed task. The server clones the full
   // configuration (three-dimensional style, author/writer, ecommerce package,
@@ -879,6 +886,78 @@ export default function TaskDetailPage() {
         </Card>
       )}
 
+      {showVideoInputParameters && (
+        <Card size="sm" className="border-border/70">
+          <div className="flex flex-col gap-2 border-b border-border px-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs text-muted-foreground">视频创作</p>
+              <h2 className="mt-1 text-base font-semibold text-foreground">输入与创作参数</h2>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">{videoCreativeType}</Badge>
+              <Badge variant="outline">{videoPurpose}</Badge>
+            </div>
+          </div>
+          <CardContent className="space-y-4">
+            <div>
+              <p className="text-xs text-muted-foreground">创作要求</p>
+              <p className="mt-1 whitespace-pre-wrap rounded-lg bg-muted/30 px-3 py-2 text-sm leading-6 text-foreground">
+                {task.prompt || '—'}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <p className="text-xs text-muted-foreground">人物 / 主体</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSubjectProfile}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">目标受众</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoAudience}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">核心信息</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{videoSingleMessage}</p>
+              </div>
+            </div>
+            <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="text-xs text-muted-foreground">视频模型</p>
+                <p className="mt-1 text-sm text-foreground">{videoModelDisplayName(task.video_config?.model_key || task.video_config?.model) || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">规格</p>
+                <p className="mt-1 text-sm text-foreground">{videoSpecSummary}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">估算积分</p>
+                <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">已消耗积分</p>
+                <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}</p>
+              </div>
+            </div>
+            <div className="border-t border-border pt-4">
+              <p className="text-xs text-muted-foreground">参考素材</p>
+              {videoInputReferences.length > 0 ? (
+                <div className="mt-2 divide-y divide-border rounded-md border border-border">
+                  {videoInputReferences.map((ref, index) => (
+                    <div key={`${ref.type}-${ref.url || ref.text}-${index}`} className="min-w-0 px-3 py-2 text-xs">
+                      <p className="truncate text-foreground">{ref.reference_role || ref.type} · {ref.file_name || ref.text || ref.url || '—'}</p>
+                      {ref.input_duration_seconds ? (
+                        <p className="mt-0.5 text-muted-foreground">输入时长 {ref.input_duration_seconds}s</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-muted-foreground">未使用参考素材</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {task.status !== 'completed' && (
         <Card>
           <CardContent>
@@ -1004,6 +1083,21 @@ export default function TaskDetailPage() {
                         inlineItemClassName="shrink-0 snap-start"
                         renderPreviewDetails={() => (
                           <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
+                            <p className="text-sm font-medium text-foreground">创作参数</p>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-xs text-muted-foreground">内容类型</p>
+                                <p className="mt-1 text-foreground">{videoCreativeType}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">商业目标</p>
+                                <p className="mt-1 text-foreground">{videoPurpose}</p>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">人物 / 主体</p>
+                              <p className="mt-1 whitespace-pre-wrap text-foreground">{videoSubjectProfile}</p>
+                            </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div>
                                 <p className="text-xs text-muted-foreground">生成任务 ID</p>

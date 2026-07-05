@@ -1,4 +1,4 @@
-import type { VideoDefaults, VideoReferenceAsset, VideoTaskConfig, VideoWorkflow } from '@/types'
+import type { VideoDefaults, VideoPurpose, VideoReferenceAsset, VideoTaskConfig, VideoWorkflow } from '@/types'
 
 export const VIDEO_PROJECT_DEFAULT_VALUE = '__project_default__'
 export type VideoFormConfig = VideoTaskConfig & { workflow: VideoWorkflow }
@@ -12,12 +12,20 @@ export function writeVideoSelectValue(value: string | null) {
   return value
 }
 
+export function defaultVideoPurposeForCreativeType(creativeType: string | null | undefined): VideoPurpose {
+  return creativeType === 'high_efficiency_joke' ? 'promotion' : 'planting'
+}
+
 export function buildVideoFormConfig(defaults?: VideoDefaults, current?: VideoTaskConfig): VideoFormConfig {
   const workflow = current?.workflow === 'editor' || defaults?.workflow === 'editor' ? 'editor' : 'creator'
+  const creativeType = current?.creative_type ?? defaults?.creative_type ?? 'personal_ip'
+  const purpose = current?.purpose ?? defaults?.purpose ?? defaultVideoPurposeForCreativeType(creativeType)
   return {
     ...(defaults ?? {}),
     ...(current ?? {}),
     workflow,
+    creative_type: creativeType,
+    purpose,
     references: current?.references ?? [],
   }
 }
@@ -43,6 +51,12 @@ export function normalizeVideoConfigForSubmit(config: VideoTaskConfig | undefine
 
   const next: VideoTaskConfig = {}
   const purpose = cleanString(config.purpose)
+  const creativeType = cleanString(config.creative_type)
+  const resolvedCreativeType = creativeType || defaults?.creative_type || 'personal_ip'
+  const resolvedPurpose = purpose || (creativeType ? defaultVideoPurposeForCreativeType(creativeType) : defaults?.purpose || defaultVideoPurposeForCreativeType(resolvedCreativeType))
+  const subjectProfile = cleanString(config.subject_profile)
+  const audience = cleanString(config.audience)
+  const singleMessage = cleanString(config.single_message)
   const modelKey = cleanString(config.model_key)
   const resolution = cleanString(config.resolution)
   const ratio = cleanString(config.ratio)
@@ -50,7 +64,11 @@ export function normalizeVideoConfigForSubmit(config: VideoTaskConfig | undefine
   const workflow = config.workflow === 'editor' ? 'editor' : 'creator'
 
   next.workflow = workflow
-  if (purpose && purpose !== defaults?.purpose) next.purpose = purpose as VideoTaskConfig['purpose']
+  if (resolvedPurpose && resolvedPurpose !== defaults?.purpose) next.purpose = resolvedPurpose as VideoTaskConfig['purpose']
+  if (resolvedCreativeType && resolvedCreativeType !== defaults?.creative_type) next.creative_type = resolvedCreativeType as VideoTaskConfig['creative_type']
+  if (subjectProfile && subjectProfile !== defaults?.subject_profile) next.subject_profile = subjectProfile
+  if (audience && audience !== defaults?.audience) next.audience = audience
+  if (singleMessage && singleMessage !== defaults?.single_message) next.single_message = singleMessage
   if (modelKey && modelKey !== defaults?.model_key) next.model_key = modelKey
   if (resolution && resolution !== defaults?.resolution) next.resolution = resolution
   if (ratio && ratio !== defaults?.ratio) next.ratio = ratio

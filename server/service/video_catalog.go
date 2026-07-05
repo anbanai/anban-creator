@@ -145,11 +145,21 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 		creditMultiplier = 1000
 	}
 	resolved := req
-	if resolved.Purpose == "" {
-		resolved.Purpose = defaults.Purpose
+	if resolved.CreativeType == "" {
+		resolved.CreativeType = defaults.CreativeType
+	}
+	if resolved.CreativeType == "" {
+		resolved.CreativeType = VideoCreativeTypePersonalIP
 	}
 	if resolved.Purpose == "" {
-		resolved.Purpose = VideoPurposePlanting
+		if req.CreativeType != "" {
+			resolved.Purpose = DefaultVideoPurposeForCreativeType(resolved.CreativeType)
+		} else {
+			resolved.Purpose = defaults.Purpose
+		}
+	}
+	if resolved.Purpose == "" {
+		resolved.Purpose = DefaultVideoPurposeForCreativeType(resolved.CreativeType)
 	}
 	modelKey := strings.TrimSpace(resolved.Model)
 	if modelKey == "" {
@@ -268,6 +278,10 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 	}
 	plan := VideoGenerationPlan{
 		Purpose:                   resolved.Purpose,
+		CreativeType:              resolved.CreativeType,
+		SubjectProfile:            resolved.SubjectProfile,
+		Audience:                  resolved.Audience,
+		SingleMessage:             resolved.SingleMessage,
 		Prompt:                    resolved.Prompt,
 		ModelKey:                  modelKey,
 		Model:                     resolved.Model,

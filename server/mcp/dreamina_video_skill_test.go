@@ -32,6 +32,7 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"获客",
 			"推广",
 			"register_video_reference",
+			"analyze_video_reference",
 			"get_project_profile",
 			"validate_video_generation_params",
 			"build_video_generation_plan",
@@ -41,6 +42,8 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"compose_video_segments",
 			"validate_video_delivery",
 			"reference-anchors.md",
+			"creative-brief.md",
+			"video-understanding.json",
 			"script.md",
 			"shot-plan.md",
 			"quality-review.md",
@@ -58,6 +61,11 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"video.model_catalog",
 			"estimated dynamic credits",
 			"OSS-backed task file",
+			"个人 IP",
+			"高效段子",
+			"主体一致性",
+			"黄金三秒",
+			"完整视频创作流程",
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s SKILL.md missing %q", plugin, want)
@@ -91,13 +99,13 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			}
 			switch ref {
 			case "methodology.md":
-				for _, want := range []string{"素材角色分配", "主体身份", "产品外观", "场景背景", "首帧", "尾帧", "运镜", "节奏", "音色", "BGM", "字体/文字风格"} {
+				for _, want := range []string{"素材角色分配", "主体身份", "产品外观", "场景背景", "首帧", "尾帧", "运镜", "节奏", "音色", "BGM", "字体/文字风格", "个人 IP", "高效段子", "创作定位", "参考视频复刻"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
 				}
 			case "prompt-templates.md":
-				for _, want := range []string{"reference_role", "audio_cue", "transition_or_effect", "主体 + 场景 + 动作 + 运镜 + 分时段 + 转场/特效 + 音频 + 风格", "产品 360", "产品拆解", "短剧式", "音乐卡点"} {
+				for _, want := range []string{"reference_role", "audio_cue", "transition_or_effect", "主体 + 场景 + 动作 + 运镜 + 分时段 + 转场/特效 + 音频 + 风格", "产品 360", "产品拆解", "短剧式", "音乐卡点", "个人 IP 种草", "高效段子", "参考视频复刻"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
@@ -110,7 +118,7 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 				}
 			}
 			if ref == "mcp-contract.md" {
-				for _, want := range []string{"get_project_profile", "resolved_profile", "agent_brief", "video.model_catalog", "validate_video_generation_params", "credit_multiplier", "estimated_credits", "pricing_breakdown", "task_file_id", "file_path", "ark_url", "OSS/CDN", "Provider raw URLs", "server-measured input video duration", "Do not trust agent-supplied input video duration"} {
+				for _, want := range []string{"get_project_profile", "resolved_profile", "agent_brief", "video.model_catalog", "analyze_video_reference", "analysis_mode", "native_video", "sampled_frames", "validate_video_generation_params", "credit_multiplier", "estimated_credits", "pricing_breakdown", "task_file_id", "file_path", "ark_url", "OSS/CDN", "Provider raw URLs", "server-measured input video duration", "Do not trust agent-supplied input video duration"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
