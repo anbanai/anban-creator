@@ -197,16 +197,18 @@ func NormalizeTier(s string) Tier {
 
 // Per-operation credit type constants (for MCP tool billing).
 const (
-	CreditTypeImageGen         = "image_gen"
-	CreditTypeArticleWrite     = "article_write"
-	CreditTypeConvert          = "convert"
-	CreditTypeHumanize         = "humanize"
-	CreditTypeTopicResearch    = "topic_research"
-	CreditTypeSEO              = "seo"
-	CreditTypeOutline          = "outline"
-	CreditTypeVideoGen         = "video_gen"
-	CreditTypePosterGeneration = "poster_generation"
-	CreditTypeViralAnalysis    = "viral_analysis"
+	CreditTypeImageGen           = "image_gen"
+	CreditTypeArticleWrite       = "article_write"
+	CreditTypeConvert            = "convert"
+	CreditTypeHumanize           = "humanize"
+	CreditTypeTopicResearch      = "topic_research"
+	CreditTypeSEO                = "seo"
+	CreditTypeOutline            = "outline"
+	CreditTypeVideoGen           = "video_gen"
+	CreditTypeImageUnderstanding = "image_understanding"
+	CreditTypeVideoUnderstanding = "video_understanding"
+	CreditTypePosterGeneration   = "poster_generation"
+	CreditTypeViralAnalysis      = "viral_analysis"
 )
 
 // Viral analysis status constants.

@@ -32,7 +32,7 @@ describe('videoApi', () => {
             estimated_credits: 5000,
             pricing_breakdown: {
               cny: 5,
-              credit_multiplier: 1000,
+              credits_per_cny: 1000,
               input_video: false,
               output_seconds: 5,
               resolution: '720p',

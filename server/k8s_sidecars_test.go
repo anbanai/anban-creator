@@ -70,7 +70,7 @@ func TestConfigExampleDocumentsSeednoteSidecarEnv(t *testing.T) {
 
 	for _, want := range []string{
 		"seednote:",
-		`base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://localhost:18060}"`,
+		`base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://seednote:18060}"`,
 		"timeout: 30",
 	} {
 		if !strings.Contains(text, want) {

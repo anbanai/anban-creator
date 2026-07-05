@@ -259,7 +259,10 @@ func main() {
 	var asynqClient *scheduler.AsynqClient
 	workspaceSvc := service.NewWorkspaceService("", cfg.Claude.Docker.WorkspaceDir)
 	videoCatalog := service.VideoModelCatalogFromConfig(cfg.VideoAPI.ModelCatalog)
-	videoCreditMultiplier := cfg.VideoAPI.CreditMultiplierOrDefault()
+	videoCreditMultiplier := cfg.Billing.CreditsPerCNY
+	if videoCreditMultiplier <= 0 {
+		videoCreditMultiplier = cfg.VideoAPI.CreditMultiplierOrDefault()
+	}
 
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
@@ -310,8 +313,7 @@ func main() {
 
 	var writingLLMClient service.LLMClient
 	if repo != nil {
-		// Writing LLM comes solely from config.yaml (writing.*). If env control
-		// is needed, write e.g. base_url: "${ANTHROPIC_BASE_URL}" in config.yaml.
+		// Writing LLM comes from model_routes.writing.
 		llmBaseURL := cfg.Writing.BaseURL
 		llmAPIKey := cfg.Writing.Key
 		llmModel := cfg.Writing.Model
@@ -323,26 +325,21 @@ func main() {
 			if strings.Contains(llmBaseURL, "/anthropic") {
 				log.Warn().
 					Str("base_url", llmBaseURL).
-					Msg("writing.base_url contains '/anthropic' — the writing service uses the OpenAI SDK; ensure the endpoint supports /v1/chat/completions")
+					Msg("model_routes.writing base_url contains '/anthropic' — the writing service uses the OpenAI SDK; ensure the endpoint supports /v1/chat/completions")
 			}
 			log.Info().Str("endpoint", llmBaseURL).Str("model", llmModel).Msg("writing LLM client initialized")
 		}
 	}
 
-	// Initialize vision LLM client (falls back to writing config if not configured).
-	var visionLLMClient service.LLMClient
-	{
-		vBaseURL := cfg.Vision.BaseURL
-		vAPIKey := cfg.Vision.Key
-		vModel := cfg.Vision.Model
-		vTimeout := cfg.Vision.Timeout
-		if vTimeout == 0 {
-			vTimeout = 60 * time.Second
-		}
-		if vBaseURL != "" && vAPIKey != "" && vModel != "" {
-			visionLLMClient = service.NewOpenAILLMClient(vBaseURL, vAPIKey, vModel, vTimeout)
-			log.Info().Str("endpoint", vBaseURL).Str("model", vModel).Msg("vision LLM client initialized")
-		}
+	var imageUnderstandingClient service.LLMClient
+	if cfg.ImageUnderstanding.BaseURL != "" && cfg.ImageUnderstanding.Key != "" && cfg.ImageUnderstanding.Model != "" {
+		imageUnderstandingClient = service.NewOpenAILLMClient(cfg.ImageUnderstanding.BaseURL, cfg.ImageUnderstanding.Key, cfg.ImageUnderstanding.Model, cfg.ImageUnderstanding.Timeout)
+		log.Info().Str("endpoint", cfg.ImageUnderstanding.BaseURL).Str("model", cfg.ImageUnderstanding.Model).Msg("image understanding LLM client initialized")
+	}
+	var videoUnderstandingClient service.LLMClient
+	if cfg.VideoUnderstanding.BaseURL != "" && cfg.VideoUnderstanding.Key != "" && cfg.VideoUnderstanding.Model != "" {
+		videoUnderstandingClient = service.NewOpenAILLMClient(cfg.VideoUnderstanding.BaseURL, cfg.VideoUnderstanding.Key, cfg.VideoUnderstanding.Model, cfg.VideoUnderstanding.Timeout)
+		log.Info().Str("endpoint", cfg.VideoUnderstanding.BaseURL).Str("model", cfg.VideoUnderstanding.Model).Msg("video understanding LLM client initialized")
 	}
 
 	if repo != nil && seednoteClient != nil {
@@ -437,8 +434,8 @@ func main() {
 		if writingLLMClient != nil {
 			projectHandler.SetLLMClient(writingLLMClient, cfg.Writing.Timeout)
 		}
-		if visionLLMClient != nil {
-			projectHandler.SetVisionClient(visionLLMClient)
+		if imageUnderstandingClient != nil {
+			projectHandler.SetVisionClient(imageUnderstandingClient)
 		}
 		if templateSvc != nil {
 			projectHandler.SetTemplateService(templateSvc)
@@ -452,7 +449,7 @@ func main() {
 		}
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if creditSvc != nil {
-			creditHandler = handler.NewCreditHandler(creditSvc, &cfg.Credits, &cfg.ImageAPI, cfg.Credits.AdminAPIKey, log)
+			creditHandler = handler.NewCreditHandler(creditSvc, cfg, cfg.Credits.AdminAPIKey, log)
 		}
 		videoHandler = handler.NewVideoHandler(repo, creditSvc, videoCatalog, videoCreditMultiplier, log)
 		if apiKeySvc != nil {
@@ -521,7 +518,7 @@ func main() {
 		if cfg.VideoAPI.Key != "" {
 			videoSvc = service.NewVideoService(&cfg.VideoAPI)
 		} else {
-			log.Warn().Msg("video generation service not configured (set video_api.key), video tools unavailable")
+			log.Warn().Msg("video generation service not configured (set model_routes.video_generation provider/model_catalog), video tools unavailable")
 		}
 		if cfg.FunASR.Complete() {
 			var err error
@@ -546,14 +543,17 @@ func main() {
 					writersDir = filepath.Join(cfg.Claude.PluginDir, "writers")
 				}
 				writingSvc = service.NewWritingService(repo, writingLLMClient, writersDir, cfg.Writing.Timeout, log)
-				if visionLLMClient != nil {
-					writingSvc.SetVisionClient(visionLLMClient)
+				if imageUnderstandingClient != nil {
+					writingSvc.SetImageUnderstandingClient(imageUnderstandingClient)
+				}
+				if videoUnderstandingClient != nil {
+					writingSvc.SetVideoUnderstandingClient(videoUnderstandingClient)
 				}
 				if modelConfigSvc != nil {
 					writingSvc.SetModelConfigService(modelConfigSvc)
 				}
 			} else {
-				log.Warn().Msg("LLM client not configured (set writing.base_url/key/model in config.yaml), writing tools unavailable")
+				log.Warn().Msg("LLM client not configured (set model_routes.writing provider/model), writing tools unavailable")
 			}
 		}
 		if writingLLMClient != nil || cfg.TingWu.Complete() || store != nil {

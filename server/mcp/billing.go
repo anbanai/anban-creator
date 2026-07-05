@@ -2,8 +2,10 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
@@ -50,6 +52,71 @@ func maybeDeduct(ctx context.Context, userID, opType, provider, mdl string, coun
 		task = taskID[0]
 	}
 	return maybeDeductForResolvedModel(ctx, userID, opType, provider, mdl, count, task, "")
+}
+
+func maybeDeductUnderstandingTokens(ctx context.Context, userID, taskID, opType string, usage config.TokenUsage) (int, error) {
+	if billSvc == nil || billSvc.creditSvc == nil || billSvc.config == nil {
+		logBillingSkip(userID, opType, "no_credit_or_config_service")
+		return 0, nil
+	}
+	if usage.TotalTokens <= 0 {
+		return 0, fmt.Errorf("%s token usage is required for billing", opType)
+	}
+	if userID == "" || userID == "system" || isAdminCall(ctx) {
+		logBillingSkip(userID, opType, "admin_or_system")
+		return 0, nil
+	}
+	var provider, modelName string
+	switch opType {
+	case model.CreditTypeImageUnderstanding:
+		provider = billSvc.config.ImageUnderstanding.ProviderKey
+		modelName = billSvc.config.ImageUnderstanding.Model
+	case model.CreditTypeVideoUnderstanding:
+		provider = billSvc.config.VideoUnderstanding.ProviderKey
+		modelName = billSvc.config.VideoUnderstanding.Model
+	default:
+		return 0, fmt.Errorf("unsupported understanding op type %s", opType)
+	}
+	if provider == "" || modelName == "" {
+		return 0, fmt.Errorf("%s model route is not configured", opType)
+	}
+	tier, err := billSvc.creditSvc.GetUserTier(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	cost, err := billSvc.config.CalculateTokenModelCredits(provider, modelName, usage, string(tier), 1)
+	if err != nil {
+		return 0, err
+	}
+	if taskID != "" {
+		if err := validateBillingTask(ctx, userID, taskID); err != nil {
+			return 0, err
+		}
+	}
+	priceSnapshot := map[string]any{}
+	if data, err := json.Marshal(cost.PriceSnapshot); err == nil {
+		_ = json.Unmarshal(data, &priceSnapshot)
+	}
+	metadata := model.CreditTransactionMetadata{
+		Provider:          provider,
+		Model:             modelName,
+		Route:             opType,
+		InputTokens:       usage.InputTokens,
+		CachedInputTokens: usage.CachedInputTokens,
+		OutputTokens:      usage.OutputTokens,
+		TotalTokens:       usage.TotalTokens,
+		BaseCredits:       cost.BaseCredits,
+		TierMultiplier:    cost.TierMultiplier,
+		UserMultiplier:    cost.UserMultiplier,
+		FinalCredits:      cost.FinalCredits,
+		PriceSnapshot:     priceSnapshot,
+	}
+	operationID := fmt.Sprintf("%s:%s:%d:%d", opType, taskID, usage.TotalTokens, time.Now().UnixNano())
+	_, err = billSvc.creditSvc.DeductForOperationWithMetadata(ctx, userID, opType, cost.FinalCredits, metadata, operationID, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return cost.FinalCredits, nil
 }
 
 func maybeDeductForResolvedModel(ctx context.Context, userID, opType, provider, mdl string, count int, taskID, modelSource string) error {
@@ -256,7 +323,7 @@ func resolveImageBillingModel(ctx context.Context, userID, imageModelKey string)
 //
 // Resolution mirrors generate_image's generation path: Task.ImageModelKey (a
 // system image_preset or "custom", chosen by the user at task creation) wins,
-// else the user override, else the server image_api.cover default. Returns
+// else the user override, else the server image generation cover default. Returns
 // ("","") only when nothing is configured.
 func resolveEcommerceImageProvider(ctx context.Context, userID string, task *model.Task) (provider, mdl string) {
 	if task != nil && task.ImageModelKey != "" && billSvc != nil && billSvc.modelConfigSvc != nil {

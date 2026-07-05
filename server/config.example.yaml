@@ -1,411 +1,297 @@
-# Anban 智能创作助手 Online Service Configuration
-# Copy this file to config.yaml and adjust values as needed.
-# 环境变量控制：本文件是唯一真相源。仅当某字段写成 ${VAR} 或 ${VAR:-default}
-# 时才会从环境变量取值（其余字段一律以文件为准，没有任何隐藏的覆盖层）。
-# 例：dsn: "${ANBAN_DATABASE_DSN:-...默认DSN...}"、addr: "${ANBAN_REDIS_ADDR:-localhost:6379}"
-
-# ---------------------------------------------------------------------------
-# Server: HTTP listen configuration
-# ---------------------------------------------------------------------------
 server:
-  port: 8080 # Listen port. Override via -port flag, or write ${ANBAN_PORT:-8080} here.
-  host: "0.0.0.0" # Listen host. Use "127.0.0.1" to restrict to localhost.
+  port: 8080
+  host: "0.0.0.0"
 
-# ---------------------------------------------------------------------------
-# Logging
 logging:
-  level:
-    info # "debug", "info" (default), "warn", "error", "trace"
-    # 如需 env 控制写 level: ${LOG_LEVEL:-info}。
+  level: info
 
-# ---------------------------------------------------------------------------
-# Database: MySQL connection
-# Required. The server will not start without a valid DSN.
-# Graceful degradation: if MySQL is unreachable at startup, the server logs an
-# error and continues running in degraded mode (no data persistence).
-# ---------------------------------------------------------------------------
 database:
-  dsn: "${ANBAN_DATABASE_DSN:-root:anban_creator_dev@tcp(localhost:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local}"
-  max_open_conns: 10 # Maximum open connections to the database.
-  max_idle_conns: 5 # Maximum idle connections kept in the pool.
-  conn_max_lifetime: 3600 # Connection maximum lifetime in seconds.
+  dsn: "${ANBAN_DATABASE_DSN}"
+  max_open_conns: 20
+  max_idle_conns: 10
+  conn_max_lifetime: 3600
 
-# ---------------------------------------------------------------------------
-# Redis: Cache and async task queue (Asynq)
-# Optional. If Redis is unreachable, the server falls back to in-process
-# goroutine-based task execution. Rate limiting is also skipped when Redis
-# is unavailable.
-# ---------------------------------------------------------------------------
 redis:
-  addr: "${ANBAN_REDIS_ADDR:-localhost:6379}" # Redis server address (host:port).
-  password: "" # Redis password. 如需 env 控制写 ${ANBAN_REDIS_PASSWORD}。
-  db: 0 # Redis database number.
+  addr: "${ANBAN_REDIS_ADDR}"
+  password: "${ANBAN_REDIS_PASSWORD}"
+  db: ${ANBAN_REDIS_DB:-0}
 
-# ---------------------------------------------------------------------------
-# JWT: JSON Web Token authentication
-# Required. secret_key must be set here（如需 env 控制写 ${ANBAN_JWT_SECRET_KEY}）。
-# ---------------------------------------------------------------------------
 jwt:
-  secret_key: "" # HMAC signing key. MUST be set in production.
-  # Generate with: openssl rand -hex 32
-  access_expiry: "24h" # Access token validity duration.
-  refresh_expiry: "168h" # Refresh token validity duration (7 days).
+  secret_key: "${ANBAN_JWT_SECRET_KEY}"
+  access_expiry: "24h"
+  refresh_expiry: "168h"
 
-# ---------------------------------------------------------------------------
-# WeChat: Optional WeChat mini-program login integration
-# Optional. If app_id and app_secret are empty, WeChat login is disabled.
-# ---------------------------------------------------------------------------
 wechat:
-  app_id: "" # WeChat Mini Program AppID.
-  app_secret: "" # WeChat Mini Program AppSecret.
+  app_id: "${ANBAN_WECHAT_APP_ID}"
+  app_secret: "${ANBAN_WECHAT_APP_SECRET}"
 
-# ---------------------------------------------------------------------------
-# MCP: Model Context Protocol endpoint
-# Optional. Provides tool-based AI operations (image generation, publishing, etc.)
-# to Claude Code agents running inside containers or local subprocesses.
-# ---------------------------------------------------------------------------
-mcp:
-  api_key: "" # Static API key for MCP endpoint authentication. If empty, only JWT auth is used.
-
-# ---------------------------------------------------------------------------
-# Storage: File storage configuration
-# Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
-# Default is "local" for development.
-# ---------------------------------------------------------------------------
 storage:
-  provider: "local"
-  endpoint: "" # OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
-  access_key_id: "" # Alibaba Cloud AccessKey ID
-  access_key_secret: "" # Alibaba Cloud AccessKey Secret
-  bucket_name: "" # OSS bucket name
-  region: "" # OSS region, e.g. "cn-hangzhou"
-  custom_domain: "" # Optional CDN domain for public file URLs
-  sts_role_arn: "" # Optional RAM role ARN for Studio browser direct uploads
-  sts_session_name: "studio-direct-upload" # Optional STS session name
-  sts_endpoint: "" # Optional STS endpoint override
-  direct_upload_expires_seconds: 900 # Studio direct upload credential TTL
-  local_data_dir: "./data/files" # Local provider: where to store files
-
-# ---------------------------------------------------------------------------
-# Project memory: Claude Code auto memory projection
-# Optional. Uses storage.provider (OSS in production) as the authoritative
-# archive store and stages per-task runtime memory into workspace/.claude/memory.
-# ---------------------------------------------------------------------------
-memory:
-  enabled: false
   provider: "oss"
-  oss_prefix: "claude-memory/projects"
-  runtime_dir: ".claude/memory"
-  max_archive_bytes: 262144
-  merge_on_status: "completed"
-  lock_ttl: "60s"
+  endpoint: "${ANBAN_OSS_ENDPOINT}"
+  access_key_id: "${ANBAN_OSS_ACCESS_KEY_ID}"
+  access_key_secret: "${ANBAN_OSS_ACCESS_KEY_SECRET}"
+  bucket_name: "anbancreator"
+  region: "cn-chengdu"
+  custom_domain: "${ANBAN_OSS_CDN_DOMAIN}"
+  direct_upload_expires_seconds: 900
+  local_data_dir: "./data/files"
 
-# ---------------------------------------------------------------------------
-# Image API: Global image generation API configuration
-# Shared across all channels. Supports cover and content image generation.
-# Provider: openai, gemini, volcengine
-# ---------------------------------------------------------------------------
-image_api:
-  cover:
-    provider: ""
-    key: ""
-    base_url: ""
-    model: ""
-    size: "" # Default size override for cover images (ratio:tier, e.g. "16:9:4K")
-    credits: 1000 # Per-image credit cost
-  content:
-    provider: ""
-    key: ""
-    base_url: ""
-    model: ""
-    size: "" # Default size override for content images (ratio:tier, e.g. "3:4:4K")
-    credits: 1000 # Per-image credit cost
-  # Designer: per-provider image generation config for the Designer studio.
-  # Each key is a provider ID used by the frontend. Set alias for display name,
-  # enable: false to hide a provider. If a provider is not listed here,
-  # it falls back to the cover config above.
-  designer:
-    openai:
-      alias: "GPT Image 2"
-      enable: true
-      provider: "openai"
-      key: "" # OpenAI API key
-      model: "gpt-image-2"
-      credits: 2400 # Per-image credit cost
-    wangcai:
-      alias: "GPT 设计师"
-      enable: true
-      provider: "openai"
-      key: "" # wangcai API key (e.g. sk-xxxx)
-      base_url: "https://api.wangcai.cloud/v1"
-      model: "gpt-image-2"
-      size: "3840x2160" # Raw pixel size, passed through for GPT-image models
-      response_format: "url"
-      credits: 2400 # Per-image credit cost
-    gemini:
-      alias: "Gemini"
-      enable: true
-      provider: "gemini"
-      key: "" # Google AI API key
-      model: "gemini-2.0-flash-preview-image-generation"
-      credits: 1600 # Per-image credit cost
-    seedream:
-      alias: "Seedream"
-      enable: true
-      provider: "volcengine"
-      key: "" # Volcengine API key
-      base_url: "https://ark.cn-beijing.volces.com/api/v3"
+mcp:
+  api_key: "${ANBAN_MCP_API_KEY}"
+
+model_providers:
+  moonshot:
+    protocol: "openai_compatible"
+    base_url: "https://api.moonshot.cn/v1"
+    api_key: "${MOONSHOT_API_KEY}"
+
+  volcengine_ark:
+    protocol: "openai_compatible"
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    api_key: "${VOLCENGINE_ARK_API_KEY}"
+
+  wangcai_openai:
+    protocol: "openai_compatible"
+    base_url: "http://18.141.196.64:18888/v1"
+    api_key: "${WANGCAI_OPENAI_API_KEY}"
+
+model_routes:
+  writing:
+    provider: "moonshot"
+    model: "kimi-k2.7-code"
+    timeout: 5m
+
+  image_understanding:
+    provider: "moonshot"
+    model: "kimi-k2.7-code-highspeed"
+    timeout: 90s
+    require_usage: true
+
+  video_understanding:
+    provider: "moonshot"
+    model: "kimi-k2.7-code-highspeed"
+    timeout: 180s
+    require_usage: true
+    require_native_video: true
+    max_recommended_resolution: "1920x1080"
+
+  image_generation:
+    cover:
+      provider: "volcengine_ark"
       model: "doubao-seedream-5-0-260128"
-      credits: 1000 # Per-image credit cost
-  sizes:
-    # Per-platform default image sizes in ratio:tier format.
-    # Ratio: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
-    # Tier: 1K, 2K (default), 4K
-    # Examples: "16:9", "3:4:4K", "9:16:2K"
-    article_cover: "16:9" # 公众号封面（横版）
-    article_content: "16:9" # 公众号正文配图
-    seednote_cover: "3:4" # 种草笔记封面（竖版）
-    seednote_content: "3:4" # 种草笔记正文配图
+      size: "9:16:2k"
+    content:
+      provider: "volcengine_ark"
+      model: "doubao-seedream-5-0-260128"
+      size: "9:16:2k"
+    designer:
+      seedream:
+        alias: "豆包 Seedream"
+        provider: "volcengine_ark"
+        model: "doubao-seedream-5-0-260128"
+        enabled: true
+      gpt_image_2:
+        alias: "GPT Image 2"
+        provider: "wangcai_openai"
+        model: "gpt-image-2"
+        enabled: true
+        response_format: "url"
+    sizes:
+      article_cover: "16:9"
+      article_content: "16:9"
+      xls_cover: "3:4"
+      xls_content: "3:4"
+      seednote_cover: "3:4"
+      seednote_content: "3:4"
 
-# ---------------------------------------------------------------------------
-# Image presets: 任务/计划创建时可选的图像模型清单（按用户等级过滤）
-# 每个预设声明所需最低等级 (min_tier: free / pro / enterprise)。
-# Free 用户只能选 min_tier=free 的预设；Pro 增加 min_tier=pro；
-# Enterprise 全部可选并额外获得 "custom"（自带密钥，复用 /api/v1/model-config）。
-# 留空 image_presets 时所有用户只能用系统默认（即 image_api 配置）。
-# ---------------------------------------------------------------------------
+  video_generation:
+    provider: "volcengine_ark"
+    timeout: 10m
+    default_model: "seedance-2.0-mini"
+    model_catalog:
+      - key: "seedance-2.0"
+        display_name: "Doubao Seedance 2.0"
+        model: "doubao-seedance-2-0-260128"
+        supported_resolutions: ["480p", "720p", "1080p", "4k"]
+        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
+        min_duration: 1
+        max_duration: 15
+        supports_video_input: true
+        supports_4k: true
+      - key: "seedance-2.0-fast"
+        display_name: "Doubao Seedance 2.0 Fast"
+        model: "doubao-seedance-2-0-fast-260128"
+        supported_resolutions: ["480p", "720p"]
+        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
+        min_duration: 1
+        max_duration: 15
+        supports_video_input: true
+      - key: "seedance-2.0-mini"
+        display_name: "Doubao Seedance 2.0 Mini"
+        model: "doubao-seedance-2-0-mini-260615"
+        supported_resolutions: ["480p", "720p"]
+        supported_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
+        min_duration: 1
+        max_duration: 15
+        supports_video_input: true
+
+model_prices:
+  currency_rates:
+    USD:
+      to_cny: 7.20
+    CNY:
+      to_cny: 1.0
+
+  token_models:
+    moonshot/kimi-k2.7-code:
+      currency: USD
+      unit: 1000000
+      cached_input: 0.19
+      input: 0.95
+      output: 4.00
+    moonshot/kimi-k2.7-code-highspeed:
+      currency: USD
+      unit: 1000000
+      cached_input: 0.38
+      input: 1.90
+      output: 8.00
+
+  image_generation:
+    volcengine_ark/doubao-seedream-5-0-260128:
+      currency: CNY
+      unit: image
+      price: 0.22
+    wangcai_openai/gpt-image-2:
+      currency: CNY
+      unit: image
+      price: "${WANGCAI_GPT_IMAGE_2_COST_CNY_PER_IMAGE}"
+
+  video_generation:
+    volcengine_ark/doubao-seedance-2-0-260128:
+      currency: CNY
+      no_input_price_per_second:
+        480p: 0.462
+        720p: 0.994
+        1080p: 2.478
+        4k: 5.054
+      video_input_5s_min_price:
+        480p: 2.53
+        720p: 5.44
+        1080p: 13.56
+        4k: 27.99
+      video_input_5s_max_price:
+        480p: 5.62
+        720p: 12.10
+        1080p: 30.13
+        4k: 62.21
+    volcengine_ark/doubao-seedance-2-0-fast-260128:
+      currency: CNY
+      no_input_price_per_second:
+        480p: 0.372
+        720p: 0.800
+      video_input_5s_min_price:
+        480p: 1.99
+        720p: 4.28
+      video_input_5s_max_price:
+        480p: 4.42
+        720p: 9.50
+    volcengine_ark/doubao-seedance-2-0-mini-260615:
+      currency: CNY
+      no_input_price_per_second:
+        480p: 0.232
+        720p: 0.496
+      video_input_5s_min_price:
+        480p: 1.27
+        720p: 2.72
+      video_input_5s_max_price:
+        480p: 2.81
+        720p: 6.05
+
+billing:
+  credits_per_cny: 1000
+  tier_multipliers:
+    free: 1.30
+    pro: 1.15
+    enterprise: 1.00
+  default_user_multiplier: 1.00
+  minimum_charge_credits: 1
+
+credits:
+  daily_sign_in: 1024
+  register_bonus: 4096
+  invite_reward: 2048
+  task_costs:
+    article: 1000
+    xls: 1000
+    seednote: 1000
+    viral_analysis: 800
+  admin_api_key: "${ANBAN_CREDITS_ADMIN_API_KEY}"
+
 image_presets:
-  - key: "volcengine-standard"           # 唯一标识（≤50 字符，不含空格，不能为 "custom"）
-    display_name: "豆包 Seedream (标准画质)" # 前端展示名
-    provider: "volcengine"               # volcengine / gemini / openai
-    model: "doubao-seedream-5-0-260128"  # 具体模型 ID
-    endpoint: "https://ark.cn-beijing.volces.com/api/v3"
-    api_key: ""                          # TODO: 填入 Volcengine API key
-    min_tier: "free"                     # free / pro / enterprise
-  - key: "gemini-pro"
-    display_name: "Gemini Pro (高质量)"
-    provider: "gemini"
-    model: "gemini-3-pro-image-preview"
-    endpoint: "https://generativelanguage.googleapis.com"
-    api_key: ""                          # TODO: 填入 Gemini API key 后对 Pro 用户开放
+  - key: "volcengine-standard"
+    display_name: "豆包 Seedream"
+    provider_route: "image_generation.designer.seedream"
+    min_tier: "free"
+  - key: "openai-standard"
+    display_name: "GPT Image 2"
+    provider_route: "image_generation.designer.gpt_image_2"
     min_tier: "pro"
 
-# ---------------------------------------------------------------------------
-# Video API: Volcengine Ark Seedance/Dreamina video generation
-# Used by MCP video tools. API keys stay server-side; agents call MCP only.
-# Reference image/audio/video URLs must be public HTTPS URLs (OSS/CDN).
-# ---------------------------------------------------------------------------
-video_api:
-  key: "${VOLCENGINE_ARK_API_KEY}" # Volcengine Ark API key
-  base_url: "https://ark.cn-beijing.volces.com/api/v3"
-  timeout: 10m
-  credit_multiplier: 1000 # 1 RMB = 1000 credits; project video profile controls business defaults.
-  # Explicit allow-list of server-configured video models. Studio, MCP, tasks,
-  # plans, and agents can only see/use keys listed here. Leaving this empty
-  # disables video model selection instead of exposing built-in defaults.
-  # Built-in Seedance keys inherit default capabilities/pricing unless a field
-  # below overrides it.
-  model_catalog:
-    - key: "seedance-2.0"
-      display_name: "Doubao Seedance 2.0"
-      model_id: "doubao-seedance-2-0-260128"
-    - key: "seedance-2.0-fast"
-      display_name: "Doubao Seedance 2.0 Fast"
-      model_id: "doubao-seedance-2-0-fast-260128"
-    - key: "seedance-2.0-mini"
-      display_name: "Doubao Seedance 2.0 Mini"
-      model_id: "doubao-seedance-2-0-mini-260615"
-
-# ---------------------------------------------------------------------------
-# Writing: LLM API configuration for writing services
-# Used by article writing, humanization, topic research, SEO, outlines.
-# 如需 env 控制（例如复用 ANTHROPIC_*），写 base_url: "${ANTHROPIC_BASE_URL}" 等。
-# ---------------------------------------------------------------------------
-writing:
-  base_url: "" # LLM API endpoint (e.g. "https://open.bigmodel.cn/api/anthropic")
-  key: "" # API key
-  model: "" # Model name (e.g. "glm-5-turbo")
-
-# ---------------------------------------------------------------------------
-# Vision: LLM API configuration for image analysis (analyze_image MCP tool).
-# Uses OpenAI-compatible /chat/completions with image content blocks.
-# Model must support vision/image input (e.g. gpt-4o, gpt-4o-mini, gemini-2.0-flash).
-# Falls back to writing config when not configured.
-# 如需 env 控制，写 base_url: "${ANBAN_VISION_BASE_URL}" 等。
-# ---------------------------------------------------------------------------
-vision:
-  base_url: "" # Vision API endpoint (e.g. "https://api.openai.com/v1")
-  key: "" # API key
-  model: "" # Model name (e.g. "gpt-4o-mini")
-  timeout: 60s # Request timeout
-
-# ---------------------------------------------------------------------------
-# TingWu: Alibaba Cloud speech transcription/analysis for live-slice workflows
-# Optional. Configure this plus OSS storage to let MCP create/query live
-# analysis tasks directly. 如需 env 控制，各字段写 ${ANBAN_TINGWU_ENDPOINT} 等。
-# ---------------------------------------------------------------------------
-tingwu:
-  endpoint: "" # e.g. "tingwu.cn-beijing.aliyuncs.com"
-  region: "" # e.g. "cn-beijing"
-  app_key: "" # TingWu app key
-  access_key: "" # Alibaba Cloud AccessKey ID
-  access_secret: "" # Alibaba Cloud AccessKey Secret
-
-# ---------------------------------------------------------------------------
-# FunASR: Aliyun recorded speech HTTP transcription for video-use editing.
-# Optional. The MCP server submits signed OSS/download URLs to DashScope Fun-ASR
-# and polls until the async task finishes. 如需 env 控制，各字段写 ${ANBAN_FUNASR_API_KEY} 等。
-# ---------------------------------------------------------------------------
-funasr:
-  base_url: "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com" # Aliyun MaaS regional host
-  api_key: "${DASHSCOPE_API_KEY}" # Bailian/DashScope API key
-  model: "fun-asr" # optional; defaults to fun-asr
-  timeout: 10m
-
-# ---------------------------------------------------------------------------
-# Credits: Credits system configuration
-# ---------------------------------------------------------------------------
-credits:
-  daily_sign_in: 1024 # credits awarded per daily sign-in
-  register_bonus: 4096 # credits awarded on registration (2^12)
-  invite_reward: 2048 # credits awarded to inviter when invitee registers (2^11)
-  task_costs:
-    article: 4000 # cost per article task
-    seednote: 3200 # cost per seednote task
-    viral_analysis: 800 # cost per viral analysis task
-  model_costs:
-    article_write:
-      "glm-5-turbo": 300
-      "glm-5.1": 400
-    convert:
-      "glm-5-turbo": 100
-      "glm-5.1": 160
-    humanize:
-      "glm-5-turbo": 80
-      "glm-5.1": 120
-    topic_research:
-      "glm-5-turbo": 60
-      "glm-5.1": 80
-    seo:
-      "glm-5-turbo": 60
-      "glm-5.1": 80
-    outline:
-      "glm-5-turbo": 60
-      "glm-5.1": 80
-  admin_api_key: "" # API key for admin credit grant endpoint (如需 env 控制写 ${ANBAN_CREDITS_ADMIN_API_KEY}）
-
-# ---------------------------------------------------------------------------
-# CORS: Cross-Origin Resource Sharing configuration
-# When allowed_origins is empty, only localhost origins are permitted.
-# Set to your production domain(s) for deployed environments.
-# ---------------------------------------------------------------------------
-cors:
-  allowed_origins: []
-  # Examples:
-  # allowed_origins:
-  #   - "https://your-domain.com"
-  #   - "https://admin.your-domain.com"
-
-# ---------------------------------------------------------------------------
-# Claude: Configuration for Claude Code CLI agent execution
-# Required for agent execution. The env vars are passed to the CLI process.
-# ---------------------------------------------------------------------------
 claude:
-  model: "" # Agent execution model override. Empty = use ANTHROPIC_MODEL env var.
-  executor: local # "local" (subprocess) or "docker" (container).
-  plugin_dir: "" # Path to the Anban Creator plugin directory (local executor only).
-  # Auto-detected by searching for agents/ in parent directories.
-  # 如需 env 控制写 plugin_dir: ${ANBAN_CLAUDE_PLUGIN_DIR}。
-  # In k8s/Docker: typically "/app" or "/anbanai".
-  sandbox: false # Enable SDK sandbox for agent tasks (local executor only).
-  # 如需 env 控制写 sandbox: ${ANBAN_CLAUDE_SANDBOX:-false}。
-
-  # Per-task-type max turns for agent execution.
-  # article=300 (10-step pipeline + 7 images + HTML + draft), seednote=150.
-  # Increase further if agent hits max_turns errors.
+  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc:8080}"
+  executor: local
+  sandbox: true
+  plugin_dir: "/anbanai"
   max_turns:
-    article: 300
-    seednote: 150
-
-  # Docker executor settings (used when executor=docker).
-  docker:
-    image: "anban-creator-agent:latest" # Docker image with Claude CLI + Anban Creator plugin.
-    container_name: "anban-creator-agent" # Persistent container to reuse via docker exec (empty = create+destroy per task).
-    workspace_dir: "${ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR:-./data/workspace}" # Host-side workspace base dir (must match docker-compose volume mount source).
-    cpu_cores: 2 # CPU limit per task container.
-    memory_mb: 4096 # Memory limit per task container (MB).
-    timeout_sec: 1800 # Container execution timeout (seconds, default 30 min).
-
-  # Per-task agent execution log directory. Each task gets a {task_id}.log file.
-  # Empty = disabled (no log files). 如需 env 控制写 ${ANBAN_CLAUDE_TASK_LOG_DIR}。
+    article: 100
+    seednote: 100
+    video: 150
   task_log_dir: "./data/logs/tasks"
-
   env:
-    ANTHROPIC_AUTH_TOKEN: "" # Auth token for API access
-    ANTHROPIC_BASE_URL: "" # Custom API endpoint (e.g. for compatible providers)
-    ANTHROPIC_MODEL: "" # Default model override
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: "" # Model override for haiku tier
-    ANTHROPIC_DEFAULT_SONNET_MODEL: "" # Model override for sonnet tier
-    ANTHROPIC_DEFAULT_OPUS_MODEL: "" # Model override for opus tier
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" # Disable telemetry
+    ANTHROPIC_AUTH_TOKEN: "${CLAUDE_CODE_AUTH_TOKEN}"
+    ANTHROPIC_BASE_URL: "https://ark.cn-beijing.volces.com/api/compatible"
+    ANTHROPIC_MODEL: "doubao-seed-evolving"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
 
-# ---------------------------------------------------------------------------
-# Email: Verification code and email delivery configuration
-# Optional. If smtp_host is empty, verification codes are generated but not
-# sent (dev mode — codes are logged to the server output).
-# ---------------------------------------------------------------------------
 email:
-  smtp_host: "" # SMTP server host (e.g. "smtp.qq.com"). Empty = dev mode.
-  smtp_port: 587 # SMTP server port.
-  smtp_username: "" # SMTP authentication username.
-  smtp_password: "" # SMTP authentication password.
-  from_address: "" # Sender email address (e.g. "noreply@example.com").
-  from_name: "Anban 智能创作助手" # Sender display name.
-  code_ttl: 5m # Verification code TTL.
-  code_length: 6 # Number of digits in verification code.
+  smtp_host: "smtp.163.com"
+  smtp_port: 465
+  smtp_username: "${ANBAN_SMTP_USERNAME}"
+  smtp_password: "${ANBAN_SMTP_PASSWORD}"
+  from_address: "${ANBAN_SMTP_FROM_ADDRESS}"
+  from_name: "Anban 智能创作助手"
+  code_ttl: 5m
+  code_length: 6
 
-# ---------------------------------------------------------------------------
-# Asynq: Background task queue worker settings
-# Used for scheduled tasks and async processing.
-# ---------------------------------------------------------------------------
-asynq:
-  concurrency: 3 # Number of concurrent task workers.
+funasr:
+  base_url: "${ANBAN_FUNASR_BASE_URL}"
+  api_key: "${ANBAN_FUNASR_API_KEY}"
+  model: "fun-asr"
+  timeout: 10m
 
-# ---------------------------------------------------------------------------
-# Invitation: Invitation-based registration system
-# When enabled, new users must provide a valid invitation code to register.
-# ---------------------------------------------------------------------------
-invitation:
-  enabled: false # Master switch for invite-required registration.
-  max_per_user: 3 # Max invitation codes each user can generate.
-
-# ---------------------------------------------------------------------------
-# Seednote: 小红书解析 sidecar (搜索、详情、登录二维码、公开资料)
-# Optional. Docker Compose uses http://seednote:18060; local development uses
-# localhost by default. k8s should set ANBAN_SEEDNOTE_BASE_URL=http://seednote:18060.
-# ---------------------------------------------------------------------------
 seednote:
-  base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://localhost:18060}"
-  timeout: 30 # HTTP client timeout (seconds).
+  base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://seednote:18060}"
+  timeout: 30
 
-# ---------------------------------------------------------------------------
-# ilink: platform WeChat assistant channel (任务通知 + 微信对话)
-# Optional. wcflink is the current transport sidecar behind this platform
-# channel. Users add the platform assistant WeChat account and send a bind code.
-# 环境变量控制（显式 ${...}，无隐藏覆盖层）：
-#   docker-compose.yml 传 ANBAN_ILINK_ENABLED=true / ANBAN_ILINK_BASE_URL=http://wcflink:18070，
-#   本文件通过下面的 ${VAR:-default} 取用——Docker 走内网服务名，本地 `make server-dev` 走默认值。
-# ---------------------------------------------------------------------------
 ilink:
-  # NOTE: env bool values must be YAML literals `true`/`false` (e.g. ANBAN_ILINK_ENABLED=true).
-  # Unlike the old override layer, `1`/`0`/`yes`/`on` are NOT coerced and will fail config load —
-  # this is intentional: YAML is the single source of truth with strict typing.
-  enabled: ${ANBAN_ILINK_ENABLED:-false} # Master switch. 本地默认关；Docker 经 compose env 打开。
-  base_url: "${ANBAN_ILINK_BASE_URL:-http://localhost:18070}" # wcflink transport HTTP base URL.
-  timeout: 30 # HTTP client timeout (seconds). 如需 env 控制写 ${ANBAN_ILINK_TIMEOUT:-30}。
-  poll_interval: 2 # Inbound event poll cadence (seconds). 如需 env 控制写 ${ANBAN_ILINK_POLL_INTERVAL:-2}。
+  enabled: ${ANBAN_ILINK_ENABLED:-true}
+  base_url: "${ANBAN_ILINK_BASE_URL:-http://wcflink:18070}"
+  timeout: 30
+  poll_interval: 2
   notification_retry_max: 5
   assistant_account_id: "${ANBAN_ILINK_ASSISTANT_ACCOUNT_ID:-}"
   assistant_name: "${ANBAN_ILINK_ASSISTANT_NAME:-Anban 微信助手}"
   assistant_wechat_id: "${ANBAN_ILINK_ASSISTANT_WECHAT_ID:-}"
   assistant_qrcode_url: "${ANBAN_ILINK_ASSISTANT_QRCODE_URL:-}"
+
+cors:
+  allowed_origins:
+    - "https://creator.anbanai.com"
+
+asynq:
+  concurrency: 3
+
+invitation:
+  enabled: true
+  max_per_user: 10

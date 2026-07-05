@@ -187,6 +187,8 @@ type fakeVideoVisionLLM struct {
 	response    string
 	err         error
 	errors      []error
+	model       string
+	usage       config.TokenUsage
 	calls       []fakeVideoVisionCall
 }
 
@@ -225,6 +227,23 @@ func (f *fakeVideoVisionLLM) CompleteWithVideoURL(_ context.Context, _ string, u
 		return "", f.err
 	}
 	return f.videoResponse()
+}
+
+func (f *fakeVideoVisionLLM) CompleteWithVideoURLResult(_ context.Context, _ string, userPrompt, videoURL string) (*service.LLMResult, error) {
+	f.videoSource = videoURL
+	f.userPrompt = userPrompt
+	f.calls = append(f.calls, fakeVideoVisionCall{kind: "video", imageSource: videoURL, userPrompt: userPrompt})
+	if len(f.errors) >= len(f.calls) && f.errors[len(f.calls)-1] != nil {
+		return nil, f.errors[len(f.calls)-1]
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	text, err := f.videoResponse()
+	if err != nil {
+		return nil, err
+	}
+	return &service.LLMResult{Text: text, Model: f.model, Usage: f.usage}, nil
 }
 
 func (f *fakeVideoVisionLLM) CompleteWithImage(_ context.Context, _ string, userPrompt, imageSource string) (string, error) {
@@ -268,6 +287,7 @@ func TestAnalyzeVideoReferenceUsesVisionModelAndRegistersArtifact(t *testing.T) 
 	vision := &fakeVideoVisionLLM{}
 	logger := zerolog.New(io.Discard)
 	writingSvc := service.NewWritingService(repo, vision, "", time.Minute, &logger)
+	writingSvc.SetVideoUnderstandingClient(vision)
 	svcs.WritingSvc = writingSvc
 
 	req := &mcp.CallToolRequest{
@@ -310,28 +330,68 @@ func TestAnalyzeVideoReferenceUsesVisionModelAndRegistersArtifact(t *testing.T) 
 	}
 }
 
-func TestAnalyzeVideoReferenceFallsBackToSampledFrames(t *testing.T) {
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		t.Skip("ffmpeg is required for sampled-frame fallback test")
+func TestAnalyzeVideoReferenceChargesTokenUsageAndStoresMetadata(t *testing.T) {
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/video-understanding.json"}
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	userID := uuid.NewString()
+	if err := repo.Users().Create(context.Background(), &model.User{
+		ID:             userID,
+		Email:          userID + "@example.com",
+		Password:       "hashed",
+		Tier:           model.TierFree,
+		InviteCode:     strings.ToUpper(userID[:8]),
+		CreditsBalance: 10_000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
 	}
-	if _, err := exec.LookPath("ffprobe"); err != nil {
-		t.Skip("ffprobe is required for sampled-frame fallback test")
+	ctx = withMCPUserID(ctx, userID)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	vision := &fakeVideoVisionLLM{
+		model: "kimi-k2.7-code-highspeed",
+		usage: config.TokenUsage{
+			InputTokens:       10_000,
+			CachedInputTokens: 2_000,
+			OutputTokens:      1_000,
+			TotalTokens:       11_000,
+		},
 	}
-	videoData := makeTinyMP4(t, "1")
-	oldTransport := http.DefaultTransport
-	http.DefaultTransport = staticVideoTransport{data: videoData}
-	t.Cleanup(func() { http.DefaultTransport = oldTransport })
-
-	ctx, _, _, projectID := setupMCPVideoProject(t)
-	vision := &fakeVideoVisionLLM{errors: []error{errors.New("native video URL unsupported")}}
 	logger := zerolog.New(io.Discard)
-	svcs.WritingSvc = service.NewWritingService(nil, vision, "", time.Minute, &logger)
+	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
+	writingSvc.SetVideoUnderstandingClient(vision)
+	svcs.WritingSvc = writingSvc
+	creditSvc := service.NewCreditService(repo, &config.CreditsConfig{}, &logger)
+	SetBillingServices(creditSvc, nil, &config.Config{
+		VideoUnderstanding: config.VideoUnderstandingRuntimeConfig{
+			UnderstandingRuntimeConfig: config.UnderstandingRuntimeConfig{
+				ProviderKey: "moonshot",
+				Model:       "kimi-k2.7-code-highspeed",
+			},
+		},
+		ModelPrices: config.ModelPricesConfig{
+			CurrencyRates: map[string]config.CurrencyRate{"USD": {ToCNY: 7.2}},
+			TokenModels: map[string]config.TokenModelPrice{
+				"moonshot/kimi-k2.7-code-highspeed": {
+					Currency:    "USD",
+					Unit:        1_000_000,
+					CachedInput: 0.38,
+					Input:       1.90,
+					Output:      8.00,
+				},
+			},
+		},
+		Billing: config.BillingConfig{
+			CreditsPerCNY:         1000,
+			TierMultipliers:       map[string]float64{"free": 1.30},
+			DefaultUserMultiplier: 1.0,
+			MinimumChargeCredits:  1,
+		},
+	})
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 			"project_id":` + strconv.Quote(projectID) + `,
-			"video_url":"https://cdn.example.com/ref.mp4",
-			"sample_count":2
+			"task_id":` + strconv.Quote(taskID) + `,
+			"video_url":"https://cdn.example.com/ref.mp4"
 		}`)},
 	}
 	result, err := analyzeVideoReferenceHandler(ctx, req)
@@ -339,27 +399,62 @@ func TestAnalyzeVideoReferenceFallsBackToSampledFrames(t *testing.T) {
 		t.Fatalf("analyzeVideoReferenceHandler returned error: %v", err)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, `"analysis_mode":"sampled_frames"`) || !strings.Contains(text, `"sampled_frames"`) {
-		t.Fatalf("expected sampled-frame response, got: %s", text)
+	if !strings.Contains(text, `"credits_charged":225`) || !strings.Contains(text, `"total_tokens":11000`) {
+		t.Fatalf("response missing token billing details: %s", text)
 	}
-	if len(vision.calls) < 4 {
-		t.Fatalf("vision calls = %d, want native + sampled frames + synthesis", len(vision.calls))
+	txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+	if err != nil {
+		t.Fatalf("find task transactions: %v", err)
 	}
-	if vision.calls[0].kind != "video" {
-		t.Fatalf("first vision call kind = %q, want native video", vision.calls[0].kind)
+	if len(txs) != 1 || txs[0].Type != model.CreditTypeVideoUnderstanding || txs[0].Amount != -225 {
+		t.Fatalf("transactions = %#v, want one video understanding deduction", txs)
 	}
-	if vision.calls[1].kind != "image" || !strings.HasPrefix(vision.calls[1].imageSource, "data:image/jpeg;base64,") {
-		t.Fatalf("fallback second call imageSource = %.40q, want sampled frame data URL", vision.calls[1].imageSource)
+	var metadata model.CreditTransactionMetadata
+	if err := json.Unmarshal(txs[0].Metadata, &metadata); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
 	}
-	if !strings.Contains(vision.calls[len(vision.calls)-1].userPrompt, "Sampled-frame observations") {
-		t.Fatalf("synthesis prompt missing sampled-frame observations: %s", vision.calls[len(vision.calls)-1].userPrompt)
+	if metadata.TotalTokens != 11_000 || metadata.BaseCredits != 173 || metadata.FinalCredits != 225 {
+		t.Fatalf("metadata = %#v, want token cost snapshot", metadata)
+	}
+}
+
+func TestAnalyzeVideoReferenceFailsFastWithoutSampledFrames(t *testing.T) {
+	ctx, _, _, projectID := setupMCPVideoProject(t)
+	vision := &fakeVideoVisionLLM{errors: []error{errors.New("native video URL unsupported")}}
+	logger := zerolog.New(io.Discard)
+	writingSvc := service.NewWritingService(nil, nil, "", time.Minute, &logger)
+	writingSvc.SetVideoUnderstandingClient(vision)
+	svcs.WritingSvc = writingSvc
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"video_url":"https://cdn.example.com/ref.mp4"
+		}`)},
+	}
+	result, err := analyzeVideoReferenceHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("analyzeVideoReferenceHandler returned error: %v", err)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "native video URL unsupported") {
+		t.Fatalf("expected native video error, got: %s", text)
+	}
+	if strings.Contains(text, "sampled_frames") {
+		t.Fatalf("response still mentions sampled frame fallback: %s", text)
+	}
+	if len(vision.calls) != 1 || vision.calls[0].kind != "video" {
+		t.Fatalf("vision calls = %#v, want exactly one native video call", vision.calls)
 	}
 }
 
 func TestAnalyzeVideoReferenceRejectsPrivateURL(t *testing.T) {
 	ctx, _, _, projectID := setupMCPVideoProject(t)
 	logger := zerolog.New(io.Discard)
-	svcs.WritingSvc = service.NewWritingService(nil, &fakeVideoVisionLLM{}, "", time.Minute, &logger)
+	vision := &fakeVideoVisionLLM{}
+	writingSvc := service.NewWritingService(nil, nil, "", time.Minute, &logger)
+	writingSvc.SetVideoUnderstandingClient(vision)
+	svcs.WritingSvc = writingSvc
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 			"project_id":` + strconv.Quote(projectID) + `,

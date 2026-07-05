@@ -253,10 +253,19 @@ func redactURLQuery(raw string) string {
 // Returns empty string for static key / admin mode.
 func getUserID(ctx context.Context) string {
 	info := auth.TokenInfoFromContext(ctx)
-	if info == nil {
-		return ""
+	if info != nil {
+		return info.UserID
 	}
-	return info.UserID
+	if userID, ok := ctx.Value(mcpUserIDContextKey{}).(string); ok {
+		return userID
+	}
+	return ""
+}
+
+type mcpUserIDContextKey struct{}
+
+func withMCPUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, mcpUserIDContextKey{}, userID)
 }
 
 // textResult creates a CallToolResult with JSON text content.

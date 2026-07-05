@@ -17,6 +17,7 @@ import (
 
 	"github.com/anbanai/anban-creator/app/converter"
 	"github.com/anbanai/anban-creator/app/writer"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/resources"
@@ -32,6 +33,16 @@ type LLMClient interface {
 	CompleteWithImage(ctx context.Context, systemPrompt, userPrompt, imageURL string) (string, error)
 }
 
+type LLMResult struct {
+	Text  string
+	Model string
+	Usage srvconfig.TokenUsage
+}
+
+type usageImageLLMClient interface {
+	CompleteWithImageResult(ctx context.Context, systemPrompt, userPrompt, imageURL string) (*LLMResult, error)
+}
+
 // streamingLLMClient is the OPTIONAL streaming capability of an LLMClient. Real
 // OpenAI-compatible clients implement it; test fakes need not — callers detect
 // support via a type assertion and fall back to the blocking Complete path. Used
@@ -43,6 +54,10 @@ type streamingLLMClient interface {
 
 type videoURLLLMClient interface {
 	CompleteWithVideoURL(ctx context.Context, systemPrompt, userPrompt, videoURL string) (string, error)
+}
+
+type usageVideoURLLLMClient interface {
+	CompleteWithVideoURLResult(ctx context.Context, systemPrompt, userPrompt, videoURL string) (*LLMResult, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +181,14 @@ func (c *openaiLLMClient) CompleteStream(ctx context.Context, systemPrompt, user
 // model and returns the assistant's text content. The imageURL can be an HTTP URL
 // or a base64 data URL (data:image/...;base64,...).
 func (c *openaiLLMClient) CompleteWithImage(ctx context.Context, systemPrompt, userPrompt, imageURL string) (string, error) {
+	result, err := c.CompleteWithImageResult(ctx, systemPrompt, userPrompt, imageURL)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+func (c *openaiLLMClient) CompleteWithImageResult(ctx context.Context, systemPrompt, userPrompt, imageURL string) (*LLMResult, error) {
 	if c.timeout > 0 {
 		if _, ok := ctx.Deadline(); !ok {
 			var cancel context.CancelFunc
@@ -215,22 +238,30 @@ func (c *openaiLLMClient) CompleteWithImage(ctx context.Context, systemPrompt, u
 
 	resp, err := c.client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		return "", fmt.Errorf("llm vision completion: %w", err)
+		return nil, fmt.Errorf("llm vision completion: %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)",
+		return nil, fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)",
 			c.model, resp.ID, resp.Model)
 	}
 
-	return resp.Choices[0].Message.Content, nil
+	return &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}, nil
 }
 
 // CompleteWithVideoURL sends a non-standard but common OpenAI-compatible
 // video_url content part. Providers/gateways that support native video
-// understanding can consume the original OSS/CDN video URL; callers fall back to
-// sampled frames when the model rejects this shape.
+// understanding consume the original OSS/CDN video URL; unsupported providers
+// fail immediately.
 func (c *openaiLLMClient) CompleteWithVideoURL(ctx context.Context, systemPrompt, userPrompt, videoURL string) (string, error) {
+	result, err := c.CompleteWithVideoURLResult(ctx, systemPrompt, userPrompt, videoURL)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+func (c *openaiLLMClient) CompleteWithVideoURLResult(ctx context.Context, systemPrompt, userPrompt, videoURL string) (*LLMResult, error) {
 	if c.timeout > 0 {
 		if _, ok := ctx.Deadline(); !ok {
 			var cancel context.CancelFunc
@@ -276,13 +307,29 @@ func (c *openaiLLMClient) CompleteWithVideoURL(ctx context.Context, systemPrompt
 	}
 	resp, err := c.client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		return "", fmt.Errorf("llm video completion: %w", err)
+		return nil, fmt.Errorf("llm video completion: %w", err)
 	}
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)",
+		return nil, fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)",
 			c.model, resp.ID, resp.Model)
 	}
-	return resp.Choices[0].Message.Content, nil
+	return &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}, nil
+}
+
+func responseModel(respModel, fallback string) string {
+	if strings.TrimSpace(respModel) != "" {
+		return respModel
+	}
+	return fallback
+}
+
+func chatCompletionUsage(usage openai.CompletionUsage) srvconfig.TokenUsage {
+	return srvconfig.TokenUsage{
+		InputTokens:       usage.PromptTokens,
+		CachedInputTokens: usage.PromptTokensDetails.CachedTokens,
+		OutputTokens:      usage.CompletionTokens,
+		TotalTokens:       usage.TotalTokens,
+	}
 }
 
 // isKimiThinkingModel returns true for Kimi K2.6/K2.5 models that default to
@@ -304,13 +351,15 @@ func isKimiThinkingModel(model string) bool {
 // WritingService wraps prompt assembly packages (writer, converter)
 // and calls an LLM for actual generation.
 type WritingService struct {
-	repo           repository.Repository
-	llmClient      LLMClient
-	llmTimeout     time.Duration
-	modelConfigSvc *ModelConfigService
-	writersDir     string
-	logger         *zerolog.Logger
-	visionClient   LLMClient // dedicated vision model client (nil = use llmClient)
+	repo                     repository.Repository
+	llmClient                LLMClient
+	llmTimeout               time.Duration
+	modelConfigSvc           *ModelConfigService
+	writersDir               string
+	logger                   *zerolog.Logger
+	visionClient             LLMClient // legacy test helper; use image/video understanding clients in production.
+	imageUnderstandingClient LLMClient
+	videoUnderstandingClient LLMClient
 }
 
 // NewWritingService creates a new WritingService.
@@ -333,6 +382,16 @@ func (s *WritingService) SetModelConfigService(svc *ModelConfigService) {
 // If not called, AnalyzeImage falls back to the default writing LLM client.
 func (s *WritingService) SetVisionClient(client LLMClient) {
 	s.visionClient = client
+	s.imageUnderstandingClient = client
+	s.videoUnderstandingClient = client
+}
+
+func (s *WritingService) SetImageUnderstandingClient(client LLMClient) {
+	s.imageUnderstandingClient = client
+}
+
+func (s *WritingService) SetVideoUnderstandingClient(client LLMClient) {
+	s.videoUnderstandingClient = client
 }
 
 // getLLMClient returns the default or per-user LLM client for the given user.
@@ -354,45 +413,77 @@ func (s *WritingService) getLLMClient(ctx context.Context, userID string) LLMCli
 // the analysis text. Uses the dedicated vision client if configured, otherwise
 // falls back to the writing LLM client.
 func (s *WritingService) AnalyzeImage(ctx context.Context, userID, imageSource, prompt string) (string, error) {
-	llm := s.visionClient
+	result, err := s.AnalyzeImageDetailed(ctx, userID, imageSource, prompt)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+func (s *WritingService) AnalyzeImageDetailed(ctx context.Context, userID, imageSource, prompt string) (*LLMResult, error) {
+	llm := s.imageUnderstandingClient
 	if llm == nil {
-		llm = s.getLLMClient(ctx, userID)
+		llm = s.visionClient
 	}
 	if llm == nil {
-		return "", fmt.Errorf("LLM service is not configured")
+		return nil, fmt.Errorf("LLM service is not configured")
 	}
 
 	systemPrompt := "You are a precise visual analysis assistant. Describe exactly what you see in the image. Be specific and detailed."
-	result, err := llm.CompleteWithImage(ctx, systemPrompt, prompt, imageSource)
-	if err != nil {
-		return "", fmt.Errorf("image analysis: %w", err)
+	if usageLLM, ok := llm.(usageImageLLMClient); ok {
+		result, err := usageLLM.CompleteWithImageResult(ctx, systemPrompt, prompt, imageSource)
+		if err != nil {
+			return nil, fmt.Errorf("image analysis: %w", err)
+		}
+		result.Text = strings.TrimSpace(result.Text)
+		return result, nil
 	}
-	return strings.TrimSpace(result), nil
+	text, err := llm.CompleteWithImage(ctx, systemPrompt, prompt, imageSource)
+	if err != nil {
+		return nil, fmt.Errorf("image analysis: %w", err)
+	}
+	return &LLMResult{Text: strings.TrimSpace(text)}, nil
 }
 
-// AnalyzeVideoURL sends an OSS/CDN video URL to a configured OpenAI-compatible
-// vision model using a native video content part. If the configured client or
-// provider does not support that shape, callers should fall back to sampled
-// frame analysis.
+// AnalyzeVideoURL sends an OSS/CDN video URL to the configured video
+// understanding client using a native video content part. If the configured
+// client or provider does not support that shape, the call fails immediately.
 func (s *WritingService) AnalyzeVideoURL(ctx context.Context, userID, videoURL, prompt string) (string, error) {
-	llm := s.visionClient
+	result, err := s.AnalyzeVideoURLDetailed(ctx, userID, videoURL, prompt)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+func (s *WritingService) AnalyzeVideoURLDetailed(ctx context.Context, userID, videoURL, prompt string) (*LLMResult, error) {
+	llm := s.videoUnderstandingClient
 	if llm == nil {
-		llm = s.getLLMClient(ctx, userID)
+		llm = s.visionClient
 	}
 	if llm == nil {
-		return "", fmt.Errorf("LLM service is not configured")
+		return nil, fmt.Errorf("LLM service is not configured")
+	}
+	if usageVideoLLM, ok := llm.(usageVideoURLLLMClient); ok {
+		systemPrompt := "You are a precise video analysis assistant. Describe exactly what you see across the whole video. Be specific and detailed."
+		result, err := usageVideoLLM.CompleteWithVideoURLResult(ctx, systemPrompt, prompt, videoURL)
+		if err != nil {
+			return nil, fmt.Errorf("video analysis: %w", err)
+		}
+		result.Text = strings.TrimSpace(result.Text)
+		return result, nil
 	}
 	videoLLM, ok := llm.(videoURLLLMClient)
 	if !ok {
-		return "", fmt.Errorf("configured LLM client does not support native video URL input")
+		return nil, fmt.Errorf("configured LLM client does not support native video URL input")
 	}
 
 	systemPrompt := "You are a precise video analysis assistant. Describe exactly what you see across the whole video. Be specific and detailed."
-	result, err := videoLLM.CompleteWithVideoURL(ctx, systemPrompt, prompt, videoURL)
+	text, err := videoLLM.CompleteWithVideoURL(ctx, systemPrompt, prompt, videoURL)
 	if err != nil {
-		return "", fmt.Errorf("video analysis: %w", err)
+		return nil, fmt.Errorf("video analysis: %w", err)
 	}
-	return strings.TrimSpace(result), nil
+	return &LLMResult{Text: strings.TrimSpace(text)}, nil
 }
 
 // resolveWriter returns the 写作者 (writer resource key) for a writing

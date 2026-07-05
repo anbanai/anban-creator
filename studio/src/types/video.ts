@@ -44,7 +44,8 @@ export interface VideoModelPolicy {
 
 export interface VideoPricingBreakdown {
   cny: number
-  credit_multiplier: number
+  credits_per_cny: number
+  credit_multiplier?: number
   input_video: boolean
   input_seconds?: number
   output_seconds: number

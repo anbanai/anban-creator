@@ -118,7 +118,7 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 				}
 			}
 			if ref == "mcp-contract.md" {
-				for _, want := range []string{"get_project_profile", "resolved_profile", "agent_brief", "video.model_catalog", "analyze_video_reference", "analysis_mode", "native_video", "sampled_frames", "validate_video_generation_params", "credit_multiplier", "estimated_credits", "pricing_breakdown", "task_file_id", "file_path", "ark_url", "OSS/CDN", "Provider raw URLs", "server-measured input video duration", "Do not trust agent-supplied input video duration"} {
+				for _, want := range []string{"get_project_profile", "resolved_profile", "agent_brief", "video.model_catalog", "analyze_video_reference", "analysis_mode", "native_video", "model_routes.video_understanding", "require_native_video=true", "require_usage=true", "usage", "credits_charged", "validate_video_generation_params", "model_prices.video_generation", "billing.credits_per_cny", "estimated_credits", "pricing_breakdown", "task_file_id", "file_path", "ark_url", "OSS/CDN", "Provider raw URLs", "server-measured input video duration", "Do not trust agent-supplied input video duration"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
