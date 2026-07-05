@@ -64,16 +64,19 @@ services:
       timeout: 5s
       retries: 5
 
-  # wcfLink — WeChat bot sidecar (iLink channel). Built from the wcflink/
-  # submodule (no official image). Holds logged-in WeChat sessions server-side;
+  # wcfLink — WeChat bot sidecar (iLink channel). Built from the upstream
+  # GitHub project (no official image). Holds logged-in WeChat sessions server-side;
   # Studio drives QR login, the server polls events for commands and pushes
   # task notifications via send-text.
   wcflink:
     build:
       context: .
       dockerfile: docker/wcflink.Dockerfile
+      args:
+        WCFLINK_REF: refs/tags/v0.1.0
+        WCFLINK_COMMIT: fb0999b81043c91e8fddb780eb2ecf03f1f8588f
     image: anban-creator-wcflink:latest
-    # Force build-only: this image is produced from the wcflink/ submodule and
+    # Force build-only: this image is produced from the upstream wcfLink source and
     # has no registry artifact. Without this, Compose probes Docker Hub for the
     # (nonexistent) anban-creator-wcflink image and aborts on a transient registry
     # EOF instead of falling back to the Dockerfile build.

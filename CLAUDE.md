@@ -15,7 +15,7 @@ Client surfaces wrapping the same server API:
 
 The `app/` directory is a **library** (no `main.go`) providing content creation functionality used by both the server and agent. It handles Markdown-to-WeChat-HTML conversion, AI writing, image generation, humanization, and WeChat publishing.
 
-Four git submodules: `claudecode/`, `openclaw/`, `codex/` (plugin distributions) and `wcflink/` (the `lich0821/wcfLink` sidecar used as the transport behind the iLink WeChat assistant channel). Run `git submodule update --init --recursive` before building Docker images.
+Three git submodules: `claudecode/`, `openclaw/`, and `codex/` (plugin distributions). Run `git submodule update --init --recursive` before building Docker images. The `lich0821/wcfLink` sidecar used by the iLink WeChat assistant channel is fetched from GitHub by `docker/wcflink.Dockerfile` at build time.
 
 MCP server config uses the `creator` server key. Business-facing agent, skill, and setup docs must reference bare MCP tool names such as `generate_image`; host-specific tool-name prefixes are a runtime concern and belong only in system-level config or tests.
 
@@ -264,7 +264,7 @@ Task progress events use `TaskProgressNotifier` interface (`server/service/task_
 
 ### ilink WeChat Assistant
 
-`wcflink/` (git submodule → `lich0821/wcfLink`) is the current sidecar transport that bridges platform-managed WeChat assistant accounts to the server. Business-facing code, config, routes, and data models use the platform channel name **ilink** instead of exposing the transport name. Server-side integration lives in `server/model/ilink.go`, `server/repository/ilink.go`, `server/service/ilink_*.go`, and `server/handler/ilink.go`. The poller consumes wcflink events and routes them by `platform_account_id + external_user_id`; task success/failure/cancel terminal notifications are persisted through `ilink_notification_outbox` before delivery. Studio binds users to the platform WeChat assistant via `/api/v1/ilink/*`.
+`lich0821/wcfLink` is the current sidecar transport that bridges platform-managed WeChat assistant accounts to the server. The source is fetched by `docker/wcflink.Dockerfile` during image builds instead of being checked out as a local submodule. Business-facing code, config, routes, and data models use the platform channel name **ilink** instead of exposing the transport name. Server-side integration lives in `server/model/ilink.go`, `server/repository/ilink.go`, `server/service/ilink_*.go`, and `server/handler/ilink.go`. The poller consumes wcflink events and routes them by `platform_account_id + external_user_id`; task success/failure/cancel terminal notifications are persisted through `ilink_notification_outbox` before delivery. Studio binds users to the platform WeChat assistant via `/api/v1/ilink/*`.
 
 ## Plugin & Agent Ecosystem
 

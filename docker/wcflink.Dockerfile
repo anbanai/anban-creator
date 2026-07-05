@@ -1,22 +1,26 @@
 # docker/wcflink.Dockerfile
 #
 # Multi-stage build for the wcfLink WeChat-bot sidecar (github.com/lich0821/wcfLink).
-# Built from the wcflink/ git submodule. wcfLink uses modernc.org/sqlite (pure Go),
-# so CGO is disabled and the final image is a static binary on alpine.
-#
-# Build context is the repo root (context: .) so the submodule source is in scope
-# — this mirrors how server/Dockerfile is built. See docker-compose.yml -> wcflink.
+# The source is fetched from GitHub at build time and pinned by WCFLINK_REF.
+# wcfLink uses modernc.org/sqlite (pure Go), so CGO is disabled and the final
+# image is a static binary on alpine.
 # syntax=docker/dockerfile:1.7
 
 FROM golang:1.25-alpine AS builder
+ARG WCFLINK_REPO=https://github.com/lich0821/wcfLink.git
+ARG WCFLINK_REF=refs/tags/v0.1.0
+ARG WCFLINK_COMMIT=fb0999b81043c91e8fddb780eb2ecf03f1f8588f
 WORKDIR /src
 
-# Cache module deps first for faster rebuilds.
-COPY wcflink/go.mod wcflink/go.sum ./
+RUN apk add --no-cache ca-certificates git
+RUN git init . \
+    && git remote add origin "$WCFLINK_REPO" \
+    && git fetch --depth 1 origin "$WCFLINK_REF" \
+    && git checkout --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "$WCFLINK_COMMIT"
+
 RUN go mod download
 
-# Copy the submodule source and compile the server binary.
-COPY wcflink/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/wcfLink ./cmd/wcfLink
 
 FROM alpine:3.20
