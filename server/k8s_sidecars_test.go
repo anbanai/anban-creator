@@ -40,6 +40,37 @@ func TestK8sSidecarManifestDefinesInternalWcflinkAndSeednoteServices(t *testing.
 	}
 }
 
+func TestACKSidecarManifestKeepsProductionSidecarsInternal(t *testing.T) {
+	raw, err := os.ReadFile("../deploy/k8s/ack-sidecars.yaml")
+	if err != nil {
+		t.Fatalf("read ACK sidecar manifest: %v", err)
+	}
+	text := string(raw)
+
+	for _, want := range []string{
+		"imagePullSecrets:",
+		"name: ${imagePullSecret}",
+		"image: ${wcflink_image_repo}",
+		"image: ${seednote_image_repo}",
+		"strategy:",
+		"type: Recreate",
+		"resources:",
+		"requests:",
+		"limits:",
+		"type: ClusterIP",
+		"claimName: wcflink-state",
+		"claimName: seednote-data",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ACK sidecar manifest missing %q", want)
+		}
+	}
+
+	if strings.Contains(text, "kind: Ingress") || strings.Contains(text, "type: LoadBalancer") || strings.Contains(text, "type: NodePort") {
+		t.Fatalf("ACK sidecar manifest must keep sidecars internal-only")
+	}
+}
+
 func TestServerDeploymentInjectsSidecarURLs(t *testing.T) {
 	raw, err := os.ReadFile("Deployment.yaml")
 	if err != nil {
