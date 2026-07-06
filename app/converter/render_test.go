@@ -241,6 +241,71 @@ func TestRender_ContainerWrapper(t *testing.T) {
 	}
 }
 
+// TestRender_CompactFallbackLayout verifies sparse/custom themes inherit the
+// mobile-first spacing defaults instead of the old wide centered card defaults.
+func TestRender_CompactFallbackLayout(t *testing.T) {
+	log := zerolog.Nop()
+	cvt := NewConverterWithThemes(&log, map[string][]byte{"compact-fallback": []byte(`name: compact-fallback
+type: deterministic
+description: "compact fallback"
+colors:
+  background: "#ffffff"
+  text: "#222222"
+`)})
+	res := cvt.Convert(&ConvertRequest{Markdown: "# Hi\n\nbody.", Theme: "compact-fallback"})
+	if !res.Success {
+		t.Fatalf("render failed: %s", res.Error)
+	}
+	html := res.HTML
+	for _, want := range []string{"max-width:none", "padding:16px 0;", "padding:20px 14px;"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("compact fallback wrapper missing %q:\n%s", want, html)
+		}
+	}
+}
+
+func TestRender_UsesThemeParagraphMargin(t *testing.T) {
+	log := zerolog.Nop()
+	cvt := NewConverterWithThemes(&log, map[string][]byte{"paragraph-margin": []byte(`name: paragraph-margin
+type: deterministic
+description: "paragraph margin"
+colors:
+  background: "#ffffff"
+  text: "#222222"
+layout:
+  paragraph_margin: "0 0 12px"
+`)})
+	res := cvt.Convert(&ConvertRequest{Markdown: "第一段。\n\n第二段。", Theme: "paragraph-margin"})
+	if !res.Success {
+		t.Fatalf("render failed: %s", res.Error)
+	}
+	if got := strings.Count(res.HTML, `<p style="margin:0 0 12px;">`); got != 2 {
+		t.Errorf("paragraph margin count = %d, want 2:\n%s", got, res.HTML)
+	}
+	if strings.Contains(res.HTML, `<p style="margin:0 0 16px;">`) {
+		t.Errorf("renderer ignored theme paragraph_margin:\n%s", res.HTML)
+	}
+}
+
+func TestRender_CompactModuleSpacing(t *testing.T) {
+	cvt := newTestConverter(t)
+	md := "# 标题\n\n## 小节\n\n> 引用内容。\n\n![图](https://x.example/a.png)\n"
+	res := cvt.Convert(&ConvertRequest{Markdown: md, Theme: "test-theme"})
+	if !res.Success {
+		t.Fatalf("render failed: %s", res.Error)
+	}
+	for _, want := range []string{
+		"margin:0 0 18px",
+		"margin:26px 0 14px",
+		`<blockquote style="margin:14px 0;padding:12px 14px;`,
+		`<p style="text-align:center;margin:16px 0;">`,
+	} {
+		if !strings.Contains(res.HTML, want) {
+			t.Errorf("compact module spacing missing %q:\n%s", want, res.HTML)
+		}
+	}
+}
+
 // TestRender_Determinism: identical (markdown, theme) yields identical HTML.
 func TestRender_Determinism(t *testing.T) {
 	cvt := newTestConverter(t)

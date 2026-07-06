@@ -27,12 +27,12 @@ typography:
 
 # 容器与卡片布局
 layout:
-  container_padding: "40px 0"
-  max_width: "800px"
-  card_padding: "25px 16px"
+  container_padding: "14px 0"
+  max_width: "none"
+  card_padding: "18px 14px"
   section_gap: "40px"
   paragraph_margin: "0 0 16px"
-  border_radius: "16px"
+  border_radius: "12px"
   card_background_color: "#ffffff"
   card_background_image: "radial-gradient(circle at 1px 1px, rgba(107, 155, 122, 0.08) 1px, transparent 0)" # 清新点状纹理
   card_background_size: "20px 20px"

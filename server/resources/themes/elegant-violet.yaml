@@ -23,12 +23,12 @@ typography:
   letter_spacing: "0.4px"
 
 layout:
-  container_padding: "40px 0"
-  max_width: "780px"
-  card_padding: "30px 16px"
+  container_padding: "14px 0"
+  max_width: "none"
+  card_padding: "18px 14px"
   section_gap: "38px"
   paragraph_margin: "0 0 17px"
-  border_radius: "20px"
+  border_radius: "12px"
   card_background_color: "#ffffff"
   card_background_image: ""
   card_background_size: ""

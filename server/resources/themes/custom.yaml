@@ -30,9 +30,9 @@ typography:
 
 # 容器与卡片布局
 layout:
-  container_padding: "32px 0"
-  max_width: "800px"
-  card_padding: "24px 16px"
+  container_padding: "12px 0"
+  max_width: "none"
+  card_padding: "18px 14px"
   section_gap: "32px"
   paragraph_margin: "0 0 16px"
   border_radius: "10px"

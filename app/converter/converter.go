@@ -129,7 +129,7 @@ func ReplaceImagePlaceholders(html string, images []ImageRef) string {
 	for _, img := range images {
 		if img.WechatURL != "" {
 			// 替换占位符为实际图片标签
-			imgTag := `<img src="` + img.WechatURL + `" style="max-width:100%;height:auto;display:block;margin:20px auto;" />`
+			imgTag := `<img src="` + img.WechatURL + `" style="max-width:100%;height:auto;display:block;margin:16px auto;" />`
 			result = strings.ReplaceAll(result, img.Placeholder, imgTag)
 		}
 	}

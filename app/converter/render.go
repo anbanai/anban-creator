@@ -83,17 +83,14 @@ type detRenderer struct {
 }
 
 // wrapContainer wraps the rendered blocks in the theme's "主容器 + 卡片"
-// layout: an outer section carrying the page background, and an inner card
-// section with max-width/padding/border/shadow. This reproduces the container
-// spec the old LLM prompt encoded in prose, now driven by the structured theme
-// (layout + colors). Every value has a fallback so partially-specified themes
-// still render.
+// layout. Fallbacks are mobile-first for WeChat reading: no artificial desktop
+// max-width, lean outer padding, and readable inner gutters.
 func (r *detRenderer) wrapContainer(inner string) string {
 	bg := r.colorOf("background", "#faf9f5")
 	cardStyle := fmt.Sprintf(
 		`max-width:%s;margin:0 auto;padding:%s;background-color:%s;border-radius:%s;border:%s;box-shadow:%s;color:%s;`,
-		r.firstNonEmpty(r.theme.Layout.MaxWidth, "800px"),
-		r.firstNonEmpty(r.theme.Layout.CardPadding, "20px"),
+		r.firstNonEmpty(r.theme.Layout.MaxWidth, "none"),
+		r.firstNonEmpty(r.theme.Layout.CardPadding, "20px 14px"),
 		r.firstNonEmpty(r.theme.Layout.CardBackgroundColor, "#ffffff"),
 		r.firstNonEmpty(r.theme.Layout.BorderRadius, "12px"),
 		r.firstNonEmpty(r.theme.Layout.CardBorder, "1px solid rgba(0,0,0,0.05)"),
@@ -119,7 +116,7 @@ func (r *detRenderer) wrapContainer(inner string) string {
 	// their font; sans themes are unaffected ('Inter' → system sans).
 	fmt.Fprintf(&sb, `<section style="background-color:%s;padding:%s;font-family:%s;font-size:%s;line-height:%s;letter-spacing:%s;">`,
 		bg,
-		r.firstNonEmpty(r.theme.Layout.ContainerPadding, "24px 12px"),
+		r.firstNonEmpty(r.theme.Layout.ContainerPadding, "16px 0"),
 		r.firstNonEmpty(r.theme.Typography.FontFamily, "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"),
 		r.firstNonEmpty(r.theme.Typography.FontSize, "16px"),
 		r.lineHeight(), r.letterSpacing())
@@ -191,7 +188,7 @@ func (r *detRenderer) renderHeading(n *ast.Heading, sb *strings.Builder) {
 	switch n.Level {
 	case 1:
 		fmt.Fprintf(sb,
-			`<h1 style="color:%s;font-size:24px;font-weight:bold;text-align:center;line-height:1.4;margin:0 0 24px;letter-spacing:%s;">%s</h1>`+"\n",
+			`<h1 style="color:%s;font-size:24px;font-weight:bold;text-align:center;line-height:1.4;margin:0 0 18px;letter-spacing:%s;">%s</h1>`+"\n",
 			r.textColor(), r.letterSpacing(), inner)
 	case 2:
 		mod := r.theme.Modules.H2
@@ -200,7 +197,7 @@ func (r *detRenderer) renderHeading(n *ast.Heading, sb *strings.Builder) {
 			icon = "▶"
 		}
 		fmt.Fprintf(sb,
-			`<h2 style="border-bottom:%s;padding-bottom:8px;margin:32px 0 16px;line-height:1.4;">`+
+			`<h2 style="border-bottom:%s;padding-bottom:8px;margin:26px 0 14px;line-height:1.4;">`+
 				`<span style="color:%s;text-shadow:%s;margin-right:8px;">%s</span>`+
 				`<span style="color:%s;font-weight:bold;">%s</span></h2>`+"\n",
 			r.firstNonEmpty(mod.BorderBottom, "1px dashed rgba(0,0,0,0.15)"),
@@ -230,7 +227,7 @@ func (r *detRenderer) renderBlockquote(n *ast.Blockquote, sb *strings.Builder) {
 	}
 	mod := r.theme.Modules.Blockquote
 	fmt.Fprintf(sb,
-		`<blockquote style="margin:16px 0;padding:14px 18px;background-color:%s;border-left:%s;border-radius:4px;box-shadow:%s;">`,
+		`<blockquote style="margin:14px 0;padding:12px 14px;background-color:%s;border-left:%s;border-radius:4px;box-shadow:%s;">`,
 		r.firstNonEmpty(mod.BackgroundColor, r.firstNonEmpty(r.theme.Colors["quote_background"], "#f5f5f5")),
 		r.firstNonEmpty(mod.BorderLeft, "5px solid "+r.primaryColor()),
 		r.firstNonEmpty(mod.BoxShadow, "none"))
@@ -243,7 +240,7 @@ func (r *detRenderer) renderBlockquote(n *ast.Blockquote, sb *strings.Builder) {
 func (r *detRenderer) renderAlert(n *ast.Blockquote, alertType string, sb *strings.Builder) {
 	spec := alertStyle(alertType, r)
 	fmt.Fprintf(sb,
-		`<section style="margin:16px 0;padding:14px 18px;border-radius:8px;background-color:%s;border:1px solid %s;">`+
+		`<section style="margin:14px 0;padding:12px 14px;border-radius:8px;background-color:%s;border:1px solid %s;">`+
 			`<p style="margin:0 0 6px;font-weight:bold;color:%s;">%s</p>`,
 		spec.bg, spec.border, spec.accent, spec.label)
 	sb.WriteString("\n")
@@ -452,7 +449,7 @@ func (r *detRenderer) emitImage(n *ast.Image, sb *strings.Builder) {
 		Placeholder: placeholder,
 		Type:        imgType,
 	})
-	fmt.Fprintf(sb, `<p style="text-align:center;margin:20px 0;">%s</p>`, placeholder)
+	fmt.Fprintf(sb, `<p style="text-align:center;margin:16px 0;">%s</p>`, placeholder)
 }
 
 // ---------------------------------------------------------------------------
@@ -485,7 +482,7 @@ func (r *detRenderer) bodyMargin() string {
 	// Body color + typography are inherited from the container wrapper, so a <p>
 	// only needs its own margin. Repeating the full style on every paragraph
 	// bloats long articles past WeChat's 20,000-char draft limit.
-	return "margin:0 0 16px;"
+	return "margin:" + r.firstNonEmpty(r.theme.Layout.ParagraphMargin, "0 0 16px") + ";"
 }
 
 func (r *detRenderer) hrTag() string {

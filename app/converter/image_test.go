@@ -89,6 +89,9 @@ func TestReplaceImagePlaceholders(t *testing.T) {
 	if strings.Contains(result, "<!-- IMG:0 -->") {
 		t.Error("placeholder 0 should be replaced")
 	}
+	if !strings.Contains(result, "margin:16px auto") {
+		t.Errorf("replacement image should use compact vertical margin, got: %s", result)
+	}
 }
 
 func TestReplaceImagePlaceholders_PartialURLs(t *testing.T) {
