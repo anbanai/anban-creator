@@ -9,6 +9,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -19,6 +20,7 @@ type PlanService struct {
 	logger                *zerolog.Logger
 	videoCatalog          VideoModelCatalog
 	videoCreditMultiplier int
+	videoBilling          srvconfig.BillingConfig
 	creditSvc             *CreditService
 }
 
@@ -42,6 +44,13 @@ func (s *PlanService) SetCreditService(creditSvc *CreditService) {
 	s.creditSvc = creditSvc
 }
 
+func (s *PlanService) SetVideoBillingConfig(billing srvconfig.BillingConfig) {
+	if s == nil {
+		return
+	}
+	s.videoBilling = billing
+}
+
 func (s *PlanService) resolvedVideoCatalog() VideoModelCatalog {
 	if s != nil && s.videoCatalog != nil {
 		return s.videoCatalog
@@ -54,6 +63,33 @@ func (s *PlanService) resolvedVideoCreditMultiplier() int {
 		return s.videoCreditMultiplier
 	}
 	return 1000
+}
+
+func (s *PlanService) videoBillingOptions(ctx context.Context, userID string) VideoBillingOptions {
+	fallback := s.resolvedVideoCreditMultiplier()
+	tier := model.TierFree
+	userMultiplier := 1.0
+	var billing srvconfig.BillingConfig
+	if s != nil {
+		billing = s.videoBilling
+	}
+	if s == nil || s.creditSvc == nil || userID == "" {
+		return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
+	}
+	if foundTier, err := s.creditSvc.GetUserTier(ctx, userID); err == nil {
+		tier = foundTier
+	} else if s.logger != nil {
+		s.logger.Warn().Err(err).Str("user_id", userID).Msg("video tier lookup failed")
+	}
+	foundMultiplier, err := s.creditSvc.GetUserBillingMultiplier(ctx, userID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn().Err(err).Str("user_id", userID).Msg("video billing multiplier lookup failed")
+		}
+	} else if foundMultiplier > 0 {
+		userMultiplier = foundMultiplier
+	}
+	return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
 }
 
 // CreatePlanParams holds the inputs for PlanService.Create. Pointer-typed optional
@@ -154,12 +190,12 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		if err := s.requireVideoCreationBalance(ctx, p.UserID); err != nil {
 			return nil, err
 		}
-		resolved, err := ResolveVideoGenerationPlan(
+		resolved, err := ResolveVideoGenerationPlanWithBilling(
 			videoRequestFromTaskConfig(p.Prompt, p.Video),
 			project.VideoDefaults.Data(),
 			project.VideoModelPolicy.Data(),
 			s.resolvedVideoCatalog(),
-			s.resolvedVideoCreditMultiplier(),
+			s.videoBillingOptions(ctx, p.UserID),
 		)
 		if err != nil {
 			return nil, wrapVideoGenerationConfigError(err)
@@ -318,12 +354,12 @@ func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Pl
 		if project.Platform != model.PlatformVideo {
 			return nil, fmt.Errorf("video_config can only be set on video plans")
 		}
-		resolved, err := ResolveVideoGenerationPlan(
+		resolved, err := ResolveVideoGenerationPlanWithBilling(
 			videoRequestFromTaskConfig(plan.Prompt, p.Video),
 			project.VideoDefaults.Data(),
 			project.VideoModelPolicy.Data(),
 			s.resolvedVideoCatalog(),
-			s.resolvedVideoCreditMultiplier(),
+			s.videoBillingOptions(ctx, plan.UserID),
 		)
 		if err != nil {
 			return nil, wrapVideoGenerationConfigError(err)

@@ -27,6 +27,26 @@ import (
 // the nil check in handlers so argument validation tests can reach the arg parsing code.
 var stubWritingSvc = &service.WritingService{}
 
+type fakeMCPWritingLLM struct {
+	response string
+	usage    config.TokenUsage
+	prompt   string
+}
+
+func (f *fakeMCPWritingLLM) Complete(_ context.Context, _, userPrompt string) (string, error) {
+	f.prompt = userPrompt
+	return f.response, nil
+}
+
+func (f *fakeMCPWritingLLM) CompleteResult(_ context.Context, _, userPrompt string) (*service.LLMResult, error) {
+	f.prompt = userPrompt
+	return &service.LLMResult{Text: f.response, Model: "kimi-k2.7-code-highspeed", Usage: f.usage}, nil
+}
+
+func (f *fakeMCPWritingLLM) CompleteWithImage(context.Context, string, string, string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+
 func repositoryTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -1023,6 +1043,310 @@ func TestResearchTopicsHandler_MissingProjectID(t *testing.T) {
 	if !strings.Contains(text, "project_id is required") {
 		t.Errorf("expected 'project_id is required', got: %q", text)
 	}
+}
+
+func TestResearchTopicsHandler_DeductsUsageCredits(t *testing.T) {
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+
+	userID := "user-research-usage"
+	projectID := "project-research-usage"
+	taskID := "task-research-usage"
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          "research-usage@example.com",
+		Password:       "hashed",
+		InviteCode:     "researchusage",
+		Tier:           model.TierFree,
+		CreditsBalance: 10_000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:           projectID,
+		UserID:       userID,
+		Platform:     model.PlatformArticle,
+		Name:         "Research Usage",
+		Instructions: "面向创作者",
+		Status:       model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "usage billing",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	llm := &fakeMCPWritingLLM{
+		response: `[{"topic":"选题","angle":"角度","keywords":["效率"],"viral_score":80}]`,
+		usage: config.TokenUsage{
+			InputTokens:       10_000,
+			CachedInputTokens: 2_000,
+			OutputTokens:      1_000,
+			TotalTokens:       11_000,
+		},
+	}
+	writingSvc := service.NewWritingService(repo, llm, "", time.Minute, &logger)
+	cfg := &config.Config{
+		Writing: config.WritingConfig{Model: "kimi-k2.7-code-highspeed"},
+		ModelPrices: config.ModelPricesConfig{
+			CurrencyRates: map[string]config.CurrencyRate{"USD": {ToCNY: 7.2}},
+			TokenModels: map[string]config.TokenModelPrice{
+				"moonshot/kimi-k2.7-code-highspeed": {
+					Currency:    "USD",
+					Unit:        1_000_000,
+					CachedInput: 0.38,
+					Input:       1.90,
+					Output:      8.00,
+				},
+			},
+		},
+		Billing: config.BillingConfig{
+			CreditsPerCNY:         1000,
+			TierMultipliers:       map[string]float64{"free": 1.30},
+			DefaultUserMultiplier: 1,
+			MinimumChargeCredits:  1,
+		},
+	}
+	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
+	SetServices(&Services{WritingSvc: writingSvc})
+	SetBillingServices(creditSvc, nil, cfg)
+	SetLogger(&logger)
+	t.Cleanup(func() {
+		SetServices(nil)
+		SetBillingServices(nil, nil, nil)
+		SetLogger(nil)
+	})
+
+	apiKeySvc := service.NewAPIKeyService(repo, &logger)
+	rawKey, err := apiKeySvc.EnsureUserKey(ctx, userID)
+	if err != nil {
+		t.Fatalf("ensure user key: %v", err)
+	}
+	handler := NewMCPHandler(apiKeySvc, "", &logger)
+
+	text := callMCPTool(t, handler, "research_topics", fmt.Sprintf(`{
+		"project_id": %q,
+		"task_id": %q,
+		"count": 1
+	}`, projectID, taskID), rawKey)
+	if strings.Contains(text, "积分不足") || strings.Contains(text, "billing") {
+		t.Fatalf("unexpected billing error: %s", text)
+	}
+
+	user, err := repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		t.Fatalf("find user: %v", err)
+	}
+	if user.CreditsBalance != 9775 {
+		t.Fatalf("credits balance = %d, want 9775", user.CreditsBalance)
+	}
+	txs, _, err := creditSvc.ListTransactions(ctx, userID, 0, 10)
+	if err != nil {
+		t.Fatalf("list transactions: %v", err)
+	}
+	if len(txs) != 1 || txs[0].Type != model.CreditTypeTopicResearch || txs[0].Amount != -225 {
+		t.Fatalf("transactions = %+v, want one topic_research -225", txs)
+	}
+	if txs[0].TaskID == nil || *txs[0].TaskID != taskID {
+		t.Fatalf("transaction task_id = %v, want %q", txs[0].TaskID, taskID)
+	}
+	var metadata model.CreditTransactionMetadata
+	if err := json.Unmarshal(txs[0].Metadata, &metadata); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if metadata.TotalTokens != 11_000 || metadata.FinalCredits != 225 || metadata.Provider != "moonshot" {
+		t.Fatalf("metadata = %#v, want token usage cost snapshot", metadata)
+	}
+}
+
+type writingUsageBillingHarness struct {
+	ctx       context.Context
+	repo      repository.Repository
+	creditSvc *service.CreditService
+	handler   http.Handler
+	rawKey    string
+	userID    string
+	projectID string
+	taskID    string
+}
+
+func setupWritingUsageBillingHarness(t *testing.T, response string, usage config.TokenUsage) *writingUsageBillingHarness {
+	t.Helper()
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+
+	userID := "user-writing-usage-" + strings.ToLower(t.Name())
+	userID = strings.NewReplacer("/", "-", "_", "-").Replace(userID)
+	projectID := "project-writing-usage-" + strings.ToLower(t.Name())
+	projectID = strings.NewReplacer("/", "-", "_", "-").Replace(projectID)
+	taskID := "task-writing-usage-" + strings.ToLower(t.Name())
+	taskID = strings.NewReplacer("/", "-", "_", "-").Replace(taskID)
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          userID + "@example.com",
+		Password:       "hashed",
+		InviteCode:     "invite-" + userID,
+		Tier:           model.TierFree,
+		CreditsBalance: 10_000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:           projectID,
+		UserID:       userID,
+		Platform:     model.PlatformArticle,
+		Name:         "Writing Usage",
+		Keywords:     "效率,创作",
+		Instructions: "面向创作者",
+		Status:       model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "usage billing",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	llm := &fakeMCPWritingLLM{response: response, usage: usage}
+	writingSvc := service.NewWritingService(repo, llm, "", time.Minute, &logger)
+	cfg := &config.Config{
+		Writing: config.WritingConfig{Model: "kimi-k2.7-code-highspeed"},
+		ModelPrices: config.ModelPricesConfig{
+			CurrencyRates: map[string]config.CurrencyRate{"USD": {ToCNY: 7.2}},
+			TokenModels: map[string]config.TokenModelPrice{
+				"moonshot/kimi-k2.7-code-highspeed": {
+					Currency:    "USD",
+					Unit:        1_000_000,
+					CachedInput: 0.38,
+					Input:       1.90,
+					Output:      8.00,
+				},
+			},
+		},
+		Billing: config.BillingConfig{
+			CreditsPerCNY:         1000,
+			TierMultipliers:       map[string]float64{"free": 1.30},
+			DefaultUserMultiplier: 1,
+			MinimumChargeCredits:  1,
+		},
+	}
+	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
+	SetServices(&Services{WritingSvc: writingSvc})
+	SetBillingServices(creditSvc, nil, cfg)
+	SetLogger(&logger)
+	t.Cleanup(func() {
+		SetServices(nil)
+		SetBillingServices(nil, nil, nil)
+		SetLogger(nil)
+	})
+
+	apiKeySvc := service.NewAPIKeyService(repo, &logger)
+	rawKey, err := apiKeySvc.EnsureUserKey(ctx, userID)
+	if err != nil {
+		t.Fatalf("ensure user key: %v", err)
+	}
+	return &writingUsageBillingHarness{
+		ctx:       ctx,
+		repo:      repo,
+		creditSvc: creditSvc,
+		handler:   NewMCPHandler(apiKeySvc, "", &logger),
+		rawKey:    rawKey,
+		userID:    userID,
+		projectID: projectID,
+		taskID:    taskID,
+	}
+}
+
+func assertWritingUsageTransaction(t *testing.T, h *writingUsageBillingHarness, creditType string) {
+	t.Helper()
+	user, err := h.repo.Users().FindByID(h.ctx, h.userID)
+	if err != nil {
+		t.Fatalf("find user: %v", err)
+	}
+	if user.CreditsBalance != 9775 {
+		t.Fatalf("credits balance = %d, want 9775", user.CreditsBalance)
+	}
+	txs, _, err := h.creditSvc.ListTransactions(h.ctx, h.userID, 0, 10)
+	if err != nil {
+		t.Fatalf("list transactions: %v", err)
+	}
+	if len(txs) != 1 || txs[0].Type != creditType || txs[0].Amount != -225 {
+		t.Fatalf("transactions = %+v, want one %s -225", txs, creditType)
+	}
+	if txs[0].TaskID == nil || *txs[0].TaskID != h.taskID {
+		t.Fatalf("transaction task_id = %v, want %q", txs[0].TaskID, h.taskID)
+	}
+	var metadata model.CreditTransactionMetadata
+	if err := json.Unmarshal(txs[0].Metadata, &metadata); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if metadata.TotalTokens != 11_000 || metadata.FinalCredits != 225 || metadata.Provider != "moonshot" {
+		t.Fatalf("metadata = %#v, want token usage cost snapshot", metadata)
+	}
+}
+
+func TestOptimizeSEOHandler_DeductsUsageCredits(t *testing.T) {
+	h := setupWritingUsageBillingHarness(t, `{"optimized_title":"SEO 标题","keywords":"效率","summary":"摘要"}`, config.TokenUsage{
+		InputTokens:       10_000,
+		CachedInputTokens: 2_000,
+		OutputTokens:      1_000,
+		TotalTokens:       11_000,
+	})
+
+	text := callMCPTool(t, h.handler, "optimize_seo", fmt.Sprintf(`{
+		"project_id": %q,
+		"task_id": %q,
+		"title": "原标题",
+		"content": "正文内容",
+		"keywords": ["效率"]
+	}`, h.projectID, h.taskID), h.rawKey)
+	if strings.Contains(text, "积分不足") || strings.Contains(text, "billing") {
+		t.Fatalf("unexpected billing error: %s", text)
+	}
+	assertWritingUsageTransaction(t, h, model.CreditTypeSEO)
+}
+
+func TestGenerateOutlineHandler_DeductsUsageCredits(t *testing.T) {
+	h := setupWritingUsageBillingHarness(t, `{
+		"title": "大纲标题",
+		"hook": "开头钩子",
+		"sections": [{"title":"第一节","content":"内容","key_points":["要点"],"engagement":"问题"}],
+		"key_points": ["要点"],
+		"seo_keywords": ["效率"]
+	}`, config.TokenUsage{
+		InputTokens:       10_000,
+		CachedInputTokens: 2_000,
+		OutputTokens:      1_000,
+		TotalTokens:       11_000,
+	})
+
+	text := callMCPTool(t, h.handler, "generate_outline", fmt.Sprintf(`{
+		"project_id": %q,
+		"task_id": %q,
+		"topic": "效率创作",
+		"template": "authoritative"
+	}`, h.projectID, h.taskID), h.rawKey)
+	if strings.Contains(text, "积分不足") || strings.Contains(text, "billing") {
+		t.Fatalf("unexpected billing error: %s", text)
+	}
+	assertWritingUsageTransaction(t, h, model.CreditTypeOutline)
 }
 
 // ---------------------------------------------------------------------------

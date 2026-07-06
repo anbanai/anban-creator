@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -51,6 +52,7 @@ type TaskService struct {
 	seednoteTrackingSvc   PublishedTrackingService
 	videoCatalog          VideoModelCatalog
 	videoCreditMultiplier int
+	videoBilling          srvconfig.BillingConfig
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
 	ilinkNotifier  *IlinkNotifier
@@ -134,6 +136,13 @@ func (s *TaskService) SetVideoCatalogAndCreditMultiplier(catalog VideoModelCatal
 	s.videoCreditMultiplier = creditMultiplier
 }
 
+func (s *TaskService) SetVideoBillingConfig(billing srvconfig.BillingConfig) {
+	if s == nil {
+		return
+	}
+	s.videoBilling = billing
+}
+
 func (s *TaskService) resolvedVideoCatalog() VideoModelCatalog {
 	if s != nil && s.videoCatalog != nil {
 		return s.videoCatalog
@@ -146,6 +155,33 @@ func (s *TaskService) resolvedVideoCreditMultiplier() int {
 		return s.videoCreditMultiplier
 	}
 	return 1000
+}
+
+func (s *TaskService) videoBillingOptions(ctx context.Context, userID string) VideoBillingOptions {
+	fallback := s.resolvedVideoCreditMultiplier()
+	tier := model.TierFree
+	userMultiplier := 1.0
+	var billing srvconfig.BillingConfig
+	if s != nil {
+		billing = s.videoBilling
+	}
+	if s == nil || s.creditSvc == nil || userID == "" {
+		return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
+	}
+	if foundTier, err := s.creditSvc.GetUserTier(ctx, userID); err == nil {
+		tier = foundTier
+	} else if s.logger != nil {
+		s.logger.Warn().Err(err).Str("user_id", userID).Msg("video tier lookup failed")
+	}
+	foundMultiplier, err := s.creditSvc.GetUserBillingMultiplier(ctx, userID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn().Err(err).Str("user_id", userID).Msg("video billing multiplier lookup failed")
+		}
+	} else if foundMultiplier > 0 {
+		userMultiplier = foundMultiplier
+	}
+	return VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
 }
 
 // Close stops the Redis pub/sub subscriber goroutine.
@@ -360,12 +396,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if taskType == model.PlatformVideo {
 		quantity = 1
 		videoReq := videoRequestFromTaskConfig(p.Prompt, p.Video)
-		resolved, err := ResolveVideoGenerationPlan(
+		resolved, err := ResolveVideoGenerationPlanWithBilling(
 			videoReq,
 			project.VideoDefaults.Data(),
 			project.VideoModelPolicy.Data(),
 			s.resolvedVideoCatalog(),
-			s.resolvedVideoCreditMultiplier(),
+			s.videoBillingOptions(ctx, p.UserID),
 		)
 		if err != nil {
 			return nil, wrapVideoGenerationConfigError(err)
@@ -734,12 +770,12 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		vc := plan.VideoConfig.Data()
 		planVideoConfig = &vc
 		if vc.EstimatedCredits <= 0 && project != nil {
-			resolved, err := ResolveVideoGenerationPlan(
+			resolved, err := ResolveVideoGenerationPlanWithBilling(
 				videoRequestFromTaskConfig(prompt, planVideoConfig),
 				project.VideoDefaults.Data(),
 				project.VideoModelPolicy.Data(),
 				s.resolvedVideoCatalog(),
-				s.resolvedVideoCreditMultiplier(),
+				s.videoBillingOptions(ctx, plan.UserID),
 			)
 			if err != nil {
 				s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("skipping video plan task with invalid video config")

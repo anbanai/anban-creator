@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -18,11 +19,17 @@ import (
 type fakeWritingLLM struct {
 	response string
 	prompt   string
+	usage    srvconfig.TokenUsage
 }
 
 func (f *fakeWritingLLM) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	f.prompt = userPrompt
 	return f.response, nil
+}
+
+func (f *fakeWritingLLM) CompleteResult(ctx context.Context, systemPrompt, userPrompt string) (*LLMResult, error) {
+	f.prompt = userPrompt
+	return &LLMResult{Text: f.response, Model: "fake-writing-model", Usage: f.usage}, nil
 }
 
 func (f *fakeWritingLLM) CompleteWithImage(_ context.Context, _, _, _ string) (string, error) {
@@ -126,6 +133,29 @@ func TestWritingServiceResearchTopicsUsesProjectInstructionsAsPositioning(t *tes
 	}
 	if strings.Contains(llm.prompt, "旧定位不应进入选题 prompt") {
 		t.Fatalf("prompt leaked legacy positioning: %q", llm.prompt)
+	}
+}
+
+func TestWritingServiceResearchTopicsReturnsLLMUsage(t *testing.T) {
+	llm := &fakeWritingLLM{
+		response: `[{"topic":"选题","angle":"角度","keywords":["效率"],"viral_score":80}]`,
+		usage: srvconfig.TokenUsage{
+			InputTokens:       1000,
+			CachedInputTokens: 200,
+			OutputTokens:      100,
+			TotalTokens:       1100,
+		},
+	}
+	svc, repo := setupTestWritingService(t, llm)
+	projectID := createWritingProject(t, repo, "user-1", model.PlatformArticle, "")
+
+	result, err := svc.ResearchTopics(context.Background(), "user-1", projectID, nil, "", 1)
+	if err != nil {
+		t.Fatalf("ResearchTopics: %v", err)
+	}
+
+	if result.Usage.TotalTokens != 1100 || result.Usage.CachedInputTokens != 200 {
+		t.Fatalf("usage = %#v, want propagated LLM usage", result.Usage)
 	}
 }
 

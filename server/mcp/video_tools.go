@@ -986,12 +986,12 @@ func resolveMCPVideoPlan(ctx context.Context, projectID string, videoReq service
 	if err := requireMeasuredVideoReferences(ctx, videoReq.ReferenceSet, videoReq.TaskID); err != nil {
 		return nil, err
 	}
-	plan, err := service.ResolveVideoGenerationPlan(
+	plan, err := service.ResolveVideoGenerationPlanWithBilling(
 		videoReq,
 		project.VideoDefaults.Data(),
 		project.VideoModelPolicy.Data(),
 		videoModelCatalog(),
-		videoCreditMultiplier(),
+		videoBillingOptions(ctx, getUserID(ctx)),
 	)
 	if err != nil {
 		return nil, err
@@ -1122,6 +1122,31 @@ func videoModelCatalog() service.VideoModelCatalog {
 		return service.VideoModelCatalogFromConfig(billSvc.config.VideoAPI.ModelCatalog)
 	}
 	return service.VideoModelCatalog{}
+}
+
+func videoBillingOptions(ctx context.Context, userID string) service.VideoBillingOptions {
+	fallback := videoCreditMultiplier()
+	var billing srvconfig.BillingConfig
+	if billSvc != nil && billSvc.config != nil {
+		billing = billSvc.config.Billing
+	}
+	tier := model.TierFree
+	userMultiplier := 1.0
+	if billSvc == nil || billSvc.creditSvc == nil || userID == "" || userID == "system" || isAdminCall(ctx) {
+		return service.VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
+	}
+	if foundTier, err := billSvc.creditSvc.GetUserTier(ctx, userID); err == nil {
+		tier = foundTier
+	} else {
+		logBillingSkip(userID, model.CreditTypeVideoGen, "tier_lookup_failed")
+	}
+	foundMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
+	if err != nil {
+		logBillingSkip(userID, model.CreditTypeVideoGen, "billing_multiplier_lookup_failed")
+	} else if foundMultiplier > 0 {
+		userMultiplier = foundMultiplier
+	}
+	return service.VideoBillingOptionsFromConfig(billing, fallback, tier, userMultiplier)
 }
 
 func maybeDeductVideo(ctx context.Context, userID, taskID string, credits int) error {

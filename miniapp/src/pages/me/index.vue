@@ -191,6 +191,7 @@ import { useAuthStore } from '@/stores/auth'
 import { creditsApi } from '@/api/credits'
 import { post } from '@/api/request'
 import { tierLabels } from '@/utils/labels'
+import type { CreditPricing } from '@/types'
 import AbBadge from '@/components/common/AbBadge.vue'
 import AbCard from '@/components/common/AbCard.vue'
 import AbButton from '@/components/common/AbButton.vue'
@@ -256,6 +257,7 @@ const dataItems: MenuItem[] = [
 
 const showFeedback = ref(false)
 const showRecharge = ref(false)
+const pricing = ref<CreditPricing | null>(null)
 
 const otherItems: MenuItem[] = [
   { icon: '设', title: '设置', path: '/pages/settings/index' },
@@ -291,25 +293,48 @@ onShareAppMessage(() => {
 
 // --- Recharge ---
 interface RechargeTier {
+  key: string
+  label: string
   price: number
   credits: number
   bonus?: number
 }
 
-const rechargeTiers: RechargeTier[] = [
-  { price: 10, credits: 10000 },
-  { price: 50, credits: 55000, bonus: 5000 },
-  { price: 100, credits: 120000, bonus: 20000 },
+const fallbackRechargeTiers: RechargeTier[] = [
+  { key: 'basic', label: '基础包', price: 10, credits: 10000 },
+  { key: 'standard', label: '标准包', price: 50, credits: 52000, bonus: 2000 },
+  { key: 'pro', label: '进阶包', price: 100, credits: 110000, bonus: 10000 },
 ]
+
+const rechargeTiers = computed<RechargeTier[]>(() => {
+  const tiers = pricing.value?.recharge_tiers
+    ?.filter((tier) => tier.enabled !== false && tier.price_cny > 0 && tier.credits > 0)
+    .map((tier) => ({
+      key: tier.key,
+      label: tier.label,
+      price: tier.price_cny,
+      credits: tier.credits,
+      bonus: tier.bonus_credits,
+    }))
+  return tiers && tiers.length > 0 ? tiers : fallbackRechargeTiers
+})
 
 const selectedTier = ref<number | null>(null)
 
 function handleRecharge() {
   if (!selectedTier.value) return
-  const tier = rechargeTiers.find(t => t.price === selectedTier.value)
+  const tier = rechargeTiers.value.find(t => t.price === selectedTier.value)
   if (!tier) return
   // Recharge is handled via customer service QR code
   uni.showToast({ title: '请联系客服完成充值', icon: 'none' })
+}
+
+async function loadPricing() {
+  try {
+    pricing.value = await creditsApi.pricing()
+  } catch {
+    // Silent fail; recharge popup falls back to safe local tiers.
+  }
 }
 
 // --- Feedback ---
@@ -338,7 +363,10 @@ async function submitFeedback() {
 }
 
 // --- Lifecycle ---
-onMounted(loadCredits)
+onMounted(() => {
+  void loadCredits()
+  void loadPricing()
+})
 </script>
 
 <style lang="scss" scoped>

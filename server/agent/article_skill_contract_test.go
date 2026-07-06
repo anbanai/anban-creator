@@ -190,7 +190,6 @@ func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 			text := string(data)
 			for _, term := range []string{
 				"render_template",
-				"inspect_article",
 				"article_templates",
 				"主路径",
 				"convert_markdown` 只用于旧版 server 兼容降级",
@@ -203,12 +202,116 @@ func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 				"Markdown 转微信 HTML：调用 `convert_markdown` MCP 工具",
 				"排版模块使用标准 Markdown 语法，由 `convert_markdown` 工具中的 LLM 自动渲染",
 				"保存为 `$DIR/05-article.html`。",
+				"inspect_article",
 			} {
 				if strings.Contains(text, stale) {
 					t.Fatalf("%s still contains stale content-writing render path %q", path, stale)
 				}
 			}
 		})
+	}
+}
+
+func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	contentWritingPaths := []string{
+		filepath.Join(root, "claudecode", "skills", "content-writing", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "content-writing", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "content-writing", "SKILL.md"),
+	}
+	for _, path := range contentWritingPaths {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{
+				"公众号文章预检",
+				"导流风险",
+				"内容完整性",
+				"标题摘要一致性",
+				"审阅未通过",
+				"自动调整",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing skill-owned preflight term %q", path, term)
+				}
+			}
+			if strings.Contains(text, "inspect_article") {
+				t.Fatalf("%s must not delegate article preflight to inspect_article", path)
+			}
+		})
+	}
+
+	articlePaths := []string{
+		filepath.Join(root, "claudecode", "skills", "article", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "article", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "article", "SKILL.md"),
+		filepath.Join(root, "claudecode", "agents", "wechatarticle.md"),
+		filepath.Join(root, "codex", "agents", "wechatarticle.toml"),
+	}
+	for _, path := range articlePaths {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{
+				"导流风险",
+				"审阅未通过",
+				"待调整",
+				"自动",
+				"content-quality-report.md",
+				"final-review.md",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing article preflight workflow term %q", path, term)
+				}
+			}
+		})
+	}
+}
+
+func TestArticleSkillContracts_WechatVisualsForbidDiversionCues(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "claudecode", "skills", "article-visual-design", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "article-visual-design", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "article-visual-design", "SKILL.md"),
+		filepath.Join(root, "claudecode", "skills", "article-cover-design", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "article-cover-design", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "article-cover-design", "SKILL.md"),
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			text := readArticleContractFile(t, path)
+			for _, term := range []string{
+				"二维码",
+				"联系方式",
+				"外链 URL",
+				"扫码提示",
+				"加群",
+				"加微信",
+			} {
+				if !strings.Contains(text, term) {
+					t.Fatalf("%s missing anti-diversion visual term %q", path, term)
+				}
+			}
+		})
+	}
+}
+
+func TestArticleSkillContracts_InspectArticleMCPRemoved(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "server", "service", "inspect_article.go"),
+		filepath.Join(root, "server", "service", "inspect_article_test.go"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s must be removed with inspect_article service preflight", path)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(root, "server", "mcp", "writing_tools.go"),
+	} {
+		text := readArticleContractFile(t, path)
+		if strings.Contains(text, `"inspect_article"`) {
+			t.Fatalf("%s must not register or expect inspect_article", path)
+		}
 	}
 }
 
@@ -219,4 +322,13 @@ func articleContractRepoRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func readArticleContractFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }

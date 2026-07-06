@@ -42,6 +42,11 @@ export interface CreditTransaction {
     input_tokens?: number
     cached_input_tokens?: number
     output_tokens?: number
+    text_input_tokens?: number
+    text_cached_input_tokens?: number
+    image_input_tokens?: number
+    image_cached_input_tokens?: number
+    image_output_tokens?: number
     total_tokens?: number
     base_credits?: number
     tier_multiplier?: number
@@ -58,9 +63,19 @@ export interface AdminGrantRequest {
   description: string
 }
 
+export interface RechargeTier {
+  key: string
+  label: string
+  price_cny: number
+  credits: number
+  bonus_credits?: number
+  enabled?: boolean
+}
+
 export interface CreditPricing {
   task_costs: Record<string, number>
   model_costs: Record<string, Record<string, number>>
+  recharge_tiers?: RechargeTier[]
   model_prices?: {
     currency_rates?: Record<string, { to_cny: number }>
     token_models?: Record<string, Record<string, number | string>>

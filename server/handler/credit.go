@@ -163,9 +163,11 @@ func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 	modelCosts := h.service.ModelCosts()
 	var modelPrices config.ModelPricesConfig
 	var billing config.BillingConfig
+	var rechargeTiers []config.RechargeTierConfig
 	if h.fullCfg != nil {
 		modelPrices = h.fullCfg.ModelPrices
 		billing = h.fullCfg.Billing
+		rechargeTiers = h.fullCfg.EnabledRechargeTiers()
 	}
 	income := fiber.Map{}
 	if h.cfg != nil {
@@ -206,6 +208,7 @@ func (h *CreditHandler) Pricing(c fiber.Ctx) error {
 		"model_costs":             modelCosts,
 		"model_prices":            modelPrices,
 		"billing":                 billing,
+		"recharge_tiers":          rechargeTiers,
 		"ecommerce_module_prices": h.service.EcommerceModulePrices(),
 		"income":                  income,
 	})

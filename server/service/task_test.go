@@ -725,6 +725,63 @@ func TestTaskService_CreateManualVideoTaskUsesConfiguredCreditMultiplier(t *test
 	}
 }
 
+func TestTaskService_CreateManualVideoTaskAppliesUserBillingMultiplier(t *testing.T) {
+	repoForCredits := setupCreditTestRepo(t)
+	creditSvc := newPricedCreditService(repoForCredits)
+	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
+	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1200)
+	creditSvc.repo = repo
+	ctx := context.Background()
+	userID := uuid.New().String()
+	multiplier := 0.5
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-user-multiplier", InviteCode: "invite-" + userID, CreditsBalance: 200_000, BillingMultiplier: &multiplier}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "视频项目",
+		Status:   model.ProjectStatusActive,
+	}
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "16:9",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		UserID:    userID,
+		ProjectID: project.ID,
+		Prompt:    "生成一条咖啡杯种草视频",
+		Quantity:  1,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.VideoEstimatedCredits != 1488 || found.VideoCreditsCharged != 1488 {
+		t.Fatalf("task video credits = estimated %d charged %d, want 1488", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	}
+}
+
 func TestTaskService_CreateManualVideoTaskRequiresProjectProfile(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()

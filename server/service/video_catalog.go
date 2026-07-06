@@ -27,6 +27,36 @@ type VideoModelSpec struct {
 	VideoInput5sMaxPrice  map[string]float64 `json:"video_input_5s_max_price" yaml:"video_input_5s_max_price"`
 }
 
+type VideoBillingOptions struct {
+	CreditsPerCNY    int
+	CreditMultiplier int
+	TierMultiplier   float64
+	UserMultiplier   float64
+}
+
+func VideoBillingOptionsFromConfig(billing config.BillingConfig, fallbackCreditMultiplier int, tier model.Tier, userMultiplier float64) VideoBillingOptions {
+	tierMultiplier := billing.DefaultUserMultiplier
+	if tierMultiplier <= 0 {
+		tierMultiplier = 1
+	}
+	if billing.TierMultipliers != nil {
+		tierKey := strings.ToLower(strings.TrimSpace(string(model.NormalizeTier(string(tier)))))
+		if configured, ok := billing.TierMultipliers[tierKey]; ok && configured > 0 {
+			tierMultiplier = configured
+		}
+	}
+	creditsPerCNY := billing.CreditsPerCNY
+	if creditsPerCNY <= 0 {
+		creditsPerCNY = fallbackCreditMultiplier
+	}
+	return normalizeVideoBillingOptions(VideoBillingOptions{
+		CreditsPerCNY:    creditsPerCNY,
+		CreditMultiplier: fallbackCreditMultiplier,
+		TierMultiplier:   tierMultiplier,
+		UserMultiplier:   userMultiplier,
+	})
+}
+
 func DefaultVideoModelCatalog() VideoModelCatalog {
 	commonRatios := []string{"16:9", "9:16", "1:1", "4:3", "3:4"}
 	return VideoModelCatalog{
@@ -135,15 +165,17 @@ func VideoModelCatalogFromConfig(entries []config.VideoModelCatalogEntry) VideoM
 }
 
 func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.VideoDefaults, policy model.VideoModelPolicy, catalog VideoModelCatalog, creditMultiplier int) (VideoGenerationPlan, error) {
+	return ResolveVideoGenerationPlanWithBilling(req, defaults, policy, catalog, VideoBillingOptions{CreditMultiplier: creditMultiplier})
+}
+
+func ResolveVideoGenerationPlanWithBilling(req VideoGenerationRequest, defaults model.VideoDefaults, policy model.VideoModelPolicy, catalog VideoModelCatalog, billing VideoBillingOptions) (VideoGenerationPlan, error) {
 	if defaults == (model.VideoDefaults{}) || policy.DefaultModel == "" || len(policy.AllowedModels) == 0 {
 		return VideoGenerationPlan{}, fmt.Errorf("project video profile is not configured")
 	}
 	if catalog == nil {
 		catalog = VideoModelCatalog{}
 	}
-	if creditMultiplier <= 0 {
-		creditMultiplier = 1000
-	}
+	billing = normalizeVideoBillingOptions(billing)
 	resolved := req
 	if resolved.CreativeType == "" {
 		resolved.CreativeType = defaults.CreativeType
@@ -236,7 +268,7 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 		if err != nil {
 			return VideoGenerationPlan{}, err
 		}
-		credits := int(math.Ceil(cny * float64(creditMultiplier)))
+		credits := videoCreditsFromCNY(cny, billing)
 		index := i + 1
 		segmentPrompt := resolved.Prompt
 		if len(segmentDurations) > 1 {
@@ -266,8 +298,10 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 	}
 	breakdown := &model.VideoPricingBreakdown{
 		CNY:              round2(totalCNY),
-		CreditMultiplier: creditMultiplier,
-		CreditsPerCNY:    creditMultiplier,
+		CreditMultiplier: billing.CreditMultiplier,
+		CreditsPerCNY:    billing.CreditsPerCNY,
+		TierMultiplier:   billing.TierMultiplier,
+		UserMultiplier:   billing.UserMultiplier,
 		InputVideo:       hasInputVideo,
 		InputSeconds:     inputSeconds,
 		OutputSeconds:    targetDuration,
@@ -305,6 +339,30 @@ func ResolveVideoGenerationPlan(req VideoGenerationRequest, defaults model.Video
 		PricingBreakdown:          breakdown,
 	}
 	return plan, nil
+}
+
+func normalizeVideoBillingOptions(billing VideoBillingOptions) VideoBillingOptions {
+	if billing.CreditsPerCNY <= 0 {
+		billing.CreditsPerCNY = billing.CreditMultiplier
+	}
+	if billing.CreditsPerCNY <= 0 {
+		billing.CreditsPerCNY = 1000
+	}
+	if billing.CreditMultiplier <= 0 {
+		billing.CreditMultiplier = billing.CreditsPerCNY
+	}
+	if billing.TierMultiplier <= 0 {
+		billing.TierMultiplier = 1
+	}
+	if billing.UserMultiplier <= 0 {
+		billing.UserMultiplier = 1
+	}
+	return billing
+}
+
+func videoCreditsFromCNY(cny float64, billing VideoBillingOptions) int {
+	billing = normalizeVideoBillingOptions(billing)
+	return int(math.Ceil(cny * float64(billing.CreditsPerCNY) * billing.TierMultiplier * billing.UserMultiplier))
 }
 
 func resolveTargetVideoDuration(req VideoGenerationRequest, defaults model.VideoDefaults) (int64, string, string, error) {

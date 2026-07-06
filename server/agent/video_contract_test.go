@@ -14,8 +14,9 @@ func TestVideoCreatorAgentStaysOnGenerationWorkflow(t *testing.T) {
 	for _, want := range []string{
 		"禁止调用 Claude `Agent` 工具",
 		"videocreator",
+		"seedance-20",
 		`agent_name="videocreator"`,
-		"不得用 dreamina-video 作为 agent_name",
+		"不得用 seedance-20 或 dreamina-video 作为 agent_name",
 		"目标成片时长",
 		"单次生成片段",
 		"create_video_generation_job",
@@ -29,6 +30,11 @@ func TestVideoCreatorAgentStaysOnGenerationWorkflow(t *testing.T) {
 		"visual-anchors/",
 		"verify_with_vision",
 		"register_video_reference",
+		"Project State Capsule",
+		"Retake Protocol",
+		"business-playbooks.md",
+		"sequence-workflow.md",
+		"delivery-qc.md",
 		"不得自动进入字幕",
 	} {
 		if !strings.Contains(text, want) {
@@ -85,10 +91,59 @@ func TestCodexVideoHookQualityGateIsRegistered(t *testing.T) {
 	}
 
 	script := readRepoFile(t, "../../codex/hooks/video-quality-gate.sh")
-	for _, want := range []string{"videocreator", "videoeditor", "dreamina-video", "video-use"} {
+	for _, want := range []string{"videocreator", "videoeditor", "seedance-20", "dreamina-video", "video-use"} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("codex video quality gate missing %q", want)
 		}
+	}
+}
+
+func TestCodexVideoAgentsUseSeedance20Skill(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+	}{
+		{path: "../../codex/agents/videocreator.toml"},
+		{path: "../../codex/agents/video.toml"},
+	} {
+		text := readRepoFile(t, tc.path)
+		for _, want := range []string{
+			"seedance-20",
+			"__PLUGIN_ROOT__/skills/seedance-20/SKILL.md",
+		} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing %q", tc.path, want)
+			}
+		}
+		for _, forbidden := range []string{
+			"using dreamina-video skill",
+			"path = \"__PLUGIN_ROOT__/skills/dreamina-video/SKILL.md\"",
+			"workflow=dreamina-video",
+		} {
+			if strings.Contains(text, forbidden) {
+				t.Fatalf("%s should not keep dreamina-video as primary workflow: %q", tc.path, forbidden)
+			}
+		}
+	}
+}
+
+func TestDockerfilesInstallPluginWithSeedance20Skill(t *testing.T) {
+	for _, path := range []string{"../../agent/Dockerfile", "../../server/Dockerfile"} {
+		text := readRepoFile(t, path)
+		for _, want := range []string{
+			"claude plugin marketplace add /anbanai",
+			"claude plugin install --scope user anban@anbanai",
+		} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing %q", path, want)
+			}
+		}
+		if !strings.Contains(text, "COPY claudecode/") || !strings.Contains(text, "/anbanai/") {
+			t.Fatalf("%s must copy claudecode plugin assets into /anbanai", path)
+		}
+	}
+
+	if _, err := os.Stat("../../claudecode/skills/seedance-20/SKILL.md"); err != nil {
+		t.Fatalf("Docker-installed Claude plugin must include seedance-20 skill: %v", err)
 	}
 }
 

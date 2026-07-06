@@ -103,6 +103,48 @@ func TestDeductForOperationStoresTaskIDAndLongOperationID(t *testing.T) {
 	}
 }
 
+func TestGetUserBillingMultiplier(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	multiplier := 1.05
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:                userID,
+		Email:             userID + "@example.com",
+		Nickname:          "Low Margin User",
+		Password:          "hashed",
+		InviteCode:        "lowmargin",
+		CreditsBalance:    1000,
+		BillingMultiplier: &multiplier,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	svc := newTestCreditService(repo)
+
+	got, err := svc.GetUserBillingMultiplier(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetUserBillingMultiplier: %v", err)
+	}
+	if got != multiplier {
+		t.Fatalf("billing multiplier = %v, want %v", got, multiplier)
+	}
+}
+
+func TestGetUserBillingMultiplierDefaultsToOne(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 1000)
+	svc := newTestCreditService(repo)
+
+	got, err := svc.GetUserBillingMultiplier(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetUserBillingMultiplier: %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("billing multiplier = %v, want 1", got)
+	}
+}
+
 func TestDeductForTaskUsesFriendlyDescription(t *testing.T) {
 	repo := setupCreditTestRepo(t)
 	ctx := context.Background()

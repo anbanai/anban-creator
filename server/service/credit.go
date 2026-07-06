@@ -113,6 +113,17 @@ func (s *CreditService) GetUserTier(ctx context.Context, userID string) (model.T
 	return model.NormalizeTier(string(user.Tier)), nil
 }
 
+func (s *CreditService) GetUserBillingMultiplier(ctx context.Context, userID string) (float64, error) {
+	user, err := s.repo.Users().FindByID(ctx, userID)
+	if err != nil {
+		return 1, fmt.Errorf("find user: %w", err)
+	}
+	if user.BillingMultiplier == nil || *user.BillingMultiplier <= 0 {
+		return 1, nil
+	}
+	return *user.BillingMultiplier, nil
+}
+
 // GetSignInStatus returns whether the user has signed in today.
 func (s *CreditService) GetSignInStatus(ctx context.Context, userID string) (bool, error) {
 	_, err := s.repo.Credits().FindTodaySignIn(ctx, userID)

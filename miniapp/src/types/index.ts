@@ -59,6 +59,7 @@ export type {
   CreditTransactionType,
   CreditBalance,
   CreditPricing,
+  RechargeTier,
   SignInStatus,
   CreditTransaction,
   AdminGrantRequest,

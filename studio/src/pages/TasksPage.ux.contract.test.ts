@@ -35,6 +35,6 @@ describe('TasksPage recovery workspace contract', () => {
     expect(source).toContain('项目')
     expect(source).toContain('目标/提示词')
     expect(source).toContain('图片/高级')
-    expect(source).toContain('费用预估')
+    expect(source).toContain('基础费用预估')
   })
 })

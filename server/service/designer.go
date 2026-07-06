@@ -161,7 +161,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 					Quality:             req.Quality,
 					Count:               req.N,
 					ReferenceImageCount: len(req.ReferenceFileIDs),
-				}, string(s.userTier(ctx, userID)), 1)
+				}, string(s.userTier(ctx, userID)), s.userBillingMultiplier(ctx, userID))
 				if err != nil {
 					return nil, err
 				}
@@ -312,6 +312,23 @@ func (s *DesignerService) userTier(ctx context.Context, userID string) model.Tie
 		return model.TierFree
 	}
 	return model.ResolveTier(model.Tier(user.Tier))
+}
+
+func (s *DesignerService) userBillingMultiplier(ctx context.Context, userID string) float64 {
+	if s.db == nil || userID == "" {
+		return 1
+	}
+	var user model.User
+	if err := s.db.Select("billing_multiplier").First(&user, "id = ?", userID).Error; err != nil {
+		if s.logger != nil {
+			s.logger.Warn().Err(err).Str("user_id", userID).Msg("designer billing multiplier lookup failed")
+		}
+		return 1
+	}
+	if user.BillingMultiplier == nil || *user.BillingMultiplier <= 0 {
+		return 1
+	}
+	return *user.BillingMultiplier
 }
 
 func imageCreditMetadata(providerKey, modelName, routeName string, cost srvconfig.ImageGenerationCreditCost) model.CreditTransactionMetadata {
@@ -589,7 +606,7 @@ func (s *DesignerService) settleGenerationBilling(ctx context.Context, gen *mode
 		ImageOutputTokens:      result.Usage.ImageOutputTokens,
 		TotalTokens:            result.Usage.TotalTokens,
 	}
-	cost, err := s.fullCfg.CalculateImageGenerationUsageCredits(providerKey, gen.Model, usage, string(s.userTier(ctx, gen.UserID)), 1)
+	cost, err := s.fullCfg.CalculateImageGenerationUsageCredits(providerKey, gen.Model, usage, string(s.userTier(ctx, gen.UserID)), s.userBillingMultiplier(ctx, gen.UserID))
 	if err != nil {
 		s.failUnbillableGeneration(ctx, gen, err.Error(), "usage_required_failed")
 		return false

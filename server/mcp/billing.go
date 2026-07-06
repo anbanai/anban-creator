@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -84,7 +85,11 @@ func maybeDeductUnderstandingTokens(ctx context.Context, userID, taskID, opType 
 	if err != nil {
 		return 0, err
 	}
-	cost, err := billSvc.config.CalculateTokenModelCredits(provider, modelName, usage, string(tier), 1)
+	userMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	cost, err := billSvc.config.CalculateTokenModelCredits(provider, modelName, usage, string(tier), userMultiplier)
 	if err != nil {
 		return 0, err
 	}
@@ -143,7 +148,11 @@ func maybeDeductImageGenerationUsage(ctx context.Context, userID, taskID, route,
 	if err != nil {
 		return 0, err
 	}
-	cost, err := billSvc.config.CalculateImageGenerationUsageCredits(provider, modelName, usage, string(tier), 1)
+	userMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	cost, err := billSvc.config.CalculateImageGenerationUsageCredits(provider, modelName, usage, string(tier), userMultiplier)
 	if err != nil {
 		return 0, err
 	}
@@ -173,6 +182,114 @@ func maybeDeductImageGenerationUsage(ctx context.Context, userID, taskID, route,
 		return 0, err
 	}
 	return cost.FinalCredits, nil
+}
+
+func maybeDeductWritingTokens(ctx context.Context, userID, taskID, opType string, usage config.TokenUsage) (int, error) {
+	if billSvc == nil || billSvc.creditSvc == nil || billSvc.config == nil {
+		logBillingSkip(userID, opType, "no_credit_or_config_service")
+		return 0, nil
+	}
+	if usage.TotalTokens <= 0 {
+		provider, mdl := resolveTextModel(ctx, userID)
+		if err := maybeDeduct(ctx, userID, opType, provider, mdl, 1, taskID); err != nil {
+			return 0, err
+		}
+		logBillingSkip(userID, opType, "missing_usage_fixed_fallback")
+		return 0, nil
+	}
+	if userID == "" || userID == "system" || isAdminCall(ctx) {
+		logBillingSkip(userID, opType, "admin_or_system")
+		return 0, nil
+	}
+	provider, modelName, modelSource := resolveWritingBillingModel(ctx, userID)
+	if isByok(ctx, userID, opType, provider, modelName, modelSource) {
+		logBillingSkip(userID, opType, "byok")
+		return 0, nil
+	}
+	var hasTokenPrice bool
+	provider, modelName, hasTokenPrice = resolveTokenPriceRoute(provider, modelName)
+	if !hasTokenPrice {
+		if err := maybeDeductForResolvedModel(ctx, userID, opType, provider, modelName, 1, taskID, modelSource); err != nil {
+			return 0, err
+		}
+		logBillingSkip(userID, opType, "token_price_missing_fixed_fallback")
+		return 0, nil
+	}
+	if provider == "" || modelName == "" {
+		return 0, fmt.Errorf("%s model route is not configured", opType)
+	}
+	tier, err := billSvc.creditSvc.GetUserTier(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	userMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	cost, err := billSvc.config.CalculateTokenModelCredits(provider, modelName, usage, string(tier), userMultiplier)
+	if err != nil {
+		return 0, err
+	}
+	if taskID != "" {
+		if err := validateBillingTask(ctx, userID, taskID); err != nil {
+			return 0, err
+		}
+	}
+	priceSnapshot := map[string]any{}
+	if data, err := json.Marshal(cost.PriceSnapshot); err == nil {
+		_ = json.Unmarshal(data, &priceSnapshot)
+	}
+	metadata := model.CreditTransactionMetadata{
+		Provider:          provider,
+		Model:             modelName,
+		Route:             opType,
+		InputTokens:       usage.InputTokens,
+		CachedInputTokens: usage.CachedInputTokens,
+		OutputTokens:      usage.OutputTokens,
+		TotalTokens:       usage.TotalTokens,
+		BaseCredits:       cost.BaseCredits,
+		TierMultiplier:    cost.TierMultiplier,
+		UserMultiplier:    cost.UserMultiplier,
+		FinalCredits:      cost.FinalCredits,
+		PriceSnapshot:     priceSnapshot,
+	}
+	operationID := fmt.Sprintf("%s:%s:%d:%d", opType, taskID, usage.TotalTokens, time.Now().UnixNano())
+	_, err = billSvc.creditSvc.DeductForOperationWithMetadata(ctx, userID, opType, cost.FinalCredits, metadata, operationID, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return cost.FinalCredits, nil
+}
+
+func resolveTokenPriceRoute(provider, modelName string) (string, string, bool) {
+	provider = strings.TrimSpace(provider)
+	modelName = strings.TrimSpace(modelName)
+	if billSvc == nil || billSvc.config == nil || modelName == "" {
+		return provider, modelName, false
+	}
+	if provider != "" {
+		_, ok := billSvc.config.ModelPrices.TokenModels[provider+"/"+modelName]
+		return provider, modelName, ok
+	}
+	suffix := "/" + modelName
+	var matchedProvider string
+	for key := range billSvc.config.ModelPrices.TokenModels {
+		if !strings.HasSuffix(key, suffix) {
+			continue
+		}
+		parts := strings.SplitN(key, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if matchedProvider != "" && matchedProvider != parts[0] {
+			return provider, modelName, false
+		}
+		matchedProvider = parts[0]
+	}
+	if matchedProvider == "" {
+		return provider, modelName, false
+	}
+	return matchedProvider, modelName, true
 }
 
 func maybeDeductForResolvedModel(ctx context.Context, userID, opType, provider, mdl string, count int, taskID, modelSource string) error {
@@ -403,8 +520,13 @@ func resolveEcommerceImageProvider(ctx context.Context, userID string, task *mod
 
 // resolveTextModel returns the effective text model for a user.
 func resolveTextModel(ctx context.Context, userID string) (provider, mdl string) {
+	provider, mdl, _ = resolveWritingBillingModel(ctx, userID)
+	return provider, mdl
+}
+
+func resolveWritingBillingModel(ctx context.Context, userID string) (provider, mdl, source string) {
 	if billSvc == nil || billSvc.config == nil {
-		return "", ""
+		return "", "", ""
 	}
 	if billSvc.modelConfigSvc != nil {
 		if _, _, m, ok := billSvc.modelConfigSvc.GetEffectiveWritingConfig(ctx, userID); ok {
@@ -415,10 +537,14 @@ func resolveTextModel(ctx context.Context, userID string) (provider, mdl string)
 					Str("source", "user_override").
 					Msg("MCP tool using user custom text model")
 			}
-			return "", m
+			return "", m, "user_custom"
 		}
 	}
-	return "", billSvc.config.Writing.Model
+	route := billSvc.config.ModelRoutes.Writing
+	if route.Provider != "" || route.Model != "" {
+		return route.Provider, route.Model, "system_default"
+	}
+	return "", billSvc.config.Writing.Model, "system_default"
 }
 
 // billingError converts an ErrInsufficientCredits into an MCP error result.

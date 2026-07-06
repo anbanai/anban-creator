@@ -267,6 +267,7 @@ func main() {
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
 		planSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
+		planSvc.SetVideoBillingConfig(cfg.Billing)
 		projectSvc = service.NewProjectService(repo, log)
 		projectSvc.SetVideoCatalog(videoCatalog)
 		creditSvc = service.NewCreditService(repo, &cfg.Credits, log)
@@ -290,6 +291,7 @@ func main() {
 		taskSvc = service.NewTaskService(repo, agentExecutor, asynqClient, store, creditSvc, log, cfg.Claude.TaskLogDir, workspaceSvc, cfg.Claude.Docker.WorkspaceDir, service.NewRedisPubSub(rdb, log), publishingSvc)
 		taskSvc.SetProjectMemoryManager(memoryMgr)
 		taskSvc.SetVideoCatalogAndCreditMultiplier(videoCatalog, videoCreditMultiplier)
+		taskSvc.SetVideoBillingConfig(cfg.Billing)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		// Wire executor defaults so local-executor claim responses carry the same
 		// model + max-turns the cloud DockerExecutor uses (desktop-built argv parity).
@@ -452,6 +454,7 @@ func main() {
 			creditHandler = handler.NewCreditHandler(creditSvc, cfg, cfg.Credits.AdminAPIKey, log)
 		}
 		videoHandler = handler.NewVideoHandler(repo, creditSvc, videoCatalog, videoCreditMultiplier, log)
+		videoHandler.SetBillingConfig(cfg.Billing)
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
 		}

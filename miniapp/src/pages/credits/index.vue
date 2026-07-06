@@ -132,7 +132,7 @@
           <!-- Task costs -->
           <view class="accordion-item">
             <view class="accordion-head" @tap="toggleSection('task')">
-              <text class="accordion-head__title">任务费（Web 端创建任务，含全部操作）</text>
+              <text class="accordion-head__title">任务基础服务费</text>
               <text class="accordion-head__arrow" :class="{ 'accordion-head__arrow--open': openSections.task }">›</text>
             </view>
             <view v-if="openSections.task" class="accordion-body">
@@ -145,6 +145,7 @@
                 <text class="price-row__label">{{ row.label }}</text>
                 <text class="price-row__value">{{ row.value }}</text>
               </view>
+              <text class="accordion-footnote">图片、视频、写作模型等 MCP 操作按实际用量另计，最终以交易明细汇总为准。</text>
             </view>
           </view>
 
@@ -164,7 +165,7 @@
                 <text class="price-row__label">{{ row.label }}</text>
                 <text class="price-row__value">{{ row.value }}</text>
               </view>
-              <text class="accordion-footnote">套餐价 = Σ（模块单价 × 数量）；产品图上传免费。</text>
+              <text class="accordion-footnote">套餐价 = Σ（模块单价 × 数量）；模型、图片、视频等额外操作按实际用量另计。</text>
             </view>
           </view>
 
@@ -450,7 +451,7 @@ const signInLoading = ref(false)
 const displayBalance = computed(() => balance.value.toLocaleString())
 
 const dailySignInCredits = computed(
-  () => pricing.value?.income.daily_sign_in ?? 1024,
+  () => pricing.value?.income.daily_sign_in ?? 100,
 )
 
 async function loadBalance() {
@@ -680,16 +681,31 @@ const showRecharge = ref(false)
 const selectedTier = ref<number | null>(null)
 
 interface RechargeTier {
+  key: string
+  label: string
   price: number
   credits: number
   bonus?: number
 }
 
-const rechargeTiers: RechargeTier[] = [
-  { price: 10, credits: 10000 },
-  { price: 50, credits: 55000, bonus: 5000 },
-  { price: 100, credits: 120000, bonus: 20000 },
+const fallbackRechargeTiers: RechargeTier[] = [
+  { key: 'basic', label: '基础包', price: 10, credits: 10000 },
+  { key: 'standard', label: '标准包', price: 50, credits: 52000, bonus: 2000 },
+  { key: 'pro', label: '进阶包', price: 100, credits: 110000, bonus: 10000 },
 ]
+
+const rechargeTiers = computed<RechargeTier[]>(() => {
+  const tiers = pricing.value?.recharge_tiers
+    ?.filter((tier) => tier.enabled !== false && tier.price_cny > 0 && tier.credits > 0)
+    .map((tier) => ({
+      key: tier.key,
+      label: tier.label,
+      price: tier.price_cny,
+      credits: tier.credits,
+      bonus: tier.bonus_credits,
+    }))
+  return tiers && tiers.length > 0 ? tiers : fallbackRechargeTiers
+})
 
 function goRecharge() {
   selectedTier.value = null

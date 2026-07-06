@@ -141,23 +141,6 @@ func registerWritingTools(server *mcp.Server) {
 	}, renderTemplateHandler)
 
 	server.AddTool(&mcp.Tool{
-		Name:        "inspect_article",
-		Description: "Inspect article Markdown, layout_plan, image mode, and draft readiness without generating images, uploading assets, charging credits, or creating drafts. Use before render_template/publish_draft to surface blockers and suggested fixes.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"project_id":         map[string]any{"type": "string", "description": "Project ID"},
-				"markdown":           map[string]any{"type": "string", "description": "Article Markdown"},
-				"article_image_mode": map[string]any{"type": "string", "enum": []any{"cover_and_content", "cover_only", "content_only", "text_only"}, "description": "Structured article image mode"},
-				"layout_plan":        map[string]any{"type": "object", "description": "Optional render_template layout_plan for slot readiness checks"},
-				"cover_media_id":     map[string]any{"type": "string", "description": "Cover media_id returned by generate_image/upload_to_cdn, when cover is enabled"},
-				"task_id":            map[string]any{"type": "string", "description": "Optional task ID for future task-scoped checks"},
-			},
-			"required": []any{"project_id", "markdown"},
-		},
-	}, inspectArticleHandler)
-
-	server.AddTool(&mcp.Tool{
 		Name:        "research_topics",
 		Description: "Generate topic suggestions based on a project's instructions positioning and keywords. Returns an array of topics with viral scores, angles, and keywords.",
 		InputSchema: map[string]any{
@@ -345,48 +328,6 @@ func renderTemplateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	return textResult(result)
 }
 
-func inspectArticleHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.WritingSvc == nil {
-		return errorResult("writing service not available"), nil
-	}
-	userID := getUserID(ctx)
-	args := parseArgs(req.Params.Arguments)
-
-	projectID, _ := args["project_id"].(string)
-	if projectID == "" {
-		return errorResult("project_id is required"), nil
-	}
-	markdown, _ := args["markdown"].(string)
-	if markdown == "" {
-		return errorResult("markdown is required"), nil
-	}
-
-	var layoutPlan *service.LayoutPlan
-	if raw, ok := args["layout_plan"]; ok && raw != nil {
-		plan, err := service.ParseLayoutPlan(raw)
-		if err != nil {
-			return errorResult(fmt.Sprintf("invalid layout_plan: %v", err)), nil
-		}
-		layoutPlan = plan
-	}
-
-	imageMode, _ := args["article_image_mode"].(string)
-	coverMediaID, _ := args["cover_media_id"].(string)
-
-	result, err := svcs.WritingSvc.InspectArticle(ctx, userID, service.InspectArticleRequest{
-		ProjectID:        projectID,
-		Markdown:         markdown,
-		ArticleImageMode: imageMode,
-		LayoutPlan:       layoutPlan,
-		CoverMediaID:     coverMediaID,
-	})
-	if err != nil {
-		return errorResult(err.Error()), nil
-	}
-
-	return textResult(result)
-}
-
 func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if svcs == nil || svcs.WritingSvc == nil {
 		return errorResult("writing service not available"), nil
@@ -420,13 +361,11 @@ func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "research_topics", longTextHeartbeatInterval)
 	defer stop()
 
-	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeTopicResearch, provider, mdl, 1, taskID); err != nil {
-		return billingError("research topics", err), nil
-	}
-
 	result, err := svcs.WritingSvc.ResearchTopics(ctx, userID, projectID, keywords, domain, count)
 	if err != nil {
+		return billingError("research topics", err), nil
+	}
+	if _, err := maybeDeductWritingTokens(ctx, userID, taskID, model.CreditTypeTopicResearch, result.Usage); err != nil {
 		return billingError("research topics", err), nil
 	}
 
@@ -468,13 +407,11 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "optimize_seo", longTextHeartbeatInterval)
 	defer stop()
 
-	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeSEO, provider, mdl, 1, taskID); err != nil {
-		return billingError("optimize seo", err), nil
-	}
-
 	result, err := svcs.WritingSvc.OptimizeSEO(ctx, userID, projectID, content, title, keywords)
 	if err != nil {
+		return billingError("optimize seo", err), nil
+	}
+	if _, err := maybeDeductWritingTokens(ctx, userID, taskID, model.CreditTypeSEO, result.Usage); err != nil {
 		return billingError("optimize seo", err), nil
 	}
 
@@ -506,13 +443,11 @@ func generateOutlineHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	stop := startProgressHeartbeat(ctx, req.Session, req.Params.GetProgressToken(), "generate_outline", longTextHeartbeatInterval)
 	defer stop()
 
-	provider, mdl := resolveTextModel(ctx, userID)
-	if err := maybeDeduct(ctx, userID, model.CreditTypeOutline, provider, mdl, 1, taskID); err != nil {
-		return billingError("generate outline", err), nil
-	}
-
 	result, err := svcs.WritingSvc.GenerateOutline(ctx, userID, projectID, topic, template, style, taskID)
 	if err != nil {
+		return billingError("generate outline", err), nil
+	}
+	if _, err := maybeDeductWritingTokens(ctx, userID, taskID, model.CreditTypeOutline, result.Usage); err != nil {
 		return billingError("generate outline", err), nil
 	}
 

@@ -43,6 +43,10 @@ type usageImageLLMClient interface {
 	CompleteWithImageResult(ctx context.Context, systemPrompt, userPrompt, imageURL string) (*LLMResult, error)
 }
 
+type usageTextLLMClient interface {
+	CompleteResult(ctx context.Context, systemPrompt, userPrompt string) (*LLMResult, error)
+}
+
 // streamingLLMClient is the OPTIONAL streaming capability of an LLMClient. Real
 // OpenAI-compatible clients implement it; test fakes need not — callers detect
 // support via a type assertion and fall back to the blocking Complete path. Used
@@ -118,6 +122,14 @@ func (c *openaiLLMClient) chatCompletionParams(systemPrompt, userPrompt string) 
 // Complete sends a system + user message to the configured model and returns the
 // assistant's text content.
 func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	result, err := c.CompleteResult(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+func (c *openaiLLMClient) CompleteResult(ctx context.Context, systemPrompt, userPrompt string) (*LLMResult, error) {
 	if c.timeout > 0 {
 		// Only add timeout if the context doesn't already have a deadline.
 		// Callers (e.g. ConvertMarkdown) may set a longer convert-specific timeout.
@@ -130,15 +142,15 @@ func (c *openaiLLMClient) Complete(ctx context.Context, systemPrompt, userPrompt
 
 	resp, err := c.client.Chat.Completions.New(ctx, c.chatCompletionParams(systemPrompt, userPrompt))
 	if err != nil {
-		return "", fmt.Errorf("llm completion: %w", err)
+		return nil, fmt.Errorf("llm completion: %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)",
+		return nil, fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)",
 			c.model, resp.ID, resp.Model)
 	}
 
-	return resp.Choices[0].Message.Content, nil
+	return &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}, nil
 }
 
 // CompleteStream sends a system + user message and returns the accumulated
@@ -547,7 +559,8 @@ type ImageRefDTO struct {
 
 // ResearchTopicsResult contains generated topic suggestions.
 type ResearchTopicsResult struct {
-	Topics []TopicSuggestion `json:"topics"`
+	Topics []TopicSuggestion    `json:"topics"`
+	Usage  srvconfig.TokenUsage `json:"usage,omitempty"`
 }
 
 // TopicSuggestion represents a single topic suggestion from the LLM.
@@ -562,9 +575,10 @@ type TopicSuggestion struct {
 
 // OptimizeSEOResult contains SEO optimization output.
 type OptimizeSEOResult struct {
-	OptimizedTitle string `json:"optimized_title"`
-	Keywords       string `json:"keywords"`
-	Summary        string `json:"summary"`
+	OptimizedTitle string               `json:"optimized_title"`
+	Keywords       string               `json:"keywords"`
+	Summary        string               `json:"summary"`
+	Usage          srvconfig.TokenUsage `json:"usage,omitempty"`
 }
 
 // OutlineSection represents a single section in a generated outline.
@@ -577,14 +591,15 @@ type OutlineSection struct {
 
 // OutlineResult contains a generated article outline.
 type OutlineResult struct {
-	Title         string           `json:"title"`
-	Subtitle      string           `json:"subtitle,omitempty"`
-	Hook          string           `json:"hook"`
-	Sections      []OutlineSection `json:"sections"`
-	KeyPoints     []string         `json:"key_points"`
-	CallToAction  string           `json:"call_to_action,omitempty"`
-	ViralElements []string         `json:"viral_elements,omitempty"`
-	SEOKeywords   []string         `json:"seo_keywords,omitempty"`
+	Title         string               `json:"title"`
+	Subtitle      string               `json:"subtitle,omitempty"`
+	Hook          string               `json:"hook"`
+	Sections      []OutlineSection     `json:"sections"`
+	KeyPoints     []string             `json:"key_points"`
+	CallToAction  string               `json:"call_to_action,omitempty"`
+	ViralElements []string             `json:"viral_elements,omitempty"`
+	SEOKeywords   []string             `json:"seo_keywords,omitempty"`
+	Usage         srvconfig.TokenUsage `json:"usage,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -810,9 +825,22 @@ func (s *WritingService) ResearchTopics(
 
 	prompt := s.buildTopicsPrompt(positioning, keywords, count)
 
-	raw, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
-	if err != nil {
-		return nil, fmt.Errorf("llm research topics: %w", err)
+	client := s.getLLMClient(ctx, userID)
+	var usage srvconfig.TokenUsage
+	var raw string
+	if usageLLM, ok := client.(usageTextLLMClient); ok {
+		result, err := usageLLM.CompleteResult(ctx, "", prompt)
+		if err != nil {
+			return nil, fmt.Errorf("llm research topics: %w", err)
+		}
+		raw = result.Text
+		usage = result.Usage
+	} else {
+		fallbackRaw, err := client.Complete(ctx, "", prompt)
+		if err != nil {
+			return nil, fmt.Errorf("llm research topics: %w", err)
+		}
+		raw = fallbackRaw
 	}
 
 	topics, err := s.parseTopicsResponse(raw)
@@ -827,6 +855,7 @@ func (s *WritingService) ResearchTopics(
 
 	return &ResearchTopicsResult{
 		Topics: topics,
+		Usage:  usage,
 	}, nil
 }
 
@@ -845,12 +874,26 @@ func (s *WritingService) OptimizeSEO(
 
 	prompt := s.buildSEOPrompt(title, keywords, content)
 
-	raw, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
-	if err != nil {
-		return nil, fmt.Errorf("llm seo optimize: %w", err)
+	client := s.getLLMClient(ctx, userID)
+	var usage srvconfig.TokenUsage
+	var raw string
+	if usageLLM, ok := client.(usageTextLLMClient); ok {
+		result, err := usageLLM.CompleteResult(ctx, "", prompt)
+		if err != nil {
+			return nil, fmt.Errorf("llm seo optimize: %w", err)
+		}
+		raw = result.Text
+		usage = result.Usage
+	} else {
+		fallbackRaw, err := client.Complete(ctx, "", prompt)
+		if err != nil {
+			return nil, fmt.Errorf("llm seo optimize: %w", err)
+		}
+		raw = fallbackRaw
 	}
 
 	result := s.parseSEOResponse(raw)
+	result.Usage = usage
 
 	s.logger.Info().
 		Str("user_id", userID).
@@ -896,15 +939,29 @@ func (s *WritingService) GenerateOutline(
 
 	prompt := buildOutlinePrompt(topic, template, style, keywords)
 
-	raw, err := s.getLLMClient(ctx, userID).Complete(ctx, "", prompt)
-	if err != nil {
-		return nil, fmt.Errorf("llm generate outline: %w", err)
+	client := s.getLLMClient(ctx, userID)
+	var usage srvconfig.TokenUsage
+	var raw string
+	if usageLLM, ok := client.(usageTextLLMClient); ok {
+		result, err := usageLLM.CompleteResult(ctx, "", prompt)
+		if err != nil {
+			return nil, fmt.Errorf("llm generate outline: %w", err)
+		}
+		raw = result.Text
+		usage = result.Usage
+	} else {
+		fallbackRaw, err := client.Complete(ctx, "", prompt)
+		if err != nil {
+			return nil, fmt.Errorf("llm generate outline: %w", err)
+		}
+		raw = fallbackRaw
 	}
 
 	result, err := parseOutlineResponse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("parse outline response: %w", err)
 	}
+	result.Usage = usage
 
 	s.logger.Info().
 		Str("user_id", userID).

@@ -228,7 +228,7 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 	for _, want := range []string{
 		"name: video",
 		"skills:",
-		"- dreamina-video",
+		"- seedance-20",
 		"- video-use",
 		"- hyperframes-video-overlays",
 		"- remotion-video-overlays",
@@ -289,8 +289,8 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		"music-to-video",
 		"slideshow",
 		"remotion-best-practices",
+		"skills/seedance-20/SKILL.md",
 		"skills/video-use/SKILL.md",
-		"skills/dreamina-video/SKILL.md",
 		"skills/hyperframes-video-overlays/SKILL.md",
 		"skills/remotion-video-overlays/SKILL.md",
 		"skills/manim-video-overlays/SKILL.md",

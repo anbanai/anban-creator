@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -122,6 +123,110 @@ func TestVideoEstimateReturnsConfiguredAllowedModelsAndBalanceGate(t *testing.T)
 	}
 	if body.Data.Balance != 120_000 || body.Data.MinBalance != service.MinVideoCreationBalance || !body.Data.MeetsMinBalance {
 		t.Fatalf("balance gate = %+v", body.Data)
+	}
+}
+
+func TestVideoEstimateAppliesBillingTierAndUserMultiplier(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	multiplier := 0.5
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:                userID,
+		Email:             "video-estimate-billing@example.com",
+		Password:          "hashed",
+		InviteCode:        "videoestimatebilling",
+		Tier:              model.TierFree,
+		CreditsBalance:    120_000,
+		BillingMultiplier: &multiplier,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := uuid.New().String()
+	project := &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "Video",
+		Status:   model.ProjectStatusActive,
+	}
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    service.VideoPurposePlanting,
+		ModelKey:   "configured-video",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"configured-video"},
+		DefaultModel:  "configured-video",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	creditSvc := service.NewCreditService(repo, nil, &logger)
+	h := NewVideoHandler(repo, creditSvc, service.VideoModelCatalog{
+		"configured-video": {
+			Key:                  "configured-video",
+			DisplayName:          "Configured Video",
+			ModelID:              "provider-configured-video",
+			SupportedResolutions: []string{"720p"},
+			SupportedRatios:      []string{"9:16"},
+			MinDuration:          1,
+			MaxDuration:          15,
+			NoInputPricePerSecond: map[string]float64{
+				"720p": 1,
+			},
+		},
+	}, 1000, &logger)
+	h.SetBillingConfig(srvconfig.BillingConfig{
+		CreditsPerCNY:         1600,
+		TierMultipliers:       map[string]float64{"free": 1.35},
+		DefaultUserMultiplier: 1,
+		MinimumChargeCredits:  1,
+	})
+
+	app := fiber.New()
+	app.Post("/video/estimate", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Estimate(c)
+	})
+
+	req := httptest.NewRequest("POST", "/video/estimate", strings.NewReader(`{"project_id":"`+projectID+`","prompt":"生成视频"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Data struct {
+			EstimatedCredits int `json:"estimated_credits"`
+			PricingBreakdown struct {
+				CreditsPerCNY  int     `json:"credits_per_cny"`
+				TierMultiplier float64 `json:"tier_multiplier"`
+				UserMultiplier float64 `json:"user_multiplier"`
+			} `json:"pricing_breakdown"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.EstimatedCredits != 5400 {
+		t.Fatalf("estimated credits = %d, want ceil(5*1600*1.35*0.5)=5400", body.Data.EstimatedCredits)
+	}
+	if body.Data.PricingBreakdown.CreditsPerCNY != 1600 || body.Data.PricingBreakdown.TierMultiplier != 1.35 || body.Data.PricingBreakdown.UserMultiplier != 0.5 {
+		t.Fatalf("pricing breakdown = %+v, want configured billing multipliers", body.Data.PricingBreakdown)
 	}
 }
 

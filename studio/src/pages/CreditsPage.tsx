@@ -6,7 +6,7 @@ import { CreditCard } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { CreditTransaction, CreditPricing } from '@/types'
+import type { CreditTransaction, CreditPricing, RechargeTier } from '@/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/common/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -43,6 +43,28 @@ function transactionBadgeVariant(type: string) {
 }
 
 const PAGE_SIZE = 20
+
+const FALLBACK_RECHARGE_TIERS: RechargeTier[] = [
+  { key: 'basic', label: '基础包', price_cny: 10, credits: 10000, bonus_credits: 0, enabled: true },
+  { key: 'standard', label: '标准包', price_cny: 50, credits: 52000, bonus_credits: 2000, enabled: true },
+  { key: 'pro', label: '进阶包', price_cny: 100, credits: 110000, bonus_credits: 10000, enabled: true },
+]
+
+function transactionUsageSummary(tx: CreditTransaction): string | null {
+  const metadata = tx.metadata
+  if (!metadata) return null
+  const parts: string[] = []
+  if (metadata.provider || metadata.model) {
+    parts.push([metadata.provider, metadata.model].filter(Boolean).join('/'))
+  }
+  if (metadata.total_tokens) {
+    parts.push(`${metadata.total_tokens.toLocaleString()} tokens`)
+  }
+  if (metadata.final_credits) {
+    parts.push(`${metadata.final_credits.toLocaleString()} 积分`)
+  }
+  return parts.length > 0 ? parts.join(' · ') : null
+}
 
 export default function CreditsPage() {
   const queryClient = useQueryClient()
@@ -88,6 +110,8 @@ export default function CreditsPage() {
   const transactions = transactionsData?.items ?? []
   const total = transactionsData?.total ?? 0
   const totalPages = Math.ceil(total / PAGE_SIZE)
+  const rechargeTiers = pricing?.recharge_tiers?.filter((tier) => tier.enabled !== false && tier.price_cny > 0 && tier.credits > 0)
+  const visibleRechargeTiers = rechargeTiers && rechargeTiers.length > 0 ? rechargeTiers : FALLBACK_RECHARGE_TIERS
 
   return (
     <div className="space-y-6">
@@ -153,17 +177,14 @@ export default function CreditsPage() {
             />
             <p className="text-sm text-muted-foreground">扫码联系客服充值</p>
             <div className="w-full space-y-2">
-              {[
-                { tier: '基础', price: '10', credits: '10,000' },
-                { tier: '标准', price: '50', credits: '55,000' },
-                { tier: '专业', price: '100', credits: '120,000' },
-              ].map(({ tier, price, credits }) => (
-                <div key={tier} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm">
-                  <span className="font-medium">{tier}</span>
+              {visibleRechargeTiers.map((tier) => (
+                <div key={tier.key} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm">
+                  <span className="font-medium">{tier.label}</span>
                   <span>
-                    <span className="text-foreground">{price} 元</span>
+                    <span className="text-foreground">{tier.price_cny} 元</span>
                     <span className="mx-2 text-muted-foreground">=</span>
-                    <span className="text-primary font-semibold">{credits} 积分</span>
+                    <span className="text-primary font-semibold">{tier.credits.toLocaleString()} 积分</span>
+                    {tier.bonus_credits ? <span className="ml-1 text-xs text-muted-foreground">含赠 {tier.bonus_credits.toLocaleString()}</span> : null}
                   </span>
                 </div>
               ))}
@@ -175,7 +196,8 @@ export default function CreditsPage() {
       {/* Transaction history */}
       <Card>
         <div className="border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold text-foreground">积分消耗</h2>
+          <h2 className="text-sm font-semibold text-foreground">积分明细</h2>
+          <p className="mt-1 text-xs text-muted-foreground">基础服务费与模型、图片、视频等 MCP 操作费会分别记录，最终以交易明细汇总为准。</p>
         </div>
         {transactionsError ? (
           <QueryErrorState onRetry={() => refetchTransactions()} />
@@ -209,27 +231,33 @@ export default function CreditsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.map((tx: CreditTransaction) => (
-                    <tr key={tx.id} className="border-b border-border transition-colors duration-150 hover:bg-accent">
-                      <td className="px-4 py-3">
-                        <Badge variant={transactionBadgeVariant(tx.type)}>
-                          {transactionTypeLabel[tx.type] || tx.type}
-                        </Badge>
-                      </td>
-                      <td className={`px-4 py-3 font-medium ${tx.amount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {tx.balance_after.toLocaleString()}
-                      </td>
-                      <td className="max-w-[200px] truncate px-4 py-3 text-muted-foreground">
-                        {formatCreditDescription(tx)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                        {formatFullDateTimeCN(tx.created_at)}
-                      </td>
-                    </tr>
-                  ))}
+                  {transactions.map((tx: CreditTransaction) => {
+                    const usageSummary = transactionUsageSummary(tx)
+                    return (
+                      <tr key={tx.id} className="border-b border-border transition-colors duration-150 hover:bg-accent">
+                        <td className="px-4 py-3">
+                          <Badge variant={transactionBadgeVariant(tx.type)}>
+                            {transactionTypeLabel[tx.type] || tx.type}
+                          </Badge>
+                        </td>
+                        <td className={`px-4 py-3 font-medium ${tx.amount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {tx.balance_after.toLocaleString()}
+                        </td>
+                        <td className="max-w-[240px] px-4 py-3 text-muted-foreground">
+                          <div className="truncate">{formatCreditDescription(tx)}</div>
+                          {usageSummary && (
+                            <div className="mt-0.5 truncate text-xs text-muted-foreground/80">{usageSummary}</div>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                          {formatFullDateTimeCN(tx.created_at)}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -287,7 +315,7 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
       <Accordion>
         {/* Task costs */}
         <AccordionItem>
-          <AccordionTrigger>任务费（Web 端创建任务，包含所有操作）</AccordionTrigger>
+          <AccordionTrigger>任务基础服务费</AccordionTrigger>
           <AccordionContent>
             <PricingTable
               rows={taskCosts.map(([type, cost]) => ({
@@ -295,6 +323,9 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
                 value: `${cost.toLocaleString()} 积分`,
               }))}
             />
+            <p className="mt-2 text-xs text-muted-foreground">
+              基础服务费不包含图片、视频、写作模型等 MCP 操作费用；最终以交易明细汇总为准。
+            </p>
           </AccordionContent>
         </AccordionItem>
 
@@ -304,7 +335,7 @@ function PricingGuide({ pricing }: { pricing: CreditPricing }) {
             <AccordionTrigger>电商素材模块（按所选模块求和扣费）</AccordionTrigger>
             <AccordionContent>
               <PricingTable rows={ecommerceRows} />
-              <p className="mt-2 text-xs text-muted-foreground">套餐价 = Σ（模块单价 × 数量）；产品图上传免费。</p>
+              <p className="mt-2 text-xs text-muted-foreground">套餐价 = Σ（模块单价 × 数量）；模型、图片、视频等额外操作按实际用量另计。</p>
             </AccordionContent>
           </AccordionItem>
         )}

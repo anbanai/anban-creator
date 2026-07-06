@@ -18,6 +18,9 @@ type User struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	CreditsBalance int       `gorm:"default:0" json:"credits_balance"`
+	// BillingMultiplier adjusts model-usage billing for account-specific margin.
+	// Nil or non-positive values default to 1.0 in the credit service.
+	BillingMultiplier *float64 `gorm:"type:decimal(8,4)" json:"billing_multiplier,omitempty"`
 }
 
 // TableName returns the database table name for User.

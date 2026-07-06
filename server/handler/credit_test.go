@@ -85,3 +85,53 @@ func TestCreditPricingKeepsGPTImage2OutOfFixedImageCosts(t *testing.T) {
 		t.Fatalf("dynamic GPT Image 2 pricing missing from model_prices.image_generation: %#v", data.ModelPrices.ImageGeneration)
 	}
 }
+
+func TestCreditPricingReturnsEnabledRechargeTiers(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	logger := zerolog.New(io.Discard)
+	cfg := &srvconfig.Config{
+		Credits: srvconfig.CreditsConfig{TaskCosts: map[string]int{"article": 4000}},
+		RechargeTiers: []srvconfig.RechargeTierConfig{
+			{Key: "basic", Label: "基础", PriceCNY: 10, Credits: 10000, Enabled: true},
+			{Key: "standard", Label: "标准", PriceCNY: 50, Credits: 52000, BonusCredits: 2000, Enabled: true},
+			{Key: "hidden", Label: "隐藏", PriceCNY: 100, Credits: 110000, Enabled: false},
+		},
+	}
+	creditSvc := service.NewCreditService(repository.New(db), &cfg.Credits, &logger)
+	handler := NewCreditHandler(creditSvc, cfg, "", &logger)
+	app := fiber.New()
+	app.Get("/credits/pricing", handler.Pricing)
+
+	resp, err := app.Test(httptest.NewRequest("GET", "/credits/pricing", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	raw, _ := json.Marshal(body.Data)
+	var data struct {
+		RechargeTiers []struct {
+			Key          string `json:"key"`
+			Label        string `json:"label"`
+			PriceCNY     int    `json:"price_cny"`
+			Credits      int    `json:"credits"`
+			BonusCredits int    `json:"bonus_credits"`
+		} `json:"recharge_tiers"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatalf("decode data: %v", err)
+	}
+	if len(data.RechargeTiers) != 2 {
+		t.Fatalf("recharge_tiers len = %d, want 2: %#v", len(data.RechargeTiers), data.RechargeTiers)
+	}
+	if got := data.RechargeTiers[1]; got.Key != "standard" || got.PriceCNY != 50 || got.Credits != 52000 || got.BonusCredits != 2000 {
+		t.Fatalf("standard tier = %#v, want 50 CNY / 52000 credits / 2000 bonus", got)
+	}
+}

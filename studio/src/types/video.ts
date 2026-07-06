@@ -46,6 +46,8 @@ export interface VideoPricingBreakdown {
   cny: number
   credits_per_cny: number
   credit_multiplier?: number
+  tier_multiplier?: number
+  user_multiplier?: number
   input_video: boolean
   input_seconds?: number
   output_seconds: number

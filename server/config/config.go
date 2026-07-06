@@ -34,6 +34,7 @@ type Config struct {
 	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
 	ModelPrices        ModelPricesConfig               `yaml:"model_prices"`
 	Billing            BillingConfig                   `yaml:"billing"`
+	RechargeTiers      []RechargeTierConfig            `yaml:"recharge_tiers"`
 	ImageUnderstanding UnderstandingRuntimeConfig      `yaml:"-"`
 	VideoUnderstanding VideoUnderstandingRuntimeConfig `yaml:"-"`
 	TingWu             TingWuConfig                    `yaml:"tingwu"`
@@ -349,6 +350,15 @@ type BillingConfig struct {
 	MinimumChargeCredits  int                `yaml:"minimum_charge_credits" json:"minimum_charge_credits"`
 }
 
+type RechargeTierConfig struct {
+	Key          string `yaml:"key" json:"key"`
+	Label        string `yaml:"label" json:"label"`
+	PriceCNY     int    `yaml:"price_cny" json:"price_cny"`
+	Credits      int    `yaml:"credits" json:"credits"`
+	BonusCredits int    `yaml:"bonus_credits" json:"bonus_credits"`
+	Enabled      bool   `yaml:"enabled" json:"enabled"`
+}
+
 type TokenUsage struct {
 	InputTokens       int64 `json:"input_tokens"`
 	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"`
@@ -492,6 +502,19 @@ func (c *Config) CalculateTokenModelCredits(provider, modelName string, usage To
 			Output:        price.Output.Float64(),
 		},
 	}, nil
+}
+
+func (c *Config) EnabledRechargeTiers() []RechargeTierConfig {
+	if c == nil || len(c.RechargeTiers) == 0 {
+		return nil
+	}
+	tiers := make([]RechargeTierConfig, 0, len(c.RechargeTiers))
+	for _, tier := range c.RechargeTiers {
+		if tier.Enabled {
+			tiers = append(tiers, tier)
+		}
+	}
+	return tiers
 }
 
 func (c *Config) CalculateImageGenerationEstimateCredits(provider, modelName string, usage ImageGenerationUsage, tier string, userMultiplier float64) (ImageGenerationCreditCost, error) {
@@ -880,10 +903,10 @@ type MemoryConfig struct {
 
 // CreditsConfig holds credits/points system configuration.
 type CreditsConfig struct {
-	DailySignIn   int                       `yaml:"daily_sign_in"`  // credits awarded per daily sign-in (default 1024)
-	RegisterBonus int                       `yaml:"register_bonus"` // credits awarded on registration (default 4096)
-	InviteReward  int                       `yaml:"invite_reward"`  // credits awarded to inviter when invitee registers (default 2048)
-	TaskCosts     map[string]int            `yaml:"task_costs"`     // per-task-type costs, e.g. {"article": 4000, "seednote": 3200}
+	DailySignIn   int                       `yaml:"daily_sign_in"`  // credits awarded per daily sign-in (default 100)
+	RegisterBonus int                       `yaml:"register_bonus"` // credits awarded on registration (default 1000)
+	InviteReward  int                       `yaml:"invite_reward"`  // credits awarded to inviter when invitee registers (default 1000)
+	TaskCosts     map[string]int            `yaml:"task_costs"`     // base service fees by task type, e.g. {"article": 4000, "seednote": 3600}
 	ModelCosts    map[string]map[string]int `yaml:"model_costs"`    // per-model costs, key format: "provider/model"
 	AdminAPIKey   string                    `yaml:"admin_api_key"`  // API key for admin credit grant endpoint
 
@@ -1029,6 +1052,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"model_routes":    true,
 		"model_prices":    true,
 		"billing":         true,
+		"recharge_tiers":  true,
 		"tingwu":          true,
 		"funasr":          true,
 		"claude":          true,
@@ -1150,25 +1174,41 @@ func (c *Config) applyDefaults() {
 	if c.VideoAPI.CreditMultiplier == 0 {
 		c.VideoAPI.CreditMultiplier = 1000
 	}
+	if c.Billing.CreditsPerCNY == 0 {
+		c.Billing.CreditsPerCNY = 1600
+	}
+	if c.Billing.TierMultipliers == nil {
+		c.Billing.TierMultipliers = map[string]float64{
+			"free":       1.35,
+			"pro":        1.20,
+			"enterprise": 1.05,
+		}
+	}
+	if c.Billing.DefaultUserMultiplier == 0 {
+		c.Billing.DefaultUserMultiplier = 1
+	}
+	if c.Billing.MinimumChargeCredits == 0 {
+		c.Billing.MinimumChargeCredits = 1
+	}
 
 	// Credits defaults.
 	if c.Credits.DailySignIn == 0 {
-		c.Credits.DailySignIn = 1024
+		c.Credits.DailySignIn = 100
 	}
 	if c.Credits.RegisterBonus == 0 {
-		c.Credits.RegisterBonus = 4096
+		c.Credits.RegisterBonus = 1000
 	}
 	if c.Credits.InviteReward == 0 {
-		c.Credits.InviteReward = 2048
+		c.Credits.InviteReward = 1000
 	}
 	if c.Credits.TaskCosts == nil {
 		c.Credits.TaskCosts = map[string]int{
 			"article":        4000,
-			"seednote":       3200,
-			"viral_analysis": 800,
+			"seednote":       3600,
+			"viral_analysis": 1200,
 		}
 	} else if _, ok := c.Credits.TaskCosts["viral_analysis"]; !ok {
-		c.Credits.TaskCosts["viral_analysis"] = 800
+		c.Credits.TaskCosts["viral_analysis"] = 1200
 	}
 	if c.Credits.GoalModeMultiplier <= 0 {
 		c.Credits.GoalModeMultiplier = 3
@@ -1180,6 +1220,13 @@ func (c *Config) applyDefaults() {
 			"cover_banner": 600,  // 封面/类目 banner，每张
 			"share_image":  400,  // 分享图，每张
 			"sku_images":   300,  // SKU 变体图，每张
+		}
+	}
+	if c.RechargeTiers == nil {
+		c.RechargeTiers = []RechargeTierConfig{
+			{Key: "basic", Label: "基础包", PriceCNY: 10, Credits: 10000, Enabled: true},
+			{Key: "standard", Label: "标准包", PriceCNY: 50, Credits: 52000, BonusCredits: 2000, Enabled: true},
+			{Key: "pro", Label: "进阶包", PriceCNY: 100, Credits: 110000, BonusCredits: 10000, Enabled: true},
 		}
 	}
 

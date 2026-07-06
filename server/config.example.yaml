@@ -218,23 +218,42 @@ model_prices:
         720p: 6.05
 
 billing:
-  credits_per_cny: 1000
+  credits_per_cny: 1600
   tier_multipliers:
-    free: 1.30
-    pro: 1.15
-    enterprise: 1.00
+    free: 1.35
+    pro: 1.20
+    enterprise: 1.05
   default_user_multiplier: 1.00
   minimum_charge_credits: 1
 
+recharge_tiers:
+  - key: "basic"
+    label: "基础包"
+    price_cny: 10
+    credits: 10000
+    bonus_credits: 0
+    enabled: true
+  - key: "standard"
+    label: "标准包"
+    price_cny: 50
+    credits: 52000
+    bonus_credits: 2000
+    enabled: true
+  - key: "pro"
+    label: "进阶包"
+    price_cny: 100
+    credits: 110000
+    bonus_credits: 10000
+    enabled: true
+
 credits:
-  daily_sign_in: 1024
-  register_bonus: 4096
-  invite_reward: 2048
+  daily_sign_in: 100
+  register_bonus: 1000
+  invite_reward: 1000
   task_costs:
-    article: 1000
-    xls: 1000
-    seednote: 1000
-    viral_analysis: 800
+    article: 4000
+    seednote: 3600
+    viral_analysis: 1200
   admin_api_key: "${ANBAN_CREDITS_ADMIN_API_KEY}"
 
 image_presets:

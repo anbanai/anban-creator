@@ -306,6 +306,116 @@ func TestTokenModelCostUsesRealCostAndTierMultiplier(t *testing.T) {
 	}
 }
 
+func TestTokenModelCostAppliesUserMultiplier(t *testing.T) {
+	cfg := &Config{
+		ModelPrices: ModelPricesConfig{
+			CurrencyRates: map[string]CurrencyRate{
+				"USD": {ToCNY: 7.2},
+			},
+			TokenModels: map[string]TokenModelPrice{
+				"moonshot/kimi-k2.7-code-highspeed": {
+					Currency:    "USD",
+					Unit:        1_000_000,
+					CachedInput: 0.38,
+					Input:       1.90,
+					Output:      8.00,
+				},
+			},
+		},
+		Billing: BillingConfig{
+			CreditsPerCNY:         1000,
+			TierMultipliers:       map[string]float64{"free": 1.30},
+			DefaultUserMultiplier: 1.0,
+			MinimumChargeCredits:  1,
+		},
+	}
+
+	cost, err := cfg.CalculateTokenModelCredits("moonshot", "kimi-k2.7-code-highspeed", TokenUsage{
+		InputTokens:       10_000,
+		CachedInputTokens: 2_000,
+		OutputTokens:      1_000,
+		TotalTokens:       11_000,
+	}, "free", 0.5)
+	if err != nil {
+		t.Fatalf("CalculateTokenModelCredits() error = %v", err)
+	}
+
+	if cost.BaseCredits != 173 {
+		t.Fatalf("base credits = %d, want 173", cost.BaseCredits)
+	}
+	if cost.FinalCredits != 113 {
+		t.Fatalf("final credits = %d, want ceil(173*1.30*0.5)=113", cost.FinalCredits)
+	}
+	if cost.UserMultiplier != 0.5 {
+		t.Fatalf("user multiplier = %v, want 0.5", cost.UserMultiplier)
+	}
+}
+
+func TestDefaultRechargeTiers(t *testing.T) {
+	cfg := &Config{}
+	cfg.applyDefaults()
+
+	if len(cfg.RechargeTiers) != 3 {
+		t.Fatalf("recharge tiers len = %d, want 3", len(cfg.RechargeTiers))
+	}
+	if got := cfg.RechargeTiers[2]; got.PriceCNY != 100 || got.Credits != 110000 || got.BonusCredits != 10000 || !got.Enabled {
+		t.Fatalf("third recharge tier = %#v, want enabled 100 CNY / 110000 credits / 10000 bonus", got)
+	}
+}
+
+func TestRechargeTiersParseFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := fakePluginDir(t, dir)
+	cfgPath := filepath.Join(dir, "config.yaml")
+	body := []byte(`
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+claude:
+  plugin_dir: "` + pluginDir + `"
+recharge_tiers:
+  - key: basic
+    label: 基础包
+    price_cny: 10
+    credits: 10000
+    bonus_credits: 0
+    enabled: true
+  - key: hidden
+    label: 隐藏包
+    price_cny: 100
+    credits: 110000
+    bonus_credits: 10000
+    enabled: false
+`)
+	if err := os.WriteFile(cfgPath, body, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := NewConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("NewConfig() error = %v", err)
+	}
+	if len(cfg.RechargeTiers) != 2 {
+		t.Fatalf("recharge tiers len = %d, want 2", len(cfg.RechargeTiers))
+	}
+	if tiers := cfg.EnabledRechargeTiers(); len(tiers) != 1 || tiers[0].Key != "basic" {
+		t.Fatalf("enabled recharge tiers = %#v, want only basic", tiers)
+	}
+}
+
+func TestEnabledRechargeTiersFiltersDisabled(t *testing.T) {
+	cfg := &Config{RechargeTiers: []RechargeTierConfig{
+		{Key: "basic", PriceCNY: 10, Credits: 10000, Enabled: true},
+		{Key: "hidden", PriceCNY: 100, Credits: 110000, Enabled: false},
+	}}
+
+	tiers := cfg.EnabledRechargeTiers()
+	if len(tiers) != 1 || tiers[0].Key != "basic" {
+		t.Fatalf("enabled tiers = %#v, want only basic", tiers)
+	}
+}
+
 func TestImageGenerationEstimateAndUsageCredits(t *testing.T) {
 	cfg := &Config{
 		ModelPrices: ModelPricesConfig{

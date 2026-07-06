@@ -161,8 +161,8 @@ export default function PlansPage() {
   }, [allProjects])
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
 
-  // 每次执行（单次触发）的预估积分消耗。计划是定时单任务生成器，无 quantity；
-  // 仅强目标模式 ×3。镜像 TasksPage 的 taskCostFor，缺定价时回落默认 3200。
+  // 每次执行（单次触发）的基础服务费。计划是定时单任务生成器，无 quantity；
+  // 仅强目标模式 ×3。镜像 TasksPage 的 taskCostFor，缺定价时回落默认 3600。
   const { data: pricing } = useQuery({
     queryKey: ['credits', 'pricing'],
     queryFn: () => api.credits.pricing(),
@@ -173,7 +173,7 @@ export default function PlansPage() {
     queryFn: () => api.credits.balance(),
     staleTime: 30_000,
   })
-  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3200
+  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3600
 
   useEffect(() => {
     if (!modalOpen || watchedType !== 'video' || !watchedProjectId) {
@@ -781,8 +781,8 @@ export default function PlansPage() {
                 </FormItem>
               )} />
 
-              {/* 每次执行（每次触发）的预估积分消耗。计划无 quantity，仅强目标 ×3。
-                  定价为预扣积分；图片生成等额外消耗按实际用量结算。 */}
+              {/* 每次执行（每次触发）的基础服务费。计划无 quantity，仅强目标 ×3。
+                  模型、图片、视频等额外 MCP 操作按实际用量结算。 */}
               {(() => {
                 const cost = taskCostFor(watchedType as string)
                 const multiplier = watchedGoalMode ? 3 : 1
@@ -792,10 +792,11 @@ export default function PlansPage() {
                 return (
                   <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                     <p className="text-muted-foreground">
-                      每次执行预估：{cost}{multiplier > 1 ? ` × ${multiplier}` : ''} ={' '}
+                      每次执行基础费用：{cost}{multiplier > 1 ? ` × ${multiplier}` : ''} ={' '}
                       <span className="font-medium text-foreground">{perRun.toLocaleString()}</span> 积分
                       {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
                     </p>
+                    <p className="text-xs text-muted-foreground">模型、图片、视频等 MCP 操作费用按实际用量另计。</p>
                     <p className="text-muted-foreground">
                       余额：{balance.toLocaleString()} →{' '}
                       <span className={`font-medium ${remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>

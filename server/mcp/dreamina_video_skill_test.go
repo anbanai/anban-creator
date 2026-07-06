@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestDreaminaVideoSkillFiles(t *testing.T) {
+func TestSeedance20SkillFiles(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -15,16 +15,20 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
 	var firstBody string
 	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
-		skillDir := filepath.Join(root, plugin, "skills", "dreamina-video")
+		skillDir := filepath.Join(root, plugin, "skills", "seedance-20")
 		skillPath := filepath.Join(skillDir, "SKILL.md")
 		raw, err := os.ReadFile(skillPath)
 		if err != nil {
-			t.Fatalf("%s dreamina-video SKILL.md missing: %v", plugin, err)
+			t.Fatalf("%s seedance-20 SKILL.md missing: %v", plugin, err)
 		}
 		body := string(raw)
-		requireValidSkillFrontmatter(t, plugin, "dreamina-video", body)
+		requireValidSkillFrontmatter(t, plugin, "seedance-20", body)
 		for _, want := range []string{
-			"name: dreamina-video",
+			"name: seedance-20",
+			"Seedance 2.0 Skill OS",
+			"Emily2040/seedance-2.0",
+			"songguoxs/seedance-prompt-skill",
+			"ZeroLu/awesome-seedance",
 			"即梦",
 			"Seedance",
 			"种草",
@@ -72,6 +76,24 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"generate_image",
 			"verify_with_vision",
 			"最多自动 3 张",
+			"Fast Lane",
+			"Mode Gate",
+			"Reference map",
+			"Sequence Gate",
+			"Project State Capsule",
+			"Retake Protocol",
+			"one-variable",
+			"Director Formula",
+			"anti-slop",
+			"Delivery And QC",
+			"首尾帧",
+			"视频延长",
+			"动态海报",
+			"穿搭变装",
+			"直播带货",
+			"广告复刻",
+			"真人短剧",
+			"AI漫剧",
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s SKILL.md missing %q", plugin, want)
@@ -81,7 +103,7 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 		if plugin == "claudecode" {
 			firstRefs = map[string]string{}
 		}
-		for _, ref := range []string{"methodology.md", "stability.md", "prompt-templates.md", "mcp-contract.md"} {
+		for _, ref := range []string{"methodology.md", "stability.md", "prompt-templates.md", "mcp-contract.md", "sequence-workflow.md", "business-playbooks.md", "delivery-qc.md"} {
 			refPath := filepath.Join(skillDir, "references", ref)
 			refRaw, err := os.ReadFile(refPath)
 			if err != nil {
@@ -94,30 +116,51 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			if plugin == "claudecode" {
 				firstRefs[ref] = refBody
 			} else {
-				firstRefPath := filepath.Join(root, "claudecode", "skills", "dreamina-video", "references", ref)
+				firstRefPath := filepath.Join(root, "claudecode", "skills", "seedance-20", "references", ref)
 				firstRefRaw, err := os.ReadFile(firstRefPath)
 				if err != nil {
 					t.Fatalf("claudecode reference %s missing: %v", ref, err)
 				}
 				if refBody != string(firstRefRaw) {
-					t.Fatalf("dreamina-video reference %s differs between plugins", ref)
+					t.Fatalf("seedance-20 reference %s differs between plugins", ref)
 				}
 			}
 			switch ref {
 			case "methodology.md":
-				for _, want := range []string{"素材角色分配", "主体身份", "产品外观", "场景背景", "首帧", "尾帧", "运镜", "节奏", "音色", "BGM", "字体/文字风格", "个人 IP", "高效段子", "创作定位", "参考视频复刻", "视觉锚定图", "0 张", "1 张", "2 张", "3 张"} {
+				for _, want := range []string{"素材角色分配", "主体身份", "产品外观", "场景背景", "首帧", "尾帧", "运镜", "节奏", "音色", "BGM", "字体/文字风格", "个人 IP", "高效段子", "创作定位", "参考视频复刻", "视觉锚定图", "0 张", "1 张", "2 张", "3 张", "Director Formula", "one visible beat", "one primary camera move", "anti-slop", "fidelity budget"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
 				}
 			case "prompt-templates.md":
-				for _, want := range []string{"reference_role", "audio_cue", "transition_or_effect", "主体 + 场景 + 动作 + 运镜 + 分时段 + 转场/特效 + 音频 + 风格", "产品 360", "产品拆解", "短剧式", "音乐卡点", "个人 IP 种草", "高效段子", "参考视频复刻", "anchor-strategy.md", "visual-anchor-pack.md", "subject-anchor-01.png"} {
+				for _, want := range []string{"reference_role", "audio_cue", "transition_or_effect", "主体 + 场景 + 动作 + 运镜 + 分时段 + 转场/特效 + 音频 + 风格", "产品 360", "产品拆解", "短剧式", "音乐卡点", "个人 IP 种草", "高效段子", "参考视频复刻", "anchor-strategy.md", "visual-anchor-pack.md", "subject-anchor-01.png", "Shot 1", "【时间轴】", "Final Prompt Template", "compact prompt"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
 				}
 			case "stability.md":
 				for _, want := range []string{"引用模糊", "镜头指令冲突", "短时长内容过载", "素材无归属", "忽视音频", "复杂度与时长不匹配", "推镜头", "拉镜头", "摇镜", "跟拍", "环绕", "俯拍", "仰拍", "特写", "中景", "全景", "ref_image_path", "0.75", "主锚定图"} {
+					if !strings.Contains(refBody, want) {
+						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
+					}
+				}
+			}
+			if ref == "sequence-workflow.md" {
+				for _, want := range []string{"project-state.json", "Project State Capsule", "accepted observed state", "extension_depth", "completed beats", "reserved future beats", "prompt compiler", "Retake Protocol", "Keep", "Fix in post", "Edit, don't regenerate", "Re-roll", "Rewrite"} {
+					if !strings.Contains(refBody, want) {
+						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
+					}
+				}
+			}
+			if ref == "business-playbooks.md" {
+				for _, want := range []string{"追热点", "商业广告", "品牌宣传", "穿搭变装", "直播带货", "动态海报", "广告复刻", "真人短剧", "AI漫剧", "product_demo", "brand_promo", "ecommerce", "lead_gen"} {
+					if !strings.Contains(refBody, want) {
+						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
+					}
+				}
+			}
+			if ref == "delivery-qc.md" {
+				for _, want := range []string{"Picture", "Color", "Audio", "Text", "Continuity", "Rights", "Metadata", "Versioning", "Human QC", "quality-review.md"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
@@ -153,7 +196,44 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 		if firstBody == "" {
 			firstBody = body
 		} else if body != firstBody {
-			t.Fatalf("dreamina-video SKILL.md differs between plugins")
+			t.Fatalf("seedance-20 SKILL.md differs between plugins")
+		}
+	}
+}
+
+func TestDreaminaVideoSkillIsCompatibilityAlias(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(wd, "..", ".."))
+	var firstBody string
+	for _, plugin := range []string{"claudecode", "codex", "openclaw"} {
+		skillPath := filepath.Join(root, plugin, "skills", "dreamina-video", "SKILL.md")
+		raw, err := os.ReadFile(skillPath)
+		if err != nil {
+			t.Fatalf("%s dreamina-video compatibility SKILL.md missing: %v", plugin, err)
+		}
+		body := string(raw)
+		requireValidSkillFrontmatter(t, plugin, "dreamina-video", body)
+		for _, want := range []string{
+			"name: dreamina-video",
+			"compatibility",
+			"seedance-20",
+			"Do not maintain separate Dreamina-only workflow logic here",
+			"agent_name=\"videocreator\"",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s dreamina-video alias missing %q", plugin, want)
+			}
+		}
+		if strings.Contains(body, "## Workflow") || strings.Contains(body, "完整视频创作流程") {
+			t.Fatalf("%s dreamina-video alias should not keep a separate full workflow", plugin)
+		}
+		if firstBody == "" {
+			firstBody = body
+		} else if body != firstBody {
+			t.Fatalf("dreamina-video compatibility SKILL.md differs between plugins")
 		}
 	}
 }

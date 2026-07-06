@@ -90,6 +90,50 @@ func TestResolveVideoGenerationPlanAppliesProjectDefaultsAndDynamicCredits(t *te
 	}
 }
 
+func TestResolveVideoGenerationPlanWithBillingAppliesTierAndUserMultipliers(t *testing.T) {
+	watermark := false
+	billing := VideoBillingOptions{
+		CreditsPerCNY:    1600,
+		TierMultiplier:   1.35,
+		UserMultiplier:   0.5,
+		CreditMultiplier: 1000,
+	}
+	plan, err := ResolveVideoGenerationPlanWithBilling(VideoGenerationRequest{
+		Prompt: "生成一条咖啡杯种草视频",
+	}, model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "16:9",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	}, model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	}, DefaultVideoModelCatalog(), billing)
+	if err != nil {
+		t.Fatalf("ResolveVideoGenerationPlanWithBilling: %v", err)
+	}
+	if plan.EstimatedCredits != 2679 {
+		t.Fatalf("credits = %d, want 2679", plan.EstimatedCredits)
+	}
+	if plan.PricingBreakdown == nil {
+		t.Fatal("pricing breakdown missing")
+	}
+	if got := plan.PricingBreakdown.CreditsPerCNY; got != 1600 {
+		t.Fatalf("credits_per_cny = %d, want 1600", got)
+	}
+	if got := plan.PricingBreakdown.TierMultiplier; got != 1.35 {
+		t.Fatalf("tier_multiplier = %v, want 1.35", got)
+	}
+	if got := plan.PricingBreakdown.UserMultiplier; got != 0.5 {
+		t.Fatalf("user_multiplier = %v, want 0.5", got)
+	}
+}
+
 func TestResolveVideoGenerationPlanDefaultsCreativeTypePurposePair(t *testing.T) {
 	plan, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
 		Prompt:       "生成一条办公室高效段子",

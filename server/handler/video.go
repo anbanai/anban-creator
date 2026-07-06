@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
+	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -17,6 +18,7 @@ type VideoHandler struct {
 	creditSvc        *service.CreditService
 	catalog          service.VideoModelCatalog
 	creditMultiplier int
+	billing          srvconfig.BillingConfig
 	logger           *zerolog.Logger
 }
 
@@ -34,6 +36,36 @@ func NewVideoHandler(repo repository.Repository, creditSvc *service.CreditServic
 		creditMultiplier: creditMultiplier,
 		logger:           logger,
 	}
+}
+
+func (h *VideoHandler) SetBillingConfig(billing srvconfig.BillingConfig) {
+	if h == nil {
+		return
+	}
+	h.billing = billing
+}
+
+func (h *VideoHandler) videoBillingOptions(ctx fiber.Ctx, userID string) service.VideoBillingOptions {
+	fallback := h.creditMultiplier
+	tier := model.TierFree
+	userMultiplier := 1.0
+	if h.creditSvc == nil || userID == "" {
+		return service.VideoBillingOptionsFromConfig(h.billing, fallback, tier, userMultiplier)
+	}
+	if foundTier, err := h.creditSvc.GetUserTier(ctx.Context(), userID); err == nil {
+		tier = foundTier
+	} else if h.logger != nil {
+		h.logger.Warn().Err(err).Str("user_id", userID).Msg("video tier lookup failed")
+	}
+	foundMultiplier, err := h.creditSvc.GetUserBillingMultiplier(ctx.Context(), userID)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Warn().Err(err).Str("user_id", userID).Msg("video billing multiplier lookup failed")
+		}
+	} else if foundMultiplier > 0 {
+		userMultiplier = foundMultiplier
+	}
+	return service.VideoBillingOptionsFromConfig(h.billing, fallback, tier, userMultiplier)
 }
 
 type videoEstimateRequest struct {
@@ -78,12 +110,12 @@ func (h *VideoHandler) Estimate(c fiber.Ctx) error {
 
 	policy := project.VideoModelPolicy.Data()
 	available, warnings := h.availableModels(policy)
-	plan, err := service.ResolveVideoGenerationPlan(
+	plan, err := service.ResolveVideoGenerationPlanWithBilling(
 		videoGenerationRequestFromConfig(req.Prompt, req.VideoConfig),
 		project.VideoDefaults.Data(),
 		policy,
 		h.catalog,
-		h.creditMultiplier,
+		h.videoBillingOptions(c, userID),
 	)
 	if err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())

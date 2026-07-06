@@ -116,3 +116,140 @@ func TestSeednoteSkillContracts_RuntimeImageMode(t *testing.T) {
 		})
 	}
 }
+
+func TestSeednoteAgentUsesAgentReachForExternalXHSData(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "claudecode", "agents", "seednote.md"),
+		filepath.Join(root, "codex", "agents", "seednote.toml"),
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			body := string(data)
+
+			for _, want := range []string{
+				"agent-reach",
+				"Agent-Reach",
+				"agent-reach doctor --json",
+				"唯一外部数据入口",
+				"backend 顺序和可用性完全由 Agent-Reach 决定",
+				"不生成虚构热门数据",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing Agent-Reach contract term %q", path, want)
+				}
+			}
+
+			for _, forbidden := range []string{
+				"opencli xiaohongshu publish",
+				"opencli xiaohongshu delete-note",
+				"opencli xiaohongshu follow",
+				"opencli xiaohongshu unfollow",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("%s must not include write-operation command %q", path, forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestSeednoteResearchSkillsUseAgentReachOnlyForExternalXHSData(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "claudecode", "skills", "seednote-research", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "seednote-research", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "seednote-research", "SKILL.md"),
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			body := string(data)
+			for _, want := range []string{
+				"Agent-Reach",
+				"agent-reach doctor --json",
+				"active_backend",
+				"data_source=agent-reach",
+				"backend_command_family",
+				"token_source",
+				"missing_fields",
+				"fallback_reason",
+				"不能凭空构造",
+				"只读",
+				"不要在 Anban 内自行判断",
+				"实际可用性、安装、登录和 fallback 顺序由 Agent-Reach 决定",
+				"只作为 legacy/server/internal fallback，不进入新 seednote 研究主路径",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing Agent-Reach research contract term %q", path, want)
+				}
+			}
+			for _, forbidden := range []string{
+				"opencli xiaohongshu publish",
+				"opencli xiaohongshu delete-note",
+				"opencli xiaohongshu follow",
+				"opencli xiaohongshu unfollow",
+				"opencli xiaohongshu like",
+				"opencli xiaohongshu favorite",
+				"mcporter call 'xiaohongshu.publish",
+				"mcporter call 'xiaohongshu.delete",
+				"mcporter call 'xiaohongshu.follow",
+				"mcporter call 'xiaohongshu.like",
+				"mcporter call 'xiaohongshu.collect",
+				"xhs publish",
+				"xhs delete",
+				"xhs follow",
+				"xhs like",
+				"xhs favorite",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("%s must not include write-operation command %q", path, forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestSeednoteSkillsDoNotUseLegacyXHSMCPAsMainPath(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		filepath.Join(root, "claudecode", "skills", "seednote", "SKILL.md"),
+		filepath.Join(root, "openclaw", "skills", "seednote", "SKILL.md"),
+		filepath.Join(root, "codex", "skills", "seednote", "SKILL.md"),
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			body := string(data)
+			for _, want := range []string{
+				"seednote-research",
+				"Agent-Reach",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing seednote Agent-Reach handoff term %q", path, want)
+				}
+			}
+			for _, forbidden := range []string{
+				"list_project_topics(",
+				"MCP `get_feed_detail",
+				"先获取 xsec_token，再调用 MCP",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("%s still uses legacy XHS MCP main path %q", path, forbidden)
+				}
+			}
+		})
+	}
+}

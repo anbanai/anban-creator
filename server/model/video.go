@@ -99,6 +99,8 @@ type VideoPricingBreakdown struct {
 	CNY              float64                        `json:"cny"`
 	CreditMultiplier int                            `json:"credit_multiplier"`
 	CreditsPerCNY    int                            `json:"credits_per_cny"`
+	TierMultiplier   float64                        `json:"tier_multiplier,omitempty"`
+	UserMultiplier   float64                        `json:"user_multiplier,omitempty"`
 	InputVideo       bool                           `json:"input_video"`
 	InputSeconds     float64                        `json:"input_seconds,omitempty"`
 	OutputSeconds    int64                          `json:"output_seconds"`

@@ -193,7 +193,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "claudecode",
 			path:        filepath.Join(root, "claudecode", "hooks", "hooks.json"),
-			wantVersion: "2.10.25",
+			wantVersion: "2.10.27",
 			wantSnippets: []string{
 				"SessionStart",
 				"${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh",
@@ -202,7 +202,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "codex",
 			path:        filepath.Join(root, "codex", "install", "install-subagents.sh"),
-			wantVersion: "2.10.20",
+			wantVersion: "2.10.22",
 			wantSnippets: []string{
 				"ANBAN_PLUGIN_ROOT=\"$PLUGIN_ROOT\"",
 				"scripts/bootstrap.sh",
@@ -211,7 +211,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "openclaw",
 			path:        filepath.Join(root, "openclaw", "src", "index.ts"),
-			wantVersion: "2.7.19",
+			wantVersion: "2.7.21",
 			wantSnippets: []string{
 				"bootstrapAnbanBinary(api)",
 				"scripts/bootstrap.sh",
@@ -259,6 +259,10 @@ func TestAnbanSetupEnsuresPluginLocalCLI(t *testing.T) {
 			"anban --help",
 			"重新安装 Anban 插件",
 			"联系 Anban 支持",
+			"Agent-Reach 小红书数据预检",
+			"agent-reach doctor --json",
+			"Agent-Reach 官方流程安装/配置",
+			"不要把 OpenCLI、xiaohongshu-mcp 或 xhs-cli 写成 Anban 自己的安装方案",
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s anban-setup missing %q", plugin, want)

@@ -336,7 +336,7 @@
     <view class="task-create__section">
       <view class="credit-info">
         <view class="credit-info__row">
-          <text class="credit-info__label">预计消耗</text>
+          <text class="credit-info__label">{{ isEcommerce ? '套餐费用预估' : '基础费用预估' }}</text>
           <text class="credit-info__value credit-info__value--cost">约 {{ estimatedCost }} 积分</text>
         </view>
         <view class="credit-info__row">
@@ -346,6 +346,8 @@
           </text>
         </view>
       </view>
+      <text v-if="!isEcommerce" class="field-hint">模型、图片、视频等 MCP 操作费用按实际用量另计。</text>
+      <text v-else class="field-hint">模块套餐不含后续模型、图片、视频等额外操作费用，最终以交易明细为准。</text>
       <text v-if="balance > 0 && balance < estimatedCost" class="field-error">积分不足，请先充值</text>
     </view>
 

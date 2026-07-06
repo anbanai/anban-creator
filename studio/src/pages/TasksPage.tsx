@@ -141,7 +141,7 @@ export default function TasksPage() {
     queryFn: () => api.credits.pricing(),
   })
 
-  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3200
+  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3600
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
@@ -854,9 +854,9 @@ export default function TasksPage() {
         <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-2xl">
           <SheetHeader className="border-b border-border px-4 py-3">
             <SheetTitle>新建任务</SheetTitle>
-            <SheetDescription>任务创建路径：类型 → 项目 → 目标/提示词 → 图片/高级 → 费用预估</SheetDescription>
+            <SheetDescription>任务创建路径：类型 → 项目 → 目标/提示词 → 图片/高级 → 基础费用预估</SheetDescription>
             <div className="grid grid-cols-5 gap-1 pt-2 text-[11px] text-muted-foreground">
-              {['类型', '项目', '目标/提示词', '图片/高级', '费用预估'].map((label, index) => (
+              {['类型', '项目', '目标/提示词', '图片/高级', '基础费用预估'].map((label, index) => (
                 <span key={label} className="truncate rounded-md bg-muted px-2 py-1">
                   {index + 1}. {label}
                 </span>
@@ -1319,7 +1319,7 @@ export default function TasksPage() {
 
               {/* Cost display */}
               <div className="pt-1">
-                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 费用预估</p>
+                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 基础费用预估</p>
               {(() => {
                 const isEcom = watchedType === 'ecommerce'
                 const cost = taskCostFor(watchedType)
@@ -1331,15 +1331,18 @@ export default function TasksPage() {
                   <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                     {isEcom ? (
                       <p className="text-muted-foreground">
-                        套餐预估：Σ（模块价 × 数量）= <span className="font-medium text-foreground">{totalCost}</span> 积分
+                        模块套餐预估：Σ（模块价 × 数量）= <span className="font-medium text-foreground">{totalCost}</span> 积分
                         {!ecommercePackageCost.known && <span className="ml-1 text-xs text-amber-600">（部分模块未定价，以实际扣费为准）</span>}
                       </p>
                     ) : (
                       <p className="text-muted-foreground">
-                        预估消耗：{cost} x {quantity}
-                        {multiplier > 1 && ` x ${multiplier}`} = <span className="font-medium text-foreground">{totalCost}</span> 积分
+                        基础费用：{cost} × {quantity}
+                        {multiplier > 1 && ` × ${multiplier}`} = <span className="font-medium text-foreground">{totalCost}</span> 积分
                         {multiplier > 1 && <span className="ml-1 text-xs text-amber-600">（含目标重试）</span>}
                       </p>
+                    )}
+                    {watchedType !== 'video' && watchedType !== 'ecommerce' && (
+                      <p className="text-xs text-muted-foreground">模型、图片、视频等 MCP 操作费用按实际用量另计。</p>
                     )}
                     <p className="text-muted-foreground">
                       余额：{balance.toLocaleString()} →{' '}

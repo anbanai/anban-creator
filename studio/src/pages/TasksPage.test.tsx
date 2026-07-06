@@ -103,7 +103,12 @@ vi.mock('@/lib/api', async () => {
           task_costs: {},
           model_costs: {},
           ecommerce_module_prices: {},
-          income: { daily_sign_in: 1024, register_bonus: 4096, invite_reward: 2048 },
+          recharge_tiers: [
+            { key: 'basic', label: '基础包', price_cny: 10, credits: 10000, bonus_credits: 0, enabled: true },
+            { key: 'standard', label: '标准包', price_cny: 50, credits: 52000, bonus_credits: 2000, enabled: true },
+            { key: 'pro', label: '进阶包', price_cny: 100, credits: 110000, bonus_credits: 10000, enabled: true },
+          ],
+          income: { daily_sign_in: 100, register_bonus: 1000, invite_reward: 1000 },
         }),
       },
       video: {
