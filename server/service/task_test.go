@@ -782,6 +782,83 @@ func TestTaskService_CreateManualVideoTaskAppliesUserBillingMultiplier(t *testin
 	}
 }
 
+func TestTaskService_CreateFromPlanVideoTaskRecomputesCurrentBilling(t *testing.T) {
+	repoForCredits := setupCreditTestRepo(t)
+	creditSvc := newPricedCreditService(repoForCredits)
+	svc, repo := setupTaskServiceWithCredits(t, creditSvc)
+	svc.SetVideoCatalogAndCreditMultiplier(DefaultVideoModelCatalog(), 1200)
+	creditSvc.repo = repo
+	ctx := context.Background()
+	userID := uuid.New().String()
+	multiplier := 0.5
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", OpenID: "openid-video-plan-reprice", InviteCode: "invite-" + userID, CreditsBalance: 200_000, BillingMultiplier: &multiplier}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "视频项目",
+		Status:   model.ProjectStatusActive,
+	}
+	watermark := false
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "16:9",
+		Duration:   5,
+		Watermark:  &watermark,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	staleConfig := model.VideoTaskConfig{
+		ModelKey:         "seedance-2.0-mini",
+		Model:            "doubao-seedance-2-0-mini-260615",
+		Resolution:       "720p",
+		Ratio:            "16:9",
+		Duration:         5,
+		EstimatedCredits: 2480,
+	}
+	plan := &model.Plan{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: project.ID,
+		Type:      model.PlatformVideo,
+		Status:    model.PlanStatusActive,
+		Prompt:    "生成一条咖啡杯种草视频",
+	}
+	plan.SetVideoConfig(staleConfig)
+
+	task, err := svc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("CreateFromPlan: %v", err)
+	}
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if found.VideoEstimatedCredits != 1488 || found.VideoCreditsCharged != 1488 {
+		t.Fatalf("task video credits = estimated %d charged %d, want current billing 1488", found.VideoEstimatedCredits, found.VideoCreditsCharged)
+	}
+	bal, err := creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	if bal != 200_000-1488 {
+		t.Fatalf("balance = %d, want %d", bal, 200_000-1488)
+	}
+}
+
 func TestTaskService_CreateManualVideoTaskRequiresProjectProfile(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()

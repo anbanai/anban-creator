@@ -39,6 +39,7 @@ import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 import { cn } from '@/lib/utils'
 import { parseCreationIntent } from '@/lib/command-center'
+import { taskCostFor } from '@/lib/pricing'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -162,7 +163,7 @@ export default function PlansPage() {
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
 
   // 每次执行（单次触发）的基础服务费。计划是定时单任务生成器，无 quantity；
-  // 仅强目标模式 ×3。镜像 TasksPage 的 taskCostFor，缺定价时回落默认 3600。
+  // 仅强目标模式 ×3。缺定价时回落后端默认价格。
   const { data: pricing } = useQuery({
     queryKey: ['credits', 'pricing'],
     queryFn: () => api.credits.pricing(),
@@ -173,8 +174,6 @@ export default function PlansPage() {
     queryFn: () => api.credits.balance(),
     staleTime: 30_000,
   })
-  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3600
-
   useEffect(() => {
     if (!modalOpen || watchedType !== 'video' || !watchedProjectId) {
       setDebouncedVideoEstimateInput(null)
@@ -784,7 +783,7 @@ export default function PlansPage() {
               {/* 每次执行（每次触发）的基础服务费。计划无 quantity，仅强目标 ×3。
                   模型、图片、视频等额外 MCP 操作按实际用量结算。 */}
               {(() => {
-                const cost = taskCostFor(watchedType as string)
+                const cost = taskCostFor(pricing, watchedType as string)
                 const multiplier = watchedGoalMode ? 3 : 1
                 const perRun = cost * multiplier
                 const balance = creditsBalance?.balance ?? 0

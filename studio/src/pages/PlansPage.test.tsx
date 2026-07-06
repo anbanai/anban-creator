@@ -234,4 +234,13 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(dialog).toBeInTheDocument()
     expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
   })
+
+  it('uses backend-matching fallback pricing for article plans when pricing omits task costs', async () => {
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(await within(dialog).findByText(/每次执行基础费用：4000 =/)).toBeInTheDocument()
+  })
 })

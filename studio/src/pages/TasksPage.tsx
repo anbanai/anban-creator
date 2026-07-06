@@ -49,6 +49,7 @@ import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
+import { taskCostFor } from '@/lib/pricing'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -140,8 +141,6 @@ export default function TasksPage() {
     queryKey: ['credits', 'pricing'],
     queryFn: () => api.credits.pricing(),
   })
-
-  const taskCostFor = (type: string) => pricing?.task_costs[type] ?? 3600
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema) as Resolver<CreateTaskFormValues>,
@@ -1322,7 +1321,7 @@ export default function TasksPage() {
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">05 基础费用预估</p>
               {(() => {
                 const isEcom = watchedType === 'ecommerce'
-                const cost = taskCostFor(watchedType)
+                const cost = taskCostFor(pricing, watchedType)
                 const multiplier = goalMode ? 3 : 1
                 const totalCost = isEcom ? ecommercePackageCost.total : cost * quantity * multiplier
                 const balance = creditsBalance?.balance ?? 0
@@ -1378,7 +1377,7 @@ export default function TasksPage() {
               loading={createMutation.isPending}
               disabled={(() => {
                 const isEcom = watchedType === 'ecommerce'
-                const cost = taskCostFor(watchedType)
+                const cost = taskCostFor(pricing, watchedType)
                 const multiplier = goalMode ? 3 : 1
                 const totalCost = isEcom ? ecommercePackageCost.total : cost * quantity * multiplier
                 const balance = creditsBalance?.balance ?? 0

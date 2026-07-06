@@ -355,6 +355,9 @@ func researchTopicsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	if v, ok := args["count"].(float64); ok && int(v) > 0 {
 		count = int(v)
 	}
+	if err := preflightWritingTokenBilling(ctx, userID, taskID, model.CreditTypeTopicResearch); err != nil {
+		return billingError("research topics", err), nil
+	}
 
 	logLongTextToolStart("research_topics", req)
 	defer logLongTextToolEnd("research_topics", time.Now())
@@ -391,6 +394,9 @@ func optimizeSEOHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	}
 	if title == "" {
 		return errorResult("title is required"), nil
+	}
+	if err := preflightWritingTokenBilling(ctx, userID, taskID, model.CreditTypeSEO); err != nil {
+		return billingError("optimize seo", err), nil
 	}
 
 	var keywords []string
@@ -437,6 +443,9 @@ func generateOutlineHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	template, _ := args["template"].(string)
 	style, _ := args["style"].(string)
 	taskID, _ := args["task_id"].(string)
+	if err := preflightWritingTokenBilling(ctx, userID, taskID, model.CreditTypeOutline); err != nil {
+		return billingError("generate outline", err), nil
+	}
 
 	logLongTextToolStart("generate_outline", req)
 	defer logLongTextToolEnd("generate_outline", time.Now())

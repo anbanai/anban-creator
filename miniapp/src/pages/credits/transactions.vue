@@ -202,7 +202,10 @@ function getTypeIcon(type: string): string {
     case 'task_deduct': return '任'
     case 'task_refund': return '返'
     case 'admin_grant': return '赠'
+    case 'register_bonus': return '注'
+    case 'invite_reward': return '邀'
     case 'image_gen': return '图'
+    case 'image_understanding': return '识'
     case 'image_upload': return '传'
     case 'article_write': return '文'
     case 'convert': return '转'
@@ -211,12 +214,16 @@ function getTypeIcon(type: string): string {
     case 'seo': return '势'
     case 'draft_publish': return '发'
     case 'outline': return '纲'
+    case 'viral_analysis': return '析'
+    case 'video_gen': return '视'
+    case 'video_understanding': return '理'
+    case 'poster_generation': return '海'
     default: return '分'
   }
 }
 
 function getTypeBadgeClass(type: string): string {
-  const incomeTypes = ['sign_in', 'task_refund', 'admin_grant']
+  const incomeTypes = ['sign_in', 'task_refund', 'admin_grant', 'register_bonus', 'invite_reward']
   return incomeTypes.includes(type) ? 'transaction-item__type-badge--income' : 'transaction-item__type-badge--expense'
 }
 

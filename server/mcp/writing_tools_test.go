@@ -31,15 +31,18 @@ type fakeMCPWritingLLM struct {
 	response string
 	usage    config.TokenUsage
 	prompt   string
+	calls    int
 }
 
 func (f *fakeMCPWritingLLM) Complete(_ context.Context, _, userPrompt string) (string, error) {
 	f.prompt = userPrompt
+	f.calls++
 	return f.response, nil
 }
 
 func (f *fakeMCPWritingLLM) CompleteResult(_ context.Context, _, userPrompt string) (*service.LLMResult, error) {
 	f.prompt = userPrompt
+	f.calls++
 	return &service.LLMResult{Text: f.response, Model: "kimi-k2.7-code-highspeed", Usage: f.usage}, nil
 }
 
@@ -354,7 +357,8 @@ func TestManagedUserMCPCallDeductsOperationCredits(t *testing.T) {
 	}
 	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
 	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
-	SetServices(&Services{WritingSvc: writingSvc})
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	SetServices(&Services{WritingSvc: writingSvc, TaskSvc: taskSvc})
 	SetBillingServices(creditSvc, nil, cfg)
 	SetLogger(&logger)
 	t.Cleanup(func() {
@@ -1117,7 +1121,8 @@ func TestResearchTopicsHandler_DeductsUsageCredits(t *testing.T) {
 		},
 	}
 	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
-	SetServices(&Services{WritingSvc: writingSvc})
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	SetServices(&Services{WritingSvc: writingSvc, TaskSvc: taskSvc})
 	SetBillingServices(creditSvc, nil, cfg)
 	SetLogger(&logger)
 	t.Cleanup(func() {
@@ -1174,12 +1179,13 @@ type writingUsageBillingHarness struct {
 	creditSvc *service.CreditService
 	handler   http.Handler
 	rawKey    string
+	llm       *fakeMCPWritingLLM
 	userID    string
 	projectID string
 	taskID    string
 }
 
-func setupWritingUsageBillingHarness(t *testing.T, response string, usage config.TokenUsage) *writingUsageBillingHarness {
+func setupWritingUsageBillingHarness(t *testing.T, response string, usage config.TokenUsage, balance ...int) *writingUsageBillingHarness {
 	t.Helper()
 	db := repositoryTestDB(t)
 	repo := repository.New(db)
@@ -1192,13 +1198,17 @@ func setupWritingUsageBillingHarness(t *testing.T, response string, usage config
 	projectID = strings.NewReplacer("/", "-", "_", "-").Replace(projectID)
 	taskID := "task-writing-usage-" + strings.ToLower(t.Name())
 	taskID = strings.NewReplacer("/", "-", "_", "-").Replace(taskID)
+	creditsBalance := 10_000
+	if len(balance) > 0 {
+		creditsBalance = balance[0]
+	}
 	if err := repo.Users().Create(ctx, &model.User{
 		ID:             userID,
 		Email:          userID + "@example.com",
 		Password:       "hashed",
 		InviteCode:     "invite-" + userID,
 		Tier:           model.TierFree,
-		CreditsBalance: 10_000,
+		CreditsBalance: creditsBalance,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -1248,7 +1258,8 @@ func setupWritingUsageBillingHarness(t *testing.T, response string, usage config
 		},
 	}
 	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
-	SetServices(&Services{WritingSvc: writingSvc})
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	SetServices(&Services{WritingSvc: writingSvc, TaskSvc: taskSvc})
 	SetBillingServices(creditSvc, nil, cfg)
 	SetLogger(&logger)
 	t.Cleanup(func() {
@@ -1268,6 +1279,7 @@ func setupWritingUsageBillingHarness(t *testing.T, response string, usage config
 		creditSvc: creditSvc,
 		handler:   NewMCPHandler(apiKeySvc, "", &logger),
 		rawKey:    rawKey,
+		llm:       llm,
 		userID:    userID,
 		projectID: projectID,
 		taskID:    taskID,
@@ -1347,6 +1359,113 @@ func TestGenerateOutlineHandler_DeductsUsageCredits(t *testing.T) {
 		t.Fatalf("unexpected billing error: %s", text)
 	}
 	assertWritingUsageTransaction(t, h, model.CreditTypeOutline)
+}
+
+func TestResearchTopicsHandler_PreflightsBillingBeforeCallingLLM(t *testing.T) {
+	h := setupWritingUsageBillingHarness(t, `[{"topic":"选题","angle":"角度","keywords":["效率"],"viral_score":80}]`, config.TokenUsage{
+		InputTokens:  10_000,
+		OutputTokens: 1_000,
+		TotalTokens:  11_000,
+	}, 0)
+
+	text := callMCPTool(t, h.handler, "research_topics", fmt.Sprintf(`{
+		"project_id": %q,
+		"task_id": %q,
+		"count": 1
+	}`, h.projectID, h.taskID), h.rawKey)
+	if !strings.Contains(text, "积分不足") {
+		t.Fatalf("response = %q, want insufficient credits", text)
+	}
+	if h.llm.calls != 0 {
+		t.Fatalf("LLM calls = %d, want 0 before billing passes", h.llm.calls)
+	}
+}
+
+func TestResearchTopicsHandler_ParseFailureDoesNotDeductCredits(t *testing.T) {
+	h := setupWritingUsageBillingHarness(t, `not-json`, config.TokenUsage{
+		InputTokens:  10_000,
+		OutputTokens: 1_000,
+		TotalTokens:  11_000,
+	})
+
+	text := callMCPTool(t, h.handler, "research_topics", fmt.Sprintf(`{
+		"project_id": %q,
+		"task_id": %q,
+		"count": 1
+	}`, h.projectID, h.taskID), h.rawKey)
+	if !strings.Contains(text, "parse topics response") {
+		t.Fatalf("response = %q, want parse failure", text)
+	}
+	if h.llm.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1", h.llm.calls)
+	}
+	user, err := h.repo.Users().FindByID(h.ctx, h.userID)
+	if err != nil {
+		t.Fatalf("find user: %v", err)
+	}
+	if user.CreditsBalance != 10_000 {
+		t.Fatalf("credits balance = %d, want unchanged 10000", user.CreditsBalance)
+	}
+	txs, _, err := h.creditSvc.ListTransactions(h.ctx, h.userID, 0, 10)
+	if err != nil {
+		t.Fatalf("list transactions: %v", err)
+	}
+	if len(txs) != 0 {
+		t.Fatalf("transactions = %+v, want none for failed parse", txs)
+	}
+}
+
+func TestOptimizeSEOHandler_PreflightsForeignTaskBeforeCallingLLM(t *testing.T) {
+	h := setupWritingUsageBillingHarness(t, `{"optimized_title":"SEO 标题","keywords":"效率","summary":"摘要"}`, config.TokenUsage{
+		InputTokens:  10_000,
+		OutputTokens: 1_000,
+		TotalTokens:  11_000,
+	})
+	otherUserID := h.userID + "-other"
+	foreignProjectID := h.projectID + "-other"
+	foreignTaskID := h.taskID + "-other"
+	if err := h.repo.Users().Create(h.ctx, &model.User{
+		ID:             otherUserID,
+		Email:          otherUserID + "@example.com",
+		Password:       "hashed",
+		InviteCode:     "invite-" + otherUserID,
+		CreditsBalance: 10_000,
+	}); err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	if err := h.repo.Projects().Create(h.ctx, &model.Project{
+		ID:       foreignProjectID,
+		UserID:   otherUserID,
+		Platform: model.PlatformArticle,
+		Name:     "Foreign Project",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
+	if err := h.repo.Tasks().Create(h.ctx, &model.Task{
+		ID:        foreignTaskID,
+		UserID:    otherUserID,
+		ProjectID: foreignProjectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "foreign",
+	}); err != nil {
+		t.Fatalf("create foreign task: %v", err)
+	}
+
+	text := callMCPTool(t, h.handler, "optimize_seo", fmt.Sprintf(`{
+		"project_id": %q,
+		"task_id": %q,
+		"title": "原标题",
+		"content": "正文内容",
+		"keywords": ["效率"]
+	}`, h.projectID, foreignTaskID), h.rawKey)
+	if !strings.Contains(text, "task does not belong to user") {
+		t.Fatalf("response = %q, want foreign task billing error", text)
+	}
+	if h.llm.calls != 0 {
+		t.Fatalf("LLM calls = %d, want 0 before task ownership passes", h.llm.calls)
+	}
 }
 
 // ---------------------------------------------------------------------------

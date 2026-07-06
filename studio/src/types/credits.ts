@@ -3,6 +3,8 @@ export type CreditTransactionType =
   | 'task_deduct'
   | 'task_refund'
   | 'admin_grant'
+  | 'register_bonus'
+  | 'invite_reward'
   | 'image_gen'
   | 'image_understanding'
   | 'image_upload'
@@ -91,7 +93,7 @@ export interface CreditPricing {
   // E-commerce module unit prices (key → credits per unit). A task's package
   // cost = Σ(price × quantity) over selected_modules. Absent on older servers.
   ecommerce_module_prices?: Record<string, number>
-  income: {
+  income?: {
     daily_sign_in: number
     register_bonus: number
     invite_reward: number

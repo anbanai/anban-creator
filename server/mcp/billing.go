@@ -261,6 +261,63 @@ func maybeDeductWritingTokens(ctx context.Context, userID, taskID, opType string
 	return cost.FinalCredits, nil
 }
 
+func preflightWritingTokenBilling(ctx context.Context, userID, taskID, opType string) error {
+	if billSvc == nil || billSvc.creditSvc == nil || billSvc.config == nil {
+		logBillingSkip(userID, opType, "no_credit_or_config_service")
+		return nil
+	}
+	if userID == "" || userID == "system" || isAdminCall(ctx) {
+		logBillingSkip(userID, opType, "admin_or_system")
+		return nil
+	}
+	provider, modelName, modelSource := resolveWritingBillingModel(ctx, userID)
+	if isByok(ctx, userID, opType, provider, modelName, modelSource) {
+		logBillingSkip(userID, opType, "byok")
+		return nil
+	}
+	var hasTokenPrice bool
+	provider, modelName, hasTokenPrice = resolveTokenPriceRoute(provider, modelName)
+	minRequired := 0
+	if hasTokenPrice {
+		if provider == "" || modelName == "" {
+			return fmt.Errorf("%s model route is not configured", opType)
+		}
+		tier, err := billSvc.creditSvc.GetUserTier(ctx, userID)
+		if err != nil {
+			return err
+		}
+		userMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
+		if err != nil {
+			return err
+		}
+		cost, err := billSvc.config.CalculateTokenModelCredits(provider, modelName, config.TokenUsage{InputTokens: 1, TotalTokens: 1}, string(tier), userMultiplier)
+		if err != nil {
+			return err
+		}
+		minRequired = cost.FinalCredits
+	} else {
+		cost, ok := billSvc.config.Credits.ModelCost(opType, provider, modelName)
+		if !ok || cost <= 0 {
+			logBillingSkip(userID, opType, "unpriced")
+			return nil
+		}
+		minRequired = cost
+	}
+	if taskID != "" {
+		if err := validateBillingTask(ctx, userID, taskID); err != nil {
+			return err
+		}
+	}
+	balance, err := billSvc.creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if balance < minRequired {
+		return service.ErrInsufficientCredits
+	}
+	return nil
+}
+
 func resolveTokenPriceRoute(provider, modelName string) (string, string, bool) {
 	provider = strings.TrimSpace(provider)
 	modelName = strings.TrimSpace(modelName)
@@ -348,15 +405,21 @@ func maybeDeductForResolvedModel(ctx context.Context, userID, opType, provider, 
 }
 
 func validateBillingTask(ctx context.Context, userID, taskID string) error {
-	if svcs == nil || svcs.TaskSvc == nil || taskID == "" {
+	if taskID == "" {
 		return nil
 	}
-	task, err := svcs.TaskSvc.GetByID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("validate billing task: %w", err)
+	if svcs != nil && svcs.TaskSvc != nil {
+		task, err := svcs.TaskSvc.GetByID(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("validate billing task: %w", err)
+		}
+		if task.UserID != userID {
+			return fmt.Errorf("validate billing task: task does not belong to user")
+		}
+		return nil
 	}
-	if task.UserID != userID {
-		return fmt.Errorf("validate billing task: task does not belong to user")
+	if billSvc != nil && billSvc.creditSvc != nil {
+		return billSvc.creditSvc.ValidateTaskOwnership(ctx, userID, taskID)
 	}
 	return nil
 }

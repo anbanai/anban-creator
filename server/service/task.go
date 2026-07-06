@@ -769,7 +769,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if taskType == model.PlatformVideo {
 		vc := plan.VideoConfig.Data()
 		planVideoConfig = &vc
-		if vc.EstimatedCredits <= 0 && project != nil {
+		if project != nil {
 			resolved, err := ResolveVideoGenerationPlanWithBilling(
 				videoRequestFromTaskConfig(prompt, planVideoConfig),
 				project.VideoDefaults.Data(),

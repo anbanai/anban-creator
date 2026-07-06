@@ -229,7 +229,7 @@ const creditsBalance = ref(0)
 const signedInToday = ref(false)
 const signInLoading = ref(false)
 const creditsAnimating = ref(false)
-const dailySignInCredits = ref(10)
+const dailySignInCredits = ref(100)
 
 const displayBalance = computed(() => creditsBalance.value.toLocaleString())
 

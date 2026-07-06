@@ -400,6 +400,11 @@ const inspirations = [
 
 const TARGET_PLATFORM_LABELS = ecommerceTargetPlatformOptions.map((o) => o.label)
 const LANGUAGE_LABELS = ecommerceLanguageOptions.map((o) => o.label)
+const DEFAULT_TASK_COSTS: Record<string, number> = {
+  article: 4000,
+  seednote: 3600,
+  viral_analysis: 1200,
+}
 
 const selectedProject = ref<Project | null>(null)
 const balance = ref(0)
@@ -544,9 +549,11 @@ const estimatedCost = computed(() => {
   if (!selectedProject.value) return 0
   // Ecommerce bills by module (Σ price × qty), not per-task unit cost.
   if (isEcommerce.value) return ecommerceCreditCost.value
-  if (!pricing.value?.task_costs) return 0
-  const costPerTask = pricing.value.task_costs[selectedProject.value.platform] || 500
-  return costPerTask * form.quantity
+  const costPerTask = pricing.value?.task_costs?.[selectedProject.value.platform]
+    ?? DEFAULT_TASK_COSTS[selectedProject.value.platform]
+    ?? 3600
+  const multiplier = form.goal_mode ? 3 : 1
+  return costPerTask * form.quantity * multiplier
 })
 
 const canSubmit = computed(() => {

@@ -303,10 +303,10 @@
         <view class="recharge-tiers">
           <view
             v-for="tier in rechargeTiers"
-            :key="tier.price"
+            :key="tier.key"
             class="recharge-tier"
-            :class="{ 'recharge-tier--active': selectedTier === tier.price }"
-            @tap="selectedTier = tier.price"
+            :class="{ 'recharge-tier--active': selectedTier === tier.key }"
+            @tap="selectedTier = tier.key"
           >
             <text class="recharge-tier__price">{{ tier.price }} 元</text>
             <text class="recharge-tier__credits">{{ tier.credits.toLocaleString() }} 积分</text>
@@ -450,8 +450,14 @@ const signInLoading = ref(false)
 
 const displayBalance = computed(() => balance.value.toLocaleString())
 
+const fallbackIncome = {
+  daily_sign_in: 100,
+  register_bonus: 1000,
+  invite_reward: 1000,
+}
+
 const dailySignInCredits = computed(
-  () => pricing.value?.income.daily_sign_in ?? 100,
+  () => pricing.value?.income?.daily_sign_in ?? fallbackIncome.daily_sign_in,
 )
 
 async function loadBalance() {
@@ -617,7 +623,7 @@ const textGroups = computed<TextGroup[]>(() => {
 
 const incomeRows = computed<PriceRow[]>(() => {
   if (!pricing.value) return []
-  const inc = pricing.value.income
+  const inc = { ...fallbackIncome, ...pricing.value.income }
   return withAlt([
     { label: '每日签到', value: `+${(inc.daily_sign_in ?? 0).toLocaleString()}` },
     { label: '注册奖励', value: `+${(inc.register_bonus ?? 0).toLocaleString()}` },
@@ -639,7 +645,7 @@ function toggleSection(key: keyof typeof openSections) {
 }
 
 // --- Transaction helpers ---
-const incomeTypes: CreditTransactionType[] = ['sign_in', 'task_refund', 'admin_grant']
+const incomeTypes: CreditTransactionType[] = ['sign_in', 'task_refund', 'admin_grant', 'register_bonus', 'invite_reward']
 
 function txTypeLabel(type: CreditTransactionType): string {
   return transactionTypeLabel[type] || type
@@ -651,7 +657,10 @@ function txIcon(type: CreditTransactionType): string {
     case 'task_deduct': return '任'
     case 'task_refund': return '返'
     case 'admin_grant': return '赠'
+    case 'register_bonus': return '注'
+    case 'invite_reward': return '邀'
     case 'image_gen': return '图'
+    case 'image_understanding': return '识'
     case 'image_upload': return '传'
     case 'article_write': return '文'
     case 'convert': return '转'
@@ -661,6 +670,9 @@ function txIcon(type: CreditTransactionType): string {
     case 'draft_publish': return '发'
     case 'outline': return '纲'
     case 'viral_analysis': return '析'
+    case 'video_gen': return '视'
+    case 'video_understanding': return '理'
+    case 'poster_generation': return '海'
     default: return '分'
   }
 }
@@ -678,7 +690,7 @@ function goAllTransactions() {
 
 // --- Recharge popup ---
 const showRecharge = ref(false)
-const selectedTier = ref<number | null>(null)
+const selectedTier = ref<string | null>(null)
 
 interface RechargeTier {
   key: string
@@ -695,7 +707,10 @@ const fallbackRechargeTiers: RechargeTier[] = [
 ]
 
 const rechargeTiers = computed<RechargeTier[]>(() => {
-  const tiers = pricing.value?.recharge_tiers
+  if (pricing.value?.recharge_tiers == null) {
+    return fallbackRechargeTiers
+  }
+  return pricing.value.recharge_tiers
     ?.filter((tier) => tier.enabled !== false && tier.price_cny > 0 && tier.credits > 0)
     .map((tier) => ({
       key: tier.key,
@@ -703,8 +718,7 @@ const rechargeTiers = computed<RechargeTier[]>(() => {
       price: tier.price_cny,
       credits: tier.credits,
       bonus: tier.bonus_credits,
-    }))
-  return tiers && tiers.length > 0 ? tiers : fallbackRechargeTiers
+    })) ?? []
 })
 
 function goRecharge() {

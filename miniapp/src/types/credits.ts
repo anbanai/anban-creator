@@ -3,7 +3,10 @@ export type CreditTransactionType =
   | 'task_deduct'
   | 'task_refund'
   | 'admin_grant'
+  | 'register_bonus'
+  | 'invite_reward'
   | 'image_gen'
+  | 'image_understanding'
   | 'image_upload'
   | 'article_write'
   | 'convert'
@@ -13,6 +16,9 @@ export type CreditTransactionType =
   | 'draft_publish'
   | 'outline'
   | 'viral_analysis'
+  | 'video_gen'
+  | 'video_understanding'
+  | 'poster_generation'
 
 export interface CreditBalance {
   balance: number
@@ -72,10 +78,22 @@ export interface CreditPricing {
   task_costs: Record<string, number>
   model_costs: Record<string, Record<string, number>>
   recharge_tiers?: RechargeTier[]
+  model_prices?: {
+    currency_rates?: Record<string, { to_cny: number }>
+    token_models?: Record<string, Record<string, number | string>>
+    image_generation?: Record<string, Record<string, unknown>>
+    video_generation?: Record<string, Record<string, unknown>>
+  }
+  billing?: {
+    credits_per_cny?: number
+    tier_multipliers?: Record<string, number>
+    default_user_multiplier?: number
+    minimum_charge_credits?: number
+  }
   // E-commerce module unit prices (key → credits per unit). A task's package
   // cost = Σ(price × quantity) over selected_modules. Absent on older servers.
   ecommerce_module_prices?: Record<string, number>
-  income: {
+  income?: {
     daily_sign_in: number
     register_bonus: number
     invite_reward: number

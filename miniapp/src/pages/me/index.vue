@@ -96,10 +96,10 @@
         <view class="recharge-tiers">
           <view
             v-for="tier in rechargeTiers"
-            :key="tier.price"
+            :key="tier.key"
             class="recharge-tier"
-            :class="{ 'recharge-tier--active': selectedTier === tier.price }"
-            @tap="selectedTier = tier.price"
+            :class="{ 'recharge-tier--active': selectedTier === tier.key }"
+            @tap="selectedTier = tier.key"
           >
             <text class="recharge-tier__price">{{ tier.price }}元</text>
             <text class="recharge-tier__credits">{{ tier.credits.toLocaleString() }} 积分</text>
@@ -307,7 +307,10 @@ const fallbackRechargeTiers: RechargeTier[] = [
 ]
 
 const rechargeTiers = computed<RechargeTier[]>(() => {
-  const tiers = pricing.value?.recharge_tiers
+  if (pricing.value?.recharge_tiers == null) {
+    return fallbackRechargeTiers
+  }
+  return pricing.value.recharge_tiers
     ?.filter((tier) => tier.enabled !== false && tier.price_cny > 0 && tier.credits > 0)
     .map((tier) => ({
       key: tier.key,
@@ -315,15 +318,14 @@ const rechargeTiers = computed<RechargeTier[]>(() => {
       price: tier.price_cny,
       credits: tier.credits,
       bonus: tier.bonus_credits,
-    }))
-  return tiers && tiers.length > 0 ? tiers : fallbackRechargeTiers
+    })) ?? []
 })
 
-const selectedTier = ref<number | null>(null)
+const selectedTier = ref<string | null>(null)
 
 function handleRecharge() {
   if (!selectedTier.value) return
-  const tier = rechargeTiers.value.find(t => t.price === selectedTier.value)
+  const tier = rechargeTiers.value.find(t => t.key === selectedTier.value)
   if (!tier) return
   // Recharge is handled via customer service QR code
   uni.showToast({ title: '请联系客服完成充值', icon: 'none' })

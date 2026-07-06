@@ -36,7 +36,10 @@ export const transactionTypeLabel: Record<CreditTransactionType, string> = {
   task_deduct: '任务消耗',
   task_refund: '任务退还',
   admin_grant: '管理员充值',
+  register_bonus: '注册奖励',
+  invite_reward: '邀请奖励',
   image_gen: '图片生成',
+  image_understanding: '图片理解',
   image_upload: '图片上传',
   article_write: '文章写作',
   convert: '格式转换',
@@ -46,11 +49,15 @@ export const transactionTypeLabel: Record<CreditTransactionType, string> = {
   draft_publish: '草稿发布',
   outline: '大纲生成',
   viral_analysis: '爆文拆解',
+  video_gen: '视频生成',
+  video_understanding: '视频理解',
+  poster_generation: '海报生成',
 }
 
 // 文本/图片模型操作的中文标签（计费说明表用）。key 来自 /credits/pricing.model_costs。
 export const operationLabel: Record<string, string> = {
   image_gen: 'AI 生图',
+  image_understanding: '图片理解',
   article_write: '文章写作',
   convert: '格式转换',
   humanize: '文章润色',
@@ -58,6 +65,9 @@ export const operationLabel: Record<string, string> = {
   seo: 'SEO 优化',
   outline: '大纲生成',
   viral_analysis: '爆文拆解',
+  video_gen: '视频生成',
+  video_understanding: '视频理解',
+  poster_generation: '海报生成',
 }
 
 // 电商素材模块目录（key 对齐 server credits.ecommerce_module_prices）。

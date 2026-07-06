@@ -50,6 +50,12 @@ const FALLBACK_RECHARGE_TIERS: RechargeTier[] = [
   { key: 'pro', label: '进阶包', price_cny: 100, credits: 110000, bonus_credits: 10000, enabled: true },
 ]
 
+const FALLBACK_INCOME = {
+  daily_sign_in: 100,
+  register_bonus: 1000,
+  invite_reward: 1000,
+}
+
 function transactionUsageSummary(tx: CreditTransaction): string | null {
   const metadata = tx.metadata
   if (!metadata) return null
@@ -104,14 +110,15 @@ export default function CreditsPage() {
     },
   })
 
-  const dailySignInCredits = pricing?.income.daily_sign_in ?? 1024
+  const dailySignInCredits = pricing?.income?.daily_sign_in ?? FALLBACK_INCOME.daily_sign_in
   const balance = balanceData?.balance ?? 0
   const signedInToday = signInStatusData?.signed_in_today ?? false
   const transactions = transactionsData?.items ?? []
   const total = transactionsData?.total ?? 0
   const totalPages = Math.ceil(total / PAGE_SIZE)
-  const rechargeTiers = pricing?.recharge_tiers?.filter((tier) => tier.enabled !== false && tier.price_cny > 0 && tier.credits > 0)
-  const visibleRechargeTiers = rechargeTiers && rechargeTiers.length > 0 ? rechargeTiers : FALLBACK_RECHARGE_TIERS
+  const rechargeTiers = pricing?.recharge_tiers
+    ?.filter((tier) => tier.enabled !== false && tier.price_cny > 0 && tier.credits > 0)
+  const visibleRechargeTiers = pricing?.recharge_tiers == null ? FALLBACK_RECHARGE_TIERS : (rechargeTiers ?? [])
 
   return (
     <div className="space-y-6">
@@ -283,7 +290,7 @@ export default function CreditsPage() {
 function PricingGuide({ pricing }: { pricing: CreditPricing }) {
   const taskCosts = Object.entries(pricing.task_costs)
   const modelOps = Object.entries(pricing.model_costs)
-  const income = pricing.income
+  const income = { ...FALLBACK_INCOME, ...pricing.income }
 
   const imageModels = modelOps.find(([op]) => op === 'image_gen')?.[1] ?? {}
   const imageGenerationPrices = pricing.model_prices?.image_generation ?? {}

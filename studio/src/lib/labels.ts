@@ -187,6 +187,8 @@ export const transactionTypeLabel: Record<string, string> = {
   task_deduct: '积分消耗',
   task_refund: '任务退还',
   admin_grant: '管理员充值',
+  register_bonus: '注册奖励',
+  invite_reward: '邀请奖励',
   image_gen: '图片生成',
   image_understanding: '图片理解',
   image_upload: '图片上传',

@@ -74,7 +74,7 @@ export default function DashboardPage() {
     queryFn: () => api.credits.pricing(),
   })
 
-  const dailySignInCredits = pricing?.income.daily_sign_in ?? 1024
+  const dailySignInCredits = pricing?.income?.daily_sign_in ?? 100
 
   const signInMutation = useMutation({
     mutationFn: () => api.credits.signIn(),

@@ -168,4 +168,11 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect((await screen.findAllByText('待发布确认')).length).toBeGreaterThan(0)
     expect(await screen.findByText('可发布')).toBeInTheDocument()
   })
+
+  it('uses backend-matching fallback pricing for article tasks when pricing omits task costs', async () => {
+    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
+
+    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByText(/基础费用：4000 × 1 =/)).toBeInTheDocument()
+  })
 })

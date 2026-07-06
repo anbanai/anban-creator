@@ -140,12 +140,25 @@ type qrLoginCallbackRequest struct {
 }
 
 type tokenResponse struct {
-	Token        string      `json:"token"`
-	RefreshToken string      `json:"refresh_token"`
-	ExpiresAt    int64       `json:"expires_at"`
-	User         *model.User `json:"user"`
-	HasPassword  bool        `json:"has_password"`
-	MaxInvites   int         `json:"max_invites"`
+	Token        string            `json:"token"`
+	RefreshToken string            `json:"refresh_token"`
+	ExpiresAt    int64             `json:"expires_at"`
+	User         *authUserResponse `json:"user"`
+	HasPassword  bool              `json:"has_password"`
+	MaxInvites   int               `json:"max_invites"`
+}
+
+type authUserResponse struct {
+	ID             string     `json:"id"`
+	Email          string     `json:"email"`
+	Nickname       string     `json:"nickname"`
+	Avatar         string     `json:"avatar"`
+	Tier           model.Tier `json:"tier"`
+	InviteCode     string     `json:"invite_code"`
+	InviteCount    int        `json:"invite_count"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	CreditsBalance int        `json:"credits_balance"`
 }
 
 // ---------------------------------------------------------------------------
@@ -237,11 +250,22 @@ func (h *AuthHandler) generateTokenPair(ctx any, userID string) (*tokenResponse,
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 		ExpiresAt:    expiresAt.Unix(),
-		User:         user,
 		MaxInvites:   h.maxInvitePerUser,
 	}
 	if user != nil {
 		resp.HasPassword = user.Password != ""
+		resp.User = &authUserResponse{
+			ID:             user.ID,
+			Email:          user.Email,
+			Nickname:       user.Nickname,
+			Avatar:         user.Avatar,
+			Tier:           model.ResolveTier(user.Tier),
+			InviteCode:     user.InviteCode,
+			InviteCount:    user.InviteCount,
+			CreatedAt:      user.CreatedAt,
+			UpdatedAt:      user.UpdatedAt,
+			CreditsBalance: user.CreditsBalance,
+		}
 	}
 	return resp, nil
 }

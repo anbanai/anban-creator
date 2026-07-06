@@ -38,6 +38,41 @@ vi.mock('@/lib/api', async () => {
 describe('ProjectsPage deletion feedback', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(api.projects.list).mockResolvedValue([{
+      id: 'ch-1',
+      user_id: '1',
+      platform: 'article',
+      name: '测试项目',
+      avatar_url: '',
+      profile_url: 'https://mp.weixin.qq.com/test',
+      instructions: '测试定位',
+      keywords: '测试',
+      visual_style: '',
+      writer: '',
+      theme: '',
+      author: '作者',
+      template_id: '',
+      reference_image_url: '',
+      image_ratio: '16:9',
+      max_concurrent_tasks: 2,
+      config: { wechat_app_id: 'wx123' },
+      status: 'active',
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-01T00:00:00Z',
+    }])
+    vi.mocked(api.projects.stats).mockResolvedValue({
+      'ch-1': {
+        total_tasks: 0,
+        completed_tasks: 0,
+        failed_tasks: 0,
+        running_tasks: 0,
+        pending_tasks: 0,
+        success_rate: 0,
+        last_activity_at: '',
+      },
+    })
+    vi.mocked(api.projects.platformConfigs).mockResolvedValue([])
+    vi.mocked(api.projects.delete).mockReset()
     window.history.pushState({}, '', '/projects')
   })
 

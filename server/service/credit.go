@@ -124,6 +124,20 @@ func (s *CreditService) GetUserBillingMultiplier(ctx context.Context, userID str
 	return *user.BillingMultiplier, nil
 }
 
+func (s *CreditService) ValidateTaskOwnership(ctx context.Context, userID, taskID string) error {
+	if taskID == "" {
+		return nil
+	}
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("validate billing task: %w", err)
+	}
+	if task.UserID != userID {
+		return fmt.Errorf("validate billing task: task does not belong to user")
+	}
+	return nil
+}
+
 // GetSignInStatus returns whether the user has signed in today.
 func (s *CreditService) GetSignInStatus(ctx context.Context, userID string) (bool, error) {
 	_, err := s.repo.Credits().FindTodaySignIn(ctx, userID)
