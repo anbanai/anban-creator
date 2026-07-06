@@ -43,7 +43,7 @@ func TestSeednoteFinalTitleOwnership(t *testing.T) {
 	}
 	hooks := string(hooksRaw)
 	for _, want := range []string{
-		`"matcher": "seednote"`,
+		`"matcher": "anban:seednote"`,
 		"finalize_task_title",
 		"submit_agent_feedback",
 	} {

@@ -181,7 +181,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 	}
 	hooks := string(hooksRaw)
 	for _, want := range []string{
-		`"matcher": "live-slicer"`,
+		`"matcher": "anban:live-slicer"`,
 		"output/live-slice/",
 		"clip-manifest.json",
 		"clip_results.json",
