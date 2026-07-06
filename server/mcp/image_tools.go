@@ -476,6 +476,9 @@ func runImageVerification(ctx context.Context, userID, taskID string, result *se
 	if svcs.WritingSvc == nil {
 		return nil, fmt.Errorf("writing service unavailable")
 	}
+	if err := preflightUnderstandingTokenBilling(ctx, userID, taskID, model.CreditTypeImageUnderstanding); err != nil {
+		return nil, fmt.Errorf("bill image understanding: %w", err)
+	}
 
 	var imageSource string
 	// Prefer the saved file_path (cheaper, no re-download). Fall back to the
@@ -749,6 +752,12 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	imageURL, _ := args["image_url"].(string)
 	filePath, _ := args["file_path"].(string)
 	taskID, _ := args["task_id"].(string)
+	if imageURL == "" && filePath == "" {
+		return errorResult("either image_url or file_path is required"), nil
+	}
+	if err := preflightUnderstandingTokenBilling(ctx, userID, taskID, model.CreditTypeImageUnderstanding); err != nil {
+		return billingError("analyze image", err), nil
+	}
 
 	var imageSource string
 
@@ -782,8 +791,6 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 			return errorResult("downloaded file is not an image"), nil
 		}
 		imageSource = fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
-	} else {
-		return errorResult("either image_url or file_path is required"), nil
 	}
 
 	result, err := svcs.WritingSvc.AnalyzeImageDetailed(ctx, userID, imageSource, prompt)

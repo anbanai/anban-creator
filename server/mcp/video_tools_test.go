@@ -565,6 +565,93 @@ func TestAnalyzeVideoReferenceChargesTokenUsageAndStoresMetadata(t *testing.T) {
 	}
 }
 
+func TestAnalyzeVideoReferencePreflightsForeignTaskBeforeCallingVision(t *testing.T) {
+	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/tasks/video-understanding.json"}
+	ctx, repo, _, projectID := setupMCPVideoProjectWithServices(t, store)
+	userID := uuid.NewString()
+	otherUserID := uuid.NewString()
+	for _, user := range []*model.User{
+		{
+			ID:             userID,
+			Email:          userID + "@example.com",
+			Password:       "hashed",
+			Tier:           model.TierFree,
+			InviteCode:     strings.ToUpper(userID[:8]),
+			CreditsBalance: 10_000,
+		},
+		{
+			ID:             otherUserID,
+			Email:          otherUserID + "@example.com",
+			Password:       "hashed",
+			Tier:           model.TierFree,
+			InviteCode:     strings.ToUpper(otherUserID[:8]),
+			CreditsBalance: 10_000,
+		},
+	} {
+		if err := repo.Users().Create(ctx, user); err != nil {
+			t.Fatalf("create user %s: %v", user.ID, err)
+		}
+	}
+	ctx = withMCPUserID(ctx, userID)
+	foreignTaskID := createMCPVideoTask(t, repo, otherUserID, projectID)
+	vision := &fakeVideoVisionLLM{
+		model: "kimi-k2.7-code-highspeed",
+		usage: config.TokenUsage{
+			InputTokens:  100,
+			OutputTokens: 100,
+			TotalTokens:  200,
+		},
+	}
+	logger := zerolog.New(io.Discard)
+	writingSvc := service.NewWritingService(repo, nil, "", time.Minute, &logger)
+	writingSvc.SetVideoUnderstandingClient(vision)
+	svcs.WritingSvc = writingSvc
+	SetBillingServices(service.NewCreditService(repo, &config.CreditsConfig{}, &logger), nil, &config.Config{
+		VideoUnderstanding: config.VideoUnderstandingRuntimeConfig{
+			UnderstandingRuntimeConfig: config.UnderstandingRuntimeConfig{
+				ProviderKey: "moonshot",
+				Model:       "kimi-k2.7-code-highspeed",
+			},
+		},
+		ModelPrices: config.ModelPricesConfig{
+			TokenModels: map[string]config.TokenModelPrice{
+				"moonshot/kimi-k2.7-code-highspeed": {
+					Currency: "CNY",
+					Unit:     1_000,
+					Input:    config.FlexibleFloat(1),
+					Output:   config.FlexibleFloat(1),
+				},
+			},
+		},
+		Billing: config.BillingConfig{
+			CreditsPerCNY:         1000,
+			TierMultipliers:       map[string]float64{"free": 1},
+			DefaultUserMultiplier: 1.0,
+			MinimumChargeCredits:  1,
+		},
+	})
+
+	result, err := analyzeVideoReferenceHandler(ctx, &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(foreignTaskID) + `,
+			"video_url":"https://cdn.example.com/ref.mp4"
+		}`)},
+	})
+	if err != nil {
+		t.Fatalf("analyzeVideoReferenceHandler returned error: %v", err)
+	}
+	if result == nil || !result.IsError {
+		t.Fatalf("expected tool error for foreign task, got %#v", result)
+	}
+	if !strings.Contains(callToolText(result), "task does not belong to user") {
+		t.Fatalf("response = %q, want foreign task ownership error", callToolText(result))
+	}
+	if len(vision.calls) != 0 {
+		t.Fatalf("vision calls = %d, want 0 before task ownership passes", len(vision.calls))
+	}
+}
+
 func TestAnalyzeVideoReferenceFailsFastWithoutSampledFrames(t *testing.T) {
 	ctx, _, _, projectID := setupMCPVideoProject(t)
 	vision := &fakeVideoVisionLLM{errors: []error{errors.New("native video URL unsupported")}}

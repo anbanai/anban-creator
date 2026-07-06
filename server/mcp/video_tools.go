@@ -257,8 +257,11 @@ func analyzeVideoReferenceHandler(ctx context.Context, req *mcp.CallToolRequest)
 	if err := service.ValidatePublicHTTPSURLForVideoReference(videoURL); err != nil {
 		return errorResult(err.Error()), nil
 	}
-	prompt := buildVideoUnderstandingPrompt(referenceRole, purposeHint, analysisPrompt)
 	userID := getUserID(ctx)
+	if err := preflightUnderstandingTokenBilling(ctx, userID, taskID, model.CreditTypeVideoUnderstanding); err != nil {
+		return billingError("analyze video reference", err), nil
+	}
+	prompt := buildVideoUnderstandingPrompt(referenceRole, purposeHint, analysisPrompt)
 	analysis, err := svcs.WritingSvc.AnalyzeVideoURLDetailed(ctx, userID, videoURL, prompt)
 	analysisMode := "native_video"
 	metadata := map[string]any{"source_url": videoURL}

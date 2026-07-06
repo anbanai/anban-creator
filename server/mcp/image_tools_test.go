@@ -583,3 +583,140 @@ func TestRunImageVerificationAssociatesUnderstandingChargeWithTask(t *testing.T)
 		t.Fatalf("transaction task_id = %v, want %s", txs[0].TaskID, taskID)
 	}
 }
+
+func TestAnalyzeImagePreflightsForeignTaskBeforeCallingVision(t *testing.T) {
+	oldSvcs := svcs
+	oldBillSvc := billSvc
+	t.Cleanup(func() {
+		svcs = oldSvcs
+		billSvc = oldBillSvc
+	})
+
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+
+	userID := "user-analyze-preflight"
+	projectID := "project-analyze-preflight"
+	otherUserID := userID + "-other"
+	foreignProjectID := projectID + "-other"
+	foreignTaskID := "task-analyze-preflight-other"
+	for _, user := range []*model.User{
+		{
+			ID:             userID,
+			Email:          userID + "@example.com",
+			Password:       "hashed",
+			InviteCode:     "invite-" + userID,
+			Tier:           model.TierFree,
+			CreditsBalance: 10_000,
+		},
+		{
+			ID:             otherUserID,
+			Email:          otherUserID + "@example.com",
+			Password:       "hashed",
+			InviteCode:     "invite-" + otherUserID,
+			Tier:           model.TierFree,
+			CreditsBalance: 10_000,
+		},
+	} {
+		if err := repo.Users().Create(ctx, user); err != nil {
+			t.Fatalf("create user %s: %v", user.ID, err)
+		}
+	}
+	for _, project := range []*model.Project{
+		{
+			ID:       projectID,
+			UserID:   userID,
+			Platform: model.PlatformArticle,
+			Name:     "Analyze Project",
+			Status:   model.ProjectStatusActive,
+		},
+		{
+			ID:       foreignProjectID,
+			UserID:   otherUserID,
+			Platform: model.PlatformArticle,
+			Name:     "Foreign Project",
+			Status:   model.ProjectStatusActive,
+		},
+	} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatalf("create project %s: %v", project.ID, err)
+		}
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        foreignTaskID,
+		UserID:    otherUserID,
+		ProjectID: foreignProjectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "foreign task",
+	}); err != nil {
+		t.Fatalf("create foreign task: %v", err)
+	}
+
+	cfg := &srvconfig.Config{
+		ImageUnderstanding: srvconfig.UnderstandingRuntimeConfig{
+			ProviderKey: "moonshot",
+			Model:       "kimi-k2.7-code-highspeed",
+		},
+		Billing: srvconfig.BillingConfig{
+			CreditsPerCNY:         1000,
+			TierMultipliers:       map[string]float64{"free": 1},
+			DefaultUserMultiplier: 1,
+			MinimumChargeCredits:  1,
+		},
+		ModelPrices: srvconfig.ModelPricesConfig{
+			TokenModels: map[string]srvconfig.TokenModelPrice{
+				"moonshot/kimi-k2.7-code-highspeed": {
+					Currency: "CNY",
+					Unit:     1_000,
+					Input:    srvconfig.FlexibleFloat(1),
+					Output:   srvconfig.FlexibleFloat(1),
+				},
+			},
+		},
+	}
+	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
+	visionClient := &fakeMCPWritingLLM{
+		response: `{"overall_pass":true}`,
+		usage: srvconfig.TokenUsage{
+			InputTokens:  100,
+			OutputTokens: 100,
+			TotalTokens:  200,
+		},
+	}
+	writingSvc := service.NewWritingService(repo, nil, "", 0, &logger)
+	writingSvc.SetImageUnderstandingClient(visionClient)
+	svcs = &Services{
+		WritingSvc: writingSvc,
+		TaskSvc:    service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil),
+	}
+	billSvc = &billingServices{creditSvc: creditSvc, config: cfg}
+
+	imagePath := filepath.Join(t.TempDir(), "analyze.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+
+	res, err := analyzeImageHandler(withMCPUserID(ctx, userID), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(fmt.Sprintf(`{
+			"project_id": %q,
+			"task_id": %q,
+			"file_path": %q,
+			"prompt": "verify"
+		}`, projectID, foreignTaskID, imagePath))},
+	})
+	if err != nil {
+		t.Fatalf("analyzeImageHandler returned error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected tool error for foreign task, got %#v", res)
+	}
+	if !strings.Contains(callToolText(res), "task does not belong to user") {
+		t.Fatalf("response = %q, want foreign task ownership error", callToolText(res))
+	}
+	if visionClient.calls != 0 {
+		t.Fatalf("vision calls = %d, want 0 before task ownership passes", visionClient.calls)
+	}
+}

@@ -67,19 +67,9 @@ func maybeDeductUnderstandingTokens(ctx context.Context, userID, taskID, opType 
 		logBillingSkip(userID, opType, "admin_or_system")
 		return 0, nil
 	}
-	var provider, modelName string
-	switch opType {
-	case model.CreditTypeImageUnderstanding:
-		provider = billSvc.config.ImageUnderstanding.ProviderKey
-		modelName = billSvc.config.ImageUnderstanding.Model
-	case model.CreditTypeVideoUnderstanding:
-		provider = billSvc.config.VideoUnderstanding.ProviderKey
-		modelName = billSvc.config.VideoUnderstanding.Model
-	default:
-		return 0, fmt.Errorf("unsupported understanding op type %s", opType)
-	}
-	if provider == "" || modelName == "" {
-		return 0, fmt.Errorf("%s model route is not configured", opType)
+	provider, modelName, err := understandingBillingRoute(opType)
+	if err != nil {
+		return 0, err
 	}
 	tier, err := billSvc.creditSvc.GetUserTier(ctx, userID)
 	if err != nil {
@@ -122,6 +112,64 @@ func maybeDeductUnderstandingTokens(ctx context.Context, userID, taskID, opType 
 		return 0, err
 	}
 	return cost.FinalCredits, nil
+}
+
+func preflightUnderstandingTokenBilling(ctx context.Context, userID, taskID, opType string) error {
+	if billSvc == nil || billSvc.creditSvc == nil || billSvc.config == nil {
+		logBillingSkip(userID, opType, "no_credit_or_config_service")
+		return nil
+	}
+	if userID == "" || userID == "system" || isAdminCall(ctx) {
+		logBillingSkip(userID, opType, "admin_or_system")
+		return nil
+	}
+	provider, modelName, err := understandingBillingRoute(opType)
+	if err != nil {
+		return err
+	}
+	if taskID != "" {
+		if err := validateBillingTask(ctx, userID, taskID); err != nil {
+			return err
+		}
+	}
+	tier, err := billSvc.creditSvc.GetUserTier(ctx, userID)
+	if err != nil {
+		return err
+	}
+	userMultiplier, err := billSvc.creditSvc.GetUserBillingMultiplier(ctx, userID)
+	if err != nil {
+		return err
+	}
+	cost, err := billSvc.config.CalculateTokenModelCredits(provider, modelName, config.TokenUsage{InputTokens: 1, TotalTokens: 1}, string(tier), userMultiplier)
+	if err != nil {
+		return err
+	}
+	balance, err := billSvc.creditSvc.GetBalance(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if balance < cost.FinalCredits {
+		return service.ErrInsufficientCredits
+	}
+	return nil
+}
+
+func understandingBillingRoute(opType string) (string, string, error) {
+	var provider, modelName string
+	switch opType {
+	case model.CreditTypeImageUnderstanding:
+		provider = billSvc.config.ImageUnderstanding.ProviderKey
+		modelName = billSvc.config.ImageUnderstanding.Model
+	case model.CreditTypeVideoUnderstanding:
+		provider = billSvc.config.VideoUnderstanding.ProviderKey
+		modelName = billSvc.config.VideoUnderstanding.Model
+	default:
+		return "", "", fmt.Errorf("unsupported understanding op type %s", opType)
+	}
+	if provider == "" || modelName == "" {
+		return "", "", fmt.Errorf("%s model route is not configured", opType)
+	}
+	return provider, modelName, nil
 }
 
 func maybeDeductImageGenerationUsage(ctx context.Context, userID, taskID, route, provider, modelName string, usage config.ImageGenerationUsage) (int, error) {
