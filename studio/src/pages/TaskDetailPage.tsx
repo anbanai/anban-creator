@@ -31,6 +31,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { taskStatusLabel, contentTypeLabel, formatFullDateTimeCN, statusBadgeVariant, progressStageLabel, transactionTypeLabel } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { videoCreativeTypeLabel, videoModelDisplayName, videoPurposeLabel } from '@/lib/video-display'
+import { formatCreditDescription } from '@/lib/credit-display'
 
 interface ResumeFileInput {
   id: string
@@ -781,11 +782,11 @@ export default function TaskDetailPage() {
           <Card size="sm" className="bg-card/70">
             <CardContent className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs text-muted-foreground">消耗积分</p>
+                <p className="text-xs text-muted-foreground">积分消耗</p>
                 <p className="mt-1 text-sm font-medium text-foreground">{netConsumedCredits.toLocaleString()}</p>
               </div>
               <Button size="sm" variant="ghost" onClick={() => setShowCreditDialog(true)}>
-                查看积分明细
+                明细
               </Button>
             </CardContent>
           </Card>
@@ -797,59 +798,59 @@ export default function TaskDetailPage() {
           <DialogContent className="sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle>积分明细</DialogTitle>
-              <DialogDescription>本任务累计消耗、退还与交易记录。</DialogDescription>
+              <DialogDescription>本任务累计积分消耗、退还与净消耗。</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-4">
-              <div>
-                <p className="text-xs text-muted-foreground">任务消耗</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{taskConsumedCredits.toLocaleString()}</p>
+              <div className="grid gap-3 sm:grid-cols-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">积分消耗</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{taskConsumedCredits.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">操作消耗</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{operationConsumedCredits.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">退还积分</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{refundedCredits.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">净消耗</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{netConsumedCredits.toLocaleString()}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">操作消耗</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{operationConsumedCredits.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">退还积分</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{refundedCredits.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">净消耗</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{netConsumedCredits.toLocaleString()}</p>
-              </div>
-            </div>
-            {creditTransactions.length > 0 && (
-              <div className="overflow-x-auto border-t border-border pt-3">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-muted-foreground">
-                      <th className="py-2 pr-3 font-medium">类型</th>
-                      <th className="py-2 pr-3 font-medium">数额</th>
-                      <th className="py-2 pr-3 font-medium">余额</th>
-                      <th className="py-2 pr-3 font-medium">描述</th>
-                      <th className="py-2 font-medium">时间</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {creditTransactions.map((tx) => (
-                      <tr key={tx.id} className="border-t border-border">
-                        <td className="py-2 pr-3">
-                          <Badge variant={tx.amount < 0 ? 'destructive' : 'secondary'}>
-                            {transactionTypeLabel[tx.type] || tx.type}
-                          </Badge>
-                        </td>
-                        <td className={`py-2 pr-3 font-medium ${tx.amount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
-                        </td>
-                        <td className="py-2 pr-3 text-muted-foreground">{tx.balance_after.toLocaleString()}</td>
-                        <td className="max-w-[260px] truncate py-2 pr-3 text-muted-foreground">{tx.description}</td>
-                        <td className="whitespace-nowrap py-2 text-xs text-muted-foreground">{formatFullDateTimeCN(tx.created_at)}</td>
+              {creditTransactions.length > 0 && (
+                <div className="overflow-x-auto border-t border-border pt-3">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-muted-foreground">
+                        <th className="py-2 pr-3 font-medium">类型</th>
+                        <th className="py-2 pr-3 font-medium">数额</th>
+                        <th className="py-2 pr-3 font-medium">余额</th>
+                        <th className="py-2 pr-3 font-medium">描述</th>
+                        <th className="py-2 font-medium">时间</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody>
+                      {creditTransactions.map((tx) => (
+                        <tr key={tx.id} className="border-t border-border">
+                          <td className="py-2 pr-3">
+                            <Badge variant={tx.amount < 0 ? 'destructive' : 'secondary'}>
+                              {transactionTypeLabel[tx.type] || tx.type}
+                            </Badge>
+                          </td>
+                          <td className={`py-2 pr-3 font-medium ${tx.amount > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                          </td>
+                          <td className="py-2 pr-3 text-muted-foreground">{tx.balance_after.toLocaleString()}</td>
+                          <td className="max-w-[260px] truncate py-2 pr-3 text-muted-foreground">{formatCreditDescription(tx)}</td>
+                          <td className="whitespace-nowrap py-2 text-xs text-muted-foreground">{formatFullDateTimeCN(tx.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </DialogContent>
         </Dialog>
@@ -940,7 +941,7 @@ export default function TaskDetailPage() {
                   <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || task.video_config.estimated_credits || 0).toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">已消耗积分</p>
+                  <p className="text-xs text-muted-foreground">积分消耗</p>
                   <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || 0).toLocaleString()}</p>
                 </div>
               </div>
@@ -996,7 +997,7 @@ export default function TaskDetailPage() {
                 <p className="mt-1 text-sm text-foreground">{(task.video_estimated_credits || task.video_config?.estimated_credits || 0).toLocaleString()}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">已消耗积分</p>
+                <p className="text-xs text-muted-foreground">积分消耗</p>
                 <p className="mt-1 text-sm text-foreground">{(task.video_credits_charged || task.credits_charged || 0).toLocaleString()}</p>
               </div>
             </div>
@@ -1400,7 +1401,7 @@ export default function TaskDetailPage() {
             <AlertDialogTitle>确定取消此任务？</AlertDialogTitle>
             <AlertDialogDescription>
               {task.status === 'pending' ? (
-                <>此任务尚未开始执行，取消后将<strong className="text-foreground">全额退还已消耗积分</strong>，不会产生任何费用。{' '}</>
+                <>此任务尚未开始执行，取消后将<strong className="text-foreground">全额退还已扣除积分</strong>，不会产生任何费用。{' '}</>
               ) : (
                 <>
                   任务正在执行中，取消后将立即停止未完成的步骤。

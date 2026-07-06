@@ -184,7 +184,7 @@ export const timelineItemTypeLabel: Record<string, string> = {
 
 export const transactionTypeLabel: Record<string, string> = {
   sign_in: '签到',
-  task_deduct: '任务消耗',
+  task_deduct: '积分消耗',
   task_refund: '任务退还',
   admin_grant: '管理员充值',
   image_gen: '图片生成',

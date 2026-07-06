@@ -100,6 +100,13 @@ func TestDeductForTaskWithAmount_SuccessAndRefund(t *testing.T) {
 	if bal != starting-amount {
 		t.Errorf("balance after deduct = %d, want %d", bal, starting-amount)
 	}
+	tx, err := repo.Credits().FindDeductionByTaskID(context.Background(), "ecom-task-A")
+	if err != nil {
+		t.Fatalf("find ecommerce deduction: %v", err)
+	}
+	if tx.Description != "生成电商出图扣除积分4500" {
+		t.Fatalf("description = %q, want friendly ecommerce package deduction", tx.Description)
+	}
 
 	// RefundForTask is amount-agnostic — it looks up the deduction by task_id and
 	// refunds -deduction.Amount, so the same code refunds a fixed-cost task and a

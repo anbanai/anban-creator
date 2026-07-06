@@ -103,6 +103,92 @@ func TestDeductForOperationStoresTaskIDAndLongOperationID(t *testing.T) {
 	}
 }
 
+func TestDeductForTaskUsesFriendlyDescription(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 10_000)
+	taskID := uuid.New().String()
+	svc := newTestCreditService(repo)
+
+	if _, err := svc.DeductForTask(ctx, userID, "seednote", taskID); err != nil {
+		t.Fatalf("deduct task: %v", err)
+	}
+
+	tx, err := repo.Credits().FindDeductionByTaskID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("find deduction by task id: %v", err)
+	}
+	if tx.Description != "生成种草笔记扣除积分3200" {
+		t.Fatalf("description = %q, want friendly seednote deduction", tx.Description)
+	}
+}
+
+func TestDeductForTaskWithMultiplierUsesFriendlyDescription(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 20_000)
+	taskID := uuid.New().String()
+	svc := newTestCreditService(repo)
+
+	if _, err := svc.DeductForTask(ctx, userID, "seednote", taskID, 3); err != nil {
+		t.Fatalf("deduct goal task: %v", err)
+	}
+
+	tx, err := repo.Credits().FindDeductionByTaskID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("find deduction by task id: %v", err)
+	}
+	if tx.Description != "生成种草笔记（强目标 x3）扣除积分9600" {
+		t.Fatalf("description = %q, want friendly goal-mode deduction", tx.Description)
+	}
+}
+
+func TestDeductBatchUsesFriendlyDescriptionPerTask(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 20_000)
+	taskIDs := []string{uuid.New().String(), uuid.New().String()}
+	svc := newTestCreditService(repo)
+
+	if err := svc.DeductBatch(ctx, userID, "article", 8000, taskIDs); err != nil {
+		t.Fatalf("deduct batch: %v", err)
+	}
+
+	for _, taskID := range taskIDs {
+		txs, err := repo.Credits().FindByTaskIDAndUserID(ctx, taskID, userID)
+		if err != nil {
+			t.Fatalf("find transactions for task %s: %v", taskID, err)
+		}
+		if len(txs) != 1 {
+			t.Fatalf("transactions len for task %s = %d, want 1", taskID, len(txs))
+		}
+		if txs[0].Description != "生成公众号文章扣除积分4000" {
+			t.Fatalf("description = %q, want friendly article deduction", txs[0].Description)
+		}
+	}
+}
+
+func TestDeductForOperationUsesFriendlyDescription(t *testing.T) {
+	repo := setupCreditTestRepo(t)
+	ctx := context.Background()
+	userID := createCreditTestUser(t, repo, 1000)
+	taskID := uuid.New().String()
+	operationID := "image_gen:" + taskID
+	svc := newTestCreditService(repo)
+
+	if _, err := svc.DeductForOperation(ctx, userID, model.CreditTypeImageGen, 80, operationID, taskID); err != nil {
+		t.Fatalf("deduct operation: %v", err)
+	}
+
+	tx, err := repo.Credits().FindDeductionByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatalf("find deduction by operation id: %v", err)
+	}
+	if tx.Description != "AI 生图扣除积分80" {
+		t.Fatalf("description = %q, want friendly image generation deduction", tx.Description)
+	}
+}
+
 func TestDeductForOperationWithMetadataStoresTokenCostSnapshot(t *testing.T) {
 	repo := setupCreditTestRepo(t)
 	ctx := context.Background()

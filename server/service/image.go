@@ -216,14 +216,20 @@ func resolveAppImageAPI(appCfg *appconfig.Config, platform, imageType string) *a
 }
 
 // buildProcessor creates a new image.Processor for the given project and image type.
-// imageModelKey (optional) routes through ResolveImageConfigForKey so that per-task
+// imageModelKey (optional) routes through ResolveImageConfigForTaskKey so that per-task
 // model selection takes effect: empty = server default / user override;
 // "custom" = user override; preset key = system-managed preset.
 func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, imageType, imageModelKey string) (*image.Processor, error) {
 	// Resolve the effective image config: per-task key → user override → server default.
 	effectiveCfg := s.imageCfg
+	if imageModelKey != "" && s.modelConfigSvc == nil {
+		return nil, fmt.Errorf("image model resolver is not available")
+	}
 	if s.modelConfigSvc != nil && imageModelKey != "" {
-		resolved, source := s.modelConfigSvc.ResolveImageConfigForKey(ctx, ch.UserID, imageModelKey)
+		resolved, source, err := s.modelConfigSvc.ResolveImageConfigForTaskKey(ctx, ch.UserID, imageModelKey)
+		if err != nil {
+			return nil, err
+		}
 		if resolved != nil {
 			s.logger.Info().
 				Str("user_id", ch.UserID).

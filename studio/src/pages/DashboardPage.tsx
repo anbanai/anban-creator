@@ -212,7 +212,7 @@ export default function DashboardPage() {
             </Button>
           </div>
           <Link to="/credits" className="mt-2 block text-right text-sm text-muted-foreground hover:text-primary">
-            查看明细 &rarr;
+            明细 &rarr;
           </Link>
         </CardContent>
       </Card>

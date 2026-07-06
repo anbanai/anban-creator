@@ -36,6 +36,66 @@ func NewCreditService(repo repository.Repository, cfg *config.CreditsConfig, log
 	return &CreditService{repo: repo, cfg: cfg, logger: logger}
 }
 
+func creditTaskLabel(taskType string) string {
+	switch taskType {
+	case model.ScopeSeednote:
+		return "种草笔记"
+	case model.ScopeArticle:
+		return "公众号文章"
+	case model.ScopeEcommerce:
+		return "电商出图"
+	case model.ScopeVideo:
+		return "视频生成"
+	case model.CreditTypeViralAnalysis:
+		return "爆文拆解"
+	default:
+		return taskType
+	}
+}
+
+func creditOperationLabel(opType string) string {
+	switch opType {
+	case model.CreditTypeImageGen:
+		return "AI 生图"
+	case model.CreditTypeImageUnderstanding:
+		return "图片理解"
+	case model.CreditTypeArticleWrite:
+		return "文章写作"
+	case model.CreditTypeConvert:
+		return "格式转换"
+	case model.CreditTypeHumanize:
+		return "文章润色"
+	case model.CreditTypeTopicResearch:
+		return "选题研究"
+	case model.CreditTypeSEO:
+		return "SEO 优化"
+	case model.CreditTypeOutline:
+		return "大纲生成"
+	case model.CreditTypeVideoGen:
+		return "视频生成"
+	case model.CreditTypeVideoUnderstanding:
+		return "视频理解"
+	case model.CreditTypePosterGeneration:
+		return "海报生成"
+	case model.CreditTypeViralAnalysis:
+		return "爆文拆解"
+	default:
+		return opType
+	}
+}
+
+func creditTaskDeductDescription(taskType string, amount int, multiplier int) string {
+	label := creditTaskLabel(taskType)
+	if multiplier > 1 {
+		return fmt.Sprintf("生成%s（强目标 x%d）扣除积分%d", label, multiplier, amount)
+	}
+	return fmt.Sprintf("生成%s扣除积分%d", label, amount)
+}
+
+func creditOperationDeductDescription(opType string, amount int) string {
+	return fmt.Sprintf("%s扣除积分%d", creditOperationLabel(opType), amount)
+}
+
 // GetBalance returns the current credit balance for a user.
 func (s *CreditService) GetBalance(ctx context.Context, userID string) (int, error) {
 	user, err := s.repo.Users().FindByID(ctx, userID)
@@ -216,17 +276,13 @@ func (s *CreditService) DeductForTask(ctx context.Context, userID, taskType, tas
 		}
 
 		taskIDCopy := taskID
-		desc := fmt.Sprintf("任务扣费 (%s) -%d", taskType, totalCost)
-		if m > 1 {
-			desc = fmt.Sprintf("强目标任务扣费 (%s, ×%d) -%d", taskType, m, totalCost)
-		}
 		tx := &model.CreditTransaction{
 			UserID:       userID,
 			Type:         model.CreditTypeTaskDeduct,
 			Amount:       -totalCost,
 			BalanceAfter: newBalance,
 			TaskID:       &taskIDCopy,
-			Description:  desc,
+			Description:  creditTaskDeductDescription(taskType, totalCost, m),
 		}
 		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 			return fmt.Errorf("create deduction transaction: %w", err)
@@ -321,7 +377,7 @@ func (s *CreditService) DeductBatch(ctx context.Context, userID, taskType string
 				Amount:       -costPerTask,
 				BalanceAfter: newBalance,
 				TaskID:       &taskIDCopy,
-				Description:  fmt.Sprintf("任务扣费 (%s) -%d", taskType, costPerTask),
+				Description:  creditTaskDeductDescription(taskType, costPerTask, 1),
 			}
 			if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 				return fmt.Errorf("create deduction transaction: %w", err)
@@ -368,7 +424,7 @@ func (s *CreditService) DeductBatchWithMultiplier(ctx context.Context, userID, t
 				Amount:       -costPerTask,
 				BalanceAfter: newBalance,
 				TaskID:       &taskIDCopy,
-				Description:  fmt.Sprintf("强目标任务扣费 (%s, ×%d) -%d", taskType, multiplier, costPerTask),
+				Description:  creditTaskDeductDescription(taskType, costPerTask, multiplier),
 			}
 			if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 				return fmt.Errorf("create deduction transaction: %w", err)
@@ -437,7 +493,7 @@ func (s *CreditService) deductForOperation(ctx context.Context, userID, opType s
 			Type:         opType,
 			Amount:       -totalCost,
 			BalanceAfter: newBalance,
-			Description:  fmt.Sprintf("操作扣费 (%s) -%d", opType, totalCost),
+			Description:  creditOperationDeductDescription(opType, totalCost),
 			Metadata:     metadataJSON,
 		}
 		if len(operationID) > 0 && operationID[0] != "" {
@@ -590,7 +646,7 @@ func (s *CreditService) DeductForTaskWithAmount(ctx context.Context, userID, tas
 			Amount:       -amount,
 			BalanceAfter: newBalance,
 			TaskID:       &taskIDCopy,
-			Description:  fmt.Sprintf("套餐扣费 (%s) -%d", taskType, amount),
+			Description:  creditTaskDeductDescription(taskType, amount, 1),
 		}
 		if err := txRepo.Credits().CreateTransaction(ctx, tx); err != nil {
 			return fmt.Errorf("create deduction transaction: %w", err)

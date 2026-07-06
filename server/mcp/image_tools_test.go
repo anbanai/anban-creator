@@ -10,11 +10,57 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	appconfig "github.com/anbanai/anban-creator/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 )
+
+func TestGenerateImageSchemaDoesNotExposeModelSelection(t *testing.T) {
+	schema := generateImageInputSchema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema properties missing or wrong type: %#v", schema["properties"])
+	}
+	if _, ok := props["image_model_key"]; ok {
+		t.Fatalf("generate_image schema must not expose image_model_key")
+	}
+	required, ok := schema["required"].([]any)
+	if !ok {
+		t.Fatalf("schema required missing or wrong type: %#v", schema["required"])
+	}
+	if !containsAnyString(required, "task_id") {
+		t.Fatalf("generate_image schema must require task_id, got %#v", required)
+	}
+}
+
+func TestGenerateImageRejectsExplicitImageModelKey(t *testing.T) {
+	oldSvcs := svcs
+	t.Cleanup(func() { svcs = oldSvcs })
+	svcs = &Services{}
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":"project-1",
+			"task_id":"task-1",
+			"prompt":"test prompt",
+			"image_model_key":"seedream-4.0"
+		}`)},
+	}
+
+	res, err := generateImageHandler(withMCPUserID(context.Background(), "user-1"), req)
+	if err != nil {
+		t.Fatalf("generateImageHandler returned error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected tool error, got %#v", res)
+	}
+	if !strings.Contains(callToolText(res), "image_model_key is not accepted") {
+		t.Fatalf("error text = %q, want image_model_key rejection", callToolText(res))
+	}
+}
 
 func TestParseVisionVerificationJSON_Pass(t *testing.T) {
 	raw := `{"all_entities_present": true, "missing_entities": [], "relevance_score": "high", "overall_pass": true}`
@@ -273,7 +319,10 @@ func TestResolveImageBillingModelUsesTaskSelectedPreset(t *testing.T) {
 		},
 	}
 
-	provider, mdl, source := resolveImageBillingModel(context.Background(), "user-1", "openai-gpt-image")
+	provider, mdl, source, err := resolveImageBillingModel(context.Background(), "user-1", "openai-gpt-image")
+	if err != nil {
+		t.Fatalf("resolveImageBillingModel returned error: %v", err)
+	}
 
 	if provider != "openai" || mdl != "gpt-image-2" {
 		t.Fatalf("billing model = %s/%s, want openai/gpt-image-2", provider, mdl)
@@ -281,6 +330,25 @@ func TestResolveImageBillingModelUsesTaskSelectedPreset(t *testing.T) {
 	if source != "preset:openai-gpt-image" {
 		t.Fatalf("billing source = %q, want preset:openai-gpt-image", source)
 	}
+}
+
+func containsAnyString(values []any, want string) bool {
+	for _, v := range values {
+		if s, ok := v.(string); ok && s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func callToolText(res *mcp.CallToolResult) string {
+	if res == nil || len(res.Content) == 0 {
+		return ""
+	}
+	if text, ok := res.Content[0].(*mcp.TextContent); ok {
+		return text.Text
+	}
+	return ""
 }
 
 // fakeTaskFileRegistrar implements taskFileRegistrar for unit tests. Its Enrich

@@ -25,25 +25,7 @@ func registerImageTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "generate_image",
 		Description: "Generate a single image using the project's configured image provider (OpenAI GPT Image, Google Gemini, Volcengine Seedream). This is image generation/reference-image generation, not a guaranteed line-art-only colorize tool. The server handles API key management and credit deduction. Returns a fetchable download_url (always a storage URL — never an inline base64 data URL), generation metadata (prompt, image_type, provider, model, revised_prompt, response_type, output_mime), and file_path when output_path is provided. When task_id is provided the image is also registered as a task_file in the same call, so list_task_files returns it immediately. When verify_with_vision=true, also runs a post-generation vision check using verification_prompt and returns a verification object {passed, score, missing_entities, notes, raw}. When upload_to_cdn=true, the server ALSO uploads the saved image to the project's CDN (WeChat material library for article projects, returning wechat_url + media_id) in the SAME call, right after a passing vision check — this makes each image durable the moment it is generated and removes the need for a separate, interruptible upload_image step. Upload is skipped when verify_with_vision=true but verification fails (so a rejected image never consumes a material slot); on a post-generation upload failure the response carries upload_error instead of wechat_url so the caller can retry just the upload via upload_image without regenerating.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"project_id":          map[string]any{"type": "string", "description": "Project ID (determines which image API config to use)"},
-				"prompt":              map[string]any{"type": "string", "description": "Image generation prompt"},
-				"image_type":          map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
-				"output_path":         map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, but required when upload_to_cdn=true since the upload reads this file). Use a writable server path such as /tmp/...; this server-local path lives on the MCP server host, not the agent client's current working directory."},
-				"size":                map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides project default when provided; providers may still return a different crop/ratio."},
-				"ref_image_path":      map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
-				"ref_image_paths":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Additional server-local reference image paths for multi-reference fidelity (optional). OpenAI/Gemini merge these with ref_image_path (up to ~16 total) as a multi-image edit request. For e-commerce product-photo consistency, pass only the product photos relevant to THIS image's depicted part (per the product-photo list / 产品图清单), not all photos; pair with a named-fidelity prompt naming the exact list index. Volcengine/Seedream only use ref_image_path (or paths[0] if no single ref). Use file_path values returned by generate_image/download_image."},
-				"task_id":             map[string]any{"type": "string", "description": "Task ID (for logging, credit tracking, and per-task image model lookup)"},
-				"image_model_key":     map[string]any{"type": "string", "description": "Optional image model key selected at task creation time. When provided, overrides user/server defaults for this single call. Resolution: '' = server default; 'custom' = user model-config override (Enterprise only); any other value must match a server-managed image preset key. If task_id is also provided and task_id has its own image_model_key, the explicit image_model_key parameter takes precedence."},
-				"watermark":           map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
-				"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities/matches the chapter content. No extra credit deduction for the vision call.", "default": false},
-				"verification_prompt": map[string]any{"type": "string", "description": "Prompt for the post-generation vision check (required when verify_with_vision=true). Should ask the vision model to verify required entities are present and return JSON {all_entities_present, missing_entities, relevance_entities, relevance_score, overall_pass}."},
-				"upload_to_cdn":       map[string]any{"type": "boolean", "description": "When true (requires output_path), upload the saved image to the project's CDN in the same call and return wechat_url + media_id on the result. For article projects this uploads to the WeChat material library. Upload runs only after a passing vision check (or when verify_with_vision is false), so rejected images are never uploaded. On upload failure the result carries upload_error instead — retry the upload alone via upload_image, no regeneration needed.", "default": false},
-			},
-			"required": []any{"project_id", "prompt"},
-		},
+		InputSchema: generateImageInputSchema(),
 	}, generateImageHandler)
 
 	server.AddTool(&mcp.Tool{
@@ -103,11 +85,14 @@ func registerImageTools(server *mcp.Server) {
 }
 
 func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
+	args := parseArgs(req.Params.Arguments)
+	if _, ok := args["image_model_key"]; ok {
+		return errorResult("image_model_key is not accepted by generate_image; the server resolves image models from task/project configuration"), nil
+	}
 	if svcs == nil || svcs.ImageSvc == nil {
 		return errorResult("image service not available"), nil
 	}
-	userID := getUserID(ctx)
-	args := parseArgs(req.Params.Arguments)
 
 	projectID, _ := args["project_id"].(string)
 	prompt, _ := args["prompt"].(string)
@@ -127,7 +112,9 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	refPath, _ := args["ref_image_path"].(string)
 	refPaths := parseStringArray(args, "ref_image_paths")
 	taskID, _ := args["task_id"].(string)
-	imageModelKey, _ := args["image_model_key"].(string)
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
+	}
 	verifyWithVision, _ := args["verify_with_vision"].(bool)
 	verificationPrompt, _ := args["verification_prompt"].(string)
 	uploadToCDN, _ := args["upload_to_cdn"].(bool)
@@ -136,21 +123,23 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		watermark = &v
 	}
 
-	// Resolve image_model_key: explicit parameter wins, else fall back to task-level setting.
-	// Ownership check prevents leaking another user's task existence via timing/error
-	// differences; also stops a caller from inheriting another user's watermark flag.
-	if imageModelKey == "" && taskID != "" {
-		if t, err := svcs.TaskSvc.GetByID(ctx, taskID); err == nil {
-			if t.UserID != userID {
-				return errorResult("task not found"), nil
-			}
-			imageModelKey = t.ImageModelKey
-			// Fall back to task-level watermark if not explicitly set.
-			if watermark == nil && t.Watermark {
-				wm := true
-				watermark = &wm
-			}
-		}
+	if svcs.TaskSvc == nil {
+		return errorResult("task service not available"), nil
+	}
+	t, err := svcs.TaskSvc.GetByID(ctx, taskID)
+	if err != nil || t == nil {
+		return errorResult("task not found"), nil
+	}
+	if userID != "" && t.UserID != userID {
+		return errorResult("task not found"), nil
+	}
+	if t.ProjectID != projectID {
+		return errorResult("task does not belong to the requested project"), nil
+	}
+	imageModelKey := t.ImageModelKey
+	if watermark == nil && t.Watermark {
+		wm := true
+		watermark = &wm
 	}
 
 	// upload_to_cdn requires a saved local file to upload; validate before
@@ -184,7 +173,10 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			Msg("MCP generate_image called")
 	}
 
-	billingProvider, billingModel, billingSource := resolveImageBillingModel(ctx, userID, imageModelKey)
+	billingProvider, billingModel, billingSource, err := resolveImageBillingModel(ctx, userID, imageModelKey)
+	if err != nil {
+		return errorResult(fmt.Sprintf("image model unavailable: %v", err)), nil
+	}
 	dynamicProvider, dynamicModel, dynamicRoute, dynamicBilling := resolveDynamicImageGenerationBillingRoute(imageType, billingModel, billingSource)
 	if !dynamicBilling {
 		if err := maybeDeductForResolvedModel(ctx, userID, model.CreditTypeImageGen, billingProvider, billingModel, 1, taskID, billingSource); err != nil {
@@ -685,6 +677,27 @@ func compressImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		"file_path":  compressedPath,
 		"compressed": compressed,
 	})
+}
+
+func generateImageInputSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"project_id":          map[string]any{"type": "string", "description": "Project ID (must match task_id; determines project context)"},
+			"prompt":              map[string]any{"type": "string", "description": "Image generation prompt"},
+			"image_type":          map[string]any{"type": "string", "enum": []any{"cover", "content"}, "description": "Whether to use the cover or content image API config"},
+			"output_path":         map[string]any{"type": "string", "description": "Server-local file path to save the generated image (optional, but required when upload_to_cdn=true since the upload reads this file). Use a writable server path such as /tmp/...; this server-local path lives on the MCP server host, not the agent client's current working directory."},
+			"size":                map[string]any{"type": "string", "description": "Image aspect ratio hint (e.g., '3:4', '16:9', '1:1', optionally ':1K/:2K/:4K' where supported). Overrides project default when provided; providers may still return a different crop/ratio."},
+			"ref_image_path":      map[string]any{"type": "string", "description": "Server-local path to a reference image for style consistency (optional). Use file_path returned by generate_image/download_image, not a client-local path."},
+			"ref_image_paths":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Additional server-local reference image paths for multi-reference fidelity (optional). OpenAI/Gemini merge these with ref_image_path (up to ~16 total) as a multi-image edit request. For e-commerce product-photo consistency, pass only the product photos relevant to THIS image's depicted part (per the product-photo list / 产品图清单), not all photos; pair with a named-fidelity prompt naming the exact list index. Volcengine/Seedream only use ref_image_path (or paths[0] if no single ref). Use file_path values returned by generate_image/download_image."},
+			"task_id":             map[string]any{"type": "string", "description": "Task ID. The server resolves the image model from this task; agents must not pass model keys."},
+			"watermark":           map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
+			"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities/matches the chapter content. No extra credit deduction for the vision call.", "default": false},
+			"verification_prompt": map[string]any{"type": "string", "description": "Prompt for the post-generation vision check (required when verify_with_vision=true). Should ask the vision model to verify required entities are present and return JSON {all_entities_present, missing_entities, relevance_entities, relevance_score, overall_pass}."},
+			"upload_to_cdn":       map[string]any{"type": "boolean", "description": "When true (requires output_path), upload the saved image to the project's CDN in the same call and return wechat_url + media_id on the result. For article projects this uploads to the WeChat material library. Upload runs only after a passing vision check (or when verify_with_vision is false), so rejected images are never uploaded. On upload failure the result carries upload_error instead — retry the upload alone via upload_image, no regeneration needed.", "default": false},
+		},
+		"required": []any{"project_id", "task_id", "prompt"},
+	}
 }
 
 func downloadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

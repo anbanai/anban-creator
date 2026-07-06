@@ -417,9 +417,9 @@ func buildAccountInfo(ctx context.Context, userID string, args map[string]any) (
 		// E-commerce: surface the package config (selected modules, target
 		// platform, brand brief, language) plus the resolved image model and the
 		// workspace path where the executor materialized the product photos.
-		// The image model is chosen by the user at task creation (Task.ImageModelKey)
-		// and resolved here to a concrete provider/model so the agent can adapt its
-		// reference-image strategy: OpenAI/Gemini accept multiple refs (≤16 via
+		// The server resolves Task.ImageModelKey to a concrete provider/model here
+		// so the agent can adapt its reference-image strategy without selecting or
+		// passing model keys: OpenAI/Gemini accept multiple refs (≤16 via
 		// generate_image's ref_image_paths) for max product fidelity; Volcengine/
 		// Seedream take a single ref (strong i2i), so the agent uses one anchor ref
 		// + product-bible text block. Product photos are downloaded by the executor

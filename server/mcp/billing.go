@@ -342,30 +342,36 @@ func resolveImageModelWithSource(ctx context.Context, userID string) (provider, 
 }
 
 // resolveImageBillingModel mirrors generate_image's provider selection for
-// billing/logging. A task/argument image_model_key must win over the server
+// billing/logging. A persisted task image_model_key must win over the server
 // default; otherwise a user choosing GPT Image can be billed/logged as the
 // default Volcengine model while generation uses OpenAI.
-func resolveImageBillingModel(ctx context.Context, userID, imageModelKey string) (provider, mdl, source string) {
+func resolveImageBillingModel(ctx context.Context, userID, imageModelKey string) (provider, mdl, source string, err error) {
 	if imageModelKey != "" && billSvc != nil {
 		if billSvc.modelConfigSvc != nil {
-			if cfg, src := billSvc.modelConfigSvc.ResolveImageConfigForKey(ctx, userID, imageModelKey); cfg != nil {
+			cfg, src, err := billSvc.modelConfigSvc.ResolveImageConfigForTaskKey(ctx, userID, imageModelKey)
+			if err != nil {
+				return "", "", "", err
+			}
+			if cfg != nil {
 				if cfg.Cover != nil && cfg.Cover.Provider != "" {
-					return cfg.Cover.Provider, cfg.Cover.Model, src
+					return cfg.Cover.Provider, cfg.Cover.Model, src, nil
 				}
 				if cfg.Content != nil && cfg.Content.Provider != "" {
-					return cfg.Content.Provider, cfg.Content.Model, src
+					return cfg.Content.Provider, cfg.Content.Model, src, nil
 				}
 			}
 		}
 		if billSvc.config != nil {
 			for _, p := range billSvc.config.ImagePresets {
 				if p.Key == imageModelKey {
-					return p.Provider, p.Model, "preset:" + p.Key
+					return p.Provider, p.Model, "preset:" + p.Key, nil
 				}
 			}
 		}
+		return "", "", "", fmt.Errorf("unknown image model key %q", imageModelKey)
 	}
-	return resolveImageModelWithSource(ctx, userID)
+	provider, mdl, source = resolveImageModelWithSource(ctx, userID)
+	return provider, mdl, source, nil
 }
 
 // resolveEcommerceImageProvider returns the provider/model the agent's
@@ -383,7 +389,7 @@ func resolveImageBillingModel(ctx context.Context, userID, imageModelKey string)
 // ("","") only when nothing is configured.
 func resolveEcommerceImageProvider(ctx context.Context, userID string, task *model.Task) (provider, mdl string) {
 	if task != nil && task.ImageModelKey != "" && billSvc != nil && billSvc.modelConfigSvc != nil {
-		if cfg, _ := billSvc.modelConfigSvc.ResolveImageConfigForKey(ctx, userID, task.ImageModelKey); cfg != nil {
+		if cfg, _, err := billSvc.modelConfigSvc.ResolveImageConfigForTaskKey(ctx, userID, task.ImageModelKey); err == nil && cfg != nil {
 			if cfg.Cover != nil && cfg.Cover.Provider != "" {
 				return cfg.Cover.Provider, cfg.Cover.Model
 			}

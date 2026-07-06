@@ -160,14 +160,13 @@ func videoGenerationInputSchema() map[string]any {
 			"target_duration_reason":   map[string]any{"type": "string"},
 			"ratio":                    map[string]any{"type": "string"},
 			"resolution":               map[string]any{"type": "string"},
-			"model":                    map[string]any{"type": "string"},
 			"seed":                     map[string]any{"type": "integer"},
 			"camera_fixed":             map[string]any{"type": "boolean"},
 			"watermark":                map[string]any{"type": "boolean"},
 			"service_tier":             map[string]any{"type": "string"},
 			"task_id":                  map[string]any{"type": "string"},
 		},
-		"required": []any{"project_id", "prompt"},
+		"required": []any{"project_id", "task_id", "prompt"},
 	}
 }
 
@@ -469,6 +468,9 @@ func videoReferenceStorageKey(userID, refType, fileName string, now time.Time) s
 
 func buildVideoGenerationPlanHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := parseArgs(req.Params.Arguments)
+	if err := rejectMCPModelSelection(args, "model"); err != nil {
+		return errorResult(err.Error()), nil
+	}
 	projectID, _ := args["project_id"].(string)
 	if projectID == "" {
 		return errorResult("project_id is required"), nil
@@ -486,6 +488,9 @@ func buildVideoGenerationPlanHandler(ctx context.Context, req *mcp.CallToolReque
 
 func validateVideoGenerationParamsHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := parseArgs(req.Params.Arguments)
+	if err := rejectMCPModelSelection(args, "model"); err != nil {
+		return errorResult(err.Error()), nil
+	}
 	projectID, _ := args["project_id"].(string)
 	if strings.TrimSpace(projectID) == "" {
 		return errorResult("project_id is required"), nil
@@ -507,10 +512,13 @@ func validateVideoGenerationParamsHandler(ctx context.Context, req *mcp.CallTool
 }
 
 func createVideoGenerationTaskHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := parseArgs(req.Params.Arguments)
+	if err := rejectMCPModelSelection(args, "model"); err != nil {
+		return errorResult(err.Error()), nil
+	}
 	if svcs == nil || svcs.VideoSvc == nil {
 		return errorResult("video service not available"), nil
 	}
-	args := parseArgs(req.Params.Arguments)
 	projectID, _ := args["project_id"].(string)
 	if projectID == "" {
 		return errorResult("project_id is required"), nil
@@ -546,13 +554,16 @@ func createVideoGenerationTaskHandler(ctx context.Context, req *mcp.CallToolRequ
 }
 
 func createVideoGenerationJobHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := parseArgs(req.Params.Arguments)
+	if err := rejectMCPModelSelection(args, "model"); err != nil {
+		return errorResult(err.Error()), nil
+	}
 	if svcs == nil || svcs.VideoSvc == nil {
 		return errorResult("video service not available"), nil
 	}
 	if svcs.TaskSvc == nil || svcs.TaskSvc.Repository() == nil || svcs.TaskSvc.Repository().VideoGenerations() == nil {
 		return errorResult("task/video generation repository not available"), nil
 	}
-	args := parseArgs(req.Params.Arguments)
 	projectID, _ := args["project_id"].(string)
 	if projectID == "" {
 		return errorResult("project_id is required"), nil
@@ -962,6 +973,16 @@ func resolveMCPVideoPlan(ctx context.Context, projectID string, videoReq service
 	if project.Platform != model.PlatformVideo {
 		return nil, fmt.Errorf("project is not a video generation project")
 	}
+	task, err := mcpTaskForProject(ctx, videoReq.TaskID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateMCPPersistedVideoModels(project, task, videoModelCatalog()); err != nil {
+		return nil, err
+	}
+	if cfg := task.VideoConfig.Data(); strings.TrimSpace(cfg.ModelKey) != "" {
+		videoReq.Model = cfg.ModelKey
+	}
 	if err := requireMeasuredVideoReferences(ctx, videoReq.ReferenceSet, videoReq.TaskID); err != nil {
 		return nil, err
 	}
@@ -1016,6 +1037,27 @@ func resolveMCPVideoPlan(ctx context.Context, projectID string, videoReq service
 	return &plan, nil
 }
 
+func mcpTaskForProject(ctx context.Context, taskID, projectID string) (*model.Task, error) {
+	if strings.TrimSpace(taskID) == "" {
+		return nil, fmt.Errorf("task_id is required")
+	}
+	if svcs == nil || svcs.TaskSvc == nil {
+		return nil, fmt.Errorf("task service not available")
+	}
+	task, err := svcs.TaskSvc.GetByID(ctx, taskID)
+	if err != nil || task == nil {
+		return nil, fmt.Errorf("task not found")
+	}
+	userID := getUserID(ctx)
+	if userID != "" && task.UserID != userID {
+		return nil, fmt.Errorf("task not found")
+	}
+	if task.ProjectID != projectID {
+		return nil, fmt.Errorf("task does not belong to the requested project")
+	}
+	return task, nil
+}
+
 func mcpVideoProject(ctx context.Context, projectID string) (*model.Project, error) {
 	if svcs == nil || svcs.ProjectSvc == nil {
 		return nil, fmt.Errorf("project service not available")
@@ -1024,8 +1066,45 @@ func mcpVideoProject(ctx context.Context, projectID string) (*model.Project, err
 	if err != nil {
 		return nil, err
 	}
-	service.SanitizeProjectVideoProfile(project, videoModelCatalog())
 	return project, nil
+}
+
+func validateMCPPersistedVideoModels(project *model.Project, task *model.Task, catalog service.VideoModelCatalog) error {
+	if catalog == nil {
+		catalog = service.VideoModelCatalog{}
+	}
+	check := func(key string) error {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil
+		}
+		if _, ok := catalog[key]; !ok {
+			return fmt.Errorf("模型未配置或不可用: %s", key)
+		}
+		return nil
+	}
+	if project != nil {
+		defaults := project.VideoDefaults.Data()
+		if err := check(defaults.ModelKey); err != nil {
+			return err
+		}
+		policy := project.VideoModelPolicy.Data()
+		if err := check(policy.DefaultModel); err != nil {
+			return err
+		}
+		for _, key := range policy.AllowedModels {
+			if err := check(key); err != nil {
+				return err
+			}
+		}
+	}
+	if task != nil {
+		cfg := task.VideoConfig.Data()
+		if err := check(cfg.ModelKey); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func videoCreditMultiplier() int {
@@ -1088,6 +1167,15 @@ func videoOperationID(taskID string) string {
 	return "video_gen:" + taskID
 }
 
+func rejectMCPModelSelection(args map[string]any, keys ...string) error {
+	for _, key := range keys {
+		if _, ok := args[key]; ok {
+			return fmt.Errorf("%s is not accepted by MCP generation tools; the server resolves models from task/project configuration", key)
+		}
+	}
+	return nil
+}
+
 func parseVideoGenerationRequest(args map[string]any) (service.VideoGenerationRequest, error) {
 	prompt, _ := args["prompt"].(string)
 	purpose, _ := args["purpose"].(string)
@@ -1095,11 +1183,13 @@ func parseVideoGenerationRequest(args map[string]any) (service.VideoGenerationRe
 	subjectProfile, _ := args["subject_profile"].(string)
 	audience, _ := args["audience"].(string)
 	singleMessage, _ := args["single_message"].(string)
-	modelName, _ := args["model"].(string)
 	resolution, _ := args["resolution"].(string)
 	ratio, _ := args["ratio"].(string)
 	serviceTier, _ := args["service_tier"].(string)
 	taskID, _ := args["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		return service.VideoGenerationRequest{}, fmt.Errorf("task_id is required")
+	}
 	req := service.VideoGenerationRequest{
 		Prompt:         prompt,
 		Purpose:        purpose,
@@ -1107,7 +1197,6 @@ func parseVideoGenerationRequest(args map[string]any) (service.VideoGenerationRe
 		SubjectProfile: subjectProfile,
 		Audience:       audience,
 		SingleMessage:  singleMessage,
-		Model:          modelName,
 		Resolution:     resolution,
 		Ratio:          ratio,
 		ServiceTier:    serviceTier,

@@ -39,6 +39,127 @@ type fakeVideoReferenceStorage struct {
 	downloadURL       string
 }
 
+func TestVideoGenerationSchemaDoesNotExposeModelSelection(t *testing.T) {
+	schema := videoGenerationInputSchema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema properties missing or wrong type: %#v", schema["properties"])
+	}
+	if _, ok := props["model"]; ok {
+		t.Fatalf("video generation schema must not expose model")
+	}
+	required, ok := schema["required"].([]any)
+	if !ok {
+		t.Fatalf("schema required missing or wrong type: %#v", schema["required"])
+	}
+	if !containsAnyString(required, "task_id") {
+		t.Fatalf("video generation schema must require task_id, got %#v", required)
+	}
+}
+
+func TestVideoGenerationToolsRejectExplicitModel(t *testing.T) {
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":"project-1",
+			"task_id":"task-1",
+			"prompt":"test video",
+			"model":"seedance-2.0-mini"
+		}`)},
+	}
+
+	handlers := map[string]func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error){
+		"build_video_generation_plan":      buildVideoGenerationPlanHandler,
+		"validate_video_generation_params": validateVideoGenerationParamsHandler,
+		"create_video_generation_job":      createVideoGenerationJobHandler,
+	}
+	for name, handler := range handlers {
+		t.Run(name, func(t *testing.T) {
+			res, err := handler(withMCPUserID(context.Background(), "user-1"), req)
+			if err != nil {
+				t.Fatalf("%s returned error: %v", name, err)
+			}
+			if res == nil || !res.IsError {
+				t.Fatalf("expected tool error, got %#v", res)
+			}
+			if !strings.Contains(callToolText(res), "model is not accepted") {
+				t.Fatalf("error text = %q, want model rejection", callToolText(res))
+			}
+		})
+	}
+}
+
+func TestBuildVideoGenerationPlanRejectsUnavailablePersistedProjectModel(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("find project: %v", err)
+	}
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    service.VideoPurposePlanting,
+		ModelKey:   "missing-video",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"missing-video", "seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	})
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
+			"prompt":"生成视频"
+		}`)},
+	}
+	res, err := buildVideoGenerationPlanHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("buildVideoGenerationPlanHandler returned error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected tool error, got %#v", res)
+	}
+	if text := callToolText(res); !strings.Contains(text, "模型未配置或不可用: missing-video") {
+		t.Fatalf("error text = %q, want unavailable persisted project model", text)
+	}
+}
+
+func TestBuildVideoGenerationPlanRejectsUnavailablePersistedTaskModel(t *testing.T) {
+	old := svcs
+	t.Cleanup(func() { svcs = old })
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTaskWithConfig(t, repo, userID, projectID, model.VideoTaskConfig{
+		ModelKey: "missing-video",
+	})
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
+			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
+			"prompt":"生成视频"
+		}`)},
+	}
+	res, err := buildVideoGenerationPlanHandler(ctx, req)
+	if err != nil {
+		t.Fatalf("buildVideoGenerationPlanHandler returned error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected tool error, got %#v", res)
+	}
+	if text := callToolText(res); !strings.Contains(text, "模型未配置或不可用: missing-video") {
+		t.Fatalf("error text = %q, want unavailable persisted task model", text)
+	}
+}
+
 func (f *fakeVideoReferenceStorage) Name() string {
 	if f.name != "" {
 		return f.name
@@ -178,6 +299,32 @@ func createMCPVideoTask(t *testing.T, repo repository.Repository, userID, projec
 		t.Fatalf("create task: %v", err)
 	}
 	return task.ID
+}
+
+func createMCPVideoTaskWithConfig(t *testing.T, repo repository.Repository, userID, projectID string, cfg model.VideoTaskConfig) string {
+	t.Helper()
+	task := &model.Task{
+		ID:        uuid.NewString(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformVideo,
+		Status:    model.TaskStatusRunning,
+		Title:     "视频生成任务",
+	}
+	task.SetVideoConfig(cfg)
+	if err := repo.Tasks().Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	return task.ID
+}
+
+func modelIDForVideoKey(t *testing.T, key string) string {
+	t.Helper()
+	spec, ok := service.DefaultVideoModelCatalog()[key]
+	if !ok {
+		t.Fatalf("video model key %q is not in test catalog", key)
+	}
+	return spec.ModelID
 }
 
 type fakeVideoVisionLLM struct {
@@ -691,9 +838,10 @@ func TestRegisterVideoReferenceUploadsLocalFileAsTaskFileWhenTaskIDProvided(t *t
 func TestBuildVideoGenerationPlanHandlerValidatesArguments(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	ctx, _, _, projectID := setupMCPVideoProject(t)
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
 	req := &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":` + strconv.Quote(projectID) + `,"prompt":"生成视频","purpose":"unknown"}`)},
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":` + strconv.Quote(projectID) + `,"task_id":` + strconv.Quote(taskID) + `,"prompt":"生成视频","purpose":"unknown"}`)},
 	}
 	result, err := buildVideoGenerationPlanHandler(ctx, req)
 	if err != nil {
@@ -848,10 +996,12 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 func TestBuildVideoGenerationPlanHandlerReturnsPayloadPreview(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	ctx, _, _, projectID := setupMCPVideoProject(t)
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
 			"prompt":"生成一条咖啡杯种草视频",
 			"purpose":"planting",
 			"references":[{"type":"image_url","url":"https://example.com/cup.png"}],
@@ -944,7 +1094,8 @@ func TestCreateVideoGenerationTaskHandlerRequiresService(t *testing.T) {
 func TestCreateVideoGenerationTaskHandlerRejectsInvalidReference(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	ctx, _, _, projectID := setupMCPVideoProject(t)
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
 	svcs.VideoSvc = service.NewVideoService(&config.VideoAPIConfig{
 		Key:     "test-key",
 		BaseURL: "https://example.com",
@@ -953,6 +1104,7 @@ func TestCreateVideoGenerationTaskHandlerRejectsInvalidReference(t *testing.T) {
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
 			"prompt":"生成视频",
 			"references":[{"type":"image_url","url":"http://localhost/a.png"}]
 		}`)},
@@ -990,7 +1142,9 @@ func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *tes
 	t.Cleanup(func() { svcs = old })
 	store := &fakeVideoReferenceStorage{url: "https://oss.example.com/task/video.mp4"}
 	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, store)
-	taskID := createMCPVideoTask(t, repo, userID, projectID)
+	taskID := createMCPVideoTaskWithConfig(t, repo, userID, projectID, model.VideoTaskConfig{
+		ModelKey: "seedance-2.0-mini",
+	})
 	arkSrv := newArkTaskServer(t)
 	defer arkSrv.Close()
 	svcs.VideoSvc = service.NewVideoService(&config.VideoAPIConfig{Key: "test-key", BaseURL: arkSrv.URL, Timeout: time.Second})
@@ -998,11 +1152,10 @@ func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *tes
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 			"project_id":` + strconv.Quote(projectID) + `,
-			"task_id":` + strconv.Quote(taskID) + `,
-			"prompt":"生成一条 5 秒产品推广视频",
-			"purpose":"promotion",
-			"model":"seedance-2.0",
-			"resolution":"720p",
+				"task_id":` + strconv.Quote(taskID) + `,
+				"prompt":"生成一条 5 秒产品推广视频",
+				"purpose":"promotion",
+				"resolution":"720p",
 			"ratio":"16:9",
 			"duration":5,
 			"references":[{"type":"image_url","url":"https://example.com/product.png","reference_role":"product_appearance"}]
@@ -1024,6 +1177,10 @@ func TestCreateVideoGenerationTaskPersistsGenerationRecordAndTaskSnapshot(t *tes
 	}
 	if gen.CreditsCharged <= 0 || gen.PricingBreakdown.Data().CNY <= 0 {
 		t.Fatalf("pricing not persisted: %#v", gen)
+	}
+	resolved := gen.ResolvedParams.Data()
+	if resolved.ModelKey != "seedance-2.0-mini" || resolved.Model != modelIDForVideoKey(t, "seedance-2.0-mini") {
+		t.Fatalf("generation model = %s/%s, want task-bound seedance-2.0-mini/%s", resolved.ModelKey, resolved.Model, modelIDForVideoKey(t, "seedance-2.0-mini"))
 	}
 	if !strings.Contains(string(gen.References), "product_appearance") {
 		t.Fatalf("reference role not persisted: %s", string(gen.References))
@@ -1350,10 +1507,12 @@ func TestRegisterVideoReferenceTaskFileMeasuresVideoDurationAndIgnoresAgentDurat
 func TestBuildVideoPlanRejectsUnmeasuredRawVideoReferenceDuration(t *testing.T) {
 	old := svcs
 	t.Cleanup(func() { svcs = old })
-	ctx, _, _, projectID := setupMCPVideoProject(t)
+	ctx, repo, userID, projectID := setupMCPVideoProjectWithServices(t, nil)
+	taskID := createMCPVideoTask(t, repo, userID, projectID)
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{
 			"project_id":` + strconv.Quote(projectID) + `,
+			"task_id":` + strconv.Quote(taskID) + `,
 			"prompt":"生成一条视频改编",
 			"references":[{"type":"video_url","url":"https://example.com/input.mp4","input_duration_seconds":99}]
 		}`)},

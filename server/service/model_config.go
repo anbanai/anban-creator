@@ -356,6 +356,47 @@ func (s *ModelConfigService) ResolveImageConfigForKey(
 	return nil, "system_default"
 }
 
+// ResolveImageConfigForTaskKey resolves a persisted task/plan image model key.
+// Empty keys keep the default behavior (user override, else system default).
+// Non-empty keys are strict: unavailable, unauthorized, or incomplete model
+// selections are errors instead of silently falling back to another provider.
+func (s *ModelConfigService) ResolveImageConfigForTaskKey(
+	ctx context.Context, userID, imageModelKey string,
+) (*config.ImageAPIConfig, string, error) {
+	if imageModelKey == "" || imageModelKey == model.ImageModelKeySystemDefault {
+		if cfg := s.GetEffectiveImageConfig(ctx, userID); cfg != nil {
+			return cfg, "user_custom", nil
+		}
+		return nil, "system_default", nil
+	}
+
+	if imageModelKey == model.ImageModelKeyCustom {
+		if !s.userTierIsEnterprise(ctx, userID) {
+			return nil, "", fmt.Errorf("image model %q is not allowed for user tier", imageModelKey)
+		}
+		cfg := s.GetEffectiveImageConfig(ctx, userID)
+		if cfg == nil {
+			return nil, "", fmt.Errorf("custom image model is not configured")
+		}
+		return cfg, "user_custom", nil
+	}
+
+	for i := range s.cfg.ImagePresets {
+		p := &s.cfg.ImagePresets[i]
+		if p.Key != imageModelKey {
+			continue
+		}
+		userTier := s.lookupUserTier(ctx, userID)
+		requiredTier := model.NormalizeTier(p.MinTier)
+		if !model.TierSatisfies(userTier, requiredTier) {
+			return nil, "", fmt.Errorf("image model %q is not allowed for user tier %s; requires %s", imageModelKey, userTier, requiredTier)
+		}
+		return presetToImageAPIConfig(p, s.cfg), "preset:" + p.Key, nil
+	}
+
+	return nil, "", fmt.Errorf("unknown image model key %q", imageModelKey)
+}
+
 // userTierIsEnterprise returns true if the user's tier resolves to Enterprise.
 // Returns false on lookup failure (fail-closed for "custom" access).
 func (s *ModelConfigService) userTierIsEnterprise(ctx context.Context, userID string) bool {

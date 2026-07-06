@@ -18,6 +18,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import { useAuth } from '@/contexts/AuthContext'
 import MembershipComparison from '@/components/credits/MembershipComparison'
 import ModelCapabilities from '@/components/credits/ModelCapabilities'
+import { formatCreditDescription } from '@/lib/credit-display'
 
 function transactionBadgeVariant(type: string) {
   switch (type) {
@@ -90,7 +91,7 @@ export default function CreditsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="积分" description="管理你的积分余额和交易记录。" />
+      <PageHeader title="积分" description="管理你的积分余额和积分消耗。" />
 
       {/* Balance card */}
       <Card>
@@ -174,7 +175,7 @@ export default function CreditsPage() {
       {/* Transaction history */}
       <Card>
         <div className="border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold text-foreground">交易记录</h2>
+          <h2 className="text-sm font-semibold text-foreground">积分消耗</h2>
         </div>
         {transactionsError ? (
           <QueryErrorState onRetry={() => refetchTransactions()} />
@@ -192,7 +193,7 @@ export default function CreditsPage() {
           </div>
         ) : transactions.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">
-            还没有交易记录
+            暂无积分消耗记录
           </div>
         ) : (
           <>
@@ -222,7 +223,7 @@ export default function CreditsPage() {
                         {tx.balance_after.toLocaleString()}
                       </td>
                       <td className="max-w-[200px] truncate px-4 py-3 text-muted-foreground">
-                        {tx.description}
+                        {formatCreditDescription(tx)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
                         {formatFullDateTimeCN(tx.created_at)}

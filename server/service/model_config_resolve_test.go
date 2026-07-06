@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -229,6 +230,70 @@ func TestResolveImageConfigForKey(t *testing.T) {
 			}
 			if cfg.Content.Provider != tt.provider || cfg.Content.Model != tt.model {
 				t.Errorf("Content not mirrored: %+v", cfg.Content)
+			}
+		})
+	}
+}
+
+func TestResolveImageConfigForTaskKeyStrictFailures(t *testing.T) {
+	svc, repo, _ := setupResolveTestService(t)
+	ctx := context.Background()
+
+	freeUser := "strict-free"
+	enterpriseUser := "strict-enterprise"
+	for _, u := range []struct {
+		id   string
+		tier model.Tier
+	}{
+		{freeUser, model.TierFree},
+		{enterpriseUser, model.TierEnterprise},
+	} {
+		if err := repo.Users().Create(ctx, &model.User{
+			ID:         u.id,
+			Email:      u.id + "@example.com",
+			Nickname:   u.id,
+			Password:   "hashed",
+			Tier:       u.tier,
+			InviteCode: u.id + "-invite",
+		}); err != nil {
+			t.Fatalf("create %s: %v", u.id, err)
+		}
+	}
+
+	tests := []struct {
+		name    string
+		userID  string
+		key     string
+		wantErr string
+	}{
+		{
+			name:    "unknown preset fails instead of falling back",
+			userID:  enterpriseUser,
+			key:     "seedream-4.0",
+			wantErr: "unknown image model key",
+		},
+		{
+			name:    "tier downgrade fails instead of falling back",
+			userID:  freeUser,
+			key:     "gemini-pro",
+			wantErr: "not allowed for user tier",
+		},
+		{
+			name:    "custom without override fails instead of falling back",
+			userID:  enterpriseUser,
+			key:     model.ImageModelKeyCustom,
+			wantErr: "custom image model is not configured",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, source, err := svc.ResolveImageConfigForTaskKey(ctx, tt.userID, tt.key)
+			if err == nil {
+				t.Fatalf("expected error, got cfg=%+v source=%q", cfg, source)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want to contain %q", err, tt.wantErr)
 			}
 		})
 	}
