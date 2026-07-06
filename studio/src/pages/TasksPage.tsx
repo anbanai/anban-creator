@@ -58,6 +58,10 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已取消', value: 'cancelled' },
 ]
 
+function normalizeTaskStatusFilter(value: string | null) {
+  return value && statusTabs.some((tab) => tab.value === value) ? value : 'all'
+}
+
 function workflowReadinessLabel(workflow: WorkflowStatus | string | null | undefined) {
   if (!workflow) return ''
   const parsed: WorkflowStatus | null = typeof workflow === 'string' ? (() => {
@@ -79,7 +83,7 @@ export default function TasksPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const initialStatus = searchParams.get('status') || 'all'
+  const initialStatus = normalizeTaskStatusFilter(searchParams.get('status'))
   const createIntent = parseCreationIntent(searchParams)
   const shouldCreate = createIntent.shouldCreate
 
@@ -121,6 +125,11 @@ export default function TasksPage() {
   }, [])
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
+
+  useEffect(() => {
+    const nextStatus = normalizeTaskStatusFilter(searchParams.get('status'))
+    setStatusFilter((current) => (current === nextStatus ? current : nextStatus))
+  }, [searchParams])
 
   useEffect(() => { setPage(1) }, [statusFilter, projectFilter, searchFilter])
 
