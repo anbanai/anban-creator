@@ -115,3 +115,60 @@ func TestClaudeCodeSkillsStayWithinOfficialSizeGuideline(t *testing.T) {
 		t.Fatalf("walk claudecode skills: %v", err)
 	}
 }
+
+func TestClaudeCodeSkillsHaveProgressiveExamples(t *testing.T) {
+	root := repoRoot(t)
+	claudeSkillsRoot := filepath.Join(root, "claudecode", "skills")
+	entries, err := os.ReadDir(claudeSkillsRoot)
+	if err != nil {
+		t.Fatalf("read claudecode skills: %v", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		skill := entry.Name()
+		skillPath := filepath.Join(root, "claudecode", "skills", skill, "SKILL.md")
+		if _, err := os.Stat(skillPath); err != nil {
+			t.Fatalf("%s missing SKILL.md: %v", skill, err)
+		}
+		skillBody := readRepoFile(t, skillPath)
+		if !strings.Contains(skillBody, "references/examples.md") {
+			t.Fatalf("%s must link to references/examples.md for progressive disclosure of cases", skillPath)
+		}
+
+		examplesPath := filepath.Join(root, "claudecode", "skills", skill, "references", "examples.md")
+		examplesBody := readRepoFile(t, examplesPath)
+		if count := strings.Count(examplesBody, "\n### Case "); count < 3 {
+			t.Fatalf("%s must include at least 3 concrete cases, got %d", examplesPath, count)
+		}
+		for _, want := range []string{
+			"## Source Patterns",
+			"Anthropic official",
+			"GitHub high-star",
+			"## How To Use These Cases",
+		} {
+			if !strings.Contains(examplesBody, want) {
+				t.Fatalf("%s missing %q", examplesPath, want)
+			}
+		}
+
+		for _, mirror := range []string{"openclaw", "codex"} {
+			mirrorPath := filepath.Join(root, mirror, "skills", skill, "SKILL.md")
+			if _, err := os.Stat(mirrorPath); err == nil {
+				mirrorSkillBody := readRepoFile(t, mirrorPath)
+				if !strings.Contains(mirrorSkillBody, "references/examples.md") {
+					t.Fatalf("%s must link to references/examples.md to stay in sync with claudecode", mirrorPath)
+				}
+				mirrorExamplesPath := filepath.Join(root, mirror, "skills", skill, "references", "examples.md")
+				mirrorExamplesBody := readRepoFile(t, mirrorExamplesPath)
+				if mirrorExamplesBody != examplesBody {
+					t.Fatalf("%s must match %s unless a test documents a distribution-specific difference", mirrorExamplesPath, examplesPath)
+				}
+			} else if !os.IsNotExist(err) {
+				t.Fatalf("stat %s: %v", mirrorPath, err)
+			}
+		}
+	}
+}
