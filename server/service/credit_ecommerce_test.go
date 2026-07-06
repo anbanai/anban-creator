@@ -21,7 +21,7 @@ func newPricedCreditService(repo repository.Repository) *CreditService {
 	return NewCreditService(repo, &config.CreditsConfig{
 		TaskCosts: map[string]int{
 			"article":  4000,
-			"seednote": 3200,
+			"seednote": 3600,
 		},
 		EcommerceModulePrices: map[string]int{
 			"main_images":  1500,

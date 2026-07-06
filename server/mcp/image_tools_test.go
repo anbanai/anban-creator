@@ -11,10 +11,12 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
 
 	appconfig "github.com/anbanai/anban-creator/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -472,5 +474,112 @@ func TestRegisterGeneratedImageTaskFile_UploadErrorPropagates(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "storage down") {
 		t.Errorf("[FAIL] error should wrap the upload error, got %q", err.Error())
+	}
+}
+
+func TestRunImageVerificationAssociatesUnderstandingChargeWithTask(t *testing.T) {
+	oldSvcs := svcs
+	oldBillSvc := billSvc
+	t.Cleanup(func() {
+		svcs = oldSvcs
+		billSvc = oldBillSvc
+	})
+
+	db := repositoryTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := "image-understanding-task-user"
+	projectID := "image-understanding-task-project"
+	taskID := "image-understanding-task"
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          userID + "@example.com",
+		Password:       "hashed",
+		InviteCode:     "imgtask",
+		Tier:           model.TierFree,
+		CreditsBalance: 10_000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformArticle,
+		Name:     "Image Task Project",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        taskID,
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusRunning,
+		Prompt:    "generate image",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	cfg := &srvconfig.Config{
+		ImageUnderstanding: srvconfig.UnderstandingRuntimeConfig{
+			ProviderKey: "moonshot",
+			Model:       "kimi-k2.7-code-highspeed",
+		},
+		Billing: srvconfig.BillingConfig{
+			CreditsPerCNY: 1000,
+			TierMultipliers: map[string]float64{
+				"free": 1,
+			},
+			MinimumChargeCredits: 1,
+		},
+		ModelPrices: srvconfig.ModelPricesConfig{
+			TokenModels: map[string]srvconfig.TokenModelPrice{
+				"moonshot/kimi-k2.7-code-highspeed": {
+					Currency: "CNY",
+					Unit:     1_000,
+					Input:    srvconfig.FlexibleFloat(1),
+					Output:   srvconfig.FlexibleFloat(1),
+				},
+			},
+		},
+		Credits: srvconfig.CreditsConfig{},
+	}
+	logger := zerolog.New(io.Discard)
+	creditSvc := service.NewCreditService(repo, &cfg.Credits, &logger)
+	writingSvc := service.NewWritingService(repo, nil, "", 0, &logger)
+	writingSvc.SetImageUnderstandingClient(&fakeMCPWritingLLM{
+		response: `{"overall_pass":true}`,
+		usage: srvconfig.TokenUsage{
+			InputTokens:  100,
+			OutputTokens: 100,
+			TotalTokens:  200,
+		},
+	})
+	taskSvc := service.NewTaskService(repo, nil, nil, nil, nil, &logger, "", nil, "", nil, nil)
+	svcs = &Services{WritingSvc: writingSvc, TaskSvc: taskSvc}
+	billSvc = &billingServices{creditSvc: creditSvc, config: cfg}
+
+	imagePath := filepath.Join(t.TempDir(), "verified.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+	_, err := runImageVerification(ctx, userID, taskID, &service.ImageResult{FilePath: imagePath}, "verify")
+	if err != nil {
+		t.Fatalf("runImageVerification: %v", err)
+	}
+
+	txs, _, err := creditSvc.ListTransactions(ctx, userID, 0, 10)
+	if err != nil {
+		t.Fatalf("list transactions: %v", err)
+	}
+	if len(txs) != 1 {
+		t.Fatalf("transactions len = %d, want 1", len(txs))
+	}
+	if txs[0].Type != model.CreditTypeImageUnderstanding {
+		t.Fatalf("transaction type = %s, want image_understanding", txs[0].Type)
+	}
+	if txs[0].TaskID == nil || *txs[0].TaskID != taskID {
+		t.Fatalf("transaction task_id = %v, want %s", txs[0].TaskID, taskID)
 	}
 }

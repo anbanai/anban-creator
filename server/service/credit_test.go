@@ -77,7 +77,7 @@ func newTestCreditService(repo repository.Repository) *CreditService {
 	return NewCreditService(repo, &config.CreditsConfig{
 		TaskCosts: map[string]int{
 			"article":  4000,
-			"seednote": 3200,
+			"seednote": 3600,
 		},
 	}, &logger)
 }
@@ -160,7 +160,7 @@ func TestDeductForTaskUsesFriendlyDescription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find deduction by task id: %v", err)
 	}
-	if tx.Description != "生成种草笔记扣除积分3200" {
+	if tx.Description != "生成种草笔记扣除积分3600" {
 		t.Fatalf("description = %q, want friendly seednote deduction", tx.Description)
 	}
 }
@@ -180,7 +180,7 @@ func TestDeductForTaskWithMultiplierUsesFriendlyDescription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find deduction by task id: %v", err)
 	}
-	if tx.Description != "生成种草笔记（强目标 x3）扣除积分9600" {
+	if tx.Description != "生成种草笔记（强目标 x3）扣除积分10800" {
 		t.Fatalf("description = %q, want friendly goal-mode deduction", tx.Description)
 	}
 }

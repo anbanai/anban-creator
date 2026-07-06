@@ -50,6 +50,11 @@ func (f *fakeMCPWritingLLM) CompleteWithImage(context.Context, string, string, s
 	return "", fmt.Errorf("not implemented")
 }
 
+func (f *fakeMCPWritingLLM) CompleteWithImageResult(context.Context, string, string, string) (*service.LLMResult, error) {
+	f.calls++
+	return &service.LLMResult{Text: f.response, Model: "kimi-k2.7-code-highspeed", Usage: f.usage}, nil
+}
+
 func repositoryTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 

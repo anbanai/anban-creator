@@ -78,6 +78,7 @@ func registerImageTools(server *mcp.Server) {
 				"image_url":  map[string]any{"type": "string", "description": "Remote HTTPS URL of the image to analyze"},
 				"file_path":  map[string]any{"type": "string", "description": "Server-local file path (from generate_image/download_image file_path result), max 10MB"},
 				"prompt":     map[string]any{"type": "string", "description": "Detailed analysis prompt describing what to analyze"},
+				"task_id":    map[string]any{"type": "string", "description": "Optional task ID to associate the image-understanding credit charge with"},
 			},
 			"required": []any{"project_id", "prompt"},
 		},
@@ -315,7 +316,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		if svcs.WritingSvc == nil {
 			return errorResult("writing/vision service not available for verification"), nil
 		}
-		verification, vErr := runImageVerification(ctx, userID, result, verificationPrompt)
+		verification, vErr := runImageVerification(ctx, userID, taskID, result, verificationPrompt)
 		if vErr != nil {
 			// Verification failed for operational reasons (vision API down,
 			// file unreadable, etc.). Surface as a soft failure: return the
@@ -471,7 +472,7 @@ func registerGeneratedImageTaskFile(ctx context.Context, reg taskFileRegistrar, 
 // runImageVerification calls AnalyzeImage on the just-generated image with the
 // user-supplied verification_prompt and parses the JSON response into a
 // VisionVerification struct. Non-fatal parse issues fall back to score=unknown.
-func runImageVerification(ctx context.Context, userID string, result *service.ImageResult, prompt string) (*service.VisionVerification, error) {
+func runImageVerification(ctx context.Context, userID, taskID string, result *service.ImageResult, prompt string) (*service.VisionVerification, error) {
 	if svcs.WritingSvc == nil {
 		return nil, fmt.Errorf("writing service unavailable")
 	}
@@ -514,7 +515,7 @@ func runImageVerification(ctx context.Context, userID string, result *service.Im
 	if err != nil {
 		return nil, fmt.Errorf("analyze image: %w", err)
 	}
-	if _, err := maybeDeductUnderstandingTokens(ctx, userID, "", model.CreditTypeImageUnderstanding, analysis.Usage); err != nil {
+	if _, err := maybeDeductUnderstandingTokens(ctx, userID, taskID, model.CreditTypeImageUnderstanding, analysis.Usage); err != nil {
 		return nil, fmt.Errorf("bill image understanding: %w", err)
 	}
 
@@ -692,7 +693,7 @@ func generateImageInputSchema() map[string]any {
 			"ref_image_paths":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Additional server-local reference image paths for multi-reference fidelity (optional). OpenAI/Gemini merge these with ref_image_path (up to ~16 total) as a multi-image edit request. For e-commerce product-photo consistency, pass only the product photos relevant to THIS image's depicted part (per the product-photo list / 产品图清单), not all photos; pair with a named-fidelity prompt naming the exact list index. Volcengine/Seedream only use ref_image_path (or paths[0] if no single ref). Use file_path values returned by generate_image/download_image."},
 			"task_id":             map[string]any{"type": "string", "description": "Task ID. The server resolves the image model from this task; agents must not pass model keys."},
 			"watermark":           map[string]any{"type": "boolean", "description": "Enable watermark on generated image (only supported by Volcengine/Seedream)", "default": false},
-			"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities/matches the chapter content. No extra credit deduction for the vision call.", "default": false},
+			"verify_with_vision":  map[string]any{"type": "boolean", "description": "When true, after generation the server runs a vision check using verification_prompt against the generated image and returns a verification object. Use this to confirm the image contains the intended entities/matches the chapter content. The image-understanding call is billed by actual usage and associated with task_id.", "default": false},
 			"verification_prompt": map[string]any{"type": "string", "description": "Prompt for the post-generation vision check (required when verify_with_vision=true). Should ask the vision model to verify required entities are present and return JSON {all_entities_present, missing_entities, relevance_entities, relevance_score, overall_pass}."},
 			"upload_to_cdn":       map[string]any{"type": "boolean", "description": "When true (requires output_path), upload the saved image to the project's CDN in the same call and return wechat_url + media_id on the result. For article projects this uploads to the WeChat material library. Upload runs only after a passing vision check (or when verify_with_vision is false), so rejected images are never uploaded. On upload failure the result carries upload_error instead — retry the upload alone via upload_image, no regeneration needed.", "default": false},
 		},
@@ -747,6 +748,7 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 
 	imageURL, _ := args["image_url"].(string)
 	filePath, _ := args["file_path"].(string)
+	taskID, _ := args["task_id"].(string)
 
 	var imageSource string
 
@@ -788,7 +790,7 @@ func analyzeImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	if err != nil {
 		return errorResult(fmt.Sprintf("analyze image: %v", err)), nil
 	}
-	creditsCharged, err := maybeDeductUnderstandingTokens(ctx, userID, "", model.CreditTypeImageUnderstanding, result.Usage)
+	creditsCharged, err := maybeDeductUnderstandingTokens(ctx, userID, taskID, model.CreditTypeImageUnderstanding, result.Usage)
 	if err != nil {
 		return errorResult(fmt.Sprintf("bill image understanding: %v", err)), nil
 	}
