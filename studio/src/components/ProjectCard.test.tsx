@@ -41,4 +41,34 @@ describe('ProjectCard contextual actions', () => {
     )
     expect(screen.getByRole('button', { name: '查看素材/选题池' })).toBeInTheDocument()
   })
+
+  it('summarizes publishing mode, defaults, and success rate as operating badges', () => {
+    render(
+      <ProjectCard
+        project={{
+          ...project,
+          visual_style: '',
+          writer: 'dan-koe',
+          theme: 'autumn-warm',
+          author: '安般',
+          config: { enable_publishing: true, require_publish_approval: true },
+        }}
+        stats={{
+          total_tasks: 7,
+          completed_tasks: 6,
+          failed_tasks: 1,
+          running_tasks: 0,
+          pending_tasks: 0,
+          success_rate: 0.86,
+          last_activity_at: '2026-07-06T08:00:00.000Z',
+        }}
+      />,
+    )
+
+    expect(screen.getByText('公众号草稿箱')).toBeInTheDocument()
+    expect(screen.getByText('发布需审核')).toBeInTheDocument()
+    expect(screen.getByText('视觉未配置')).toBeInTheDocument()
+    expect(screen.getByText('写作已配置')).toBeInTheDocument()
+    expect(screen.getAllByText('成功率 86%').length).toBeGreaterThan(0)
+  })
 })

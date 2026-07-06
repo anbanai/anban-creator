@@ -20,6 +20,49 @@ interface ProjectCardProps {
   onDelete?: (id: string) => void
 }
 
+function buildOperatingBadges(project: Project, stats?: ProjectStats) {
+  const badges: Array<{ label: string; variant: 'secondary' | 'outline' | 'destructive' }> = []
+
+  if (project.config.enable_publishing) {
+    badges.push({ label: '公众号草稿箱', variant: 'secondary' })
+    badges.push({
+      label: project.config.require_publish_approval ? '发布需审核' : '自动入草稿箱',
+      variant: project.config.require_publish_approval ? 'outline' : 'secondary',
+    })
+  } else if (project.platform === 'article') {
+    badges.push({ label: '发布未启用', variant: 'outline' })
+  }
+
+  badges.push({
+    label: project.visual_style ? '视觉已配置' : '视觉未配置',
+    variant: project.visual_style ? 'secondary' : 'outline',
+  })
+
+  if (project.platform === 'article') {
+    badges.push({
+      label: project.writer || project.theme || project.author ? '写作已配置' : '写作未配置',
+      variant: project.writer || project.theme || project.author ? 'secondary' : 'outline',
+    })
+  }
+
+  if (project.platform === 'ecommerce' && project.ecommerce_defaults?.target_platform) {
+    badges.push({ label: `投放 ${project.ecommerce_defaults.target_platform}`, variant: 'secondary' })
+  }
+
+  if (project.platform === 'video' && project.video_defaults?.model_key) {
+    badges.push({ label: '视频默认已配置', variant: 'secondary' })
+  }
+
+  if (stats && stats.total_tasks > 0) {
+    badges.push({
+      label: `成功率 ${(stats.success_rate * 100).toFixed(0)}%`,
+      variant: stats.success_rate >= 0.6 ? 'secondary' : 'destructive',
+    })
+  }
+
+  return badges
+}
+
 export function ProjectCard({ project, stats, onEdit, archiving, restoring, onArchive, onRestore, onDelete }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const platformLabel = platformLabels[project.platform] || project.platform
@@ -30,6 +73,7 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
   const taskHref = createTaskHref({ type: project.platform, projectId: project.id, intent: 'new' })
   const planHref = `/plans?create=true&type=${project.platform}&project_id=${project.id}&intent=schedule`
   const canCreatePlan = project.platform !== 'ecommerce'
+  const operatingBadges = buildOperatingBadges(project, stats)
 
   return (
     <div className={`group rounded-lg border border-border bg-card p-5 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md active:scale-[0.98]`}>
@@ -50,6 +94,15 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
       </div>
       {positioning && (
         <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{positioning}</p>
+      )}
+      {operatingBadges.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {operatingBadges.map((badge) => (
+            <Badge key={badge.label} variant={badge.variant} className="text-[10px]">
+              {badge.label}
+            </Badge>
+          ))}
+        </div>
       )}
       {stats && (
         <div className="mt-4 flex gap-4 border-t border-border pt-3 text-xs text-muted-foreground">
