@@ -42,7 +42,8 @@ import { Button } from '@/components/common/button'
 import PageHeader from '@/components/layout/PageHeader'
 import StatsCardSkeleton from '@/components/StatsCardSkeleton'
 import EmptyState from '@/components/EmptyState'
-import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, projectsReturnHref, type CommandCenterSignalKind } from '@/lib/command-center'
+import { getLocalExecutorStatus, isDesktop } from '@/lib/tauri'
+import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, hasUsableModelConfig, projectsReturnHref, type CommandCenterSignalKind, type ReadinessStatus } from '@/lib/command-center'
 import { cn } from '@/lib/utils'
 
 const CHART_COLORS = [
@@ -103,6 +104,24 @@ export default function DashboardPage() {
     queryFn: () => api.projects.list({ status: 'active' }),
     staleTime: 60_000,
   })
+  const desktopMode = isDesktop()
+  const { data: apiKeys = [], isLoading: apiKeysLoading } = useQuery({
+    queryKey: queryKeys.apiKeys.all,
+    queryFn: async () => {
+      const data = await api.apiKeys.list()
+      return data.items || []
+    },
+  })
+  const { data: modelConfig, isLoading: modelConfigLoading } = useQuery({
+    queryKey: queryKeys.modelConfig.all,
+    queryFn: () => api.modelConfig.get(),
+  })
+  const { data: localExecutorStatus, isLoading: localExecutorLoading } = useQuery({
+    queryKey: ['dashboard', 'local-executor-status'],
+    queryFn: getLocalExecutorStatus,
+    enabled: desktopMode,
+    staleTime: 30_000,
+  })
 
   const plans = plansData?.items ?? []
   const tasks = tasksData?.items ?? []
@@ -160,7 +179,27 @@ export default function DashboardPage() {
     projects,
     creditsBalance,
     signInStatus,
-  }), [tasks, plans, projects, creditsBalance, signInStatus])
+    apiKeysReady: apiKeysLoading ? null : apiKeys.length > 0,
+    modelConfigReady: modelConfigLoading ? null : hasUsableModelConfig(modelConfig),
+    localExecutorReady: desktopMode
+      ? localExecutorLoading
+        ? null
+        : Boolean(localExecutorStatus?.available)
+      : true,
+  }), [
+    tasks,
+    plans,
+    projects,
+    creditsBalance,
+    signInStatus,
+    apiKeysLoading,
+    apiKeys.length,
+    modelConfigLoading,
+    modelConfig,
+    desktopMode,
+    localExecutorLoading,
+    localExecutorStatus,
+  ])
   const nextBestActions = useMemo(() => buildNextBestActions(commandSignals), [commandSignals])
   const defaultCreateHref = commandSignals.readiness.projectsReady
     ? createTaskHref({
@@ -293,31 +332,22 @@ export default function DashboardPage() {
             <p className="text-sm text-muted-foreground">把创建、执行、发布链路拆成可检查状态。</p>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <ReadinessItem
-                ready={commandSignals.readiness.projectsReady}
-                label="项目定位"
-                description={commandSignals.readiness.projectsReady ? `${commandSignals.projects.length} 个项目可用` : '先创建账号/项目'}
-                href={commandSignals.readiness.projectsReady ? '/projects' : projectsReturnHref({ type: 'seednote', intent: 'new' })}
-              />
-              <ReadinessItem
-                ready={commandSignals.readiness.publishingReady}
-                label="发布能力"
-                description={commandSignals.readiness.publishingReady ? '已有项目启用发布' : '需要检查发布配置'}
-                href="/settings"
-              />
-              <ReadinessItem
-                ready
-                label="模型配置"
-                description="沿用当前模型策略"
-                href="/settings"
-              />
-              <ReadinessItem
-                ready
-                label="本地执行"
-                description="状态由桌面层同步"
-                href="/settings"
-              />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {[
+                commandSignals.readiness.checks.projects,
+                commandSignals.readiness.checks.apiKeys,
+                commandSignals.readiness.checks.modelConfig,
+                commandSignals.readiness.checks.localExecutor,
+                commandSignals.readiness.checks.publishing,
+              ].map((item) => (
+                <ReadinessItem
+                  key={item.label}
+                  status={item.status}
+                  label={item.label}
+                  description={item.description}
+                  href={item.href}
+                />
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -561,16 +591,18 @@ function ActionDot({ kind }: { kind: CommandCenterSignalKind }) {
 }
 
 function ReadinessItem({
-  ready,
+  status,
   label,
   description,
   href,
 }: {
-  ready: boolean
+  status: ReadinessStatus
   label: string
   description: string
   href: string
 }) {
+  const ready = status === 'ready'
+  const unknown = status === 'unknown'
   return (
     <Link
       to={href}
@@ -579,6 +611,7 @@ function ReadinessItem({
       <span className={cn(
         'mt-0.5 flex size-6 items-center justify-center rounded-full bg-muted text-muted-foreground',
         ready && 'bg-primary/10 text-primary',
+        !ready && !unknown && 'bg-destructive/10 text-destructive',
       )}>
         {ready ? <CheckCircle2 className="size-3.5" /> : <Settings className="size-3.5" />}
       </span>

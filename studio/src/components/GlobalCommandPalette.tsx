@@ -16,7 +16,8 @@ import {
 import { allNavItems, type NavItem } from '@/lib/navigation'
 import { commandPaletteStore } from '@/lib/command-palette'
 import { api } from '@/lib/api'
-import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, projectsReturnHref } from '@/lib/command-center'
+import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, hasUsableModelConfig, projectsReturnHref } from '@/lib/command-center'
+import { queryKeys } from '@/lib/query-keys'
 
 const shortcutMap: Record<string, string> = {
   '今日': 'g d',
@@ -69,6 +70,19 @@ export default function GlobalCommandPalette() {
     queryFn: () => api.credits.signInStatus(),
     enabled: open,
   })
+  const { data: apiKeys = [] } = useQuery({
+    queryKey: queryKeys.apiKeys.all,
+    queryFn: async () => {
+      const data = await api.apiKeys.list()
+      return data.items || []
+    },
+    enabled: open,
+  })
+  const { data: modelConfig } = useQuery({
+    queryKey: queryKeys.modelConfig.all,
+    queryFn: () => api.modelConfig.get(),
+    enabled: open,
+  })
 
   const tasks = tasksData?.items ?? []
   const plans = plansData?.items ?? []
@@ -78,7 +92,10 @@ export default function GlobalCommandPalette() {
     projects,
     creditsBalance,
     signInStatus,
-  }), [tasks, plans, projects, creditsBalance, signInStatus])
+    apiKeysReady: apiKeys.length > 0,
+    modelConfigReady: hasUsableModelConfig(modelConfig),
+    localExecutorReady: true,
+  }), [tasks, plans, projects, creditsBalance, signInStatus, apiKeys.length, modelConfig])
   const nextActions = useMemo(() => buildNextBestActions(signals), [signals])
   const failedTasks = signals.failedTasks.slice(0, 5)
   const defaultProject = signals.projects[0]

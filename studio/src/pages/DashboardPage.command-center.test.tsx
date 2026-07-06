@@ -18,6 +18,16 @@ vi.mock('@/contexts/AuthContext', () => ({
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
+vi.mock('@/lib/tauri', () => ({
+  isDesktop: () => true,
+  getLocalExecutorStatus: vi.fn().mockResolvedValue({
+    state: 'running_idle',
+    available: true,
+    running: true,
+    reason: '',
+  }),
+}))
+
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
   return {
@@ -123,7 +133,11 @@ vi.mock('@/lib/api', async () => {
       },
       apiKeys: {
         ...actual.api.apiKeys,
-        list: vi.fn().mockResolvedValue([{ id: 'key-1' }]),
+        list: vi.fn().mockResolvedValue({ items: [{ id: 'key-1' }] }),
+      },
+      modelConfig: {
+        ...actual.api.modelConfig,
+        get: vi.fn().mockResolvedValue({ text: { model: 'gpt-5' }, image: null }),
       },
     },
   }
@@ -137,8 +151,16 @@ describe('DashboardPage command center', () => {
     expect(await screen.findByText('今日创作态势')).toBeInTheDocument()
     expect(await screen.findByText('失败待恢复')).toBeInTheDocument()
     expect(await screen.findByText('待发布确认')).toBeInTheDocument()
+    expect(await screen.findByText('平台密钥')).toBeInTheDocument()
+    expect(await screen.findByText('密钥可用于 Agent 接入')).toBeInTheDocument()
+    expect(await screen.findByText('模型配置')).toBeInTheDocument()
+    expect(await screen.findByText('模型策略已配置')).toBeInTheDocument()
+    expect(await screen.findByText('执行环境')).toBeInTheDocument()
+    expect(await screen.findByText('执行环境可用')).toBeInTheDocument()
     expect(await screen.findByRole('link', { name: /恢复失败任务/ })).toHaveAttribute('href', '/tasks/failed-task')
     expect(await screen.findByRole('link', { name: /处理发布审批/ })).toHaveAttribute('href', '/tasks/approval-task')
     expect(api.projects.list).toHaveBeenCalledWith({ status: 'active' })
+    expect(api.apiKeys.list).toHaveBeenCalled()
+    expect(api.modelConfig.get).toHaveBeenCalled()
   })
 })
