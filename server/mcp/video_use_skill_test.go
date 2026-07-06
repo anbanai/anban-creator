@@ -107,6 +107,30 @@ func TestVideoUseSkillFiles(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeSkillFrontmatterParses(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(wd, "..", ".."))
+	skillRoot := filepath.Join(root, "claudecode", "skills")
+	entries, err := os.ReadDir(skillRoot)
+	if err != nil {
+		t.Fatalf("read claudecode skills: %v", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		skill := entry.Name()
+		raw, err := os.ReadFile(filepath.Join(skillRoot, skill, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("%s SKILL.md missing: %v", skill, err)
+		}
+		requireValidSkillFrontmatter(t, "claudecode", skill, string(raw))
+	}
+}
+
 func TestVideoOverlaySkillFiles(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -204,9 +228,6 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 	for _, want := range []string{
 		"name: video",
 		"skills:",
-		"- music-to-video",
-		"- slideshow",
-		"- remotion-best-practices",
 		"- dreamina-video",
 		"- video-use",
 		"- hyperframes-video-overlays",
@@ -216,8 +237,7 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		"- short-video-cover",
 		"- portrait-pose-variants",
 		"- capcut-draft",
-		"mcpServers:",
-		"- creator",
+		"插件级 `.mcp.json`",
 		"prepare_file_upload",
 		"create_video_asr_task",
 		"query_video_asr_task",
@@ -239,6 +259,13 @@ func TestVideoAgentReplacesShortVideoStudio(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("video agent missing %q", want)
 		}
+	}
+	frontmatter := body
+	if end := strings.Index(body[len("---\n"):], "\n---"); end >= 0 {
+		frontmatter = body[:len("---\n")+end+len("\n---")]
+	}
+	if strings.Contains(frontmatter, "\nmcpServers:") {
+		t.Fatal("video agent must not define mcpServers; plugin subagents inherit the plugin-level MCP server")
 	}
 	for _, banned := range []string{"short-video-studio", "upload_live_audio", "create_live_analysis_task"} {
 		if strings.Contains(body, banned) {

@@ -33,11 +33,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "resources/bin/*",
-      "resources/claude/**/*",
-      "resources/claudecode/**/*"
-    ],
+    "resources": ["resources/**/*"],
     "macOS": {
       "frameworks": [],
       "minimumSystemVersion": "11.0",

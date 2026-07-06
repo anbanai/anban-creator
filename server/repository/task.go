@@ -31,11 +31,14 @@ func (r *taskRepository) FindByID(ctx context.Context, id string) (*model.Task, 
 	return &task, nil
 }
 
-func (r *taskRepository) FindByUserID(ctx context.Context, userID string, projectID string, offset, limit int) ([]*model.Task, error) {
+func (r *taskRepository) FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
 	q := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC")
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
+	}
+	if planID != "" {
+		q = q.Where("plan_id = ?", planID)
 	}
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
@@ -46,11 +49,14 @@ func (r *taskRepository) FindByUserID(ctx context.Context, userID string, projec
 	return tasks, nil
 }
 
-func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, offset, limit int) ([]*model.Task, error) {
+func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
 	q := r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, status).Order("created_at DESC")
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
+	}
+	if planID != "" {
+		q = q.Where("plan_id = ?", planID)
 	}
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
@@ -212,11 +218,14 @@ func (r *taskRepository) UpdateHeartbeat(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("last_heartbeat_at", now).Error
 }
 
-func (r *taskRepository) CountByUserID(ctx context.Context, userID string, projectID string) (int64, error) {
+func (r *taskRepository) CountByUserID(ctx context.Context, userID string, projectID string, planID string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ?", userID)
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
+	}
+	if planID != "" {
+		q = q.Where("plan_id = ?", planID)
 	}
 	if err := q.Count(&count).Error; err != nil {
 		return 0, err
@@ -224,11 +233,14 @@ func (r *taskRepository) CountByUserID(ctx context.Context, userID string, proje
 	return count, nil
 }
 
-func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, status string, projectID string) (int64, error) {
+func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ? AND status = ?", userID, status)
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
+	}
+	if planID != "" {
+		q = q.Where("plan_id = ?", planID)
 	}
 	if err := q.Count(&count).Error; err != nil {
 		return 0, err

@@ -62,7 +62,7 @@ export interface Task {
   skip_reference_image?: boolean
   reference_image_url?: string
   error: string | null
-  plan_id: string | null
+  plan_id?: string | null
   project_id: string
   result: TaskResult
   published: boolean

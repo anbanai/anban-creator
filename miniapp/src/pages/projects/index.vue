@@ -141,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
 import type { Project, ProjectStats } from '@/types'
 import { projectsApi } from '@/api/projects'
@@ -320,6 +320,10 @@ function onDelete(project: Project) {
 
 // Watch platform filter change
 watch(activePlatform, () => {
+  fetchProjects(true)
+})
+
+onMounted(() => {
   fetchProjects(true)
 })
 

@@ -798,6 +798,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		ID:                       taskID,
 		UserID:                   plan.UserID,
 		ProjectID:                plan.ProjectID,
+		PlanID:                   &plan.ID,
 		Type:                     taskType,
 		Status:                   model.TaskStatusPending,
 		Prompt:                   prompt,
@@ -858,15 +859,15 @@ func (s *TaskService) GetByID(ctx context.Context, id string) (*model.Task, erro
 	return task, nil
 }
 
-// List returns tasks for a user with optional status and project filters and pagination.
-func (s *TaskService) List(ctx context.Context, userID string, offset, limit int, status, projectID string) ([]*model.Task, int64, error) {
+// List returns tasks for a user with optional status, project, and plan filters and pagination.
+func (s *TaskService) List(ctx context.Context, userID string, offset, limit int, status, projectID, planID string) ([]*model.Task, int64, error) {
 	var tasks []*model.Task
 	var err error
 
 	if status != "" {
-		tasks, err = s.repo.Tasks().FindByUserIDAndStatus(ctx, userID, status, projectID, offset, limit)
+		tasks, err = s.repo.Tasks().FindByUserIDAndStatus(ctx, userID, status, projectID, planID, offset, limit)
 	} else {
-		tasks, err = s.repo.Tasks().FindByUserID(ctx, userID, projectID, offset, limit)
+		tasks, err = s.repo.Tasks().FindByUserID(ctx, userID, projectID, planID, offset, limit)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("list tasks: %w", err)
@@ -874,9 +875,9 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 
 	var total int64
 	if status != "" {
-		total, err = s.repo.Tasks().CountByUserIDAndStatus(ctx, userID, status, projectID)
+		total, err = s.repo.Tasks().CountByUserIDAndStatus(ctx, userID, status, projectID, planID)
 	} else {
-		total, err = s.repo.Tasks().CountByUserID(ctx, userID, projectID)
+		total, err = s.repo.Tasks().CountByUserID(ctx, userID, projectID, planID)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("count tasks: %w", err)

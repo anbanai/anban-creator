@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus, Ban, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, Plus, Loader2, ClipboardList, Check, Download, Square, CheckSquare, Stamp, Target, Images, Package, Minus, Ban, RotateCcw, Trash2, Send, Settings, type LucideIcon } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -26,7 +26,17 @@ import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant, platformDefaultRatio, platformRatioLabel, ecommerceModuleCatalog, ecommerceTargetPlatformOptions, ecommerceLanguageOptions } from '@/lib/labels'
-import { isLocalExecutorAvailable } from '@/lib/tauri'
+import {
+  getLocalExecutorStatus,
+  setExecutorEnabled,
+  startLocalExecutor,
+  type LocalExecutorStatus,
+} from '@/lib/tauri'
+import {
+  canSubmitLocalTask,
+  localExecutorCreateHint,
+  shouldDefaultRunLocally,
+} from '@/lib/local-executor-ux'
 import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
@@ -37,6 +47,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useImageModels } from '@/hooks/useImageModels'
 import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
+import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 
 const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
@@ -69,7 +80,8 @@ export default function TasksPage() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const initialStatus = searchParams.get('status') || 'all'
-  const shouldCreate = searchParams.get('create') === 'true'
+  const createIntent = parseCreationIntent(searchParams)
+  const shouldCreate = createIntent.shouldCreate
 
   const [statusFilter, setStatusFilter] = useState(initialStatus)
   const [projectFilter, setProjectFilter] = useState('')
@@ -93,14 +105,16 @@ export default function TasksPage() {
   // provisioned local executor, default new tasks to run on the user's machine
   // (enables ffmpeg / local-shell). The user can flip this off to force cloud.
   // In the browser isLocalExecutorAvailable() is always false → no-op.
-  const [localExecutorAvailable, setLocalExecutorAvailable] = useState(false)
+  const [localExecutorStatus, setLocalExecutorStatus] = useState<LocalExecutorStatus | null>(null)
   const [runLocally, setRunLocally] = useState(true)
+  const localExecutorAvailable = localExecutorStatus?.available ?? false
+  const localExecutorHint = localExecutorCreateHint(localExecutorStatus)
   useEffect(() => {
     let cancelled = false
-    isLocalExecutorAvailable().then((ok) => {
+    getLocalExecutorStatus().then((status) => {
       if (!cancelled) {
-        setLocalExecutorAvailable(ok)
-        setRunLocally(ok)
+        setLocalExecutorStatus(status)
+        setRunLocally(shouldDefaultRunLocally(status))
       }
     })
     return () => { cancelled = true }
@@ -229,8 +243,8 @@ export default function TasksPage() {
 
     setModalOpen(false)
     toast.error('请先创建一个项目，再开始新建任务。')
-    navigate('/projects')
-  }, [projects.length, modalOpen, navigate])
+    navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
+  }, [projects.length, modalOpen, navigate, createIntent.type, createIntent.intent])
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['tasks', statusFilter, projectFilter, page],
@@ -355,18 +369,35 @@ export default function TasksPage() {
   function openCreate() {
     if (projects.length === 0) {
       toast.error('请先创建一个项目，再开始新建任务。')
-      navigate('/projects')
+      navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
       return
     }
-    const defaultType = (searchParams.get('type') || 'seednote') as TaskType
-    form.reset({ type: defaultType, prompt: '', project_id: '', image_ratio: '', image_model_key: '', product_photos: [], selected_modules: {}, target_platform: '', selling_points: '', language: '' })
+    const selectedIntentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
+    const defaultType = createIntent.type ?? selectedIntentProject?.platform ?? 'seednote'
+    form.reset({
+      type: defaultType as TaskType,
+      prompt: '',
+      project_id: selectedIntentProject?.id ?? '',
+      image_ratio: (selectedIntentProject?.image_ratio || '') as CreateTaskFormValues['image_ratio'],
+      image_model_key: '',
+      product_photos: [],
+      selected_modules: selectedIntentProject?.ecommerce_defaults?.default_selected_modules ?? {},
+      target_platform: selectedIntentProject?.ecommerce_defaults?.target_platform ?? '',
+      selling_points: '',
+      language: '',
+      video_config: selectedIntentProject?.platform === 'video' ? buildVideoFormConfig(selectedIntentProject.video_defaults) : undefined,
+    })
     setQuantity(1)
     setWatermark(false)
-    setProjectImageRatio('')
+    setProjectImageRatio(selectedIntentProject?.image_ratio || '')
     setHasContentImage(true)
     setHasTailImage(false)
     setArticleWithCover(true)
     setArticleWithContentImages(true)
+    void getLocalExecutorStatus().then((status) => {
+      setLocalExecutorStatus(status)
+      setRunLocally(shouldDefaultRunLocally(status))
+    })
     setModalOpen(true)
   }
 
@@ -394,6 +425,22 @@ export default function TasksPage() {
   }
 
   async function onSubmit(values: CreateTaskFormValues) {
+    let statusForSubmit = localExecutorStatus
+    if (runLocally && statusForSubmit?.state === 'ready_stopped') {
+      const ok = await startLocalExecutor()
+      if (ok) {
+        await setExecutorEnabled(true)
+        statusForSubmit = { ...statusForSubmit, running: true, state: 'running_idle' }
+        setLocalExecutorStatus(statusForSubmit)
+        toast.success('本地执行器已启动')
+      } else {
+        toast.error('本地执行器启动失败，本次将改为云端执行')
+      }
+    }
+    const runThisTaskLocally = canSubmitLocalTask(statusForSubmit, runLocally)
+    if (runLocally && !runThisTaskLocally) {
+      toast.message('本地执行器未运行，本次将改为云端执行')
+    }
     await submit(async () => createMutation.mutateAsync({
       type: values.type as import('@/types').TaskType,
       prompt: values.prompt?.trim() || undefined,
@@ -417,8 +464,8 @@ export default function TasksPage() {
       selling_points: values.type === 'ecommerce' ? (values.selling_points?.trim() || undefined) : undefined,
       language: values.type === 'ecommerce' ? (values.language || undefined) : undefined,
       video_config: values.type === 'video' ? normalizeVideoConfigForSubmit(values.video_config, selectedProject?.video_defaults) : undefined,
-      // Route to the desktop local executor when available and opted in.
-      execution_target: localExecutorAvailable && runLocally ? 'local' : undefined,
+      // Route to the desktop local executor only when it is running and able to claim now.
+      execution_target: runThisTaskLocally ? 'local' : undefined,
     }))
   }
 
@@ -457,19 +504,25 @@ export default function TasksPage() {
   const bulkActionCopy: Record<string, { title: string; desc: string }> = {
     cancel: {
       title: '批量取消任务？',
-      desc: `将取消 ${selectedCancellable.length} 个待执行/运行中的任务。未消耗的部分将退还积分，此操作不可撤销。`,
+      desc: `已选 ${selectedTasks.length} 个，其中 ${selectedCancellable.length} 个可取消，其余将跳过。未消耗的部分将退还积分，此操作不可撤销。`,
     },
     clone: {
       title: '批量克隆任务？',
-      desc: `将为 ${selectedCloneable.length} 个失败/已取消任务克隆新任务（按新任务重新计费），原任务保留。`,
+      desc: `已选 ${selectedTasks.length} 个，其中 ${selectedCloneable.length} 个可克隆，其余将跳过。克隆会按新任务重新计费，原任务保留。`,
     },
     delete: {
       title: '批量删除任务？',
-      desc: `将永久删除 ${selectedDeletable.length} 个任务及其产出文件，不可恢复。运行中的任务需先取消。`,
+      desc: `已选 ${selectedTasks.length} 个，其中 ${selectedDeletable.length} 个可删除，其余将跳过。将永久删除任务及其产出文件，不可恢复。`,
     },
   }
 
   const runningCount = tasks.filter((t) => t.status === 'running').length
+  const queueStats = useMemo(() => ({
+    active: tasks.filter((t) => t.status === 'running' || t.status === 'pending').length,
+    failed: tasks.filter((t) => t.status === 'failed').length,
+    approval: tasks.filter((t) => t.publish_approval_state === 'pending').length,
+    completed: tasks.filter((t) => t.status === 'completed').length,
+  }), [tasks])
 
   return (
     <div className="space-y-6">
@@ -486,6 +539,50 @@ export default function TasksPage() {
           新建任务
         </Button>
       </PageHeader>
+
+      <section className="rounded-lg border border-border bg-card p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">恢复工作台</h2>
+            <p className="mt-1 text-sm text-muted-foreground">把运行、失败、待发布和最近完成的任务先排成队列。</p>
+          </div>
+          <Button variant="outline" size="sm" render={<Link to="/settings" />}>
+            <Settings className="h-4 w-4" />
+            检查设置
+          </Button>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <TaskQueueLink
+            to="/tasks?status=running"
+            icon={Clock3}
+            label="运行队列"
+            value={queueStats.active}
+            description="待执行 / 运行中"
+          />
+          <TaskQueueLink
+            to="/tasks?status=failed"
+            icon={AlertTriangle}
+            label="失败待恢复"
+            value={queueStats.failed}
+            description="进入详情查看日志、重试或克隆"
+            urgent={queueStats.failed > 0}
+          />
+          <TaskQueueLink
+            to="/tasks?status=completed"
+            icon={Send}
+            label="待发布确认"
+            value={queueStats.approval}
+            description="需要人工审批的发布任务"
+          />
+          <TaskQueueLink
+            to="/tasks?status=completed"
+            icon={CheckCircle2}
+            label="最近完成"
+            value={queueStats.completed}
+            description="可下载、发布或复用"
+          />
+        </div>
+      </section>
 
       {/* Filters row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -1234,10 +1331,15 @@ export default function TasksPage() {
           </Form>
           <DialogFooter>
             {localExecutorAvailable && (
-              <label className="mr-auto flex cursor-pointer items-center gap-2 text-xs text-muted-foreground" title="在本机运行：使用桌面端内置的 Claude Code + ffmpeg，可剪辑本地视频、执行本地命令。关闭则改为云端执行。">
-                <Switch checked={runLocally} onCheckedChange={setRunLocally} />
-                在本机运行
-              </label>
+              <div className="mr-auto flex min-w-0 items-center gap-2 text-xs">
+                <label className="flex cursor-pointer items-center gap-2 text-muted-foreground" title="在本机运行：使用桌面端内置的 Claude Code + ffmpeg，可剪辑本地视频、执行本地命令。关闭则改为云端执行。">
+                  <Switch checked={runLocally} onCheckedChange={setRunLocally} />
+                  <span className="whitespace-nowrap">在本机运行</span>
+                </label>
+                <span className="max-w-[260px] truncate text-muted-foreground/75" title={localExecutorHint}>
+                  {localExecutorHint}
+                </span>
+              </div>
             )}
             <Button variant="secondary" onClick={closeModal}>取消</Button>
             <Button
@@ -1259,7 +1361,9 @@ export default function TasksPage() {
                 return false
               })()}
             >
-              {quantity > 1 ? `创建 ${quantity} 个任务` : '创建'}
+              {runLocally && localExecutorStatus?.state === 'ready_stopped'
+                ? '启动并创建'
+                : quantity > 1 ? `创建 ${quantity} 个任务` : '创建'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1302,5 +1406,44 @@ export default function TasksPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+function TaskQueueLink({
+  to,
+  icon: Icon,
+  label,
+  value,
+  description,
+  urgent = false,
+}: {
+  to: string
+  icon: LucideIcon
+  label: string
+  value: number
+  description: string
+  urgent?: boolean
+}) {
+  return (
+    <Link
+      to={to}
+      className={`group flex items-start justify-between gap-3 rounded-lg border p-3 transition-colors ${
+        urgent
+          ? 'border-destructive/30 bg-destructive/5 hover:bg-destructive/10'
+          : 'border-border bg-background hover:border-primary/30 hover:bg-accent'
+      }`}
+    >
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <Icon className={`h-4 w-4 ${urgent ? 'text-destructive' : 'text-muted-foreground'}`} />
+          <span className="text-sm font-medium text-foreground">{label}</span>
+        </div>
+        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <span className="text-xl font-semibold tabular-nums text-foreground">{value}</span>
+        <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+      </div>
+    </Link>
   )
 }

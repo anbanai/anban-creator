@@ -276,6 +276,19 @@ func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, im
 			}
 		}
 	}
+	if apiCfg == nil && ch.Platform == model.PlatformVideo {
+		// Video projects use generate_image only for temporary visual anchors
+		// that become video references. They have no dedicated app-config image
+		// section, so reuse the generic image API with Content preferred because
+		// anchors behave like internal content assets, not publication covers.
+		if effectiveCfg != nil {
+			if effectiveCfg.Content != nil {
+				apiCfg = effectiveCfg.Content
+			} else if effectiveCfg.Cover != nil {
+				apiCfg = effectiveCfg.Cover
+			}
+		}
+	}
 	if apiCfg == nil {
 		return nil, fmt.Errorf("no image API config available for type %q", imageType)
 	}

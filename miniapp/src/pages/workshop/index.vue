@@ -3,7 +3,7 @@
     <!-- Three main feature cards -->
     <view class="workshop-index__grid">
       <view class="feature-card" @tap="navigateTo('viral-analysis')">
-        <view class="feature-card__icon">🔬</view>
+        <view class="feature-card__icon">析</view>
         <view class="feature-card__body">
           <text class="feature-card__title">爆文拆解</text>
           <text class="feature-card__desc">分析种草笔记爆款笔记，获取创作灵感</text>
@@ -12,7 +12,7 @@
       </view>
 
       <view class="feature-card" @tap="navigateTo('poster')">
-        <view class="feature-card__icon">🎨</view>
+        <view class="feature-card__icon">图</view>
         <view class="feature-card__body">
           <text class="feature-card__title">海报制作</text>
           <text class="feature-card__desc">AI智能生成商业海报</text>
@@ -21,7 +21,7 @@
       </view>
 
       <view class="feature-card" @tap="navigateTo('clone')">
-        <view class="feature-card__icon">📋</view>
+        <view class="feature-card__icon">复</view>
         <view class="feature-card__body">
           <text class="feature-card__title">爆款复刻</text>
           <text class="feature-card__desc">复刻爆款内容，融入你的风格</text>

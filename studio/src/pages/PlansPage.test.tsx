@@ -1,4 +1,4 @@
-import { screen, waitFor, fireEvent } from '@testing-library/react'
+import { screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import PlansPage from './PlansPage'
 import { render } from '@/test/test-utils'
@@ -62,6 +62,7 @@ vi.mock('@/lib/api', async () => {
 describe('PlansPage — mutation failure feedback (no silent failure)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.history.pushState({}, '', '/')
     vi.mocked(api.plans.list).mockResolvedValue({
       items: [{
         id: 'plan-1',
@@ -208,5 +209,24 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     const [projectSelector] = await screen.findAllByRole('combobox')
     expect(projectSelector).toBeDisabled()
+  })
+
+  it('highlights a plan addressed by the timeline highlight parameter', async () => {
+    window.history.pushState({}, '', '/plans?highlight=plan-1')
+
+    render(<PlansPage />)
+
+    const highlightedPlan = await screen.findByTestId('plan-card-plan-1')
+    expect(highlightedPlan).toHaveAttribute('data-highlighted', 'true')
+  })
+
+  it('opens create dialog from URL intent with the project context preselected', async () => {
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+
+    render(<PlansPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
   })
 })

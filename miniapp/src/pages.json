@@ -7,12 +7,13 @@
 				"enablePullDownRefresh": true
 			}
 		},
-		{
-			"path": "pages/projects/index",
-			"style": {
-				"navigationBarTitleText": "账号"
-			}
-		},
+			{
+				"path": "pages/projects/index",
+				"style": {
+					"navigationBarTitleText": "账号",
+					"enablePullDownRefresh": true
+				}
+			},
 		{
 			"path": "pages/tasks/index",
 			"style": {
@@ -20,12 +21,13 @@
 				"enablePullDownRefresh": true
 			}
 		},
-		{
-			"path": "pages/plans/index",
-			"style": {
-				"navigationBarTitleText": "计划"
-			}
-		},
+			{
+				"path": "pages/plans/index",
+				"style": {
+					"navigationBarTitleText": "计划",
+					"enablePullDownRefresh": true
+				}
+			},
 		{
 			"path": "pages/me/index",
 			"style": {

@@ -1,6 +1,8 @@
-import { useEffect, useCallback, useSyncExternalStore } from 'react'
+import { useEffect, useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from 'next-themes'
+import { useQuery } from '@tanstack/react-query'
+import { AlertTriangle, FileText, FolderPlus, ListChecks, Moon, Plus, Search, Settings, Sun, WandSparkles } from 'lucide-react'
 import {
   CommandDialog,
   CommandInput,
@@ -13,9 +15,11 @@ import {
 } from '@/components/ui/command'
 import { allNavItems, type NavItem } from '@/lib/navigation'
 import { commandPaletteStore } from '@/lib/command-palette'
+import { api } from '@/lib/api'
+import { buildCommandCenterSignals, buildNextBestActions, createTaskHref, projectsReturnHref } from '@/lib/command-center'
 
 const shortcutMap: Record<string, string> = {
-  '仪表盘': 'g d',
+  '今日': 'g d',
   '项目': 'g c',
   '计划': 'g p',
   '任务': 'g t',
@@ -38,6 +42,46 @@ export default function GlobalCommandPalette() {
   const open = useSyncExternalStore(commandPaletteStore.subscribe, commandPaletteStore.getSnapshot)
   const navigate = useNavigate()
   const { setTheme } = useTheme()
+
+  const { data: tasksData } = useQuery({
+    queryKey: ['command-palette', 'tasks'],
+    queryFn: () => api.tasks.list({ limit: 20 }),
+    enabled: open,
+  })
+  const { data: projects = [] } = useQuery({
+    queryKey: ['command-palette', 'projects'],
+    queryFn: () => api.projects.list({ status: 'active' }),
+    enabled: open,
+    staleTime: 60_000,
+  })
+  const { data: plansData } = useQuery({
+    queryKey: ['command-palette', 'plans'],
+    queryFn: () => api.plans.list({ limit: 20 }),
+    enabled: open,
+  })
+  const { data: creditsBalance } = useQuery({
+    queryKey: ['command-palette', 'credits', 'balance'],
+    queryFn: () => api.credits.balance(),
+    enabled: open,
+  })
+  const { data: signInStatus } = useQuery({
+    queryKey: ['command-palette', 'credits', 'signInStatus'],
+    queryFn: () => api.credits.signInStatus(),
+    enabled: open,
+  })
+
+  const tasks = tasksData?.items ?? []
+  const plans = plansData?.items ?? []
+  const signals = useMemo(() => buildCommandCenterSignals({
+    tasks,
+    plans,
+    projects,
+    creditsBalance,
+    signInStatus,
+  }), [tasks, plans, projects, creditsBalance, signInStatus])
+  const nextActions = useMemo(() => buildNextBestActions(signals), [signals])
+  const failedTasks = signals.failedTasks.slice(0, 5)
+  const defaultProject = signals.projects[0]
 
   const setOpen = useCallback((v: boolean) => {
     if (v) commandPaletteStore.open()
@@ -63,12 +107,68 @@ export default function GlobalCommandPalette() {
   }, [])
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen} title="命令面板" description="搜索命令或导航">
-      <CommandInput placeholder="输入命令或搜索..." />
+    <CommandDialog open={open} onOpenChange={setOpen} title="行动面板" description="搜索命令、任务或下一步动作">
+      <CommandInput placeholder="搜索动作、任务、页面..." />
       <CommandList>
         <CommandEmpty>没有找到匹配项</CommandEmpty>
 
-        <CommandGroup heading="导航">
+        <CommandGroup heading="继续工作">
+          {nextActions.slice(0, 4).map((action) => (
+            <CommandItem
+              key={action.id}
+              onSelect={() => handleSelect(() => navigate(action.href))}
+            >
+              <WandSparkles className="mr-2 h-4 w-4" />
+              {action.label}
+            </CommandItem>
+          ))}
+          {nextActions.length === 0 && (
+            <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: defaultProject?.platform, projectId: defaultProject?.id, intent: 'new' })))}>
+              <Plus className="mr-2 h-4 w-4" />
+              新建创作任务
+            </CommandItem>
+          )}
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="创建">
+          <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: 'article', projectId: defaultProject?.platform === 'article' ? defaultProject.id : undefined, intent: 'new' })))}>
+            <FileText className="mr-2 h-4 w-4" />
+            新建公众号文章
+          </CommandItem>
+          <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: 'seednote', projectId: defaultProject?.platform === 'seednote' ? defaultProject.id : undefined, intent: 'new' })))}>
+            <Plus className="mr-2 h-4 w-4" />
+            新建种草笔记
+          </CommandItem>
+          <CommandItem onSelect={() => handleSelect(() => navigate('/plans?create=true&type=article&intent=schedule'))}>
+            <ListChecks className="mr-2 h-4 w-4" />
+            创建自动计划
+          </CommandItem>
+          <CommandItem onSelect={() => handleSelect(() => navigate(projectsReturnHref({ type: 'seednote', intent: 'new' })))}>
+            <FolderPlus className="mr-2 h-4 w-4" />
+            新建项目
+          </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="恢复">
+          {failedTasks.map((task) => (
+            <CommandItem key={task.id} onSelect={() => handleSelect(() => navigate(`/tasks/${task.id}`))}>
+              <AlertTriangle className="mr-2 h-4 w-4" />
+              {task.title || task.prompt || '失败任务'}
+            </CommandItem>
+          ))}
+          <CommandItem onSelect={() => handleSelect(() => navigate('/tasks?status=failed'))}>
+            <AlertTriangle className="mr-2 h-4 w-4" />
+            打开失败队列
+          </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="跳转">
           {allNavItems.map((item) => (
             <CommandItem
               key={item.to}
@@ -83,24 +183,23 @@ export default function GlobalCommandPalette() {
 
         <CommandSeparator />
 
-        <CommandGroup heading="快捷操作">
-          <CommandItem onSelect={() => handleSelect(() => navigate('/tasks?create=true'))}>
-            <span className="mr-2 text-primary">+</span>
-            新建任务
-          </CommandItem>
-          <CommandItem onSelect={() => handleSelect(() => navigate('/projects'))}>
-            <span className="mr-2 text-primary">+</span>
-            新建项目
+        <CommandGroup heading="设置">
+          <CommandItem onSelect={() => handleSelect(() => navigate('/settings'))}>
+            <Settings className="mr-2 h-4 w-4" />
+            打开接入就绪中心
           </CommandItem>
           <CommandItem onSelect={() => handleSelect(() => setTheme('light'))}>
+            <Sun className="mr-2 h-4 w-4" />
             亮色模式
             <CommandShortcut>Theme</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => handleSelect(() => setTheme('dark'))}>
+            <Moon className="mr-2 h-4 w-4" />
             暗色模式
             <CommandShortcut>Theme</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => handleSelect(() => setTheme('system'))}>
+            <Search className="mr-2 h-4 w-4" />
             跟随系统
             <CommandShortcut>Theme</CommandShortcut>
           </CommandItem>

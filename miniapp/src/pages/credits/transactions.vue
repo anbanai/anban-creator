@@ -198,20 +198,20 @@ function getTypeLabel(type: string): string {
 
 function getTypeIcon(type: string): string {
   switch (type) {
-    case 'sign_in': return '✅'
-    case 'task_deduct': return '📝'
-    case 'task_refund': return '↩️'
-    case 'admin_grant': return '🎁'
-    case 'image_gen': return '🖼'
-    case 'image_upload': return '📤'
-    case 'article_write': return '📄'
-    case 'convert': return '🔄'
-    case 'humanize': return '✨'
-    case 'topic_research': return '🔍'
-    case 'seo': return '📈'
-    case 'draft_publish': return '📢'
-    case 'outline': return '📋'
-    default: return '💰'
+    case 'sign_in': return '签'
+    case 'task_deduct': return '任'
+    case 'task_refund': return '返'
+    case 'admin_grant': return '赠'
+    case 'image_gen': return '图'
+    case 'image_upload': return '传'
+    case 'article_write': return '文'
+    case 'convert': return '转'
+    case 'humanize': return '润'
+    case 'topic_research': return '搜'
+    case 'seo': return '势'
+    case 'draft_publish': return '发'
+    case 'outline': return '纲'
+    default: return '分'
   }
 }
 

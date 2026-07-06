@@ -262,7 +262,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, 0, 10)
+	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
 	if err != nil {
 		t.Fatalf("find tasks: %v", err)
 	}

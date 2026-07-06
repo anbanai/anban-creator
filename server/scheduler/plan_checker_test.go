@@ -109,7 +109,7 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 		t.Fatalf("TriggerPlanNow: %v", err)
 	}
 
-	tasks, total, err := taskSvc.List(ctx, userID, 0, 10, "", projectID)
+	tasks, total, err := taskSvc.List(ctx, userID, 0, 10, "", projectID, "")
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestTriggerPlanNowSkipsInactivePlanWithoutRetryableError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TriggerPlanNow returned retryable error for inactive plan: %v", err)
 	}
-	tasks, total, err := taskSvc.List(ctx, plan.UserID, 0, 10, "", "")
+	tasks, total, err := taskSvc.List(ctx, plan.UserID, 0, 10, "", "", "")
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}

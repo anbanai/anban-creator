@@ -152,12 +152,16 @@ pub fn run() {
             commands::set_local_executor_config,
             commands::set_executor_enabled,
             commands::local_executor_status,
+            commands::validate_local_executor_config,
             commands::is_local_executor_available,
             commands::is_local_executor_running,
             commands::start_local_executor,
             commands::stop_local_executor,
             commands::open_external,
+            commands::open_workspace,
+            commands::copy_local_diagnostics,
             commands::save_blob,
+            commands::save_url_to_file,
             commands::pick_directory,
         ])
         .run(tauri::generate_context!())
@@ -185,10 +189,20 @@ async fn commands_start(app: &tauri::AppHandle) -> Result<bool, String> {
         let mut slot = state.cancel.lock().await;
         *slot = Some(cancel.clone());
     }
+    {
+        let mut runtime = state.runtime.write().await;
+        runtime.state = Some("starting".to_string());
+        runtime.current_task_id = None;
+        runtime.last_error = None;
+        runtime.last_event_at = Some(provision::now_event_at());
+    }
     let config = state.config.clone();
     let running = state.running.clone();
     let res = state.resources.clone();
+    let runtime = state.runtime.clone();
     let handle = app.clone();
-    tauri::async_runtime::spawn(executor::run_loop(handle, config, running, res, cancel));
+    tauri::async_runtime::spawn(executor::run_loop(
+        handle, config, running, res, runtime, cancel,
+    ));
     Ok(true)
 }

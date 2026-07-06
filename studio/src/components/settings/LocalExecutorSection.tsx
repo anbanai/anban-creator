@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Loader2, RefreshCw, FolderOpen, Play, Square } from 'lucide-react'
+import { Loader2, RefreshCw, FolderOpen, Play, Square, ClipboardCopy, ExternalLink, KeyRound, Cpu } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/common/button'
 import { Input } from '@/components/ui/input'
@@ -17,9 +17,13 @@ import {
   pickDirectory,
   getApiBase,
   setApiBase,
+  validateLocalExecutorConfig,
+  openWorkspace,
+  copyLocalDiagnostics,
   type LocalExecutorStatus,
 } from '@/lib/tauri'
 import { applyApiBase } from '@/lib/http-client'
+import { localExecutorCreateHint } from '@/lib/local-executor-ux'
 
 /**
  * Desktop-only local-executor configuration. Renders only inside the Tauri
@@ -57,7 +61,11 @@ export default function LocalExecutorSection() {
 
   const handlePick = async () => {
     const dir = await pickDirectory()
-    if (dir) setWorkspace(dir)
+    if (dir) {
+      setWorkspace(dir)
+      const validated = await validateLocalExecutorConfig(dir)
+      if (validated) queryClient.setQueryData(['local-executor-status'], validated)
+    }
   }
 
   const handleSaveBase = async () => {
@@ -92,6 +100,46 @@ export default function LocalExecutorSection() {
     }
   }
 
+  const handleClearSecrets = async (kind: 'api' | 'claude') => {
+    setSaving(true)
+    try {
+      const ok = await setLocalExecutorConfig({
+        apiKey: '',
+        workspace: '',
+        claudeApiKey: '',
+        clearApiKey: kind === 'api',
+        clearClaudeApiKey: kind === 'claude',
+      })
+      if (ok) {
+        toast.success(kind === 'api' ? '平台密钥已清除' : 'Claude Key 已清除')
+        await refetch()
+      } else {
+        toast.error('清除失败')
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCopyDiagnostics = async () => {
+    try {
+      const diagnostics = await copyLocalDiagnostics()
+      if (!diagnostics) {
+        toast.error('诊断信息不可用')
+        return
+      }
+      await navigator.clipboard.writeText(diagnostics)
+      toast.success('诊断信息已复制')
+    } catch {
+      toast.error('复制诊断信息失败')
+    }
+  }
+
+  const handleOpenWorkspace = async () => {
+    if (await openWorkspace()) toast.success('已打开工作区')
+    else toast.error('无法打开工作区')
+  }
+
   const handleToggle = async () => {
     setToggling(true)
     try {
@@ -118,25 +166,34 @@ export default function LocalExecutorSection() {
   const ready = status?.available ?? false
 
   return (
-    <Card>
-      <CardContent className="space-y-4 pt-6">
-        <div className="flex items-center justify-between">
+    <Card className="overflow-hidden border-cyan-500/20">
+      <CardContent className="space-y-4 bg-[linear-gradient(135deg,hsl(var(--card)),hsl(var(--muted))/0.38)] pt-6">
+        <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              本地执行器
+              <Cpu className="h-4 w-4 text-cyan-500" />
+              本机运行中心
               {status?.running ? (
                 <Badge variant="outline" className="text-[10px] text-emerald-600">运行中</Badge>
+              ) : ready ? (
+                <Badge variant="outline" className="text-[10px] text-cyan-600">已就绪</Badge>
               ) : (
-                <Badge variant="outline" className="text-[10px]">已停止</Badge>
+                <Badge variant="outline" className="text-[10px] text-amber-600">需配置</Badge>
               )}
             </h2>
             <p className="text-xs text-muted-foreground">
-              在本机运行任务（Claude Code + ffmpeg / 本地命令）。未就绪时新任务自动走云端。
+              Agentic Mission Control：本机 Claude Code、工作区、运行时与任务认领状态。
             </p>
+            <p className="text-xs text-muted-foreground/80">{localExecutorCreateHint(status ?? null)}</p>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => refetch()} disabled={isFetching}>
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button variant="secondary" size="sm" onClick={() => refetch()} disabled={isFetching} title="重新检测">
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+            </Button>
+            <Button variant="secondary" size="sm" onClick={handleCopyDiagnostics} title="复制诊断">
+              <ClipboardCopy className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
 
         {/* Readiness checklist */}
@@ -154,13 +211,20 @@ export default function LocalExecutorSection() {
         {/* Config form */}
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="le-api-key" className="text-xs">Anban Creator API Key</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="le-api-key" className="text-xs">Anban Creator API Key</Label>
+              {status?.api_key_set && (
+                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => handleClearSecrets('api')}>
+                  清除
+                </Button>
+              )}
+            </div>
             <Input
               id="le-api-key"
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder={status?.api_key_set ? '已配置（输入可覆盖）' : '在「平台密钥」创建后粘贴'}
+              placeholder={status?.api_key_set ? '已配置，留空将保留' : '在「平台密钥」创建后粘贴'}
             />
           </div>
 
@@ -176,24 +240,37 @@ export default function LocalExecutorSection() {
               <Button variant="secondary" size="icon" onClick={handlePick} title="选择目录">
                 <FolderOpen className="h-4 w-4" />
               </Button>
+              {status?.workspace_valid && (
+                <Button variant="secondary" size="icon" onClick={handleOpenWorkspace} title="打开工作区">
+                  <ExternalLink className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="le-claude-key" className="text-xs">Anthropic API Key（可选，否则用 Claude OAuth）</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="le-claude-key" className="text-xs">Anthropic API Key（当前版本必填）</Label>
+              {status?.claude_authenticated && (
+                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => handleClearSecrets('claude')}>
+                  清除
+                </Button>
+              )}
+            </div>
             <Input
               id="le-claude-key"
               type="password"
               value={claudeKey}
               onChange={(e) => setClaudeKey(e.target.value)}
-              placeholder={status?.claude_authenticated ? '已配置（输入可覆盖）' : 'ANTHROPIC_API_KEY'}
+              placeholder={status?.claude_authenticated ? '已配置，留空将保留' : 'ANTHROPIC_API_KEY'}
             />
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button onClick={handleSave} disabled={saving || (!apiKey && !claudeKey && !workspace)}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : '保存配置'}
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+            保存配置
           </Button>
           <Button
             variant={status?.running ? 'destructive' : 'default'}

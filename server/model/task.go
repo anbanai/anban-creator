@@ -78,17 +78,17 @@ type ProjectSnapshot struct {
 
 // Task represents a content generation task.
 type Task struct {
-	ID                string `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID            string `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
-	ProjectID         string `gorm:"type:char(36);index" json:"project_id"`
-	PlanID            *uint  `gorm:"index" json:"plan_id"`
-	Type              string `gorm:"type:varchar(20);not null" json:"type"`
-	Status            string `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
-	Prompt            string `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
-	Title             string `gorm:"type:varchar(200)" json:"title,omitempty"`
-	ImageRatio        string `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
-	ImageModelKey     string `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
-	ReferenceImageURL string `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
+	ID                string  `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID            string  `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
+	ProjectID         string  `gorm:"type:char(36);index" json:"project_id"`
+	PlanID            *string `gorm:"type:char(36);index" json:"plan_id,omitempty"`
+	Type              string  `gorm:"type:varchar(20);not null" json:"type"`
+	Status            string  `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
+	Prompt            string  `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
+	Title             string  `gorm:"type:varchar(200)" json:"title,omitempty"`
+	ImageRatio        string  `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
+	ImageModelKey     string  `gorm:"type:varchar(50);default:''" json:"image_model_key,omitempty"`
+	ReferenceImageURL string  `gorm:"type:varchar(500)" json:"reference_image_url,omitempty"`
 	// Overrides is legacy storage for old task-level style/author/theme overrides.
 	// New tasks use ProjectSnapshot as the runtime fact source.
 	Overrides          datatypes.JSONType[StyleOverrides]  `gorm:"type:json" json:"overrides"`
@@ -175,7 +175,7 @@ type Task struct {
 
 	CreatedAt time.Time `gorm:"index:idx_user_created,priority:2" json:"created_at"`
 	UpdatedAt time.Time `gorm:"index" json:"updated_at"`
-	Plan      *Plan     `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
+	Plan      *Plan     `gorm:"foreignKey:PlanID;references:ID" json:"plan,omitempty"`
 }
 
 // ExecutionTarget values selecting where a task runs.

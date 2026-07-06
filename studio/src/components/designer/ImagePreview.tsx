@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { downloadBlob, openInExternalWindow } from '@/lib/tauri'
+import { downloadBlob, isDesktop, openInExternalWindow, saveUrlToFile } from '@/lib/tauri'
 
 export interface PreviewImage {
   url: string
@@ -100,10 +100,14 @@ export default function ImagePreview({
 
   async function handleDownload() {
     try {
+      const filename = `designer-image-${currentIndex + 1}.${metadata.outputFormat || 'png'}`
+      if (isDesktop() && /^https?:\/\//i.test(current.url) && await saveUrlToFile(current.url, filename)) {
+        return
+      }
       const res = await fetch(current.url)
       const blob = await res.blob()
       // Native save dialog on desktop; anchor click in the browser.
-      await downloadBlob(`designer-image-${currentIndex + 1}.${metadata.outputFormat || 'png'}`, blob)
+      await downloadBlob(filename, blob)
     } catch {
       void openInExternalWindow(current.url)
     }

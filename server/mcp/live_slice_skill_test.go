@@ -96,10 +96,9 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 	for _, want := range []string{
 		"name: live-slicer",
 		"直播切片",
-		"mcpServers:",
-		"- creator",
 		"skills:",
 		"- live-slice",
+		"插件级 `.mcp.json`",
 		"- TaskCreate",
 		"- TaskUpdate",
 		"- Read",
@@ -150,6 +149,13 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 			t.Fatalf("live-slicer agent missing %q", want)
 		}
 	}
+	frontmatter := body
+	if end := strings.Index(body[len("---\n"):], "\n---"); end >= 0 {
+		frontmatter = body[:len("---\n")+end+len("\n---")]
+	}
+	if strings.Contains(frontmatter, "\nmcpServers:") {
+		t.Fatal("live-slicer agent must not define mcpServers; plugin subagents inherit the plugin-level MCP server")
+	}
 	for _, banned := range []string{
 		"Python",
 		"python" + "3",
@@ -192,10 +198,10 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		}
 	}
 
-	claudePath := filepath.Join(root, "claudecode", "CLAUDE.md")
+	claudePath := filepath.Join(root, "claudecode", "docs", "plugin-development.md")
 	claudeRaw, err := os.ReadFile(claudePath)
 	if err != nil {
-		t.Fatalf("claudecode CLAUDE.md missing: %v", err)
+		t.Fatalf("claudecode plugin development docs missing: %v", err)
 	}
 	claude := string(claudeRaw)
 	for _, want := range []string{
@@ -206,7 +212,7 @@ func TestLiveSlicerAgentFile(t *testing.T) {
 		"complete_live_subject",
 	} {
 		if !strings.Contains(claude, want) {
-			t.Fatalf("claudecode CLAUDE.md missing %q", want)
+			t.Fatalf("claudecode plugin development docs missing %q", want)
 		}
 	}
 }

@@ -118,6 +118,14 @@
           编辑第 {{ index + 1 }} 张
         </AbButton>
       </view>
+      <view class="result-actions">
+        <AbButton type="primary" size="sm" :loading="isGenerating" @click="regenerateVariant">
+          继续变体
+        </AbButton>
+        <AbButton type="ghost" size="sm" @click="copyImagePrompt">
+          复制 Prompt
+        </AbButton>
+      </view>
     </view>
 
     <view v-if="editingImage" class="section">
@@ -321,6 +329,32 @@ function removeReference(index: number) {
 function previewGenerated(index: number) {
   const urls = generatedImages.value.map((item) => item.url)
   uni.previewImage({ current: urls[index], urls })
+}
+
+function buildImagePrompt(): string {
+  return [
+    prompt.value.trim(),
+    selectedProvider.value ? `模型：${selectedProvider.value.name} / ${selectedProvider.value.model}` : '',
+    `尺寸：${settings.size}`,
+    `数量：${settings.n}`,
+    `质量：${settings.quality}`,
+    `格式：${settings.outputFormat}`,
+    settings.watermark ? '水印：开启' : '',
+  ].filter(Boolean).join('\n')
+}
+
+function copyImagePrompt() {
+  const text = buildImagePrompt()
+  if (!text) return
+  uni.setClipboardData({
+    data: text,
+    success: () => uni.showToast({ title: '图片 Prompt 已复制', icon: 'none' }),
+  })
+}
+
+async function regenerateVariant() {
+  if (!canGenerate.value) return
+  await generate()
 }
 
 function startEdit(index: number) {
@@ -686,6 +720,13 @@ onMounted(() => {
     border-radius: $ab-radius-sm;
     background-color: $ab-divider;
   }
+}
+
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $ab-space-sm;
+  margin-top: $ab-space-md;
 }
 
 .history-row {

@@ -408,6 +408,60 @@ func TestTaskService_CreateFromPlanSnapshotsProjectWithoutPlanStyleOverrides(t *
 	if overrides := found.Overrides.Data(); overrides != (model.StyleOverrides{}) {
 		t.Fatalf("overrides = %+v, want empty", overrides)
 	}
+	if found.PlanID == nil || *found.PlanID != plan.ID {
+		t.Fatalf("plan_id = %v, want %q", found.PlanID, plan.ID)
+	}
+}
+
+func TestTaskService_ListFiltersByPlanID(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	project := &model.Project{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Platform: model.PlatformSeednote,
+		Name:     "项目",
+		Status:   model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	planA := &model.Plan{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: project.ID,
+		Type:      model.PlatformSeednote,
+		Status:    model.PlanStatusActive,
+		Prompt:    "计划 A",
+	}
+	planB := &model.Plan{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: project.ID,
+		Type:      model.PlatformSeednote,
+		Status:    model.PlanStatusActive,
+		Prompt:    "计划 B",
+	}
+	taskA, err := svc.CreateFromPlan(ctx, planA)
+	if err != nil {
+		t.Fatalf("CreateFromPlan A: %v", err)
+	}
+	if _, err := svc.CreateFromPlan(ctx, planB); err != nil {
+		t.Fatalf("CreateFromPlan B: %v", err)
+	}
+
+	tasks, total, err := svc.List(ctx, userID, 0, 20, "", "", planA.ID)
+	if err != nil {
+		t.Fatalf("List by plan_id: %v", err)
+	}
+	if total != 1 || len(tasks) != 1 {
+		t.Fatalf("filtered tasks len/total = %d/%d, want 1/1", len(tasks), total)
+	}
+	if tasks[0].ID != taskA.ID || tasks[0].PlanID == nil || *tasks[0].PlanID != planA.ID {
+		t.Fatalf("filtered task = %+v, want task %s for plan %s", tasks[0], taskA.ID, planA.ID)
+	}
 }
 
 func TestTaskService_CreateManualVideoTaskSnapshotsProfileAndChargesDynamicCredits(t *testing.T) {
@@ -1885,7 +1939,7 @@ func TestTaskService_List(t *testing.T) {
 		Prompt:    "Task 2",
 	})
 
-	tasks, total, err := svc.List(context.Background(), userID, 0, 10, "", "")
+	tasks, total, err := svc.List(context.Background(), userID, 0, 10, "", "", "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -1911,7 +1965,7 @@ func TestTaskService_List_ByStatus(t *testing.T) {
 	svc.Cancel(context.Background(), task.ID)
 
 	// Filter by pending — should find none
-	tasks, total, err := svc.List(context.Background(), userID, 0, 10, model.TaskStatusPending, "")
+	tasks, total, err := svc.List(context.Background(), userID, 0, 10, model.TaskStatusPending, "", "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -1923,7 +1977,7 @@ func TestTaskService_List_ByStatus(t *testing.T) {
 	}
 
 	// Filter by cancelled
-	tasks, total, err = svc.List(context.Background(), userID, 0, 10, model.TaskStatusCancelled, "")
+	tasks, total, err = svc.List(context.Background(), userID, 0, 10, model.TaskStatusCancelled, "", "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

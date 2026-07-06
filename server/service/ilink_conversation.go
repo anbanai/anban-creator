@@ -139,7 +139,7 @@ func (s *IlinkConversationService) handleRecent(ctx context.Context, userID stri
 	if s.taskSvc == nil {
 		return "任务服务暂不可用。"
 	}
-	tasks, _, err := s.taskSvc.List(ctx, userID, 0, 5, "", "")
+	tasks, _, err := s.taskSvc.List(ctx, userID, 0, 5, "", "", "")
 	if err != nil || len(tasks) == 0 {
 		return "暂无最近任务。"
 	}

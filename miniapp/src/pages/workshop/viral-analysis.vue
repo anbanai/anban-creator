@@ -56,7 +56,7 @@
     <!-- Analysis result display -->
     <view v-if="result" class="va-result">
       <view class="va-score-card">
-        <text class="va-score-card__label">🔥 爆文指数</text>
+        <text class="va-score-card__label">爆文指数</text>
         <view class="va-score-card__number">
           <text class="va-score-card__score">{{ result.overall_score.score }}</text>
           <text class="va-score-card__max">/100</text>
@@ -64,6 +64,18 @@
         <text class="va-score-card__confidence">
           置信度 {{ confidenceLabel(result.overall_score.confidence) }} · {{ result.overall_score.evidence_count }} 条证据
         </text>
+      </view>
+
+      <view class="va-reuse-card">
+        <view class="va-reuse-card__head">
+          <text class="va-reuse-card__title">结果复用</text>
+          <text class="va-reuse-card__hint">把分析变成下一步动作</text>
+        </view>
+        <view class="va-reuse-card__actions">
+          <AbButton type="primary" size="sm" @click="createCloneTask">创建复刻任务</AbButton>
+          <AbButton type="ghost" size="sm" :loading="templateSaving" @click="saveCloneTemplate">保存为模板</AbButton>
+          <AbButton type="ghost" size="sm" @click="copyClonePrompt">复制 Prompt</AbButton>
+        </view>
       </view>
 
       <view v-if="result.summary?.length" class="va-summary-card">
@@ -159,7 +171,7 @@
 
     <!-- Failed state -->
     <view v-if="currentAnalysis && currentAnalysis.status === 'failed'" class="va-failed">
-      <text class="va-failed__icon">❌</text>
+      <text class="va-failed__icon">×</text>
       <text class="va-failed__text">分析失败</text>
       <text v-if="currentAnalysis.error_message" class="va-failed__error">{{ currentAnalysis.error_message }}</text>
     </view>
@@ -178,6 +190,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import type { ViralAnalysis, AnalysisResult } from '@/types'
 import { viralAnalysesApi } from '@/api/viral-analyses'
+import { templatesApi } from '@/api/templates'
 import { relativeTime } from '@/utils/format'
 import AbButton from '@/components/common/AbButton.vue'
 import AbInput from '@/components/common/AbInput.vue'
@@ -192,6 +205,7 @@ const selectedId = ref<string | null>(null)
 const currentAnalysis = ref<ViralAnalysis | null>(null)
 const historyList = ref<ViralAnalysis[]>([])
 const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const templateSaving = ref(false)
 
 const expandedDetails = reactive<Record<string, boolean>>({
   evidence: false,
@@ -304,6 +318,92 @@ function sourceLabel(source: string): string {
 
 function toggleDetail(key: string) {
   expandedDetails[key] = !expandedDetails[key]
+}
+
+function buildClonePrompt(): string {
+  if (!result.value) return ''
+  const r = result.value
+  const template = r.viral_template
+  const suggestions = r.clone_suggestions
+  const dimensionLines = r.dimensions
+    .map((dim) => `- ${dimensionLabel(dim.name)}：${dim.action}`)
+    .join('\n')
+  const suggestionLines = [
+    suggestions.title.length ? `标题：${suggestions.title.join('；')}` : '',
+    suggestions.body.length ? `正文：${suggestions.body.join('；')}` : '',
+    suggestions.cover.length ? `封面：${suggestions.cover.join('；')}` : '',
+    suggestions.tags.length ? `标签：${suggestions.tags.join('；')}` : '',
+    suggestions.interaction.length ? `互动：${suggestions.interaction.join('；')}` : '',
+  ].filter(Boolean).join('\n')
+  const riskLines = r.risks.length ? r.risks.map((risk) => `- ${risk}`).join('\n') : '- 不照搬原文表达、图片构图和专有经历'
+  return [
+    '请基于以下爆文拆解结果，创作一篇新的种草笔记。',
+    '',
+    `复刻深度：${template.recommended_clone_depth || r.recommended_clone_depth}`,
+    `目标人群洞察：${template.audience_insight}`,
+    `爆款机制：${template.viral_mechanism}`,
+    '',
+    '可迁移动作：',
+    dimensionLines,
+    '',
+    '复刻建议：',
+    suggestionLines,
+    '',
+    '模板骨架：',
+    `标题：${template.title_template}`,
+    `封面：${template.cover_template}`,
+    `正文：${template.body_template}`,
+    `互动：${template.interaction_template}`,
+    `标签：${template.tag_template}`,
+    '',
+    '风险与约束：',
+    riskLines,
+  ].filter((line) => line !== '').join('\n')
+}
+
+function copyClonePrompt() {
+  const prompt = buildClonePrompt()
+  if (!prompt) return
+  uni.setClipboardData({
+    data: prompt,
+    success: () => uni.showToast({ title: '复刻 Prompt 已复制', icon: 'none' }),
+  })
+}
+
+function createCloneTask() {
+  const prompt = buildClonePrompt()
+  if (!prompt) {
+    uni.showToast({ title: '暂无可复用结果', icon: 'none' })
+    return
+  }
+  uni.navigateTo({
+    url: `/pages/tasks/create?type=seednote&prompt=${encodeURIComponent(prompt)}`,
+  })
+}
+
+async function saveCloneTemplate() {
+  if (!result.value || templateSaving.value) return
+  const r = result.value
+  templateSaving.value = true
+  try {
+    const meta = r.template_meta
+    await templatesApi.create({
+      name: meta?.name || '爆文复刻模板',
+      type: 'seednote',
+      thumbnail_url: '',
+      style_prompt: r.viral_template.cover_template || r.clone_suggestions.cover.join('；') || '复刻来源笔记的封面节奏与视觉钩子',
+      visibility: 'private',
+      structure: buildClonePrompt(),
+      example_content: r.viral_template.body_template,
+      category: meta?.category || '爆文复刻',
+      tags: meta?.tags || [],
+    })
+    uni.showToast({ title: '模板已保存', icon: 'success' })
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '保存失败', icon: 'none' })
+  } finally {
+    templateSaving.value = false
+  }
 }
 
 async function startAnalysis() {
@@ -668,6 +768,40 @@ onUnmounted(stopPolling)
   &--highlight {
     background-color: $ab-primary-bg;
     color: $ab-primary;
+  }
+}
+
+.va-reuse-card {
+  background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-md;
+  padding: $ab-space-md;
+  margin-bottom: $ab-space-sm;
+  box-shadow: $ab-shadow-sm;
+
+  &__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: $ab-space-sm;
+    margin-bottom: $ab-space-sm;
+  }
+
+  &__title {
+    font-size: $ab-text-md;
+    color: $ab-text;
+    font-weight: $ab-font-semibold;
+  }
+
+  &__hint {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $ab-space-sm;
   }
 }
 

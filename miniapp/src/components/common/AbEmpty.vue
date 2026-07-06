@@ -1,6 +1,6 @@
 <template>
   <view class="ab-empty">
-    <text class="ab-empty__icon">📭</text>
+    <text class="ab-empty__icon">空</text>
     <text v-if="title" class="ab-empty__title">{{ title }}</text>
     <text v-if="description" class="ab-empty__desc">{{ description }}</text>
     <view v-if="actionText" class="ab-empty__action" @tap="$emit('action')">

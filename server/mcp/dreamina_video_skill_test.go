@@ -47,6 +47,9 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"script.md",
 			"shot-plan.md",
 			"quality-review.md",
+			"anchor-strategy.md",
+			"visual-anchor-pack.md",
+			"visual-anchors/",
 			"references/methodology.md",
 			"references/stability.md",
 			"references/prompt-templates.md",
@@ -66,6 +69,9 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			"主体一致性",
 			"黄金三秒",
 			"完整视频创作流程",
+			"generate_image",
+			"verify_with_vision",
+			"最多自动 3 张",
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s SKILL.md missing %q", plugin, want)
@@ -99,26 +105,26 @@ func TestDreaminaVideoSkillFiles(t *testing.T) {
 			}
 			switch ref {
 			case "methodology.md":
-				for _, want := range []string{"素材角色分配", "主体身份", "产品外观", "场景背景", "首帧", "尾帧", "运镜", "节奏", "音色", "BGM", "字体/文字风格", "个人 IP", "高效段子", "创作定位", "参考视频复刻"} {
+				for _, want := range []string{"素材角色分配", "主体身份", "产品外观", "场景背景", "首帧", "尾帧", "运镜", "节奏", "音色", "BGM", "字体/文字风格", "个人 IP", "高效段子", "创作定位", "参考视频复刻", "视觉锚定图", "0 张", "1 张", "2 张", "3 张"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
 				}
 			case "prompt-templates.md":
-				for _, want := range []string{"reference_role", "audio_cue", "transition_or_effect", "主体 + 场景 + 动作 + 运镜 + 分时段 + 转场/特效 + 音频 + 风格", "产品 360", "产品拆解", "短剧式", "音乐卡点", "个人 IP 种草", "高效段子", "参考视频复刻"} {
+				for _, want := range []string{"reference_role", "audio_cue", "transition_or_effect", "主体 + 场景 + 动作 + 运镜 + 分时段 + 转场/特效 + 音频 + 风格", "产品 360", "产品拆解", "短剧式", "音乐卡点", "个人 IP 种草", "高效段子", "参考视频复刻", "anchor-strategy.md", "visual-anchor-pack.md", "subject-anchor-01.png"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
 				}
 			case "stability.md":
-				for _, want := range []string{"引用模糊", "镜头指令冲突", "短时长内容过载", "素材无归属", "忽视音频", "复杂度与时长不匹配", "推镜头", "拉镜头", "摇镜", "跟拍", "环绕", "俯拍", "仰拍", "特写", "中景", "全景"} {
+				for _, want := range []string{"引用模糊", "镜头指令冲突", "短时长内容过载", "素材无归属", "忽视音频", "复杂度与时长不匹配", "推镜头", "拉镜头", "摇镜", "跟拍", "环绕", "俯拍", "仰拍", "特写", "中景", "全景", "ref_image_path", "0.75", "主锚定图"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}
 				}
 			}
 			if ref == "mcp-contract.md" {
-				for _, want := range []string{"get_project_profile", "resolved_profile", "agent_brief", "video.model_catalog", "analyze_video_reference", "analysis_mode", "native_video", "model_routes.video_understanding", "require_native_video=true", "require_usage=true", "usage", "credits_charged", "validate_video_generation_params", "model_prices.video_generation", "billing.credits_per_cny", "estimated_credits", "pricing_breakdown", "task_file_id", "file_path", "ark_url", "OSS/CDN", "Provider raw URLs", "server-measured input video duration", "Do not trust agent-supplied input video duration"} {
+				for _, want := range []string{"get_project_profile", "resolved_profile", "agent_brief", "video.model_catalog", "analyze_video_reference", "analysis_mode", "native_video", "model_routes.video_understanding", "require_native_video=true", "require_usage=true", "usage", "credits_charged", "validate_video_generation_params", "model_prices.video_generation", "billing.credits_per_cny", "estimated_credits", "pricing_breakdown", "task_file_id", "file_path", "ark_url", "OSS/CDN", "Provider raw URLs", "server-measured input video duration", "Do not trust agent-supplied input video duration", "visual_anchor_generation", "generate_image", "register_video_reference"} {
 					if !strings.Contains(refBody, want) {
 						t.Fatalf("%s reference %s missing %q", plugin, ref, want)
 					}

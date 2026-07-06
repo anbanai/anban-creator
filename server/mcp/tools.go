@@ -543,6 +543,15 @@ func buildVideoProfileBlock(ch *model.Project, task *model.Task) map[string]any 
 			"estimate_rule":           "Server estimates credits from configured price tables, model key, resolution, duration, input video presence, and measured input video duration.",
 		},
 		"persistent_file_rule": "all server-persistent references and generated results must be OSS-backed task files; local agent files are temporary only",
+		"visual_anchor_generation": map[string]any{
+			"available":           true,
+			"default_image_type":  "content",
+			"max_auto_anchors":    3,
+			"verify_with_vision":  "Required for generated visual anchors; accept only verification.passed=true and score >= 0.75 when a score is present.",
+			"register_tool":       "After a generated anchor passes vision verification, call register_video_reference(type=\"image_url\", file_path=<generated file_path>, reference_role=\"subject identity\" | \"product appearance\" | \"first frame\").",
+			"fallback":            "If generate_image is unavailable or the main anchor fails two verification attempts, use text-only anchors for ordinary videos or stop and request user reference media for high-consistency tasks.",
+			"derived_anchor_rule": "When generating 2-3 anchors, derive later anchors from the approved main anchor with ref_image_path; do not independently regenerate the same subject.",
+		},
 	}
 }
 
@@ -632,8 +641,9 @@ func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTo
 	}
 	status, _ := args["status"].(string)
 	projectID, _ := args["project_id"].(string)
+	planID, _ := args["plan_id"].(string)
 
-	tasks, total, err := svcs.TaskSvc.List(context.Background(), userID, 0, limit, status, projectID)
+	tasks, total, err := svcs.TaskSvc.List(context.Background(), userID, 0, limit, status, projectID, planID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("list tasks: %v", err)), nil
 	}

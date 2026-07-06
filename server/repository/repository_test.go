@@ -436,7 +436,7 @@ func TestTaskRepository_CRUD(t *testing.T) {
 	}
 
 	// CountByUserID
-	count, err := repo.Tasks().CountByUserID(ctx, "user-task-1", "")
+	count, err := repo.Tasks().CountByUserID(ctx, "user-task-1", "", "")
 	if err != nil {
 		t.Fatalf("CountByUserID: %v", err)
 	}

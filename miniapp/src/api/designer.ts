@@ -1,4 +1,5 @@
 import { get, post } from './request'
+import { uploadUrl } from './api-base'
 import type { DesignerProvider, GenerateRequest, HistoryResponse, ImageGeneration } from '@/types'
 import { TOKEN_KEY } from '@/utils/constants'
 
@@ -13,7 +14,7 @@ export const designerApi = {
     new Promise<{ file_id: string; filename: string; size: number }>((resolve, reject) => {
       const token = uni.getStorageSync(TOKEN_KEY)
       uni.uploadFile({
-        url: '/api/v1/designer/upload-reference',
+        url: uploadUrl('/designer/upload-reference'),
         filePath,
         name,
         header: token ? { Authorization: `Bearer ${token}` } : undefined,

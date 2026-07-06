@@ -28,7 +28,7 @@
             </text>
           </view>
           <view class="hero__recharge" @tap="goRecharge">
-            <text class="hero__recharge-icon">💳</text>
+            <text class="hero__recharge-icon">卡</text>
             <text class="hero__recharge-text">充值</text>
           </view>
         </view>
@@ -319,7 +319,7 @@
         </view>
         <view class="recharge-qr">
           <view class="recharge-qr__placeholder">
-            <text class="recharge-qr__icon">📱</text>
+            <text class="recharge-qr__icon">扫</text>
             <text class="recharge-qr__label">客服二维码</text>
             <text class="recharge-qr__hint">长按识别添加客服</text>
           </view>
@@ -646,21 +646,21 @@ function txTypeLabel(type: CreditTransactionType): string {
 
 function txIcon(type: CreditTransactionType): string {
   switch (type) {
-    case 'sign_in': return '✅'
-    case 'task_deduct': return '📝'
-    case 'task_refund': return '↩️'
-    case 'admin_grant': return '🎁'
-    case 'image_gen': return '🖼'
-    case 'image_upload': return '📤'
-    case 'article_write': return '📄'
-    case 'convert': return '🔄'
-    case 'humanize': return '✨'
-    case 'topic_research': return '🔍'
-    case 'seo': return '📈'
-    case 'draft_publish': return '📢'
-    case 'outline': return '📋'
-    case 'viral_analysis': return '🔬'
-    default: return '💰'
+    case 'sign_in': return '签'
+    case 'task_deduct': return '任'
+    case 'task_refund': return '返'
+    case 'admin_grant': return '赠'
+    case 'image_gen': return '图'
+    case 'image_upload': return '传'
+    case 'article_write': return '文'
+    case 'convert': return '转'
+    case 'humanize': return '润'
+    case 'topic_research': return '搜'
+    case 'seo': return '势'
+    case 'draft_publish': return '发'
+    case 'outline': return '纲'
+    case 'viral_analysis': return '析'
+    default: return '分'
   }
 }
 

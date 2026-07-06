@@ -1,7 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
-  Settings,
   Menu,
   X,
   Workflow,
@@ -10,6 +9,9 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
+  CalendarRange,
+  Boxes,
+  LayoutDashboard,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
 import LocalExecutorStatusPill from "@/components/desktop/LocalExecutorStatusPill";
@@ -21,7 +23,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { workflowItems, analyticsItems, platformItems } from "@/lib/navigation";
+import {
+  assetItems,
+  automationItems,
+  businessItems,
+  connectSettingItems,
+  creationItems,
+  todayItems,
+} from "@/lib/navigation";
 import {
   commandPaletteStore,
   commandPaletteAccelerator,
@@ -146,15 +155,18 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pt-2" aria-label="主导航">
-          <SidebarSection label="工作区" icon={Workflow} items={workflowItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
-          <SidebarSection label="经营数据" icon={BarChart3} items={analyticsItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="今日" icon={LayoutDashboard} items={todayItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="创作" icon={Workflow} items={creationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="自动化" icon={CalendarRange} items={automationItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="资产" icon={Boxes} items={assetItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
+          <SidebarSection label="经营" icon={BarChart3} items={businessItems} collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
         </nav>
 
         {/* Divider */}
         <div className="mx-3 border-t border-sidebar-border" />
 
         {/* Bottom: Platform + Settings */}
-        <div className="px-3 py-2 space-y-0.5">
+        <div className="flex flex-col gap-0.5 px-3 py-2">
           {isDesktop() && <LocalExecutorStatusPill collapsed={collapsed} />}
           <SidebarBottomSection collapsed={collapsed} onSelect={() => setMobileOpen(false)} />
         </div>
@@ -245,7 +257,7 @@ function SidebarSection({
           </TooltipTrigger>
           <TooltipContent side="right">{label}</TooltipContent>
         </Tooltip>
-        <div className="space-y-0.5">
+        <div className="flex flex-col gap-0.5">
           {items.map((item) => (
             <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
           ))}
@@ -262,7 +274,7 @@ function SidebarSection({
           {label}
         </span>
       </div>
-      <div className="space-y-0.5">
+      <div className="flex flex-col gap-0.5">
         {items.map((item) => (
           <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
         ))}
@@ -278,15 +290,10 @@ function SidebarBottomSection({
   collapsed: boolean
   onSelect: () => void
 }) {
-  const allItems = [
-    ...platformItems,
-    { to: "/settings", label: "设置", icon: Settings },
-  ];
-
   if (collapsed) {
     return (
-      <div className="space-y-0.5">
-        {allItems.map((item) => (
+      <div className="flex flex-col gap-0.5">
+        {connectSettingItems.map((item) => (
           <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
         ))}
       </div>
@@ -301,7 +308,7 @@ function SidebarBottomSection({
           接入配置
         </span>
       </div>
-      {allItems.map((item) => (
+      {connectSettingItems.map((item) => (
         <SidebarNavLink key={item.to} item={item} collapsed={collapsed} onClick={onSelect} />
       ))}
     </>

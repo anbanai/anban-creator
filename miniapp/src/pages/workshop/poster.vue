@@ -101,6 +101,11 @@
           <image :src="img.url" class="pp-image-item__img" mode="aspectFill" />
         </view>
       </view>
+      <view class="pp-result-actions">
+        <AbButton type="primary" size="sm" :loading="submitting" @click="regenerateVariant">继续变体</AbButton>
+        <AbButton type="ghost" size="sm" @click="copyPosterPrompt">复制 Prompt</AbButton>
+        <AbButton type="ghost" size="sm" :loading="templateSaving" @click="savePosterTemplate">设为模板</AbButton>
+      </view>
     </view>
 
     <!-- Generating indicator -->
@@ -146,6 +151,7 @@ const styleOptions = [
 const templates = ref<Template[]>([])
 const templateLoading = ref(false)
 const submitting = ref(false)
+const templateSaving = ref(false)
 const currentTask = ref<PosterTask | null>(null)
 const generatedImages = ref<PosterImage[]>([])
 const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
@@ -196,6 +202,56 @@ function previewImage(index: number) {
     current: urls[index],
     urls,
   })
+}
+
+function buildPosterPrompt(): string {
+  return [
+    `海报标题：${form.title.trim()}`,
+    form.brand.trim() ? `品牌：${form.brand.trim()}` : '',
+    form.price.trim() ? `价格：${form.price.trim()}` : '',
+    form.style_preference ? `风格：${styleOptions.find((item) => item.value === form.style_preference)?.label || form.style_preference}` : '',
+    form.selling_points.filter((point) => point.trim()).length
+      ? `卖点：${form.selling_points.filter((point) => point.trim()).join('；')}`
+      : '',
+  ].filter(Boolean).join('\n')
+}
+
+function copyPosterPrompt() {
+  const prompt = buildPosterPrompt()
+  if (!prompt) return
+  uni.setClipboardData({
+    data: prompt,
+    success: () => uni.showToast({ title: '海报 Prompt 已复制', icon: 'none' }),
+  })
+}
+
+async function regenerateVariant() {
+  if (!canSubmit.value) return
+  await onGenerate()
+}
+
+async function savePosterTemplate() {
+  if (!generatedImages.value.length || templateSaving.value) return
+  templateSaving.value = true
+  try {
+    await templatesApi.create({
+      name: form.title.trim() || '海报模板',
+      type: 'poster',
+      thumbnail_url: generatedImages.value[0]?.url || '',
+      style_prompt: form.style_preference || buildPosterPrompt(),
+      visibility: 'private',
+      writer_key: buildPosterPrompt(),
+      structure: form.selling_points.filter((point) => point.trim()).join('\n'),
+      example_content: buildPosterPrompt(),
+      category: form.brand.trim() || '海报',
+      tags: form.selling_points.filter((point) => point.trim()).slice(0, 5),
+    })
+    uni.showToast({ title: '模板已保存', icon: 'success' })
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '保存失败', icon: 'none' })
+  } finally {
+    templateSaving.value = false
+  }
 }
 
 function validate(): boolean {
@@ -467,6 +523,13 @@ onUnmounted(stopPolling)
     height: 100%;
     background-color: $ab-divider;
   }
+}
+
+.pp-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $ab-space-sm;
+  margin-top: $ab-space-md;
 }
 
 // Generating indicator

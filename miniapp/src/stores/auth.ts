@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { User, AuthResponse } from '@/types'
 import { TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY, AUTO_REFRESH_TOKEN_THRESHOLD } from '@/utils/constants'
+import { apiUrl } from '@/api/api-base'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string>('')
@@ -66,7 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
       })
 
       const res = await uni.request({
-        url: '/api/v1/auth/wx-login',
+        url: apiUrl('/auth/wx-login'),
         method: 'POST',
         data: { code: loginRes.code },
         header: { 'Content-Type': 'application/json' },
@@ -87,7 +88,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function fetchUser() {
     const res = await uni.request({
-      url: '/api/v1/auth/me',
+      url: apiUrl('/auth/me'),
       method: 'GET',
       header: {
         'Content-Type': 'application/json',
@@ -106,7 +107,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     const res = await uni.request({
-      url: '/api/v1/auth/refresh',
+      url: apiUrl('/auth/refresh'),
       method: 'POST',
       data: { refresh_token: refreshToken.value },
       header: { 'Content-Type': 'application/json' },
@@ -125,7 +126,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function logout() {
     try {
       await uni.request({
-        url: '/api/v1/auth/logout',
+        url: apiUrl('/auth/logout'),
         method: 'POST',
         header: {
           'Content-Type': 'application/json',

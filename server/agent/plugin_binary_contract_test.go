@@ -58,7 +58,11 @@ func TestPluginBootstrapInstallsAnbanBinary(t *testing.T) {
 			"install_asset \"$SERVER_ASSET\" \"$SERVER_DEST\"",
 			"ANBAN_PLUGIN_ROOT",
 			"CLAUDE_PLUGIN_ROOT",
+			"CLAUDE_PLUGIN_DATA",
 			"PLUGIN_ROOT",
+			"PLUGIN_DATA",
+			"ANBAN_BINARY_VERSION",
+			"v2.10.22",
 			"$BIN_DIR/anban",
 		} {
 			if !strings.Contains(body, want) {
@@ -76,6 +80,7 @@ func TestPluginBootstrapInstallsAnbanBinary(t *testing.T) {
 func TestPluginBootstrapPreservesBundledAnbanBinary(t *testing.T) {
 	root := repositoryRoot(t)
 	pluginRoot := t.TempDir()
+	pluginData := t.TempDir()
 	binDir := filepath.Join(pluginRoot, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -104,8 +109,8 @@ for arg in "$@"; do
   prev="$arg"
 done
 if printf '%s\n' "$*" | grep -q 'api.github.com'; then
-  printf '{"tag_name":"v9.9.9"}\n'
-  exit 0
+  echo "unexpected latest release lookup" >&2
+  exit 3
 fi
 if [ -z "$out" ]; then
   echo "missing -o" >&2
@@ -117,6 +122,7 @@ printf 'downloaded asset\n' > "$out"
 	cmd := exec.Command("bash", filepath.Join(root, "scripts", "bootstrap.sh"))
 	cmd.Env = append(os.Environ(),
 		"ANBAN_PLUGIN_ROOT="+pluginRoot,
+		"CLAUDE_PLUGIN_DATA="+pluginData,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	output, err := cmd.CombinedOutput()
@@ -131,8 +137,11 @@ printf 'downloaded asset\n' > "$out"
 	if got := string(raw); got != "bundled-anban\n" {
 		t.Fatalf("bootstrap overwrote bundled bin/anban: got %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(binDir, "anban-creator-server")); err != nil {
-		t.Fatalf("bootstrap should still install missing server binary: %v", err)
+	if _, err := os.Stat(filepath.Join(pluginData, "bin", "anban-creator-server")); err != nil {
+		t.Fatalf("bootstrap should install missing server binary into plugin data: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(binDir, "anban-creator-server")); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap should not write server binary into plugin root, got err %v", err)
 	}
 }
 
@@ -184,7 +193,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "claudecode",
 			path:        filepath.Join(root, "claudecode", "hooks", "hooks.json"),
-			wantVersion: "2.10.21",
+			wantVersion: "2.10.22",
 			wantSnippets: []string{
 				"SessionStart",
 				"${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh",
@@ -193,7 +202,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "codex",
 			path:        filepath.Join(root, "codex", "install", "install-subagents.sh"),
-			wantVersion: "2.10.17",
+			wantVersion: "2.10.18",
 			wantSnippets: []string{
 				"ANBAN_PLUGIN_ROOT=\"$PLUGIN_ROOT\"",
 				"scripts/bootstrap.sh",
@@ -202,7 +211,7 @@ func TestPluginsWireAnbanBootstrap(t *testing.T) {
 		{
 			name:        "openclaw",
 			path:        filepath.Join(root, "openclaw", "src", "index.ts"),
-			wantVersion: "2.7.16",
+			wantVersion: "2.7.17",
 			wantSnippets: []string{
 				"bootstrapAnbanBinary(api)",
 				"scripts/bootstrap.sh",
@@ -241,7 +250,9 @@ func TestAnbanSetupEnsuresPluginLocalCLI(t *testing.T) {
 			"在调用 `list_projects` 之前",
 			"ANBAN_PLUGIN_ROOT",
 			"CLAUDE_PLUGIN_ROOT",
+			"CLAUDE_PLUGIN_DATA",
 			"PLUGIN_ROOT",
+			"PLUGIN_DATA",
 			"bin/anban",
 			"bin/anban.exe",
 			"scripts/bootstrap.sh",

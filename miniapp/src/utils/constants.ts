@@ -1,7 +1,6 @@
 export const TOKEN_KEY = 'anban_creator_token'
 export const REFRESH_TOKEN_KEY = 'anban_creator_refresh_token'
 export const USER_KEY = 'anban_creator_user'
-export const API_BASE_URL = '/api/v1'
 
 export const POLL_INTERVAL_RUNNING = 3000
 export const AUTO_REFRESH_TOKEN_THRESHOLD = 5 * 60 * 1000 // 5 minutes before expiry

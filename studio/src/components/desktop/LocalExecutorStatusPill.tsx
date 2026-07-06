@@ -5,27 +5,34 @@ import {
   localExecutorStore,
   useLocalExecutorStatus,
 } from '@/lib/local-executor-store'
+import type { LocalExecutorStatus } from '@/lib/tauri'
 
-type Mode = 'running' | 'ready' | 'unready' | 'unknown'
+type Mode = 'running' | 'ready' | 'unready' | 'error' | 'busy' | 'unknown'
 
-function deriveMode(running?: boolean, available?: boolean): Mode {
-  if (running) return 'running'
-  if (available) return 'ready'
-  if (available === false) return 'unready'
+function deriveMode(status: LocalExecutorStatus | null): Mode {
+  if (status?.state === 'error') return 'error'
+  if (status?.state === 'running_task' || status?.state === 'claiming') return 'busy'
+  if (status?.state === 'running_idle' || status?.running) return 'running'
+  if (status?.state === 'ready_stopped' || status?.available) return 'ready'
+  if (status?.available === false) return 'unready'
   return 'unknown'
 }
 
 const DOT_CLASS: Record<Mode, string> = {
   running: 'bg-emerald-500',
+  busy: 'bg-cyan-500',
   ready: 'bg-muted-foreground/40',
   unready: 'bg-amber-500',
+  error: 'bg-red-500',
   unknown: 'bg-muted-foreground/20',
 }
 
 const LABEL: Record<Mode, string> = {
-  running: '本地执行中',
+  running: '本地运行中',
+  busy: '本地任务中',
   ready: '本地已就绪',
   unready: '本地未配置',
+  error: '本地异常',
   unknown: '本地执行器',
 }
 
@@ -38,7 +45,7 @@ const LABEL: Record<Mode, string> = {
  */
 export default function LocalExecutorStatusPill({ collapsed }: { collapsed: boolean }) {
   const status = useLocalExecutorStatus()
-  const mode = deriveMode(status?.running, status?.available)
+  const mode = deriveMode(status)
 
   const handleClick = () => {
     if (mode === 'unready' || mode === 'unknown') localExecutorStore.openWizard()
@@ -62,7 +69,7 @@ export default function LocalExecutorStatusPill({ collapsed }: { collapsed: bool
           className={cn(
             'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-sidebar',
             DOT_CLASS[mode],
-            mode === 'running' && 'animate-pulse',
+            (mode === 'running' || mode === 'busy') && 'animate-pulse',
           )}
         />
       </span>

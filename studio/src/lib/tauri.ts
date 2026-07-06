@@ -97,6 +97,7 @@ export async function stopLocalExecutor(): Promise<boolean> {
 
 /** Provisioning status reported by the first-run wizard backend. */
 export interface LocalExecutorStatus {
+  state: 'needs_config' | 'ready_stopped' | 'starting' | 'running_idle' | 'claiming' | 'running_task' | 'stopping' | 'error'
   available: boolean
   running: boolean
   agent_present: boolean
@@ -106,7 +107,20 @@ export interface LocalExecutorStatus {
   ffmpeg_present: boolean
   claude_authenticated: boolean
   workspace_set: boolean
+  workspace_valid: boolean
+  workspace_writable: boolean
   api_key_set: boolean
+  auth_mode: 'api_key' | 'oauth' | 'missing'
+  checks: Array<{
+    id: string
+    label: string
+    ok: boolean
+    required: boolean
+    hint: string
+  }>
+  current_task_id: string | null
+  last_error: string | null
+  last_event_at: string | null
   workspace: string
   reason: string
 }
@@ -115,16 +129,24 @@ export async function getLocalExecutorStatus(): Promise<LocalExecutorStatus | nu
   return invoke<LocalExecutorStatus>('local_executor_status')
 }
 
+export async function validateLocalExecutorConfig(workspace: string): Promise<LocalExecutorStatus | null> {
+  return invoke<LocalExecutorStatus>('validate_local_executor_config', { workspace })
+}
+
 /** Persist local-executor credentials + workspace (first-run wizard / settings). */
 export async function setLocalExecutorConfig(opts: {
   apiKey: string
   workspace: string
   claudeApiKey?: string
+  clearApiKey?: boolean
+  clearClaudeApiKey?: boolean
 }): Promise<boolean> {
   return (await invoke<boolean>('set_local_executor_config', {
     apiKey: opts.apiKey,
     workspace: opts.workspace,
     claudeApiKey: opts.claudeApiKey ?? '',
+    clearApiKey: opts.clearApiKey ?? false,
+    clearClaudeApiKey: opts.clearClaudeApiKey ?? false,
   })) ?? false
 }
 
@@ -141,6 +163,14 @@ export async function openExternal(url: string): Promise<void> {
   await invoke('open_external', { url })
 }
 
+export async function openWorkspace(): Promise<boolean> {
+  return (await invoke<boolean>('open_workspace')) ?? false
+}
+
+export async function copyLocalDiagnostics(): Promise<string | null> {
+  return invoke<string>('copy_local_diagnostics')
+}
+
 /**
  * Persist a downloaded file to disk via a native save dialog. Returns true if
  * saved, false if cancelled/failed/unavailable (browser). Bytes are passed as
@@ -149,6 +179,10 @@ export async function openExternal(url: string): Promise<void> {
  */
 export async function saveBlob(filename: string, bytes: Uint8Array): Promise<boolean> {
   return (await invoke<boolean>('save_blob', { filename, data: Array.from(bytes) })) ?? false
+}
+
+export async function saveUrlToFile(url: string, filename: string): Promise<boolean> {
+  return (await invoke<boolean>('save_url_to_file', { url, filename })) ?? false
 }
 
 /**
@@ -194,7 +228,7 @@ export async function pickDirectory(): Promise<string | null> {
 
 /** Event emitted by the local executor while a task runs on this machine. */
 export interface LocalRunEvent {
-  task_id: string
+  task_id?: string
   stage?: string
   level?: 'info' | 'warn' | 'error'
   message: string

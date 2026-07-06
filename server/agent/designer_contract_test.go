@@ -21,12 +21,14 @@ func TestDesignerAgentKeepsMCPAndSkillLoadingContract(t *testing.T) {
 	if strings.Contains(frontmatter, "\ntools:") {
 		t.Fatal("designer agent must not define a tools allowlist; omitting tools lets Claude Code inherit MCP tools")
 	}
+	if strings.Contains(frontmatter, "\nmcpServers:") {
+		t.Fatal("designer agent must not define mcpServers; plugin subagent frontmatter ignores that field, so MCP is provided by plugin-level .mcp.json")
+	}
 
 	required := []string{
-		"mcpServers:",
-		"- creator",
 		"skills:",
 		"- line-art-coloring",
+		"插件级 `.mcp.json`",
 		"Claude Code subagent 的 `tools:` 字段是 allowlist",
 		"不要在本 agent frontmatter 中声明 `tools:`",
 		"`generate_image`",
@@ -55,11 +57,11 @@ func TestDesignerAgentKeepsMCPAndSkillLoadingContract(t *testing.T) {
 
 func TestClaudeCodePluginDocsKeepDesignerMCPContract(t *testing.T) {
 	root := repoRoot(t)
-	claudePath := filepath.Join(root, "claudecode", "CLAUDE.md")
+	claudePath := filepath.Join(root, "claudecode", "docs", "plugin-development.md")
 
 	data, err := os.ReadFile(claudePath)
 	if err != nil {
-		t.Fatalf("read claudecode CLAUDE.md: %v", err)
+		t.Fatalf("read claudecode plugin development docs: %v", err)
 	}
 	body := string(data)
 
@@ -67,6 +69,8 @@ func TestClaudeCodePluginDocsKeepDesignerMCPContract(t *testing.T) {
 		"Do not add a `tools` allowlist to agents that need MCP tools",
 		"Claude Code treats `tools` as an allowlist",
 		"hide inherited MCP tools from subagents",
+		"Do not add `mcpServers` to plugin agent frontmatter",
+		"Plugin subagents receive MCP servers from the plugin-level `.mcp.json`",
 		"single-candidate by default, optional 2-candidate",
 		"needs_img2img",
 		"not a guaranteed line-preserving colorize tool",
@@ -74,18 +78,19 @@ func TestClaudeCodePluginDocsKeepDesignerMCPContract(t *testing.T) {
 	}
 	for _, term := range required {
 		if !strings.Contains(body, term) {
-			t.Fatalf("claudecode CLAUDE.md missing required term %q", term)
+			t.Fatalf("claudecode plugin development docs missing required term %q", term)
 		}
 	}
 
 	banned := []string{
 		"frontmatter block with `name`, `tools`, `skills`",
+		"frontmatter block with `name`, `skills`, `mcpServers`",
 		"Progressive coloring (2-candidate)",
 		"frontmatter (name, tools, skills",
 	}
 	for _, term := range banned {
 		if strings.Contains(body, term) {
-			t.Fatalf("claudecode CLAUDE.md still contains stale term %q", term)
+			t.Fatalf("claudecode plugin development docs still contains stale term %q", term)
 		}
 	}
 }

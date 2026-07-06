@@ -1,6 +1,6 @@
 import type { ApiResponse } from '@/types'
+import { apiUrl } from './api-base'
 
-const API_BASE_URL = '/api/v1'
 const TOKEN_KEY = 'anban_creator_token'
 const REFRESH_TOKEN_KEY = 'anban_creator_refresh_token'
 const USER_KEY = 'anban_creator_user'
@@ -23,7 +23,7 @@ function doRefreshToken(): Promise<string> {
     }
 
     uni.request({
-      url: `${API_BASE_URL}/auth/refresh`,
+      url: apiUrl('/auth/refresh'),
       method: 'POST',
       header: { 'Content-Type': 'application/json' },
       data: { refresh_token: refreshToken },
@@ -69,7 +69,7 @@ function addAuthHeader(header: Record<string, string>): Record<string, string> {
 }
 
 function buildUrl(path: string, data?: Record<string, unknown>): string {
-  const url = `${API_BASE_URL}${path}`
+  const url = apiUrl(path)
   if (!data) return url
 
   const qs = Object.entries(data)
@@ -87,7 +87,7 @@ function request<T>(
   customTimeout?: number,
 ): Promise<T> {
   const isGetLike = method === 'GET' || method === 'DELETE'
-  const url = isGetLike ? buildUrl(path, data) : `${API_BASE_URL}${path}`
+  const url = isGetLike ? buildUrl(path, data) : apiUrl(path)
 
   const header = addAuthHeader({
     'Content-Type': 'application/json',

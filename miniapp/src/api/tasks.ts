@@ -6,7 +6,8 @@ import type {
   PaginatedResponse,
   SeednoteAnalytics,
 } from '@/types'
-import { API_BASE_URL, TOKEN_KEY } from '@/utils/constants'
+import { TOKEN_KEY } from '@/utils/constants'
+import { apiUrl } from './api-base'
 
 export const tasksApi = {
   create: async (data: CreateTaskRequest): Promise<Task> => {
@@ -14,7 +15,7 @@ export const tasksApi = {
     return Array.isArray(result) ? result[0] : result
   },
 
-  list: (params?: { status?: string; project_id?: string; limit?: number; offset?: number }) =>
+  list: (params?: { status?: string; project_id?: string; plan_id?: string; limit?: number; offset?: number }) =>
     get<PaginatedResponse<Task>>('/tasks', params as Record<string, any>),
 
   get: (id: string) =>
@@ -44,7 +45,7 @@ export const tasksApi = {
   fetchPreviewHTML: (id: string): Promise<string> =>
     new Promise((resolve, reject) => {
       uni.request({
-        url: `${API_BASE_URL}/tasks/${id}/preview`,
+        url: apiUrl(`/tasks/${id}/preview`),
         method: 'GET',
         responseType: 'text' as any,
         dataType: '' as any,
@@ -70,10 +71,10 @@ export const tasksApi = {
     post<{ url: string }>('/tasks/files/zip', { task_ids: taskIds }),
 
   fileDownloadUrl: (taskId: string, fileId: string) =>
-    `${API_BASE_URL}/tasks/${taskId}/files/${fileId}/download`,
+    apiUrl(`/tasks/${taskId}/files/${fileId}/download`),
 
   zipDownloadUrl: (taskId: string) =>
-    `${API_BASE_URL}/tasks/${taskId}/files/zip`,
+    apiUrl(`/tasks/${taskId}/files/zip`),
 
   downloadHeaders: () => {
     const token = uni.getStorageSync(TOKEN_KEY)

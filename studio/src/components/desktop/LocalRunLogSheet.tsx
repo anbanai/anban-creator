@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Play, Square, Trash2, Settings, Terminal } from 'lucide-react'
+import { Loader2, Play, Square, Trash2, Settings, Terminal, ClipboardCopy, ExternalLink, Activity } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Sheet,
@@ -17,6 +17,8 @@ import {
   stopLocalExecutor,
   setExecutorEnabled,
   getLocalExecutorStatus,
+  copyLocalDiagnostics,
+  openWorkspace,
 } from '@/lib/tauri'
 import {
   localExecutorStore,
@@ -25,6 +27,7 @@ import {
   useLocalExecutorStatus,
   type LogLevel,
 } from '@/lib/local-executor-store'
+import { localExecutorCreateHint } from '@/lib/local-executor-ux'
 
 /**
  * Desktop-only live-log drawer. Surfaces the `local-run://event` stream the Rust
@@ -81,16 +84,31 @@ export default function LocalRunLogSheet() {
     }
   }
 
+  const handleCopyDiagnostics = async () => {
+    const diagnostics = await copyLocalDiagnostics()
+    if (!diagnostics) {
+      toast.error('诊断信息不可用')
+      return
+    }
+    await navigator.clipboard.writeText(diagnostics)
+    toast.success('诊断信息已复制')
+  }
+
+  const handleOpenWorkspace = async () => {
+    if (await openWorkspace()) toast.success('已打开工作区')
+    else toast.error('无法打开工作区')
+  }
+
   const running = status?.running ?? false
   const available = status?.available ?? false
 
   return (
     <Sheet open={open} onOpenChange={(o) => { if (!o) localExecutorStore.closePanel() }}>
-      <SheetContent side="right" className="w-full p-0 sm:max-w-md">
-        <SheetHeader className="border-b">
+      <SheetContent side="right" className="flex w-full flex-col p-0 sm:max-w-xl">
+        <SheetHeader className="shrink-0 border-b">
           <div className="flex items-center justify-between gap-2 pr-8">
             <SheetTitle className="flex items-center gap-2">
-              <Terminal className="h-4 w-4 text-primary" /> 本地执行
+              <Terminal className="h-4 w-4 text-cyan-500" /> Mission Control
               {running ? (
                 <Badge variant="outline" className="text-[10px] text-emerald-600">运行中</Badge>
               ) : available ? (
@@ -117,12 +135,30 @@ export default function LocalRunLogSheet() {
         </SheetHeader>
 
         {/* Status summary + controls */}
-        <div className="space-y-3 border-b px-4 py-3">
+        <div className="shrink-0 space-y-3 border-b px-4 py-3">
+          <div className="rounded-md border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+            <p className="flex items-center gap-2 text-xs font-medium text-foreground">
+              <Activity className="h-3.5 w-3.5 text-cyan-500" />
+              {localExecutorCreateHint(status)}
+            </p>
+            {status?.current_task_id && (
+              <button
+                type="button"
+                className="mt-1 text-xs text-primary hover:underline"
+                onClick={() => {
+                  localExecutorStore.closePanel()
+                  navigate(`/tasks/${status.current_task_id}`)
+                }}
+              >
+                查看当前任务 {status.current_task_id.slice(0, 8)}
+              </button>
+            )}
+          </div>
           {status && !available && status.reason && (
             <p className="text-xs text-amber-600">{status.reason}</p>
           )}
           <ReadinessChecklist status={status} />
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               variant={running ? 'destructive' : 'default'}
@@ -141,6 +177,23 @@ export default function LocalRunLogSheet() {
             <Button
               size="sm"
               variant="ghost"
+              onClick={handleOpenWorkspace}
+              disabled={!status?.workspace_valid}
+              title="打开工作区"
+            >
+              <ExternalLink className="h-4 w-4" /> 工作区
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleCopyDiagnostics}
+              title="复制诊断"
+            >
+              <ClipboardCopy className="h-4 w-4" /> 诊断
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => localExecutorStore.clearLogs()}
               disabled={logs.length === 0}
               title="清空日志"
@@ -151,7 +204,7 @@ export default function LocalRunLogSheet() {
         </div>
 
         {/* Live log tail */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto bg-muted/20 p-3">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-muted/20 p-3">
           {logs.length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">
               暂无日志。{available ? '启动执行器后将在此显示认领与运行记录。' : '完成配置并启动后，认领与运行记录会在此实时显示。'}

@@ -119,13 +119,13 @@ export default function FirstRunWizard() {
         if (!o) localExecutorStore.dismissWizard()
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Cpu className="h-4 w-4 text-primary" /> 配置本地执行器
+            <Cpu className="h-4 w-4 text-cyan-500" /> 本机运行中心
           </DialogTitle>
           <DialogDescription>
-            在本机运行任务（Claude Code + ffmpeg / 本地命令）。数据与进度仍在云端，未就绪时新任务自动走云端。
+            在本机接管任务执行：Claude Code、ffmpeg、本地命令与工作区状态会在这里统一预检。
           </DialogDescription>
         </DialogHeader>
 
@@ -153,12 +153,12 @@ export default function FirstRunWizard() {
         {step === 0 && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              本地执行器让你在自己的电脑上跑任务——拥有完整文件系统与命令行（ffmpeg、本地脚本等），适合直播切片、设计上色等需要本地环境的场景。
+              本机运行让任务拥有真实文件系统与命令行，适合直播切片、设计上色、批量素材处理等需要本地环境的工作流。
             </p>
             <p className="text-xs text-muted-foreground">配置需要三样东西：</p>
             <ul className="space-y-1 text-xs text-foreground/80">
               <li>• <b>Anban Creator API Key</b>（在「设置 → 平台密钥」创建）</li>
-              <li>• <b>Claude 鉴权</b>（ANTHROPIC_API_KEY，或留空用 OAuth）</li>
+              <li>• <b>Claude 鉴权</b>（当前版本需要 ANTHROPIC_API_KEY）</li>
               <li>• <b>本地工作区根目录</b>（任务的临时工作目录）</li>
             </ul>
             {available && (
@@ -179,7 +179,7 @@ export default function FirstRunWizard() {
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder={status?.api_key_set ? '已配置（输入可覆盖）' : '在「平台密钥」创建后粘贴'}
+                placeholder={status?.api_key_set ? '已配置，留空将保留' : '在「平台密钥」创建后粘贴'}
               />
             </div>
             <div className="space-y-1.5">
@@ -198,14 +198,14 @@ export default function FirstRunWizard() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="wiz-claude-key" className="text-xs">
-                Anthropic API Key（可选，否则用 Claude OAuth）
+                Anthropic API Key（当前版本必填）
               </Label>
               <Input
                 id="wiz-claude-key"
                 type="password"
                 value={claudeKey}
                 onChange={(e) => setClaudeKey(e.target.value)}
-                placeholder={status?.claude_authenticated ? '已配置（输入可覆盖）' : 'ANTHROPIC_API_KEY'}
+                placeholder={status?.claude_authenticated ? '已配置，留空将保留' : 'ANTHROPIC_API_KEY'}
               />
             </div>
           </div>
@@ -220,7 +220,7 @@ export default function FirstRunWizard() {
             )}
             {available && (
               <p className="text-xs text-muted-foreground">
-                一切就绪，点击下方按钮启动本地执行器，开始认领任务。
+                本机运行链路已就绪。启动后，新任务可以立即由这台电脑认领。
               </p>
             )}
           </div>

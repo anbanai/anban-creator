@@ -1,4 +1,5 @@
 import { get, post, put, patch, del } from './request'
+import { uploadUrl } from './api-base'
 import { TOKEN_KEY } from '@/utils/constants'
 import type {
   Project,
@@ -72,10 +73,8 @@ export const projectsApi = {
   ) =>
     new Promise<FileUploadResponse>((resolve, reject) => {
       const token = uni.getStorageSync(TOKEN_KEY)
-      const formData = new FormData()
-      formData.append('purpose', purpose)
       uni.uploadFile({
-        url: '/api/v1/files/upload',
+        url: uploadUrl('/files/upload'),
         filePath,
         name: 'file',
         header: token ? { Authorization: `Bearer ${token}` } : undefined,

@@ -14,6 +14,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	root := repoRoot(t)
 
 	assertJSONField(t, filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"), "name", "anban")
+	assertClaudePluginUserConfig(t, filepath.Join(root, "claudecode", ".claude-plugin", "plugin.json"))
 	assertJSONField(t, filepath.Join(root, "codex", ".codex-plugin", "plugin.json"), "name", "anban")
 	assertJSONField(t, filepath.Join(root, "openclaw", "openclaw.plugin.json"), "id", "anban")
 	assertJSONField(t, filepath.Join(root, "openclaw", "openclaw.plugin.json"), "name", "Anban 智能创作助手")
@@ -55,8 +56,15 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "The MCP server key is `creator`")
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban:<agent>")
 	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "claude plugin install --scope user anban@anbanai")
-	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "--agent anban:article")
+	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "/anban:anban-setup")
+	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "/anban:article")
+	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "--agent anban:wechatarticle")
+	assertFileNotContains(t, filepath.Join(root, "claudecode", "README.md"), "--dangerously-skip-permissions")
 	assertFileContains(t, filepath.Join(root, "claudecode", "README.md"), "插件内的 MCP server key 固定为 `creator`")
+	assertFileNotExists(t, filepath.Join(root, "claudecode", "CLAUDE.md"))
+	assertFileContains(t, filepath.Join(root, "claudecode", "docs", "plugin-development.md"), "Plugin developer notes")
+	assertFileContains(t, filepath.Join(root, "claudecode", ".mcp.json"), "${user_config.api_url}/mcp")
+	assertFileContains(t, filepath.Join(root, "claudecode", ".mcp.json"), "Bearer ${user_config.api_key}")
 	assertTrackedFilesDoNotContainLegacyNames(t, root)
 	assertBusinessLayerFilesDoNotContainHostMCPPrefixes(t, root)
 }
@@ -64,9 +72,10 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 func assertClaudeMarketplacePlugin(t *testing.T, path string) {
 	t.Helper()
 	var object struct {
-		Name    string `json:"name"`
-		Owner   named  `json:"owner"`
-		Plugins []struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Owner       named  `json:"owner"`
+		Plugins     []struct {
 			Name       string `json:"name"`
 			Homepage   string `json:"homepage"`
 			Repository string `json:"repository"`
@@ -79,6 +88,9 @@ func assertClaudeMarketplacePlugin(t *testing.T, path string) {
 	}
 	if object.Owner.Name != "anbanai" {
 		t.Fatalf("%s owner name = %q, want %q", path, object.Owner.Name, "anbanai")
+	}
+	if strings.TrimSpace(object.Description) == "" {
+		t.Fatalf("%s marketplace description is required", path)
 	}
 	if len(object.Plugins) != 1 {
 		t.Fatalf("%s has %d plugins, want exactly one", path, len(object.Plugins))
@@ -218,7 +230,7 @@ func businessLayerMCPDocs(t *testing.T, root string) []string {
 
 	addFile("CLAUDE.md")
 	addFile(filepath.Join("claudecode", "README.md"))
-	addFile(filepath.Join("claudecode", "CLAUDE.md"))
+	addFile(filepath.Join("claudecode", "docs", "plugin-development.md"))
 	addTree(filepath.Join("claudecode", "agents"))
 	addTree(filepath.Join("claudecode", "skills"))
 	addTree(filepath.Join("codex", "skills"))
@@ -256,6 +268,34 @@ func assertJSONField(t *testing.T, path, field, want string) {
 	}
 }
 
+func assertClaudePluginUserConfig(t *testing.T, path string) {
+	t.Helper()
+	var object struct {
+		UserConfig map[string]struct {
+			Type        string `json:"type"`
+			Required    bool   `json:"required"`
+			Sensitive   bool   `json:"sensitive"`
+			Default     string `json:"default"`
+			Description string `json:"description"`
+		} `json:"userConfig"`
+	}
+	readJSONFile(t, path, &object)
+	apiKey, ok := object.UserConfig["api_key"]
+	if !ok {
+		t.Fatalf("%s missing userConfig.api_key", path)
+	}
+	if apiKey.Type != "string" || !apiKey.Required || !apiKey.Sensitive {
+		t.Fatalf("%s userConfig.api_key = %+v, want required sensitive string", path, apiKey)
+	}
+	apiURL, ok := object.UserConfig["api_url"]
+	if !ok {
+		t.Fatalf("%s missing userConfig.api_url", path)
+	}
+	if apiURL.Type != "string" || apiURL.Default != "https://api.creator.anbanai.com" {
+		t.Fatalf("%s userConfig.api_url = %+v, want string default official API URL", path, apiURL)
+	}
+}
+
 func assertOnlyMCPServerKey(t *testing.T, path, want string) {
 	t.Helper()
 	var object struct {
@@ -283,6 +323,15 @@ func assertFileNotContains(t *testing.T, path, banned string) {
 	body := readTextFile(t, path)
 	if strings.Contains(body, banned) {
 		t.Fatalf("%s still contains banned term %q", path, banned)
+	}
+}
+
+func assertFileNotExists(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err == nil {
+		t.Fatalf("%s should not exist", path)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat %s: %v", path, err)
 	}
 }
 

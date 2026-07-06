@@ -8,8 +8,8 @@
       </view>
     </view>
     <view class="project-card__stats" v-if="stats">
-      <text class="stats-item success">✅{{ stats.completed_tasks }}</text>
-      <text class="stats-item danger">❌{{ stats.failed_tasks }}</text>
+      <text class="stats-item success">OK {{ stats.completed_tasks }}</text>
+      <text class="stats-item danger">ERR {{ stats.failed_tasks }}</text>
       <text class="stats-item">{{ stats.success_rate }}%成功</text>
     </view>
     <text class="project-card__activity" v-if="stats?.last_activity_at">

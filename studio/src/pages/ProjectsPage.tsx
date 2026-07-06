@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -35,6 +36,7 @@ import { renderPlatformIcon } from '@/lib/PlatformIcon'
 import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
 import { useImageModels } from '@/hooks/useImageModels'
 import { videoModelDisplayName } from '@/lib/video-display'
+import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 
 const platformOptions = [
   { value: 'seednote', label: '种草笔记' },
@@ -134,6 +136,10 @@ function projectToForm(ch: Project, configuredVideoModels: VideoModelSpec[] = []
 
 export default function ProjectsPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const createIntent = parseCreationIntent(searchParams)
+  const returnTo = searchParams.get('return_to')
   const [statusFilter, setStatusFilter] = useState('all')
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
@@ -354,10 +360,21 @@ export default function ProjectsPage() {
 
   const createMutation = useMutation({
     mutationFn: (data: CreateProjectRequest) => api.projects.create(data),
-    onSuccess: () => {
+    onSuccess: (created) => {
       toast.success('项目创建成功')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
+      const createdProject = created.project
+      if (returnTo && createdProject?.id) {
+        resetModal()
+        navigate(projectCreatedReturnHref({
+          returnTo,
+          type: createIntent.type ?? createdProject.platform,
+          projectId: createdProject.id,
+          intent: createIntent.intent,
+        }))
+        return
+      }
       resetModal()
     },
     onError: (err) => {
@@ -419,10 +436,18 @@ export default function ProjectsPage() {
   function openCreate() {
     setEditingProject(null)
     setProfileFetchHint(null)
-    form.reset(CHANNEL_FORM_DEFAULTS)
+    form.reset({
+      ...CHANNEL_FORM_DEFAULTS,
+      platform: createIntent.type ?? CHANNEL_FORM_DEFAULTS.platform,
+    })
     setSelectedTemplate(null)
     setModalOpen(true)
   }
+
+  useEffect(() => {
+    if (!createIntent.shouldCreate || modalOpen) return
+    openCreate()
+  }, [createIntent.shouldCreate, modalOpen])
 
   function openEdit(project: Project) {
     setEditingProject(project)
@@ -465,6 +490,9 @@ export default function ProjectsPage() {
     setProfileFetchHint(null)
     setSelectedTemplate(null)
     form.reset(CHANNEL_FORM_DEFAULTS)
+    if (createIntent.shouldCreate) {
+      setSearchParams({}, { replace: true })
+    }
   }
 
   // 选模板=一次性把模板视觉提示导入表单（可编辑）。再次点击同一

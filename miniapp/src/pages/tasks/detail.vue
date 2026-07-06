@@ -5,7 +5,7 @@
     <view v-else-if="task">
       <!-- Goal mode banner -->
       <view v-if="task.goal_mode" class="task-detail__goal-banner">
-        <text class="task-detail__goal-icon">🎯</text>
+        <text class="task-detail__goal-icon">目</text>
         <view class="task-detail__goal-body">
           <text class="task-detail__goal-title">强目标模式</text>
           <text class="task-detail__goal-text">
@@ -48,6 +48,26 @@
           <text class="task-detail__time">
             来源: {{ task.plan_id ? '计划任务' : '手动创建' }}
           </text>
+        </view>
+      </view>
+
+      <!-- Next actions -->
+      <view v-if="nextActions.length > 0" class="task-detail__section next-actions">
+        <view class="section-header">
+          <text class="section-title">下一步操作</text>
+          <text class="next-actions__hint">{{ nextActionHint }}</text>
+        </view>
+        <view class="next-actions__grid">
+          <view
+            v-for="action in nextActions"
+            :key="action.key"
+            class="next-action"
+            :class="`next-action--${action.tone}`"
+            @tap="runNextAction(action.key)"
+          >
+            <text class="next-action__label">{{ action.label }}</text>
+            <text class="next-action__desc">{{ action.desc }}</text>
+          </view>
         </view>
       </view>
 
@@ -99,7 +119,7 @@
             :key="i"
             class="task-detail__warning"
           >
-            <text class="task-detail__warning-icon">⚠️</text>
+            <text class="task-detail__warning-icon">!</text>
             <text class="task-detail__warning-text">{{ w.message }}</text>
           </view>
         </view>
@@ -559,13 +579,76 @@ const analyticsMetrics = computed(() => {
   ]
 })
 
+interface NextAction {
+  key: string
+  label: string
+  desc: string
+  tone: 'primary' | 'neutral' | 'warning' | 'danger'
+}
+
+const availableFiles = computed(() => {
+  return taskFiles.value.length > 0 ? taskFiles.value : task.value?.result?.files || []
+})
+
+const resultText = computed(() => {
+  const output = task.value?.result?.output?.trim()
+  if (output) return output
+  return task.value?.prompt?.trim() || ''
+})
+
+const nextActionHint = computed(() => {
+  switch (task.value?.status) {
+    case 'completed': return '交付已就绪'
+    case 'failed': return '先恢复任务'
+    case 'cancelled': return '可重新执行'
+    case 'running': return '实时执行中'
+    case 'pending': return '等待排队'
+    default: return ''
+  }
+})
+
+const nextActions = computed<NextAction[]>(() => {
+  const t = task.value
+  if (!t) return []
+  if (t.status === 'running' || t.status === 'pending') {
+    return [
+      { key: 'copy-logs', label: '复制日志', desc: logs.value.length > 0 ? '带走当前执行输出' : '暂无日志可复制', tone: 'neutral' },
+      { key: 'cancel', label: '取消任务', desc: t.status === 'pending' ? '排队中可退还积分' : '停止后保留已完成费用', tone: 'danger' },
+    ]
+  }
+  if (t.status === 'failed' || t.status === 'cancelled') {
+    return [
+      { key: 'retry', label: '重新执行', desc: '保留原任务全部设置', tone: 'primary' },
+      { key: 'copy-error', label: '复制错误', desc: '用于反馈或排查', tone: 'neutral' },
+      { key: 'follow-up', label: '基于要求再创作', desc: '回到创建页调整提示词', tone: 'warning' },
+    ]
+  }
+  if (t.status === 'completed') {
+    const actions: NextAction[] = []
+    if (availableFiles.value.length > 0) {
+      actions.push({ key: 'download-zip', label: '下载全部', desc: `${availableFiles.value.length} 个文件打包`, tone: 'primary' })
+    }
+    if (t.type === 'article') {
+      actions.push({ key: 'preview', label: '预览 HTML', desc: '检查公众号排版', tone: 'neutral' })
+    }
+    if (resultText.value) {
+      actions.push({ key: 'copy-result', label: '复制内容', desc: '带走正文或任务要求', tone: 'neutral' })
+    }
+    actions.push({ key: 'published', label: t.published ? '取消发布标记' : '标记已发布', desc: '同步内容状态', tone: 'warning' })
+    actions.push({ key: 'share', label: '分享结果', desc: '通过微信菜单转发', tone: 'neutral' })
+    actions.push({ key: 'follow-up', label: '基于结果再创作', desc: '复用产出生成新任务', tone: 'primary' })
+    return actions
+  }
+  return []
+})
+
 function stageIcon(stageStatus: string): string {
   switch (stageStatus) {
-    case 'completed': return '✅'
-    case 'running': return '🔄'
-    case 'failed': return '❌'
-    case 'warning': return '⚠️'
-    default: return '⏳'
+    case 'completed': return 'OK'
+    case 'running': return 'RUN'
+    case 'failed': return 'ERR'
+    case 'warning': return '!'
+    default: return 'WAIT'
   }
 }
 
@@ -605,6 +688,66 @@ function copyText(text: string, toast = '已复制') {
 function copyLogs() {
   if (logs.value.length === 0) return
   copyText(logs.value.join('\n'), '已复制执行日志')
+}
+
+function copyResultText() {
+  if (!resultText.value) {
+    uni.showToast({ title: '暂无可复制内容', icon: 'none' })
+    return
+  }
+  copyText(resultText.value, '结果内容已复制')
+}
+
+function createFollowUpTask() {
+  const t = task.value
+  if (!t) return
+  const source = resultText.value || t.prompt || ''
+  const trimmed = source.length > 700 ? `${source.slice(0, 700)}...` : source
+  const prompt = t.status === 'completed'
+    ? `基于以下产出继续创作一个升级版本：\n${trimmed}`
+    : `基于原任务要求重新创作，并修正失败原因：\n${trimmed}\n\n失败信息：${errorMessage.value}`
+  const params = [
+    `type=${encodeURIComponent(t.type)}`,
+    `project_id=${encodeURIComponent(t.project_id)}`,
+    `prompt=${encodeURIComponent(prompt)}`,
+  ]
+  if (t.template_id) params.push(`template_id=${encodeURIComponent(t.template_id)}`)
+  uni.navigateTo({ url: `/pages/tasks/create?${params.join('&')}` })
+}
+
+function runNextAction(key: string) {
+  switch (key) {
+    case 'download-zip':
+      downloadZip()
+      break
+    case 'preview':
+      void onPreviewArticle()
+      break
+    case 'copy-result':
+      copyResultText()
+      break
+    case 'copy-logs':
+      copyLogs()
+      break
+    case 'copy-error':
+      copyText(errorMessage.value, '错误信息已复制')
+      break
+    case 'published':
+      void onTogglePublished()
+      break
+    case 'share':
+      onShare()
+      break
+    case 'retry':
+      void onRetry()
+      break
+    case 'cancel':
+      void onCancel()
+      break
+    case 'follow-up':
+      createFollowUpTask()
+      break
+  }
 }
 
 function downloadByUrl(url: string, fileName: string, openAfterDownload = false) {
@@ -1158,6 +1301,58 @@ onShareAppMessage(() => ({
   &--disabled {
     color: $ab-text-tertiary;
     opacity: 0.5;
+  }
+}
+
+.next-actions {
+  border: 2rpx solid $ab-border;
+
+  &__hint {
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: $ab-space-sm;
+  }
+}
+
+.next-action {
+  padding: $ab-space-sm;
+  border-radius: $ab-radius-sm;
+  border: 2rpx solid $ab-border;
+  background-color: $ab-background;
+
+  &--primary {
+    border-color: rgba($ab-primary, 0.35);
+    background-color: $ab-primary-bg;
+  }
+
+  &--warning {
+    border-color: rgba($ab-warning, 0.35);
+    background-color: $ab-warning-bg;
+  }
+
+  &--danger {
+    border-color: rgba($ab-danger, 0.35);
+    background-color: $ab-danger-bg;
+  }
+
+  &__label {
+    display: block;
+    font-size: $ab-text-sm;
+    font-weight: $ab-font-semibold;
+    color: $ab-text;
+  }
+
+  &__desc {
+    display: block;
+    margin-top: 6rpx;
+    font-size: $ab-text-xs;
+    line-height: 1.4;
+    color: $ab-text-secondary;
   }
 }
 

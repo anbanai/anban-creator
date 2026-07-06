@@ -23,6 +23,12 @@ func TestVideoCreatorAgentStaysOnGenerationWorkflow(t *testing.T) {
 		"download_video_generation_results",
 		"compose_video_segments",
 		"validate_video_delivery",
+		"generate_image",
+		"anchor-strategy.md",
+		"visual-anchor-pack.md",
+		"visual-anchors/",
+		"verify_with_vision",
+		"register_video_reference",
 		"不得自动进入字幕",
 	} {
 		if !strings.Contains(text, want) {

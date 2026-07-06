@@ -1,5 +1,6 @@
 use crate::executor::LocalExecutionConfig;
 use serde::Serialize;
+use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tauri::{AppHandle, Emitter};
@@ -16,7 +17,7 @@ pub struct SidecarEnv {
     pub node_bin: PathBuf,
     /// Bundled claudecode plugin root → CLAUDE_PLUGIN_ROOT.
     pub plugin_dir: PathBuf,
-    /// Optional ANTHROPIC_API_KEY (empty → Claude uses its OAuth login).
+    /// ANTHROPIC_API_KEY forwarded to Claude Code; provisioning requires it.
     pub anthropic_api_key: String,
     /// Original PATH to preserve system tools (ffmpeg may be system-installed).
     pub system_path: String,
@@ -126,17 +127,22 @@ pub async fn run_agent(
     // Wait for exit OR cancellation. On cancel we kill + reap the child so a
     // stopped executor halts the running task promptly (the loop can't reach
     // its next cancel-check while it's blocked in this await).
+    let mut run_error: Option<String> = None;
     tokio::select! {
         status = child.wait() => {
             let status = status?;
             let level: &'static str = if status.success() { "info" } else { "error" };
             emit(app, &cfg.task_id, level, format!("agent exited ({})", status));
+            if !status.success() {
+                run_error = Some(format!("agent exited ({})", status));
+            }
         }
         _ = env.cancel.cancelled() => {
             emit(app, &cfg.task_id, "warn", "本地执行器已停止，终止当前 agent".to_string());
             // Best-effort kill + reap so we don't orphan the process tree.
             let _ = child.kill().await;
             let _ = child.wait().await;
+            run_error = Some("用户停止了本地执行器，当前 agent 已终止".to_string());
         }
     }
 
@@ -144,6 +150,9 @@ pub async fn run_agent(
     // both normal exit and kill); abort anyway so cleanup is deterministic.
     out_handle.abort();
     err_handle.abort();
+    if let Some(message) = run_error {
+        return Err(Error::new(ErrorKind::Other, message));
+    }
     Ok(())
 }
 

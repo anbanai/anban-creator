@@ -1,4 +1,4 @@
-use crate::{config::AppConfig, paths::Resources};
+use crate::{config::AppConfig, paths::Resources, provision::RuntimeSnapshot};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -18,6 +18,7 @@ pub struct AppState {
     pub resources: Resources,
     pub running: Arc<AtomicBool>,
     pub cancel: Arc<Mutex<Option<CancellationToken>>>,
+    pub runtime: Arc<RwLock<RuntimeSnapshot>>,
 }
 
 impl AppState {
@@ -28,6 +29,7 @@ impl AppState {
             resources,
             running: Arc::new(AtomicBool::new(false)),
             cancel: Arc::new(Mutex::new(None)),
+            runtime: Arc::new(RwLock::new(RuntimeSnapshot::default())),
         }
     }
 }

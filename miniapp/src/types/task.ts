@@ -36,7 +36,7 @@ export interface Task {
   error: string | null
   // miniapp-specific convenience (some endpoints return a human message)
   error_message?: string | null
-  plan_id: string | null
+  plan_id?: string | number | null
   project_id: string
   result: TaskResult
   published: boolean

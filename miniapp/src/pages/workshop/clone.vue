@@ -9,7 +9,7 @@
           :class="{ 'cp-source-tab--active': sourceType === 'url' }"
           @tap="sourceType = 'url'"
         >
-          <text class="cp-source-tab__icon">🔗</text>
+          <text class="cp-source-tab__icon">链</text>
           <text class="cp-source-tab__text">粘贴链接</text>
         </view>
         <view
@@ -17,7 +17,7 @@
           :class="{ 'cp-source-tab--active': sourceType === 'template' }"
           @tap="goToTemplates"
         >
-          <text class="cp-source-tab__icon">📑</text>
+          <text class="cp-source-tab__icon">模</text>
           <text class="cp-source-tab__text">从模板选</text>
         </view>
       </view>
@@ -128,21 +128,21 @@ import ProjectSelector from '@/components/business/ProjectSelector.vue'
 const depthOptions = [
   {
     value: 'style',
-    icon: '🎨',
+    icon: '图',
     label: '风格复刻',
     description: '学习写作风格和排版',
     recommended: false,
   },
   {
     value: 'medium',
-    icon: '📝',
+    icon: '文',
     label: '中度复刻',
     description: '风格+结构+关键词',
     recommended: true,
   },
   {
     value: 'deep',
-    icon: '🔄',
+    icon: '变',
     label: '深度复刻',
     description: '全面学习并创新',
     recommended: false,

@@ -568,6 +568,7 @@ const authorAvatarUploading = ref(false)
 const projectArchived = ref(false)
 const currentStep = ref(0)
 const stats = ref<ProjectStats | null>(null)
+const returnToUrl = ref('')
 
 const form = reactive({
   platform: '',
@@ -1044,14 +1045,20 @@ async function onSave() {
   saving.value = true
   try {
     const payload = buildPayload()
+    let createdProjectId = ''
     if (isNew.value) {
-      await projectsApi.create(payload)
+      const created = await projectsApi.create(payload)
+      createdProjectId = created.project?.id || ''
       uni.showToast({ title: '创建成功', icon: 'success' })
     } else {
       await projectsApi.update(editId.value, payload)
       uni.showToast({ title: '保存成功', icon: 'success' })
     }
     setTimeout(() => {
+      if (isNew.value && returnToUrl.value && createdProjectId) {
+        uni.redirectTo({ url: appendReturnProject(returnToUrl.value, createdProjectId) })
+        return
+      }
       uni.navigateBack()
     }, 500)
   } catch (err: any) {
@@ -1059,6 +1066,19 @@ async function onSave() {
     uni.showToast({ title: msg, icon: 'none' })
   } finally {
     saving.value = false
+  }
+}
+
+function appendReturnProject(url: string, projectId: string): string {
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}project_id=${encodeURIComponent(projectId)}`
+}
+
+function safeDecodeQuery(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
   }
 }
 
@@ -1144,6 +1164,12 @@ function onDelete() {
 }
 
 onLoad((query) => {
+  if (query?.return_to) {
+    returnToUrl.value = safeDecodeQuery(String(query.return_to))
+  }
+  if (query?.platform && !query.id) {
+    form.platform = String(query.platform)
+  }
   if (query?.id) {
     isNew.value = false
     editId.value = query.id

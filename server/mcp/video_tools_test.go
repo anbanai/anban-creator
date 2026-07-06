@@ -983,6 +983,25 @@ func TestBuildAccountInfoVideoProjectReturnsResolvedVideoBlock(t *testing.T) {
 	if len(refs) != 1 || refs[0].ReferenceRole != "product appearance" {
 		t.Fatalf("video.references = %#v, want task video references", refs)
 	}
+	anchors, ok := video["visual_anchor_generation"].(map[string]any)
+	if !ok {
+		t.Fatalf("video.visual_anchor_generation missing or wrong type: %T", video["visual_anchor_generation"])
+	}
+	if got := anchors["available"]; got != true {
+		t.Fatalf("video.visual_anchor_generation.available = %v, want true", got)
+	}
+	if got := anchors["default_image_type"]; got != "content" {
+		t.Fatalf("video.visual_anchor_generation.default_image_type = %v, want content", got)
+	}
+	if got := anchors["max_auto_anchors"]; got != 3 {
+		t.Fatalf("video.visual_anchor_generation.max_auto_anchors = %v, want 3", got)
+	}
+	for _, field := range []string{"verify_with_vision", "register_tool", "fallback"} {
+		value, _ := anchors[field].(string)
+		if strings.TrimSpace(value) == "" {
+			t.Fatalf("video.visual_anchor_generation.%s is empty: %#v", field, anchors[field])
+		}
+	}
 	pricing := video["pricing"].(map[string]any)
 	if got := pricing["min_balance"]; got != service.MinVideoCreationBalance {
 		t.Fatalf("video.pricing.min_balance = %v, want %d", got, service.MinVideoCreationBalance)

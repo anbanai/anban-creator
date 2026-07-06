@@ -1,6 +1,7 @@
 use crate::{
     config::AppConfig,
     paths::Resources,
+    provision::{self, RuntimeSnapshot},
     sidecar::{self, SidecarEnv},
 };
 use serde::{Deserialize, Serialize};
@@ -67,10 +68,25 @@ struct ClaimBody<'a> {
     executor_info: ExecutorInfo<'a>,
 }
 
+#[derive(Serialize)]
+struct CompleteBody<'a> {
+    task_id: &'a str,
+    result: FailureResult<'a>,
+}
+
+#[derive(Serialize)]
+struct FailureResult<'a> {
+    success: bool,
+    error: &'a str,
+    log_text: &'a str,
+}
+
 #[derive(Clone, Serialize)]
 struct StatusEvent {
     stage: &'static str,
     level: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
     message: String,
 }
 
@@ -120,6 +136,62 @@ async fn claim_once(
     Ok(envelope.data)
 }
 
+fn failure_complete_payload<'a>(task_id: &'a str, error: &'a str) -> CompleteBody<'a> {
+    CompleteBody {
+        task_id,
+        result: FailureResult {
+            success: false,
+            error,
+            log_text: error,
+        },
+    }
+}
+
+async fn complete_failed_task(
+    client: &reqwest::Client,
+    api_base: &str,
+    api_key: &str,
+    task_id: &str,
+    error: &str,
+) -> Result<(), String> {
+    let url = format!("{}/agent/complete", api_base.trim_end_matches('/'));
+    let resp = client
+        .post(&url)
+        .bearer_auth(api_key)
+        .json(&failure_complete_payload(task_id, error))
+        .send()
+        .await
+        .map_err(|e| format!("complete request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("complete returned HTTP {}", resp.status()));
+    }
+    Ok(())
+}
+
+async fn set_runtime(
+    runtime: &Arc<RwLock<RuntimeSnapshot>>,
+    state: &str,
+    current_task_id: Option<String>,
+    last_error: Option<String>,
+) {
+    let mut snapshot = runtime.write().await;
+    snapshot.state = Some(state.to_string());
+    snapshot.current_task_id = current_task_id;
+    snapshot.last_error = last_error;
+    snapshot.last_event_at = Some(provision::now_event_at());
+}
+
+async fn set_runtime_state_preserving_error(
+    runtime: &Arc<RwLock<RuntimeSnapshot>>,
+    state: &str,
+    current_task_id: Option<String>,
+) {
+    let mut snapshot = runtime.write().await;
+    snapshot.state = Some(state.to_string());
+    snapshot.current_task_id = current_task_id;
+    snapshot.last_event_at = Some(provision::now_event_at());
+}
+
 /// The background claim loop. Runs until `cancel` is cancelled. Designed to be
 /// spawned on a tokio task; reads the live config from `cfg` so credential /
 /// workspace / server changes take effect without restarting the loop.
@@ -128,6 +200,7 @@ pub async fn run_loop(
     cfg: Arc<RwLock<AppConfig>>,
     running: Arc<AtomicBool>,
     res: Resources,
+    runtime: Arc<RwLock<RuntimeSnapshot>>,
     cancel: CancellationToken,
 ) {
     let client = match reqwest::Client::builder()
@@ -146,18 +219,29 @@ pub async fn run_loop(
                 StatusEvent {
                     stage: "executor",
                     level: "error",
+                    task_id: None,
                     message: format!("http client init failed: {e}"),
                 },
             );
+            running.store(false, Ordering::SeqCst);
+            set_runtime(
+                &runtime,
+                "error",
+                None,
+                Some(format!("http client init failed: {e}")),
+            )
+            .await;
             return;
         }
     };
 
+    set_runtime(&runtime, "running_idle", None, None).await;
     let _ = app.emit(
         "local-run://event",
         StatusEvent {
             stage: "executor",
             level: "info",
+            task_id: None,
             message: "本地执行器已启动".to_string(),
         },
     );
@@ -173,10 +257,7 @@ pub async fn run_loop(
         // so a missing binary would burn through the pending queue — each task
         // lingering ~5 min until the stuck-task reaper force-fails + refunds it.
         // Don't claim work we can't execute.
-        let proceed = snapshot.agent_ready()
-            && res.agent_bin.is_some()
-            && !snapshot.api_key.is_empty()
-            && !snapshot.workspace_root.is_empty();
+        let proceed = provision::status(&res, &snapshot, false).available;
         if !proceed {
             // Not fully provisioned — back off and re-check.
             if tokio::time::timeout(ERROR_BACKOFF, cancel.cancelled())
@@ -191,17 +272,26 @@ pub async fn run_loop(
         // Claim is cancelable: a hung request (bounded by the client timeout)
         // or a user-initiated stop can still interrupt this await so the loop
         // can exit promptly instead of blocking on the in-flight claim.
+        set_runtime_state_preserving_error(&runtime, "claiming", None).await;
         let claimed = tokio::select! {
             r = claim_once(&client, &snapshot.api_base, &snapshot.api_key) => r,
             _ = cancel.cancelled() => break,
         };
         match claimed {
             Ok(Some(task_cfg)) => {
+                set_runtime(
+                    &runtime,
+                    "running_task",
+                    Some(task_cfg.task_id.clone()),
+                    None,
+                )
+                .await;
                 let _ = app.emit(
                     "local-run://event",
                     StatusEvent {
                         stage: "executor",
                         level: "info",
+                        task_id: Some(task_cfg.task_id.clone()),
                         message: format!(
                             "已认领任务 {}（{}），开始本地执行",
                             task_cfg.task_id, task_cfg.task_type
@@ -229,17 +319,51 @@ pub async fn run_loop(
                 )
                 .await
                 {
+                    let error = e.to_string();
                     let _ = app.emit(
                         "local-run://event",
                         StatusEvent {
                             stage: "executor",
                             level: "error",
-                            message: format!("任务 {} 执行失败: {e}", task_cfg.task_id),
+                            task_id: Some(task_cfg.task_id.clone()),
+                            message: format!("任务 {} 执行失败: {error}", task_cfg.task_id),
                         },
                     );
+                    set_runtime(
+                        &runtime,
+                        "error",
+                        Some(task_cfg.task_id.clone()),
+                        Some(error.clone()),
+                    )
+                    .await;
+                    if let Err(complete_err) = complete_failed_task(
+                        &client,
+                        &snapshot.api_base,
+                        &snapshot.api_key,
+                        &task_cfg.task_id,
+                        &error,
+                    )
+                    .await
+                    {
+                        let _ = app.emit(
+                            "local-run://event",
+                            StatusEvent {
+                                stage: "executor",
+                                level: "error",
+                                task_id: Some(task_cfg.task_id.clone()),
+                                message: format!(
+                                    "任务 {} 失败终局上报失败: {complete_err}",
+                                    task_cfg.task_id
+                                ),
+                            },
+                        );
+                    }
+                } else {
+                    set_runtime_state_preserving_error(&runtime, "running_idle", None).await;
                 }
             }
             Ok(None) => {
+                set_runtime_state_preserving_error(&runtime, "running_idle", None).await;
                 // Nothing claimable — sleep until the next poll.
                 if tokio::time::timeout(POLL_INTERVAL, cancel.cancelled())
                     .await
@@ -254,9 +378,11 @@ pub async fn run_loop(
                     StatusEvent {
                         stage: "executor",
                         level: "error",
+                        task_id: None,
                         message: format!("认领失败: {e}"),
                     },
                 );
+                set_runtime(&runtime, "error", None, Some(format!("认领失败: {e}"))).await;
                 if tokio::time::timeout(ERROR_BACKOFF, cancel.cancelled())
                     .await
                     .is_ok()
@@ -268,21 +394,29 @@ pub async fn run_loop(
     }
 
     running.store(false, Ordering::SeqCst);
+    set_runtime_state_preserving_error(&runtime, "ready_stopped", None).await;
     let _ = app.emit(
         "local-run://event",
         StatusEvent {
             stage: "executor",
             level: "info",
+            task_id: None,
             message: "本地执行器已停止".to_string(),
         },
     );
 }
 
-/// Helper on AppConfig: whether all bundled deps are present for local runs.
-impl AppConfig {
-    pub fn agent_ready(&self) -> bool {
-        // Resource presence is checked elsewhere (provision::status). From the
-        // config side we only need credentials + workspace + api base set.
-        !self.api_key.is_empty() && !self.workspace_root.is_empty() && !self.api_base.is_empty()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failure_complete_payload_marks_local_task_failed() {
+        let body = failure_complete_payload("task-1", "spawn failed");
+        let json = serde_json::to_value(&body).expect("serialize payload");
+
+        assert_eq!(json["task_id"], "task-1");
+        assert_eq!(json["result"]["success"], false);
+        assert_eq!(json["result"]["error"], "spawn failed");
     }
 }

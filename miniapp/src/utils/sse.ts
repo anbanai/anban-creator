@@ -10,6 +10,7 @@
 // via conditional compilation.
 
 // #ifdef H5
+import { apiUrl } from '@/api/api-base'
 
 export interface SSEEvent {
   event: string
@@ -59,7 +60,7 @@ export async function* streamTaskProgress(
   token: string,
   signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
-  const response = await fetch(`/api/v1/tasks/${taskId}/stream`, {
+  const response = await fetch(apiUrl(`/tasks/${taskId}/stream`), {
     headers: { Authorization: `Bearer ${token}` },
     signal,
   })

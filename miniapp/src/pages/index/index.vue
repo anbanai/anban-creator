@@ -1,174 +1,203 @@
 <template>
-  <view class="dashboard">
-    <!-- Greeting + Credits Card -->
-    <view class="greeting-card">
-      <view class="greeting-card__top">
-        <text class="greeting-card__greeting">{{ greeting }}{{ nicknameSuffix }}</text>
-        <text class="greeting-card__sub">以下是你的内容工作区概览</text>
-      </view>
-      <view class="greeting-card__bottom">
-        <view class="greeting-card__credits" @tap="goCredits">
-          <text class="greeting-card__credits-value" :class="{ 'animate-bounce': creditsAnimating }">
-            {{ displayBalance }}
-          </text>
-          <text class="greeting-card__credits-label">积分</text>
+  <view class="workbench">
+    <view class="workbench-hero">
+      <view class="workbench-hero__top">
+        <view class="workbench-hero__copy">
+          <text class="workbench-hero__kicker">AI 创作工作舱</text>
+          <text class="workbench-hero__title">{{ greeting }}{{ nicknameSuffix }}</text>
+          <text class="workbench-hero__sub">把账号、计划、任务和工坊产出收拢到一个移动控制台。</text>
         </view>
-        <AbButton
-          v-if="!signedInToday"
-          type="primary"
-          size="sm"
-          :loading="signInLoading"
-          @click="handleSignIn"
-        >
-          签到 +{{ dailySignInCredits }}
-        </AbButton>
-        <view v-else class="greeting-card__signed">
-          <text class="greeting-card__signed-icon">&#10003;</text>
-          <text class="greeting-card__signed-text">今日已签到</text>
+        <view class="balance-chip" @tap="goCredits">
+          <text class="balance-chip__value" :class="{ 'animate-bounce': creditsAnimating }">{{ displayBalance }}</text>
+          <text class="balance-chip__label">积分</text>
+        </view>
+      </view>
+
+      <view class="production-strip">
+        <view class="production-strip__cell">
+          <text class="production-strip__label">签到</text>
+          <AbButton
+            v-if="!signedInToday"
+            type="primary"
+            size="sm"
+            :loading="signInLoading"
+            @click="handleSignIn"
+          >
+            +{{ dailySignInCredits }}
+          </AbButton>
+          <text v-else class="production-strip__value production-strip__value--quiet">已完成</text>
+        </view>
+        <view class="production-strip__cell">
+          <text class="production-strip__label">今日生产</text>
+          <text class="production-strip__value">{{ todayTasks }}</text>
+          <text class="production-strip__hint">{{ todayTasksDesc }}</text>
+        </view>
+        <view class="production-strip__cell">
+          <text class="production-strip__label">运行计划</text>
+          <text class="production-strip__value">{{ activePlans }}</text>
+          <text class="production-strip__hint">{{ activePlansDesc }}</text>
         </view>
       </view>
     </view>
 
-    <!-- Stats Grid -->
-    <view class="stats-grid">
-      <view class="stats-grid__item">
-        <StatsCard :value="activePlans" label="活跃计划" :desc="activePlansDesc" />
-      </view>
-      <view class="stats-grid__item">
-        <StatsCard :value="todayTasks" label="今日任务" :desc="todayTasksDesc" />
-      </view>
-      <view class="stats-grid__item">
-        <StatsCard :value="successRate" label="成功率" desc="按今日完成与失败计算" />
-      </view>
-      <view class="stats-grid__item">
-        <StatsCard :value="totalTasksSample" label="任务样本" desc="最近 100 条任务" />
-      </view>
-    </view>
-
-    <!-- Error bar -->
     <view v-if="errorMsg" class="error-bar">
       <text class="error-bar__text">{{ errorMsg }}</text>
       <text class="error-bar__retry" @tap="loadAll">重试</text>
     </view>
 
-    <!-- Loading -->
-    <AbLoading v-if="pageLoading" text="加载中..." />
+    <AbLoading v-if="pageLoading" text="加载工作台..." />
 
-    <!-- Invite card -->
-    <view v-if="!pageLoading" class="invite-card">
-      <view class="invite-card__main">
-        <text class="invite-card__label">我的邀请码</text>
-        <text class="invite-card__code">{{ inviteCode || '------' }}</text>
-        <text class="invite-card__count">
-          已邀请 {{ inviteCountDisplay }} / {{ maxInvites }} 人
-        </text>
-      </view>
-      <AbButton
-        type="ghost"
-        size="sm"
-        :disabled="!inviteCode"
-        @click="copyInviteLink"
-      >
-        复制邀请链接
-      </AbButton>
-    </view>
-
-    <!-- Charts -->
-    <view v-if="!pageLoading" class="charts-row">
-      <!-- Trend bar chart (last 30 days) -->
-      <view class="chart-card">
-        <view class="chart-card__head">
-          <text class="chart-card__title">任务趋势</text>
-          <text class="chart-card__hint">近 30 天</text>
+    <template v-else>
+      <view class="next-card" :class="`next-card--${nextSuggestion.tone}`" @tap="runSuggestion">
+        <view class="next-card__rail" />
+        <view class="next-card__body">
+          <text class="next-card__label">下一步建议</text>
+          <text class="next-card__title">{{ nextSuggestion.title }}</text>
+          <text class="next-card__desc">{{ nextSuggestion.description }}</text>
         </view>
-        <TrendBars v-if="trendData.length > 0" :data="trendData" />
-        <view v-else class="chart-card__empty">暂无数据</view>
+        <view class="next-card__action">
+          <text>{{ nextSuggestion.cta }}</text>
+          <text class="next-card__arrow">›</text>
+        </view>
       </view>
 
-      <!-- Status distribution donut -->
-      <view class="chart-card">
-        <view class="chart-card__head">
-          <text class="chart-card__title">状态分布</text>
-          <text class="chart-card__hint">近 100 条任务</text>
+      <view class="control-row">
+        <view class="control-tile control-tile--primary" @tap="goCreateTask">
+          <text class="control-tile__icon">＋</text>
+          <text class="control-tile__label">新建任务</text>
         </view>
-        <StatusDonut
-          v-if="statusData.length > 0"
-          :completed="statusCounts.completed"
-          :failed="statusCounts.failed"
-          :cancelled="statusCounts.cancelled"
-        />
-        <view v-else class="chart-card__empty">暂无数据</view>
-      </view>
-    </view>
-
-    <!-- Recent Tasks -->
-    <view v-if="!pageLoading" class="section">
-      <view class="section__header">
-        <text class="section__title">最近任务</text>
-        <text class="section__more" @tap="goTasks">更多 ›</text>
-      </view>
-
-      <view v-if="recentTasks.length > 0">
-        <TaskCard
-          v-for="task in recentTasks"
-          :key="task.id"
-          :task="task"
-          @tap="goTaskDetail(task.id)"
-        />
-      </view>
-      <AbEmpty
-        v-else
-        title="还没有任务"
-        description="创建第一个任务开始智能创作"
-        action-text="新建任务"
-        @action="goCreateTask"
-      />
-    </view>
-
-    <!-- Quick Actions -->
-    <view v-if="!pageLoading" class="section">
-      <text class="section__title">快捷操作</text>
-      <view class="quick-actions">
-        <view class="quick-actions__item" @tap="goCreateTask">
-          <view class="quick-actions__icon quick-actions__icon--task">
-            <text>&#128221;</text>
-          </view>
-          <text class="quick-actions__label">新建任务</text>
+        <view class="control-tile" @tap="goCreatePlan">
+          <text class="control-tile__icon">⟳</text>
+          <text class="control-tile__label">自动计划</text>
         </view>
-        <view class="quick-actions__item" @tap="goCreatePlan">
-          <view class="quick-actions__icon quick-actions__icon--plan">
-            <text>&#128203;</text>
-          </view>
-          <text class="quick-actions__label">新建计划</text>
-        </view>
-        <view class="quick-actions__item" @tap="goTimeline">
-          <view class="quick-actions__icon quick-actions__icon--timeline">
-            <text>&#128197;</text>
-          </view>
-          <text class="quick-actions__label">查看时间轴</text>
-        </view>
-        <view class="quick-actions__item" @tap="goWorkshop('viral-analysis')">
-          <view class="quick-actions__icon quick-actions__icon--viral">
-            <text>&#128300;</text>
-          </view>
-          <text class="quick-actions__label">爆文拆解</text>
-        </view>
-        <view class="quick-actions__item" @tap="goWorkshop('poster')">
-          <view class="quick-actions__icon quick-actions__icon--poster">
-            <text>&#127912;</text>
-          </view>
-          <text class="quick-actions__label">海报制作</text>
-        </view>
-        <view class="quick-actions__item" @tap="goCredits">
-          <view class="quick-actions__icon quick-actions__icon--credits">
-            <text>&#128176;</text>
-          </view>
-          <text class="quick-actions__label">积分明细</text>
+        <view class="control-tile" @tap="goTemplates">
+          <text class="control-tile__icon">▦</text>
+          <text class="control-tile__label">模板资产</text>
         </view>
       </view>
-    </view>
 
-    <!-- Bottom spacer for tab bar -->
+      <view class="section">
+        <view class="section__header">
+          <view>
+            <text class="section__eyebrow">LIVE QUEUE</text>
+            <text class="section__title">运行中任务</text>
+          </view>
+          <text class="section__more" @tap="goTasks">全部</text>
+        </view>
+        <view v-if="runningTasks.length > 0" class="run-list">
+          <view
+            v-for="task in runningTasks"
+            :key="task.id"
+            class="run-row"
+            @tap="goTaskDetail(task.id)"
+          >
+            <view class="run-row__pulse" />
+            <view class="run-row__body">
+              <text class="run-row__title">{{ task.title || task.prompt || '未命名任务' }}</text>
+              <text class="run-row__meta">{{ taskTypeLabel(task.type) }} · {{ taskProgressLabel(task) }}</text>
+            </view>
+            <text class="run-row__percent">{{ task.progress || task.latest_progress?.percent || 0 }}%</text>
+          </view>
+        </view>
+        <view v-else class="soft-empty">
+          <text class="soft-empty__title">当前没有执行中的任务</text>
+          <text class="soft-empty__desc">可以从模板、工坊分析或账号直接发起新创作。</text>
+        </view>
+      </view>
+
+      <view class="section">
+        <view class="section__header">
+          <view>
+            <text class="section__eyebrow">RECENT OUTPUTS</text>
+            <text class="section__title">最近产出</text>
+          </view>
+          <text class="section__more" @tap="goTasks">更多</text>
+        </view>
+        <view v-if="recentOutputs.length > 0" class="output-list">
+          <view
+            v-for="task in recentOutputs"
+            :key="task.id"
+            class="output-row"
+            @tap="goTaskDetail(task.id)"
+          >
+            <view class="output-row__mark" :class="`output-row__mark--${task.type}`">
+              <text>{{ taskTypeInitial(task.type) }}</text>
+            </view>
+            <view class="output-row__body">
+              <text class="output-row__title">{{ task.title || task.prompt || '创作结果' }}</text>
+              <text class="output-row__meta">{{ taskTypeLabel(task.type) }} · {{ relativeTime(task.completed_at || task.created_at) }}</text>
+            </view>
+            <text class="output-row__action">查看</text>
+          </view>
+        </view>
+        <view v-else class="soft-empty">
+          <text class="soft-empty__title">还没有完成产出</text>
+          <text class="soft-empty__desc">完成后的文章、笔记和素材会出现在这里。</text>
+        </view>
+      </view>
+
+      <view class="section">
+        <view class="section__header">
+          <view>
+            <text class="section__eyebrow">WORKSHOP</text>
+            <text class="section__title">创作工坊</text>
+          </view>
+          <text class="section__more" @tap="goWorkshopIndex">入口</text>
+        </view>
+        <view class="workshop-grid">
+          <view
+            v-for="entry in workshopEntries"
+            :key="entry.key"
+            class="workshop-tile"
+            @tap="entry.action"
+          >
+            <view class="workshop-tile__icon" :class="`workshop-tile__icon--${entry.key}`">
+              <text>{{ entry.icon }}</text>
+            </view>
+            <text class="workshop-tile__title">{{ entry.title }}</text>
+            <text class="workshop-tile__desc">{{ entry.desc }}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="section">
+        <view class="section__header">
+          <view>
+            <text class="section__eyebrow">AUTOPILOT</text>
+            <text class="section__title">计划提醒</text>
+          </view>
+          <text class="section__more" @tap="goPlans">管理</text>
+        </view>
+        <view v-if="planReminders.length > 0" class="plan-list">
+          <view
+            v-for="plan in planReminders"
+            :key="plan.id"
+            class="plan-row"
+            @tap="goPlanTasks(plan.id)"
+          >
+            <view class="plan-row__body">
+              <text class="plan-row__title">{{ plan.title || plan.prompt || '自动计划' }}</text>
+              <text class="plan-row__meta">{{ taskTypeLabel(plan.type) }} · 下次 {{ formatDateTimeCN(plan.next_run_at) }}</text>
+            </view>
+            <text class="plan-row__action">任务</text>
+          </view>
+        </view>
+        <view v-else class="soft-empty soft-empty--compact">
+          <text class="soft-empty__title">还没有启用计划</text>
+          <text class="soft-empty__desc">为账号设置固定节奏，系统会自动生成内容任务。</text>
+        </view>
+      </view>
+
+      <view v-if="inviteCode" class="invite-card">
+        <view class="invite-card__main">
+          <text class="invite-card__label">邀请资产</text>
+          <text class="invite-card__code">{{ inviteCode }}</text>
+          <text class="invite-card__count">已邀请 {{ inviteCountDisplay }} / {{ maxInvites }} 人</text>
+        </view>
+        <AbButton type="ghost" size="sm" @click="copyInviteLink">复制链接</AbButton>
+      </view>
+    </template>
+
     <view class="bottom-spacer" />
   </view>
 </template>
@@ -180,35 +209,29 @@ import { useAuthStore } from '@/stores/auth'
 import { creditsApi } from '@/api/credits'
 import { tasksApi } from '@/api/tasks'
 import { plansApi } from '@/api/plans'
-import { getGreeting } from '@/utils/format'
-import TaskCard from '@/components/business/TaskCard.vue'
-import StatsCard from '@/components/business/StatsCard.vue'
-import TrendBars from '@/components/business/TrendBars.vue'
-import StatusDonut from '@/components/business/StatusDonut.vue'
+import { getGreeting, relativeTime, formatDateTimeCN } from '@/utils/format'
+import { contentTypeLabel } from '@/utils/labels'
 import AbButton from '@/components/common/AbButton.vue'
-import AbEmpty from '@/components/common/AbEmpty.vue'
 import AbLoading from '@/components/common/AbLoading.vue'
-import type { Task } from '@/types'
+import type { Plan, Task } from '@/types'
+
+const PLAN_FILTER_KEY = 'anban_task_plan_filter'
 
 const authStore = useAuthStore()
 
-// --- Greeting ---
 const greeting = getGreeting()
 const nicknameSuffix = computed(() => {
   const name = authStore.user?.nickname || ''
   return name ? `，${name}` : ''
 })
 
-// --- Credits + pricing (daily sign-in amount) ---
 const creditsBalance = ref(0)
 const signedInToday = ref(false)
 const signInLoading = ref(false)
 const creditsAnimating = ref(false)
 const dailySignInCredits = ref(10)
 
-const displayBalance = computed(() => {
-  return creditsBalance.value.toLocaleString()
-})
+const displayBalance = computed(() => creditsBalance.value.toLocaleString())
 
 async function loadCredits() {
   try {
@@ -224,7 +247,6 @@ async function loadCredits() {
 }
 
 async function loadPricing() {
-  // Best-effort: failures fall back to default reward of 10.
   try {
     const pricing = await creditsApi.pricing()
     if (pricing?.income?.daily_sign_in) {
@@ -241,51 +263,114 @@ async function handleSignIn() {
   try {
     const res = await creditsApi.signIn()
     signedInToday.value = true
-
-    // Animate balance +reward
-    const oldBalance = creditsBalance.value
-    creditsBalance.value = oldBalance + (res.reward || dailySignInCredits.value)
+    creditsBalance.value += res.reward || dailySignInCredits.value
     creditsAnimating.value = true
     setTimeout(() => {
       creditsAnimating.value = false
     }, 600)
-
-    uni.showToast({
-      title: `签到成功 +${res.reward || dailySignInCredits.value}积分`,
-      icon: 'none',
-    })
+    uni.showToast({ title: `签到成功 +${res.reward || dailySignInCredits.value}积分`, icon: 'none' })
   } catch (err: any) {
-    const msg = err?.message || '签到失败'
-    uni.showToast({ title: msg, icon: 'none' })
+    uni.showToast({ title: err?.message || '签到失败', icon: 'none' })
   } finally {
     signInLoading.value = false
   }
 }
 
-// --- Stats (mirrors studio DashboardPage exact set) ---
 const activePlans = ref(0)
 const todayTasks = ref(0)
-const successRate = ref('--')
-const totalTasksSample = ref(0)
 const completedToday = ref(0)
 const failedToday = ref(0)
+const allTasks = ref<Task[]>([])
+const activePlanItems = ref<Plan[]>([])
 
-// Today-bound counts for the "今日任务" description.
-const activePlansDesc = computed(() => '当前启用的自动调度')
-const todayTasksDesc = computed(() => `${completedToday.value} 已完成，${failedToday.value} 失败`)
+const activePlansDesc = computed(() => activePlanItems.value.length > 0 ? '自动调度已接管' : '等待设置节奏')
+const todayTasksDesc = computed(() => `${completedToday.value} 完成，${failedToday.value} 失败`)
 
-// --- Charts data ---
-interface TrendPoint { date: string; count: number }
-const trendData = ref<TrendPoint[]>([])
-const statusCounts = ref({ completed: 0, failed: 0, cancelled: 0 })
-const statusData = computed(() => {
-  const c = statusCounts.value
-  return [
-    { name: '已完成', value: c.completed },
-    { name: '失败', value: c.failed },
-    { name: '已取消', value: c.cancelled },
-  ].filter((d) => d.value > 0)
+const runningTasks = computed(() =>
+  allTasks.value
+    .filter((task) => task.status === 'running' || task.status === 'pending')
+    .slice(0, 3),
+)
+
+const recentOutputs = computed(() =>
+  allTasks.value
+    .filter((task) => task.status === 'completed')
+    .slice(0, 4),
+)
+
+const planReminders = computed(() =>
+  [...activePlanItems.value]
+    .sort((a, b) => new Date(a.next_run_at || '').getTime() - new Date(b.next_run_at || '').getTime())
+    .slice(0, 3),
+)
+
+const nextSuggestion = computed(() => {
+  if (runningTasks.value.length > 0) {
+    return {
+      title: '先盯住正在执行的任务',
+      description: `${runningTasks.value.length} 个任务正在推进，进入执行舱查看进度、日志和可交付文件。`,
+      cta: '查看队列',
+      action: 'tasks',
+      tone: 'live',
+    }
+  }
+  if (recentOutputs.value.length === 0) {
+    return {
+      title: '创建第一条可复用产出',
+      description: '选择账号后写下创作要求，系统会自动预估积分并把高级设置折叠起来。',
+      cta: '新建任务',
+      action: 'create-task',
+      tone: 'start',
+    }
+  }
+  if (activePlanItems.value.length === 0) {
+    return {
+      title: '把高频选题交给自动计划',
+      description: '把稳定栏目设成计划，让内容生产从单次任务升级为持续节奏。',
+      cta: '创建计划',
+      action: 'create-plan',
+      tone: 'plan',
+    }
+  }
+  return {
+    title: '复用最近产出继续放大',
+    description: '从工坊拆解爆款、生成海报或沉淀模板，把单次结果变成下一轮任务。',
+    cta: '进入工坊',
+    action: 'workshop',
+    tone: 'reuse',
+  }
 })
+
+const workshopEntries = [
+  {
+    key: 'viral',
+    icon: '拆',
+    title: '爆文拆解',
+    desc: '分析链接后直接复刻任务',
+    action: () => goWorkshop('viral-analysis'),
+  },
+  {
+    key: 'poster',
+    icon: '图',
+    title: '海报制作',
+    desc: '生成后继续变体',
+    action: () => goWorkshop('poster'),
+  },
+  {
+    key: 'designer',
+    icon: '设',
+    title: '设计师',
+    desc: '参考图与局部编辑',
+    action: () => uni.navigateTo({ url: '/pages/designer/index' }),
+  },
+  {
+    key: 'template',
+    icon: '模',
+    title: '模板中心',
+    desc: '沉淀为可操作资产',
+    action: () => goTemplates(),
+  },
+]
 
 async function loadStats() {
   try {
@@ -294,107 +379,40 @@ async function loadStats() {
       tasksApi.list({ limit: 100 }),
     ])
 
-    // Active plans
     const plans = plansRes.items || []
-    activePlans.value = plans.filter((p) => p.status === 'active').length
+    activePlanItems.value = plans.filter((plan) => plan.status === 'active')
+    activePlans.value = activePlanItems.value.length
 
-    // Today's tasks (created today)
+    const tasks = tasksRes.items || []
+    allTasks.value = tasks
+
     const today = new Date()
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-    const tasks = tasksRes.items || []
-    totalTasksSample.value = tasks.length
-
-    const todayTasksList = tasks.filter(
-      (t) => t.created_at && t.created_at.startsWith(todayStr),
-    )
+    const todayTasksList = tasks.filter((task) => task.created_at && task.created_at.startsWith(todayStr))
     todayTasks.value = todayTasksList.length
-    completedToday.value = todayTasksList.filter((t) => t.status === 'completed').length
-    failedToday.value = todayTasksList.filter((t) => t.status === 'failed').length
-
-    // Success rate: today-based, completed / (completed + failed)
-    const finishedToday = completedToday.value + failedToday.value
-    if (finishedToday > 0) {
-      successRate.value = `${Math.round((completedToday.value / finishedToday) * 100)}%`
-    } else {
-      successRate.value = '--'
-    }
-
-    // --- Trend (last 30 days, all-task sample) ---
-    buildTrend(tasks)
-
-    // --- Status distribution (all-task sample) ---
-    statusCounts.value = {
-      completed: tasks.filter((t) => t.status === 'completed').length,
-      failed: tasks.filter((t) => t.status === 'failed').length,
-      cancelled: tasks.filter((t) => t.status === 'cancelled').length,
-    }
+    completedToday.value = todayTasksList.filter((task) => task.status === 'completed').length
+    failedToday.value = todayTasksList.filter((task) => task.status === 'failed').length
   } catch (err) {
     console.error('Failed to load stats:', err)
+    errorMsg.value = '工作台数据加载失败'
   }
 }
 
-function buildTrend(tasks: Task[]) {
-  const now = new Date()
-  const buckets: Record<string, number> = {}
-  const keys: string[] = []
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(now)
-    d.setDate(now.getDate() - i)
-    // Use a YYYY-MM-DD key (local) for grouping, matching created_at prefix.
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    buckets[key] = 0
-    keys.push(key)
-  }
-  for (const t of tasks) {
-    if (!t.created_at) continue
-    const key = t.created_at.slice(0, 10)
-    if (key in buckets) buckets[key]++
-  }
-  trendData.value = keys.map((k) => {
-    const d = new Date(k + 'T00:00:00')
-    return {
-      date: `${d.getMonth() + 1}/${d.getDate()}`,
-      count: buckets[k],
-    }
-  })
-}
-
-// --- Recent Tasks ---
-const recentTasks = ref<Task[]>([])
-
-async function loadRecentTasks() {
-  try {
-    const res = await tasksApi.list({ limit: 5 })
-    recentTasks.value = res.items || []
-  } catch (err) {
-    console.error('Failed to load recent tasks:', err)
-  }
-}
-
-// --- Invite (mirrors studio invite card; no dedicated endpoint,
-//     derived from user.invite_code) ---
 const inviteCode = computed(() => authStore.user?.invite_code || '')
 const inviteCountDisplay = computed(() => authStore.user?.invite_count ?? 0)
 const maxInvites = computed(() => authStore.user?.max_invites ?? 3)
 
 function copyInviteLink() {
   if (!inviteCode.value) return
-  // Mini-program has no public web origin; build an H5 register deep-link.
-  // The host is the server's web frontend if configured; otherwise a placeholder.
   const host = 'https://anban-creator.com'
   const link = `${host}/register?invite=${inviteCode.value}`
   uni.setClipboardData({
     data: link,
-    success: () => {
-      uni.showToast({ title: '邀请链接已复制', icon: 'none' })
-    },
-    fail: () => {
-      uni.showToast({ title: '复制失败', icon: 'none' })
-    },
+    success: () => uni.showToast({ title: '邀请链接已复制', icon: 'none' }),
+    fail: () => uni.showToast({ title: '复制失败', icon: 'none' }),
   })
 }
 
-// --- Page state ---
 const pageLoading = ref(true)
 const errorMsg = ref('')
 
@@ -406,10 +424,7 @@ async function loadAll() {
       loadCredits(),
       loadPricing(),
       loadStats(),
-      loadRecentTasks(),
     ])
-  } catch (err) {
-    errorMsg.value = '数据加载失败'
   } finally {
     pageLoading.value = false
   }
@@ -417,26 +432,58 @@ async function loadAll() {
 
 onMounted(loadAll)
 
-// Pull-down refresh
 onPullDownRefresh(async () => {
   try {
     await Promise.all([
       loadCredits(),
       loadStats(),
-      loadRecentTasks(),
     ])
   } finally {
     uni.stopPullDownRefresh()
   }
 })
 
-// --- Navigation ---
+function taskTypeLabel(type: string): string {
+  return contentTypeLabel[type] || type
+}
+
+function taskTypeInitial(type: string): string {
+  const label = taskTypeLabel(type)
+  return label.slice(0, 1)
+}
+
+function taskProgressLabel(task: Task): string {
+  if (task.latest_progress?.title) return task.latest_progress.title
+  if (task.status === 'pending') return '等待执行'
+  return '实时执行中'
+}
+
+function runSuggestion() {
+  switch (nextSuggestion.value.action) {
+    case 'tasks':
+      goTasks()
+      break
+    case 'create-plan':
+      goCreatePlan()
+      break
+    case 'workshop':
+      goWorkshopIndex()
+      break
+    default:
+      goCreateTask()
+  }
+}
+
 function goCredits() {
   uni.navigateTo({ url: '/pages/credits/index' })
 }
 
 function goTasks() {
   uni.switchTab({ url: '/pages/tasks/index' })
+}
+
+function goPlans() {
+  uni.switchTab({ url: '/pages/plans/index' })
 }
 
 function goTaskDetail(taskId: string) {
@@ -451,91 +498,132 @@ function goCreatePlan() {
   uni.navigateTo({ url: '/pages/plans/create' })
 }
 
-function goTimeline() {
-  uni.navigateTo({ url: '/pages/timeline/index' })
+function goTemplates() {
+  uni.navigateTo({ url: '/pages/templates/index' })
 }
 
-function goWorkshop(tab: string) {
-  uni.navigateTo({ url: `/pages/workshop/index?tab=${tab}` })
+function goWorkshopIndex() {
+  uni.navigateTo({ url: '/pages/workshop/index' })
+}
+
+function goWorkshop(page: string) {
+  uni.navigateTo({ url: `/pages/workshop/${page}` })
+}
+
+function goPlanTasks(planId: string) {
+  uni.setStorageSync(PLAN_FILTER_KEY, planId)
+  uni.switchTab({ url: '/pages/tasks/index' })
 }
 </script>
 
 <style lang="scss" scoped>
-.dashboard {
+.workbench {
   min-height: 100vh;
   background-color: $ab-background;
   padding: $ab-space-md;
   box-sizing: border-box;
 }
 
-// Greeting card
-.greeting-card {
+.workbench-hero {
   background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
   border-radius: $ab-radius-lg;
   padding: $ab-space-lg;
   margin-bottom: $ab-space-md;
   box-shadow: $ab-shadow-sm;
 
   &__top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: $ab-space-md;
     margin-bottom: $ab-space-md;
   }
 
-  &__greeting {
-    font-size: $ab-text-xl;
-    font-weight: $ab-font-semibold;
-    color: $ab-text;
+  &__copy {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__kicker {
     display: block;
+    font-size: $ab-text-xs;
+    color: $ab-primary;
+    font-weight: $ab-font-semibold;
+    margin-bottom: 6rpx;
+  }
+
+  &__title {
+    display: block;
+    font-size: $ab-text-2xl;
+    font-weight: $ab-font-bold;
+    color: $ab-text;
+    line-height: 1.2;
   }
 
   &__sub {
-    font-size: $ab-text-xs;
-    color: $ab-text-tertiary;
-    margin-top: 6rpx;
     display: block;
-  }
-
-  &__bottom {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  &__credits {
-    display: flex;
-    align-items: baseline;
-    gap: $ab-space-xs;
-    cursor: pointer;
-  }
-
-  &__credits-value {
-    font-size: $ab-text-2xl;
-    font-weight: $ab-font-bold;
-    color: $ab-primary;
-    transition: transform 0.3s ease;
-  }
-
-  &__credits-label {
+    margin-top: 8rpx;
     font-size: $ab-text-sm;
     color: $ab-text-secondary;
+    line-height: 1.5;
+  }
+}
+
+.balance-chip {
+  flex-shrink: 0;
+  min-width: 140rpx;
+  padding: $ab-space-sm;
+  border-radius: $ab-radius-md;
+  background-color: $ab-primary-bg;
+  text-align: right;
+
+  &__value {
+    display: block;
+    font-size: $ab-text-xl;
+    font-weight: $ab-font-bold;
+    color: $ab-primary;
+    line-height: 1.1;
   }
 
-  &__signed {
-    display: flex;
-    align-items: center;
-    gap: 6rpx;
-    padding: 8rpx $ab-space-md;
-    background-color: $ab-divider;
-    border-radius: $ab-radius-full;
+  &__label {
+    display: block;
+    margin-top: 4rpx;
+    font-size: $ab-text-xs;
+    color: $ab-text-secondary;
+  }
+}
+
+.production-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 2rpx solid $ab-divider;
+  padding-top: $ab-space-sm;
+  gap: $ab-space-sm;
+
+  &__cell {
+    min-width: 0;
   }
 
-  &__signed-icon {
-    font-size: $ab-text-sm;
-    color: $ab-text-tertiary;
-  }
-
-  &__signed-text {
+  &__label,
+  &__hint {
+    display: block;
     font-size: $ab-text-xs;
     color: $ab-text-tertiary;
+    line-height: 1.35;
+  }
+
+  &__value {
+    display: block;
+    margin-top: 4rpx;
+    font-size: $ab-text-lg;
+    font-weight: $ab-font-semibold;
+    color: $ab-text;
+
+    &--quiet {
+      font-size: $ab-text-sm;
+      color: $ab-success;
+    }
   }
 }
 
@@ -545,24 +633,11 @@ function goWorkshop(tab: string) {
 
 @keyframes credits-bounce {
   0% { transform: scale(1); }
-  30% { transform: scale(1.25); }
-  60% { transform: scale(0.95); }
+  30% { transform: scale(1.2); }
+  60% { transform: scale(0.96); }
   100% { transform: scale(1); }
 }
 
-// Stats grid
-.stats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: $ab-space-sm;
-  margin-bottom: $ab-space-md;
-
-  &__item {
-    display: flex;
-  }
-}
-
-// Error bar
 .error-bar {
   display: flex;
   align-items: center;
@@ -582,103 +657,133 @@ function goWorkshop(tab: string) {
     font-size: $ab-text-sm;
     color: $ab-primary;
     font-weight: $ab-font-medium;
-    flex-shrink: 0;
     margin-left: $ab-space-md;
   }
 }
 
-// Invite card
-.invite-card {
+.next-card {
+  position: relative;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: stretch;
+  gap: $ab-space-md;
   background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
   border-radius: $ab-radius-lg;
-  padding: $ab-space-md $ab-space-lg;
+  padding: $ab-space-md;
   margin-bottom: $ab-space-md;
   box-shadow: $ab-shadow-sm;
+  overflow: hidden;
 
-  &__main {
-    display: flex;
-    flex-direction: column;
+  &__rail {
+    width: 8rpx;
+    border-radius: $ab-radius-full;
+    background-color: $ab-primary;
+    flex-shrink: 0;
+  }
+
+  &--live &__rail { background-color: $ab-warning; }
+  &--plan &__rail { background-color: $ab-info; }
+  &--reuse &__rail { background-color: $ab-success; }
+
+  &__body {
     flex: 1;
     min-width: 0;
   }
 
   &__label {
-    font-size: $ab-text-sm;
-    color: $ab-text-secondary;
-  }
-
-  &__code {
-    font-size: $ab-text-xl;
-    font-weight: $ab-font-bold;
-    color: $ab-text;
-    letter-spacing: 4rpx;
-    margin-top: 4rpx;
-  }
-
-  &__count {
+    display: block;
     font-size: $ab-text-xs;
     color: $ab-text-tertiary;
-    margin-top: 4rpx;
-  }
-}
-
-// Charts row
-.charts-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: $ab-space-sm;
-  margin-bottom: $ab-space-md;
-}
-
-.chart-card {
-  background-color: $ab-surface;
-  border-radius: $ab-radius-lg;
-  padding: $ab-space-md;
-  box-shadow: $ab-shadow-sm;
-
-  &__head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    margin-bottom: $ab-space-sm;
+    margin-bottom: 6rpx;
   }
 
   &__title {
-    font-size: $ab-text-md;
+    display: block;
+    font-size: $ab-text-lg;
     font-weight: $ab-font-semibold;
     color: $ab-text;
+    line-height: 1.35;
   }
 
-  &__hint {
-    font-size: $ab-text-xs;
-    color: $ab-text-tertiary;
+  &__desc {
+    display: block;
+    margin-top: 6rpx;
+    font-size: $ab-text-sm;
+    color: $ab-text-secondary;
+    line-height: 1.5;
   }
 
-  &__empty {
-    height: 320rpx;
+  &__action {
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 4rpx;
+    align-self: center;
+    flex-shrink: 0;
     font-size: $ab-text-sm;
-    color: $ab-text-tertiary;
+    color: $ab-primary;
+    font-weight: $ab-font-semibold;
+  }
+
+  &__arrow {
+    font-size: $ab-text-lg;
+    line-height: 1;
   }
 }
 
-// Section
+.control-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $ab-space-sm;
+  margin-bottom: $ab-space-lg;
+}
+
+.control-tile {
+  background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-md;
+  padding: $ab-space-md $ab-space-sm;
+  text-align: center;
+
+  &--primary {
+    border-color: $ab-primary;
+    background-color: $ab-primary-bg;
+  }
+
+  &__icon {
+    display: block;
+    font-size: $ab-text-xl;
+    color: $ab-primary;
+    line-height: 1;
+    margin-bottom: $ab-space-xs;
+  }
+
+  &__label {
+    display: block;
+    font-size: $ab-text-sm;
+    color: $ab-text;
+    font-weight: $ab-font-medium;
+  }
+}
+
 .section {
   margin-bottom: $ab-space-lg;
 
   &__header {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
     margin-bottom: $ab-space-sm;
   }
 
+  &__eyebrow {
+    display: block;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+    margin-bottom: 4rpx;
+  }
+
   &__title {
+    display: block;
     font-size: $ab-text-lg;
     font-weight: $ab-font-semibold;
     color: $ab-text;
@@ -686,52 +791,263 @@ function goWorkshop(tab: string) {
 
   &__more {
     font-size: $ab-text-sm;
-    color: $ab-text-secondary;
-  }
-}
-
-// Quick actions
-.quick-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: $ab-space-sm;
-
-  &__item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: $ab-space-xs;
-    background-color: $ab-surface;
-    border-radius: $ab-radius-md;
-    padding: $ab-space-md $ab-space-sm;
-    box-shadow: $ab-shadow-sm;
-  }
-
-  &__icon {
-    width: 72rpx;
-    height: 72rpx;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 36rpx;
-
-    &--task { background-color: $ab-primary-bg; }
-    &--plan { background-color: $ab-success-bg; }
-    &--timeline { background-color: $ab-info-bg; }
-    &--viral { background-color: $ab-warning-bg; }
-    &--poster { background-color: $ab-purple-bg; }
-    &--credits { background-color: $ab-yellow-bg; }
-  }
-
-  &__label {
-    font-size: $ab-text-xs;
-    color: $ab-text;
+    color: $ab-primary;
     font-weight: $ab-font-medium;
   }
 }
 
-// Bottom spacer
+.run-list,
+.output-list,
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: $ab-space-sm;
+}
+
+.run-row,
+.output-row,
+.plan-row {
+  display: flex;
+  align-items: center;
+  gap: $ab-space-sm;
+  background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-md;
+  padding: $ab-space-md;
+}
+
+.run-row {
+  &__pulse {
+    width: 18rpx;
+    height: 18rpx;
+    border-radius: 50%;
+    background-color: $ab-warning;
+    box-shadow: 0 0 0 8rpx $ab-warning-bg;
+    flex-shrink: 0;
+  }
+
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title,
+  &__meta {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__title {
+    font-size: $ab-text-base;
+    color: $ab-text;
+    font-weight: $ab-font-medium;
+  }
+
+  &__meta {
+    margin-top: 6rpx;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__percent {
+    flex-shrink: 0;
+    font-size: $ab-text-sm;
+    color: $ab-warning;
+    font-weight: $ab-font-semibold;
+  }
+}
+
+.output-row {
+  &__mark {
+    width: 64rpx;
+    height: 64rpx;
+    border-radius: $ab-radius-sm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background-color: $ab-primary-bg;
+    color: $ab-primary;
+    font-size: $ab-text-sm;
+    font-weight: $ab-font-semibold;
+
+    &--seednote { background-color: $ab-danger-bg; color: $ab-danger; }
+    &--article { background-color: $ab-success-bg; color: $ab-success; }
+    &--ecommerce { background-color: $ab-warning-bg; color: $ab-warning; }
+  }
+
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title,
+  &__meta {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__title {
+    font-size: $ab-text-base;
+    color: $ab-text;
+    font-weight: $ab-font-medium;
+  }
+
+  &__meta {
+    margin-top: 6rpx;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__action {
+    flex-shrink: 0;
+    font-size: $ab-text-sm;
+    color: $ab-primary;
+  }
+}
+
+.workshop-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: $ab-space-sm;
+}
+
+.workshop-tile {
+  background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-md;
+  padding: $ab-space-md;
+
+  &__icon {
+    width: 56rpx;
+    height: 56rpx;
+    border-radius: $ab-radius-sm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: $ab-text-sm;
+    font-weight: $ab-font-semibold;
+    margin-bottom: $ab-space-sm;
+    background-color: $ab-primary-bg;
+    color: $ab-primary;
+
+    &--viral { background-color: $ab-danger-bg; color: $ab-danger; }
+    &--poster { background-color: $ab-warning-bg; color: $ab-warning; }
+    &--designer { background-color: $ab-info-bg; color: $ab-info; }
+    &--template { background-color: $ab-success-bg; color: $ab-success; }
+  }
+
+  &__title {
+    display: block;
+    font-size: $ab-text-base;
+    color: $ab-text;
+    font-weight: $ab-font-semibold;
+  }
+
+  &__desc {
+    display: block;
+    margin-top: 6rpx;
+    font-size: $ab-text-xs;
+    color: $ab-text-secondary;
+    line-height: 1.45;
+  }
+}
+
+.plan-row {
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title,
+  &__meta {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__title {
+    font-size: $ab-text-base;
+    color: $ab-text;
+    font-weight: $ab-font-medium;
+  }
+
+  &__meta {
+    margin-top: 6rpx;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__action {
+    flex-shrink: 0;
+    font-size: $ab-text-sm;
+    color: $ab-primary;
+  }
+}
+
+.soft-empty {
+  background-color: $ab-surface;
+  border: 2rpx dashed $ab-border;
+  border-radius: $ab-radius-md;
+  padding: $ab-space-lg $ab-space-md;
+
+  &--compact {
+    padding: $ab-space-md;
+  }
+
+  &__title {
+    display: block;
+    font-size: $ab-text-base;
+    color: $ab-text;
+    font-weight: $ab-font-medium;
+  }
+
+  &__desc {
+    display: block;
+    margin-top: 6rpx;
+    font-size: $ab-text-sm;
+    color: $ab-text-secondary;
+    line-height: 1.45;
+  }
+}
+
+.invite-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-md;
+  padding: $ab-space-md;
+  margin-bottom: $ab-space-lg;
+
+  &__main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__label,
+  &__count {
+    display: block;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+  }
+
+  &__code {
+    display: block;
+    margin: 4rpx 0;
+    font-size: $ab-text-lg;
+    color: $ab-text;
+    font-weight: $ab-font-semibold;
+    letter-spacing: 2rpx;
+  }
+}
+
 .bottom-spacer {
   height: 120rpx;
 }

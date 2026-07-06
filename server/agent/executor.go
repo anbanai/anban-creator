@@ -138,7 +138,7 @@ func AppendResumeContextToPrompt(prompt, workDir string) string {
 }
 
 // describeRuntimeControls emits compact, machine-readable controls for agents.
-// Detailed semantics live in claudecode agents/skills/CLAUDE.md so server code
+// Detailed semantics live in claudecode agents/skills and docs/plugin-development.md so server code
 // does not duplicate workflow prose.
 func describeRuntimeControls(p UserPromptParams) string {
 	var controls []string

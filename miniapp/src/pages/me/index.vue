@@ -21,7 +21,7 @@
     <!-- Credits Balance Card -->
     <view class="balance-card" @tap="goCredits">
       <view class="balance-card__left">
-        <text class="balance-card__icon">&#128176;</text>
+        <text class="balance-card__icon">分</text>
         <text class="balance-card__value">{{ displayBalance }}</text>
         <text class="balance-card__unit">积分</text>
       </view>
@@ -115,7 +115,7 @@
 
         <view class="recharge-qr">
           <view class="recharge-qr__placeholder">
-            <text class="recharge-qr__icon">&#128247;</text>
+            <text class="recharge-qr__icon">码</text>
             <text class="recharge-qr__label">客服二维码</text>
             <text class="recharge-qr__hint">长按识别添加客服</text>
           </view>
@@ -146,14 +146,14 @@
                 :class="{ 'feedback-type--active': feedbackType === 'bug' }"
                 @tap="feedbackType = 'bug'"
               >
-                <text>&#128027; Bug</text>
+                <text>BUG</text>
               </view>
               <view
                 class="feedback-type"
                 :class="{ 'feedback-type--active': feedbackType === 'suggestion' }"
                 @tap="feedbackType = 'suggestion'"
               >
-                <text>&#128161; 建议</text>
+                <text>建议</text>
               </view>
             </view>
           </view>
@@ -241,30 +241,30 @@ interface MenuItem {
 }
 
 const creativeTools: MenuItem[] = [
-  { icon: '🖌️', title: '设计师', path: '/pages/designer/index' },
-  { icon: '🔬', title: '爆文拆解', path: '/pages/workshop/index?tab=viral-analysis' },
-  { icon: '🎨', title: '海报制作', path: '/pages/workshop/index?tab=poster' },
-  { icon: '📋', title: '爆款复刻', path: '/pages/workshop/index?tab=clone' },
-  { icon: '📑', title: '模板库', path: '/pages/templates/index' },
+  { icon: '设', title: '设计师', path: '/pages/designer/index' },
+  { icon: '拆', title: '爆文拆解', path: '/pages/workshop/index?tab=viral-analysis' },
+  { icon: '图', title: '海报制作', path: '/pages/workshop/index?tab=poster' },
+  { icon: '复', title: '爆款复刻', path: '/pages/workshop/index?tab=clone' },
+  { icon: '模', title: '模板库', path: '/pages/templates/index' },
 ]
 
 const dataItems: MenuItem[] = [
-  { icon: '📊', title: '时间轴', path: '/pages/timeline/index' },
-  { icon: '📈', title: '用量统计', path: '/pages/usage/index' },
-  { icon: '💳', title: '积分中心', path: '/pages/credits/index' },
+  { icon: '轴', title: '时间轴', path: '/pages/timeline/index' },
+  { icon: '量', title: '用量统计', path: '/pages/usage/index' },
+  { icon: '分', title: '积分中心', path: '/pages/credits/index' },
 ]
 
 const showFeedback = ref(false)
 const showRecharge = ref(false)
 
 const otherItems: MenuItem[] = [
-  { icon: '⚙️', title: '设置', path: '/pages/settings/index' },
-  { icon: '🔑', title: '平台密钥', path: '/pages/settings/api-keys' },
-  { icon: '🧩', title: 'Claude Code 接入', path: '/pages/connect/claude-code' },
-  { icon: '🪄', title: 'OpenClaw 接入', path: '/pages/connect/openclaw' },
-  { icon: '⚡', title: 'Codex 接入', path: '/pages/connect/codex' },
-  { icon: '💬', title: '意见反馈', action: () => { showFeedback.value = true } },
-  { icon: '📤', title: '分享给好友', action: () => { /* handled by onShareAppMessage */ } },
+  { icon: '设', title: '设置', path: '/pages/settings/index' },
+  { icon: '钥', title: '平台密钥', path: '/pages/settings/api-keys' },
+  { icon: '接', title: 'Claude Code 接入', path: '/pages/connect/claude-code' },
+  { icon: '爪', title: 'OpenClaw 接入', path: '/pages/connect/openclaw' },
+  { icon: 'C', title: 'Codex 接入', path: '/pages/connect/codex' },
+  { icon: '馈', title: '意见反馈', action: () => { showFeedback.value = true } },
+  { icon: '享', title: '分享给好友', action: () => { /* handled by onShareAppMessage */ } },
 ]
 
 function navigateTo(path?: string) {

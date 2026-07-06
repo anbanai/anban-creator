@@ -3,7 +3,7 @@
     <!-- Search + filter bar -->
     <view class="filter-bar">
       <view class="filter-bar__search" @tap="onSearchTap">
-        <text class="filter-bar__search-icon">🔍</text>
+        <text class="filter-bar__search-icon">搜</text>
         <input
           class="filter-bar__search-input"
           v-model="searchFilter"
@@ -129,6 +129,7 @@ const hasMore = ref(true)
 const offset = ref(0)
 const pageSize = 20
 const errorMsg = ref('')
+const PLAN_FILTER_KEY = 'anban_task_plan_filter'
 
 // Filters (mirror studio: project filter + search + status tabs).
 // Studio uses server-side project_id; here we filter client-side because the
@@ -260,7 +261,8 @@ onReachBottom(async () => {
 // --- Event handlers ---
 
 function onPlanTap(plan: Plan) {
-  uni.navigateTo({ url: `/pages/tasks/index?plan_id=${plan.id}` })
+  uni.setStorageSync(PLAN_FILTER_KEY, plan.id)
+  uni.switchTab({ url: '/pages/tasks/index' })
 }
 
 function onPause(plan: Plan) {

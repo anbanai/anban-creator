@@ -5,7 +5,7 @@ import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronR
 import { toast } from 'sonner'
 import type { TaskFile } from '@/types'
 import { api } from '../lib/api'
-import { downloadBlob } from '@/lib/tauri'
+import { downloadBlob, isDesktop, saveUrlToFile } from '@/lib/tauri'
 import {
   Dialog,
   DialogContent,
@@ -136,6 +136,9 @@ function FilePreviewModalContent({
 
   const handleDownload = async () => {
     try {
+      if (isDesktop() && /^https?:\/\//i.test(file.url || '') && await saveUrlToFile(file.url, file.file_name)) {
+        return
+      }
       const blob = await api.tasks.downloadFileBlob(taskId, file.id)
       // Native save dialog on desktop (WKWebView ignores <a download>); anchor
       // click in the browser. See lib/tauri.ts downloadBlob.
@@ -428,6 +431,9 @@ function FilePreviewInline({
 
   const handleDownload = async () => {
     try {
+      if (isDesktop() && /^https?:\/\//i.test(file.url || '') && await saveUrlToFile(file.url, file.file_name)) {
+        return
+      }
       const blob = await api.tasks.downloadFileBlob(taskId, file.id)
       // Native save dialog on desktop (WKWebView ignores <a download>); anchor
       // click in the browser. See lib/tauri.ts downloadBlob.

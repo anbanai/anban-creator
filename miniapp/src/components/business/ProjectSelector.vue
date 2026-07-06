@@ -10,7 +10,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import type { Project } from '@/types'
 import { projectsApi } from '@/api/projects'
 import PlatformAvatar from './PlatformAvatar.vue'
@@ -19,6 +19,7 @@ const props = defineProps<{
   modelValue?: string
   placeholder?: string
   platformFilter?: string
+  emptyActionText?: string
 }>()
 
 const emit = defineEmits<{
@@ -40,9 +41,20 @@ async function loadProjects() {
   }
 }
 
+async function refresh() {
+  await loadProjects()
+}
+
 function showPicker() {
   if (projects.value.length === 0) {
-    uni.showToast({ title: '暂无可用账号', icon: 'none' })
+    uni.showModal({
+      title: '暂无可用账号',
+      content: `先创建一个账号，再回到这里继续创作。`,
+      confirmText: props.emptyActionText || '创建账号',
+      success: (res) => {
+        if (res.confirm) createProject()
+      },
+    })
     return
   }
 
@@ -59,9 +71,28 @@ function showPicker() {
   })
 }
 
-onMounted(loadProjects)
+function currentPageUrl(): string {
+  const pages = getCurrentPages()
+  const current = pages[pages.length - 1] as any
+  const route = current?.route ? `/${current.route}` : '/pages/projects/index'
+  const options = current?.options || {}
+  const qs = Object.entries(options)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+    .join('&')
+  return qs ? `${route}?${qs}` : route
+}
 
-defineExpose({ loadProjects })
+function createProject() {
+  const returnTo = encodeURIComponent(currentPageUrl())
+  const platform = props.platformFilter ? `&platform=${encodeURIComponent(props.platformFilter)}` : ''
+  uni.navigateTo({ url: `/pages/projects/detail?return_to=${returnTo}${platform}` })
+}
+
+onMounted(loadProjects)
+watch(() => props.platformFilter, loadProjects)
+
+defineExpose({ loadProjects, refresh })
 </script>
 
 <style lang="scss" scoped>

@@ -1,8 +1,9 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import assert from 'node:assert/strict'
+import { fileURLToPath } from 'node:url'
 
-const root = resolve(import.meta.dirname, '..')
+const root = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 
 function read(path) {
   return readFileSync(resolve(root, path), 'utf8')
@@ -166,6 +167,7 @@ assertContains('src/api/topic-pool.ts', [
 ])
 assertContains('src/api/tasks.ts', [
   'project_id?: string',
+  'plan_id?: string',
 ])
 assertContains('src/api/plans.ts', [
   'project_id?: string',
@@ -197,6 +199,81 @@ assertContains('src/pages.json', [
 assertContains('src/types/timeline.ts', [
   'project_id?: string',
   'project_name?: string',
+])
+
+// === miniapp UX workbench contracts (2026-07-06) ===
+assertFile('src/api/api-base.ts')
+assertContains('src/api/api-base.ts', [
+  'https://api.creator.anbanai.com/api/v1',
+  'VITE_API_BASE_URL',
+])
+assertContains('src/api/request.ts', [
+  'apiUrl(',
+])
+assertContains('src/stores/auth.ts', [
+  'apiUrl(',
+])
+assertContains('src/api/projects.ts', [
+  'uploadUrl(',
+])
+assertContains('src/api/designer.ts', [
+  'uploadUrl(',
+])
+
+assertContains('src/pages/projects/index.vue', [
+  'onMounted',
+  'fetchProjects(true)',
+])
+
+assertContains('src/pages/tasks/index.vue', [
+  'planId',
+  'onLoad',
+  'plan_id: planId.value',
+])
+
+assertContains('src/pages/tasks/create.vue', [
+  'onLoad',
+  'template_id',
+  'prefillProjectId',
+  'applyTemplate',
+  'advancedOpen',
+])
+
+assertContains('src/pages/index/index.vue', [
+  'nextSuggestion',
+  'runningTasks',
+  'recentOutputs',
+  'workshopEntries',
+  'planReminders',
+])
+
+assertContains('src/pages/tasks/detail.vue', [
+  'nextActions',
+  'createFollowUpTask',
+  'copyResultText',
+  'downloadZip',
+])
+
+assertContains('src/components/business/ProjectSelector.vue', [
+  'emptyActionText',
+  'createProject',
+  'refresh',
+])
+
+assertContains('src/pages/workshop/viral-analysis.vue', [
+  'buildClonePrompt',
+  'copyClonePrompt',
+  'createCloneTask',
+])
+
+assertContains('src/pages/workshop/poster.vue', [
+  'copyPosterPrompt',
+  'regenerateVariant',
+])
+
+assertContains('src/pages/designer/index.vue', [
+  'copyImagePrompt',
+  'regenerateVariant',
 ])
 
 // OLD names must be GONE — no /channels API, no channel_id, no Channel type

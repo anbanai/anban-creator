@@ -29,6 +29,11 @@
       </view>
     </view>
 
+    <view v-if="planId" class="tasks-page__context">
+      <text class="tasks-page__context-label">当前仅显示此计划生成的任务</text>
+      <text class="tasks-page__context-clear" @tap="clearPlanFilter">查看全部任务</text>
+    </view>
+
     <!-- Bulk action bar (only in bulk mode) -->
     <view v-if="bulkMode" class="tasks-page__bulkbar">
       <view class="tasks-page__bulkbar-info">
@@ -130,7 +135,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
+import { onLoad, onShow, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
 import type { Task, TaskFile, Project } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import { projectsApi } from '@/api/projects'
@@ -155,6 +160,7 @@ const statusTabs = [
 const activeStatus = ref('')
 const activeProjectId = ref('')
 const activeProjectName = ref('')
+const planId = ref('')
 const searchKeyword = ref('')
 const items = ref<Task[]>([])
 const loading = ref(false)
@@ -162,6 +168,7 @@ const refreshing = ref(false)
 const hasMore = ref(true)
 const offset = ref(0)
 const pageSize = 20
+const PLAN_FILTER_KEY = 'anban_task_plan_filter'
 
 // Bulk selection state
 const bulkMode = ref(false)
@@ -254,19 +261,21 @@ async function fetchTasks(reset = false) {
     const res = await tasksApi.list({
       status: activeStatus.value || undefined,
       project_id: activeProjectId.value || undefined,
+      plan_id: planId.value || undefined,
       limit: pageSize,
       offset: offset.value,
     })
 
-    const newItems = res.items || []
+    const rawItems = res.items || []
+    const newItems = rawItems.filter(matchesPlanFilter)
     if (reset) {
       items.value = newItems
     } else {
       items.value = [...items.value, ...newItems]
     }
 
-    offset.value += newItems.length
-    hasMore.value = newItems.length >= pageSize
+    offset.value += rawItems.length
+    hasMore.value = rawItems.length >= pageSize
   } catch (err) {
     console.error('Failed to load tasks:', err)
     if (reset) items.value = []
@@ -553,6 +562,23 @@ function goToCreate() {
   uni.navigateTo({ url: '/pages/tasks/create' })
 }
 
+function clearPlanFilter() {
+  planId.value = ''
+  uni.removeStorageSync(PLAN_FILTER_KEY)
+  fetchTasks(true)
+}
+
+function applyPlanFilter(nextPlanId: string) {
+  if (!nextPlanId) return
+  planId.value = nextPlanId
+  fetchTasks(true)
+}
+
+function matchesPlanFilter(task: Task): boolean {
+  if (!planId.value) return true
+  return String(task.plan_id ?? '') === planId.value
+}
+
 // Watch status filter
 watch(activeStatus, () => {
   fetchTasks(true)
@@ -562,6 +588,20 @@ onMounted(() => {
   fetchTasks(true)
   loadProjects()
   startPolling()
+})
+
+onLoad((query) => {
+  if (query?.plan_id) {
+    planId.value = String(query.plan_id)
+  }
+})
+
+onShow(() => {
+  const storedPlanId = uni.getStorageSync(PLAN_FILTER_KEY)
+  if (storedPlanId) {
+    uni.removeStorageSync(PLAN_FILTER_KEY)
+    applyPlanFilter(String(storedPlanId))
+  }
 })
 
 onUnmounted(() => {
@@ -654,6 +694,28 @@ onReachBottom(() => {
       color: $ab-primary;
       background-color: $ab-primary-bg;
     }
+  }
+
+  &__context {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $ab-space-sm;
+    padding: $ab-space-sm $ab-space-md;
+    background: linear-gradient(90deg, $ab-primary-bg, $ab-surface);
+    border-bottom: 2rpx solid $ab-border;
+  }
+
+  &__context-label {
+    font-size: $ab-text-xs;
+    color: $ab-primary;
+    font-weight: $ab-font-medium;
+  }
+
+  &__context-clear {
+    font-size: $ab-text-xs;
+    color: $ab-text-secondary;
+    flex-shrink: 0;
   }
 
   &__bulkbar {

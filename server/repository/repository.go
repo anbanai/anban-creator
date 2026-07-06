@@ -77,8 +77,8 @@ type PlanRepository interface {
 type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	FindByID(ctx context.Context, id string) (*model.Task, error)
-	FindByUserID(ctx context.Context, userID string, projectID string, offset, limit int) ([]*model.Task, error)
-	FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, offset, limit int) ([]*model.Task, error)
+	FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
+	FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
 	FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindByUserIDAndCreatedAtRange(ctx context.Context, userID string, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindRunning(ctx context.Context) ([]*model.Task, error)
@@ -104,8 +104,8 @@ type TaskRepository interface {
 	SetStartedAt(ctx context.Context, id string) error
 	SetCompletedAt(ctx context.Context, id string) error
 	UpdateHeartbeat(ctx context.Context, id string) error
-	CountByUserID(ctx context.Context, userID string, projectID string) (int64, error)
-	CountByUserIDAndStatus(ctx context.Context, userID, status string, projectID string) (int64, error)
+	CountByUserID(ctx context.Context, userID string, projectID string, planID string) (int64, error)
+	CountByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string) (int64, error)
 	CountRunningByProject(ctx context.Context, projectID string) (int64, error)
 	FindPendingByProject(ctx context.Context, projectID string, limit int) ([]*model.Task, error)
 	// ClaimNextLocalTask atomically claims the oldest pending local-target task

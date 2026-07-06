@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Loader2 } from 'lucide-react'
+import { CheckCircle2, Loader2, RadioTower, ShieldCheck, Terminal, WandSparkles, type LucideIcon } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useAuth } from '@/contexts/AuthContext'
@@ -97,14 +97,68 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="设置" description="管理你的账号和偏好设置。" />
+      <PageHeader title="接入就绪中心" description="按执行、模型、发布和账号安全检查 Studio 是否可以顺畅创作。" />
 
+      <Card>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <SettingsReadinessItem
+              icon={Terminal}
+              title="执行环境"
+              status={isDesktop() ? '桌面执行器可检查' : '浏览器模式'}
+              description={isDesktop() ? '本地执行器、ffmpeg 与任务认领状态在这里管理。' : '当前为 Web 端，任务默认走云端执行。'}
+              href="#execution-settings"
+              ready
+            />
+            <SettingsReadinessItem
+              icon={WandSparkles}
+              title="模型与密钥"
+              status={apiKeys.length > 0 ? `${apiKeys.length} 个平台密钥` : '需要创建密钥'}
+              description="模型配置与 API Key 决定 agent、插件和生成能力。"
+              href="#model-key-settings"
+              ready={apiKeys.length > 0}
+            />
+            <SettingsReadinessItem
+              icon={RadioTower}
+              title="发布渠道"
+              status="需要检查"
+              description="微信助手、通知和发布相关能力从这里进入。"
+              href="#publishing-settings"
+              ready={false}
+            />
+            <SettingsReadinessItem
+              icon={ShieldCheck}
+              title="账号安全"
+              status={user?.has_password ? '已设置密码' : '需要设置密码'}
+              description="账号资料、配额和登录密码集中管理。"
+              href="#account-security-settings"
+              ready={Boolean(user?.has_password)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <SettingsGroupTitle
+        id="execution-settings"
+        title="执行环境"
+        description="本机执行、任务通知和创作助手接入状态。"
+      />
       {/* Local executor (desktop only — renders nothing in the web build) */}
       {isDesktop() && <LocalExecutorSection />}
 
+      <SettingsGroupTitle
+        id="publishing-settings"
+        title="发布渠道"
+        description="微信助手、发布通知和后续渠道能力。"
+      />
       {/* WeChat bot binding (web + desktop) — task notifications + commands */}
       <IlinkBindingSection />
 
+      <SettingsGroupTitle
+        id="account-security-settings"
+        title="账号安全"
+        description="个人资料、配额与登录凭证。"
+      />
       {/* Profile Card */}
       <Card>
         <div className="border-b border-border px-4 py-3">
@@ -134,9 +188,14 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Account Quota Card */}
+      <SettingsGroupTitle
+        id="model-key-settings"
+        title="模型与密钥"
+        description="模型路由和插件访问密钥。"
+      />
       <ModelConfigSection />
 
+      {/* Account Quota Card */}
       <Card>
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">账号与配额</h2>
@@ -336,6 +395,58 @@ export default function SettingsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  )
+}
+
+function SettingsReadinessItem({
+  icon: Icon,
+  title,
+  status,
+  description,
+  href,
+  ready,
+}: {
+  icon: LucideIcon
+  title: string
+  status: string
+  description: string
+  href: string
+  ready: boolean
+}) {
+  return (
+    <a
+      href={href}
+      className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:border-primary/30 hover:bg-accent"
+    >
+      <span className={`mt-0.5 flex size-8 items-center justify-center rounded-lg ${ready ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+        <Icon className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-foreground">{title}</span>
+          {ready && <CheckCircle2 className="size-3.5 shrink-0 text-primary" />}
+        </span>
+        <span className="mt-1 block text-xs font-medium text-foreground">{status}</span>
+        <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">{description}</span>
+      </span>
+    </a>
+  )
+}
+
+function SettingsGroupTitle({
+  id,
+  title,
+  description,
+}: {
+  id: string
+  title: string
+  description: string
+}) {
+  return (
+    <div id={id} className="scroll-mt-6">
+      <h2 className="text-base font-semibold text-foreground">{title}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
     </div>
   )
 }

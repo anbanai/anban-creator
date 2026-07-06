@@ -4,8 +4,11 @@
     <view class="task-create__section">
       <text class="field-label">选择账号 <text class="field-required">*</text></text>
       <ProjectSelector
+        ref="projectSelectorRef"
         v-model="form.project_id"
         placeholder="搜索账号..."
+        :platform-filter="requestedType || undefined"
+        empty-action-text="创建账号"
         @change="onProjectChange"
       />
       <text v-if="errors.project" class="field-error">{{ errors.project }}</text>
@@ -43,7 +46,7 @@
         :error="errors.prompt"
       />
       <view class="inspiration-hint" @tap="applyInspiration">
-        <text class="inspiration-hint__icon">💡</text>
+        <text class="inspiration-hint__icon">灵</text>
         <text class="inspiration-hint__text">试试: {{ currentInspiration }}</text>
       </view>
     </view>
@@ -55,8 +58,16 @@
       <text v-if="errors.image_model_key" class="field-error">{{ errors.image_model_key }}</text>
     </view>
 
+    <view class="task-create__advanced-toggle" @tap="advancedOpen = !advancedOpen">
+      <view class="task-create__advanced-toggle-main">
+        <text class="task-create__advanced-toggle-title">高级控制</text>
+        <text class="task-create__advanced-toggle-desc">视觉、人设、参考图和强目标模式</text>
+      </view>
+      <text class="task-create__advanced-toggle-arrow">{{ advancedOpen ? '收起' : '展开' }}</text>
+    </view>
+
     <!-- Visual style -->
-    <view class="task-create__section" v-if="!isEcommerce">
+    <view class="task-create__section" v-if="advancedOpen && !isEcommerce">
       <text class="field-label">视觉风格</text>
       <AbTextarea
         v-model="form.visual_style"
@@ -68,7 +79,7 @@
     </view>
 
     <!-- Writing style (article only) -->
-    <view class="task-create__section" v-if="isArticle">
+    <view class="task-create__section" v-if="advancedOpen && isArticle">
       <text class="field-label">写作风格</text>
       <AbTextarea
         v-model="form.writer_key"
@@ -79,7 +90,7 @@
     </view>
 
     <!-- Theme (article only) -->
-    <view class="task-create__section" v-if="isArticle">
+    <view class="task-create__section" v-if="advancedOpen && isArticle">
       <text class="field-label">排版主题</text>
       <view class="picker-row" @tap="pickTheme">
         <text v-if="selectedThemeName" class="picker-row__value">{{ selectedThemeName }}</text>
@@ -90,7 +101,7 @@
     </view>
 
     <!-- Persona (article / seednote) -->
-    <view class="task-create__section" v-if="isArticle || isSeednote">
+    <view class="task-create__section" v-if="advancedOpen && (isArticle || isSeednote)">
       <text class="field-label">作者人设</text>
       <view class="field-spacer">
         <text class="field-sublabel">作者署名</text>
@@ -258,7 +269,7 @@
     </view>
 
     <!-- Image ratio selector -->
-    <view class="task-create__section">
+    <view class="task-create__section" v-if="advancedOpen">
       <text class="field-label">图片比例</text>
       <view class="ratio-group">
         <view
@@ -274,7 +285,7 @@
     </view>
 
     <!-- Image generation options -->
-    <view class="task-create__section">
+    <view class="task-create__section" v-if="advancedOpen">
       <view class="switch-row">
         <view class="switch-row__text">
           <text class="field-label switch-row__label">跳过参考图</text>
@@ -301,7 +312,7 @@
     </view>
 
     <!-- Goal mode -->
-    <view class="task-create__section">
+    <view class="task-create__section" v-if="advancedOpen">
       <view class="switch-row">
         <view class="switch-row__text">
           <text class="field-label switch-row__label">强目标模式</text>
@@ -356,6 +367,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import type { Project, CreditPricing, Template, ResourceEntry } from '@/types'
 import { tasksApi } from '@/api/tasks'
 import { templatesApi } from '@/api/templates'
@@ -392,6 +404,10 @@ const balance = ref(0)
 const pricing = ref<CreditPricing | null>(null)
 const submitting = ref(false)
 const inspirationIndex = ref(0)
+const requestedType = ref('')
+const prefillProjectId = ref('')
+const advancedOpen = ref(false)
+const projectSelectorRef = ref<{ refresh?: () => void } | null>(null)
 
 // Loaded on platform change
 const platformTemplates = ref<Template[]>([])
@@ -540,6 +556,7 @@ const canSubmit = computed(() => {
 
 function onProjectChange(project: Project) {
   selectedProject.value = project
+  form.project_id = project.id
 
   if (project.image_ratio) {
     form.image_ratio = project.image_ratio
@@ -555,6 +572,21 @@ function onProjectChange(project: Project) {
 
   delete errors.project
   loadPlatformResources()
+}
+
+async function applyProjectById(projectId: string) {
+  if (!projectId) return
+  prefillProjectId.value = projectId
+  form.project_id = projectId
+  try {
+    const projects = await projectsApi.list({ status: 'active' })
+    const project = projects.find((item) => item.id === projectId)
+    if (project) {
+      onProjectChange(project)
+    }
+  } catch (err) {
+    console.error('Failed to prefill project:', err)
+  }
 }
 
 async function loadPlatformResources() {
@@ -591,11 +623,53 @@ function pickTemplate() {
     success: (res) => {
       const tpl = platformTemplates.value[res.tapIndex]
       if (tpl) {
-        form.template_id = tpl.id
-        form.template_name = tpl.name
+        applyTemplate(tpl)
       }
     },
   })
+}
+
+function applyTemplate(tpl: Template) {
+  form.template_id = tpl.id
+  form.template_name = tpl.name
+  if (tpl.style_prompt) form.visual_style = tpl.style_prompt
+  if (tpl.writer_key) form.writer_key = tpl.writer_key
+  if (tpl.theme) form.theme = tpl.theme
+  if (tpl.author_name) form.byline = tpl.author_name
+  if (tpl.writing_voice) form.writing_voice = tpl.writing_voice
+  if (tpl.persona_avatar) form.persona_avatar = tpl.persona_avatar
+  if (tpl.ecommerce?.image_model_key) form.image_model_key = tpl.ecommerce.image_model_key
+  if (tpl.ecommerce?.default_selected_modules) {
+    form.selected_modules = { ...tpl.ecommerce.default_selected_modules }
+  }
+  if (tpl.ecommerce?.target_platform) form.target_platform = tpl.ecommerce.target_platform
+  if (tpl.ecommerce?.brand_brief && !form.selling_points) {
+    form.selling_points = tpl.ecommerce.brand_brief
+  }
+  if (
+    tpl.style_prompt ||
+    tpl.writer_key ||
+    tpl.theme ||
+    tpl.author_name ||
+    tpl.writing_voice ||
+    tpl.persona_avatar ||
+    tpl.ecommerce
+  ) {
+    advancedOpen.value = true
+  }
+  delete errors.prompt
+}
+
+async function applyTemplateFromId(templateId: string) {
+  if (!templateId) return
+  form.template_id = templateId
+  try {
+    const tpl = await templatesApi.get(templateId)
+    applyTemplate(tpl)
+  } catch (err) {
+    console.error('Failed to prefill template:', err)
+    uni.showToast({ title: '模板加载失败，请手动选择', icon: 'none' })
+  }
 }
 
 function clearTemplate() {
@@ -747,6 +821,33 @@ async function loadPricing() {
   }
 }
 
+function safeDecodeQuery(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+onLoad((query) => {
+  if (query?.type) {
+    requestedType.value = String(query.type)
+  }
+  if (query?.prompt) {
+    form.prompt = safeDecodeQuery(String(query.prompt))
+  }
+  if (query?.project_id) {
+    void applyProjectById(String(query.project_id))
+  }
+  if (query?.template_id) {
+    void applyTemplateFromId(String(query.template_id))
+  }
+})
+
+onShow(() => {
+  projectSelectorRef.value?.refresh?.()
+})
+
 onMounted(() => {
   loadBalance()
   loadPricing()
@@ -798,6 +899,46 @@ onMounted(() => {
 
 .field-required {
   color: $ab-danger;
+}
+
+.task-create__advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $ab-space-md;
+  background-color: $ab-surface;
+  border: 2rpx solid $ab-border;
+  border-radius: $ab-radius-md;
+  padding: $ab-space-md;
+  margin-bottom: $ab-space-sm;
+  box-shadow: $ab-shadow-sm;
+
+  &-main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &-title {
+    display: block;
+    font-size: $ab-text-base;
+    font-weight: $ab-font-semibold;
+    color: $ab-text;
+  }
+
+  &-desc {
+    display: block;
+    margin-top: 4rpx;
+    font-size: $ab-text-xs;
+    color: $ab-text-tertiary;
+    line-height: 1.4;
+  }
+
+  &-arrow {
+    flex-shrink: 0;
+    font-size: $ab-text-sm;
+    color: $ab-primary;
+    font-weight: $ab-font-medium;
+  }
 }
 
 .field-error {

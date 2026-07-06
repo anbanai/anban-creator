@@ -1,13 +1,16 @@
 #!/bin/bash
 # Auto-download/update Anban Creator binaries from GitHub releases.
 # Designed to run from plugin install scripts or in background from SessionStart hooks.
-# All output goes to bin/.bootstrap.log; failures are silent.
+# All output goes to the plugin data bin/.bootstrap.log when available; failures are silent.
 
 set -euo pipefail
 
 REPO="anbanai/anban-creator"
+ANBAN_BINARY_VERSION="${ANBAN_BINARY_VERSION:-v2.10.22}"
 ROOT="${ANBAN_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"
-BIN_DIR="$ROOT/bin"
+DATA_ROOT="${ANBAN_PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-${PLUGIN_DATA:-$ROOT}}}"
+ROOT_BIN_DIR="$ROOT/bin"
+BIN_DIR="$DATA_ROOT/bin"
 LOG="$BIN_DIR/.bootstrap.log"
 VERSION_FILE="$BIN_DIR/.version"
 
@@ -36,22 +39,28 @@ esac
 SERVER_ASSET="anban-creator-server-${OS}-${ARCH}"
 AGENT_ASSET="anban-${OS}-${ARCH}"
 SERVER_DEST="$BIN_DIR/anban-creator-server"
+ROOT_AGENT_DEST="$ROOT_BIN_DIR/anban"
 AGENT_DEST="$BIN_DIR/anban"
+AGENT_IS_BUNDLED=0
 if [ "$OS" = "windows" ]; then
   SERVER_ASSET="${SERVER_ASSET}.exe"
   AGENT_ASSET="${AGENT_ASSET}.exe"
   SERVER_DEST="${SERVER_DEST}.exe"
+  ROOT_AGENT_DEST="${ROOT_AGENT_DEST}.exe"
   AGENT_DEST="${AGENT_DEST}.exe"
 fi
 
-# Get latest version from GitHub API
-LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
-if [ -z "$LATEST" ]; then
-  echo "Failed to fetch latest version"
-  exit 0
+if [ -x "$ROOT_AGENT_DEST" ]; then
+  AGENT_DEST="$ROOT_AGENT_DEST"
+  AGENT_IS_BUNDLED=1
 fi
 
-echo "Latest version: $LATEST"
+LATEST="$ANBAN_BINARY_VERSION"
+case "$LATEST" in
+  v*) ;;
+  *) LATEST="v${LATEST}" ;;
+esac
+echo "Target binary version: $LATEST"
 
 # Compare with local version and both binaries. bin/anban is the plugin-local CLI.
 CURRENT_VERSION=""
@@ -81,10 +90,12 @@ if [ "$CURRENT_VERSION" != "$LATEST" ] || [ ! -x "$SERVER_DEST" ]; then
   install_asset "$SERVER_ASSET" "$SERVER_DEST"
 fi
 
-if [ ! -x "$AGENT_DEST" ]; then
+if [ "$AGENT_IS_BUNDLED" = "0" ] && { [ "$CURRENT_VERSION" != "$LATEST" ] || [ ! -x "$AGENT_DEST" ]; }; then
   install_asset "$AGENT_ASSET" "$AGENT_DEST"
-else
+elif [ "$AGENT_IS_BUNDLED" = "1" ]; then
   echo "Keeping bundled $AGENT_DEST"
+else
+  echo "Agent binary already up to date"
 fi
 
 echo "$LATEST" > "$VERSION_FILE"

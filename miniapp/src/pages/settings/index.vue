@@ -14,7 +14,7 @@
             <text class="profile__avatar-text">{{ avatarLetter }}</text>
           </view>
           <view class="profile__avatar-badge">
-            <text class="profile__avatar-badge-icon">📷</text>
+            <text class="profile__avatar-badge-icon">相</text>
           </view>
         </view>
         <view class="profile__info">
@@ -25,15 +25,15 @@
 
       <view class="profile-meta">
         <view class="profile-meta__row">
-          <text class="profile-meta__icon">📧</text>
+          <text class="profile-meta__icon">邮</text>
           <text class="profile-meta__value">{{ authStore.user?.email || '未设置邮箱' }}</text>
         </view>
         <view class="profile-meta__row">
-          <text class="profile-meta__icon">📅</text>
+          <text class="profile-meta__icon">日</text>
           <text class="profile-meta__value">{{ registeredDate }}</text>
         </view>
         <view class="profile-meta__row" @tap="copyInviteCode">
-          <text class="profile-meta__icon">🎫</text>
+          <text class="profile-meta__icon">券</text>
           <text class="profile-meta__label">邀请码</text>
           <text class="profile-meta__code">{{ authStore.user?.invite_code || '--' }}</text>
           <view class="profile-meta__copy">
@@ -41,7 +41,7 @@
           </view>
         </view>
         <view v-if="authStore.user" class="profile-meta__row">
-          <text class="profile-meta__icon">👥</text>
+          <text class="profile-meta__icon">友</text>
           <text class="profile-meta__value">已邀请 {{ authStore.user.invite_count ?? 0 }}/{{ authStore.user.max_invites ?? 0 }} 人</text>
         </view>
       </view>
@@ -71,42 +71,42 @@
       <text class="section__title">账号与接入</text>
       <AbCard :padding="0">
         <view class="list-item" @tap="navigateTo('/pages/settings/model-config')">
-          <text class="list-item__icon">🤖</text>
+          <text class="list-item__icon">AI</text>
           <text class="list-item__title">模型配置</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
         <view class="list-item" @tap="navigateTo('/pages/settings/api-keys')">
-          <text class="list-item__icon">🔑</text>
+          <text class="list-item__icon">钥</text>
           <text class="list-item__title">平台密钥</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
         <view class="list-item" @tap="navigateTo('/pages/settings/password')">
-          <text class="list-item__icon">🔒</text>
+          <text class="list-item__icon">锁</text>
           <text class="list-item__title">{{ authStore.user?.has_password ? '修改密码' : '设置密码' }}</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
         <view class="list-item" @tap="navigateTo('/pages/connect/claude-code')">
-          <text class="list-item__icon">🧩</text>
+          <text class="list-item__icon">接</text>
           <text class="list-item__title">Claude Code 接入</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
         <view class="list-item" @tap="navigateTo('/pages/connect/openclaw')">
-          <text class="list-item__icon">🪄</text>
+          <text class="list-item__icon">爪</text>
           <text class="list-item__title">OpenClaw 接入</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
         <view class="list-item" @tap="navigateTo('/pages/connect/codex')">
-          <text class="list-item__icon">⚡</text>
+          <text class="list-item__icon">C</text>
           <text class="list-item__title">Codex 接入</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
         <view class="list-item" @tap="showFeedback = true">
-          <text class="list-item__icon">💬</text>
+          <text class="list-item__icon">馈</text>
           <text class="list-item__title">意见反馈</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
         <view class="list-item">
-          <text class="list-item__icon">📜</text>
+          <text class="list-item__icon">议</text>
           <text class="list-item__title">用户协议</text>
           <text class="list-item__arrow">&#8250;</text>
         </view>
@@ -145,14 +145,14 @@
                 :class="{ 'feedback-type--active': feedbackType === 'bug' }"
                 @tap="feedbackType = 'bug'"
               >
-                <text>&#128027; Bug</text>
+                <text>BUG</text>
               </view>
               <view
                 class="feedback-type"
                 :class="{ 'feedback-type--active': feedbackType === 'suggestion' }"
                 @tap="feedbackType = 'suggestion'"
               >
-                <text>&#128161; 建议</text>
+                <text>建议</text>
               </view>
             </view>
           </view>
@@ -187,6 +187,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { post } from '@/api/request'
+import { uploadUrl } from '@/api/api-base'
 import { tierLabels, tierDescriptions } from '@/utils/labels'
 import { formatDateYMD } from '@/utils/format'
 import AbCard from '@/components/common/AbCard.vue'
@@ -238,7 +239,7 @@ function handleChangeAvatar() {
       const tempPath = res.tempFilePaths[0]
       // Upload avatar to server
       uni.uploadFile({
-        url: '/api/v1/auth/avatar',
+        url: uploadUrl('/auth/avatar'),
         filePath: tempPath,
         name: 'avatar',
         header: {

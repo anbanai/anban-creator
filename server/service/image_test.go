@@ -181,6 +181,54 @@ func TestBuildProcessor_EcommerceErrorsWhenNoImageAPI(t *testing.T) {
 	}
 }
 
+// TestBuildProcessor_VideoResolvesGenericImageAPI protects videocreator's
+// visual-anchor bootstrap path: video projects have no platform-specific image
+// app-config section, but they still need generate_image for temporary subject
+// and product anchor references before video generation.
+func TestBuildProcessor_VideoResolvesGenericImageAPI(t *testing.T) {
+	logger := zerolog.Nop()
+	cases := []struct {
+		name     string
+		imageCfg *srvconfig.ImageAPIConfig
+	}{
+		{
+			name: "content config",
+			imageCfg: &srvconfig.ImageAPIConfig{
+				Content: &appconfig.ImageAPI{
+					Provider: "volcengine",
+					Key:      "test-key",
+					Model:    "seedream-3.0",
+				},
+			},
+		},
+		{
+			name: "cover fallback",
+			imageCfg: &srvconfig.ImageAPIConfig{
+				Cover: &appconfig.ImageAPI{
+					Provider: "openai",
+					Key:      "test-key",
+					Model:    "gpt-image-2",
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &ImageService{imageCfg: tc.imageCfg, logger: &logger}
+			ch := &model.Project{Platform: model.PlatformVideo, UserID: "u1"}
+
+			proc, err := svc.buildProcessor(context.Background(), ch, "content", "")
+			if err != nil {
+				t.Fatalf("buildProcessor(video) error = %v, want nil", err)
+			}
+			if proc == nil {
+				t.Fatal("buildProcessor(video) returned nil processor, want non-nil")
+			}
+		})
+	}
+}
+
 // timeoutNetErr is a minimal net.Error whose Timeout()==true, exercising the
 // net-timeout branch of isTransientImageError without spinning up a socket.
 type timeoutNetErr struct{}

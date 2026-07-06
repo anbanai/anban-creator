@@ -16,6 +16,22 @@ export function ReadinessChecklist({
   status?: LocalExecutorStatus | null
   className?: string
 }) {
+  if (status?.checks?.length) {
+    return (
+      <ul className={cn('grid grid-cols-2 gap-x-4 gap-y-1 text-xs', className)}>
+        {status.checks.map((check) => (
+          <Readiness
+            key={check.id}
+            ok={check.ok}
+            label={check.label}
+            optional={!check.required}
+            title={check.hint}
+          />
+        ))}
+      </ul>
+    )
+  }
+
   return (
     <ul className={cn('grid grid-cols-2 gap-x-4 gap-y-1 text-xs', className)}>
       <Readiness ok={status?.api_key_set} label="Anban Creator API Key" />
@@ -30,16 +46,17 @@ export function ReadinessChecklist({
   )
 }
 
-function Readiness({ ok, label, optional }: { ok?: boolean; label: string; optional?: boolean }) {
+function Readiness({ ok, label, optional, title }: { ok?: boolean; label: string; optional?: boolean; title?: string }) {
   if (ok) {
     return (
-      <li className="flex items-center gap-1.5 text-muted-foreground">
+      <li className="flex items-center gap-1.5 text-muted-foreground" title={title}>
         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> {label}
       </li>
     )
   }
   return (
     <li
+      title={title}
       className={cn(
         'flex items-center gap-1.5',
         optional ? 'text-muted-foreground/60' : 'text-amber-600',

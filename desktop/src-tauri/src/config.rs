@@ -33,14 +33,23 @@ pub struct AppConfig {
     #[serde(default)]
     pub workspace_root: String,
 
-    /// Optional Anthropic API key (ANTHROPIC_API_KEY) for Claude Code. When
-    /// empty, Claude Code falls back to its OAuth login.
+    /// Anthropic API key (ANTHROPIC_API_KEY) for Claude Code. Current desktop
+    /// UX requires this explicitly; OAuth detection can be added later as a
+    /// separate authenticated state.
     #[serde(default)]
     pub claude_api_key: String,
 
     /// Whether the background claim loop should run at startup.
     #[serde(default)]
     pub local_executor_enabled: bool,
+}
+
+pub struct LocalExecutorConfigPatch {
+    pub api_key: String,
+    pub workspace: String,
+    pub claude_api_key: String,
+    pub clear_api_key: bool,
+    pub clear_claude_api_key: bool,
 }
 
 impl Default for AppConfig {
@@ -75,6 +84,31 @@ impl AppConfig {
         }
     }
 
+    pub fn apply_local_executor_patch(&mut self, patch: LocalExecutorConfigPatch) {
+        if patch.clear_api_key {
+            self.api_key.clear();
+        } else {
+            let api_key = patch.api_key.trim();
+            if !api_key.is_empty() {
+                self.api_key = api_key.to_string();
+            }
+        }
+
+        if patch.clear_claude_api_key {
+            self.claude_api_key.clear();
+        } else {
+            let claude_api_key = patch.claude_api_key.trim();
+            if !claude_api_key.is_empty() {
+                self.claude_api_key = claude_api_key.to_string();
+            }
+        }
+
+        let workspace = patch.workspace.trim();
+        if !workspace.is_empty() {
+            self.workspace_root = workspace.to_string();
+        }
+    }
+
     fn save_inner(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -96,4 +130,53 @@ impl AppConfig {
 
 pub fn config_path(dir: &Path) -> PathBuf {
     dir.join("anban-creator-desktop.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_executor_patch_preserves_existing_secrets_when_inputs_are_blank() {
+        let mut cfg = AppConfig {
+            api_key: "anban-old".to_string(),
+            claude_api_key: "anthropic-old".to_string(),
+            workspace_root: "/old/workspace".to_string(),
+            ..AppConfig::default()
+        };
+
+        cfg.apply_local_executor_patch(LocalExecutorConfigPatch {
+            api_key: "".to_string(),
+            workspace: "/new/workspace".to_string(),
+            claude_api_key: "   ".to_string(),
+            clear_api_key: false,
+            clear_claude_api_key: false,
+        });
+
+        assert_eq!(cfg.api_key, "anban-old");
+        assert_eq!(cfg.claude_api_key, "anthropic-old");
+        assert_eq!(cfg.workspace_root, "/new/workspace");
+    }
+
+    #[test]
+    fn local_executor_patch_clears_secrets_only_when_explicitly_requested() {
+        let mut cfg = AppConfig {
+            api_key: "anban-old".to_string(),
+            claude_api_key: "anthropic-old".to_string(),
+            workspace_root: "/old/workspace".to_string(),
+            ..AppConfig::default()
+        };
+
+        cfg.apply_local_executor_patch(LocalExecutorConfigPatch {
+            api_key: "".to_string(),
+            workspace: "".to_string(),
+            claude_api_key: "".to_string(),
+            clear_api_key: true,
+            clear_claude_api_key: true,
+        });
+
+        assert!(cfg.api_key.is_empty());
+        assert!(cfg.claude_api_key.is_empty());
+        assert_eq!(cfg.workspace_root, "/old/workspace");
+    }
 }

@@ -6,6 +6,8 @@ import GlobalCommandPalette from '@/components/GlobalCommandPalette'
 import { NavigationProgress } from '@/components/NavigationProgress'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { commandPaletteStore } from '@/lib/command-palette'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createTestQueryClient } from '@/test/test-utils'
 import Sidebar from './Sidebar'
 
 vi.mock('next-themes', () => ({
@@ -28,21 +30,24 @@ function renderSidebar() {
 }
 
 function renderAuthenticatedShell(initialPath = '/') {
+  const queryClient = createTestQueryClient()
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <TooltipProvider>
-        <NavigationProgress />
-        <GlobalCommandPalette />
-        <Sidebar />
-        <main>
-          <Routes>
-            <Route path="/" element={<h1>仪表盘页</h1>} />
-            <Route path="/projects" element={<h1>项目页</h1>} />
-            <Route path="/tasks" element={<h1>任务页</h1>} />
-          </Routes>
-        </main>
-      </TooltipProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialPath]}>
+        <TooltipProvider>
+          <NavigationProgress />
+          <GlobalCommandPalette />
+          <Sidebar />
+          <main>
+            <Routes>
+              <Route path="/" element={<h1>今日页</h1>} />
+              <Route path="/projects" element={<h1>项目页</h1>} />
+              <Route path="/tasks" element={<h1>任务页</h1>} />
+            </Routes>
+          </main>
+        </TooltipProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 
@@ -57,7 +62,7 @@ describe('Sidebar', () => {
   it('renders navigation items', () => {
     renderSidebar()
 
-    expect(screen.getByText('仪表盘')).toBeInTheDocument()
+    expect(screen.getAllByText('今日').length).toBeGreaterThan(0)
     expect(screen.getByText('项目')).toBeInTheDocument()
     expect(screen.getByText('计划')).toBeInTheDocument()
     expect(screen.getByText('任务')).toBeInTheDocument()
@@ -88,7 +93,7 @@ describe('Sidebar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /搜索/ }))
 
-    expect(await screen.findByRole('dialog', { name: '命令面板' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '行动面板' })).toBeInTheDocument()
   })
 
   it('keeps collapsed tooltip navigation clickable in the authenticated shell', async () => {

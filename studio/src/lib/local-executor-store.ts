@@ -22,7 +22,7 @@ export type LogLevel = 'info' | 'warn' | 'error'
 export interface LogEntry {
   id: number
   ts: number
-  taskId: string
+  taskId?: string
   stage?: string
   level: LogLevel
   message: string
@@ -112,7 +112,31 @@ export const localExecutorStore = {
     const base = state.logs
     const logs = base.length >= MAX_LOGS ? base.slice(base.length - MAX_LOGS + 1) : base.slice()
     logs.push(entry)
-    set({ logs })
+
+    const status = state.status ? { ...state.status } : null
+    if (status) {
+      status.last_event_at = new Date(entry.ts).toISOString()
+      if (entry.level === 'error') {
+        status.state = 'error'
+        status.last_error = entry.message
+      } else if (entry.message.startsWith('本地执行器已启动')) {
+        status.state = 'running_idle'
+        status.running = true
+        status.last_error = null
+      } else if (entry.message.startsWith('已认领任务')) {
+        status.state = 'running_task'
+        status.running = true
+        status.current_task_id = entry.taskId ?? extractTaskId(entry.message)
+      } else if (entry.message.includes('agent exited')) {
+        status.state = status.running ? 'running_idle' : 'ready_stopped'
+        status.current_task_id = null
+      } else if (entry.message.startsWith('本地执行器已停止')) {
+        status.state = status.available ? 'ready_stopped' : 'needs_config'
+        status.running = false
+        status.current_task_id = null
+      }
+    }
+    set({ logs, status })
   },
   clearLogs() {
     set({ logs: [] })
@@ -124,6 +148,11 @@ export const localExecutorStore = {
   getWizardDismissed: () => state.wizardDismissed,
   getStatus: () => state.status,
   getLogs: () => state.logs,
+}
+
+function extractTaskId(message: string): string | null {
+  const match = message.match(/任务\s+([^\s（]+)/)
+  return match?.[1] ?? null
 }
 
 // --- React hooks (each subscribes to a single slice) ---

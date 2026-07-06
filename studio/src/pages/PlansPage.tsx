@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -36,6 +37,8 @@ import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 import { VideoCreationPanel } from '@/components/video/VideoCreationPanel'
 import { VideoEstimateSummary } from '@/components/video/VideoEstimateSummary'
+import { cn } from '@/lib/utils'
+import { parseCreationIntent } from '@/lib/command-center'
 
 const planTypeOptions: { value: PlanType; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
@@ -64,6 +67,8 @@ function planToFormValues(plan: Plan): PlanFormValues {
 
 export default function PlansPage() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const createIntent = parseCreationIntent(searchParams)
   const [projectFilter, setProjectFilter] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
   const [page, setPage] = useState(1)
@@ -73,6 +78,8 @@ export default function PlansPage() {
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const { submit } = useSubmitLock()
   const { items: imageModelOptions, isLoading: imageModelsLoading } = useImageModels()
+  const highlightedPlanId = searchParams.get('highlight') || ''
+  const planRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
@@ -130,6 +137,11 @@ export default function PlansPage() {
     const q = searchFilter.toLowerCase()
     return plans.filter((p) => (p.prompt || '').toLowerCase().includes(q))
   }, [plans, searchFilter])
+
+  useEffect(() => {
+    if (!highlightedPlanId || isLoading) return
+    planRefs.current[highlightedPlanId]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [highlightedPlanId, isLoading, filteredPlans.length])
 
   // Fetch projects for name/avatar display
   const { data: allProjects } = useQuery({
@@ -244,11 +256,14 @@ export default function PlansPage() {
     },
   })
 
-  function openCreate() {
+  const openCreate = useCallback(() => {
+    const requestedType = createIntent.type && createIntent.type !== 'ecommerce'
+      ? (createIntent.type as PlanType)
+      : 'seednote'
     setEditingPlan(null)
     form.reset({
-      project_id: '',
-      type: 'seednote',
+      project_id: createIntent.projectId ?? '',
+      type: requestedType,
       cron_expr: '0 9 * * 1,3,5',
       prompt: '',
       image_model_key: '',
@@ -256,10 +271,19 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
-      video_config: undefined,
+      video_config: requestedType === 'video'
+        ? buildVideoFormConfig(projectMap[createIntent.projectId ?? '']?.video_defaults)
+        : undefined,
     })
     setModalOpen(true)
-  }
+  }, [createIntent.projectId, createIntent.type, form, projectMap])
+
+  useEffect(() => {
+    if (!createIntent.shouldCreate) return
+    if (createIntent.projectId && !allProjects) return
+    openCreate()
+    setSearchParams({}, { replace: true })
+  }, [allProjects, createIntent.projectId, createIntent.shouldCreate, openCreate, setSearchParams])
 
   function openEdit(plan: Plan) {
     setEditingPlan(plan)
@@ -390,7 +414,18 @@ export default function PlansPage() {
             return (
               <div
                 key={plan.id}
-                className={`group rounded-lg border border-border bg-card p-4 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md`}
+                ref={(node) => {
+                  planRefs.current[plan.id] = node
+                }}
+                data-testid={`plan-card-${plan.id}`}
+                data-plan-id={plan.id}
+                data-highlighted={highlightedPlanId === plan.id ? 'true' : undefined}
+                className={cn(
+                  'group rounded-lg border border-border bg-card p-4 border-l-4 transition-all duration-200 hover:shadow-md',
+                  borderColor,
+                  hoverBorderColor,
+                  highlightedPlanId === plan.id && 'ring-2 ring-primary/30 bg-primary/5',
+                )}
               >
                 <div className="flex items-start gap-3">
                   <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={plan.type} />
