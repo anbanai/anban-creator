@@ -795,11 +795,10 @@ func (c *ImageAPIConfig) DesignerOrder() []string {
 }
 
 // WritingConfig holds LLM API configuration for writing services
-// (article writing, topic research, SEO, outlines).
+// (LLM-backed writing-adjacent services).
 //
 // Markdown→WeChat-HTML conversion is now deterministic (no LLM), so it has no
 // dedicated timeout — Timeout below covers only the LLM-using paths
-// (write_article, outlines).
 type WritingConfig struct {
 	BaseURL string        `yaml:"base_url"` // LLM API endpoint
 	Key     string        `yaml:"key"`      // API key

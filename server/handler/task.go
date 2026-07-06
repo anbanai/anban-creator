@@ -414,7 +414,7 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this task")
 	}
 
-	if err := h.service.Cancel(c.Context(), id); err != nil {
+	if err := h.service.CancelForUser(c.Context(), userID, id); err != nil {
 		h.logger.Error().Err(err).Msg("cancel task failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to cancel task")
 	}
@@ -740,7 +740,7 @@ func (h *TaskHandler) BulkCancel(c fiber.Ctx) error {
 			results = append(results, bulkTaskResult{ID: id, Reason: "not_cancellable"})
 			continue
 		}
-		if err := h.service.Cancel(c.Context(), id); err != nil {
+		if err := h.service.CancelForUser(c.Context(), userID, id); err != nil {
 			h.logger.Error().Err(err).Str("task_id", id).Msg("bulk cancel: task failed")
 			results = append(results, bulkTaskResult{ID: id, Reason: "failed"})
 			continue

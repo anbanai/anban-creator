@@ -652,6 +652,7 @@ func taskListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTo
 }
 
 func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
@@ -661,6 +662,9 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	task, err := svcs.TaskSvc.GetByID(context.Background(), taskID)
 	if err != nil {
 		return errorResult(fmt.Sprintf("get task: %v", err)), nil
+	}
+	if task.UserID != userID {
+		return errorResult("task not found"), nil
 	}
 	var result any
 	if task.Result != nil && *task.Result != "" {
@@ -682,13 +686,14 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 }
 
 func taskCancelHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := getUserID(ctx)
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
 		return errorResult("task_id is required"), nil
 	}
 
-	if err := svcs.TaskSvc.Cancel(context.Background(), taskID); err != nil {
+	if err := svcs.TaskSvc.CancelForUser(context.Background(), userID, taskID); err != nil {
 		return errorResult(fmt.Sprintf("cancel task: %v", err)), nil
 	}
 	return textResult(map[string]any{"cancelled": true, "task_id": taskID})

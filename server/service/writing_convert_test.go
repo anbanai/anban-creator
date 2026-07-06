@@ -17,7 +17,7 @@ import (
 
 // ---------------------------------------------------------------------------
 // Diagnostic LLM mock — still wired through setupConvertTest because the
-// WriteArticle path uses it. ConvertMarkdown/RenderTemplate no longer call the
+// legacy conversion test harness uses it. ConvertMarkdown/RenderTemplate do not call the
 // LLM (deterministic renderer), so the mock's recorded calls stay empty for
 // those paths and the tests below assert on the rendered HTML instead.
 // ---------------------------------------------------------------------------

@@ -182,6 +182,12 @@ func TestMCPHandlerToolsList(t *testing.T) {
 	if toolNames[deprecatedTool] {
 		t.Errorf("unexpected deprecated tool %q found in tools/list response", deprecatedTool)
 	}
+	for _, removed := range []string{"write_article", "research_topics", "optimize_seo", "generate_outline"} {
+		if toolNames[removed] {
+			t.Errorf("unexpected removed tool %q found in tools/list response", removed)
+		}
+	}
+
 	if toolNames["get_project_video_profile"] {
 		t.Errorf("unexpected removed tool %q found in tools/list response", "get_project_video_profile")
 	}

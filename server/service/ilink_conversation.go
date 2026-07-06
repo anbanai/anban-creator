@@ -129,7 +129,7 @@ func (s *IlinkConversationService) handleCancel(ctx context.Context, userID, tas
 	if task.Status != model.TaskStatusPending && task.Status != model.TaskStatusRunning {
 		return fmt.Sprintf("该任务当前为「%s」，无法取消。", taskStatusLabel(task.Status))
 	}
-	if err := s.taskSvc.Cancel(ctx, taskID); err != nil {
+	if err := s.taskSvc.CancelForUser(ctx, userID, taskID); err != nil {
 		return "取消失败：" + cleanErr(err.Error())
 	}
 	return fmt.Sprintf("已取消任务\n《%s》", taskSubject(task))

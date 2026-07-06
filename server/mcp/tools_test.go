@@ -2,11 +2,13 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -82,6 +84,64 @@ func createAccountInfoTask(t *testing.T, repo repository.Repository, userID, pro
 		t.Fatalf("create task: %v", err)
 	}
 	return task
+}
+
+func taskToolRequest(t *testing.T, taskID string) *mcp.CallToolRequest {
+	t.Helper()
+	args, err := json.Marshal(map[string]string{"task_id": taskID})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	return &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
+}
+
+func TestTaskGetHandlerRejectsForeignTask(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+
+	ownerID := uuid.New().String()
+	intruderID := uuid.New().String()
+	project := createAccountInfoProject(t, repo, ownerID, "")
+	task := createAccountInfoTask(t, repo, ownerID, project.ID, "")
+
+	result, err := taskGetHandler(withMCPUserID(context.Background(), intruderID), taskToolRequest(t, task.ID))
+	if err != nil {
+		t.Fatalf("taskGetHandler: %v", err)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "task not found") {
+		t.Fatalf("expected ownership error, got: %s", text)
+	}
+}
+
+func TestTaskCancelHandlerRejectsForeignTaskWithoutStatusChange(t *testing.T) {
+	_, _, repo, cleanup := setupAccountInfoTest(t)
+	defer cleanup()
+
+	ownerID := uuid.New().String()
+	intruderID := uuid.New().String()
+	project := createAccountInfoProject(t, repo, ownerID, "")
+	task := createAccountInfoTask(t, repo, ownerID, project.ID, "")
+	task.Status = model.TaskStatusRunning
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	result, err := taskCancelHandler(withMCPUserID(context.Background(), intruderID), taskToolRequest(t, task.ID))
+	if err != nil {
+		t.Fatalf("taskCancelHandler: %v", err)
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "task not found") {
+		t.Fatalf("expected ownership error, got: %s", text)
+	}
+	reloaded, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if reloaded.Status != model.TaskStatusRunning {
+		t.Fatalf("foreign cancel changed status to %q", reloaded.Status)
+	}
 }
 
 // TestBuildAccountInfo_NoTaskID_FallsBackToProject: without task_id the project's
