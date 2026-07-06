@@ -2,12 +2,28 @@ import type { CreditBalance, Plan, Project, SignInStatus, Task, TaskType } from 
 
 export type CommandCenterSignalKind = 'success' | 'risk' | 'running' | 'waiting' | 'publishing' | 'neutral'
 
+export type ReadinessStatus = 'ready' | 'not_ready' | 'unknown'
+
+export interface CommandCenterReadinessCheck {
+  status: ReadinessStatus
+  label: string
+  description: string
+  href: string
+}
+
 export interface CommandCenterReadiness {
   projectsReady: boolean
   localExecutorKnown: boolean
   modelConfigKnown: boolean
   apiKeysKnown: boolean
   publishingReady: boolean
+  checks: {
+    projects: CommandCenterReadinessCheck
+    apiKeys: CommandCenterReadinessCheck
+    modelConfig: CommandCenterReadinessCheck
+    localExecutor: CommandCenterReadinessCheck
+    publishing: CommandCenterReadinessCheck
+  }
 }
 
 export interface CommandCenterCreditRisk {
@@ -40,6 +56,23 @@ export interface BuildCommandCenterSignalsInput {
   localExecutorKnown?: boolean
   modelConfigKnown?: boolean
   apiKeysKnown?: boolean
+  localExecutorReady?: boolean | null
+  modelConfigReady?: boolean | null
+  apiKeysReady?: boolean | null
+}
+
+export interface ModelConfigLike {
+  text?: {
+    endpoint?: string
+    api_key?: string
+    model?: string
+  } | null
+  image?: {
+    provider?: string
+    endpoint?: string
+    api_key?: string
+    model?: string
+  } | null
 }
 
 export interface NextBestAction {
@@ -63,6 +96,26 @@ const LOW_CREDIT_THRESHOLD = 200
 const CRITICAL_CREDIT_THRESHOLD = 50
 const taskTypes = new Set<TaskType>(['seednote', 'article', 'ecommerce', 'video'])
 const creationIntents = new Set(['new', 'retry', 'schedule'])
+
+export function hasUsableModelConfig(config?: ModelConfigLike | null) {
+  return Boolean(
+    config?.text?.model ||
+    config?.text?.endpoint ||
+    config?.text?.api_key ||
+    config?.image?.provider ||
+    config?.image?.model ||
+    config?.image?.endpoint ||
+    config?.image?.api_key,
+  )
+}
+
+function readinessStatus(ready?: boolean | null, legacyKnown?: boolean): ReadinessStatus {
+  if (ready === true) return 'ready'
+  if (ready === false) return 'not_ready'
+  if (legacyKnown === true) return 'ready'
+  if (legacyKnown === false) return 'unknown'
+  return 'unknown'
+}
 
 export interface CreationIntent {
   shouldCreate: boolean
@@ -191,6 +244,69 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
             : 'ok',
   }
 
+  const publishableProjects = projects.filter((project) => project.config.enable_publishing)
+  const approvalProjects = publishableProjects.filter((project) => project.config.require_publish_approval)
+  const projectStatus: ReadinessStatus = projects.length > 0 ? 'ready' : 'not_ready'
+  const publishingStatus: ReadinessStatus =
+    projects.length === 0 ? 'unknown' : publishableProjects.length > 0 ? 'ready' : 'not_ready'
+  const apiKeysStatus = readinessStatus(input.apiKeysReady, input.apiKeysKnown)
+  const modelConfigStatus = readinessStatus(input.modelConfigReady, input.modelConfigKnown)
+  const localExecutorStatus = readinessStatus(input.localExecutorReady, input.localExecutorKnown)
+  const checks: CommandCenterReadiness['checks'] = {
+    projects: {
+      status: projectStatus,
+      label: '项目定位',
+      description: projects.length > 0 ? `${projects.length} 个项目可用` : '先创建账号/项目',
+      href: projects.length > 0 ? '/projects' : projectsReturnHref({ type: 'seednote', intent: 'new' }),
+    },
+    apiKeys: {
+      status: apiKeysStatus,
+      label: '平台密钥',
+      description:
+        apiKeysStatus === 'ready'
+          ? '密钥可用于 Agent 接入'
+          : apiKeysStatus === 'not_ready'
+            ? '需要创建平台密钥'
+            : '正在检查密钥状态',
+      href: '/settings',
+    },
+    modelConfig: {
+      status: modelConfigStatus,
+      label: '模型配置',
+      description:
+        modelConfigStatus === 'ready'
+          ? '模型策略已配置'
+          : modelConfigStatus === 'not_ready'
+            ? '需要配置文本或图像模型'
+            : '正在检查模型配置',
+      href: '/settings',
+    },
+    localExecutor: {
+      status: localExecutorStatus,
+      label: '执行环境',
+      description:
+        localExecutorStatus === 'ready'
+          ? '执行环境可用'
+          : localExecutorStatus === 'not_ready'
+            ? '本地执行器未就绪，可走云端'
+            : '正在检查桌面执行状态',
+      href: '/settings',
+    },
+    publishing: {
+      status: publishingStatus,
+      label: '发布能力',
+      description:
+        publishingStatus === 'ready'
+          ? approvalProjects.length > 0
+            ? `${publishableProjects.length} 个项目可发布，${approvalProjects.length} 个发布需审核`
+            : `${publishableProjects.length} 个项目可发布到草稿箱`
+          : publishingStatus === 'not_ready'
+            ? '需要检查发布配置'
+            : '创建项目后检查发布配置',
+      href: '/settings',
+    },
+  }
+
   return {
     now,
     tasks,
@@ -203,11 +319,12 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
     upcomingPlans,
     creditRisk,
     readiness: {
-      projectsReady: projects.length > 0,
-      localExecutorKnown: input.localExecutorKnown ?? true,
-      modelConfigKnown: input.modelConfigKnown ?? true,
-      apiKeysKnown: input.apiKeysKnown ?? true,
-      publishingReady: projects.some((project) => project.config.enable_publishing),
+      projectsReady: checks.projects.status === 'ready',
+      localExecutorKnown: checks.localExecutor.status !== 'unknown',
+      modelConfigKnown: checks.modelConfig.status === 'ready',
+      apiKeysKnown: checks.apiKeys.status === 'ready',
+      publishingReady: checks.publishing.status === 'ready',
+      checks,
     },
   }
 }
@@ -218,6 +335,9 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
   const approvalTask = signals.pendingApprovalTasks[0]
   const upcomingPlan = signals.upcomingPlans[0]
   const defaultProject = signals.projects[0]
+  const setupNeedsAttention =
+    signals.readiness.checks.apiKeys.status !== 'ready' ||
+    signals.readiness.checks.modelConfig.status !== 'ready'
 
   if (failedTask) {
     actions.push({
@@ -245,6 +365,16 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
       label: '创建第一个项目',
       description: '先建立账号定位，再让任务自动继承风格和配置',
       href: projectsReturnHref({ type: 'seednote' }),
+      kind: 'neutral',
+    })
+  }
+
+  if (setupNeedsAttention && signals.readiness.projectsReady) {
+    actions.push({
+      id: 'connect-settings',
+      label: '检查接入设置',
+      description: '确认平台密钥和模型配置后再创建任务',
+      href: '/settings',
       kind: 'neutral',
     })
   }
@@ -279,16 +409,6 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
       description: defaultProject ? `使用「${defaultProject.name}」继续产出` : '开始新的内容任务',
       href: createTaskHref({ type: defaultProject?.platform, projectId: defaultProject?.id, intent: 'new' }),
       kind: 'running',
-    })
-  }
-
-  if (!signals.readiness.modelConfigKnown || !signals.readiness.apiKeysKnown) {
-    actions.push({
-      id: 'connect-settings',
-      label: '检查接入设置',
-      description: '确认模型、密钥和本地执行环境是否准备好',
-      href: '/settings',
-      kind: 'neutral',
     })
   }
 

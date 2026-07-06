@@ -75,6 +75,14 @@ vi.mock('@/lib/api', async () => {
         balance: vi.fn().mockResolvedValue({ balance: 80 }),
         signInStatus: vi.fn().mockResolvedValue({ signed_in_today: false }),
       },
+      apiKeys: {
+        ...actual.api.apiKeys,
+        list: vi.fn().mockResolvedValue({ items: [] }),
+      },
+      modelConfig: {
+        ...actual.api.modelConfig,
+        get: vi.fn().mockResolvedValue({ text: null, image: null }),
+      },
     },
   }
 })
@@ -96,6 +104,15 @@ describe('GlobalCommandPalette actions', () => {
     expect(await screen.findByText('跳转')).toBeInTheDocument()
     expect((await screen.findAllByText('设置')).length).toBeGreaterThan(0)
     expect(await screen.findByText('恢复失败任务')).toBeInTheDocument()
+    expect(await screen.findByText('新建公众号文章')).toBeInTheDocument()
+  })
+
+  it('surfaces setup review before generic creation when readiness is missing', async () => {
+    renderWithProviders(<GlobalCommandPalette />)
+
+    act(() => commandPaletteStore.open())
+
+    expect(await screen.findByText('检查接入设置')).toBeInTheDocument()
     expect(await screen.findByText('新建公众号文章')).toBeInTheDocument()
   })
 })

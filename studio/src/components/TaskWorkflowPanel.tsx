@@ -2,32 +2,14 @@ import { CheckCircle2, Circle, AlertTriangle, Loader2 } from 'lucide-react'
 import type { WorkflowStatus } from '@/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { parseWorkflowStatus, readinessValueLabel } from '@/lib/workflow-readiness'
 
 interface TaskWorkflowPanelProps {
   workflow?: WorkflowStatus | string | null
 }
 
 export function parseWorkflow(workflow?: WorkflowStatus | string | null): WorkflowStatus | null {
-  if (!workflow) return null
-  if (typeof workflow !== 'string') return workflow
-  try {
-    return JSON.parse(workflow) as WorkflowStatus
-  } catch {
-    return null
-  }
-}
-
-function readinessLabel(readiness?: string) {
-  switch (readiness) {
-    case 'ready':
-      return '可发布'
-    case 'ready_with_minor_edits':
-      return '建议修改'
-    case 'needs_revision':
-      return '需重做'
-    default:
-      return readiness || '未评估'
-  }
+  return parseWorkflowStatus(workflow)
 }
 
 function stageIcon(status: string) {
@@ -136,7 +118,7 @@ export function WorkflowReviewSummary({ workflow }: TaskWorkflowPanelProps) {
               <p className="mt-1 text-xs text-muted-foreground">质量复盘</p>
             </div>
             <Badge variant="outline" className={readinessClassName(data.review.overall_score)}>
-              {readinessLabel(data.review.readiness)}
+              {readinessValueLabel(data.review.readiness) || '未评估'}
             </Badge>
           </div>
 

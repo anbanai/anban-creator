@@ -15,8 +15,21 @@ import (
 var (
 	ErrProjectNotFound       = errors.New("project not found")
 	ErrProjectOwnedByUser    = errors.New("project not owned by user")
+	ErrProjectDeleteConflict = errors.New("project delete conflict")
 	ErrVideoModelUnavailable = errors.New("video model unavailable")
 )
+
+type projectDeleteConflictError struct {
+	msg string
+}
+
+func (e projectDeleteConflictError) Error() string {
+	return e.msg
+}
+
+func (e projectDeleteConflictError) Is(target error) bool {
+	return target == ErrProjectDeleteConflict
+}
 
 // validPlatforms defines the allowed platform values.
 var validPlatforms = map[string]bool{
@@ -294,7 +307,7 @@ func (s *ProjectService) Delete(ctx context.Context, userID, projectID string) e
 		s.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to get project stats before delete")
 	}
 	if stats != nil && stats.TotalTasks > 0 {
-		return fmt.Errorf("cannot delete project with %d associated tasks; archive it instead", stats.TotalTasks)
+		return projectDeleteConflictError{msg: fmt.Sprintf("cannot delete project with %d associated tasks; archive it instead", stats.TotalTasks)}
 	}
 
 	// Check if the project has associated plans.
@@ -303,7 +316,7 @@ func (s *ProjectService) Delete(ctx context.Context, userID, projectID string) e
 		s.logger.Warn().Err(err).Str("project_id", projectID).Msg("failed to count plans before delete")
 	}
 	if planCount > 0 {
-		return fmt.Errorf("cannot delete project with %d associated plans; archive it instead", planCount)
+		return projectDeleteConflictError{msg: fmt.Sprintf("cannot delete project with %d associated plans; archive it instead", planCount)}
 	}
 
 	if err := s.repo.Projects().Delete(ctx, projectID); err != nil {

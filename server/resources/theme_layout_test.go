@@ -2,6 +2,7 @@ package resources
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ func TestEmbeddedThemesExposeColorsAndLayoutMetadata(t *testing.T) {
 			ContainerPadding string `yaml:"container_padding"`
 			MaxWidth         string `yaml:"max_width"`
 			CardPadding      string `yaml:"card_padding"`
+			BorderRadius     string `yaml:"border_radius"`
 		} `yaml:"layout"`
 	}
 
@@ -51,10 +53,53 @@ func TestEmbeddedThemesExposeColorsAndLayoutMetadata(t *testing.T) {
 		if theme.Layout.MaxWidth == "" {
 			t.Errorf("theme %s must declare max_width so WeChat width is theme-owned", name)
 		}
+		if theme.Layout.MaxWidth != "none" {
+			t.Errorf("theme %s max_width = %q, want none for mobile-first WeChat rendering", name, theme.Layout.MaxWidth)
+		}
 		if theme.Layout.CardPadding == "" {
 			t.Errorf("theme %s must declare card_padding so WeChat whitespace is theme-owned", name)
 		}
+		if vertical, _, ok := spacingPx(theme.Layout.ContainerPadding); !ok || vertical > 16 {
+			t.Errorf("theme %s container_padding = %q, want vertical padding <= 16px", name, theme.Layout.ContainerPadding)
+		}
+		if _, horizontal, ok := spacingPx(theme.Layout.CardPadding); !ok || horizontal > 14 {
+			t.Errorf("theme %s card_padding = %q, want horizontal padding <= 14px", name, theme.Layout.CardPadding)
+		}
+		if radius, ok := cssPx(theme.Layout.BorderRadius); !ok || radius > 12 {
+			t.Errorf("theme %s border_radius = %q, want <= 12px", name, theme.Layout.BorderRadius)
+		}
 	}
+}
+
+func spacingPx(value string) (vertical int, horizontal int, ok bool) {
+	parts := strings.Fields(value)
+	if len(parts) == 0 {
+		return 0, 0, false
+	}
+	first, ok := cssPx(parts[0])
+	if !ok {
+		return 0, 0, false
+	}
+	second := first
+	if len(parts) > 1 {
+		second, ok = cssPx(parts[1])
+		if !ok {
+			return 0, 0, false
+		}
+	}
+	return first, second, true
+}
+
+func cssPx(value string) (int, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "0" {
+		return 0, true
+	}
+	if !strings.HasSuffix(trimmed, "px") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSuffix(trimmed, "px"))
+	return n, err == nil
 }
 
 func TestEmbeddedArticleTemplatesAreDiscoverableAndRawReadable(t *testing.T) {

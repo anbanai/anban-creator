@@ -1,6 +1,22 @@
 package handler
 
-import "testing"
+import (
+	"context"
+	"io"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/service"
+)
 
 func TestProjectRequestMapsRequirePublishApproval(t *testing.T) {
 	req := projectRequest{
@@ -19,5 +35,115 @@ func TestProjectRequestMapsRequirePublishApproval(t *testing.T) {
 	}
 	if got := req.getFieldValue("require_publish_approval"); got != "true" {
 		t.Fatalf("getFieldValue(require_publish_approval) = %q, want true", got)
+	}
+}
+
+func setupProjectDeleteHandlerTest(t *testing.T) (*fiber.App, repository.Repository) {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "projects.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	projectSvc := service.NewProjectService(repo, &logger)
+	h := NewProjectHandler(projectSvc, &logger)
+
+	app := fiber.New()
+	injectUser := func(c fiber.Ctx) error {
+		if uid := c.Get("X-User-ID"); uid != "" {
+			c.Locals("user_id", uid)
+		}
+		return c.Next()
+	}
+	app.Delete("/api/v1/projects/:id", injectUser, h.Delete)
+	return app, repo
+}
+
+func TestProjectHandler_DeleteWithAssociatedTasksReturnsConflict(t *testing.T) {
+	app, repo := setupProjectDeleteHandlerTest(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformSeednote,
+		Name:     "Seednote",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformSeednote,
+		Status:    model.TaskStatusCompleted,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	resp := doRequest(t, app, "DELETE", "/api/v1/projects/"+projectID, userID, nil)
+	if resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusConflict)
+	}
+
+	body := decodeBody(t, resp)
+	msg, _ := body["msg"].(string)
+	if !strings.Contains(msg, "cannot delete project with 1 associated tasks") ||
+		!strings.Contains(msg, "archive it instead") {
+		t.Fatalf("msg = %q, want associated task archive guidance", msg)
+	}
+}
+
+func TestProjectHandler_DeleteWithAssociatedPlansReturnsConflict(t *testing.T) {
+	app, repo := setupProjectDeleteHandlerTest(t)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	projectID := uuid.New().String()
+
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformSeednote,
+		Name:     "Seednote",
+		Status:   model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := repo.Plans().Create(ctx, &model.Plan{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformSeednote,
+		Title:     "Daily ideas",
+		Status:    model.PlanStatusActive,
+	}); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+
+	resp := doRequest(t, app, "DELETE", "/api/v1/projects/"+projectID, userID, nil)
+	if resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusConflict)
+	}
+
+	body := decodeBody(t, resp)
+	msg, _ := body["msg"].(string)
+	if !strings.Contains(msg, "cannot delete project with 1 associated plans") ||
+		!strings.Contains(msg, "archive it instead") {
+		t.Fatalf("msg = %q, want associated plan archive guidance", msg)
 	}
 }

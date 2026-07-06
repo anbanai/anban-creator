@@ -22,7 +22,7 @@ import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
-import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
+import { WorkflowReviewSummary, WorkflowStageProgress } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
@@ -418,6 +418,7 @@ export default function TaskDetailPage() {
   const currentTask = task
   const snapshot = task.project_snapshot
   const showProjectParameters = Boolean(snapshot?.platform || project)
+  const showWorkflowStages = Boolean(task.workflow_status) && task.status !== 'pending' && task.status !== 'running'
   const projectParameterName = snapshot?.project_name || project?.name || '—'
   const projectParameterVisualStyle = snapshot?.visual_style || project?.visual_style || '—'
   const projectParameterImageRatio = snapshot?.image_ratio || project?.image_ratio || task.image_ratio || '—'
@@ -750,6 +751,14 @@ export default function TaskDetailPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {showWorkflowStages && (
+        <WorkflowStageProgress workflow={task.workflow_status} />
+      )}
+
+      {task.status === 'completed' && (
+        <WorkflowReviewSummary workflow={task.workflow_status} />
       )}
 
       {/* Details (stats) */}
@@ -1090,10 +1099,6 @@ export default function TaskDetailPage() {
             )}
           </CardContent>
         </Card>
-      )}
-
-      {task.status === 'completed' && (
-        <WorkflowReviewSummary workflow={task.workflow_status} />
       )}
 
       {/* Files (top priority - most useful content) */}

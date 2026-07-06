@@ -490,6 +490,9 @@ func (h *ProjectHandler) Delete(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrProjectOwnedByUser) {
 			return Forbidden(c, "you do not have access to this project")
 		}
+		if errors.Is(err, service.ErrProjectDeleteConflict) {
+			return Error(c, fiber.StatusConflict, err.Error())
+		}
 		h.logger.Error().Err(err).Str("project_id", projectID).Msg("delete project failed")
 		return Error(c, fiber.StatusInternalServerError, err.Error())
 	}

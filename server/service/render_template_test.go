@@ -443,6 +443,7 @@ func TestRenderTemplate_UsesSlotImageSizeForInlineStyles(t *testing.T) {
 	assertImageStyleContains(t, result.HTML, "https://cdn/hero.png", "max-width:100%")
 	assertImageStyleContains(t, result.HTML, "https://cdn/section.png", "max-width:100%")
 	assertImageStyleContains(t, result.HTML, "https://cdn/inline.png", "max-width:68%")
+	assertImageStyleContains(t, result.HTML, "https://cdn/hero.png", "margin:16px auto")
 }
 
 func TestRenderTemplate_RendersLayoutModuleFromSlotVars(t *testing.T) {

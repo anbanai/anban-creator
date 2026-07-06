@@ -666,7 +666,7 @@ func renderImagesAsRealTags(htmlContent string, images []converter.ImageRef, pla
 			continue
 		}
 		maxWidth := imageMaxWidth(imageSizes[img.Original])
-		tag := fmt.Sprintf(`<img src="%s" style="max-width:%s;height:auto;display:block;margin:20px auto;" alt="" />`, img.Original, maxWidth)
+		tag := fmt.Sprintf(`<img src="%s" style="max-width:%s;height:auto;display:block;margin:16px auto;" alt="" />`, img.Original, maxWidth)
 		out = strings.ReplaceAll(out, img.Placeholder, tag)
 	}
 	return out

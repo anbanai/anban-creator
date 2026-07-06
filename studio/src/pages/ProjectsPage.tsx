@@ -428,8 +428,8 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       setDeleteTarget(null)
     },
-    onError: () => {
-      toast.error('删除项目失败，请重试')
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, '删除项目失败，请重试'))
     },
   })
 

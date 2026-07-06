@@ -40,6 +40,9 @@ func TestPreviewTheme_RendersHTML(t *testing.T) {
 	if len(body) == 0 {
 		t.Fatalf("rendered HTML body is empty")
 	}
+	if !strings.Contains(string(body), `<body style="margin:0;">`) {
+		t.Errorf("preview HTML should zero browser body margin, got: %s", string(body)[:min(160, len(body))])
+	}
 	if !strings.Contains(string(body), "<") {
 		t.Errorf("rendered body does not look like HTML: %q", string(body)[:min(80, len(body))])
 	}

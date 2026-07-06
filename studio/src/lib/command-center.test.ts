@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCommandCenterSignals,
   buildNextBestActions,
+  hasUsableModelConfig,
   projectCreatedReturnHref,
   createTaskHref,
   parseCreationIntent,
   projectsReturnHref,
+  type ModelConfigLike,
 } from './command-center'
 import type { CreditBalance, Plan, Project, SignInStatus, Task } from '@/types'
 
@@ -89,6 +91,9 @@ describe('command center rules', () => {
       projects: [project()],
       creditsBalance: { balance: 80 } satisfies CreditBalance,
       signInStatus: { signed_in_today: false } satisfies SignInStatus,
+      apiKeysReady: true,
+      modelConfigReady: true,
+      localExecutorReady: true,
     })
 
     expect(signals.runningTasks).toHaveLength(1)
@@ -110,6 +115,9 @@ describe('command center rules', () => {
       projects: [project()],
       creditsBalance: { balance: 80 },
       signInStatus: { signed_in_today: false },
+      apiKeysReady: true,
+      modelConfigReady: true,
+      localExecutorReady: true,
     })
 
     expect(buildNextBestActions(signals).map((action) => action.id)).toEqual([
@@ -128,6 +136,9 @@ describe('command center rules', () => {
       projects: [],
       creditsBalance: { balance: 1000 },
       signInStatus: { signed_in_today: true },
+      apiKeysReady: true,
+      modelConfigReady: true,
+      localExecutorReady: true,
     })
 
     expect(signals.readiness.projectsReady).toBe(false)
@@ -175,5 +186,56 @@ describe('command center rules', () => {
       projectId: undefined,
       intent: undefined,
     })
+  })
+
+  it('represents setup readiness as ready, not-ready, or unknown', () => {
+    const signals = buildCommandCenterSignals({
+      now: new Date('2026-07-06T02:00:00.000Z'),
+      tasks: [],
+      plans: [],
+      projects: [project({ config: { enable_publishing: true, require_publish_approval: true } })],
+      creditsBalance: { balance: 1000 },
+      signInStatus: { signed_in_today: true },
+      apiKeysReady: null,
+      modelConfigReady: false,
+      localExecutorReady: true,
+    })
+
+    expect(signals.readiness.projectsReady).toBe(true)
+    expect(signals.readiness.publishingReady).toBe(true)
+    expect(signals.readiness.checks.projects.status).toBe('ready')
+    expect(signals.readiness.checks.apiKeys.status).toBe('unknown')
+    expect(signals.readiness.checks.modelConfig.status).toBe('not_ready')
+    expect(signals.readiness.checks.localExecutor.status).toBe('ready')
+    expect(signals.readiness.checks.publishing.description).toContain('发布需审核')
+  })
+
+  it('places setup review before generic creation when keys or model config are not ready', () => {
+    const signals = buildCommandCenterSignals({
+      now: new Date('2026-07-06T02:00:00.000Z'),
+      tasks: [],
+      plans: [],
+      projects: [project()],
+      creditsBalance: { balance: 1000 },
+      signInStatus: { signed_in_today: true },
+      apiKeysReady: false,
+      modelConfigReady: null,
+      localExecutorReady: true,
+    })
+
+    expect(buildNextBestActions(signals).map((action) => action.id)).toEqual([
+      'connect-settings',
+      'create-task',
+    ])
+  })
+
+  it('detects usable model config from text or image model settings', () => {
+    const empty: ModelConfigLike = {}
+    const textReady: ModelConfigLike = { text: { model: 'gpt-5' } }
+    const imageReady: ModelConfigLike = { image: { provider: 'openai' } }
+
+    expect(hasUsableModelConfig(empty)).toBe(false)
+    expect(hasUsableModelConfig(textReady)).toBe(true)
+    expect(hasUsableModelConfig(imageReady)).toBe(true)
   })
 })

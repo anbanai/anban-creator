@@ -111,7 +111,7 @@ func (h *ResourceHandler) PreviewTheme(c fiber.Ctx) error {
 	// (A srcDoc document otherwise relies on the parent page's charset, which is
 	// fragile.) Preview-only — the production converter output stays bare
 	// WeChat-safe <section> fragments with no <head>.
-	previewDoc := "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"></head><body>" + result.HTML + "</body></html>"
+	previewDoc := "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"></head><body style=\"margin:0;\">" + result.HTML + "</body></html>"
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(previewDoc)
 }

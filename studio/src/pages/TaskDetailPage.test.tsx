@@ -112,6 +112,50 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
   })
 
+  it('shows terminal workflow stages before review and generated files', async () => {
+    mockTask(taskWith({
+      status: 'completed',
+      progress: 100,
+      workflow_status: {
+        version: 'creation_workflow_v1',
+        current_stage: 'review',
+        stages: [
+          { key: 'draft', label: '初稿', status: 'completed', artifact_paths: ['03-draft.md'] },
+          { key: 'review', label: '质量复盘', status: 'completed', artifact_paths: ['review.json'] },
+        ],
+        review: {
+          overall_score: 91,
+          readiness: 'ready',
+          risks: ['标题可微调'],
+          next_actions: ['发布前改标题'],
+          strengths: ['结构完整'],
+        },
+      },
+      result: { files: null, output: '' },
+    }))
+    vi.mocked(api.tasks.files).mockResolvedValue([{
+      id: 'file-1',
+      task_id: 'task-1',
+      role: 'output',
+      file_name: 'article.html',
+      mime_type: 'text/html',
+      file_size: 1024,
+      url: '/api/v1/files/file-1',
+      created_at: '2026-07-06T03:00:00Z',
+    }])
+
+    render(<TaskDetailPage />)
+
+    const stages = await screen.findByText('创作进度')
+    const review = await screen.findByText('发布前检查')
+    const parameters = await screen.findByText('项目参数')
+    const files = await screen.findByText('生成文件 (1)')
+    expect(stages.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(review.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText('03-draft.md')).toBeInTheDocument()
+  })
+
   it('lets completed tasks be cloned as a fresh task', async () => {
     mockTask(taskWith({
       id: 'task-1',
