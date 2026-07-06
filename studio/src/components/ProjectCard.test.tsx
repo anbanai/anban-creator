@@ -71,4 +71,19 @@ describe('ProjectCard contextual actions', () => {
     expect(screen.getByText('写作已配置')).toBeInTheDocument()
     expect(screen.getAllByText('成功率 86%').length).toBeGreaterThan(0)
   })
+
+  it('visually quiets archived projects while keeping recovery actions available', () => {
+    render(
+      <ProjectCard
+        project={{ ...project, status: 'archived' }}
+        onRestore={() => {}}
+      />,
+    )
+
+    const card = screen.getByText('公众号项目').closest('.group')
+    expect(card).toHaveClass('bg-muted/30', 'opacity-75', 'grayscale-[0.25]')
+    expect(card).not.toHaveClass('hover:shadow-md')
+    expect(screen.getByText('已归档')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复项目' })).toBeEnabled()
+  })
 })

@@ -74,9 +74,13 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
   const planHref = `/plans?create=true&type=${project.platform}&project_id=${project.id}&intent=schedule`
   const canCreatePlan = project.platform !== 'ecommerce'
   const operatingBadges = buildOperatingBadges(project, stats)
+  const isArchived = project.status === 'archived'
+  const cardTone = isArchived
+    ? 'border-border/60 bg-muted/30 opacity-75 grayscale-[0.25] hover:border-border/70 hover:shadow-none'
+    : `border-border bg-card ${borderColor} ${hoverBorderColor} hover:shadow-md`
 
   return (
-    <div className={`group rounded-lg border border-border bg-card p-5 border-l-4 ${borderColor} ${hoverBorderColor} transition-all duration-200 hover:shadow-md active:scale-[0.98]`}>
+    <div className={`group rounded-lg border border-l-4 p-5 transition-all duration-200 active:scale-[0.98] ${cardTone}`}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <PlatformAvatar avatarUrl={project.avatar_url} name={project.name} platform={project.platform} size="lg" />
