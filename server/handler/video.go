@@ -75,14 +75,18 @@ type videoEstimateRequest struct {
 }
 
 type videoEstimateResponse struct {
-	AvailableModels  []service.VideoModelSpec     `json:"available_models"`
-	ResolvedConfig   model.VideoTaskConfig        `json:"resolved_config"`
-	EstimatedCredits int                          `json:"estimated_credits"`
-	PricingBreakdown *model.VideoPricingBreakdown `json:"pricing_breakdown,omitempty"`
-	Balance          int                          `json:"balance"`
-	MinBalance       int                          `json:"min_balance"`
-	MeetsMinBalance  bool                         `json:"meets_min_balance"`
-	Warnings         []string                     `json:"warnings,omitempty"`
+	AvailableModels       []service.VideoModelSpec       `json:"available_models"`
+	ResolvedConfig        model.VideoTaskConfig          `json:"resolved_config"`
+	EstimatedCredits      int                            `json:"estimated_credits"`
+	PricingBreakdown      *model.VideoPricingBreakdown   `json:"pricing_breakdown,omitempty"`
+	Balance               int                            `json:"balance"`
+	MinBalance            int                            `json:"min_balance"`
+	MeetsMinBalance       bool                           `json:"meets_min_balance"`
+	Warnings              []string                       `json:"warnings,omitempty"`
+	MissingReferenceRoles []string                       `json:"missing_reference_roles,omitempty"`
+	ExpectedArtifacts     []string                       `json:"expected_artifacts,omitempty"`
+	SegmentPlan           []model.VideoTaskSegmentConfig `json:"segment_plan,omitempty"`
+	AffordableTakes       int                            `json:"affordable_takes"`
 }
 
 func (h *VideoHandler) Estimate(c fiber.Ctx) error {
@@ -131,15 +135,27 @@ func (h *VideoHandler) Estimate(c fiber.Ctx) error {
 		}
 	}
 	return Success(c, videoEstimateResponse{
-		AvailableModels:  available,
-		ResolvedConfig:   videoTaskConfigFromGenerationPlan(plan),
-		EstimatedCredits: plan.EstimatedCredits,
-		PricingBreakdown: plan.PricingBreakdown,
-		Balance:          balance,
-		MinBalance:       service.MinVideoCreationBalance,
-		MeetsMinBalance:  balance >= service.MinVideoCreationBalance,
-		Warnings:         warnings,
+		AvailableModels:       available,
+		ResolvedConfig:        videoTaskConfigFromGenerationPlan(plan),
+		EstimatedCredits:      plan.EstimatedCredits,
+		PricingBreakdown:      plan.PricingBreakdown,
+		Balance:               balance,
+		MinBalance:            service.MinVideoCreationBalance,
+		MeetsMinBalance:       balance >= service.MinVideoCreationBalance,
+		Warnings:              warnings,
+		MissingReferenceRoles: videoMissingReferenceRoles(plan),
+		ExpectedArtifacts:     service.VideoProductionArtifactNames(),
+		SegmentPlan:           videoTaskSegmentsFromPlan(plan.Segments),
+		AffordableTakes:       affordableVideoTakes(balance, plan.EstimatedCredits, plan.RetakeBudget),
 	})
+}
+
+func (h *VideoHandler) Playbooks(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	return Success(c, fiber.Map{"items": service.DefaultVideoPlaybooks()})
 }
 
 func (h *VideoHandler) Models(c fiber.Ctx) error {
@@ -175,6 +191,8 @@ func videoGenerationRequestFromConfig(prompt string, cfg *model.VideoTaskConfig)
 	if cfg == nil {
 		return req
 	}
+	req.ScenarioKey = cfg.ScenarioKey
+	req.ProductionMode = cfg.ProductionMode
 	req.Purpose = cfg.Purpose
 	req.CreativeType = cfg.CreativeType
 	req.SubjectProfile = cfg.SubjectProfile
@@ -186,12 +204,17 @@ func videoGenerationRequestFromConfig(prompt string, cfg *model.VideoTaskConfig)
 	req.Duration = cfg.Duration
 	req.Watermark = cfg.Watermark
 	req.Preflight = &cfg.Preflight
+	req.RetakeBudget = cfg.RetakeBudget
+	req.DeliveryTargets = cfg.DeliveryTargets
 	for _, asset := range cfg.References {
 		req.ReferenceSet = append(req.ReferenceSet, service.VideoReferenceInput{
 			Type:                 asset.Type,
 			URL:                  asset.URL,
 			Text:                 asset.Text,
 			ReferenceRole:        asset.ReferenceRole,
+			MustKeep:             asset.MustKeep,
+			CanChange:            asset.CanChange,
+			MustNotTransfer:      asset.MustNotTransfer,
 			InputDurationSeconds: asset.InputDurationSeconds,
 		})
 	}
@@ -200,6 +223,8 @@ func videoGenerationRequestFromConfig(prompt string, cfg *model.VideoTaskConfig)
 
 func videoTaskConfigFromGenerationPlan(plan service.VideoGenerationPlan) model.VideoTaskConfig {
 	cfg := model.VideoTaskConfig{
+		ScenarioKey:      plan.ScenarioKey,
+		ProductionMode:   plan.ProductionMode,
 		Purpose:          plan.Purpose,
 		CreativeType:     plan.CreativeType,
 		SubjectProfile:   plan.SubjectProfile,
@@ -212,6 +237,8 @@ func videoTaskConfigFromGenerationPlan(plan service.VideoGenerationPlan) model.V
 		Duration:         plan.Duration,
 		Watermark:        plan.Watermark,
 		Preflight:        plan.Preflight,
+		RetakeBudget:     plan.RetakeBudget,
+		DeliveryTargets:  plan.DeliveryTargets,
 		EstimatedCredits: plan.EstimatedCredits,
 		PricingBreakdown: plan.PricingBreakdown,
 	}
@@ -221,8 +248,49 @@ func videoTaskConfigFromGenerationPlan(plan service.VideoGenerationPlan) model.V
 			URL:                  ref.URL,
 			Text:                 ref.Text,
 			ReferenceRole:        ref.ReferenceRole,
+			MustKeep:             ref.MustKeep,
+			CanChange:            ref.CanChange,
+			MustNotTransfer:      ref.MustNotTransfer,
 			InputDurationSeconds: ref.InputDurationSeconds,
 		})
 	}
 	return cfg
+}
+
+func videoMissingReferenceRoles(plan service.VideoGenerationPlan) []string {
+	playbook, ok := service.FindVideoPlaybook(plan.ScenarioKey)
+	if !ok {
+		return nil
+	}
+	return service.MissingVideoReferenceRoles(plan.References, playbook)
+}
+
+func videoTaskSegmentsFromPlan(segments []service.VideoGenerationSegmentPlan) []model.VideoTaskSegmentConfig {
+	result := make([]model.VideoTaskSegmentConfig, 0, len(segments))
+	for _, seg := range segments {
+		result = append(result, model.VideoTaskSegmentConfig{
+			Index:            seg.Index,
+			StartSecond:      seg.StartSecond,
+			EndSecond:        seg.EndSecond,
+			Duration:         seg.Duration,
+			Prompt:           seg.Prompt,
+			ModelKey:         seg.ModelKey,
+			Model:            seg.Model,
+			Resolution:       seg.Resolution,
+			Ratio:            seg.Ratio,
+			EstimatedCredits: seg.EstimatedCredits,
+		})
+	}
+	return result
+}
+
+func affordableVideoTakes(balance, estimatedCredits, retakeBudget int) int {
+	if estimatedCredits <= 0 || balance <= 0 {
+		return 0
+	}
+	affordable := balance / estimatedCredits
+	if retakeBudget > 0 && affordable > retakeBudget {
+		return retakeBudget
+	}
+	return affordable
 }

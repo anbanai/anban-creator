@@ -218,6 +218,41 @@ describe('createTaskSchema', () => {
     })
     expect(result.success).toBe(false)
   })
+
+  it('keeps video production fields and reference transfer rules', () => {
+    const result = createTaskSchema.parse({
+      project_id: 'video-1',
+      type: 'video',
+      prompt: '测试',
+      video_config: {
+        workflow: 'creator',
+        scenario_key: 'live_selling',
+        production_mode: 'guided',
+        retake_budget: 3,
+        delivery_targets: ['vertical_9x16'],
+        references: [{
+          type: 'video_url',
+          url: 'https://cdn.example.com/ref.mp4',
+          reference_role: 'camera movement',
+          must_keep: ['运镜'],
+          can_change: ['人物'],
+          must_not_transfer: ['logo'],
+        }],
+      },
+    })
+
+    expect(result.video_config).toMatchObject({
+      scenario_key: 'live_selling',
+      production_mode: 'guided',
+      retake_budget: 3,
+      delivery_targets: ['vertical_9x16'],
+      references: [{
+        must_keep: ['运镜'],
+        can_change: ['人物'],
+        must_not_transfer: ['logo'],
+      }],
+    })
+  })
 })
 
 describe('planSchema', () => {

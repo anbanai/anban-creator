@@ -6,6 +6,10 @@ function formatCredits(value: number | undefined) {
   return typeof value === 'number' ? value.toLocaleString() : '—'
 }
 
+function joinList(values: string[] | undefined) {
+  return values && values.length > 0 ? values.join('、') : '—'
+}
+
 export function VideoEstimateSummary({
   estimate,
   isLoading,
@@ -75,6 +79,36 @@ export function VideoEstimateSummary({
             ? ` · 输入视频 ${estimate.pricing_breakdown.input_seconds}s`
             : ''}
         </p>
+      )}
+      {(estimate.missing_reference_roles?.length || estimate.segment_plan?.length || estimate.expected_artifacts?.length || typeof estimate.affordable_takes === 'number') && (
+        <div className="grid gap-2 border-t border-border pt-2 text-xs sm:grid-cols-2">
+          {estimate.missing_reference_roles && estimate.missing_reference_roles.length > 0 && (
+            <div>
+              <p className="font-medium text-foreground">缺少参考角色</p>
+              <p className="mt-0.5 text-muted-foreground">{joinList(estimate.missing_reference_roles)}</p>
+            </div>
+          )}
+          {estimate.segment_plan && estimate.segment_plan.length > 0 && (
+            <div>
+              <p className="font-medium text-foreground">{estimate.segment_plan.length} 段生成计划</p>
+              <p className="mt-0.5 text-muted-foreground">
+                {estimate.segment_plan.map((segment) => `${segment.index}:${segment.duration}s`).join('、')}
+              </p>
+            </div>
+          )}
+          {typeof estimate.affordable_takes === 'number' && estimate.affordable_takes > 0 && (
+            <div>
+              <p className="font-medium text-foreground">预算内约 {estimate.affordable_takes} 次 take</p>
+              <p className="mt-0.5 text-muted-foreground">包含首轮生成和可承受返修试拍。</p>
+            </div>
+          )}
+          {estimate.expected_artifacts && estimate.expected_artifacts.length > 0 && (
+            <div>
+              <p className="font-medium text-foreground">预期产物</p>
+              <p className="mt-0.5 line-clamp-2 text-muted-foreground">{joinList(estimate.expected_artifacts)}</p>
+            </div>
+          )}
+        </div>
       )}
       {estimate.warnings && estimate.warnings.length > 0 && (
         <div className="space-y-1 text-xs text-amber-600 dark:text-amber-300">

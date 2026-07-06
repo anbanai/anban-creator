@@ -31,6 +31,7 @@ describe('video form helpers', () => {
     expect(buildVideoFormConfig(defaults)).toEqual({
       ...defaults,
       creative_type: 'personal_ip',
+      production_mode: 'guided',
       workflow: 'creator',
       references: [],
     })
@@ -39,6 +40,7 @@ describe('video form helpers', () => {
   it('submits creator workflow by default for video generation', () => {
     expect(normalizeVideoConfigForSubmit(buildVideoFormConfig())).toEqual({
       workflow: 'creator',
+      production_mode: 'guided',
       creative_type: 'personal_ip',
       purpose: 'planting',
     })
@@ -56,6 +58,8 @@ describe('video form helpers', () => {
   it('keeps explicit false values and references while dropping default select sentinels', () => {
     const config: VideoTaskConfig = {
       workflow: 'editor',
+      scenario_key: 'live_selling',
+      production_mode: 'guided',
       purpose: 'promotion',
       model_key: VIDEO_PROJECT_DEFAULT_VALUE,
       resolution: '',
@@ -63,20 +67,38 @@ describe('video form helpers', () => {
       duration: 0,
       watermark: false,
       preflight: true,
+      retake_budget: 4,
+      delivery_targets: ['vertical_9x16', 'textless_master'],
       references: [
-        { type: 'text', text: '镜头要明亮' },
+        {
+          type: 'text',
+          text: '镜头要明亮',
+          must_keep: ['杯身'],
+          can_change: ['背景'],
+          must_not_transfer: ['参考人物'],
+        },
         { type: 'image_url', url: '' },
       ],
     }
 
     expect(normalizeVideoConfigForSubmit(config)).toEqual({
       workflow: 'editor',
+      scenario_key: 'live_selling',
+      production_mode: 'guided',
       creative_type: 'personal_ip',
       purpose: 'promotion',
       ratio: '16:9',
       watermark: false,
       preflight: true,
-      references: [{ type: 'text', text: '镜头要明亮' }],
+      retake_budget: 4,
+      delivery_targets: ['vertical_9x16', 'textless_master'],
+      references: [{
+        type: 'text',
+        text: '镜头要明亮',
+        must_keep: ['杯身'],
+        can_change: ['背景'],
+        must_not_transfer: ['参考人物'],
+      }],
     })
   })
 
@@ -93,10 +115,12 @@ describe('video form helpers', () => {
 
     expect(normalizeVideoConfigForSubmit(buildVideoFormConfig(defaults), defaults)).toEqual({
       workflow: 'creator',
+      production_mode: 'guided',
       creative_type: 'personal_ip',
     })
     expect(normalizeVideoConfigForSubmit({ ...buildVideoFormConfig(defaults), duration: 60 }, defaults)).toEqual({
       workflow: 'creator',
+      production_mode: 'guided',
       creative_type: 'personal_ip',
       duration: 60,
     })

@@ -621,6 +621,8 @@ func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) Video
 	if cfg == nil {
 		return req
 	}
+	req.ScenarioKey = cfg.ScenarioKey
+	req.ProductionMode = cfg.ProductionMode
 	req.Purpose = cfg.Purpose
 	req.CreativeType = cfg.CreativeType
 	req.SubjectProfile = cfg.SubjectProfile
@@ -633,6 +635,8 @@ func videoRequestFromTaskConfig(prompt string, cfg *model.VideoTaskConfig) Video
 	req.TargetDurationReason = cfg.TargetDurationReason
 	req.Watermark = cfg.Watermark
 	req.Preflight = &cfg.Preflight
+	req.RetakeBudget = cfg.RetakeBudget
+	req.DeliveryTargets = cfg.DeliveryTargets
 	req.ReferenceSet = videoReferencesFromAssets(cfg.References)
 	return req
 }
@@ -648,6 +652,9 @@ func videoReferencesFromAssets(assets []model.VideoReferenceAsset) []VideoRefere
 			URL:                  asset.URL,
 			Text:                 asset.Text,
 			ReferenceRole:        asset.ReferenceRole,
+			MustKeep:             asset.MustKeep,
+			CanChange:            asset.CanChange,
+			MustNotTransfer:      asset.MustNotTransfer,
 			InputDurationSeconds: asset.InputDurationSeconds,
 		})
 	}
@@ -665,6 +672,9 @@ func videoAssetsFromReferences(refs []VideoReferenceInput) []model.VideoReferenc
 			URL:                  ref.URL,
 			Text:                 ref.Text,
 			ReferenceRole:        ref.ReferenceRole,
+			MustKeep:             ref.MustKeep,
+			CanChange:            ref.CanChange,
+			MustNotTransfer:      ref.MustNotTransfer,
 			InputDurationSeconds: ref.InputDurationSeconds,
 		})
 	}
@@ -673,6 +683,8 @@ func videoAssetsFromReferences(refs []VideoReferenceInput) []model.VideoReferenc
 
 func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
 	return model.VideoTaskConfig{
+		ScenarioKey:               plan.ScenarioKey,
+		ProductionMode:            plan.ProductionMode,
 		Purpose:                   plan.Purpose,
 		CreativeType:              plan.CreativeType,
 		SubjectProfile:            plan.SubjectProfile,
@@ -692,6 +704,8 @@ func videoTaskConfigFromPlan(plan VideoGenerationPlan) model.VideoTaskConfig {
 		Watermark:                 plan.Watermark,
 		Preflight:                 plan.Preflight,
 		References:                videoAssetsFromReferences(plan.References),
+		RetakeBudget:              plan.RetakeBudget,
+		DeliveryTargets:           plan.DeliveryTargets,
 		EstimatedCredits:          plan.EstimatedCredits,
 		PricingBreakdown:          plan.PricingBreakdown,
 	}

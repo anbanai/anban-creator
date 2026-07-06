@@ -20,10 +20,12 @@ export function buildVideoFormConfig(defaults?: VideoDefaults, current?: VideoTa
   const workflow = current?.workflow === 'editor' || defaults?.workflow === 'editor' ? 'editor' : 'creator'
   const creativeType = current?.creative_type ?? defaults?.creative_type ?? 'personal_ip'
   const purpose = current?.purpose ?? defaults?.purpose ?? defaultVideoPurposeForCreativeType(creativeType)
+  const productionMode = current?.production_mode ?? defaults?.production_mode ?? 'guided'
   return {
     ...(defaults ?? {}),
     ...(current ?? {}),
     workflow,
+    production_mode: productionMode,
     creative_type: creativeType,
     purpose,
     references: current?.references ?? [],
@@ -50,6 +52,8 @@ export function normalizeVideoConfigForSubmit(config: VideoTaskConfig | undefine
   if (!config) return undefined
 
   const next: VideoTaskConfig = {}
+  const scenarioKey = cleanString(config.scenario_key)
+  const productionMode = cleanString(config.production_mode)
   const purpose = cleanString(config.purpose)
   const creativeType = cleanString(config.creative_type)
   const resolvedCreativeType = creativeType || defaults?.creative_type || 'personal_ip'
@@ -64,6 +68,8 @@ export function normalizeVideoConfigForSubmit(config: VideoTaskConfig | undefine
   const workflow = config.workflow === 'editor' ? 'editor' : 'creator'
 
   next.workflow = workflow
+  if (scenarioKey) next.scenario_key = scenarioKey
+  if (productionMode) next.production_mode = productionMode as VideoTaskConfig['production_mode']
   if (resolvedPurpose && resolvedPurpose !== defaults?.purpose) next.purpose = resolvedPurpose as VideoTaskConfig['purpose']
   if (resolvedCreativeType && resolvedCreativeType !== defaults?.creative_type) next.creative_type = resolvedCreativeType as VideoTaskConfig['creative_type']
   if (subjectProfile && subjectProfile !== defaults?.subject_profile) next.subject_profile = subjectProfile
@@ -75,6 +81,8 @@ export function normalizeVideoConfigForSubmit(config: VideoTaskConfig | undefine
   if (typeof config.duration === 'number' && config.duration > 0 && config.duration !== defaults?.duration) next.duration = config.duration
   if (typeof config.watermark === 'boolean' && config.watermark !== defaults?.watermark) next.watermark = config.watermark
   if (typeof config.preflight === 'boolean' && config.preflight !== defaults?.preflight) next.preflight = config.preflight
+  if (typeof config.retake_budget === 'number' && config.retake_budget > 0) next.retake_budget = config.retake_budget
+  if (config.delivery_targets?.length) next.delivery_targets = config.delivery_targets
   if (references) next.references = references
 
   return Object.keys(next).length > 0 ? next : undefined

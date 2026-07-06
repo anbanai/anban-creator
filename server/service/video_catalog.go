@@ -177,6 +177,17 @@ func ResolveVideoGenerationPlanWithBilling(req VideoGenerationRequest, defaults 
 	}
 	billing = normalizeVideoBillingOptions(billing)
 	resolved := req
+	if playbook, ok := FindVideoPlaybook(resolved.ScenarioKey); ok {
+		if resolved.CreativeType == "" {
+			resolved.CreativeType = playbook.CreativeType
+		}
+		if resolved.Purpose == "" {
+			resolved.Purpose = playbook.Purpose
+		}
+		if resolved.Ratio == "" {
+			resolved.Ratio = playbook.DefaultRatio
+		}
+	}
 	if resolved.CreativeType == "" {
 		resolved.CreativeType = defaults.CreativeType
 	}
@@ -312,6 +323,8 @@ func ResolveVideoGenerationPlanWithBilling(req VideoGenerationRequest, defaults 
 		Segments:         pricingSegments,
 	}
 	plan := VideoGenerationPlan{
+		ScenarioKey:               resolved.ScenarioKey,
+		ProductionMode:            resolved.ProductionMode,
 		Purpose:                   resolved.Purpose,
 		CreativeType:              resolved.CreativeType,
 		SubjectProfile:            resolved.SubjectProfile,
@@ -335,6 +348,8 @@ func ResolveVideoGenerationPlanWithBilling(req VideoGenerationRequest, defaults 
 		Preflight:                 preflight,
 		ServiceTier:               resolved.ServiceTier,
 		References:                resolved.ReferenceSet,
+		RetakeBudget:              resolved.RetakeBudget,
+		DeliveryTargets:           resolved.DeliveryTargets,
 		EstimatedCredits:          totalCredits,
 		PricingBreakdown:          breakdown,
 	}

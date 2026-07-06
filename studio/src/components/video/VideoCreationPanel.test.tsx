@@ -42,6 +42,30 @@ function PanelHarness() {
         form={form}
         selectedProject={videoProject}
         availableVideoModels={[]}
+        playbooks={[
+          {
+            key: 'live_selling',
+            label: '直播带货',
+            creative_type: 'product_demo',
+            purpose: 'ecommerce',
+            required_reference_roles: ['product appearance', 'action'],
+            default_ratio: '9:16',
+            prompt_scaffold: '黄金三秒开场、一个核心卖点、亲手展示。',
+            qc_focus: ['产品保真', 'CTA'],
+            risk_notes: ['不要编造优惠。'],
+          },
+          {
+            key: 'brand_promo',
+            label: '品牌宣传',
+            creative_type: 'brand_promo',
+            purpose: 'promotion',
+            required_reference_roles: ['scene background'],
+            default_ratio: '16:9',
+            prompt_scaffold: '只保留一个品牌记忆点。',
+            qc_focus: ['品牌记忆'],
+            risk_notes: ['文字建议后期加。'],
+          },
+        ]}
         minimumBalanceHint="视频任务需至少 100,000 积分余额。"
         promptField={(
           <FormField control={form.control} name="prompt" render={({ field }) => (
@@ -80,5 +104,18 @@ describe('VideoCreationPanel', () => {
 
     expect(screen.getByTestId('video-config')).toHaveTextContent('"workflow":"editor"')
     expect(screen.getByText('剪辑要求')).toBeInTheDocument()
+  })
+
+  it('applies a playbook and production mode before detailed prompting', () => {
+    render(<PanelHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: /直播带货/ }))
+    fireEvent.click(screen.getByRole('button', { name: '专业序列' }))
+
+    expect(screen.getByTestId('video-config')).toHaveTextContent('"scenario_key":"live_selling"')
+    expect(screen.getByTestId('video-config')).toHaveTextContent('"creative_type":"product_demo"')
+    expect(screen.getByTestId('video-config')).toHaveTextContent('"purpose":"ecommerce"')
+    expect(screen.getByTestId('video-config')).toHaveTextContent('"ratio":"9:16"')
+    expect(screen.getByTestId('video-config')).toHaveTextContent('"production_mode":"sequence"')
   })
 })

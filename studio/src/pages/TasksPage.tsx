@@ -184,6 +184,12 @@ export default function TasksPage() {
     retry: false,
   })
   const availableVideoModels = videoEstimateQuery.data?.available_models ?? []
+  const { data: videoPlaybooks } = useQuery({
+    queryKey: ['video-playbooks'],
+    queryFn: () => api.video.playbooks(),
+    enabled: modalOpen && watchedType === 'video',
+    staleTime: 10 * 60 * 1000,
+  })
 
   // E-commerce package cost = Σ(module price × quantity), mirroring the server's
   // CreditService.EcommercePackageCost. `known=false` when pricing lacks a selected
@@ -1022,6 +1028,7 @@ export default function TasksPage() {
                   form={form}
                   selectedProject={selectedProject}
                   availableVideoModels={availableVideoModels}
+                  playbooks={videoPlaybooks?.items ?? []}
                   modelsLoading={videoEstimateQuery.isLoading}
                   minimumBalanceHint="视频任务需至少 100,000 积分余额；实际扣费按下方动态估算。"
                   promptField={(

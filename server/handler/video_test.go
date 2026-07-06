@@ -303,6 +303,191 @@ func TestVideoEstimateAllowsEmptyPromptForConfigurationPreview(t *testing.T) {
 	}
 }
 
+func TestVideoPlaybooksReturnsSeedanceBusinessScenarios(t *testing.T) {
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	h := NewVideoHandler(nil, nil, nil, 1000, &logger)
+
+	app := fiber.New()
+	app.Get("/video/playbooks", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.Playbooks(c)
+	})
+
+	resp, err := app.Test(httptest.NewRequest("GET", "/video/playbooks", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Data struct {
+			Items []struct {
+				Key                    string   `json:"key"`
+				Label                  string   `json:"label"`
+				CreativeType           string   `json:"creative_type"`
+				Purpose                string   `json:"purpose"`
+				RequiredReferenceRoles []string `json:"required_reference_roles"`
+				DefaultRatio           string   `json:"default_ratio"`
+				PromptScaffold         string   `json:"prompt_scaffold"`
+				QCFocus                []string `json:"qc_focus"`
+				RiskNotes              []string `json:"risk_notes"`
+				AgentBrief             string   `json:"agent_brief"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Data.Items) < 13 {
+		t.Fatalf("playbooks count = %d, want business and style scenarios", len(body.Data.Items))
+	}
+	foundLiveSelling := false
+	foundCinematic := false
+	for _, item := range body.Data.Items {
+		switch item.Key {
+		case "live_selling":
+			foundLiveSelling = true
+			if item.CreativeType != service.VideoCreativeTypeProductDemo || item.Purpose != service.VideoPurposeEcommerce {
+				t.Fatalf("live_selling routing = %+v", item)
+			}
+			if item.DefaultRatio != "9:16" || len(item.RequiredReferenceRoles) == 0 || item.PromptScaffold == "" || len(item.QCFocus) == 0 || len(item.RiskNotes) == 0 || item.AgentBrief == "" {
+				t.Fatalf("live_selling playbook lacks production guidance: %+v", item)
+			}
+		case "cinematic":
+			foundCinematic = true
+			if item.PromptScaffold == "" || len(item.QCFocus) == 0 {
+				t.Fatalf("cinematic playbook lacks guidance: %+v", item)
+			}
+		}
+	}
+	if !foundLiveSelling || !foundCinematic {
+		t.Fatalf("expected live_selling and cinematic playbooks, got %+v", body.Data.Items)
+	}
+}
+
+func TestVideoEstimateReturnsProductionGuidance(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.New().String()
+	if err := repo.Users().Create(ctx, &model.User{
+		ID:             userID,
+		Email:          "video-production-estimate@example.com",
+		Password:       "hashed",
+		InviteCode:     "videoproductionestimate",
+		CreditsBalance: 120_000,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	projectID := uuid.New().String()
+	project := &model.Project{
+		ID:       projectID,
+		UserID:   userID,
+		Platform: model.PlatformVideo,
+		Name:     "Video",
+		Status:   model.ProjectStatusActive,
+	}
+	project.SetVideoDefaults(model.VideoDefaults{
+		Purpose:    service.VideoPurposeEcommerce,
+		ModelKey:   "configured-video",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   16,
+		Preflight:  true,
+	})
+	project.SetVideoModelPolicy(model.VideoModelPolicy{
+		AllowedModels: []string{"configured-video"},
+		DefaultModel:  "configured-video",
+		MaxResolution: "720p",
+		MaxDuration:   45,
+	})
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	h := NewVideoHandler(repo, service.NewCreditService(repo, nil, &logger), service.VideoModelCatalog{
+		"configured-video": {
+			Key:                  "configured-video",
+			DisplayName:          "Configured Video",
+			ModelID:              "provider-configured-video",
+			SupportedResolutions: []string{"720p"},
+			SupportedRatios:      []string{"9:16"},
+			MinDuration:          1,
+			MaxDuration:          15,
+			SupportsVideoInput:   true,
+			NoInputPricePerSecond: map[string]float64{
+				"720p": 1,
+			},
+			VideoInput5sMinPrice: map[string]float64{"720p": 5},
+			VideoInput5sMaxPrice: map[string]float64{"720p": 10},
+		},
+	}, 1000, &logger)
+
+	app := fiber.New()
+	app.Post("/video/estimate", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Estimate(c)
+	})
+
+	body := `{
+		"project_id":"` + projectID + `",
+		"prompt":"生成一条直播带货口播视频",
+		"video_config":{
+			"scenario_key":"live_selling",
+			"production_mode":"guided",
+			"retake_budget":5,
+			"references":[
+				{"type":"image_url","url":"https://cdn.example.com/product.png","reference_role":"product appearance"}
+			]
+		}
+	}`
+	req := httptest.NewRequest("POST", "/video/estimate", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var decoded struct {
+		Data struct {
+			MissingReferenceRoles []string `json:"missing_reference_roles"`
+			ExpectedArtifacts     []string `json:"expected_artifacts"`
+			AffordableTakes       int      `json:"affordable_takes"`
+			SegmentPlan           []struct {
+				Index    int   `json:"index"`
+				Duration int64 `json:"duration"`
+			} `json:"segment_plan"`
+			ResolvedConfig struct {
+				ScenarioKey    string `json:"scenario_key"`
+				ProductionMode string `json:"production_mode"`
+				RetakeBudget   int    `json:"retake_budget"`
+			} `json:"resolved_config"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if decoded.Data.ResolvedConfig.ScenarioKey != "live_selling" || decoded.Data.ResolvedConfig.ProductionMode != "guided" || decoded.Data.ResolvedConfig.RetakeBudget != 5 {
+		t.Fatalf("resolved production config = %+v", decoded.Data.ResolvedConfig)
+	}
+	if len(decoded.Data.SegmentPlan) != 2 || decoded.Data.SegmentPlan[0].Duration != 8 || decoded.Data.SegmentPlan[1].Duration != 8 {
+		t.Fatalf("segment plan = %+v, want two 8s segments", decoded.Data.SegmentPlan)
+	}
+	if !containsString(decoded.Data.MissingReferenceRoles, "action") || !containsString(decoded.Data.MissingReferenceRoles, "voice tone") {
+		t.Fatalf("missing reference roles = %+v", decoded.Data.MissingReferenceRoles)
+	}
+	if !containsString(decoded.Data.ExpectedArtifacts, "quality-review.md") || !containsString(decoded.Data.ExpectedArtifacts, "delivery-manifest.json") {
+		t.Fatalf("expected artifacts = %+v", decoded.Data.ExpectedArtifacts)
+	}
+	if decoded.Data.AffordableTakes != 5 {
+		t.Fatalf("affordable takes = %d, want capped retake budget 5", decoded.Data.AffordableTakes)
+	}
+}
+
 func TestVideoModelsReturnsOnlyConfiguredCatalog(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	h := NewVideoHandler(nil, nil, service.VideoModelCatalog{
@@ -371,4 +556,13 @@ func TestVideoModelsReturnsEmptyWhenCatalogUnconfigured(t *testing.T) {
 	if len(body.Data.Items) != 0 {
 		t.Fatalf("items = %+v, want no models for unconfigured catalog", body.Data.Items)
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

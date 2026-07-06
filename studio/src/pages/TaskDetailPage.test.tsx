@@ -34,6 +34,7 @@ vi.mock('@/lib/api', async () => {
         clone: vi.fn(),
         resume: vi.fn(),
         files: vi.fn().mockResolvedValue([]),
+        videoProduction: vi.fn(),
       },
       projects: {
         ...actual.api.projects,
@@ -71,6 +72,14 @@ describe('TaskDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api.tasks.files).mockResolvedValue([])
+    vi.mocked(api.tasks.videoProduction).mockResolvedValue({
+      task_id: 'task-1',
+      scenario_key: 'live_selling',
+      production_mode: 'guided',
+      artifacts: {},
+      retake_actions: [],
+      next_actions: [],
+    })
     vi.mocked(api.tasks.clone).mockResolvedValue(taskWith({ id: 'task-clone', status: 'pending' }))
     vi.mocked(api.tasks.resume).mockResolvedValue(taskWith({ id: 'task-1', status: 'pending' }))
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
@@ -453,6 +462,68 @@ describe('TaskDetailPage', () => {
     expect(within(videoDialog).getByText('生成任务 ID')).toBeInTheDocument()
     expect(within(videoDialog).getByText('参考素材')).toBeInTheDocument()
     expect(within(videoDialog).getByText(/已消耗 7,440/)).toBeInTheDocument()
+  })
+
+  it('shows video production tabs, QC, delivery actions, and retake cloning', async () => {
+    mockTask(taskWith({
+      id: 'task-1',
+      type: 'video',
+      status: 'completed',
+      prompt: '生成一条直播带货视频',
+      video_config: {
+        scenario_key: 'live_selling',
+        production_mode: 'guided',
+        creative_type: 'product_demo',
+        purpose: 'ecommerce',
+        model_key: 'seedance-2.0-mini',
+        resolution: '720p',
+        ratio: '9:16',
+        duration: 16,
+      },
+      result: { files: null, output: '' },
+    }))
+    vi.mocked(api.tasks.videoProduction).mockResolvedValue({
+      task_id: 'task-1',
+      scenario_key: 'live_selling',
+      production_mode: 'guided',
+      artifacts: {
+        'creative-brief.md': {
+          status: 'available',
+          file_name: 'creative-brief.md',
+          content: '# Brief\n产品可信感',
+        },
+        'quality-review.md': {
+          status: 'available',
+          file_name: 'quality-review.md',
+          content: '主体一致性：通过\n产品保真：通过\nCTA：需要补强',
+        },
+        'delivery-manifest.json': {
+          status: 'available',
+          file_name: 'delivery-manifest.json',
+          parsed_json: { final_video_task_file: 'file-final' },
+        },
+      },
+      retake_actions: ['keep', 'fix_in_post', 'edit', 're_roll', 'rewrite'],
+      next_actions: ['continue_editing', 'generate_cover', 'export_capcut_draft'],
+    })
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByText('制作状态')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Brief' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'QC' })).toBeInTheDocument()
+    expect(screen.getByText('产品可信感')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'QC' }))
+    expect(screen.getByText(/主体一致性：通过/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '继续剪辑' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成封面' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导出剪映草稿' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-roll' }))
+    await waitFor(() => {
+      expect(api.tasks.clone).toHaveBeenCalledWith('task-1')
+      expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-clone')
+    })
   })
 
   it('opens project details in a dialog instead of navigating to the projects list', async () => {

@@ -7,11 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { VideoReferenceInput } from '@/components/video/VideoReferenceInput'
 import { VIDEO_PROJECT_DEFAULT_VALUE, buildVideoFormConfig, defaultVideoPurposeForCreativeType, readVideoSelectValue, writeVideoSelectValue } from '@/lib/video-form'
 import { videoCreativeTypeLabels, videoModelDisplayName, videoPurposeLabels } from '@/lib/video-display'
-import type { Project, VideoModelSpec, VideoTaskConfig } from '@/types'
+import type { Project, VideoModelSpec, VideoPlaybookSpec, VideoProductionMode, VideoTaskConfig } from '@/types'
 
 function yesNo(value: boolean | undefined) {
   return value ? '开启' : '关闭'
@@ -21,10 +22,18 @@ function settingValue<T>(override: T | undefined, fallback: T | undefined, empty
   return override ?? fallback ?? empty
 }
 
+const productionModes: Array<{ value: VideoProductionMode; label: string; description: string }> = [
+  { value: 'fast_lane', label: 'Fast Lane', description: '快速生成单条成片' },
+  { value: 'guided', label: '导演引导', description: '先补 brief 和素材约束' },
+  { value: 'sequence', label: '专业序列', description: '强调分镜和连续性' },
+  { value: 'remake', label: '复刻参考', description: '隔离参考与新主体' },
+]
+
 export function VideoCreationPanel({
   form,
   selectedProject,
   availableVideoModels,
+  playbooks = [],
   modelsLoading,
   promptField,
   estimateSummary,
@@ -34,6 +43,7 @@ export function VideoCreationPanel({
   form: UseFormReturn<any>
   selectedProject?: Project
   availableVideoModels: VideoModelSpec[]
+  playbooks?: VideoPlaybookSpec[]
   modelsLoading?: boolean
   promptField: ReactNode
   estimateSummary: ReactNode
@@ -48,10 +58,22 @@ export function VideoCreationPanel({
   const resolvedRatio = settingValue(config?.ratio, defaults?.ratio, '9:16')
   const resolvedFallbackDuration = settingValue(config?.duration, defaults?.duration, 15)
   const resolvedWatermark = settingValue(config?.watermark, defaults?.watermark, false)
+  const selectedPlaybook = playbooks.find((item) => item.key === config?.scenario_key)
+  const selectedProductionMode = config?.production_mode || 'guided'
 
   const restoreDefaults = () => {
     const references = form.getValues('video_config.references') ?? []
     form.setValue('video_config', buildVideoFormConfig(defaults, { references }), { shouldDirty: true })
+  }
+
+  const applyPlaybook = (playbook: VideoPlaybookSpec) => {
+    form.setValue('video_config.scenario_key', playbook.key, { shouldDirty: true })
+    form.setValue('video_config.creative_type', playbook.creative_type, { shouldDirty: true })
+    form.setValue('video_config.purpose', playbook.purpose, { shouldDirty: true })
+    form.setValue('video_config.ratio', playbook.default_ratio, { shouldDirty: true })
+    if (!form.getValues('video_config.production_mode')) {
+      form.setValue('video_config.production_mode', playbook.key === 'ad_remake' ? 'remake' : 'guided', { shouldDirty: true })
+    }
   }
 
   return (
@@ -60,6 +82,59 @@ export function VideoCreationPanel({
         <p className="text-sm font-medium text-foreground">{title}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">{selectedProject?.name ? `将使用「${selectedProject.name}」的视频项目配置。` : '先选择视频项目，再补充创作要求和素材。'}</p>
       </div>
+
+      {playbooks.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <div>
+            <p className="text-sm font-medium text-foreground">视频玩法</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">先选要做的业务场景，再补 prompt、受众、核心信息和素材。</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {playbooks.map((playbook) => (
+              <button
+                key={playbook.key}
+                type="button"
+                aria-pressed={config?.scenario_key === playbook.key}
+                className="min-h-24 rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/50 aria-pressed:border-primary aria-pressed:bg-primary/5"
+                onClick={() => applyPlaybook(playbook)}
+              >
+                <span className="block text-sm font-medium text-foreground">{playbook.label}</span>
+                <span className="mt-1 line-clamp-2 block text-xs leading-5 text-muted-foreground">{playbook.prompt_scaffold}</span>
+                <span className="mt-2 block text-xs text-muted-foreground">{playbook.default_ratio} · {videoPurposeLabels[playbook.purpose]}</span>
+              </button>
+            ))}
+          </div>
+          {selectedPlaybook && (
+            <p className="text-xs text-muted-foreground">
+              QC 重点：{selectedPlaybook.qc_focus.join('、')}；需补素材角色：{selectedPlaybook.required_reference_roles.join('、') || '无'}。
+            </p>
+          )}
+        </section>
+      )}
+
+      <section className="flex flex-col gap-2">
+        <FormLabel>制作模式</FormLabel>
+        <ToggleGroup
+          value={[selectedProductionMode]}
+          onValueChange={(value) => {
+            const next = value[0] as VideoProductionMode | undefined
+            if (next) form.setValue('video_config.production_mode', next, { shouldDirty: true })
+          }}
+          variant="outline"
+          size="sm"
+          spacing={2}
+          className="flex-wrap"
+        >
+          {productionModes.map((mode) => (
+            <ToggleGroupItem key={mode.value} value={mode.value} aria-label={mode.label}>
+              {mode.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <p className="text-xs text-muted-foreground">
+          {productionModes.find((mode) => mode.value === selectedProductionMode)?.description || '先补 brief 和素材约束'}
+        </p>
+      </section>
 
       <section className="flex flex-col gap-2">
         <FormField control={form.control} name="video_config.workflow" render={() => (

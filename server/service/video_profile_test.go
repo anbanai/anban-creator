@@ -160,6 +160,63 @@ func TestResolveVideoGenerationPlanDefaultsCreativeTypePurposePair(t *testing.T)
 	}
 }
 
+func TestResolveVideoGenerationPlanAppliesPlaybookRouting(t *testing.T) {
+	plan, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
+		Prompt:      "做一个品牌记忆点视频",
+		ScenarioKey: "brand_promo",
+	}, model.VideoDefaults{
+		Purpose:      VideoPurposePlanting,
+		CreativeType: VideoCreativeTypePersonalIP,
+		ModelKey:     "seedance-2.0-mini",
+		Resolution:   "720p",
+		Ratio:        "1:1",
+		Duration:     5,
+	}, model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	}, DefaultVideoModelCatalog(), 1000)
+	if err != nil {
+		t.Fatalf("ResolveVideoGenerationPlan: %v", err)
+	}
+	if plan.CreativeType != VideoCreativeTypeBrandPromo || plan.Purpose != VideoPurposePromotion || plan.Ratio != "16:9" {
+		t.Fatalf("playbook routing = creative:%s purpose:%s ratio:%s", plan.CreativeType, plan.Purpose, plan.Ratio)
+	}
+}
+
+func TestResolveVideoGenerationPlanValidatesProductionControls(t *testing.T) {
+	defaults := model.VideoDefaults{
+		Purpose:    VideoPurposePlanting,
+		ModelKey:   "seedance-2.0-mini",
+		Resolution: "720p",
+		Ratio:      "9:16",
+		Duration:   5,
+	}
+	policy := model.VideoModelPolicy{
+		AllowedModels: []string{"seedance-2.0-mini"},
+		DefaultModel:  "seedance-2.0-mini",
+		MaxResolution: "720p",
+		MaxDuration:   15,
+	}
+
+	_, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
+		Prompt:         "生成一条产品视频",
+		ProductionMode: "magic_mode",
+	}, defaults, policy, DefaultVideoModelCatalog(), 1000)
+	if err == nil || !strings.Contains(err.Error(), "production_mode must be one of") {
+		t.Fatalf("invalid production mode error = %v", err)
+	}
+
+	_, err = ResolveVideoGenerationPlan(VideoGenerationRequest{
+		Prompt:       "生成一条产品视频",
+		RetakeBudget: 21,
+	}, defaults, policy, DefaultVideoModelCatalog(), 1000)
+	if err == nil || !strings.Contains(err.Error(), "retake_budget must be between 0 and 20") {
+		t.Fatalf("invalid retake budget error = %v", err)
+	}
+}
+
 func TestResolveVideoGenerationPlanSplitsTargetDurationByModelLimit(t *testing.T) {
 	plan, err := ResolveVideoGenerationPlan(VideoGenerationRequest{
 		Prompt:   "生成一条 1 分钟茶文化短视频",

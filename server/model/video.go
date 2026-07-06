@@ -34,6 +34,8 @@ type VideoModelPolicy struct {
 // VideoTaskConfig is the immutable plan/task snapshot used by agents and Studio.
 type VideoTaskConfig struct {
 	Workflow                  string                   `json:"workflow,omitempty"`
+	ScenarioKey               string                   `json:"scenario_key,omitempty"`
+	ProductionMode            string                   `json:"production_mode,omitempty"`
 	Purpose                   string                   `json:"purpose,omitempty"`
 	CreativeType              string                   `json:"creative_type,omitempty"`
 	SubjectProfile            string                   `json:"subject_profile,omitempty"`
@@ -53,6 +55,8 @@ type VideoTaskConfig struct {
 	Watermark                 *bool                    `json:"watermark,omitempty"`
 	Preflight                 bool                     `json:"preflight,omitempty"`
 	References                []VideoReferenceAsset    `json:"references,omitempty"`
+	RetakeBudget              int                      `json:"retake_budget,omitempty"`
+	DeliveryTargets           []string                 `json:"delivery_targets,omitempty"`
 	EstimatedCredits          int                      `json:"estimated_credits,omitempty"`
 	PricingBreakdown          *VideoPricingBreakdown   `json:"pricing_breakdown,omitempty"`
 }
@@ -83,14 +87,17 @@ func NormalizeVideoWorkflow(workflow string) string {
 // plans. Agents map it into provider-facing references via MCP so only
 // server-owned or public assets reach the video model.
 type VideoReferenceAsset struct {
-	Type                 string  `json:"type"`
-	URL                  string  `json:"url,omitempty"`
-	Text                 string  `json:"text,omitempty"`
-	ReferenceRole        string  `json:"reference_role,omitempty"`
-	FileName             string  `json:"file_name,omitempty"`
-	MimeType             string  `json:"mime_type,omitempty"`
-	FileSize             int64   `json:"file_size,omitempty"`
-	InputDurationSeconds float64 `json:"input_duration_seconds,omitempty"`
+	Type                 string   `json:"type"`
+	URL                  string   `json:"url,omitempty"`
+	Text                 string   `json:"text,omitempty"`
+	ReferenceRole        string   `json:"reference_role,omitempty"`
+	MustKeep             []string `json:"must_keep,omitempty"`
+	CanChange            []string `json:"can_change,omitempty"`
+	MustNotTransfer      []string `json:"must_not_transfer,omitempty"`
+	FileName             string   `json:"file_name,omitempty"`
+	MimeType             string   `json:"mime_type,omitempty"`
+	FileSize             int64    `json:"file_size,omitempty"`
+	InputDurationSeconds float64  `json:"input_duration_seconds,omitempty"`
 }
 
 // VideoPricingBreakdown records the resolved official-price estimate used for
